@@ -17,6 +17,10 @@ The full text of every step, as it was written when it was built, is in the
 - **The dynamics curves on decibel axes:** the Compressor's and the Multiband's curves show what they play (a straight
   line a ratio, a bent one inside its points), their presets converted to play as they did, a point's menu at the
   pointer, and the Compressor's history a reading every half millisecond, drawn as a line, not stairs.
+- **The browser without Phazite Sounds and Phazite Presets:** Sounds lists the downloaded sounds' folders, each
+  instrument's and effect's row opens by its chevron to Phazite's and your presets as one list, containers' presets
+  show under Container and Instrument Container, tracks' under Track Presets, your presets of no device listed under
+  Other Presets, and a device's Swap tries that same list.
 - **No new audio, video or picture files in the repository:** the pre-commit hook refuses them.
 
 ## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)

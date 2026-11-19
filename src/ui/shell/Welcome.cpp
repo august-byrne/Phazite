@@ -269,7 +269,7 @@ void SoundPackPage::update()
 
     if (installed)
     {
-        statusText = "Installed in " + soundPack.getFolder().getFullPathName() + ". The browser lists them under Phazite Sounds.";
+        statusText = "Installed in " + soundPack.getFolder().getFullPathName() + ". The browser lists them under Sounds.";
     }
     else if (state == State::downloading)
     {

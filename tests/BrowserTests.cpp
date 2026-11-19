@@ -7,9 +7,11 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/Preview.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/Preview.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -198,10 +200,10 @@ TEST_CASE ("The browser shows its places, plays a sound when clicked, and Enter 
 {
     BrowserScreen screen;
 
-    // Phazite's sounds are open at first.
+    // Sounds are open at first, with Phazite Sounds' folders.
     CHECK (screen.getRows()
-           == juce::StringArray { "Favorites", "Recent", "Collections", "Phazite Sounds", "Drums", "Loops", "Instruments", "Effects",
-                                  "Phazite Presets", "Presets", "Add Folder..." });
+           == juce::StringArray { "Favorites", "Recent", "Collections", "Sounds", "Drums", "Loops", "Instruments", "Effects",
+                                  "Track Presets", "Add Folder..." });
 
     // One click opens a folder; a click on a sound plays it.
     phazite::test::Mouse mouse (screen.browser.getTree());
@@ -387,10 +389,10 @@ TEST_CASE ("Performance gate: a folder opened in the browser reads no folder fro
         auto& tree = screen.browser.getTree();
         phazite::test::Mouse mouse (tree);
 
-        // Phazite Sounds, open at first: closed and opened again; then its Drums folder.
-        mouse.click (screen.getRow ("Phazite Sounds").getCentre());
+        // Sounds, open at first: closed and opened again; then its Drums folder.
+        mouse.click (screen.getRow ("Sounds").getCentre());
         phazite::test::dispatchPendingMessages();
-        mouse.click (screen.getRow ("Phazite Sounds").getCentre());
+        mouse.click (screen.getRow ("Sounds").getCentre());
         waitForFolders (screen);
         REQUIRE (screen.getRows().contains ("Drums"));
         mouse.click (screen.getRow ("Drums").getCentre());
@@ -546,7 +548,7 @@ TEST_CASE ("Folders open within a folder still being read open again once it is 
     auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
     const auto rowsOf = [] (phazite::ui::Browser& browser) { return ::getRows (browser); };
 
-    // Drums opened within Phazite Sounds; the browser goes, keeping what is open.
+    // Drums opened within Sounds; the browser goes, keeping what is open.
     {
         phazite::ui::Browser browser { library, *previewer, soundPack, settings, context };
         phazite::test::TestWindow window { browser, 320, 700 };
@@ -557,7 +559,7 @@ TEST_CASE ("Folders open within a folder still being read open again once it is 
         REQUIRE (rowsOf (browser).contains ("Kick"));
     }
 
-    // Made again, every folder read held: Phazite Sounds says it is being read; once let go, Drums is open within it.
+    // Made again, every folder read held: Sounds says it is being read; once let go, Drums is open within it.
     library.setListsFromIndex (false);
     HeldReads held (library);
     phazite::ui::Browser browser { library, *previewer, soundPack, settings, context };
@@ -1322,9 +1324,9 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     browser.onShowSoundPack = [&pageShown] { pageShown = true; };
     phazite::test::dispatchPendingMessages();
 
-    // Their place has a row that downloads them, which says how large they are.
+    // Sounds has a row that downloads them, which says how large they are.
     const auto rows = getRows (browser);
-    const auto place = rows.indexOf ("Phazite Sounds");
+    const auto place = rows.indexOf ("Sounds");
     REQUIRE (place >= 0);
     REQUIRE (rows.size() > place + 2);
     CHECK (rows[place + 1].startsWith (phazite::SoundPack::canDownload() ? "Download (" : "Get Them ("));
@@ -1342,9 +1344,12 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     REQUIRE (phazite::test::waitForSoundPack (soundPack));
     REQUIRE (soundPack.isInstalled());
 
-    // The place lists them now (after the pack's change message, which its thread posts after it sets the state), and
-    // search finds them once they are indexed.
+    // Sounds lists their folders now, the download's row gone (after the pack's change message, which its thread posts
+    // after it sets the state), and search finds them once they are indexed.
     CHECK (phazite::test::dispatchMessagesUntil ([&browser] { return getRows (browser).contains ("Drums"); }));
+    const auto installed = getRows (browser);
+    CHECK (installed[installed.indexOf ("Sounds") + 1] == juce::String ("Drums"));
+    CHECK_FALSE (installed.joinIntoString ("|").contains ("Download ("));
     REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
     CHECK_FALSE (library.search ("kick").empty());
 }
@@ -1446,6 +1451,120 @@ TEST_CASE ("A device's presets menu lists Phazite's for it by kind of sound, the
     CHECK (phazite::ui::makeDevicePresetMenu (library, "Reverb", "Reverb", [] (const juce::File&) {}).getNumItems() == 0);
 }
 
+TEST_CASE ("A device's row opens to its presets by its chevron; a click elsewhere, Enter and a double-click still act on the device")
+{
+    // Phazite's presets for the synth and the user's; none for the sampler.
+    phazite::test::TemporaryFolder temp;
+    const auto factory = temp.folder.getChildFile ("Factory"), own = temp.folder.getChildFile ("Presets");
+    const auto writePreset = [] (const juce::File& file)
+    {
+        REQUIRE (file.getParentDirectory().createDirectory());
+        REQUIRE (file.replaceWithText (
+            R"({ "kind": "device", "device": { "type": "phaziteSynth", "name": "Synth", "instrument": true, "parameters": {} } })"));
+    };
+
+    writePreset (factory.getChildFile ("Synth/Bass/Acid Bass.phazitepreset"));
+    writePreset (own.getChildFile ("Synth/My Synth.phazitepreset"));
+
+    phazite::SoundPack soundPack { temp.folder.getChildFile ("Packs") }; // not installed
+    phazite::Settings settings;
+    phazite::Library library { phazite::test::getEngineContext(), settings, {}, own, factory };
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
+    const phazite::ProjectContext noProject (phazite::test::getEngineContext());
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
+    phazite::ui::Browser browser { library, *previewerOwner, soundPack, settings, noProject };
+    phazite::test::TestWindow window { browser, 320, 700 };
+    std::vector<phazite::LibraryItem> placed;
+    browser.onPlace = [&placed] (const phazite::LibraryItem& item)
+    {
+        placed.push_back (item);
+        return true;
+    };
+
+    phazite::test::dispatchPendingMessages();
+    auto& tree = browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    mouse.click (getRow (browser, "Instruments").getCentre());
+    phazite::test::dispatchPendingMessages();
+
+    const auto findRow = [&tree] (const juce::String& name) -> juce::TreeViewItem*
+    {
+        for (int i = 0; i < tree.getNumRowsInTree(); ++i)
+            if (auto* item = tree.getItemOnRow (i); item->getAccessibilityName().upToFirstOccurrenceOf (",", false, false) == name)
+                return item;
+
+        return nullptr;
+    };
+
+    // The synth's row can open; the sampler's, without presets, can't.
+    REQUIRE (findRow ("Synth") != nullptr);
+    REQUIRE (findRow ("Sampler") != nullptr);
+    CHECK (findRow ("Synth")->mightContainSubItems());
+    CHECK_FALSE (findRow ("Sampler")->mightContainSubItems());
+
+    // A click on its name selects it and leaves it closed; one on its chevron opens it: Phazite's kind of sound, then the
+    // user's preset, in one list.
+    mouse.click (getRow (browser, "Synth").getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (findRow ("Synth")->isOpen());
+    REQUIRE (browser.getSelectedItem().has_value());
+    CHECK (browser.getSelectedItem()->name == juce::String ("Synth"));
+
+    const auto synthRow = getRow (browser, "Synth");
+    namespace SideBar = phazite::ui::SideBar;
+    mouse.click ({ synthRow.getX() + SideBar::rowChevron + SideBar::chevronSize / 2, synthRow.getCentreY() });
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (findRow ("Synth")->isOpen());
+    const auto rows = getRows (browser);
+    const auto at = rows.indexOf ("Synth, Instrument");
+    REQUIRE (at >= 0);
+    CHECK (rows[at + 1] == juce::String ("Bass"));
+    CHECK (rows[at + 2] == juce::String ("My Synth, Synth"));
+
+    // Enter on the device's row adds the device, as a double-click does; a preset's double-click puts the preset in.
+    tree.grabKeyboardFocus();
+    window.pressKey (returnKey);
+    REQUIRE (placed.size() == 1);
+    CHECK (placed[0].device.has_value());
+    CHECK (findRow ("Synth")->isOpen()); // Enter didn't close it
+
+    mouse.doubleClick (getRow (browser, "Synth").getCentre());
+    REQUIRE (placed.size() == 2);
+    CHECK (placed[1].name == juce::String ("Synth"));
+
+    mouse.doubleClick (getRow (browser, "My Synth").getCentre());
+    REQUIRE (placed.size() == 3);
+    CHECK (placed[2].kind == phazite::LibraryItem::Kind::preset);
+    CHECK (placed[2].file == own.getChildFile ("Synth/My Synth.phazitepreset"));
+
+    // A preset saved for the sampler, which had none: once the index has it, the sampler's row opens to it, and it is
+    // selected there.
+    const auto saved = own.getChildFile ("Sampler/Soft Keys.phazitepreset");
+    REQUIRE (saved.getParentDirectory().createDirectory());
+    REQUIRE (saved.replaceWithText (
+        R"({ "kind": "device", "device": { "type": "phaziteSampler", "name": "Sampler", "instrument": true, "parameters": {} } })"));
+    browser.presetSaved (saved);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&browser, &saved] { return browser.getSelectedItem().has_value() && browser.getSelectedItem()->file == saved; }));
+    REQUIRE (findRow ("Sampler") != nullptr);
+    CHECK (findRow ("Sampler")->mightContainSubItems());
+    CHECK (findRow ("Sampler")->isOpen());
+    CHECK (findRow ("Synth")->isOpen()); // what was open stays open
+
+    // One that came from outside: once the index has it, its device's row can open, Instruments brought up to date in place.
+    const auto came = own.getChildFile ("FM/Bell.phazitepreset");
+    REQUIRE (came.getParentDirectory().createDirectory());
+    REQUIRE (came.replaceWithText (
+        R"({ "kind": "device", "device": { "type": "phaziteFm", "name": "FM", "instrument": true, "parameters": {} } })"));
+    REQUIRE (findRow ("FM") != nullptr);
+    CHECK_FALSE (findRow ("FM")->mightContainSubItems());
+    auto* synthBefore = findRow ("Synth");
+    library.refresh();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! library.isIndexing() && findRow ("FM")->mightContainSubItems(); }));
+    CHECK (findRow ("Synth") == synthBefore); // its row kept, not made again
+    CHECK (findRow ("Synth")->isOpen());
+}
+
 TEST_CASE ("The browser is laid out as VS Code's Explorer: its title, its rows' height, each level further in, the outline after keys")
 {
     namespace ListRow = phazite::ui::ListRow;
@@ -1464,8 +1583,8 @@ TEST_CASE ("The browser is laid out as VS Code's Explorer: its title, its rows' 
     CHECK (tree.getWidth() == screen.browser.getWidth());
 
     // Rows as tall as VS Code's, each level a step further in, the first at the tree's edge.
-    CHECK (screen.getRow ("Phazite Sounds").getHeight() == ListRow::height);
-    CHECK (screen.getRow ("Phazite Sounds").getX() == 0);
+    CHECK (screen.getRow ("Sounds").getHeight() == ListRow::height);
+    CHECK (screen.getRow ("Sounds").getX() == 0);
     CHECK (screen.getRow ("Drums").getX() == SideBar::indent);
 
     // The selected row's outline, at the row's inset edge, in the focus colour: not after a click, which selects it; once
@@ -1564,4 +1683,225 @@ TEST_CASE ("Typing on after Enter, before the results are in, keeps the keys in 
     screen.library.setBeforeSearch (nullptr);
     CHECK (search.hasKeyboardFocus (true));
     CHECK_FALSE (screen.browser.getTree().hasKeyboardFocus (true));
+}
+
+namespace
+{
+// A device's preset, as Phazite writes its first element.
+void writeDevicePreset (const juce::File& file, const juce::String& type, const juce::String& device, bool instrument)
+{
+    REQUIRE (file.getParentDirectory().createDirectory());
+    REQUIRE (file.replaceWithText ("{ \"kind\": \"device\", \"device\": { \"type\": \"" + type + "\", \"name\": \"" + device
+                                   + "\", \"instrument\": " + (instrument ? "true" : "false") + ", \"parameters\": {} } }"));
+}
+
+// Phazite's presets for the synth (a kind of sound, Bass) and the user's (one), the library of them, and the browser on it
+// once made.
+struct PresetScreen
+{
+    PresetScreen()
+    {
+        writeDevicePreset (factory.getChildFile ("Synth/Bass/Acid Bass.phazitepreset"), "phaziteSynth", "Synth", true);
+        writeDevicePreset (own.getChildFile ("Synth/My Synth.phazitepreset"), "phaziteSynth", "Synth", true);
+        refresh();
+    }
+
+    void refresh()
+    {
+        library.refresh();
+        REQUIRE (phazite::test::runTimersUntil ([this] { return ! library.isIndexing(); }));
+    }
+
+    void makeBrowser()
+    {
+        browser = std::make_unique<phazite::ui::Browser> (library, *previewer, soundPack, settings, noProject);
+        window = std::make_unique<phazite::test::TestWindow> (*browser, 320, 700);
+        phazite::test::dispatchPendingMessages();
+    }
+
+    void goBrowser()
+    {
+        window = nullptr;
+        browser = nullptr;
+    }
+
+    juce::TreeViewItem* findRow (const juce::String& name) const
+    {
+        auto& tree = browser->getTree();
+
+        for (int i = 0; i < tree.getNumRowsInTree(); ++i)
+            if (auto* item = tree.getItemOnRow (i); item->getAccessibilityName().upToFirstOccurrenceOf (",", false, false) == name)
+                return item;
+
+        return nullptr;
+    }
+
+    void click (const juce::String& name) const
+    {
+        phazite::test::Mouse mouse (browser->getTree());
+        mouse.click (getRow (*browser, name).getCentre());
+        phazite::test::dispatchPendingMessages();
+    }
+
+    void clickChevron (const juce::String& name) const
+    {
+        namespace SideBar = phazite::ui::SideBar;
+        const auto row = getRow (*browser, name);
+        phazite::test::Mouse mouse (browser->getTree());
+        mouse.click ({ row.getX() + SideBar::rowChevron + SideBar::chevronSize / 2, row.getCentreY() });
+        phazite::test::dispatchPendingMessages();
+    }
+
+    juce::StringArray rows() const { return getRows (*browser); }
+
+    phazite::test::TemporaryFolder temp;
+    const juce::File factory = temp.folder.getChildFile ("Factory"), own = temp.folder.getChildFile ("Presets");
+    phazite::SoundPack soundPack { temp.folder.getChildFile ("Packs") }; // not installed
+    phazite::Settings settings;
+    phazite::Library library { phazite::test::getEngineContext(), settings, {}, own, factory };
+    const phazite::ProjectContext noProject { phazite::test::getEngineContext() };
+    const std::unique_ptr<phazite::Previewer> previewer = phazite::createPreviewer (phazite::test::getEngineContext());
+    std::unique_ptr<phazite::ui::Browser> browser;
+    std::unique_ptr<phazite::test::TestWindow> window;
+};
+
+// A plug-in the scan found, in the engine's list (which every test shares): taken away again as it goes.
+struct ScannedPlugin
+{
+    explicit ScannedPlugin (const juce::String& name)
+    {
+        description.name = name;
+        description.pluginFormatName = "VST3";
+        description.fileOrIdentifier = "C:/Plug-ins/" + name + ".vst3";
+        getKnown().addType (description);
+    }
+
+    ~ScannedPlugin() { getKnown().removeType (description); }
+
+    static juce::KnownPluginList& getKnown() { return phazite::getPluginHost (phazite::test::getEngineContext()).getKnownPlugins(); }
+
+    juce::PluginDescription description;
+};
+} // namespace
+
+TEST_CASE ("An open device's row lists its presets again as one is saved for it elsewhere, what is open and selected in it kept")
+{
+    PresetScreen screen;
+    screen.makeBrowser();
+    screen.click ("Instruments");
+    screen.clickChevron ("Synth");
+    screen.click ("Bass");
+    screen.click ("My Synth");
+    REQUIRE (screen.rows().contains ("Acid Bass, Synth"));
+    REQUIRE (screen.browser->getSelectedItem().has_value());
+    REQUIRE (screen.browser->getSelectedItem()->name == juce::String ("My Synth"));
+
+    // Saved from a plug-in's window, as it saves one (app/PluginWindow.cpp): written, and the library told.
+    writeDevicePreset (screen.own.getChildFile ("Synth/Second.phazitepreset"), "phaziteSynth", "Synth", true);
+    screen.library.notePresetSaved();
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.library.isIndexing() && ! screen.library.isReadingFolders(); }));
+    phazite::test::dispatchPendingMessages(); // the index's change told
+
+    CHECK (screen.rows().contains ("Second, Synth"));
+    CHECK (screen.rows().contains ("Acid Bass, Synth")); // Bass open still
+    REQUIRE (screen.browser->getSelectedItem().has_value());
+    CHECK (screen.browser->getSelectedItem()->name == juce::String ("My Synth"));
+}
+
+TEST_CASE (
+    "A device's row whose folder of the user's doesn't answer shows Phazite's presets once it is late, and nothing comes once it has gone")
+{
+    PresetScreen screen;
+    screen.library.setListsFromIndex (false); // every folder read from the disk
+    phazite::test::HeldClock clock;
+    HeldReads held (screen.library, { screen.own.getChildFile ("Synth") });
+
+    {
+        screen.makeBrowser();
+        screen.click ("Instruments");
+        screen.clickChevron ("Synth");
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&held] { return held.countHolding() == 1; }));
+        CHECK (screen.rows().contains ("Reading this folder..."));
+
+        // A few seconds on: Phazite's, which came, and a line that says the drive isn't answering, under them.
+        clock.advance (4000.0);
+        REQUIRE (phazite::test::dispatchMessagesUntil (
+            [&screen] { return screen.rows().contains ("Bass") && screen.rows().contains ("This drive isn't answering..."); }));
+        const auto rows = screen.rows();
+        CHECK (rows.indexOf ("This drive isn't answering...") > rows.indexOf ("Bass"));
+        CHECK_FALSE (rows.contains ("My Synth, Synth"));
+
+        // Closed, opened again (its read joined), and the whole browser gone, before the read is let go.
+        screen.clickChevron ("Synth");
+        CHECK_FALSE (screen.rows().contains ("Bass"));
+        screen.clickChevron ("Synth");
+        screen.goBrowser();
+    }
+
+    // A listing of the model's, given what came once it was late, then gone before the read is let go: nothing more comes.
+    const phazite::BrowserModel model { screen.library, screen.soundPack };
+    auto told = 0;
+    auto listing = model.open (phazite::PresetShelf::ofDevice ("Synth", "Synth"), [&told] (const phazite::BrowserContents&) { ++told; });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&told] { return told > 0; }));
+    CHECK (listing->isPartial());
+    listing = nullptr;
+    const auto toldBefore = told;
+
+    held.letGo();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.library.isReadingFolders(); }));
+    phazite::test::dispatchPendingMessages();
+    CHECK (told == toldBefore);
+    screen.library.setListsFromIndex (true);
+}
+
+TEST_CASE (
+    "Other Presets shows the user's presets of no device, a save there is shown, and a plug-in scanned takes its folder, with no restart")
+{
+    PresetScreen screen;
+    writeDevicePreset (screen.own.getChildFile ("Faraway Echo/Wide.phazitepreset"), "plugin", "Faraway Echo", false);
+    screen.refresh();
+    screen.makeBrowser();
+
+    // After Track Presets, with the plug-in's folder.
+    auto rows = screen.rows();
+    REQUIRE (rows.contains ("Other Presets"));
+    CHECK (rows.indexOf ("Other Presets") == rows.indexOf ("Track Presets") + 1);
+
+    // A preset saved at the top of the user's presets (Save Preset's dialog lets one go anywhere): shown there, selected.
+    const auto loose = screen.own.getChildFile ("Loose.phazitepreset");
+    writeDevicePreset (loose, "phaziteEq", "EQ", false);
+    screen.browser->presetSaved (loose);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&screen, &loose] { return screen.browser->getSelectedItem().has_value() && screen.browser->getSelectedItem()->file == loose; }));
+    CHECK (screen.rows().contains ("Faraway Echo"));
+    screen.click ("Effects");
+
+    // The plug-in scanned (the app tells the library as the scan's list changes): its row under Effects holds its folder's
+    // presets, and its folder leaves Other Presets, which keeps the loose one.
+    {
+        const ScannedPlugin echo ("Faraway Echo");
+        screen.library.noteDevicesChanged();
+        REQUIRE (phazite::test::dispatchMessagesUntil (
+            [&screen]
+            {
+                auto* row = screen.findRow ("Faraway Echo");
+                return row != nullptr && row->mightContainSubItems() && row->getParentItem() != nullptr
+                       && row->getParentItem()->getUniqueName().contains (":Effects:");
+            }));
+        phazite::test::dispatchPendingMessages(); // Other Presets listed again
+        rows = screen.rows();
+        CHECK (rows.contains ("Other Presets"));
+        CHECK (rows.contains ("Loose, EQ"));
+        CHECK (countOf (rows, "Faraway Echo") == 0); // its folder's row: the device's says "Faraway Echo, Effect"
+    }
+
+    // Without the loose one and the plug-in gone again, Other Presets holds the folder alone; with the plug-in, nothing.
+    REQUIRE (loose.deleteFile());
+    screen.refresh();
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.rows().contains ("Other Presets"));
+    const ScannedPlugin echo ("Faraway Echo");
+    screen.library.noteDevicesChanged();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.rows().contains ("Other Presets"); }));
 }

@@ -212,7 +212,7 @@ TEST_CASE ("The website's picture of the window" * doctest::test_suite ("site-pi
 
         stage.screen.showView<phazite::ui::DevicesView> ("view.instrument");
 
-        // The browser's instruments open, and Phazite Sounds, which offers its download, closed.
+        // The browser's instruments open, and Sounds, which offers Phazite Sounds' download, closed.
         auto* browser = findAll<phazite::ui::Browser> (stage.screen.shell).getFirst();
         REQUIRE (browser != nullptr);
         REQUIRE (browser->getTree().getRootItem() != nullptr);
@@ -224,7 +224,7 @@ TEST_CASE ("The website's picture of the window" * doctest::test_suite ("site-pi
 
             if (place.getUniqueName().contains (":Instruments:"))
                 place.setOpen (true);
-            else if (place.getUniqueName().contains (":Phazite Sounds:"))
+            else if (place.getUniqueName().contains (":Sounds:"))
                 place.setOpen (false);
         }
 

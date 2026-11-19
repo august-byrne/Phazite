@@ -19,15 +19,24 @@ selected sound and the preview's controls.
 | Favorites | What you starred |
 | Recent | The last items you put into the song |
 | Collections | Your named sets, then **New Collection...** |
-| Phazite Sounds | The free sounds, once downloaded; until then a row that downloads them |
-| Instruments | Phazite's instruments, and the instrument plug-ins found by scanning |
-| Effects | Phazite's effects, and the effect plug-ins found by scanning |
-| Phazite Presets | The presets that come with Phazite, by device and by kind of sound |
-| Presets | Your own presets |
+| Sounds | The free Phazite Sounds, once downloaded, by their folders (Drums, Loops...); until then a row that downloads them |
+| Instruments | Phazite's instruments, and the instrument plug-ins found by scanning, each with its presets |
+| Effects | Phazite's effects, and the effect plug-ins found by scanning, each with its presets |
+| Track Presets | Your track presets |
+| Other Presets | Only while there are some: your presets that belong to no device listed |
 | Your folders | Each folder you added, as it is on disk |
 | Add Folder... | Adds a folder of your sounds |
 
 One click opens a folder. A folder you added has **Remove from the Browser** in its right-click menu.
+
+**Presets live under what they are for.** A device that has presets shows a chevron: click the chevron (or press
+**Right**) to open its presets, the ones that come with Phazite and your own in one list, by name, with Phazite's in
+folders by kind of sound (Bass, Lead, Pad...). A click on the device's name selects it, and **Enter**, a double-click
+or a drag adds the device as it starts. Presets of containers show under **Container** at the top of Effects, and
+under **Instrument Container** at the top of Instruments, once you have saved some. A device's row lists its folder of
+presets, so a preset you save into another device's folder shows under that device. **Other Presets** holds your
+presets kept elsewhere: at the top of your presets folder, or in a folder of a plug-in that isn't scanned (yet). Once
+you scan that plug-in, its presets show under it.
 
 ## Search and tags
 
@@ -86,7 +95,7 @@ bars, or a one-shot; how long it lasts; its sample rate, bits and channels.
 **Enter** or a double-click puts a sound on the selected track where playback starts (or on a new track), and a
 device or a preset onto the selected track. **Add to the Song**, in an item's right-click menu, does the same.
 
-A track dragged from the playlist into the browser is saved as a track preset.
+A track dragged from the playlist into the browser is saved as a track preset, which then shows under Track Presets.
 
 ## The plug-in picker
 
@@ -113,7 +122,7 @@ Swap tries sounds or presets in place in the song, so you hear each one in the m
 While a swap is open, a strip over the browser's search says what is being swapped, with **Keep** and **Put Back**. Move
 through the browser with the arrow keys or click: each sound (for a pad) or preset (for a device) plays in its place,
 in the beat while the song plays, or on its own while it is stopped. A pad's swap lists sounds of the same type; a
-device's swap lists its presets alone.
+device's swap lists its presets alone, as its row in Instruments or Effects lists them, every folder open.
 
 | To | Do |
 |---|---|
@@ -125,8 +134,8 @@ Any other change to the song while a swap is open keeps what you were trying and
 ## Phazite Sounds
 
 Phazite Sounds are 85 free drums, loops, effects and foley sounds to start with, in the public domain (CC0), so songs
-made with them owe nothing to anyone. They are a separate download, only when you ask: from the Phazite Sounds row in
-the browser, the Welcome window, or **Help > Phazite Sounds**. On a computer without a connection, download the zip from
+made with them owe nothing to anyone. They are a separate download, only when you ask: from the download's row under
+Sounds in the browser, the Welcome window, or **Help > Phazite Sounds**. Once installed, Sounds lists their folders. On a computer without a connection, download the zip from
 the [phazite-sounds releases](https://github.com/august-byrne/phazite-sounds/releases) elsewhere and use **Install
 from a File...** on the Welcome window's Phazite Sounds page.
 

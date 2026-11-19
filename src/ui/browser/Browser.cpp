@@ -108,6 +108,12 @@ struct Browser::Node : public juce::TreeViewItem
     bool mightContainSubItems() override { return false; }
     int getItemHeight() const override { return rowHeight; }
 
+    // A folder or a place, which a click opens and Enter too; not a device whose row holds its presets, which is put into the
+    // song as any item, and opens by its chevron (or Right).
+    virtual bool isFolder() { return mightContainSubItems(); }
+
+    bool isOnChevron (const juce::MouseEvent& e) const { return e.x < SideBar::rowChevron + SideBar::chevronSize + SideBar::gap; }
+
     ~Node() override
     {
         // What waits for its rows goes with it: a key pressed on it, a reveal.
@@ -138,6 +144,8 @@ struct Browser::Node : public juce::TreeViewItem
     // the index here, its rows brought up to date in place only where the folder differs; at most once in a few seconds.
     using Opening = std::function<std::unique_ptr<Library::FolderListing> (std::function<void (BrowserContents)>)>;
     void openWith (const Opening& open, Opening check);
+    void show (BrowserContents);       // what its listing gave: its first rows, or brought up to date in place
+    void relist (const Opening& open); // filled, listed again (from the index as it is now), its rows brought up to date
     void lookAgain (bool whateverItsLastLook = false);
     void sayIfLate();                         // its folder still being read, its drive not answering for a few seconds: its line says so
     void filledWith (const BrowserContents&); // its first rows, and what waited for them (openness asked meanwhile, a reveal)
@@ -206,16 +214,16 @@ struct Browser::Node : public juce::TreeViewItem
             return;
         }
 
-        // A folder opens with one click, as in FL Studio's browser.
-        if (mightContainSubItems())
+        // A folder opens with one click, as in FL Studio's browser; a device's presets by its chevron, as in Ableton Live's.
+        if (isFolder() || (mightContainSubItems() && isOnChevron (e)))
             setOpen (! isOpen());
 
         clicked();
     }
 
-    void itemDoubleClicked (const juce::MouseEvent&) override
+    void itemDoubleClicked (const juce::MouseEvent& e) override
     {
-        if (! mightContainSubItems()) // a folder opened with the first click
+        if (! isFolder() && ! (mightContainSubItems() && isOnChevron (e))) // a folder opened with the first click
             activate();
     }
 
@@ -382,14 +390,7 @@ void Browser::Node::openWith (const Opening& open, Opening check)
     filled = false;
     saidLate = false;
     checkedAt = devices::Clock::getMilliseconds(); // read as it opens: not again at once
-    listing = open (
-        [this] (BrowserContents contents)
-        {
-            if (filled)
-                browser.updateRows (*this, contents); // what changed since the index's rows, in place
-            else
-                filledWith (contents);
-        });
+    listing = open ([this] (BrowserContents contents) { show (std::move (contents)); });
 
     // Its first rows still to come: a line says so.
     if (! filled && listing != nullptr)
@@ -398,6 +399,25 @@ void Browser::Node::openWith (const Opening& open, Opening check)
         browser.openingRows.insert (this);
         addSubItem (new MessageNode (browser, "Reading this folder..."));
     }
+}
+
+void Browser::Node::show (BrowserContents contents)
+{
+    // What several folders gave while one of them doesn't answer: its line says so, under them, until the rest comes.
+    if (listing != nullptr && listing->isPartial())
+        contents.messages.add ("This drive isn't answering...");
+
+    if (filled)
+        browser.updateRows (*this, contents); // what changed since the index's rows, in place
+    else
+        filledWith (contents);
+}
+
+void Browser::Node::relist (const Opening& open)
+{
+    // Listed again in place: what is open and selected in it stays.
+    listing = nullptr;
+    listing = open ([this] (BrowserContents contents) { show (std::move (contents)); });
 }
 
 void Browser::Node::sayIfLate()
@@ -474,12 +494,13 @@ struct Browser::SoundPackNode : public Node
 };
 
 //==============================================================================
-// A sound, MIDI file, device or folder.
+// A sound, MIDI file, preset, device or folder. A device's row opens to its presets, while it has some.
 struct Browser::ItemNode : public Node
 {
-    ItemNode (Browser& b, LibraryItem i)
+    ItemNode (Browser& b, LibraryItem i, int presetsHeld = 0)
         : Node (b),
-          item (std::move (i))
+          item (std::move (i)),
+          presets (presetsHeld)
     {
     }
 
@@ -487,10 +508,36 @@ struct Browser::ItemNode : public Node
     juce::String getDetail() const override { return BrowserModel::getDetail (item); }
     std::optional<Icon> getIcon() const override { return getIconFor (item); }
     const LibraryItem* getItem() const override { return &item; }
-    bool mightContainSubItems() override { return item.kind == LibraryItem::Kind::folder; }
+    bool mightContainSubItems() override { return item.kind == LibraryItem::Kind::folder || presets != 0; }
+    bool isFolder() override { return item.kind == LibraryItem::Kind::folder; }
     juce::String getUniqueName() const override { return item.getKey(); }
+
+    // How many presets its row holds now (BrowserContents::presets): one that has none any more closes; one open with none
+    // before (left open last time) shows them; one open with others before (a preset saved from a plug-in's window, or one
+    // that came from outside) lists them again, what is open and selected in it kept.
+    void setPresets (int held)
+    {
+        const auto before = std::exchange (presets, held);
+
+        if (before == held)
+            return;
+
+        if (held == 0 && isOpen())
+            setOpen (false);
+        else if (before == 0 && isOpen())
+            populate();
+        else if (isOpen() && filled)
+            relist ([this] (std::function<void (BrowserContents)> opened) { return browser.model.open (item, std::move (opened)); });
+
+        treeHasChanged();
+    }
+
     void populate() override
     {
+        // A device's row with no presets any more, asked to be open (as the browser was left last time): nothing in it.
+        if (! mightContainSubItems())
+            return;
+
         openWith ([this] (std::function<void (BrowserContents)> opened) { return browser.model.open (item, std::move (opened)); },
                   [this] (std::function<void (BrowserContents)> opened) { return browser.model.check (item, std::move (opened)); });
     }
@@ -506,6 +553,7 @@ struct Browser::ItemNode : public Node
     juce::String getTooltip() override { return BrowserModel::getTooltip (item); }
 
     const LibraryItem item;
+    int presets = 0; // a device's: how many presets its row holds, -1 while that isn't known
 };
 
 //==============================================================================
@@ -531,8 +579,10 @@ struct Browser::PlaceNode : public Node
             case BrowserPlace::Kind::recent:
                 return Icon::recent;
             case BrowserPlace::Kind::instruments:
+            case BrowserPlace::Kind::instrumentContainers:
                 return Icon::instrument;
             case BrowserPlace::Kind::effects:
+            case BrowserPlace::Kind::containers:
                 return Icon::effect;
             case BrowserPlace::Kind::addFolder:
                 return Icon::addFolder;
@@ -540,9 +590,9 @@ struct Browser::PlaceNode : public Node
                 return Icon::plus;
             case BrowserPlace::Kind::collections: // a folder of sets, not the browser's own icon
             case BrowserPlace::Kind::sounds:
+            case BrowserPlace::Kind::trackPresets: // a folder of the user's presets
+            case BrowserPlace::Kind::otherPresets:
             case BrowserPlace::Kind::folder:
-            case BrowserPlace::Kind::factoryPresets:
-            case BrowserPlace::Kind::presets: // a folder of the user's presets
             case BrowserPlace::Kind::collection:
                 break;
         }
@@ -639,8 +689,8 @@ struct Browser::Tree : public juce::TreeView
 
         auto* before = dynamic_cast<Node*> (getSelectedItem (0));
 
-        // Enter puts an item into the song; on a folder, it opens or closes it.
-        if (key == juce::KeyPress::returnKey && before != nullptr && ! before->mightContainSubItems())
+        // Enter puts an item into the song (a device whose row holds presets too); on a folder, it opens or closes it.
+        if (key == juce::KeyPress::returnKey && before != nullptr && ! before->isFolder())
         {
             before->activate();
             return true;
@@ -967,16 +1017,18 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
                 row->afterFill.push_back (std::move (then));
         }
 
-        // A preset just saved, shown in Presets, selected, once the index has it (another change of it, a folder patched,
-        // may come first).
-        if (revealWhenIndexed.has_value() && library.getWholeIndex()->find (revealWhenIndexed->second.getFullPathName()).has_value())
-        {
-            const auto toReveal = *std::exchange (revealWhenIndexed, std::nullopt);
-            reveal (toReveal.first, toReveal.second);
-        }
+        // The devices' rows as many presets as the index counts now, and Other Presets as it holds now.
+        refreshDevices();
+        refreshOtherPresets();
+
+        // A preset just saved, shown where it belongs, selected, once the index has it (another change of it, a folder
+        // patched, may come first).
+        if (revealWhenIndexed.has_value() && library.getWholeIndex()->find (revealWhenIndexed->getFullPathName()).has_value())
+            reveal (*std::exchange (revealWhenIndexed, std::nullopt));
     };
 
     soundPack.addChangeListener (this);
+    deviceFolders = model.getDeviceFolders();
     rebuildPlaces();
     lookAndFeelChanged();
 }
@@ -1018,7 +1070,7 @@ void Browser::addRows (juce::TreeViewItem& parent, const BrowserContents& conten
         parent.addSubItem (new PlaceNode (*this, place));
 
     for (const auto& item : contents.items)
-        parent.addSubItem (new ItemNode (*this, item));
+        parent.addSubItem (new ItemNode (*this, item, contents.getPresets (item)));
 
     for (const auto& message : contents.messages)
         parent.addSubItem (new MessageNode (*this, message));
@@ -1068,12 +1120,22 @@ void Browser::updateRows (juce::TreeViewItem& parent, const BrowserContents& con
         if (! wantedNames.count (parent.getSubItem (i)->getUniqueName()))
             parent.removeSubItem (i);
 
+    // A device's row that stays holds as many presets as it does now.
+    const auto keep = [&contents] (juce::TreeViewItem* row)
+    {
+        if (auto* kept = dynamic_cast<ItemNode*> (row))
+            kept->setPresets (contents.getPresets (kept->item));
+    };
+
     for (int i = 0; i < (int) wanted.size(); ++i)
     {
         const auto& each = wanted[(size_t) i];
 
         if (i < parent.getNumSubItems() && parent.getSubItem (i)->getUniqueName() == each.name)
+        {
+            keep (parent.getSubItem (i));
             continue;
+        }
 
         // One that stays, further down: moved here, as it is.
         auto moved = false;
@@ -1084,6 +1146,7 @@ void Browser::updateRows (juce::TreeViewItem& parent, const BrowserContents& con
             {
                 parent.removeSubItem (j, false);
                 parent.addSubItem (row, i);
+                keep (row);
                 moved = true;
             }
         }
@@ -1102,7 +1165,7 @@ void Browser::updateRows (juce::TreeViewItem& parent, const BrowserContents& con
                 made = new PlaceNode (*this, contents.places[each.index]);
                 break;
             case Kind::item:
-                made = new ItemNode (*this, contents.items[each.index]);
+                made = new ItemNode (*this, contents.items[each.index], contents.getPresets (contents.items[each.index]));
                 break;
             case Kind::message:
                 made = new MessageNode (*this, contents.messages[(int) each.index]);
@@ -1451,6 +1514,44 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
                         reopen (holder->getSubItem (j));
             }
         });
+}
+
+void Browser::refreshDevices()
+{
+    // Instruments and Effects open, without filters (with them, they don't show): brought up to date in place, so that what
+    // is open within them stays.
+    if (placesRoot == nullptr || ! listedPlaces.filters.isEmpty())
+        return;
+
+    for (int i = 0; i < placesRoot->getNumSubItems(); ++i)
+        if (auto* place = dynamic_cast<PlaceNode*> (placesRoot->getSubItem (i));
+            place != nullptr && place->isOpen() && place->filled
+            && (place->place.kind == BrowserPlace::Kind::instruments || place->place.kind == BrowserPlace::Kind::effects))
+            updateRows (*place, model.getContents (place->place));
+}
+
+void Browser::refreshOtherPresets()
+{
+    // Without filters: Other Presets shows while it holds any (the places listed again where it came or went), and holds
+    // what no device's row lists (its rows listed again where the devices changed: a plug-in scanned, whose folder it held,
+    // shows under the plug-in's row now). The places' open folders stay open.
+    if (placesRoot == nullptr || ! filters.isEmpty() || ! listedPlaces.filters.isEmpty())
+        return;
+
+    const auto folders = model.getDeviceFolders();
+    const auto devicesChanged = std::exchange (deviceFolders, folders) != folders;
+    juce::StringArray shown, wanted;
+
+    for (int i = 0; i < placesRoot->getNumSubItems(); ++i)
+        shown.add (placesRoot->getSubItem (i)->getUniqueName());
+
+    for (const auto& place : model.getPlaces())
+        wanted.add ("place:" + place.getKey());
+
+    if (shown != wanted)
+        rebuildPlaces();
+    else if (devicesChanged)
+        refreshPlace (BrowserPlace::Kind::otherPresets);
 }
 
 void Browser::textEditorTextChanged (juce::TextEditor&)
@@ -1905,9 +2006,11 @@ juce::PopupMenu Browser::getPlaceMenu (const BrowserPlace& place)
         return menu;
     }
 
-    // A folder's, Phazite Sounds' and the presets' folder's, as the items' are; the user's folders can go from the browser.
+    // A folder's, Phazite Sounds' and the user's folder of track presets, of containers' or of other presets, as the items'
+    // are; the user's folders can go from the browser.
     const auto isFolder = place.kind == BrowserPlace::Kind::folder;
-    const auto isPresets = place.kind == BrowserPlace::Kind::presets && place.folder.isDirectory();
+    const auto isPresets =
+        (model.getShelf (place).has_value() || place.kind == BrowserPlace::Kind::otherPresets) && place.folder.isDirectory();
 
     if (isFolder || isPresets || (place.kind == BrowserPlace::Kind::sounds && soundPack.isInstalled()))
         return getItemMenu (library.makeFileItem (place.folder, place.folder), isFolder);
@@ -2181,18 +2284,23 @@ void Browser::scrollTreeTo (int y)
 
 std::unique_ptr<Browser::RootNode> Browser::makeSwapRoot (DeviceID device)
 {
+    // As its row under Instruments or Effects lists them: Phazite's and the user's as one, every folder of them open, so that
+    // every preset is there for Down to go to (those of a folder still being read, once it is in).
     auto root = std::make_unique<RootNode> (*this);
-    const auto places = model.getPresetPlaces (getPresetFolderName (projectContext, device));
+    const auto shelf = PresetShelf::ofDevice (getPresetFolderName (projectContext, device), swap->getTargetName());
+    auto* opened = root.get();
+    opened->openWith ([this, shelf] (std::function<void (BrowserContents)> then) { return model.open (shelf, std::move (then)); },
+                      [this, shelf] (std::function<void (BrowserContents)> then) { return model.check (shelf, std::move (then)); });
 
-    for (const auto& place : places)
-    {
-        auto* node = new PlaceNode (*this, place);
-        root->addSubItem (node);
-        openWithFolders (*node); // so that every preset is there for Down to go to
-    }
-
-    if (root->getNumSubItems() == 0)
-        root->addSubItem (new MessageNode (*this, "No presets for " + swap->getTargetName() + " yet"));
+    if (opened->filled)
+        openWithFolders (*opened);
+    else
+        opened->afterFill.push_back (
+            [safeThis = juce::Component::SafePointer<Browser> (this), opened]
+            {
+                if (safeThis != nullptr && safeThis->swapRoot.get() == opened)
+                    openWithFolders (*opened);
+            });
 
     return root;
 }
@@ -2424,22 +2532,26 @@ void Browser::saveTrackPreset (TrackID track)
 
 void Browser::presetSaved (const juce::File& file)
 {
-    // Search finds it, and Presets shows it, selected, once the index has it (Presets lists what the index holds).
-    revealWhenIndexed = std::pair { BrowserPlace::Kind::presets, file };
+    // Search finds it, and its place shows it, selected, once the index has it: under its device, the containers' row or
+    // Track Presets (BrowserModel::findHome()).
+    revealWhenIndexed = file;
     library.notePresetSaved();
 }
 
-void Browser::reveal (BrowserPlace::Kind kind, const juce::File& file)
+void Browser::reveal (const juce::File& file)
 {
-    if (placesRoot == nullptr)
+    const auto home = model.findHome (file);
+
+    if (placesRoot == nullptr || ! home.has_value())
         return;
 
-    // The place, listed anew with its folders open as they were, and opened down to the file.
+    // The place, listed anew with its folders open as they were (its rows as the index has them now: the device's row with
+    // its presets), and opened down to the file.
     for (int i = 0; i < placesRoot->getNumSubItems(); ++i)
     {
         auto* place = dynamic_cast<PlaceNode*> (placesRoot->getSubItem (i));
 
-        if (place == nullptr || place->place.kind != kind)
+        if (place == nullptr || place->place.kind != home->place)
             continue;
 
         const auto openness = getOpenness (*place);
@@ -2449,43 +2561,62 @@ void Browser::reveal (BrowserPlace::Kind kind, const juce::File& file)
         if (openness != nullptr)
             restoreOpenness (*place, *openness);
 
-        revealIn (kind, file);
+        revealIn (file);
         return;
     }
 }
 
-void Browser::revealIn (BrowserPlace::Kind kind, const juce::File& file)
+void Browser::revealIn (const juce::File& file)
 {
-    // Down to the file, a folder at a time, each once its rows are in (a folder read on a listing thread).
+    // Down to the file, a row at a time, each once its rows are in (a folder read on a listing thread).
     if (isWaitingForRows())
     {
         afterSearch (
-            [safeThis = juce::Component::SafePointer<Browser> (this), kind, file]
+            [safeThis = juce::Component::SafePointer<Browser> (this), file]
             {
                 if (safeThis != nullptr)
-                    safeThis->revealIn (kind, file);
+                    safeThis->revealIn (file);
             });
         return;
     }
 
-    if (placesRoot == nullptr)
+    const auto home = model.findHome (file);
+
+    if (placesRoot == nullptr || ! home.has_value())
         return;
+
+    // Whether a row leads to the file: the containers' row it is in, its device's row, or a folder it is in.
+    const auto leads = [this, &home, &file] (Node& node)
+    {
+        if (const auto* place = dynamic_cast<PlaceNode*> (&node))
+            return home->container.has_value() && place->place.kind == *home->container;
+
+        const auto* item = node.getItem();
+
+        if (item == nullptr)
+            return false;
+
+        if (item->device.has_value())
+            return home->deviceFolder.isNotEmpty() && BrowserModel::getShelf (*item)->folderName == home->deviceFolder;
+
+        return model.leadsTo (*item, file);
+    };
 
     for (int i = 0; i < placesRoot->getNumSubItems(); ++i)
     {
         auto* place = dynamic_cast<PlaceNode*> (placesRoot->getSubItem (i));
 
-        if (place == nullptr || place->place.kind != kind || ! place->isOpen())
+        if (place == nullptr || place->place.kind != home->place || ! place->isOpen())
             continue;
 
         // On once a folder being read has its rows (dropped if it closes or goes first).
-        const auto onceFilled = [this, kind, file] (Node& reading)
+        const auto onceFilled = [this, file] (Node& reading)
         {
             reading.afterFill.push_back (
-                [safeThis = juce::Component::SafePointer<Browser> (this), kind, file]
+                [safeThis = juce::Component::SafePointer<Browser> (this), file]
                 {
                     if (safeThis != nullptr)
-                        safeThis->revealIn (kind, file);
+                        safeThis->revealIn (file);
                 });
         };
 
@@ -2502,18 +2633,20 @@ void Browser::revealIn (BrowserPlace::Kind kind, const juce::File& file)
             for (int j = 0; j < parent->getNumSubItems() && next == nullptr; ++j)
             {
                 auto* node = dynamic_cast<Node*> (parent->getSubItem (j));
-                const auto* item = node != nullptr ? node->getItem() : nullptr;
 
-                if (item == nullptr || (item->file != file && ! file.isAChildOf (item->file)))
+                if (node == nullptr)
                     continue;
 
-                if (item->file == file)
+                if (const auto* item = node->getItem(); item != nullptr && item->file == file)
                 {
                     node->setSelected (true, true);
-                    layOutTreeNow(); // the folders just opened
+                    layOutTreeNow(); // the rows just opened
                     tree->scrollToKeepItemVisible (node);
                     return;
                 }
+
+                if (! node->mightContainSubItems() || ! leads (*node))
+                    continue;
 
                 if (! node->isOpen())
                     node->setOpen (true);

@@ -410,8 +410,10 @@ device cannot break a saved preset. Presets carry no format version.
   a plug-in's name), `Containers` and `Tracks`.
 - The presets that come with Phazite are in a `presets` folder next to the app, by device and kind of sound. Nothing
   writes to them.
-- The browser shows the two as **Phazite Presets** and **Presets**, and search finds both
-  ([browser.md](browser.md)).
+- The browser shows the two as one, under what each is for: a device's under its row in Instruments or Effects, a
+  container's under **Container** or **Instrument Container** there, a track's under **Track Presets**, and the user's
+  kept where none of those lists them (at the top of the folder, or a plug-in's not scanned) under **Other Presets**;
+  search finds both ([browser.md](browser.md)).
 
 ### Saving
 
@@ -454,10 +456,9 @@ come with Phazite go by their names.
 ### Swap
 
 **Swap: Try Them in Place**, first in the Presets menu of one of Phazite's own devices, tries presets in the device
-itself. The browser lists the device's presets alone, and each one it moves to is put in place and heard at once: in
-the beat while the song plays, through the track's devices; while it is stopped, an instrument plays a short note.
-Enter or Keep
-keeps the one tried as one undo step; Escape or Put Back puts the old settings back, leaving nothing to redo. Anything
+itself. The browser lists the device's presets alone, as the device's row lists them, and each one it moves to is put
+in place and heard at once: in the beat while the song plays, through the track's devices; while it is stopped, an
+instrument plays a short note. Enter or Keep keeps the one tried as one undo step; Escape or Put Back puts the old settings back, leaving nothing to redo. Anything
 else that changes the song meanwhile keeps what is tried, as a step of its own, and ends the swap.
 
 A Drum Sampler's pad swaps its sound the same way ([drum-sampler.md](devices/drum-sampler.md),

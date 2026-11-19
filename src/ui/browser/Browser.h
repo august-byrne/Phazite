@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The browser (docs/design.md, section 11; roadmap step 1.5): favorites, recent items, the user's collections, Phazite
-// Sounds (or, until they are downloaded, a row that downloads them), the instruments and effects, the user's presets and own
-// folders, in a tree as in FL Studio's browser, laid out as VS Code's Explorer under its title (its rows, chevrons, levels
+// The browser (docs/design.md, section 11; roadmap step 1.5): favorites, recent items, the user's collections, Sounds
+// (Phazite Sounds, or until they are downloaded a row that downloads them), the instruments and effects, each device's row
+// opening to its presets (Phazite's and the user's as one), the user's track presets and own folders, in a tree as in FL
+// Studio's browser, laid out as VS Code's Explorer under its title (its rows, chevrons, levels
 // and their guides); or, while the search field has text, what search finds in all of them. Under the search, the filters
 // (FilterBar.h): with any set, each place lists its sounds with their values as one list. Clicking a sound,
 // or moving to it with the arrow keys, plays it (a loop in time with the song). Dragging an item puts it into the song:
@@ -53,8 +54,12 @@ public:
     bool canSaveTrackPreset() const;
 
     // Saves a preset of a track in the presets' Tracks folder, named after it (with a number if the name is taken), as a
-    // track dropped here is, once the plug-ins that said they changed have given their states; shows it in Presets.
+    // track dropped here is, once the plug-ins that said they changed have given their states; shows it in Track Presets.
     void saveTrackPreset (TrackID);
+
+    // A preset just saved (by the commands above, a device's Save Preset... or a track dropped here): indexed again, and
+    // shown where it belongs, selected, once the index has it (BrowserModel::findHome()).
+    void presetSaved (const juce::File&);
 
     // A device's presets, as its Presets button in the Devices view shows them: Phazite's for it, by kind of sound, then
     // the user's; the one chosen loads into the device as one undo step (PresetModel.h: loadPresetInto()). And Save
@@ -102,8 +107,8 @@ public:
     // keeps one as one undo step, Esc or Put Back puts the old one back, and starting another, or anything else that changes
     // the song, keeps what was tried. Meanwhile a strip over the search says what is swapped, previews stay silent, and
     // the tree shows what fits, from its top: a pad's sounds of its type ("Kick", by its sound's name), by the filters; or
-    // the device's presets alone, Phazite's and the user's, every folder of them open, so that Down goes from one to the
-    // next, the filters hidden (presets have none of their values). Once it ends, the browser is as it was: its search, its
+    // the device's presets alone, as its row lists them (Phazite's and the user's as one), every folder of them open, so that
+    // Down goes from one to the next, the filters hidden (presets have none of their values). Once it ends, the browser is as it was: its search, its
     // filters, its folders open, the row selected and how far it was scrolled. onSwapStarted shows the browser, which then has the keys. Asked again for what it swaps (its Swap
     // button clicked again), it keeps what is in its place.
     void startSwap (DeviceID, int pad = -1);
@@ -224,10 +229,12 @@ private:
     void saveSelectedDevicePreset();
     void saveSelectedTrackPreset();
     void choosePresetFile (const juce::String& folder, const juce::String& name, std::function<bool (const juce::File&)> save);
-    void presetSaved (const juce::File&);
-    void reveal (BrowserPlace::Kind, const juce::File&);   // a file in a place: its folders opened, and it selected
-    void revealIn (BrowserPlace::Kind, const juce::File&); // the place's folders opened down to it, each once its rows are in
-    std::optional<std::pair<BrowserPlace::Kind, juce::File>> revealWhenIndexed; // a preset saved: once the index has it
+    void refreshDevices();                       // Instruments and Effects open: as many presets on each device's row as now
+    void refreshOtherPresets();                  // Other Presets shown while it holds any, holding what no device's row lists
+    juce::StringArray deviceFolders;             // the devices' presets' folders, as refreshOtherPresets() last saw them
+    void reveal (const juce::File& preset);      // a preset where it shows (BrowserModel::findHome()): its rows opened, it selected
+    void revealIn (const juce::File& preset);    // the rows opened down to it, each once its rows are in
+    std::optional<juce::File> revealWhenIndexed; // a preset saved: once the index has it
     void addRows (juce::TreeViewItem& parent, const BrowserContents&);
     void updateRows (juce::TreeViewItem& parent, const BrowserContents&); // in place: only what differs added, moved or taken away
     bool wasFocused = false, wasInFront = false;                          // at the timer's last look

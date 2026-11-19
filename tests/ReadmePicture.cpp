@@ -93,7 +93,7 @@ TEST_CASE ("The README's picture of the window" * doctest::test_suite ("readme-p
 
     REQUIRE (isShown<phazite::ui::DevicesView> (screen.shell));
 
-    // The browser's instruments open, and Phazite Sounds, which offers its download, closed.
+    // The browser's instruments open, and Sounds, which offers Phazite Sounds' download, closed.
     auto* browser = phazite::test::findAll<phazite::ui::Browser> (screen.shell).getFirst();
     REQUIRE (browser != nullptr);
     REQUIRE (browser->getTree().getRootItem() != nullptr);
@@ -105,7 +105,7 @@ TEST_CASE ("The README's picture of the window" * doctest::test_suite ("readme-p
 
         if (place.getUniqueName().contains (":Instruments:"))
             place.setOpen (true);
-        else if (place.getUniqueName().contains (":Phazite Sounds:"))
+        else if (place.getUniqueName().contains (":Sounds:"))
             place.setOpen (false);
     }
 

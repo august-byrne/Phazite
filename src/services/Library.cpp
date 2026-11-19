@@ -337,31 +337,6 @@ std::optional<LibraryItem> LibraryIndex::find (const juce::String& path) const
     return found->second.first ? folders[found->second.second] : files[found->second.second];
 }
 
-std::optional<int> LibraryIndex::countFilesWithin (const juce::File& folder, const juce::String& extension) const
-{
-    if (! holdsWhole (folder))
-        return std::nullopt;
-
-    auto count = 0;
-    std::vector<juce::String> toCount { folder.getFullPathName() };
-
-    for (size_t next = 0; next < toCount.size(); ++next)
-    {
-        const auto found = children.find (toCount[next]);
-
-        if (found == children.end())
-            continue;
-
-        for (const auto i : found->second.files)
-            count += files[i].file.hasFileExtension (extension) ? 1 : 0;
-
-        for (const auto i : found->second.folders)
-            toCount.push_back (folders[i].file.getFullPathName());
-    }
-
-    return count;
-}
-
 std::shared_ptr<const LibraryIndex> LibraryIndex::withListing (const juce::File& folder, const std::vector<LibraryItem>& listed,
                                                                const juce::File& root, bool& hasNewFolders) const
 {
@@ -386,6 +361,7 @@ std::shared_ptr<const LibraryIndex> LibraryIndex::withListing (const juce::File&
     auto made = std::make_shared<LibraryIndex>();
     made->full = full;
     made->wholeRoots = wholeRoots;
+    made->walkedRoots = walkedRoots;
     made->loops = loops;
     made->listedAt = listedAt;
     hasNewFolders = false;
@@ -845,6 +821,7 @@ struct Library::Indexer : public juce::Thread
         if (! full && (int) folders.size() < maxIndexed)
             made->wholeRoots = roots;
 
+        made->walkedRoots = roots;
         made->loops = loops;
         made->listedAt = listedAt;
         made->makeChildren();
@@ -1222,19 +1199,30 @@ std::optional<std::vector<LibraryItem>> Library::readFolder (const juce::File& f
 struct Library::FolderListing::State
 {
     std::atomic<bool> cancelled { false };
-    std::atomic<bool> late { false }; // its read inside the system, or waiting to start, for a few seconds (markLate())
+    std::atomic<bool> late { false };    // its read inside the system, or waiting to start, for a few seconds (markLate())
+    std::atomic<bool> partial { false }; // several folders': what it gave last lacks a late one's rows (listFoldersOf())
     Listed listed;
+    std::function<void()> whenLate; // a folder's of several, opened: posted as it becomes late (message thread alone)
 };
 
 void Library::FolderListing::cancel()
 {
     state->cancelled = true;
     state->listed = nullptr;
+
+    for (auto& part : parts)
+        part->cancel();
 }
 
 bool Library::FolderListing::isLate() const
 {
-    return state->late.load();
+    return state->late.load()
+           || std::any_of (parts.begin(), parts.end(), [] (const std::unique_ptr<FolderListing>& part) { return part->isLate(); });
+}
+
+bool Library::FolderListing::isPartial() const
+{
+    return state->partial.load();
 }
 
 namespace
@@ -1286,6 +1274,268 @@ std::unique_ptr<Library::FolderListing> Library::checkListing (const juce::File&
     // Compared with the index as it is when it is read, not with anything an opening gave.
     JUCE_ASSERT_MESSAGE_THREAD
     return listFolderOf (folder, std::move (listed), std::nullopt, true);
+}
+
+std::unique_ptr<Library::FolderListing> Library::startListing (const juce::Array<juce::File>& folders, Listed listed) const
+{
+    return listFoldersOf (folders, std::move (listed), false);
+}
+
+std::unique_ptr<Library::FolderListing> Library::checkListing (const juce::Array<juce::File>& folders, Listed listed) const
+{
+    return listFoldersOf (folders, std::move (listed), true);
+}
+
+std::unique_ptr<Library::FolderListing> Library::listFoldersOf (const juce::Array<juce::File>& folders, Listed listed, bool check) const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (folders.size() == 1)
+        return check ? checkListing (folders.getFirst(), std::move (listed)) : startListing (folders.getFirst(), std::move (listed));
+
+    // Each folder's rows as its own listing gives them, the outer optional whether it has: what the index knows at once,
+    // the disk's once read. Looked at again, a folder the index knows is as the index has it until its read differs (its
+    // listing tells nothing else).
+    using Rows = std::optional<std::vector<LibraryItem>>;
+
+    struct Parts
+    {
+        std::vector<std::optional<Rows>> given; // each folder's
+        std::vector<bool> late;                 // each folder's read late, its rows not in (message thread)
+    };
+
+    const auto parts = std::make_shared<Parts>();
+    parts->given.resize ((size_t) folders.size());
+    parts->late.resize ((size_t) folders.size(), false);
+    const auto indexed = getWholeIndex();
+
+    for (int i = 0; i < folders.size(); ++i)
+        if (auto known = knowFromIndex (*indexed, folders[i]))
+            parts->given[(size_t) i] = std::move (*known);
+
+    auto state = std::make_shared<FolderListing::State>();
+    state->listed = std::move (listed);
+    auto whole = std::make_unique<FolderListing> (state);
+    const std::weak_ptr<FolderListing::State> weakState = state;
+
+    // What they hold together, given once every folder's rows are in; and opened, while one not in is late, what came (a
+    // drive that doesn't answer hides nothing the others hold), then again with each folder's rows that come. Told of a
+    // folder that became late, given only what it hadn't given.
+    const auto give = [parts, weakState] (bool becameLate)
+    {
+        const auto held = weakState.lock();
+
+        if (held == nullptr || held->cancelled.load())
+            return;
+
+        auto missing = (size_t) 0;
+        auto waitsForLate = false;
+
+        for (size_t i = 0; i < parts->given.size(); ++i)
+        {
+            if (! parts->given[i].has_value())
+            {
+                ++missing;
+                waitsForLate = waitsForLate || parts->late[i];
+            }
+        }
+
+        if (missing == parts->given.size() || (missing > 0 && ! waitsForLate) || (missing == 0 && becameLate))
+            return;
+
+        std::vector<Rows> all;
+
+        for (const auto& each : parts->given)
+            if (each.has_value())
+                all.push_back (*each);
+
+        held->partial = missing > 0;
+
+        // A copy: what it calls may cancel the listing, which lets go of its own.
+        if (auto then = held->listed)
+            then (mergeListings (all));
+    };
+
+    for (int i = 0; i < folders.size(); ++i)
+    {
+        auto part = [parts, give, at = (size_t) i] (Rows rows)
+        {
+            auto& had = parts->given[at];
+
+            // None and an empty list the same: a presets' folder that isn't there tells nothing new of one the index has empty.
+            const auto same =
+                had.has_value() && isSameListing (had->value_or (std::vector<LibraryItem>()), rows.value_or (std::vector<LibraryItem>()));
+            had = std::move (rows);
+
+            if (! same)
+                give (false);
+        };
+
+        auto each = check ? checkListing (folders[i], std::move (part)) : startListing (folders[i], std::move (part));
+
+        if (! check)
+            each->state->whenLate = [parts, give, at = (size_t) i]
+            {
+                parts->late[at] = true;
+                give (true);
+            };
+
+        whole->parts.push_back (std::move (each));
+    }
+
+    // What the index knows of every one, at once; or none to list: none there.
+    if (folders.isEmpty())
+    {
+        if (auto then = state->listed)
+            then (std::nullopt);
+    }
+    else if (! check)
+    {
+        give (false);
+    }
+
+    return whole;
+}
+
+std::optional<std::optional<std::vector<LibraryItem>>> Library::knowFromIndex (const LibraryIndex& indexed, const juce::File& folder) const
+{
+    if (isListedFromIndex (indexed, folder))
+        return indexed.listChildren (folder);
+
+    {
+        const std::scoped_lock held (listingsShared->lock);
+
+        if (! listingsShared->fromIndex)
+            return std::nullopt;
+    }
+
+    // In a presets' folder that wasn't there as the index walked (none on a fresh install): not there, until a read finds it.
+    const auto isIn = [&folder] (const juce::File& root) { return root != juce::File() && (folder == root || folder.isAChildOf (root)); };
+
+    if ((isIn (presetsFolder) || isIn (factoryPresetsFolder)) && ! indexed.walkedRoots.isEmpty()
+        && std::none_of (indexed.walkedRoots.begin(), indexed.walkedRoots.end(), isIn))
+        return std::optional<std::vector<LibraryItem>>();
+
+    return std::nullopt;
+}
+
+bool Library::isListedFromIndex (const LibraryIndex& indexed, const juce::File& folder) const
+{
+    {
+        const std::scoped_lock held (listingsShared->lock);
+
+        if (! listingsShared->fromIndex)
+            return false;
+    }
+
+    return indexed.holdsWhole (folder);
+}
+
+std::optional<std::vector<LibraryItem>> Library::mergeListings (const std::vector<std::optional<std::vector<LibraryItem>>>& parts)
+{
+    std::vector<LibraryItem> folders, files;
+    auto any = false;
+
+    for (const auto& part : parts)
+    {
+        if (! part.has_value())
+            continue;
+
+        any = true;
+
+        for (const auto& item : *part)
+        {
+            if (item.kind != LibraryItem::Kind::folder)
+                files.push_back (item);
+            else if (std::none_of (folders.begin(), folders.end(),
+                                   [&item] (const LibraryItem& other) { return other.name.equalsIgnoreCase (item.name); }))
+                folders.push_back (item);
+        }
+    }
+
+    if (! any)
+        return std::nullopt;
+
+    // By name alone, so that those of one name keep the folders' order (each folder's are by name, then by path).
+    const auto byName = [] (const LibraryItem& a, const LibraryItem& b) { return a.name.compareNatural (b.name) < 0; };
+    std::stable_sort (folders.begin(), folders.end(), byName);
+    std::stable_sort (files.begin(), files.end(), byName);
+    folders.insert (folders.end(), std::make_move_iterator (files.begin()), std::make_move_iterator (files.end()));
+    return folders;
+}
+
+std::optional<std::vector<LibraryItem>> Library::listFolders (const juce::Array<juce::File>& folders) const
+{
+    std::vector<std::optional<std::vector<LibraryItem>>> parts;
+
+    for (const auto& folder : folders)
+        parts.push_back (readFolder (folder, findRootByPath (folder), audioExtensions, *getFacts()));
+
+    return mergeListings (parts);
+}
+
+juce::Array<juce::File> Library::getPresetFolders (const juce::String& folderName) const
+{
+    juce::Array<juce::File> folders;
+
+    if (folderName.trim().isEmpty())
+        return folders; // not the presets' folders themselves: a device without a name has none
+
+    const auto indexed = getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
+
+    for (const auto& root : { presetsFolder, factoryPresetsFolder })
+        if (root != juce::File())
+            folders.add (findPresetFolder (*indexed, root, folderName));
+
+    return folders;
+}
+
+juce::File Library::findPresetFolder (const LibraryIndex& indexed, const juce::File& root, const juce::String& path)
+{
+    // Each folder of the path as the index has it: the one of that name, else one whose name matches without regard to case.
+    auto folder = root;
+
+    for (const auto& name : juce::StringArray::fromTokens (path, "/\\", ""))
+    {
+        if (name.isEmpty())
+            continue;
+
+        auto next = folder.getChildFile (name);
+
+        if (const auto found = indexed.children.find (folder.getFullPathName()); found != indexed.children.end())
+        {
+            const auto& within = found->second.folders;
+            const auto named = [&indexed, &name, &within] (bool exactly)
+            {
+                return std::find_if (within.begin(), within.end(),
+                                     [&indexed, &name, exactly] (size_t i)
+                                     {
+                                         const auto each = indexed.folders[i].file.getFileName();
+                                         return exactly ? each == name : each.equalsIgnoreCase (name);
+                                     });
+            };
+
+            if (const auto exact = named (true); exact != within.end())
+                next = indexed.folders[*exact].file;
+            else if (const auto alike = named (false); alike != within.end())
+                next = indexed.folders[*alike].file;
+        }
+
+        folder = next;
+    }
+
+    return folder;
+}
+
+juce::Array<juce::File> Library::getPresetFoldersWith (const juce::File& folder) const
+{
+    // Within either presets' folder by its path, whatever root the index has it in (a user's folder that holds the presets'
+    // folder is walked as one root with it).
+    for (const auto& root : { presetsFolder, factoryPresetsFolder })
+        if (root != juce::File() && folder.isAChildOf (root))
+            return getPresetFolders (folder.getRelativePathFrom (root));
+
+    return { folder };
 }
 
 std::unique_ptr<Library::FolderListing> Library::listFolderOf (const juce::File& folder, Listed listed,
@@ -1410,8 +1660,16 @@ void Library::markLate() const
                                                         : ! read->started && now - read->createdAt > stuckMilliseconds;
 
         for (const auto& waiter : read->waiters)
-            if (const auto state = waiter.listing.lock())
-                state->late = late;
+        {
+            const auto state = waiter.listing.lock();
+
+            if (state == nullptr)
+                continue;
+
+            // A folder's of several, as it becomes late: later, outside this lock, what the others gave is given.
+            if (const auto was = state->late.exchange (late); late && ! was && state->whenLate != nullptr && ! state->cancelled.load())
+                juce::MessageManager::callAsync (state->whenLate);
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BrowserModel.h"
+#include "model/base/WholeFile.h"
 
 #include <algorithm>
 #include <iterator>
@@ -90,16 +91,21 @@ juce::String BrowserPlace::getTooltip() const
         case Kind::recent:
             return "What you put into the song lately, newest first";
         case Kind::sounds:
-            return "Phazite's free sounds: drums, loops, effects and foley, all public domain (CC0)";
+            return "Free sounds to start with: drums, loops, effects and foley, all public domain (CC0)";
         case Kind::instruments:
-            return "Instruments turn a track's notes into sound";
+            return "Instruments turn a track's notes into sound. Open one to see its presets";
         case Kind::effects:
-            return "Effects change the sound of a track";
-        case Kind::factoryPresets:
-            return "Phazite's presets for its instruments and effects, by device and by kind of sound: drag one onto a track, "
-                   "or pick one from a device's Presets menu";
-        case Kind::presets:
-            return "Your presets: devices', containers' and tracks' settings, saved to use again, in " + folder.getFullPathName();
+            return "Effects change the sound of a track. Open one to see its presets";
+        case Kind::trackPresets:
+            return "Your track presets: a track's devices, mix and modulators, saved to make a new track with them. Drag a track "
+                   "into the browser to save one";
+        case Kind::containers:
+            return "Your presets of containers of effects, each with its devices and macros";
+        case Kind::instrumentContainers:
+            return "Your presets of instrument containers, each with its devices and macros";
+        case Kind::otherPresets:
+            return "Your presets of no device listed here: those at the top of " + folder.getFullPathName()
+                   + ", and the folders of plug-ins not scanned or no longer installed (once scanned, a plug-in's show under it)";
         case Kind::folder:
             return folder.getFullPathName();
         case Kind::addFolder:
@@ -131,14 +137,18 @@ BrowserModel::BrowserModel (const Library& l, const SoundPack& pack)
 std::vector<BrowserPlace> BrowserModel::getPlaces (const BrowserFilters& filters) const
 {
     using Kind = BrowserPlace::Kind;
+    const auto presets = library.getPresetsFolder();
     std::vector<BrowserPlace> places { { Kind::favorites, "Favorites", {} },
                                        { Kind::recent, "Recent", {} },
                                        { Kind::collections, "Collections", {} },
-                                       { Kind::sounds, "Phazite Sounds", library.getFactorySounds() },
+                                       { Kind::sounds, "Sounds", library.getFactorySounds() },
                                        { Kind::instruments, "Instruments", {} },
                                        { Kind::effects, "Effects", {} },
-                                       { Kind::factoryPresets, "Phazite Presets", library.getFactoryPresetsFolder() },
-                                       { Kind::presets, "Presets", library.getPresetsFolder() } };
+                                       { Kind::trackPresets, "Track Presets",
+                                         presets != juce::File() ? presets.getChildFile (trackPresetsFolder) : juce::File() } };
+
+    if (hasOtherPresets())
+        places.push_back ({ Kind::otherPresets, "Other Presets", presets });
 
     for (const auto& folder : library.getUserFolders())
         places.push_back ({ Kind::folder, folder.getFileName(), folder });
@@ -157,7 +167,7 @@ std::vector<BrowserPlace> BrowserModel::getPlaces (const BrowserFilters& filters
 bool BrowserModel::isOfIndex (const BrowserPlace& place)
 {
     using Kind = BrowserPlace::Kind;
-    return place.kind == Kind::sounds || place.kind == Kind::folder || place.kind == Kind::presets || place.kind == Kind::factoryPresets;
+    return place.kind == Kind::sounds || place.kind == Kind::folder;
 }
 
 std::optional<std::vector<BrowserModel::Listed>> BrowserModel::listIndexed (const LibraryIndex& index,
@@ -289,45 +299,6 @@ void BrowserModel::cancelFilteredPlaces() const
     listings.cancel();
 }
 
-std::vector<BrowserPlace> BrowserModel::getPresetPlaces (const juce::String& folderName) const
-{
-    using Kind = BrowserPlace::Kind;
-    std::vector<BrowserPlace> found;
-
-    if (folderName.isEmpty())
-        return found;
-
-    for (auto& place : getPlaces())
-    {
-        if ((place.kind != Kind::factoryPresets && place.kind != Kind::presets) || place.folder == juce::File())
-            continue;
-
-        place.folder = place.folder.getChildFile (folderName);
-        place.count = 0;
-
-        // From the index, which holds the presets' folders whole once walked: no disk. Else counted on the disk (the index
-        // first being made): the device's presets alone.
-        if (const auto counted = library.getWholeIndex()->countFilesWithin (place.folder, presetExtension))
-        {
-            place.count = *counted;
-        }
-        else
-        {
-            Library::noteFileQuery();
-
-            if (place.folder.isDirectory())
-                for ([[maybe_unused]] const auto& entry :
-                     juce::RangedDirectoryIterator (place.folder, true, juce::String ("*") + presetExtension, juce::File::findFiles))
-                    ++place.count;
-        }
-
-        if (place.count > 0)
-            found.push_back (std::move (place));
-    }
-
-    return found;
-}
-
 std::vector<LibraryItem> BrowserModel::getFiltered (const BrowserPlace& place, const BrowserFilters& filters, int& total) const
 {
     using Kind = BrowserPlace::Kind;
@@ -362,8 +333,10 @@ std::vector<LibraryItem> BrowserModel::getFiltered (const BrowserPlace& place, c
             break;
         case Kind::sounds:
         case Kind::folder:
-        case Kind::presets:
-        case Kind::factoryPresets:
+        case Kind::trackPresets: // presets have none of the filters' values
+        case Kind::containers:
+        case Kind::instrumentContainers:
+        case Kind::otherPresets:
         case Kind::collections:
         case Kind::instruments:
         case Kind::effects:
@@ -415,18 +388,312 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place, const Brow
         return describeFiltered (place, std::move (listed));
     }
 
-    // A folder's, read here.
+    // A folder's, read here; or a list of presets'.
+    if (const auto shelf = getShelf (place))
+        return getContents (*shelf);
+
     if (listsFolder (place))
         return describePlace (place, place.folder.isDirectory() ? std::optional (library.listFolder (place.folder)) : std::nullopt);
 
     return describePlace (place, std::nullopt);
 }
 
+BrowserContents BrowserModel::getContents (const PresetShelf& shelf) const
+{
+    return describeShelf (shelf, library.listFolders (library.getPresetFolders (shelf.folderName)));
+}
+
 bool BrowserModel::listsFolder (const BrowserPlace& place) const
 {
     using Kind = BrowserPlace::Kind;
-    return place.kind == Kind::folder || place.kind == Kind::factoryPresets || place.kind == Kind::presets
-           || (place.kind == Kind::sounds && isSoundPackInstalled());
+    return place.kind == Kind::folder || place.kind == Kind::otherPresets || (place.kind == Kind::sounds && isSoundPackInstalled());
+}
+
+//==============================================================================
+int BrowserContents::getPresets (const LibraryItem& item) const
+{
+    const auto found = presets.find (item.getKey());
+    return found != presets.end() ? found->second : 0;
+}
+
+bool PresetShelf::accepts (const LibraryItem& item) const
+{
+    if (! instrumentContainers.has_value() || item.kind != LibraryItem::Kind::preset)
+        return true;
+
+    // Of instrument containers under Instrument Container; the others (any other preset kept there too) under Container.
+    const auto ofInstrumentContainer = item.preset.has_value() && item.preset->kind == PresetKind::container && item.preset->isInstrument;
+    return ofInstrumentContainer == *instrumentContainers;
+}
+
+PresetShelf PresetShelf::ofDevice (const juce::String& folderName, const juce::String& deviceName)
+{
+    return { folderName, "No presets for " + deviceName + " yet" };
+}
+
+std::optional<PresetShelf> BrowserModel::getShelf (const LibraryItem& item)
+{
+    if (! item.device.has_value())
+        return std::nullopt;
+
+    // Its folder among the presets, as getPresetFolderName() names a device's in the song: by its name.
+    return PresetShelf::ofDevice (makeUsableFileName (item.device->name), item.device->name);
+}
+
+std::optional<PresetShelf> BrowserModel::getShelf (const BrowserPlace& place) const
+{
+    using Kind = BrowserPlace::Kind;
+
+    switch (place.kind)
+    {
+        case Kind::trackPresets:
+            return PresetShelf { trackPresetsFolder, "None yet: drag a track here, or right-click one and save its preset" };
+        case Kind::containers:
+            return PresetShelf { "Containers", "No presets of containers yet", false };
+        case Kind::instrumentContainers:
+            return PresetShelf { "Containers", "No presets of instrument containers yet", true };
+        case Kind::otherPresets: // a folder of the user's: listed as one (describePlace())
+        case Kind::favorites:
+        case Kind::recent:
+        case Kind::sounds:
+        case Kind::instruments:
+        case Kind::effects:
+        case Kind::folder:
+        case Kind::addFolder:
+        case Kind::collections:
+        case Kind::collection:
+        case Kind::newCollection:
+            break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<int> BrowserModel::countPresets (const PresetShelf& shelf) const
+{
+    // Not while the index is first made.
+    const auto index = library.getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
+
+    if (isIndexFirstMade())
+        return std::nullopt;
+
+    return countPresets (*index, library.getPresetFolders (shelf.folderName), shelf,
+                         [this, &index] (const juce::File& folder) { return library.isListedFromIndex (*index, folder); });
+}
+
+std::optional<int> BrowserModel::countPresets (const LibraryIndex& index, const juce::Array<juce::File>& folders, const PresetShelf& shelf,
+                                               const std::function<bool (const juce::File&)>& listedFromIndex)
+{
+    // A folder in no root the index walked wasn't there then (a fresh install's presets' folder), and holds none; one in a
+    // root it walked is counted where the index holds it whole, else isn't known (a library larger than the index holds,
+    // where the row opens from the disk).
+    auto count = 0;
+
+    for (const auto& folder : folders)
+    {
+        if (std::none_of (index.walkedRoots.begin(), index.walkedRoots.end(),
+                          [&folder] (const juce::File& root) { return folder == root || folder.isAChildOf (root); }))
+            continue;
+
+        if (! listedFromIndex (folder))
+            return std::nullopt;
+
+        // Its presets, within its folders too; at its top, those it shows.
+        std::vector<juce::String> toCount { folder.getFullPathName() };
+
+        for (size_t next = 0; next < toCount.size(); ++next)
+        {
+            const auto found = index.children.find (toCount[next]);
+
+            if (found == index.children.end())
+                continue;
+
+            for (const auto i : found->second.files)
+                if (const auto& file = index.files[i]; file.kind == LibraryItem::Kind::preset && (next > 0 || shelf.accepts (file)))
+                    ++count;
+
+            for (const auto i : found->second.folders)
+                toCount.push_back (index.folders[i].file.getFullPathName());
+        }
+    }
+
+    return count;
+}
+
+bool BrowserModel::isIndexFirstMade() const
+{
+    return library.getWholeIndex()->walkedRoots.isEmpty() && library.isIndexing();
+}
+
+int BrowserModel::countForRow (const PresetShelf& shelf) const
+{
+    // While the index doesn't know: none while it is first made (its rows come again once it is, Browser), else maybe some,
+    // which the row's opening reads from the disk.
+    if (const auto counted = countPresets (shelf))
+        return *counted;
+
+    return isIndexFirstMade() ? 0 : -1;
+}
+
+juce::StringArray BrowserModel::getDeviceFolders() const
+{
+    juce::StringArray folders;
+
+    for (const auto& item : library.getAllDevices())
+        if (const auto shelf = getShelf (item))
+            folders.add (shelf->folderName);
+
+    return folders;
+}
+
+bool BrowserModel::isOtherPreset (const LibraryItem& item, const juce::StringArray& deviceFolders)
+{
+    if (item.kind == LibraryItem::Kind::preset)
+        return true;
+
+    const auto& name = item.name;
+    return item.kind == LibraryItem::Kind::folder && ! name.equalsIgnoreCase ("Containers") && ! name.equalsIgnoreCase (trackPresetsFolder)
+           && ! deviceFolders.contains (name, true);
+}
+
+bool BrowserModel::hasOtherPresets() const
+{
+    // From the index: the user's presets' folder, if it was there as the index walked, holding any. Where the index doesn't
+    // hold it whole, it may hold some: shown, and read from the disk as it opens.
+    const auto root = library.getPresetsFolder();
+    const auto index = library.getWholeIndex();
+
+    if (root == juce::File()
+        || std::none_of (index->walkedRoots.begin(), index->walkedRoots.end(),
+                         [&root] (const juce::File& walked) { return root == walked || root.isAChildOf (walked); }))
+        return false;
+
+    const auto listed = library.isListedFromIndex (*index, root) ? index->listChildren (root) : std::nullopt;
+
+    if (! listed.has_value())
+        return true;
+
+    const auto deviceFolders = getDeviceFolders();
+    return std::any_of (listed->begin(), listed->end(),
+                        [&deviceFolders] (const LibraryItem& item) { return isOtherPreset (item, deviceFolders); });
+}
+
+void BrowserModel::describeDevices (BrowserContents& contents, bool instruments) const
+{
+    contents.items = library.listDevices (instruments ? LibraryItem::Kind::instrument : LibraryItem::Kind::effect);
+
+    for (const auto& item : contents.items)
+        if (const auto count = countForRow (*getShelf (item)); count != 0)
+            contents.presets[item.getKey()] = count;
+
+    // The containers' presets first, as a rack's are first in Ableton Live's devices: while there are some.
+    const BrowserPlace containers { instruments ? BrowserPlace::Kind::instrumentContainers : BrowserPlace::Kind::containers,
+                                    instruments ? "Instrument Container" : "Container",
+                                    library.getPresetsFolder() != juce::File() ? library.getPresetsFolder().getChildFile ("Containers")
+                                                                               : juce::File() };
+
+    if (countForRow (*getShelf (containers)) != 0)
+        contents.places.push_back (containers);
+}
+
+BrowserContents BrowserModel::describeShelf (const PresetShelf& shelf, std::optional<std::vector<LibraryItem>> listed)
+{
+    BrowserContents contents;
+
+    for (auto& item : listed.value_or (std::vector<LibraryItem>()))
+        if (shelf.accepts (item))
+            contents.items.push_back (std::move (item));
+
+    if (contents.items.empty())
+        contents.messages.add (shelf.emptyText);
+
+    return contents;
+}
+
+std::unique_ptr<Library::FolderListing> BrowserModel::listShelf (const PresetShelf& shelf, std::function<void (BrowserContents)> opened,
+                                                                 bool check) const
+{
+    const auto folders = library.getPresetFolders (shelf.folderName);
+    auto described = [shelf, opened = std::move (opened)] (std::optional<std::vector<LibraryItem>> listed)
+    { opened (describeShelf (shelf, std::move (listed))); };
+
+    return check ? library.checkListing (folders, std::move (described)) : library.startListing (folders, std::move (described));
+}
+
+std::unique_ptr<Library::FolderListing> BrowserModel::open (const PresetShelf& shelf, std::function<void (BrowserContents)> opened) const
+{
+    return listShelf (shelf, std::move (opened), false);
+}
+
+std::unique_ptr<Library::FolderListing> BrowserModel::check (const PresetShelf& shelf, std::function<void (BrowserContents)> opened) const
+{
+    return listShelf (shelf, std::move (opened), true);
+}
+
+std::optional<BrowserModel::PresetHome> BrowserModel::findHome (const juce::File& preset) const
+{
+    using Kind = BrowserPlace::Kind;
+    const auto item = library.getWholeIndex()->find (preset.getFullPathName());
+
+    if (! item.has_value() || ! item->preset.has_value())
+        return std::nullopt;
+
+    // The folder of the presets' it is in: its path's first folder in its presets' folder; and whether it is the user's.
+    juce::String folderName, within; // its first folder, and its path in that
+    auto isUsers = false;
+
+    for (const auto& root : { library.getPresetsFolder(), library.getFactoryPresetsFolder() })
+    {
+        if (root != juce::File() && preset.isAChildOf (root))
+        {
+            const auto relative = preset.getRelativePathFrom (root);
+            folderName = relative.upToFirstOccurrenceOf (juce::File::getSeparatorString(), false, false);
+            within = relative.fromFirstOccurrenceOf (juce::File::getSeparatorString(), false, false);
+            isUsers = root == library.getPresetsFolder();
+            break;
+        }
+    }
+
+    // Where its folder shows: a loose one at the top of the user's, Other Presets (Phazite's: in no list).
+    if (folderName.isEmpty() || folderName == preset.getFileName())
+        return isUsers ? std::optional (PresetHome { Kind::otherPresets, std::nullopt, {} }) : std::nullopt;
+
+    if (folderName.equalsIgnoreCase (trackPresetsFolder))
+        return PresetHome { Kind::trackPresets, std::nullopt, {} };
+
+    // At the containers' top, under Instrument Container or Container as PresetShelf::accepts() shows it; within a folder of
+    // theirs, under both (Container's taken).
+    if (folderName.equalsIgnoreCase ("Containers"))
+    {
+        const auto atTop = within == preset.getFileName();
+        const auto& info = *item->preset;
+        const auto ofInstruments = atTop && info.kind == PresetKind::container && info.isInstrument;
+        return PresetHome { ofInstruments ? Kind::instruments : Kind::effects,
+                            ofInstruments ? Kind::instrumentContainers : Kind::containers,
+                            {} };
+    }
+
+    // A device's folder: under that device's row, whatever device the preset is for (one saved into another's folder).
+    for (const auto& device : library.getAllDevices())
+        if (const auto shelf = getShelf (device); shelf.has_value() && shelf->folderName.equalsIgnoreCase (folderName))
+            return PresetHome { device.kind == LibraryItem::Kind::instrument ? Kind::instruments : Kind::effects, std::nullopt,
+                                shelf->folderName };
+
+    // A folder of no device listed (a plug-in not scanned): the user's in Other Presets.
+    return isUsers ? std::optional (PresetHome { Kind::otherPresets, std::nullopt, {} }) : std::nullopt;
+}
+
+bool BrowserModel::leadsTo (const LibraryItem& folder, const juce::File& preset) const
+{
+    if (folder.kind != LibraryItem::Kind::folder)
+        return false;
+
+    // In either presets' folder: the same folder of the other shows as it.
+    for (const auto& each : library.getPresetFoldersWith (folder.file))
+        if (preset.isAChildOf (each))
+            return true;
+
+    return false;
 }
 
 BrowserContents BrowserModel::describePlace (const BrowserPlace& place, std::optional<std::vector<LibraryItem>> listed) const
@@ -474,20 +741,26 @@ BrowserContents BrowserModel::describePlace (const BrowserPlace& place, std::opt
             contents.items = listed.value_or (std::vector<LibraryItem>());
             hint = listed.has_value() ? "No sounds here" : "This folder isn't there any more";
             break;
+        case Kind::otherPresets:
+        {
+            // What the user's presets' folder holds that no other row lists: its own presets, and the folders of no device.
+            const auto deviceFolders = getDeviceFolders();
+
+            for (auto& item : listed.value_or (std::vector<LibraryItem>()))
+                if (isOtherPreset (item, deviceFolders))
+                    contents.items.push_back (std::move (item));
+
+            hint = "None: each of your presets shows under its device";
+            break;
+        }
         case Kind::instruments:
         case Kind::effects:
-            contents.items =
-                library.listDevices (place.kind == Kind::instruments ? LibraryItem::Kind::instrument : LibraryItem::Kind::effect);
+            describeDevices (contents, place.kind == Kind::instruments);
             hint = "Your plug-ins show here once Scan for Plug-ins, in the gear's menu at the bottom left, has found them";
             break;
-        case Kind::factoryPresets:
-            contents.items = listed.value_or (std::vector<LibraryItem>());
-            hint = "None here";
-            break;
-        case Kind::presets:
-            contents.items = listed.value_or (std::vector<LibraryItem>());
-            hint = "None yet: right-click a device or a track to save its settings, or drag a track here";
-            break;
+        case Kind::trackPresets: // lists of presets: describeShelf()
+        case Kind::containers:
+        case Kind::instrumentContainers:
         case Kind::addFolder:
         case Kind::newCollection:
             break;
@@ -506,10 +779,13 @@ BrowserContents BrowserModel::describePlace (const BrowserPlace& place, std::opt
     return contents;
 }
 
-BrowserContents BrowserModel::getContents (const LibraryItem& folder) const
+BrowserContents BrowserModel::getContents (const LibraryItem& item) const
 {
+    if (const auto shelf = getShelf (item))
+        return getContents (*shelf);
+
     BrowserContents contents;
-    contents.items = library.listFolder (folder.file);
+    contents.items = library.listFolders (library.getPresetFoldersWith (item.file)).value_or (std::vector<LibraryItem>());
 
     if (contents.items.empty())
         contents.messages.add ("No sounds here");
@@ -519,6 +795,9 @@ BrowserContents BrowserModel::getContents (const LibraryItem& folder) const
 
 std::unique_ptr<Library::FolderListing> BrowserModel::open (const BrowserPlace& place, std::function<void (BrowserContents)> opened) const
 {
+    if (const auto shelf = getShelf (place))
+        return open (*shelf, std::move (opened));
+
     if (! listsFolder (place))
     {
         opened (describePlace (place, std::nullopt));
@@ -529,9 +808,12 @@ std::unique_ptr<Library::FolderListing> BrowserModel::open (const BrowserPlace& 
                                  { opened (describePlace (place, std::move (listed))); });
 }
 
-std::unique_ptr<Library::FolderListing> BrowserModel::open (const LibraryItem& folder, std::function<void (BrowserContents)> opened) const
+std::unique_ptr<Library::FolderListing> BrowserModel::open (const LibraryItem& item, std::function<void (BrowserContents)> opened) const
 {
-    return library.startListing (folder.file, describeFolder (std::move (opened)));
+    if (const auto shelf = getShelf (item))
+        return open (*shelf, std::move (opened));
+
+    return library.startListing (library.getPresetFoldersWith (item.file), describeFolder (std::move (opened)));
 }
 
 Library::Listed BrowserModel::describeFolder (std::function<void (BrowserContents)> opened)
@@ -550,6 +832,9 @@ Library::Listed BrowserModel::describeFolder (std::function<void (BrowserContent
 
 std::unique_ptr<Library::FolderListing> BrowserModel::check (const BrowserPlace& place, std::function<void (BrowserContents)> opened) const
 {
+    if (const auto shelf = getShelf (place))
+        return check (*shelf, std::move (opened));
+
     if (! listsFolder (place))
         return {};
 
@@ -557,9 +842,12 @@ std::unique_ptr<Library::FolderListing> BrowserModel::check (const BrowserPlace&
                                  { opened (describePlace (place, std::move (listed))); });
 }
 
-std::unique_ptr<Library::FolderListing> BrowserModel::check (const LibraryItem& folder, std::function<void (BrowserContents)> opened) const
+std::unique_ptr<Library::FolderListing> BrowserModel::check (const LibraryItem& item, std::function<void (BrowserContents)> opened) const
 {
-    return library.checkListing (folder.file, describeFolder (std::move (opened)));
+    if (const auto shelf = getShelf (item))
+        return check (*shelf, std::move (opened));
+
+    return library.checkListing (library.getPresetFoldersWith (item.file), describeFolder (std::move (opened)));
 }
 
 bool BrowserModel::isSoundPackInstalled() const

@@ -12,10 +12,11 @@ namespace phazite
 {
 struct AppServices::PluginLists final : private juce::ChangeListener
 {
-    PluginLists (PluginHost& h, Settings& s)
+    PluginLists (PluginHost& h, Settings& s, Library& l)
         : host (h),
           known (h.getKnownPlugins()),
-          settings (s)
+          settings (s),
+          library (l)
     {
         if (const auto xml = juce::parseXML (settings.get (Settings::knownPlugins)))
             known.recreateFromXml (*xml);
@@ -34,6 +35,7 @@ struct AppServices::PluginLists final : private juce::ChangeListener
     PluginHost& host;
     juce::KnownPluginList& known;
     Settings& settings;
+    Library& library;
 
     void changeListenerCallback (juce::ChangeBroadcaster* changed) override
     {
@@ -41,6 +43,8 @@ struct AppServices::PluginLists final : private juce::ChangeListener
         {
             if (const auto xml = known.createXml())
                 settings.set (Settings::knownPlugins, xml->toString (juce::XmlElement::TextFormat().withoutHeader().singleLine()));
+
+            library.noteDevicesChanged(); // what lists the devices lists them again: the browser, search
         }
         else if (const auto crashed = host.getCrashedWhileLoading(); crashed != settings.get (Settings::pluginsCrashedLoading))
         {
@@ -100,7 +104,7 @@ AppServices::AppServices (EngineContext& context, AppServicesOptions options)
       previewer (createPreviewer (engineContext))
 {
     // Plug-ins in helper processes: the scan's list, and those that crashed as they loaded kept off.
-    pluginLists = std::make_unique<PluginLists> (getPluginHost (engineContext), settings);
+    pluginLists = std::make_unique<PluginLists> (getPluginHost (engineContext), settings, library);
 
     // This computer, as projects' histories know it: an ID made once and kept, before any project opens.
     auto computer = settings.get (Settings::computer);

@@ -29,6 +29,13 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   JUCE tells a component before its peer is destroyed. Found by the review of known bug 165's Linux side
   (2026-11-16); never seen, and the Linux code is not yet compiled by CI.
 
+- **209. A plug-in named as one of Phazite's devices shares that device's presets** (2026-11-19, found as the browser
+  put presets under their devices): a presets folder is named by the device's name (`getPresetFolderName()`), so a
+  plug-in called "Reverb", "EQ", "Delay" or "Filter" opens, in the browser and in Swap, to Phazite's presets, which it
+  can't load, and Phazite's device lists the plug-in's. To fix: plug-ins' presets in folders of their own, such as
+  `Plug-ins/<name>`, in `getPresetFolderName()` and `BrowserModel::getShelf()`, Other Presets looking inside
+  `Plug-ins/` for plug-ins not scanned.
+
 ## Versions
 
 - **186. After a song's IDs were given anew as it opened, Restore and Merge against its earlier commits do wrong

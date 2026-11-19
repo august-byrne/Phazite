@@ -107,6 +107,7 @@ struct LibraryIndex
     // there, by their places in folders and files, each by name, as Library::listFolder() lists them: what a folder of
     // theirs holds, found without the disk (listChildren(): none for a folder outside them).
     juce::Array<juce::File> wholeRoots;
+    juce::Array<juce::File> walkedRoots; // the roots there as it walked (whole or not): a folder in none wasn't there then
     struct Children
     {
         std::vector<size_t> folders, files;
@@ -125,10 +126,6 @@ struct LibraryIndex
     // A file or a folder by its full path, without the disk: none for one the index hasn't.
     std::optional<LibraryItem> find (const juce::String& path) const;
     std::map<juce::String, std::pair<bool, size_t>> byPath; // makeChildren()'s: a folder (true) or a file, and its place
-
-    // How many files with an extension (".phazitepreset") a folder of a whole root holds, within its folders too; none if it
-    // doesn't hold the folder whole.
-    std::optional<int> countFilesWithin (const juce::File& folder, const juce::String& extension) const;
 
     // The same index with a folder's own files and folders as a listing read them now: those it held there and are gone,
     // with everything within those folders, taken away; the others put in or brought up to date, each with its search key
@@ -180,6 +177,23 @@ public:
     // Indexes the presets again, after one was saved, and tells onIndexChanged.
     void notePresetSaved() { reindex(); }
 
+    // The devices that can be added changed (a plug-in scan found others, or lost some): onIndexChanged is told, so that what
+    // lists them (search, the browser's devices and the presets of no device) lists them again. Nothing is read again.
+    void noteDevicesChanged() { triggerAsyncUpdate(); }
+
+    // The presets' folders as the browser shows them, one in the other (BrowserModel.h): the folder of a name ("EQ",
+    // "Containers", "Tracks", or a path in them, "Synth/Bass") in the user's presets and in Phazite's, the user's first,
+    // each whose presets' folder is given; none for no name. In each, each folder of the path is the one there whose name
+    // matches without regard to case (as the index has it: a user's "synth" is the Synth's), else as named. And for a
+    // folder within either presets' folder (by its path, whatever root the index has it in), the same folder in both; for
+    // any other, the folder alone. No disk.
+    juce::Array<juce::File> getPresetFolders (const juce::String& folderName) const;
+    juce::Array<juce::File> getPresetFoldersWith (const juce::File& folder) const;
+
+    // Whether a folder's rows come from the index (listing, counting): held whole by it (LibraryIndex::holdsWhole()), and
+    // the library listing from the index (setListsFromIndex()). No disk.
+    bool isListedFromIndex (const LibraryIndex&, const juce::File& folder) const;
+
     // The folders the browser shows besides the factory library, in the order added.
     juce::Array<juce::File> getUserFolders() const;
     void addUserFolder (const juce::File&);
@@ -218,7 +232,8 @@ public:
     public:
         ~FolderListing() { cancel(); }
         void cancel();
-        bool isLate() const; // its read inside the system, or waiting to start, for a few seconds: the drive isn't answering
+        bool isLate() const;    // its read inside the system, or waiting to start, for a few seconds: the drive isn't answering
+        bool isPartial() const; // several folders' (startListing() of several): what it gave last lacks a late folder's rows
 
         struct State;
         explicit FolderListing (std::shared_ptr<State> s)
@@ -227,7 +242,9 @@ public:
         }
 
     private:
+        friend class Library;
         std::shared_ptr<State> state;
+        std::vector<std::unique_ptr<FolderListing>> parts; // a listing of several folders as one: each folder's own
         JUCE_DECLARE_NON_COPYABLE (FolderListing)
     };
 
@@ -237,6 +254,22 @@ public:
     // compared on that thread with what the index holds of it; listed gets it, and the index is patched, only where it
     // differs (where the index doesn't hold the folder whole, listed gets every read). Joins a read in flight, as above.
     std::unique_ptr<FolderListing> checkListing (const juce::File& folder, Listed) const;
+
+    // The same for several folders as one (the presets' folders, getPresetFolders()): each listed as above, and listed gets
+    // what they hold together (mergeListings()) once each has given its rows, then again each time one gives others; a
+    // folder that isn't there and one the index has with nothing in it are the same, so that one doesn't give its rows again.
+    // At once where the index knows every one: holds it whole, or holds its presets' folder as not there at its walk. Opened,
+    // once a folder not in yet is late (a drive that doesn't answer), listed gets what the others gave meanwhile, and
+    // isPartial() says so, then all of it once that folder's rows come. Looked at again, those the index knows count as it
+    // has them until their reads differ, and listed gets nothing while none differs.
+    std::unique_ptr<FolderListing> startListing (const juce::Array<juce::File>& folders, Listed) const;
+    std::unique_ptr<FolderListing> checkListing (const juce::Array<juce::File>& folders, Listed) const;
+
+    // What several folders hold, as one, in listFolder()'s order: their folders, one of each name (the first folder's), then
+    // their files by name, those of one name in the folders' order; none while none of them is there. And the same read from
+    // the disk on the calling thread.
+    static std::optional<std::vector<LibraryItem>> mergeListings (const std::vector<std::optional<std::vector<LibraryItem>>>&);
+    std::optional<std::vector<LibraryItem>> listFolders (const juce::Array<juce::File>&) const;
 
     // Whether a folder is being read for a listing, or waits to be (tests). Message thread.
     bool isReadingFolders() const;
@@ -541,6 +574,12 @@ private:
 
     std::unique_ptr<FolderListing> listFolderOf (const juce::File& folder, Listed, std::optional<std::vector<LibraryItem>> shown,
                                                  bool againstIndex) const;
+    std::unique_ptr<FolderListing> listFoldersOf (const juce::Array<juce::File>& folders, Listed, bool check) const;
+
+    // What the index knows of a folder, without the disk, as isListedFromIndex() allows: its rows, where it holds it whole;
+    // none (not there), in a presets' folder its walk didn't find there; else nothing known.
+    std::optional<std::optional<std::vector<LibraryItem>>> knowFromIndex (const LibraryIndex&, const juce::File& folder) const;
+    static juce::File findPresetFolder (const LibraryIndex&, const juce::File& root, const juce::String& path); // getPresetFolders()'
     void queueRead (const std::shared_ptr<Read>&) const; // under listingsShared->lock
     void startRead (const std::shared_ptr<Read>&) const; // the same: on a listing thread, or a spare one while all are stuck
     void moveOnFromStuck() const;                        // the same: roots whose read is stuck give their turn to the next

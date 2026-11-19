@@ -300,6 +300,12 @@ the [changelog](changelog.md).
 | X9 | Right-click a point of the curve | Its menu opens at the pointer | |
 | X10 | Compressor in Duck under a kick at 120 and at 174 BPM, in the dock and in a wide window | Smooth dips with their attack, hold and release, no stairs, no notches to silence between kicks | |
 | X11 | Load Compressor > Noise Gate, Drum Bus Glue and Gentle Master, and Multiband > Upward Squash, on what they are for | They sound as they did; the gates open and close where they did | |
+| X12 | Browser: Instruments, click Synth's chevron; click its name; press Enter on it | Its kinds of sound and your own presets in one list, no "Phazite" heading; the name only selects; Enter adds a default Synth | |
+| X13 | Save a preset from an EQ's Presets menu; drag a track into the browser; save a container of effects as a preset | The browser opens Effects > EQ at the new preset; Track Presets opens at the track; Container appears at the top of Effects | |
+| X14 | A Synth's Presets > Swap, then Down several times | One list, each preset tried in turn | |
+| X15 | Without Phazite Sounds installed, open Sounds; install them | A row that downloads them; then Drums, Loops and the rest, nothing named "Phazite" | |
+| X16 | Put a preset file at the top of Documents/Phazite/Presets; with presets saved for a plug-in, run the app with that plug-in not scanned, then scan | Other Presets shows after Track Presets and holds them; after the scan the plug-in's folder is under its row, with no restart | |
+| X17 | Save a preset from a plug-in's own window while its row is open under Effects | It appears in the row at once; what was open and selected stays | |
 
 ## Performance on other machines
 

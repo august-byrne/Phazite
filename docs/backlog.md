@@ -206,6 +206,11 @@ and nothing is listed in both.
 | What is switched on or picked drawn apart from what is playing or recording: a soft tint of the accent for the first (Snap, the tool, Ghost Notes), the solid accent for the second alone, so that the eye finds what runs | `src/ui/theme/DesignTokens.h` | M | 5 | comparison with another DAW, 2026-11-17 |
 | Secondary windows that don't block the main one: Settings, the plug-in scan, Chord Progressions and the rest | `src/app/MainWindow.cpp` | M | 5 | ui-shell-browser 2, ui-core-mixer-app 6 |
 | One Settings window that holds what is spread over three tabs and four menus | `src/ui/shell/SettingsPanel.cpp` | L | 5 | ui-shell-browser 9 |
+| Rename and Delete for the user's own presets, from their rows in the browser (there are none; found 2026-11-19) | `src/ui/browser/Browser.cpp` | S | — | owner's round 2026-11-19 |
+| The Devices view's Presets menu as the browser lists a device's presets: one list, no "Your Presets" heading | `src/ui/mixer/DevicesView.cpp` | S | — | owner's round 2026-11-19 |
+| The device menus' list of devices built once a menu, not once for each menu and submenu; a pen's or a touch's press read for where a right-click's menu opens; the transport bar's widths as tokens | `src/ui/devices/DeviceMenus.cpp` | S | — | owner's round 2026-11-19 |
+| The dynamics curve's readout at its bottom: the first point reads "Out silence" beside a 1.0:1 line, and a level out typed as -60 becomes silence | `src/ui/devices/DynamicsCurve.cpp` | S | — | owner's round 2026-11-19 |
+| The Limiter's history from readings every half millisecond, as the Compressor's (`devices/core/LevelTrail.h`) | `src/devices/dynamics/Limiter.cpp` | S | — | owner's round 2026-11-19 |
 | The text the user reads in a strings table, with one term and one spelling for each thing; with it the design tokens in a file a designer edits, and a gallery app (architecture phase A4) | `src/ui/theme/DesignTokens.h` | L | 8 | ui-shell-browser 11, docs 5 |
 | A session with Narrator, and what it finds fixed | `docs/hand-checks.md` | M | 3 | plan |
 | Clips, notes, automation points and graphs' handles in a form a screen reader finds | `src/ui/playlist/ClipComponent.cpp` | L | 7 | tests-ui 5 |

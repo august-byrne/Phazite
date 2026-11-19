@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the browser shows (docs/design.md, section 11), without its window (roadmap phase A2): the places at the top of
-// its tree and what each holds, what search finds, the filters over them and what each offers, the row that downloads
-// Phazite Sounds, and what an item's row says and does. ui::Browser shows it as a tree.
+// its tree and what each holds, the presets under each device, what search finds, the filters over them and what each
+// offers, the row that downloads Phazite Sounds, and what an item's row says and does. ui::Browser shows it as a tree.
 #pragma once
 
 #include "Library.h"
@@ -23,22 +23,25 @@ struct BrowserPlace
     {
         favorites,
         recent,
-        sounds, // the ones that come with Phazite
+        sounds, // Phazite Sounds, once downloaded: the folders of the pack
         instruments,
         effects,
-        folder, // one of the user's
+        trackPresets, // the user's presets of tracks, which belong to no device
+        folder,       // one of the user's
         addFolder,
-        presets,        // the user's presets, listed after the effects and Phazite's presets
-        factoryPresets, // the presets that come with Phazite
-        collections,    // the user's collections, each a place of its own (its name), then the row that makes one
+        collections, // the user's collections, each a place of its own (its name), then the row that makes one
         collection,
-        newCollection
+        newCollection,
+        containers,           // under Effects, while it has any: the presets of containers of effects
+        instrumentContainers, // under Instruments, the same of instrument containers
+        otherPresets // after Track Presets, while it holds any: the user's presets of no device listed (BrowserModel::isOtherPreset())
     };
 
     Kind kind = Kind::favorites;
     juce::String name; // as its row shows it; for a collection, its name
-    juce::File folder; // Phazite Sounds', or the user's folder
-    int count = -1;    // how many of its sounds have the filters' values, or of a device's presets it holds; else -1
+    juce::File folder; // Phazite Sounds', the user's folder, or the user's presets' folder that holds its presets (Other
+                       // Presets': the user's presets' folder itself)
+    int count = -1;    // how many of its sounds have the filters' values; else -1
 
     juce::String getTooltip() const;
     juce::String getKey() const; // the same for the same place each time the browser lists it
@@ -49,9 +52,30 @@ struct BrowserPlace
 struct BrowserContents
 {
     bool offersSoundPack = false;     // first, while Phazite Sounds aren't installed: the row that downloads them
-    std::vector<BrowserPlace> places; // the collections, under Collections
+    std::vector<BrowserPlace> places; // the collections, under Collections; a container's presets, under Instruments or Effects
     std::vector<LibraryItem> items;
     juce::StringArray messages; // last: lines of text, such as what a place is for while it holds nothing
+
+    // Under Instruments and Effects: how many presets each device's row holds, by the device's key (LibraryItem::getKey()),
+    // for those that hold any; -1 for each while the index doesn't know (in a library larger than it holds), when the row
+    // may hold some.
+    std::map<juce::String, int> presets;
+    int getPresets (const LibraryItem& item) const;
+};
+
+// A list of presets the browser shows under a row (docs/design/browser.md), as Library::getPresetFolders() gives the folder
+// of its name: the user's presets and Phazite's in one list. A device's, under its row in Instruments or Effects, are in the
+// folder of its name ("EQ"); the containers', in Containers, show under Instrument Container (those of instrument
+// containers at its top) or Container (the others at its top: a folder in it shows under both); the tracks', in Tracks,
+// under Track Presets.
+struct PresetShelf
+{
+    juce::String folderName;                     // PresetModel.h: getPresetFolderName(), or trackPresetsFolder
+    juce::String emptyText;                      // what it says while it holds none
+    std::optional<bool> instrumentContainers {}; // the containers': of instruments, or of effects
+
+    bool accepts (const LibraryItem& atItsTop) const; // what shows at its top: of the containers', each at one of the two
+    static PresetShelf ofDevice (const juce::String& folderName, const juce::String& deviceName);
 };
 
 //==============================================================================
@@ -94,28 +118,71 @@ class BrowserModel
 public:
     BrowserModel (const Library&, const SoundPack&);
 
-    // At the top of the tree: Favorites, Recent, Collections, Phazite Sounds, Instruments, Effects, Phazite Presets, Presets,
-    // each of the user's folders, and Add Folder. With filters set, those that hold sounds with their values, each with how
-    // many it holds (the Type filter lists a type's sounds from every library, as Ableton Live's labels and Bitwig's "Drum
-    // Hits" do).
+    // At the top of the tree: Favorites, Recent, Collections, Sounds (Phazite Sounds, or the row that downloads them),
+    // Instruments, Effects, Track Presets, Other Presets (while it holds any), each of the user's folders, and Add Folder.
+    // With filters set, those that hold sounds with their values, each with how many it holds (the Type filter lists a
+    // type's sounds from every library, as Ableton Live's labels and Bitwig's "Drum Hits" do). The presets that come with
+    // Phazite and the user's show where they belong (PresetShelf): a device's under the device's row, which opens to them, a
+    // container's under Instruments or Effects, a track's under Track Presets, and the user's that are of no device listed
+    // under Other Presets.
     std::vector<BrowserPlace> getPlaces (const BrowserFilters& = {}) const;
     BrowserContents getContents (const BrowserPlace&, const BrowserFilters& = {}) const;
-    BrowserContents getContents (const LibraryItem& folder) const;
+    BrowserContents getContents (const LibraryItem& folderOrDevice) const;
+    BrowserContents getContents (const PresetShelf&) const;
 
-    // The same as the browser opens a place (without filters) or a folder, without the message thread touching the disk:
-    // what comes from no folder (favorites, recent items, collections, devices) and what the index holds whole, given to
-    // opened at once, returning nothing; else read on a listing thread (Library::startListing()), given to opened on the
-    // message thread, unless what this returns has gone first (or was cancelled). Phazite Sounds, the user's folders and
-    // the presets' folders are the index's roots: their folders come from the index once it has walked them whole (not
-    // while it is first built, nor in a library larger than Library::maxIndexed), else from the disk.
+    // The same as the browser opens a place (without filters), a folder or a device's row, without the message thread
+    // touching the disk: what comes from no folder (favorites, recent items, collections, devices) and what the index holds
+    // whole, given to opened at once, returning nothing; else read on a listing thread (Library::startListing()), given to
+    // opened on the message thread, unless what this returns has gone first (or was cancelled). Phazite Sounds, the user's
+    // folders and the presets' folders are the index's roots: their folders come from the index once it has walked them
+    // whole (not while it is first built, nor in a library larger than Library::maxIndexed), else from the disk. A list of
+    // presets, and a folder in either presets' folder, is what the user's and Phazite's hold together, as one.
     std::unique_ptr<Library::FolderListing> open (const BrowserPlace&, std::function<void (BrowserContents)> opened) const;
-    std::unique_ptr<Library::FolderListing> open (const LibraryItem& folder, std::function<void (BrowserContents)> opened) const;
+    std::unique_ptr<Library::FolderListing> open (const LibraryItem& folderOrDevice, std::function<void (BrowserContents)> opened) const;
+    std::unique_ptr<Library::FolderListing> open (const PresetShelf&, std::function<void (BrowserContents)> opened) const;
 
-    // A place or a folder shown open, looked at again (Library::checkListing()): read on a listing thread alone, opened called
-    // only where it differs from the index (every read for a folder the index doesn't hold whole). Nothing for a place that
-    // lists no folder.
+    // A place, a folder or a device's row shown open, looked at again (Library::checkListing()): read on a listing thread
+    // alone, opened called only where it differs from the index (every read for a folder the index doesn't hold whole).
+    // Nothing for a place that lists no folder.
     std::unique_ptr<Library::FolderListing> check (const BrowserPlace&, std::function<void (BrowserContents)> opened) const;
-    std::unique_ptr<Library::FolderListing> check (const LibraryItem& folder, std::function<void (BrowserContents)> opened) const;
+    std::unique_ptr<Library::FolderListing> check (const LibraryItem& folderOrDevice, std::function<void (BrowserContents)> opened) const;
+    std::unique_ptr<Library::FolderListing> check (const PresetShelf&, std::function<void (BrowserContents)> opened) const;
+
+    // The presets a place, a device's row or a list holds: a device's row's (none for anything else but a device), and those
+    // of Track Presets and the containers' rows.
+    static std::optional<PresetShelf> getShelf (const LibraryItem&);
+    std::optional<PresetShelf> getShelf (const BrowserPlace&) const;
+
+    // How many presets a list holds, from the index, none of the disk: nothing while the index doesn't know (while it is
+    // first made, or where it doesn't hold a presets' folder that was there whole, as in a library larger than it holds). And
+    // the same through an index given, for its folders (Library::getPresetFolders()): one in no root the index walked wasn't
+    // there, and holds none.
+    std::optional<int> countPresets (const PresetShelf&) const;
+    static std::optional<int> countPresets (const LibraryIndex&, const juce::Array<juce::File>& folders, const PresetShelf&,
+                                            const std::function<bool (const juce::File&)>& listedFromIndex);
+
+    // The folders of the devices' presets, one for each device listed (as getShelf() names them: "EQ", a plug-in's name), in
+    // the order the devices are listed: what tells a folder of no device's (Other Presets) from the others. No disk.
+    juce::StringArray getDeviceFolders() const;
+
+    // Whether an item at the top of the user's presets' folder shows in Other Presets: a preset, or a folder named for no
+    // device listed, and neither Containers nor Tracks (without regard to case, as the folders are found).
+    static bool isOtherPreset (const LibraryItem&, const juce::StringArray& deviceFolders);
+
+    // Where a preset of the presets' folders shows: the place at the top it is under (Instruments, Effects, Track Presets or
+    // Other Presets), the container's row it is in under that, if any, and the folder name of the device whose row it is
+    // under, if any; and whether a row is a folder that leads to it, in either presets' folder (a folder there shows both). By
+    // its folder: one in a device's folder shows under that device, whatever device it is for. Nothing for a file that isn't
+    // a preset in a presets' folder, as the index has it, nor for one of Phazite's that is in no list.
+    struct PresetHome
+    {
+        BrowserPlace::Kind place = BrowserPlace::Kind::trackPresets;
+        std::optional<BrowserPlace::Kind> container {};
+        juce::String deviceFolder {};
+    };
+
+    std::optional<PresetHome> findHome (const juce::File& preset) const;
+    bool leadsTo (const LibraryItem& folder, const juce::File& preset) const;
 
     // Whether Phazite Sounds are installed: asked of the disk once, and again after soundPackChanged() (its download or
     // install told).
@@ -132,18 +199,13 @@ public:
         std::map<juce::String, BrowserContents> contents;
     };
 
-    // The same as the browser lists them while filters are set: the places of the index (Phazite Sounds, the user's folders,
-    // the presets) gone through on the search's thread (Library::IndexWork), so that a filter set or the index changed goes
+    // The same as the browser lists them while filters are set: the places of the index (Phazite Sounds, the user's folders)
+    // gone through on the search's thread (Library::IndexWork), so that a filter set or the index changed goes
     // through none of it on the message thread; Favorites, Recent and the collections, the user's own lists, at once. Each
     // listing cancels the one before, so that found has the newest's alone, on the message thread; or none, once cancelled.
     void startFilteredPlaces (const BrowserFilters&, std::function<void (FilteredPlaces)> found) const;
     void cancelFilteredPlaces() const;
     bool isListingPlaces() const { return listings.isPending(); }
-
-    // A device's presets, as its swap shows them alone (model/devices/SwapModel.h): Phazite Presets, then Presets, each as
-    // its folder for the device, by the folder's name (model/presets/PresetModel.h: getPresetFolderName()), with how many
-    // presets it holds, while it holds any. Nothing for a device without presets.
-    std::vector<BrowserPlace> getPresetPlaces (const juce::String& folderName) const;
 
     // What search finds in all the places, with the filters' values, the best maxFound (Library::search() says how they
     // are ranked), or why it finds nothing; a line where the list is cut, saying how many match ("The first 200 of 3,412");
@@ -213,10 +275,19 @@ private:
                                                            const std::function<bool()>& shouldStop = nullptr);
     BrowserContents describeFiltered (const BrowserPlace&, Listed) const;
 
-    // Whether a place without filters lists a folder (Phazite Sounds once installed, a folder, the presets); what it holds,
-    // given what the folder holds (none: the folder isn't there).
+    // Whether a place without filters lists a folder (Phazite Sounds once installed, a folder); what it holds, given what the
+    // folder holds (none: the folder isn't there). And a list of presets', given what its folders hold.
     bool listsFolder (const BrowserPlace&) const;
     BrowserContents describePlace (const BrowserPlace&, std::optional<std::vector<LibraryItem>> listed) const;
+    static BrowserContents describeShelf (const PresetShelf&, std::optional<std::vector<LibraryItem>> listed);
+    std::unique_ptr<Library::FolderListing> listShelf (const PresetShelf&, std::function<void (BrowserContents)> opened, bool check) const;
+
+    // Instruments' or Effects' rows: the devices, each with how many presets its row holds, and the containers' row while it
+    // holds some.
+    void describeDevices (BrowserContents&, bool instruments) const;
+    int countForRow (const PresetShelf&) const; // countPresets(), or while the index doesn't know, -1 (none while it is made)
+    bool isIndexFirstMade() const;              // the index not made yet: none of its roots walked, its walk under way
+    bool hasOtherPresets() const;               // Other Presets' row: what it holds, from the index; or, unknown, shown
     FilteredPlaces assemble (const BrowserFilters&, std::vector<BrowserPlace> places, std::vector<Listed> ofIndex) const;
     BrowserContents describeSearch (const juce::String& query, const BrowserFilters&, SearchResults) const;
 };

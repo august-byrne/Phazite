@@ -743,18 +743,10 @@ TEST_CASE ("A device's Swap shows its presets alone, from the top, Down trying e
     phazite::Library library (phazite::test::getEngineContext(), settings, {}, own, factory);
     REQUIRE (waitForIndex (library));
 
-    // The places that hold a device's presets, each as its folder for the device, with how many: both of them for the synth,
-    // neither for the reverb.
+    // How many presets the device's row holds, Phazite's and the user's: five for the synth, none for the reverb.
     const phazite::BrowserModel model { library, sounds };
-    const auto places = model.getPresetPlaces ("Synth");
-    REQUIRE (places.size() == 2);
-    CHECK (places[0].kind == Kind::factoryPresets);
-    CHECK (places[0].folder == factory.getChildFile ("Synth"));
-    CHECK (places[0].count == 4);
-    CHECK (places[1].kind == Kind::presets);
-    CHECK (places[1].folder == own.getChildFile ("Synth"));
-    CHECK (places[1].count == 1);
-    CHECK (model.getPresetPlaces ("Reverb").empty());
+    CHECK (model.countPresets (phazite::PresetShelf::ofDevice ("Synth", "Synth")) == 5);
+    CHECK (model.countPresets (phazite::PresetShelf::ofDevice ("Reverb", "Reverb")) == 0);
 
     const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
     phazite::ui::Browser browser (library, *previewerOwner, sounds, settings, song.context);
@@ -763,28 +755,29 @@ TEST_CASE ("A device's Swap shows its presets alone, from the top, Down trying e
     auto& viewport = *tree.getViewport();
     phazite::test::dispatchPendingMessages(); // the tree makes its rows' components
 
-    // The browser as it is used: Phazite Presets opened with a click, and scrolled down some.
+    // The browser as it is used: the effects opened with a click, and scrolled down some.
     phazite::test::Mouse mouse (tree);
-    mouse.click (getRow (browser, "Phazite Presets").getCentre());
+    mouse.click (getRow (browser, "Effects").getCentre());
     phazite::test::dispatchPendingMessages();
     viewport.setViewPosition (0, 4 * phazite::ui::Browser::rowHeight);
     REQUIRE (viewport.getViewPositionY() == 4 * phazite::ui::Browser::rowHeight);
     const auto rowsBefore = getRows (browser);
     const auto inViewBefore = getRowsInView (browser);
     REQUIRE (tree.getSelectedItem (0) != nullptr);
-    CHECK (tree.getSelectedItem (0)->getAccessibilityName() == juce::String ("Phazite Presets"));
+    CHECK (tree.getSelectedItem (0)->getAccessibilityName() == juce::String ("Effects"));
 
-    // The synth's Swap: its presets alone, Phazite's then the user's, every folder open, in view from the top.
+    // The synth's Swap: its presets alone, Phazite's and the user's as one list, as its row lists them, every folder open,
+    // in view from the top.
     browser.startSwap (synth);
     phazite::test::dispatchPendingMessages();
     REQUIRE (browser.isSwapping());
-    const juce::StringArray presets { "Phazite Presets, 4", "Bass", "Acid Bass, Synth", "Deep Sub, Synth", "Lead",
-                                      "Saw Lead, Synth",    "Pad",  "Warm Pad, Synth",  "Presets, 1",      "My Synth, Synth" };
+    const juce::StringArray presets { "Bass", "Acid Bass, Synth", "Deep Sub, Synth", "Lead", "Saw Lead, Synth",
+                                      "Pad",  "Warm Pad, Synth",  "My Synth, Synth" };
     CHECK (getRows (browser) == presets);
     CHECK (viewport.getViewPositionY() == 0);
     const auto inView = getRowsInView (browser);
     REQUIRE (inView.size() >= 4);
-    CHECK (inView[0] == juce::String ("Phazite Presets, 4"));
+    CHECK (inView[0] == juce::String ("Bass"));
     CHECK (inView.contains ("Acid Bass, Synth"));
     CHECK (tree.getNumSelectedItems() == 0);
     CHECK (tree.hasKeyboardFocus (true));
@@ -809,7 +802,7 @@ TEST_CASE ("A device's Swap shows its presets alone, from the top, Down trying e
     CHECK (viewport.getViewPositionY() == 4 * phazite::ui::Browser::rowHeight);
     CHECK (getRowsInView (browser) == inViewBefore);
     REQUIRE (tree.getSelectedItem (0) != nullptr);
-    CHECK (tree.getSelectedItem (0)->getAccessibilityName() == juce::String ("Phazite Presets"));
+    CHECK (tree.getSelectedItem (0)->getAccessibilityName() == juce::String ("Effects"));
     CHECK (browser.getFilterBar().isVisible());
 
     // A device without presets says so, with nothing of the synth's left over.

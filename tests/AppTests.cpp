@@ -426,7 +426,12 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     services.recentProjects.add (project);
     CHECK (services.settings.get (phazite::Settings::recentProjects) == juce::StringArray { project.getFullPathName() });
 
-    // So are the plug-ins a scan found, and those that crashed as they loaded.
+    // So are the plug-ins a scan found, and those that crashed as they loaded; and the library hears of those found, so that
+    // the browser and search list them again.
+    REQUIRE (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }));
+    phazite::test::dispatchPendingMessages(); // the index's own change told
+    auto libraryTold = false;
+    services.library.onIndexChanged = [&libraryTold] { libraryTold = true; };
     auto& known = phazite::getPluginHost (services.engineContext).getKnownPlugins();
     juce::PluginDescription scanned;
     scanned.name = "Scanned";
@@ -435,6 +440,8 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     known.addType (scanned);
     CHECK (phazite::test::dispatchMessagesUntil (
         [&] { return services.settings.get (phazite::Settings::knownPlugins).contains (scanned.fileOrIdentifier); }));
+    CHECK (phazite::test::dispatchMessagesUntil ([&libraryTold] { return libraryTold; }));
+    services.library.onIndexChanged = nullptr;
     known.removeType (scanned);
 
     auto& plugins = phazite::getPluginHost (services.engineContext);

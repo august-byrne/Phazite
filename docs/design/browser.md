@@ -10,7 +10,7 @@ name.
 
 | Feature | State | Note |
 | --- | --- | --- |
-| A tree of places: favorites, recent items, collections, Phazite Sounds, devices, presets, the user's folders | Built | |
+| A tree of places: favorites, recent items, collections, sounds, devices with their presets, track presets, the user's folders | Built | |
 | Search as you type, best matches first | Built | |
 | Tags from names and folders: type, loop or one-shot, tempo, key | Built | |
 | Keys and tempos from loop data in WAV and AIFF files | Built | |
@@ -43,17 +43,60 @@ selected sound and the preview's controls. The places at the top of the tree, in
 | Favorites | The items starred |
 | Recent | The last 50 items put into the song |
 | Collections | The user's named sets, each a place of its own, then **New Collection...** |
-| Phazite Sounds | The free sounds, once downloaded; until then a row that downloads them |
-| Instruments | Phazite's instruments and the instrument plug-ins found by scanning |
-| Effects | Phazite's effects and the effect plug-ins found by scanning |
-| Phazite Presets | The presets that come with Phazite, by device and by kind of sound |
-| Presets | The user's presets ([devices.md](devices.md)) |
+| Sounds | Phazite Sounds' folders (Drums, Loops...), once downloaded; until then a row that downloads them |
+| Instruments | Phazite's instruments and the instrument plug-ins found by scanning, each with its presets |
+| Effects | Phazite's effects and the effect plug-ins found by scanning, each with its presets |
+| Track Presets | The user's track presets ([devices.md](devices.md)) |
+| Other Presets | While it holds any: the user's presets of no device listed |
 | The user's folders | Each folder added, as it is on disk |
 | Add Folder... | Asks for a folder to add |
 
 - One click opens a folder.
 - The folders open when Phazite closes are open again at the next start.
 - A folder's right-click menu has **Remove from the Browser**.
+- Nothing at the top names Phazite or a pack: Phazite Sounds are sounds to start with, and the presets that come with
+  Phazite are presets of its devices. The folders on disk stay where they are (`Documents/Phazite/Packs/Phazite Sounds`,
+  the presets next to the app, the user's in `Documents/Phazite/Presets`); this is only what the browser shows.
+
+**Presets under what they are for,** as Ableton Live's browser lists a device's presets under it:
+
+| Preset | Shows under |
+| --- | --- |
+| A device's | Its row in Instruments or Effects, which opens to them by its chevron |
+| An effect container's | **Container**, at the top of Effects, while there are some |
+| An instrument container's | **Instrument Container**, at the top of Instruments, while there are some |
+| A track's | **Track Presets** |
+| One of the user's kept where no row above lists it | **Other Presets** |
+
+- A device's row lists the presets of the folder of its name ("Synth") in Phazite's presets and in the user's as one
+  list: their folders first, one of each name (Phazite's kinds of sound, Bass, Lead..., with the user's of that name
+  inside), then the presets by name, with no heading or mark between Phazite's and the user's; of one name, the user's
+  first. A folder there opens to the same folder of both. Folders are matched without regard to case, in each presets'
+  folder as the index has them: a user's `synth` or `Synth/bass` is the Synth's, and its Bass's, on every system.
+- A row lists its folder, not the presets' devices: a preset saved (through Save Preset's dialog) into another device's
+  folder shows under that folder's device. A plug-in named as one of Phazite's devices ("Reverb") shares its folder,
+  and so its presets (docs/known-bugs.md).
+- A device's row shows a chevron only while it has presets, as the index counts them (no disk on the message thread):
+  a device without any opens to nothing. While the index is first made the rows show none, and gain them once it is in.
+  Where the index doesn't hold a presets' folder that is there whole (a library larger than it holds: 50,000 sounds,
+  or as many folders), every device's row may open, reads its presets from the disk as it opens, and one without
+  presets says so. A device without a folder name has none.
+- An open device's row whose count changes (a preset saved from a plug-in's window, or one that came from outside) is
+  listed again in place: what is open and selected in it stays.
+- A click on the chevron (or Right) opens a device's row; a click on its name selects it. Enter, a double-click and a drag
+  put the device in with its defaults; a preset's row puts the preset in.
+- The containers' presets are in one folder, `Containers`: those of instrument containers at its top show under
+  Instrument Container, the others at its top under Container; a folder in it shows under both.
+- **Other Presets,** after Track Presets, shows only while it holds something, as the index has it (no listing to decide
+  it): the presets at the top of the user's presets' folder, and each folder there named for no device listed, nor
+  `Containers` nor `Tracks` (a plug-in not scanned yet, as after a fresh install or a settings reset, or one removed). It
+  opens as a folder does. Once the plug-in is scanned, its folder leaves Other Presets and shows under the plug-in's
+  row, with no restart (the scan's list changing tells the library, which tells the browser). Phazite's own presets are
+  all in their devices' folders: the test that walks every one of them and the user's of each kind finds each in the
+  tree.
+- A preset saved (from a device's Presets menu, Save Device Preset or Save Track Preset, a plug-in's window, or a track
+  dragged into the browser) is shown selected where it belongs, once the index has it: under its folder's device, a
+  container's row, Track Presets or Other Presets.
 
 ## Search
 
@@ -133,6 +176,15 @@ Folders that were open within a folder still being read (as the browser restores
 swap or a filter) open again once its rows are in, as does the row that was selected, unless the user selected another
 meanwhile.
 
+A list of presets (a device's row, a container's, Track Presets, or a folder in them) is two folders read as one: the
+same folder in the user's presets and in Phazite's. Each is listed as a folder is, and the list shows what they hold
+together once both are in: at once where the index knows both (holds it whole, or knows that it isn't there because
+its presets' folder wasn't there as it walked, as on a fresh install), else as each read comes. A folder that isn't
+there and one the index has with nothing in it are the same, so that a device without a folder of the user's isn't
+listed again at each opening or look. Where one folder is late (a user's presets' folder on a drive that doesn't
+answer), the list shows what the other gave, with "This drive isn't answering..." under it, and the rest when it comes.
+Closing the row, or the browser going, lets go of both reads: nothing comes after.
+
 A folder already open when what it holds changes is read again as the browser takes the keys again, or as Phazite comes
 back to the front (from Explorer, or the program that wrote into the folder), no more than 16 at a time (those in view
 first), and the next time it opens. Coming back to the front reads again those in view whatever their last read (the
@@ -175,7 +227,7 @@ While any filter is set:
 - a list shows 2,000 sounds at most, then says how many more there are;
 - search results take the filters too;
 - MIDI files take the filters as sounds do; folders, devices and presets have none of their values, so they don't
-  show;
+  show, nor do Instruments, Effects and Track Presets;
 - the folders that were open before open again once the filters are taken away.
 
 ## Preview
@@ -260,8 +312,8 @@ While a swap is open:
   click, plays in that place: in the beat while the song plays; while the song is stopped the pad plays once, or an
   instrument plays a short note;
 - a pad's swap shows the sounds of its sound's type (a kick's: kicks), by the filters;
-- a device's swap shows its presets alone, Phazite's and then the user's, every folder of them open, from the top,
-  so that Down tries one after another; the filters are hidden;
+- a device's swap shows its presets alone, as its row lists them (Phazite's and the user's as one), every folder of
+  them open, from the top, so that Down tries one after another; the filters are hidden;
 - previews stay silent, and what can't be tried shows muted;
 - the pad being swapped is outlined and its Swap button lit; a click on it keeps what is tried.
 
@@ -286,8 +338,8 @@ to 174 BPM, risers, impacts and other effects, and foley.
 - **An optional download, not part of Phazite.** They live in their own public repository,
   [phazite-sounds](https://github.com/august-byrne/phazite-sounds), whose releases hold the pack as a zip, so
   Phazite's repository and installer stay small. Phazite offers them once, in the welcome window
-  ([getting-started.md](getting-started.md)); the browser's Phazite Sounds place has a row that downloads them until
-  they are installed; **Help > Phazite Sounds** offers them again.
+  ([getting-started.md](getting-started.md)); the browser's Sounds has a row that downloads them until they are
+  installed, then lists their folders; **Help > Phazite Sounds** offers them again.
 - **Download:** only when the user asks, over HTTPS, on a thread of its own, with progress in the browser and the
   welcome window. Phazite pins the release it installs by its address, size and SHA-256, so a changed or damaged file
   is refused. A released zip is never replaced: a new release means a new pin in Phazite.
@@ -303,6 +355,8 @@ to 174 BPM, risers, impacts and other effects, and foley.
 
 - **The tree of places is the backbone;** filters and search narrow it. Tags never replace folders, and the user's
   folders show as they are on disk.
+- **Presets show under what they are for,** Phazite's and the user's as one list (the owner, after stage 6): a place
+  for "Phazite's" or "yours" made the user look in two places for one device's sounds.
 - **Each filter offers only what has results, with counts,** and shows its value on its chip, so a filter is never
   left on unseen. Filters aren't kept between starts for the same reason.
 - **One way to find a type's sounds:** the Type filter lists them from every library. There is no place of its own
