@@ -29,6 +29,15 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   JUCE tells a component before its peer is destroyed. Found by the review of known bug 165's Linux side
   (2026-11-16); never seen, and the Linux code is not yet compiled by CI.
 
+- **212. A plug-in whose load ended without it, for another reason than not being installed, shows as missing**
+  (2026-11-19, found while 191 was looked into). Where the plug-in host didn't start, the load took too long, or the
+  host stopped as it started, the device's status is `missing` (`finishOpening()`, `src/model/plugins/PluginInstances.cpp`):
+  the project's notes list it among the plug-ins not installed on this computer, though it is; its slot looks as
+  any device's and is silent; Reload refuses it; and nothing asks for the load again until the project opens again
+  (the retry after a scan takes only plug-ins that weren't known). The reason is kept now
+  (`PluginInstances::getError()`), and nothing shows it. To fix: a status of its own, shown in the slot with its
+  reason, which a click reloads as it does a crashed plug-in, and which `getPluginsMissing()` leaves out.
+
 ## Versions
 
 - **186. After a song's IDs were given anew as it opened, Restore and Merge against its earlier commits do wrong
@@ -120,22 +129,19 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 ## Tests
 
-- **205. `VersionsTests`, the plug-in update's case, failed once in CI's linux-clang job** (2026-11-18, the run of
-  `4ff18a92`): after the project opened again, its plug-ins loaded and their settings stored as a save stores them,
-  the changes didn't name the update ("updated 1.0 → 2.0", its last check). `39633f06` made that case wait for the
-  plug-in after the project opens again, for a failure of the same check in a release build; this is that failure
-  again, on another compiler, so the wait isn't the whole of it. To fix: find what `describeChanges()` reads of the
-  plug-in's stored settings there and whether `saveWithPluginStates()` can return before the reopened plug-in's
-  answer is in the song (the test should print the stored version when the check fails).
-- **191. `SandboxedPluginTests`, "A plug-in opened from its project keeps the settings the project holds when it
-  crashes", failed once under AddressSanitizer** (2026-11-17, `main`'s own run of `7df779c8`; the same commit's run on
-  its branch passed): the stand-in effect, added and waited for until no plug-in was loading, had no Gain parameter
-  (`tests/TestSong.cpp`, "no parameter 1"). So its load ended without it: given up at a time limit that a helper
-  started under a sanitizer on a busy runner missed, or met by the helper that the test case before it had just
-  crashed on purpose. To fix: find which limit (the helper's start, or the
-  plug-in's load in it) from the plug-in's status at that point, which the test should say when it fails; then either
-  the tests' helper is given longer under the sanitizers, as the tests' waits are, or the load is asked for again.
-  Seen again the same day, under AddressSanitizer again (`main`'s own run of `7514292b`, whose branch run passed), in
-  "A project with slow plug-ins opens at once": of its two slow plug-ins, one never reached its gate in two minutes
-  and was no longer loading, so its load had ended without it. Both times the test case just before had crashed or
-  ended a helper on purpose, which points at the second cause: a load that meets a helper on its way out.
+- **191. `SandboxedPluginTests`: under AddressSanitizer on CI, a plug-in's load now and then ends without the
+  plug-in** (2026-11-17, twice on `main`'s runs; 2026-11-19 on `b3d34c37`, in "A save asks slow plug-ins for their
+  states at once...": after 20.5 s, "no parameter 60"). The plug-in is no longer loading and has no parameters, so
+  the next thing the test asks of it fails. Not the first lead (a load that meets a helper on its way out): there is
+  one helper for each plug-in file, and the helpers crashed or ended by the cases before were other files'; that a
+  load could go to a helper that had crashed a moment before was true, and is fixed, but none of the three failures
+  was that. What fits: the 20.5 s is the helper's limit to start (`startMilliseconds`, `src/model/plugins/PluginHost.cpp`,
+  kept by `Helper.cpp`'s watching thread) and no other limit. The likely cause, not proved (it needs Linux and the
+  sanitizer): JUCE's `ChildProcess` allocates between `fork()` and `exec` (`juce_SharedCode_posix.h`, the `argv`
+  array), and under GCC 13's AddressSanitizer a child forked while another thread held the allocator's lock waits
+  on it for ever, never becomes the helper, and is ended at the limit. Since the fix round a failed test says the
+  plug-in's status and why its load ended (`PluginInstances::getError()`, `TestSong::describePlugin()`): "Phazite's
+  plug-in host didn't start." after about 20 s confirms the start. To tell a child that never became the helper
+  from a helper slow to start: at a start that timed out on Linux, read `/proc/<child>/exe` (still the program
+  that started it: it never did `exec`). To fix then: start the helper on Linux with `posix_spawn`, which allocates
+  nothing in the child, as a JUCE workaround.

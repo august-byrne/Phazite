@@ -480,7 +480,7 @@ int countChanges (const ProjectContext& context)
 bool areChangesWorkedOut (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history == nullptr || history->isReading() || history->areChangesWorkedOut();
+    return history == nullptr || (! history->isReading() && history->areChangesWorkedOut());
 }
 
 bool mayHaveChangesSinceLastVersion (const ProjectContext& context)

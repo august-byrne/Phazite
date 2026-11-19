@@ -720,6 +720,13 @@ std::optional<PluginInstances::Status> PluginInstances::getStatus (DeviceID id)
     return found != entries.end() ? found->second.unloaded : Status::missing;
 }
 
+juce::String PluginInstances::getError (DeviceID id) const
+{
+    const auto found = entries.find (id);
+    return found != entries.end() && found->second.instance == nullptr && found->second.opening == nullptr ? found->second.error
+                                                                                                           : juce::String();
+}
+
 bool PluginInstances::reload (DeviceID id, Reloaded then)
 {
     const auto device = findDeviceState (song, id);
@@ -1158,6 +1165,12 @@ std::optional<PluginInstances::Status> getPluginStatus (const Song& song, Device
 {
     auto* session = findSession (song);
     return session != nullptr ? session->getPlugins().getStatus (id) : std::nullopt;
+}
+
+juce::String getPluginError (const Song& song, DeviceID id)
+{
+    auto* session = findSession (song);
+    return session != nullptr ? session->getPlugins().getError (id) : juce::String();
 }
 
 void whenPluginStatesIn (const Song& song, SandboxedInstance::Ask which, std::function<void (bool)> then)

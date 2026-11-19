@@ -249,6 +249,13 @@ The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed be
 bug has a test that failed before its fix, and a reviewer read each area's changes; what the reviews found is fixed
 too. A line names the bug's number in that list.
 
+- **205 The versions' changes, asked for too early:** the changes since the last version count as worked out only
+  once the history has read the project's versions; before, a test that asked just after a project opened again got
+  an empty list, on any machine fast or slow enough. The plug-in update's test holds the read to make that order.
+- **191 A load just after a helper crashed:** a plug-in asked for in the fifth of a second before Phazite noticed
+  that its helper had crashed went to the dead helper, failed, and was kept off as one that crashed as it loaded; it
+  opens in a fresh helper now. A plug-in whose load ends without it says why, to the tests for now. The failures on
+  CI themselves have another cause, not proved yet (the entry says which is likely).
 - **209 A plug-in's presets apart from Phazite's devices':** a plug-in's presets are kept in a folder of its own in
   `Plug-ins`, so a plug-in named as one of Phazite's devices ("Reverb") no longer shares that device's presets in the
   browser, Swap or the presets menus, and Other Presets shows the folders of plug-ins not scanned by their names.

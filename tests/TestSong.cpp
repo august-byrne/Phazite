@@ -316,13 +316,48 @@ void TestSong::waitForPlugins()
     if (auto* session = findSession (song))
         session->update();
 
+    const auto since = juce::Time::getMillisecondCounterHiRes();
     REQUIRE (dispatchMessagesUntil ([&song] { return getPluginsLoading (song).isEmpty(); }));
+    pluginsWaitedFor = juce::Time::getMillisecondCounterHiRes() - since;
+}
+
+juce::String TestSong::describePlugin (DeviceID device) const
+{
+    const auto status = getPluginStatus (project->getSong(), device);
+
+    if (! status.has_value())
+        return {};
+
+    const auto named = [] (PluginInstances::Status s) -> juce::String
+    {
+        switch (s)
+        {
+            case PluginInstances::Status::playing:
+                return "playing";
+            case PluginInstances::Status::loading:
+                return "loading";
+            case PluginInstances::Status::crashed:
+                return "crashed";
+            case PluginInstances::Status::crashedWhileLoading:
+                return "crashed while loading";
+            case PluginInstances::Status::missing:
+                return "missing";
+            case PluginInstances::Status::off:
+                return "off";
+        }
+
+        return "?";
+    };
+
+    const auto error = getPluginError (project->getSong(), device);
+    return "its plug-in " + named (*status) + (error.isNotEmpty() ? " (" + error + ")" : juce::String())
+           + ", after a wait for the plug-ins of " + juce::String (juce::roundToInt (pluginsWaitedFor)) + " ms";
 }
 
 void TestSong::setParameter (DeviceID device, const juce::String& parameterID, float value)
 {
     auto parameter = getParameter (context, { device, parameterID });
-    REQUIRE_MESSAGE (parameter.exists(), ("no parameter " + parameterID).toStdString());
+    REQUIRE_MESSAGE (parameter.exists(), ("no parameter " + parameterID + "; " + describePlugin (device)).toStdString());
     parameter.setValue (value);
 }
 

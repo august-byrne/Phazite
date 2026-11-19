@@ -98,6 +98,10 @@ public:
     // setInstrument() and addEffect() wait so for a plug-in they add.
     void waitForPlugins();
 
+    // How a plug-in device plays, why it didn't load if it has no instance, and how long the last wait for the plug-ins
+    // took: for a failure's message, where a plug-in's load ended without it (known bug 191). Nothing for another device.
+    juce::String describePlugin (DeviceID) const;
+
     // The mixer: a track's volume in decibels and its pan from -1 to 1, and their parameters, for automation and modulation.
     void setVolume (TrackID, float decibels);
     void setPan (TrackID, float pan);
@@ -151,6 +155,7 @@ private:
     // within the same moment would keep.
     const juce::File folder;
     std::unique_ptr<Project> project;
+    double pluginsWaitedFor = 0.0; // the last wait for the plug-ins, in milliseconds (describePlugin())
 
     // Takes the song out of the context first as the test song goes, before the project and its song do: also when the
     // constructor gave up part way (a REQUIRE failed), when the destructor doesn't run. The members go in the reverse of

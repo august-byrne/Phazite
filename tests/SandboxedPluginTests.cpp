@@ -86,6 +86,9 @@
   #define WIN32_LEAN_AND_MEAN
  #endif
  #include <windows.h>
+#else
+ #include <csignal>
+ #include <sys/types.h>
 #endif
 
 using phazite::test::EnginePlayback;
@@ -1894,6 +1897,7 @@ TEST_CASE (
     CHECK (phazite::getPluginsLoading (opened) == juce::StringArray ("Test Slow", "Test Slow Too"));
 
     // Each began in its own helper, beside the other.
+    INFO ("Test Slow: " << song.describePlugin (slow).toStdString() << "; Test Slow Too: " << song.describePlugin (slowToo).toStdString());
     CHECK (phazite::test::dispatchMessagesUntil (
         []
         {
@@ -3938,6 +3942,63 @@ TEST_CASE ("A song's plug-ins in one helper open one at a time; one taken away f
     song.reopen();
     CHECK (phazite::getPluginStatus (getSong (song), crashing) == Status::crashedWhileLoading);
     CHECK (phazite::getPluginStatus (getSong (song), sibling) == Status::playing);
+}
+
+namespace
+{
+// Ends a helper's process from outside, as a crash ends it, and waits until it has ended: its watching thread may not have
+// looked since, so that Phazite still takes the helper for running (sandbox/client/Helper.h).
+void endAsACrash (phazite::sandbox::Helper& helper)
+{
+    const auto id = helper.getProcessID();
+    REQUIRE (id > 0);
+#if JUCE_WINDOWS
+    auto* process = OpenProcess (PROCESS_TERMINATE | SYNCHRONIZE, FALSE, (DWORD) id);
+    REQUIRE (process != nullptr);
+    TerminateProcess (process, 1);
+    const auto ended = WaitForSingleObject (process, (DWORD) phazite::test::hangTimeout);
+    CloseHandle (process);
+    REQUIRE (ended == WAIT_OBJECT_0);
+#else
+    REQUIRE (::kill ((pid_t) id, SIGKILL) == 0);
+
+    // Ended once it is a zombie, or gone (reaped by the watching thread, which looked meanwhile). Linux's /proc says so;
+    // a macOS build will need another way.
+    const auto stat = juce::File ("/proc").getChildFile (juce::String (id)).getChildFile ("stat");
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&stat]
+        { return ! stat.existsAsFile() || stat.loadFileAsString().fromLastOccurrenceOf (")", false, false).trim().startsWithChar ('Z'); }));
+#endif
+}
+} // namespace
+
+TEST_CASE ("A plug-in asked for just after its helper crashed opens in a fresh helper, and the crash isn't taken for its own")
+{
+    // Known bug 191's review: a load went to a helper that had crashed a moment before, until its watching thread looked (a
+    // fifth of a second later at most), and failed as it looked; where nothing else was in the helper, its crash was taken
+    // for the plug-in's own as it loaded, which kept the plug-in off.
+    SandboxedPlugins sandboxed;
+    auto& host = SandboxedPlugins::getHost();
+    const auto effect = phazite::test::TestPlugins::getDescription (Kind::effect);
+
+    for (int round = 0; round < 24; ++round)
+    {
+        CAPTURE (round);
+
+        // One opened in its helper, not an instance yet (as one opened in the background is until the message thread takes
+        // it in): what keeps the helper, which holds nothing else. The helper crashes.
+        auto held = host.open (effect, {}, -1, 48000.0, 512);
+        INFO (held.error.toStdString());
+        REQUIRE (held.remote != nullptr);
+        endAsACrash (held.remote->getHelper());
+
+        // Another asked for at once opens in a fresh helper, and the plug-in isn't kept off.
+        auto opened = host.open (effect, {}, -1, 48000.0, 512);
+        INFO (opened.error.toStdString());
+        REQUIRE (opened.remote != nullptr);
+        CHECK (&opened.remote->getHelper() != &held.remote->getHelper());
+        REQUIRE_FALSE (host.hasCrashedWhileLoading (effect));
+    }
 }
 
 TEST_CASE ("A plug-in still loading is silent in its place, an effect too, and its sound fades in as it comes in")

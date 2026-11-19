@@ -793,11 +793,29 @@ TEST_CASE ("A plug-in's update shows in the changes, by the version that made it
 
     // And as the project opens again, once the updated plug-in has loaded in it and its settings are stored as a save stores
     // them: a plug-in's stored settings count from its first word on, as any plug-in's, so the list read before that word
-    // (a release build on CI read it so) shows none of them yet.
+    // (a release build on CI read it so) shows none of them yet. The history reads the versions as the project opens, beside
+    // the plug-in's load: held here until the plug-in is in and its settings are stored, the list isn't worked out meanwhile,
+    // and names the update once the read is in (known bug 205: the list was taken for worked out while the read was still
+    // under way, and was empty).
+    struct FirstReadHeld
+    {
+        FirstReadHeld() { phazite::VersionHistory::holdFirstReadsForTests = true; }
+        ~FirstReadHeld() { letGo(); }
+        void letGo() { phazite::VersionHistory::holdFirstReadsForTests = false; }
+    } held;
+
     s.reopen();
     s.waitForPlugins();
     s.saveWithPluginStates();
-    CHECK (describeChanges (s.context).contains (updated));
+    REQUIRE (dispatchMessagesUntil ([] { return phazite::VersionHistory::firstReadsHeldForTests.load() == 1; }));
+    CHECK_FALSE (phazite::areChangesWorkedOut (s.context));
+    held.letGo();
+
+    const auto listed = describeChanges (s.context);
+    INFO (
+        "listed: \"" << listed.toStdString() << "\"; stored version: "
+                     << phazite::findDeviceState (*phazite::findSong (s.context), device)[schema::pluginVersion].toString().toStdString());
+    CHECK (listed.contains (updated));
 }
 
 TEST_CASE ("Verify History finds the versions no branch holds and what is damaged, and Recover Lost Versions makes a branch of each line")

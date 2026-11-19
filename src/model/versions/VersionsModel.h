@@ -123,7 +123,9 @@ juce::String getSaveProblem (const ProjectContext&);
 // what changed in the song (docs/design/versions.md: Off the message thread): these read the last list worked out, and the
 // listeners (ProjectContext::Listener::versionsChanged()) are told when a newer one is in. Whether the last list is the song's
 // as it is now (nothing changed since its round, which is in; and the list against a version compared with the song, if
-// one is), what a test waits for; and whether the song may have changes, as far as is known now (some in the last list, or a
+// one is), what a test waits for, which is never so while the history still reads the versions as its project opens (there
+// is no list then: known bug 205, a test that read the list just after the project opened again found none); and whether
+// the song may have changes, as far as is known now (some in the last list, or a
 // change since it), which the commands that act on the song as it is (Discard All Changes, Save Version) are enabled by.
 std::vector<VersionChange> getChangesSinceLastVersion (const ProjectContext&);
 bool hasChangesSinceLastVersion (const ProjectContext&);

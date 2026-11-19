@@ -274,8 +274,11 @@ std::shared_ptr<PluginHost::Running> PluginHost::getHelper (const juce::String& 
         return nullptr;
     }
 
-    // Gone already, before its loss was told (a crash a moment ago): another, once.
-    if (! running->helper->isRunning())
+    // Gone already, before its loss was told (a crash a moment ago, which its watching thread tells of at its next look, a
+    // fifth of a second later at most): another, once. Its process asked, not what the watching thread last found: a load
+    // sent to a helper that has gone fails as that thread looks, and was taken for the plug-in's own crash as it loaded
+    // where nothing else was in the helper (known bug 191's review).
+    if (! running->helper->isRunning() || running->helper->hasProcessEnded())
     {
         running->lost = true;
 

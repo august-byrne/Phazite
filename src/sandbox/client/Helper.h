@@ -36,6 +36,10 @@ public:
 
     bool isRunning() const noexcept { return running.load(); }
 
+    // Whether its process has ended, asked of the system now (any thread but the pipe's), rather than as the watching
+    // thread last found it: a helper that crashed a moment ago still counts as running until that thread's next look.
+    bool hasProcessEnded() { return ! isProcessRunning(); }
+
     // The helper's process's ID, as it told it once started (0 before). On Windows it is then in a job of Phazite's that
     // ends it as Phazite ends, however that is (not what it starts); on Linux and macOS it watches for Phazite to go
     // itself (host/core/Host.h).

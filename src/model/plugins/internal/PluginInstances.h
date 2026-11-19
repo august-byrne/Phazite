@@ -101,6 +101,10 @@ public:
 
     std::optional<Status> getStatus (DeviceID);
 
+    // Why a plug-in that has no instance didn't load, as its last opening said (not installed, its helper didn't start, it
+    // took too long, it crashed as it loaded, its helper went); none while it loads, or once it has loaded.
+    juce::String getError (DeviceID) const;
+
     // A crashed plug-in opened again, in the background (known bug 166: the message thread waited for its helper to start and
     // the plug-in to open): in a new helper from the state it last had, or, one that crashed as it loaded, loaded again from
     // the song; loading meanwhile (getStatus()). False, calling nothing, for one that isn't crashed or is reloading; else
@@ -246,6 +250,7 @@ bool reloadPlugin (Song&, DeviceID, PluginInstances::Reloaded then);
 // How a song's plug-in plays (PluginInstances::getStatus()), through its session: nothing without one, or for a device
 // that isn't a plug-in.
 std::optional<PluginInstances::Status> getPluginStatus (const Song&, DeviceID);
+juce::String getPluginError (const Song&, DeviceID); // PluginInstances::getError(), none without a session
 
 // Through the song's session (none: nothing to wait for): its plug-ins' states asked for at once, and a call once they are
 // in (PluginInstances::whenStatesIn(): with true at once without a session); the wait given up, and the plug-ins still
