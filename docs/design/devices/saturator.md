@@ -221,6 +221,33 @@ limits what goes into the curve, not what it makes; the Exciter's High Cut came 
 - Auto Gain only undoes the Drive; it does not match the loudness of what comes out to what went in.
 - A drag on the curve starts from the Drive as modulation plays it, and sets that as the value by hand.
 
+## Listening set
+
+Ten minutes, on a bass, a vocal, a snare, a bright synth and a whole mix. Hand checks E3, E4 and E22 go further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A bass, then a whole mix | A new Saturator (Soft, Drive +6 dB, Auto Gain on); turn the Drive from 0 to +24 dB | The sound gets warmer and fuller, then grittier, without getting louder |
+| A bass, Drive +12 dB | Step through Soft, Tape, Tube, Hard and Fold while it plays | Each shape its own colour; a change of shape comes in whole without a thump under it |
+| A bass, Drive +12 dB | Colour from 0 to 100 %, quickly | Warmer, the curve leans, and no swell in the lows as it turns |
+| A drum loop | `Saturator/Distortion/Bit Crush`, then Drive from -24 to +36 dB | Coarser the harder it is driven, from 12 bits to 2 |
+| A vocal, a snare, then a whole mix | `Saturator/Exciter/Vocal Air`, `Saturator/Exciter/Snare Crack`, `Saturator/Exciter/Top End Restore`; Listen on, then off | Brighter highs with new harmonics, the lows untouched; Listen plays the band alone |
+| A sine at 12 kHz, or a bright synth's high notes: the test of its aliasing | Fold, Drive +24 dB, Quality 2x, then 8x | At 2x tones that don't follow the note (15 dB under, the page's table: the Limits' weakest place); at 8x they are gone (62 dB under); whether 2x, the default, is grainy on your material |
+| A bass | `Saturator/Warmth/Bass Warmth`, Mix 50 % | Thicker, with no thinning or phasing between the dry and the driven sound |
+
+## Verdict
+
+- Its curves are played by their antiderivatives at up to 8x, the worst alias 61.8 dB under the tone at 8x
+  (`tests/AntialiasingTests.cpp`); a quiet sound keeps its level within 0.1 dB at any Colour; its Band is flat within
+  0.1 dB while it bends nothing, and adds nothing under From but its crossover's slope (80 dB under at 8x); the dry copy
+  meets the sound in phase to 60 dB (this page). The Exciter's eight presets were matched within 2.5 dB a band.
+- At its default Quality, 2x, a high tone driven hard into Fold aliases 15 dB under itself, where a flagship
+  saturation plug-in oversamples more by default.
+- Against a flagship saturation plug-in: one band (no multiband with settings per band), six fixed curves with none
+  to draw, no dynamics or envelope on the drive, no filters around the curve but the tilt and the band, and Auto Gain
+  that undoes the Drive rather than matching loudness (no backlog row).
+- **Near it: several bands, a curve to draw, and gain matched by loudness** (by measurement; to be confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/saturation/Saturator.h`, `src/devices/saturation/Saturator.cpp`; the curves and their

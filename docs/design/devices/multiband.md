@@ -159,6 +159,35 @@ for the session, not to the project. Each edit of a parameter is one undo step.
 - A drag of a band's level in the graph starts from the level as modulation plays it, and sets that as the value by
   hand.
 
+## Listening set
+
+Ten minutes, on a whole song, a vocal, a bass with a kick on another track, and pink noise. Hand checks E7 and E19
+go further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A whole song | A new Multiband | Nothing changes (every band's curve is a limiter at 0 dB, which a song under 0 dB never reaches) |
+| Pink noise: the test of its split | A new Multiband; drag Low Freq from 60 Hz to 1 kHz and High Freq from 2 kHz to 12 kHz while it plays | No hole, bump or whoosh at either crossover as it moves (Linkwitz-Riley bands that add up flat) |
+| A whole song | `Multiband/Mastering/Gentle Master` | Denser and more even, the lows not pumping the highs, no dulling |
+| A vocal | `Multiband/Mixing/De-esser Split Band` | The "s" sounds come down, the voice's body untouched |
+| A bass, with a kick on another track as the sidechain | A new Multiband; choose the kick's track as its sidechain (it sets the low band to duck) | Only the bass's lows duck under each kick; its mids and top stay |
+| A drum loop | `Multiband/Creative/Upward Squash` | The quiet tails and room come up between the hits |
+| A bass | Low band Sat +60 %, Ceiling -6 dB; take Sat back to 0 % while it plays | Rounder and thicker lows; the saturation goes and comes without a click |
+| A drum loop, Master Pre +12 dB | The default curves (a limit at 0 dB with an attack) | The Limits' weakest place: the hits' fast peaks pass over 0 dB, where a Limiter keeps a ceiling; whether you hear them crack |
+
+## Verdict
+
+- Its bands add up flat (Linkwitz-Riley crossovers, the sound mixed back through the same all-pass), its look-ahead
+  puts a band down as a peak arrives, its saturation plays at twice the rate by its antiderivative, and its latency is
+  fixed at 10 ms and 12 samples whatever the settings (this page). No measure of its gain's moves against the
+  Compressor's is written down.
+- Against a flagship multiband dynamics plug-in: three fixed bands, none added, removed or placed freely; minimum-phase
+  crossovers (backlog: "A linear-phase Multiband"); the chain not oversampled past its saturations (no backlog row for
+  bands or oversampling).
+- Its curve is small in the dock and shows nothing under -60 dB; no gain reduction drawn on the spectrum (no backlog
+  row).
+- **Near it: bands of free number and place, and linear-phase crossovers** (by measurement; to be confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/dynamics/Multiband.h`, `src/devices/dynamics/Multiband.cpp`; the curve in

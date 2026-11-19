@@ -307,6 +307,34 @@ Mix is the knob on the device's row in the Devices view.
 - A drag of the threshold's line starts from the Threshold as modulation plays it, and sets that as the value by
   hand.
 
+## Listening set
+
+Ten minutes, on a vocal, a drum loop, a snare, a pad and a kick on another track. Hand checks E6, E7 and E18 go further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A vocal or a bass line | A new Compressor (4:1 over -18 dB), then Auto on | The loud words come down and the quiet ones stay; with Auto the level is back about where it was (6.75 dB made up) and nothing pumps on a held note |
+| A drum loop | `Compressor/Drums/Drum Bus Glue`, Drive 30 %; step through Clean, VCA, FET, Opto and Tube | Each character's switch without a click; FET grittier the harder it turns down, Opto slow to let go after a loud fill |
+| A held pad, with a kick on another track | `Compressor/Sidechain/Sidechain Pump`, its sidechain on the kick's track | The pad dips with each kick and is back before the next; the kick's click stays as the pad ducks |
+| A drum loop with toms | `Compressor/Gate/Drum Gate`; then Hold at 0 and at 60 ms | At 0 a tom's tail chatters; at 60 ms it opens once and closes cleanly, each hit's start whole |
+| A snare | Attack 1 ms, Look-Ahead at 0, then 5 ms | At 0 each hit's first click gets through; at 5 ms it is already down (within a decibel of where it settles, this page) |
+| A drum loop, then a held pad | `Compressor/Transient/More Punch`; Punch to +100 % and -100 %, Sustain both ways | Punch snaps the hits or softens them, Sustain lengthens or tightens the tails; the pad's level doesn't move |
+| A steady sine at -6 dBFS, then at -30 dBFS: the test tone | Transient, Punch +100 %, Sustain +100 % | No change of level at either (within a tenth of a decibel, this page) |
+| A stereo mix with a loud hit hard on one side | 4:1 over -24 dB, Attack 5 ms | The Limits' weakest place: the channels are always linked, so the quiet side dips with the loud one; whether that matters for your mixes |
+
+## Verdict
+
+- Feed-forward, so once settled it follows its curve exactly; 5 ms of look-ahead and a 1 ms attack put a burst's
+  first millisecond within a decibel of where it settles; Transient leaves a steady sine within a tenth of a decibel at
+  any level; a change of mode keeps the level within a decibel of either mode's (this page).
+- Against a flagship compressor: no stereo link choices (unlinked, mid/side), no automatic release, no knee as a
+  number (backlog: "Compressor: stereo link options (unlinked, mid and side), an automatic release, a knee as a
+  number").
+- Its characters are choices of detector, release and colour, not models of circuits; its drive runs at 2x only; the
+  key has two cuts and no gain; Transient has no look-ahead (no backlog row).
+- **Near it: stereo link choices, an automatic release, and a key with a filter and gain of its own** (by
+  measurement; to be confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/dynamics/Compressor.h`, `src/devices/dynamics/Compressor.cpp`; the curve in

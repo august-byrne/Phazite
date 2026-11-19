@@ -99,6 +99,29 @@ large knobs) over Bass (Bass Mono and Frequency), then Sides (Balance, Mono, Swa
   ([decisions.md](../decisions.md)).
 - The picture's dots are scaled so that the loudest reaches the rim, so it shows the image's shape but not its level.
 
+## Listening set
+
+Ten minutes, on a wide pad, a mono synth or vocal, a drum loop and a whole mix. Hand check E1 goes further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A wide pad | A new Stereo; then Width from 0 to 200 % | Nothing changes at the defaults; from mono to twice as wide, the middle never moves |
+| A mono synth or vocal | `Stereo/Width/Mono to Stereo`; then Mono on | Wide without a delay's echo; in mono exactly as before it (Spread keeps the mono sum) |
+| A whole mix with a wide bass | `Stereo/Checks/Mono Bass` | The bass sits in the middle, the top as wide as it was, no thinning at the split |
+| A drum loop | Balance fully right, then a double-click on it | The left goes silent and the right is no louder; a double-click reads Center |
+| A whole mix | Mono on and off, then Swap Sides on and off, while it plays | Mono collapses the image to the middle, the bar reads +1, no click; Swap trades the sides without a click |
+| A Saturator set to Tube before it: the test of the DC filter | `Stereo/Checks/DC Filter`; switch it off and on | Switching it clicks nothing, and the lows are as they were |
+| A mix whose low mids are wide | Width 200 % | The Limits' weakest place: one band, so the low mids widen with the top; whether you wanted to widen only the top |
+
+## Verdict
+
+- Its Spread never changes the mono sum, its Balance at the centre leaves both sides as they are exactly, its DC
+  filter switched off passes the sound bit for bit, and every switch glides over 20 ms (this page,
+  `tests/StereoTests.cpp`).
+- As a channel utility it does all a utility device does; against a stereo imager it has one band where an imager
+  has several, no Mix and one balance law (no backlog row for width by band).
+- **At the bar** as a channel utility; width by band is an imager's (by measurement; to be confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/stereo/Stereo.h`, `src/devices/stereo/Stereo.cpp`; the crossover and its all-pass,

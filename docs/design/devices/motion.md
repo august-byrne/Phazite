@@ -215,6 +215,34 @@ both menus.
 - A change of Mode takes 20 ms, the effect passing the sound untouched at its middle: it is for switching between
   sections of a song, not for a sweep between two modes.
 
+## Listening set
+
+Ten minutes, on chords of a pad or keys, a bass and a guitar or synth line. Hand check E2 goes further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| Chords of keys or a pad | A new Motion (the Juno-60's first chorus mode) | A gentle, wide shimmer, the two sides swinging opposite ways, the pitch never seasick |
+| The same chords | `Motion/Chorus/Chorus I + II`, then `Motion/Ensemble/String Ensemble` | A deeper, quicker swirl; the ensemble thick as a string machine's, as loud as one copy |
+| A bass line | `Motion/Ensemble/Solid Bass Chorus` | The top shimmers while the lows stay solid and centred (Safe Bass) |
+| A guitar or synth line | `Motion/Flanger/Jet Sweep`, then `Motion/Flanger/Negative Flange` | The jet's whoosh sweeping evenly; the negative one hollow, not metallic |
+| Chords | `Motion/Phaser/Classic Phase`, then `Motion/Phaser/Resonant Jet` | Notches gliding up and down; at high feedback a vocal ring, never running away |
+| The chords, playing | Click the Chorus, Flanger and Phaser tabs; in Flanger or Phaser turn Mix to 50 %, then 100 % | Each tab switches without a click or a dip; at 50 % the effect is whole, at 100 % the copy alone (a vibrato, or a flat phaser) |
+| Pink noise: the test of the phaser's steps | Phaser, Rate 20 Hz, Depth 100 %, Notches 6 | The Limits' weakest place: the sections move every 8 samples; whether a fast deep sweep is smooth or buzzes |
+| A drum loop | Flanger, Delay 1 ms, Depth 100 %, Feedback 0 % | Whether you miss the "through zero" sweep, the jet passing through silence: it has none |
+
+## Verdict
+
+- Each mode plays what its device played before S6.10 (`tests/MotionTests.cpp`); a change of mode holds the level
+  within 0.6 dB; its LFO follows the song's place, so a loop sweeps alike each time and a render matches live; the
+  flanger's peaks rise as far as what lies between them falls (up to 8.5 dB), so its level holds at any feedback; the
+  phaser's loop is solved within each
+  sample (this page).
+- Against a flagship modulation plug-in: no through-zero flanging, no bucket-brigade or tape character (noise,
+  companding, clock), one LFO of two shapes with no envelope follower, no per-voice pan, the phaser's stages at one
+  frequency with no barber-pole mode, no self-oscillation (no backlog row).
+- **Near it: through-zero flanging, a bucket-brigade character, and a barber-pole phaser** (by measurement; to be
+  confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/motion/Motion.h`, `src/devices/motion/Motion.cpp` (the device, its parameters, the mapping to its

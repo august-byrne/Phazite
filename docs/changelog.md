@@ -10,6 +10,11 @@ The full text of every step, as it was written when it was built, is in the
 
 ## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)
 
+- **S6.1 A listening set and a verdict for each device:** each of the sixteen devices' pages ends with what to play
+  through it, the setting and what to listen for, so that a person can judge it in ten minutes, and a verdict by what
+  was measured: what it does well, with the figure, what it lacks against the plug-ins producers own, and its
+  standing (one device at the bar, eleven near it, four short of it), each to be confirmed by ear; the standings and
+  each device's largest gap are a table at the end of the devices' page.
 - **S6.3 The Compressor:** Compress hears a sidechain, looks ahead up to 10 ms, makes its gain up by itself and holds
   its detector, so that a gate drawn on its curve opens in a tenth of a millisecond and doesn't chatter (two more gate
   shapes, three gate presets); a third mode, Transient, turns each hit's attack and what follows it up or down
@@ -88,7 +93,7 @@ The full text of every step, as it was written when it was built, is in the
   C5 is 39, 60 and 74 dB under the note, a bent wave 42, 62 and 77. A change of Quality cuts the notes sounding, with
   a 3 ms fade.
 - **S6.7 The Synth's filter drives:** a Character for its filter, Clean or Driven, the Filter device's loop on every
-  voice at the Quality's rate: the resonance saturates, the top of the Resonance sings in tune (within a sixth of a
+  voice at the Quality's rate: the resonance saturates, the top of the Resonance sings in tune (within a fifth of a
   cent from C2 to C7), a change of Character hands the filter's ring over without a dip, and its ceiling works at a
   voice's level, so that Driven at no Drive leaves a patch's shape alone. Its editor draws the wavetable through its
   Warp, and shows its own matrix on the knobs it moves as a dashed ring inside Phazite's solid one. Three presets:

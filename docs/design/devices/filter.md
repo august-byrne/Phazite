@@ -6,8 +6,8 @@ A resonant filter to sweep a sound open or closed, with a drive. Besides the low
 has two combs, a vowel, a phaser and a sample and hold. Its Character is Clean, a linear filter after a drive that gives
 back the gain it adds, or Driven, whose drive pushes the sound into the filter's loop, where the resonance saturates and,
 at the top of the Resonance, the filter sings on its own. The [Synth](synth.md), the [FM](fm.md) synth and the
-[Sampler](sampler.md) use the same filter types, from the same code, so each type sounds the same in all four (Clean: the
-instruments have no Character yet).
+[Sampler](sampler.md) use the same filter types, from the same code, so each type sounds the same in all four (the
+Synth's has the Character too; the FM synth's and the Sampler's play Clean).
 
 ## Parameters
 
@@ -174,13 +174,41 @@ Mix is not in the editor: it is with the device in the Devices view ([devices.md
   the ceiling holds full scale at the Quality's rate, and the half-band filters back to the sound's rate overshoot it.
 - Clean's Q stops at 16 at 12 dB and at about 21 at 24 dB: Clean doesn't self-oscillate.
 - Slopes of 12 and 24 dB per octave only.
-- The synths' filters (the [Synth](synth.md)'s, the FM synth's and the sampler's) are
-  still Clean: Driven lives in their shared filter, for them to take later.
+- The FM synth's and the Sampler's filters are still Clean: Driven lives in their shared filter, for them to take
+  later (the [Synth](synth.md) has it).
 - No LFO or envelope follower of its own: a track's modulators
   ([automation-and-modulation.md](../automation-and-modulation.md)) move its cutoff.
 - No stereo offset between the two channels' cutoffs, and no mid/side mode.
 - Not built: a filter that morphs between types, a peak type (the [EQ](eq.md)'s bell does that) and a DJ-style
   filter that is a low-pass one way and a high-pass the other.
+
+## Listening set
+
+Ten minutes, on a bass line, a pad, a loud saw and an empty track. Hand checks E13, E16 and E19 go further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A drum loop or a whole song | A new Filter; sweep the Cutoff from 20 kHz down to 200 Hz and back over two bars | At the default nothing changes; the sweep is even, with no zipper or step |
+| A pad | `Filter/Classic/Low-Pass Sweep`, then Type through Comb +, Vowel and Phaser | Each type sounds like itself; a comb rings at its pitch without running away |
+| A bass line of sixteenths | `Filter/Driven/Acid Squelch`; sweep the Cutoff, then turn the Drive up | It squelches at the cutoff and gets louder and thicker as it is driven, never quieter |
+| An empty track, the song stopped | `Filter/Driven/Self-Oscillating Sine`; then turn its Cutoff from 5 kHz down to 50 Hz | A sine starts by itself within a few seconds and stays in tune as the Cutoff moves (0.04 cents flat in `tests/FilterTests.cpp`) |
+| A loud saw | `Filter/Driven/Screaming Sweep`; then Character Clean on the same settings, and back while it plays | Driven is louder and screams at the cutoff; the switch fades without a click |
+| A bright saw at C6: the test of its aliasing | Clean, Drive 24 dB, Quality 2x, then 8x | 8x has less grit that doesn't follow the note (Clean's worst alias 34 dB under at 2x, 87 at 8x: the page's table); whether 2x, the default, is grainy enough to matter |
+| A pad in stereo | A low-pass at 1 kHz with Resonance 60 %, Mix 50 % | The cut filled in by half (about -6 dB left), no phasing between the dry and the filtered sound |
+| A bass line | Driven, a low-pass at 300 Hz, Resonance 85 %, Drive 18 dB | The Limits' weakest place: the state-variable loop, not a ladder or a diode; whether it is the bass you expect of a classic filter |
+
+## Verdict
+
+- Its Driven filter sings in tune from 50 Hz to 5 kHz (0.04 cents flat, held within 5 cents), leaves a sound under
+  -6 dBFS within 0.01 dB of Clean at no Drive, and its worst alias at 8x is 87 dB (Clean) and 99.5 dB (Driven) under
+  (this page, `tests/FilterTests.cpp`).
+- At its default Quality, 2x, a driven bright sound aliases 34 dB under (Clean) and 46 dB (Driven) at 12 kHz, where a
+  filter plug-in's drive is cleaner; the higher Qualities are there.
+- Against a flagship filter plug-in: one character model, no ladder or diode (backlog: "The Filter's Driven character
+  for the FM synth's and the Sampler's filters...; a ladder or a diode model as a third character").
+- No LFO or envelope follower of its own, no stereo offset or mid/side, no morph between types and no DJ filter (no
+  backlog row).
+- **Near it: modulation of its own, a stereo offset, and a ladder model** (by measurement; to be confirmed by ear).
 
 ## In the code
 

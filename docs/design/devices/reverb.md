@@ -146,6 +146,34 @@ map are Decay and Size as large knobs, then Mode, Diffusion and Pre-Delay, then 
 - Its sound is checked by measurement (decay times, level between the modes), not by listening tests against other
   reverbs ([dsp-audit.md](../../archive/dsp-audit.md)).
 
+## Listening set
+
+Ten minutes, on a snare loop, a vocal and one clap. Hand check E12 goes further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A snare loop, then a vocal | A new Reverb (Room, Decay 2 s, Mix 25 %) | A natural space behind the sound; the tail fades without a flutter or a metallic ring |
+| A snare loop, then a vocal | `Reverb/Plates/Vocal Plate`, then `Reverb/Plates/Snare Plate` | A dense, bright plate that blooms quickly; the same tail whether the sound is panned left or right (the Limits) |
+| A snare loop, then a vocal | `Reverb/Halls/Large Hall` | A smooth, wide tail, no flutter and no metal |
+| One clap, then silence: the test of its ringing | `Reverb/Halls/Endless` (20 s) | The clap fades for 20 s without a pitch, a beat or a flutter in it (its peak 12.5 dB over its envelope, as decaying noise's 10.5, `tests/ReverbTests.cpp`) |
+| The same clap | Room, Decay 20 s | It rings like a pipe (17 dB over its envelope): the Limits' weakest place, which the Hall is for; whether a Room this long is ever wanted |
+| A snare | `Reverb/Halls/Chamber` | Whether it is a small bright space, or too large for its name (its lines are longer than the Room's) |
+| A tail ringing | Change Mode between Room, Plate and Hall | A fade without a click (30 ms out, then in) |
+| A vocal | `Reverb/Rooms/Drum Ambience`, then a Room at Size 0 % and Decay 0.4 s | Whether the voice sits in a room: there are no early reflections apart from the tail |
+
+## Verdict
+
+- Its Hall holds its decay within 2 % from 250 Hz to 1 kHz at 1 to 20 s, rings 11.2 to 12.5 dB over its envelope where
+  decaying noise measures 10.1 to 10.5, keeps its sides' correlation under 0.02 and its level within 0.14 dB of the
+  Room's, at about twice the Room's cost (the page's table, `tests/ReverbTests.cpp`).
+- Its Hall's 2 kHz octave decays 6 % short at 20 s and the smallest Size, and the Room and Plate play a little
+  differently after a sleep (backlog: "Reverb, after its Hall...").
+- Against a flagship algorithmic reverb: three algorithms where it has a dozen or more, no early reflections, no bass
+  decay multiplier, no freeze, shimmer, gate or duck, a Pre-Delay that doesn't follow the tempo, no control of the
+  sways (no backlog row).
+- **Near it: early reflections, a bass decay multiplier, and more spaces than three** (by measurement; to be confirmed
+  by ear).
+
 ## In the code
 
 - DSP: `src/devices/reverb/Reverb.h`, `src/devices/reverb/Reverb.cpp`; the delay line and its interpolation,

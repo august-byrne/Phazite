@@ -223,6 +223,35 @@ the frame every editor shares).
 - A right-click on the drawing plays the sound as a left click does, and a double-click removes a slice where it resets
   a marker.
 
+## Listening set
+
+Ten minutes, on a track of its own, with a sung or played note and a drum loop of your own. Stage 6 changed nothing
+in the Sampler, so this set judges it as it stands.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A single sung or played note, dropped on a new Sampler; play its own pitch, then a melody over an octave | Classic, at the defaults (the root key found by itself) | The note at its own key is in tune with the song; the melody in tune throughout |
+| The same sound, a held note | Loop on, Loop Start and Loop End around its steady part, Crossfade 30 % | The held note goes round the loop without a click or a thump at the seam |
+| A chord from C5 up to C8: the test of its reading | `Sampler/Pad/Wide Saw Pad` | The top notes stay bright and level, with no tone that falls as the melody rises (the sinc reader and the octave copies) |
+| A bass line with overlapping notes | `Sampler/Bass/808 Glide` | Overlapping notes slide without the sound starting again; each new note's attack is whole |
+| Short notes | `Sampler/FX/Reverse Crash` | Each plays to its end however short the note (One-Shot, Trigger) |
+| A drum loop of your own, its slices from C2 up | Slice, Slice By Transients; raise Sensitivity, then Choke on | Each hit on its own key, each cut cleanly at its start, no click at its end; with Choke a slice cuts the one before |
+| The same loop after Slices to Clip, at a song tempo 15 % faster than the loop's | As above | The slices land in time, each at its own length: the gaps or overlaps between them are the Limits' weakest place (no time-stretching); whether they matter for your loops |
+
+## Verdict
+
+- It reads its sound through a Kaiser-windowed sinc of 16 zero crossings a side, from copies at half, a quarter and
+  an eighth of the rate for high notes, and finds a sound's root key and its cents by itself (this page). No measure
+  of its aliasing is written down.
+- Against a studio sampler it plays one sound in one zone: no velocity layers, round robin or keyboard zones (the
+  Multisampler, roadmap stage 7 and 4.10), no slices that stretch with the tempo, no ping-pong loop, no pitch
+  envelope and no settings for each slice (no backlog row).
+- Its pitch and cutoff move in steps of 16 samples, as the FM synth's (no backlog row); one free LFO, a mod wheel that
+  does nothing, no aftertouch (backlog: "Modulation and expression in the Synth, the FM synth and the Sampler"); a
+  Clean filter only (backlog: "The Filter's Driven character for the FM synth's and the Sampler's filters").
+- **Short of it: several sounds across keys and velocities, slices that follow the tempo, and a pitch envelope**
+  (by measurement; to be confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/sampler/Sampler.h`, `src/devices/sampler/Sampler.cpp`; what is found in a sound as it loads,

@@ -212,6 +212,36 @@ plays, a modulator's how bright it makes what it bends.
 - An operator's settings can't be copied onto another, and there is no randomizer.
 - The editor shows three of the four groups of operator controls only behind their tabs.
 
+## Listening set
+
+Ten minutes, on a track of its own. Stage 6 changed nothing in the FM synth, so this set judges it as it stands.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| Chords in the middle of the keys, soft then hard | A new FM, at its defaults (a soft electric piano) | Soft notes are darker as well as quieter, hard ones bark, and two operators a few cents apart beat gently |
+| A held chord | A new FM; step through the eight algorithms with the arrows | The tone changes and the level stays about the same at each |
+| A held low note, C2 | Algorithm Stack, Op 4 Feedback at +50 %, then -50 %, then +100 % | +50 % a saw's brightness, -50 % hollower (odd harmonics), +100 % rough toward noise, without a jump in level |
+| A melody from C6 to C8 | `FM/Mallets/Bell`, then Timbre at 200 % | Bright bells with no tone that moves against the melody (the operators run at twice the rate, always); yours to judge at 200 % |
+| A bass line with overlapping notes | `FM/Bass/FM Bass`, Voices Mono, Glide 80 ms | Overlapping notes slide without the attack starting again; detached ones strike |
+| Kicks at four velocities | `FM/Percussion/FM Kick` | Each hit's pitch drop is the same every time (Phase Reset), louder with velocity |
+| A held note at C4: the test tone | Algorithm Four Carriers, Op 1 alone; LFO On, Target Level, Rate 20 Hz, Depth 100 % | Whether a buzz or roughness sits under the tremolo: the LFO moves the level in steps of 16 samples, the Limits' weakest place (the Synth's stepping measured -47 dB under its note before S6.7) |
+| A held low note, C2 | Two Pairs; Op 2 Ratio 1 and Fine 0.01 | A slow wobble of a few hertz under the note (known bug 136, up to 0.083 of the note's level): whether you hear it at all |
+
+## Verdict
+
+- It runs its operators at twice the rate through half-band filters, always, and its DC blocker keeps 20 Hz within
+  0.02 dB while it leaves 0.0085 of an offset at the defaults (this page; known bug 136). No measure of its aliasing
+  or of its modulation's steps is written down.
+- Against a six-operator FM synth it lacks two operators, 32 algorithms or a matrix, DX7 patches, multi-stage
+  envelopes and breakpoint key scaling (no backlog row).
+- Its pitch, levels and cutoff move in steps of 16 samples, where the Synth glides between steps since S6.7, and its
+  Quality is fixed at 2x (no backlog row).
+- One free LFO with one target, no aftertouch or MPE (backlog: "Modulation and expression in the Synth, the FM synth
+  and the Sampler"); its filter is Clean only (backlog: "The Filter's Driven character for the FM synth's and the
+  Sampler's filters").
+- **Short of it: six operators or a matrix, modulation that glides between steps, and expression past the wheels**
+  (by measurement; to be confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/fm/FmSynth.h`, `src/devices/fm/FmSynth.cpp`. Shared: `src/devices/dsp/Oversampling.h`,

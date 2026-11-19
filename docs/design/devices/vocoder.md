@@ -96,6 +96,32 @@ the Range and Response controls.
   voice as its sidechain, as some vocoders work.
 - No switch for the evening-out of the carrier: it is always on.
 
+## Listening set
+
+Ten minutes, on a spoken or sung vocal of your own, with a synth playing chords on another track. Stage 6 changed
+nothing in the Vocoder, so this set judges it as it stands.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A spoken phrase | A new Vocoder (Buzz at C3, 16 bands) | The words are understood, as a robot speaks them, at about the voice's level |
+| The same phrase | `Vocoder/Voices/Robot Voice`, then `Vocoder/Voices/Whisper Voice` | A clear robot; a whisper whose words are still clear |
+| A sung phrase, with a synth's chords on another track | `Vocoder/Sidechain/Synth Choir`, the synth's track as its carrier | The chords sing the words, in tune with the synth; silent when the synth is |
+| A phrase with many "s" and "t" sounds | Unvoiced at 0 %, then 100 % | At 0 % the consonants smear; at 100 % they stay clear |
+| The same phrase | `Vocoder/Formant/Formant Down`, then `Vocoder/Formant/Formant Up` | A larger, then a smaller voice, the words still clear |
+| The phrase: the test of its bands | Bands 8, then 40, while it plays | 8 coarse and buzzy, 40 near speech; the change fades without a click |
+| A sung melody | Buzz, Pitch 0 | The Limits' weakest place: the buzz stays on one note whatever the voice sings, and takes no chords; whether that is how you would use it |
+
+## Verdict
+
+- Its band followers never move faster than two cycles of their band, the carrier is evened band by band so the
+  vocoder sounds about as loud as the voice whatever the carrier, and it is silent when the carrier is (this page). No
+  measure of its intelligibility is written down.
+- Against a flagship vocoder: its own carrier is one saw at one pitch that takes no notes, so chords need another
+  track; no level, pan or solo for single bands; no freeze of the voice's shape; the voice taken as mono; no pitch
+  tracking of the voice (no backlog row).
+- **Short of it: a carrier that plays notes and chords, and controls for single bands** (by measurement; to be
+  confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/vocoder/Vocoder.h`, `src/devices/vocoder/Vocoder.cpp`; its filters, `src/devices/dsp/Filters.h`;

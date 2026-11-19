@@ -65,6 +65,32 @@ down, and the loudest sample going out.
   meters and its history start from the sound now.
 - A drag of the ceiling's line starts from the Ceiling as modulation plays it, and sets that as the value by hand.
 
+## Listening set
+
+Ten minutes, on a whole song on the master, a drum bus and a snare. Stage 6 changed only its history (S6.9; hand
+check E19).
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A whole song on the master | A new Limiter (Ceiling -1 dB), Gain 0 dB | Nothing changes on a song that peaks under -1 dB; Out never crosses the ceiling's mark |
+| The same song | `Limiter/Mastering/Transparent Master` | Louder, with the punch and the image as they were, no pumping |
+| The same song | `Limiter/Mastering/Loud Master`, then Gain up by 3 dB more | Where the drums start to flatten and the mix to pump: the point past which more gain costs the sound |
+| A bright sine at 0 dBFS, around 10 kHz: the test tone | Ceiling -1 dB | Nothing crackles, and the master's loudness meter reads its true peak at most -1 dB (within a quarter of a decibel, this page) |
+| A drum bus | `Limiter/Mixing/Drum Bus Shaver` | Only the hits' tips come down, the room and tails as they were |
+| A snare loop | Gain +12 dB, Release 1 ms, then 1000 ms | At 1 ms the snare distorts in its low end; at 1000 ms it ducks the whole loop. The Limits' weakest place: one release, no automatic one; whether a setting between serves your material |
+| A mix with a loud hit hard on one side | Gain +6 dB | The quiet side dips with the loud one (the channels are always linked) |
+
+## Verdict
+
+- No sample goes over its ceiling, and it finds true peaks as ITU-R BS.1770-5 does, at four times the rate, the same
+  detector as the master's loudness meter (`tests/LimiterTests.cpp`, `tests/TruePeakTests.cpp`); a bright sine's peak
+  is read within a quarter of a decibel. Its latency is 101 samples at 48 kHz.
+- Against a flagship mastering limiter: a fixed 2 ms look-ahead with a straight ramp, one release with no automatic
+  or two-stage one, no limiting styles, no oversampled gain, linked channels only, no dither and no unity-gain
+  listen (no backlog row).
+- **Short of it: styles and an automatic release, a look-ahead to set, and an oversampled gain** (by measurement; to
+  be confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/dynamics/Limiter.h`, `src/devices/dynamics/Limiter.cpp`; the true-peak detector in

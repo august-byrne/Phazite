@@ -133,8 +133,33 @@ Link is on), the Feedback, large, with Ping-Pong and Freeze; the Character, with
 - Fade crosses at equal power, which keeps the level of sound unrelated between the two reads (the usual case: a note value
   switched); where the two reads match (a steady tone changed by whole cycles, or a low sound whose time moves just over
   1 ms), the sum is up to 3 dB louder at the fade's middle.
-- A press over the echoes sets the time and the feedback together from where the pointer is, and a right-click presses
-  as a left-click does.
+
+## Listening set
+
+Ten minutes, on a vocal, a snare, a held synth line and a click. Hand checks E9, E16 and E21 go further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A vocal phrase | A new Delay (1/8D, Feedback 35 %, Tape, Mix 25 %) | Dotted-eighth echoes in time, each darker and thinner than the last, fading out without a flutter |
+| A mono vocal | `Delay/Clean/Wide Slap` | Two slaps, left then right, no wobble |
+| A vocal | `Delay/Ambient/Ducked Throw` | The echoes stay low under the singing and rise in the gaps |
+| A snare | `Delay/Creative/Dub Swell`; turn its Feedback past 100 % for a few bars, then back | The echoes swell, hold without running away (Clean's curve keeps them under +6 dBFS) and fall again |
+| A phrase, then other notes | Feedback 50 %, Freeze on after the phrase, off a few bars later | The last echoes repeat as they sounded, unchanged while it is on, the new notes not added; no click either way |
+| A held synth line | Switch Note between 1/8D and 1/4, with Transition on Fade, then on Repitch | Fade: the time changes without a bend or a click; Repitch: a tape's swoop |
+| A click track at 120 BPM: the test of its time | Sync off, Time 2 s, Repitch; change the Time to 1 s | The echoes land on the new time exactly (it ends within a hundredth of a sample, known bug 202's fix) |
+| A bright synth stab, loud | Tape, Feedback 90 %, High Cut 20 kHz | The Limits' weakest place: Tape's curve isn't anti-aliased; whether the repeats grow a grit that doesn't follow the note |
+
+## Verdict
+
+- At its defaults it plays as before step S6.6, sample for sample; Fade never bends the pitch by more than 10 cents;
+  Repitch ends on the time set exactly; Clean returns an echo up to full scale unchanged but for the Feedback and the
+  cuts, and holds a Feedback of 110 % under +6 dBFS; the freeze repeats what was heard, whole samples (this page,
+  `tests/DelayTests.cpp`).
+- Against a flagship delay plug-in: no reverse, no diffusion, no width, no bucket-brigade character, Tape's curve not
+  anti-aliased (backlog: "Delay: reverse, diffusion, a width, a bucket-brigade character, the Tape loop's curve
+  anti-aliased"); no filters or modulation sources inside the loop beyond its two cuts and one sine (no backlog row).
+- **Near it: reverse and diffusion, a third character, and an anti-aliased Tape loop** (by measurement; to be
+  confirmed by ear).
 
 ## In the code
 

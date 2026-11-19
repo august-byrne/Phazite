@@ -211,6 +211,32 @@ is whole in the default dock.
 - Two media only: none of the other modules that RC-20 puts beside its noise and wobble (a radio, a telephone, a
   sampler's converters).
 
+## Listening set
+
+Ten minutes, on keys, a drum bus, a bass and a whole mix. Hand check E8 goes further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A held chord of keys | A new Age (Record, every part on) | A gentle pitch swing once a turn, faint hush and crackle, highs a little broken up, lows in mono |
+| The same chord | Switch each part off and on (Wobble, Noise, Drive, Stereo, Band), then the Record and Tape tabs | No click and no jump of the pitch at any switch; the part's sound goes and comes |
+| A mix, then keys | `Age/Tapes/Clean Reel`, `Age/Tapes/Warm Cassette`, `Age/Tapes/Worn Cassette`, `Age/Tapes/Chewed Tape` | From a little warmth and faint bright hiss to pitch drift, a rounded top and dips that lose their highs first, more of each as they wear |
+| A drum bus, then a bass | `Age/Tapes/Tape Saturation` | Thicker, rounded highs, no wobble or noise; the bass stays saturated, not louder |
+| A record's old sound on a loop | `Age/Records/Old 78`, then `Age/Lo-Fi/Dusty Lo-Fi` | Narrow band, loud crackle, the same clicks each time the loop plays (they follow the song's place) |
+| A held sine at 440 Hz: the test tone | Wow 25 cents at Rate 0.25 Hz; turn the Rate to 4 Hz quickly | The pitch bends a little on the way, never a swoop (at most twice the Wow, this page) |
+| A loud hi-hat or a bright synth | Tape, Distortion 100 % | The Limits' weakest place: a soft symmetric curve, not a tape's hysteresis; whether the saturation sounds like tape or like a clipper to you |
+
+## Verdict
+
+- Its record plays what the Vinyl played, sample for sample; a switch fades its part over 20 ms; a deep wow's rate
+  turned fast bends the pitch no more than twice the Wow; its crackle and dropouts fall by the song's place, alike live
+  and in a render; at a Mix of 0 % its level is within a hundredth of a decibel to 5 kHz (this page, `tests/AgeTests.cpp`).
+- Driven harder than its range, the tape's curve aliases more than the record's (39 dB under a high tone at 18 dB in).
+- Against a lo-fi plug-in of the kind it names: the tape is a sound, not a model of one (no hysteresis, speeds, bias or
+  print-through, no tape echo); the record has no rumble, hum, spin-down or once-a-turn scratches and no wear control
+  that sets the parts together; two media only (no radio, telephone or converters) (no backlog row).
+- **Near it: a wear control, a record's rumble and hum, and a tape whose saturation follows its frequency** (by
+  measurement; to be confirmed by ear).
+
 ## In the code
 
 - DSP: `src/devices/age/Age.h`, `src/devices/age/Age.cpp`; the record's hiss and crackle,

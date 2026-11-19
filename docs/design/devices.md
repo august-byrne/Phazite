@@ -550,3 +550,28 @@ a crash, and their windows with the keys that work over them, are in [plugin-hos
   `tests/DevicesViewTests.cpp`, `tests/ContainerTests.cpp`, `tests/ContainerChainTests.cpp`,
   `tests/ContainerUiTests.cpp`, `tests/SidechainTests.cpp`, `tests/PresetTests.cpp`, `tests/FactoryPresetTests.cpp`,
   `tests/SwapTests.cpp`, and the golden list of every device's parameters, `tests/golden/format/devices.json`.
+
+## Where each device stands
+
+The verdict of roadmap step S6.1, against the plug-ins producers own ([decisions.md](decisions.md), "Sound and
+devices"): by what stage 6 measured, each to be confirmed by ear with its page's listening set. Each page's "Verdict"
+gives the figures and the backlog rows.
+
+| Device | Standing | Its largest gap |
+| --- | --- | --- |
+| [Synth](devices/synth.md) | Near it | No table to draw or edit and no warp in the spectrum; no aftertouch or MPE |
+| [FM](devices/fm.md) | Short of it | Four operators in eight fixed algorithms, where an FM synth has six and a matrix; modulation in steps |
+| [Sampler](devices/sampler.md) | Short of it | One sound in one zone: no layers across keys and velocities, no slices that follow the tempo |
+| [Drum Sampler](devices/drum-sampler.md) | Near it | Layers split evenly by velocity, without ranges or crossfades |
+| [EQ](devices/eq.md) | Near it | No band solo; a dynamic band has no sidechain or times of its own |
+| [Filter](devices/filter.md) | Near it | No LFO or envelope follower of its own, and no stereo offset |
+| [Compressor](devices/compressor.md) | Near it | Channels always linked: no unlinked or mid/side detection, no automatic release |
+| [Multiband](devices/multiband.md) | Near it | Three fixed bands, minimum-phase crossovers |
+| [Limiter](devices/limiter.md) | Short of it | One release and one style, a fixed 2 ms look-ahead, the gain not oversampled |
+| [Saturator](devices/saturator.md) | Near it | One band, six fixed curves; its default 2x aliases 15 dB under a high tone driven into Fold |
+| [Age](devices/age.md) | Near it | No wear control, no record rumble or hum; the tape a sound, not a model |
+| [Delay](devices/delay.md) | Near it | No reverse or diffusion; Tape's loop not anti-aliased |
+| [Reverb](devices/reverb.md) | Near it | No early reflections, three spaces |
+| [Motion](devices/motion.md) | Near it | No through-zero flanging or bucket-brigade character |
+| [Vocoder](devices/vocoder.md) | Short of it | Its own carrier takes no notes, so it plays no chords |
+| [Stereo](devices/stereo.md) | At the bar | Width by band is an imager's, not a utility's |

@@ -262,7 +262,34 @@ shrinks to fit the dock, and it never wraps or turns into pages.
 - The analyzer has no settings (range, tilt, freeze). With every band on Stereo it shows both channels as one trace,
   each level the louder channel's; the left, right, mid and side traces show only while those curves do, and what
   comes in is always one trace.
-- A dot has no fine drag.
+
+## Listening set
+
+Ten minutes, on a vocal, a stereo pad, a kick and a whole song. Hand checks E10 and E15 go further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A whole song | A new EQ, then band 4 a bell of +6 dB at 800 Hz, Q 1, swept from 200 Hz to 5 kHz | At the defaults nothing changes; the sweep moves smoothly, with no zipper and no click |
+| Pink noise or a whole song: the test of its top | Band 7 a bell of +6 dB at 16 kHz, Q 2 | A bright lift that stays a bell, not a shelf, near the top (its matched coefficients) |
+| A vocal with "s" sounds | `EQ/Dynamic/De-Ess` | Each "s" comes down and is back before the next vowel, no lisp and no click |
+| A stereo pad, then Stereo's Mono after the EQ | `EQ/Mid-Side/Wider Top` | A wider top that in mono sounds as without the EQ |
+| A kick | A 48 dB/oct low cut at 100 Hz, Phase Linear, then Minimum | Linear: a faint swell just before each kick (its pre-ring), none in Minimum, the low end thinned alike |
+| A whole song | `EQ/Linear Phase/Master Air` | The rumble goes, a little air comes, the punch and the image stay; every track stays in time (85 ms of latency) |
+| A bass line | Phase Linear, a bell of +12 dB at 30 Hz, Q 10; then Minimum | The one place the Limits name: Linear's bell is up to 5.3 dB off its curve (the page's table); whether the two sound different on a bass |
+| A pad | Turn band 3, a bell of +12 dB, on and off while it plays; change its type | Whether a click is heard: a band's switch and type change at once, without a fade (the Limits) |
+
+## Verdict
+
+- Its bells keep their shape near the top (coefficients matched to the analog shape), it plays from 200 Hz up within
+  0.01 dB of its curve in Linear, and its Mid band leaves a sound opposite on the two sides untouched to the bit (this
+  page, `tests/EqualizerTests.cpp`); the de-esser takes a burst 8 dB down in both phases.
+- Against a flagship parametric EQ: no more than eight bands, no sidechain or attack and release for a dynamic band,
+  one kernel length in Linear (5.3 dB off at 30 Hz, Q 10), and Phase not automatable (backlog: "EQ: more than eight
+  bands, a sidechain and attack and release controls for its dynamic bands...").
+- No band solo, no automatic gain, no natural phase, no 6 or 96 dB slopes and no tilt; a band's switch and type
+  change without a fade (no backlog row).
+- **Near it: band solo, a dynamic band's sidechain and times, and a fade on a band's switch** (by measurement; to be
+  confirmed by ear).
 
 ## In the code
 

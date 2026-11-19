@@ -154,12 +154,35 @@ Swap tries sounds from the [browser](../browser.md) on the selected pad in place
 - A pad is fixed to its note: pads can't be dragged to move or copy them.
 - A track whose pads play on tracks of their own can't be frozen or bounced.
 - Every kit is synthesized: no recorded kit comes with it.
-- Sounds read from floating-point files aren't checked for values that aren't numbers (known bug 35 in
-  [known-bugs.md](../../known-bugs.md)).
+- Sounds read from floating-point files aren't checked for values that aren't numbers.
 - A press anywhere on the sound's drawing takes the nearest envelope handle, however far it is (a drag then moves it
   from where it is, as far as the pointer goes). A right-click there shows the nearest handle's menu, and a double-click puts it
   back.
 - Pads light as they play but have no level meters.
+
+## Listening set
+
+Ten minutes, on a drum track, with a snare sample of your own for the layers. Stage 6 changed the pads' press (S6.9).
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A beat of kick, snare and hats | A new Drum Sampler, its default kit | Each hit starts at once, its tail ends without a click, the kit even in level |
+| The kick held long, then short notes | `Drum Sampler/Kits/808 Kit` | The kick's boom rings on its decay whatever the note's length (Trigger); its start is whole |
+| The editor's pads, pressed near their bottom edge, then near their top | Any kit | Each pad sounds on the press, soft at the bottom, full at the top (S6.9; hand check E21) |
+| A closed hat right after an open one, sixteenths | `Drum Sampler/Kits/909 Kit`; both hats in Choke group 1 | The closed hat cuts the open one at once, without a click (a 10 ms fade) |
+| A snare up an octave and down an octave | Tune +12, then -12 semitones | Up, the crack stays bright without a whistle; down, a thicker snare, its tail longer (the sinc reader) |
+| A kick with a pitch drop | Sweep +24 semitones, Sweep Time 40 ms | The drop sounds the same on every hit, and its click follows the Sweep Time |
+| A snare roll that swells from soft to hard | Two snare sounds on one pad, Layers by velocity | Whether the step where the soft layer gives way to the hard one is heard: layers split the range evenly and don't crossfade, the Limits' weakest place |
+
+## Verdict
+
+- An untuned pad at the engine's rate plays its samples as they are; others read through the same sinc reader as the
+  Sampler; 32 voices, a hit stolen by fading the quietest over 5 ms, and pads on tracks of their own (this page). No
+  measure of the kits' sound against the machines they recreate is written down beyond the presets' leveling.
+- Against a drum sampler of a plug-in maker: no velocity range or crossfade for each layer, no round robin, no end
+  marker or loop on a pad, no filter envelope, no effects inside a pad, and no recorded kits (no backlog row).
+- **Near it: layers with velocity ranges that crossfade, and a pad's end, loop and filter envelope** (by
+  measurement; to be confirmed by ear).
 
 ## In the code
 

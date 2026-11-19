@@ -477,6 +477,38 @@ over Voice; Unison and Modulation.
   now only for the Cutoff, the oscillators' Positions and their Warp Amounts.
 - No effects of its own: Phazite's devices follow it.
 
+## Listening set
+
+Ten minutes, on a track of its own, in a `windows-profile` build. Hand checks E5, E14, E17 and E20 go further.
+
+| What to play | The setting | Listen for |
+| --- | --- | --- |
+| A held chord, C3 E3 G3, then one note at a time | A new Synth, at its defaults | Each note opens and settles (Envelope 2 on the cutoff) with no click at its start or its end |
+| A sine held at B5 (about 1 kHz): the test tone | Basic Shapes at Position 0; LFO 1 at 20 Hz (Sync off) in a slot on Volume at 100 %, then on Pitch | A tremolo, then a vibrato, with no buzz under the note (-87 and -95 dB in `tests/SynthTests.cpp`) |
+| A saw from A6 up to C8 | Basic Shapes, Position 67 %, unison 1 | The high notes clean, no whistle that moves against the melody (over 90 dB under in `tests/AntialiasingTests.cpp`) |
+| A line of sixteenths in C2 | `Synth/Bass/Acid Line`; turn Resonance up to 100 %, then switch Character between Clean and Driven on a held note | The squelch turns into a scream without a jump in level; the switch has no dip and no ping |
+| A slow melody over two octaves | `Synth/Lead/Singing Filter` | The filter's sung pitch is right on every key (within a fifth of a cent from C2 to C7, the page's Filter Character) and its vibrato fades in |
+| Held notes at C5, then C7 | `Synth/Lead/Sync Sweep` at Quality 1x, then 2x, then 4x | The whistles that move against the sweep fall at each step; at C7 4x, whether what is left (about 60 dB under) matters to you: the page's weakest place |
+| Detached notes, then overlapping ones | Voices Mono, Glide 150 ms, Glide Mode Legato; then slot 1 Mod Wheel on Mod 2 Amount at 50 %, slot 2 LFO 1 on Pitch at 0 % | Detached notes jump, overlapping ones slide; the mod wheel brings a vibrato in, nothing at the wheel's bottom |
+| A held chord of four voices | A new Synth with Unison Voices 4; switch Quality from 1x to 4x while it holds | The chord stops in a short fade without a click, and a key pressed just after plays (the Limits' cut of sounding notes) |
+
+## Verdict
+
+- Its basic waves alias more than 90 dB under the note from A0 to A7, as a band-limited oscillator does
+  (`tests/AntialiasingTests.cpp`); a 25 Hz LFO leaves its buzz 65 to 121 dB under the note on every target but the
+  warp's amount (the glides' table above, `tests/SynthTests.cpp`); the Driven filter sings in tune within a fifth of a cent
+  (Filter Character, above).
+- Its warps alias where a flagship wavetable synth's are clean: Sync at C5 74 to 76 dB under at 4x, Pulse Width and
+  Mirror less, FM's sidebands least (backlog: "The Synth's warps past its Quality").
+- A flagship wavetable synth draws and edits its tables, warps them in the spectrum, and has a third oscillator, a
+  second filter with routing, drawn LFOs and an arpeggiator; the Synth has none of these (no backlog row).
+- Playing response: velocity, glide in two modes, the mod wheel as a source; no aftertouch, MPE, or tempo-synced
+  free LFOs per target (backlog: "Modulation and expression in the Synth, the FM synth and the Sampler"). One filter
+  character beside Clean, no ladder or diode (backlog: "The Filter's Driven character for the FM synth's and the
+  Sampler's filters").
+- **Near it: table editing, spectral warps, a second filter, and aftertouch and MPE** (by measurement; to be confirmed
+  by ear).
+
 ## In the code
 
 - DSP: `src/devices/synth/Synth.h`, `Synth.cpp`; a table in `src/devices/wavetable/Wavetable.h`;
