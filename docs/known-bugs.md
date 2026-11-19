@@ -147,7 +147,7 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   it: `getCurrentValue()` (`src/model/devices/`) and what it reads of the engine's played values for a parameter that
   nothing moves, after a modulation on its track was undone, with no block played.
 - **207. `PerformanceGateTests`, "what an edit and a save allocate grows as the song does", failed once in CI's linux-tsan
-  job** (2026-11-18, the run of `367e9321`): a note added "with its new plan" allocated 867 times in the song of 16
+  job** (2026-11-18, the run of `367e9321`); and again in its linux-debug job on `9afe34a2`, with the same two counts, so it is one of two fixed outcomes and not noise; the test captures since how many plans were made within each count: a note added "with its new plan" allocated 867 times in the song of 16
   tracks and 10,056 in the one of 64, where it measures about 28,000 and 119,000: in neither count was the plan
   compiled inside the counted stretch (one `dispatchPendingMessages()` after the edit), and the two counts then hold
   different leftovers, so their ratio (11.6, against a bound of 6) says nothing. So under the thread sanitizer the plan

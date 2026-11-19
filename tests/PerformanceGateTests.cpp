@@ -823,6 +823,7 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
     struct Counts
     {
         int edit = 0, save = 0, text = 0;
+        int plans = 0; // made within the edit's count (known bug 207: twice on Linux CI the count held no plan's work)
     };
 
     const auto countsFor = [] (int numTracks)
@@ -833,6 +834,8 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
         REQUIRE (s.getProject().save().wasOk());
         phazite::test::dispatchPendingMessages();
 
+        phazite::test::PlanCounter plans (s.context);
+        plans.take();
         Counts counts;
         counts.edit = phazite::test::countAllocations (
                           [&]
@@ -841,6 +844,7 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
                               phazite::test::dispatchPendingMessages();
                           })
                           .value_or (0);
+        counts.plans = plans.take();
         counts.save = phazite::test::countAllocations ([&] { REQUIRE (s.getProject().save().wasOk()); }).value_or (0);
         counts.text = phazite::test::countAllocations (
                           [&]
@@ -862,6 +866,8 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
 
     // Four times the song: about four times the work (4.15 and 3.9 measured), and well short of the 16 times that work which
     // grows as the square of the song makes.
+    CAPTURE (small.plans);
+    CAPTURE (big.plans);
     CHECK (big.edit < small.edit * 6);
     CHECK (big.save < small.save * 6);
 
