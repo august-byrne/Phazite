@@ -1267,6 +1267,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/CommandGoldenTests.cpp
         tests/CommandPaletteTests.cpp
         tests/CommandTests.cpp
+        tests/CompilerProbeTests.cpp
         tests/CompressorEditorTests.cpp
         tests/CompressorTests.cpp
         tests/ComputerKeyboardTests.cpp

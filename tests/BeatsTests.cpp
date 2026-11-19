@@ -4,7 +4,6 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/project/internal/Project.h"
 
-#include <algorithm>
 #include <unordered_set>
 
 namespace
@@ -88,57 +87,4 @@ TEST_CASE ("A song's items have IDs, each kind its own type, which order and has
     std::unordered_set<phazite::TrackID> ids { id, phazite::TrackID::fromRaw (id.getRaw()) };
     CHECK (ids.size() == 1);
     CHECK (phazite::ClipID::fromRaw (1) < phazite::ClipID::fromRaw (2));
-}
-
-TEST_CASE ("Beats compare, and ranges meet and join, with numbers the compiler can't know")
-{
-    // CI's Windows release build (MSVC 19.52) made the part of a clip from 0 to 8 that lies in a range from 2 to 6 end at 2
-    // (known bug 204), where every other build made it end at 6. The steps of that sum on their own, with numbers read
-    // through volatiles so that none is worked out as the test is compiled.
-    volatile double numbers[] = { 0.0, 8.0, 2.0, 6.0 };
-    const auto clipStart = BeatPosition::fromBeats (numbers[0]), clipEnd = BeatPosition::fromBeats (numbers[1]);
-    const auto rangeStart = BeatPosition::fromBeats (numbers[2]), rangeEnd = BeatPosition::fromBeats (numbers[3]);
-
-    CHECK (rangeEnd < clipEnd);
-    CHECK_FALSE (clipEnd < rangeEnd);
-    CHECK (clipStart < rangeStart);
-    CHECK (std::min (clipEnd, rangeEnd).inBeats() == doctest::Approx (6.0));
-    CHECK (std::min (rangeEnd, clipEnd).inBeats() == doctest::Approx (6.0));
-    CHECK (std::max (clipStart, rangeStart).inBeats() == doctest::Approx (2.0));
-    CHECK (std::max (rangeStart, rangeEnd).inBeats() == doctest::Approx (6.0));
-    CHECK (std::max (std::max (clipStart, rangeStart), std::min (clipEnd, rangeEnd)).inBeats() == doctest::Approx (6.0));
-
-    const BeatRange clip (clipStart, clipEnd), range (rangeStart, rangeEnd);
-    CHECK (clip.getStart().inBeats() == doctest::Approx (0.0));
-    CHECK (clip.getEnd().inBeats() == doctest::Approx (8.0));
-    CHECK (range.getStart().inBeats() == doctest::Approx (2.0));
-    CHECK (range.getEnd().inBeats() == doctest::Approx (6.0));
-    CHECK (range.getLength().inBeats() == doctest::Approx (4.0));
-
-    // Of what the getters return. (Not here: a BeatRange made of the two at once, std::max (...) and std::min (...) of the
-    // getters as its arguments, which is what that compiler gets wrong; the ranges' own functions below are used instead.)
-    CHECK (std::min (clip.getEnd(), range.getEnd()).inBeats() == doctest::Approx (6.0));
-    CHECK (std::max (clip.getStart(), range.getStart()).inBeats() == doctest::Approx (2.0));
-
-    const auto met = clip.getIntersectionWith (range);
-    CHECK (met.getStart().inBeats() == doctest::Approx (2.0));
-    CHECK (met.getEnd().inBeats() == doctest::Approx (6.0));
-    CHECK (met == range);
-    CHECK (range.getIntersectionWith (clip) == range);
-    CHECK (clip.overlaps (range));
-    CHECK (clip.contains (rangeStart));
-
-    const auto joined = range.getUnionWith (clip);
-    CHECK (joined.getStart().inBeats() == doctest::Approx (0.0));
-    CHECK (joined.getEnd().inBeats() == doctest::Approx (8.0));
-    CHECK (joined == clip);
-    CHECK (BeatRange::between (clipEnd, rangeStart) == BeatRange (rangeStart, clipEnd));
-    CHECK (range.withEnd (clipEnd).getEnd().inBeats() == doctest::Approx (8.0));
-    CHECK (range.movedBy (BeatDuration::fromBeats (numbers[2])).getEnd().inBeats() == doctest::Approx (8.0));
-
-    // Lengths, the same way.
-    const auto shorter = BeatDuration::fromBeats (numbers[2]), longer = BeatDuration::fromBeats (numbers[3]);
-    CHECK (std::min (longer, shorter).inBeats() == doctest::Approx (2.0));
-    CHECK (std::max (shorter, longer).inBeats() == doctest::Approx (6.0));
-    CHECK (std::min (clip.getLength(), range.getLength()).inBeats() == doctest::Approx (4.0));
 }
