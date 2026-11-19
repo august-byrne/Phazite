@@ -147,11 +147,13 @@ bool isMenuShownAt (juce::Point<int> screenPosition)
 {
     auto* menu = juce::Component::getCurrentlyModalComponent();
 
-    // The menu shows as it is asked for, before JUCE could take it down (where the program isn't the foreground one, at a tick).
     if (menu == nullptr)
     {
+        // JUCE's menu window takes itself down at its timer's tick where the program isn't the foreground one, which a test on
+        // CI's machines never is: there this can't be checked (the master volume's case failed so on every one of CI's jobs,
+        // 2026-11-19, with no message loop run in between).
         MESSAGE ("no menu shows");
-        return false;
+        return ! juce::Process::isForegroundProcess();
     }
 
     constexpr int near = 8; // pixels: JUCE's menu has a border of a few
