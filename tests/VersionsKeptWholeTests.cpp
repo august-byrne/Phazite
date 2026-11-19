@@ -13,6 +13,7 @@
 #include "UiTestHelpers.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -968,6 +969,299 @@ TEST_CASE (
         CHECK (phazite::getReadingProblem (s.context).contains ("too large to count on from"));
         CHECK_FALSE (phazite::isMerging (s.context));
     }
+}
+
+namespace
+{
+phazite::TrackID findTrackNamed (const phazite::Song& song, const juce::String& name)
+{
+    for (const auto track : phazite::getTrackIDs (song))
+        if (phazite::getTrackName (song, track) == name)
+            return track;
+
+    return {};
+}
+
+juce::String writeSongText (const phazite::ProjectContext& context)
+{
+    return phazite::writeElement (phazite::findSong (context)->getState()).toString();
+}
+
+juce::String readNumbering (const phazite::ProjectContext& context)
+{
+    return phazite::findSong (context)->getState()[phazite::schema::idNumbering].toString();
+}
+
+// Tracks added until the song's next ID is past the mark (Schema.h: renumberMark), so that its next opening gives its IDs
+// anew.
+void passTheMark (TestSong& s, const juce::String& name)
+{
+    while (phazite::findNextID (phazite::findSong (s.context)->getState()) <= phazite::schema::renumberMark)
+        s.addTrack (name);
+}
+
+// Known bug 186's song. A file whose largest ID lies just below the mark opens as it is; "Before" is saved, and another
+// computer's version from it ("old-line", its branch parted at "Before"); what the session makes passes the mark, and the
+// next opening gives every ID past 2^61 anew, the song stamped with its new numbering (Schema.h: idNumbering). The versions
+// saved before hold the IDs as they were.
+struct GivenAnew
+{
+    juce::String before, oldLine, stamp;
+    phazite::TrackID bass;
+};
+
+GivenAnew openGivenAnew (TestSong& s)
+{
+    GivenAnew made;
+    const auto mark = (juce::int64) phazite::schema::renumberMark;
+
+    {
+        auto edited = phazite::findSong (s.context)->getState().createCopy();
+        auto tracks = phazite::getTrackElements (edited);
+        REQUIRE (tracks.size() == 1);
+        tracks.front().setProperty (phazite::schema::trackID, mark - 20, nullptr);
+        tracks.front().setProperty (phazite::schema::trackName, "Bass", nullptr);
+        s.openSong (edited);
+    }
+
+    REQUIRE (findTrackNamed (*phazite::findSong (s.context), "Bass").getRaw() == (std::uint64_t) (mark - 20));
+    keepVersion (s.context, "Before");
+    made.before = phazite::getLastVersion (s.context)->id;
+    s.addTrack ("Idea");
+    made.oldLine = writeOthersCommit (s, phazite::findSong (s.context)->getState().createCopy(), "old-line");
+    passTheMark (s, "More");
+
+    REQUIRE (readNumbering (s.context).isEmpty());
+    s.reopen();
+    REQUIRE (waitForVersionHistory (s.context));
+    checkSong (*phazite::findSong (s.context));
+    made.stamp = readNumbering (s.context);
+    REQUIRE (made.stamp.length() == phazite::schema::idNumberingDigits);
+    made.bass = findTrackNamed (*phazite::findSong (s.context), "Bass");
+    REQUIRE (made.bass.isValid());
+    REQUIRE (made.bass.getRaw() < phazite::schema::maxCountedID); // given anew
+    return made;
+}
+
+// What a refusal of a line's Restore and of a Merge for another numbering says, whichever side is the older.
+const juce::String otherNumbering = "number their tracks and clips differently";
+} // namespace
+
+TEST_CASE ("After a song's IDs were given anew as it opened, a line's Restore and Merge refuse the versions from before, and "
+           "take those after")
+{
+    // Known bug 186 (openGivenAnew()): matched by ID, Bass restored from a version from before came back beside Bass, and a
+    // merge brought its tracks in again.
+    TestSong s;
+    const auto mark = (juce::int64) phazite::schema::renumberMark;
+    const auto made = openGivenAnew (s);
+    const auto song = [&s]() -> phazite::Song& { return *phazite::findSong (s.context); }; // opened again by each commit of others
+    const auto& before = made.before;
+    const auto& oldLine = made.oldLine;
+    const auto& stamp = made.stamp;
+    const auto bass = made.bass;
+    phazite::VersionChange bassLine;
+    bassLine.name = "Bass";
+    bassLine.track = bass;
+    auto now = writeSongText (s.context);
+
+    // Bass restored from the version before: refused, with why, the song as it was.
+    CHECK_FALSE (finished (s.context, [&] { return phazite::restoreFromVersion (s.context, before, bassLine); }));
+    CHECK (phazite::getReadingProblem (s.context).contains ("\"Before\" and the song " + otherNumbering));
+    CHECK (phazite::getReadingProblem (s.context).contains ("Open the version to hear it, or restore the whole version"));
+    CHECK (writeSongText (s.context) == now);
+
+    // Its changes discarded from it, the last version: refused, with why.
+    CHECK_FALSE (phazite::takeBack (s.context, bassLine));
+    CHECK (phazite::getRestoreProblem (s.context).contains ("Nothing was discarded: the last version and the song " + otherNumbering));
+    CHECK (phazite::getRestoreProblem (s.context).contains ("Discard All Changes"));
+    CHECK (writeSongText (s.context) == now);
+
+    // The other computer's version merged, the other side from before: refused, with what does work on another branch.
+    CHECK_FALSE (finished (s.context, [&] { return phazite::startMerge (s.context, oldLine); }));
+    CHECK (phazite::getReadingProblem (s.context).contains ("Nothing was merged"));
+    CHECK (phazite::getReadingProblem (s.context).contains (otherNumbering));
+    CHECK (phazite::getReadingProblem (s.context).contains ("Switch to its branch to go on from it"));
+    CHECK_FALSE (phazite::isMerging (s.context));
+    CHECK (writeSongText (s.context) == now);
+
+    // One numbered as the song is now, whose parting with the song is the version before: refused.
+    const auto newLine = writeOthersCommit (s, song().getState().createCopy(), "new-line");
+    CHECK (song().getState()[phazite::schema::idNumbering].toString() == stamp); // saved and opened again: nothing given anew
+    now = writeSongText (s.context);
+    CHECK_FALSE (finished (s.context, [&] { return phazite::startMerge (s.context, newLine); }));
+    CHECK (phazite::getReadingProblem (s.context).contains (otherNumbering));
+    CHECK_FALSE (phazite::isMerging (s.context));
+    CHECK (writeSongText (s.context) == now);
+
+    // The version before opened in the song's place: the song is that version, as it was numbered, and Back to Now brings it
+    // back exactly.
+    REQUIRE (finished (s.context, [&] { return phazite::openVersion (s.context, before, s.save); }));
+    CHECK_FALSE (song().getState().hasProperty (phazite::schema::idNumbering));
+    CHECK (findTrackNamed (song(), "Bass").getRaw() == (std::uint64_t) (mark - 20));
+    CHECK_FALSE (findTrackNamed (song(), "Idea").isValid());
+    REQUIRE (phazite::backToNow (s.context));
+    CHECK (writeSongText (s.context) == now);
+
+    // And restored whole: the song is that version as it was numbered, one undo step, which Undo takes back.
+    REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, before); }));
+    CHECK_FALSE (song().getState().hasProperty (phazite::schema::idNumbering));
+    CHECK (findTrackNamed (song(), "Bass").getRaw() == (std::uint64_t) (mark - 20));
+    checkSong (song());
+    phazite::undo (song());
+    CHECK (findTrackNamed (song(), "Bass") == bass);
+    CHECK (song().getState()[phazite::schema::idNumbering].toString() == stamp);
+
+    // A version saved after: a line restored from it, a line's changes discarded and a merge from it, as ever.
+    keepVersion (s.context, "After");
+    const auto after = phazite::getLastVersion (s.context)->id;
+
+    // The other way round, the song the older: made the version from before again, a line restored from the version saved
+    // after is refused with the same words; Undo brings the song back.
+    REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, before); }));
+    now = writeSongText (s.context);
+    CHECK_FALSE (finished (s.context, [&] { return phazite::restoreFromVersion (s.context, after, bassLine); }));
+    CHECK (phazite::getReadingProblem (s.context).contains ("\"After\" and the song " + otherNumbering));
+    CHECK (writeSongText (s.context) == now);
+    phazite::undo (song());
+    REQUIRE (readNumbering (s.context) == stamp);
+
+    s.rename (bass, "Bass changed");
+    REQUIRE (finished (s.context, [&] { return phazite::restoreFromVersion (s.context, after, bassLine); }));
+    CHECK (phazite::getTrackName (song(), bass) == "Bass");
+
+    s.rename (bass, "Bass changed");
+    REQUIRE (phazite::takeBack (s.context, bassLine));
+    CHECK (phazite::getTrackName (song(), bass) == "Bass");
+    CHECK (phazite::getRestoreProblem (s.context).isEmpty());
+
+    auto theirs = song().getState().createCopy();
+    for (auto track : phazite::getTrackElements (theirs))
+        if (phazite::readID (track[phazite::schema::trackID]) == bass.getRaw())
+            track.setProperty (phazite::schema::trackName, "Bass elsewhere", nullptr);
+
+    const auto afterLine = writeOthersCommit (s, theirs, "after-line");
+    REQUIRE (finished (s.context, [&] { return phazite::startMerge (s.context, afterLine); }));
+    REQUIRE (phazite::finishMerge (s.context));
+    CHECK (phazite::getTrackName (song(), bass) == "Bass elsewhere");
+    checkSong (song());
+}
+
+namespace
+{
+// Every file in the project's Versions folder, with its size: what a refusal must leave as it is.
+juce::String listVersionsFolder (TestSong& s)
+{
+    juce::StringArray files;
+
+    for (const auto& file : s.getProject().getFolder().getChildFile ("Versions").findChildFiles (juce::File::findFiles, true))
+        files.add (file.getFullPathName() + " " + juce::String (file.getSize()));
+
+    files.sort (false);
+    return files.joinIntoString ("\n");
+}
+} // namespace
+
+TEST_CASE ("A merge's list worked out against the song in one numbering takes nothing into it once it is in another")
+{
+    // Found in review of known bug 186's fix: the list survives Restore This Version and its Undo, which can make the song
+    // another numbering's (Schema.h: idNumbering) while it shows, and Merge took old-numbered songs into the song as it is
+    // numbered now, or the other way round. It keeps the song's stamp as it was worked out, and refuses another.
+    TestSong s;
+    const auto made = openGivenAnew (s);
+    const auto song = [&s]() -> phazite::Song& { return *phazite::findSong (s.context); };
+
+    SUBCASE ("Listed for the song made a version from before again, then that undone")
+    {
+        // Restore This Version of the version from before: the song is that version's, without a stamp, as the other
+        // computer's version and their parting are; the list shows. Then Undo: the song given its IDs anew again.
+        REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, made.before); }));
+        REQUIRE (readNumbering (s.context).isEmpty());
+        REQUIRE (finished (s.context, [&] { return phazite::startMerge (s.context, made.oldLine); }));
+        REQUIRE_FALSE (phazite::getMergeLines (s.context).empty());
+        phazite::undo (song());
+        REQUIRE (readNumbering (s.context) == made.stamp);
+    }
+
+    SUBCASE ("Listed for the song as it was given its IDs anew, then Restore This Version of a version from before")
+    {
+        // A version saved after, and another computer's from it, each with the song's stamp: the list shows. Then the song
+        // made the version from before again, without a stamp.
+        keepVersion (s.context, "After");
+        auto theirs = song().getState().createCopy();
+
+        for (auto track : phazite::getTrackElements (theirs))
+            if (phazite::readID (track[phazite::schema::trackID]) == made.bass.getRaw())
+                track.setProperty (phazite::schema::trackName, "Bass elsewhere", nullptr);
+
+        const auto newLine = writeOthersCommit (s, theirs, "new-line");
+        REQUIRE (readNumbering (s.context) == made.stamp);
+        REQUIRE (finished (s.context, [&] { return phazite::startMerge (s.context, newLine); }));
+        REQUIRE_FALSE (phazite::getMergeLines (s.context).empty());
+        REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, made.before); }));
+        REQUIRE (readNumbering (s.context).isEmpty());
+    }
+
+    // Merge: refused with why, in the words of a merge's other refusal for this, and nothing changed: the song, its undo
+    // history (no step begun, Redo still there where it was), the Versions folder; the list stays, to cancel.
+    REQUIRE (waitForVersionHistory (s.context));
+    const auto now = writeSongText (s.context);
+    const auto undoName = song().getUndoManager().getUndoDescription();
+    const auto couldRedo = song().getUndoManager().canRedo();
+    const auto folder = listVersionsFolder (s);
+
+    CHECK_FALSE (finished (s.context, [&] { return phazite::finishMerge (s.context); }));
+    CHECK (phazite::getMergeProblem (s.context).contains ("Nothing was merged"));
+    CHECK (phazite::getMergeProblem (s.context).contains (otherNumbering));
+    CHECK (phazite::getMergeProblem (s.context).contains ("Switch to its branch to go on from it"));
+    CHECK_FALSE (phazite::isMerging (s.context));
+    CHECK_FALSE (phazite::getMergeLines (s.context).empty());
+    CHECK (writeSongText (s.context) == now);
+    CHECK (song().getUndoManager().getUndoDescription() == undoName);
+    CHECK (song().getUndoManager().canRedo() == couldRedo);
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK (listVersionsFolder (s) == folder);
+
+    // Cancel Merge closes the list, taking nothing.
+    phazite::cancelMerge (s.context);
+    CHECK (phazite::getMergeLines (s.context).empty());
+    CHECK (writeSongText (s.context) == now);
+}
+
+TEST_CASE ("A song that crosses the mark again gets another stamp, and the versions saved between are refused for a line's "
+           "Restore")
+{
+    // Schema.h: renumberMark. Restore This Version of a version from before takes its count of IDs near the mark, which Undo
+    // doesn't put back: a later session crosses again, the next opening gives the IDs anew once more, with another stamp,
+    // and the version saved between the two crossings no longer matches the song by ID.
+    TestSong s;
+    const auto made = openGivenAnew (s);
+    keepVersion (s.context, "Between");
+    const auto between = phazite::getLastVersion (s.context)->id;
+
+    REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, made.before); }));
+    phazite::undo (*phazite::findSong (s.context));
+    REQUIRE (readNumbering (s.context) == made.stamp);
+    CHECK (phazite::findNextID (phazite::findSong (s.context)->getState()) > phazite::schema::maxCountedID); // kept by the Undo
+
+    passTheMark (s, "Later");
+    s.reopen();
+    REQUIRE (waitForVersionHistory (s.context));
+    checkSong (*phazite::findSong (s.context));
+    const auto second = readNumbering (s.context);
+    CHECK (second.length() == phazite::schema::idNumberingDigits);
+    CHECK (second != made.stamp);
+
+    // Bass restored from the version saved between: refused, with why, the song as it was.
+    const auto bass = findTrackNamed (*phazite::findSong (s.context), "Bass");
+    REQUIRE (bass.isValid());
+    phazite::VersionChange bassLine;
+    bassLine.name = "Bass";
+    bassLine.track = bass;
+    const auto now = writeSongText (s.context);
+    CHECK_FALSE (finished (s.context, [&] { return phazite::restoreFromVersion (s.context, between, bassLine); }));
+    CHECK (phazite::getReadingProblem (s.context).contains ("\"Between\" and the song " + otherNumbering));
+    CHECK (writeSongText (s.context) == now);
 }
 
 TEST_CASE ("The loader's checks change nothing in a song Phazite wrote, read back from its pieces")

@@ -46,7 +46,8 @@ inline constexpr double maxSongBeats = 1.0e6;
 // of a type Phazite has; every number Schema.h gives a range brought within it (a channel's volume, a tempo, a note's
 // pitch, places in beats up to a million), and every parameter's value set by hand and automation point within its
 // parameter's range; every item's ID its own and below 2^62, and in a song whose IDs reach 3 * 2^60, every one at 2^61 or
-// past it given anew, what named it following (Schema.h: renumberMark); a lane, a curve or a modulation of something the song hasn't
+// past it given anew, what named it following, the song stamped with its new numbering (Schema.h: renumberMark,
+// idNumbering); a lane, a curve or a modulation of something the song hasn't
 // left out, as a sidechain or a pad's sampler that isn't there, and a sidechain the model would refuse, a device hearing
 // its own track's sound round a loop (model/mixer/internal/Sidechain.h: forgetSidechainLoops()); no two elements of a parent with one key (Schema.h:
 // getElementKey()); and, for a song with a file, a sound file on a network share, or one that leaves the project's folder

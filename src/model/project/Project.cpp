@@ -25,6 +25,8 @@
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <juce_cryptography/juce_cryptography.h>
+
 #include <algorithm>
 #include <atomic>
 #include <charconv>
@@ -741,7 +743,8 @@ namespace
         {
             using namespace schema;
             static const std::vector<HexID> ids { { &PHAZITE, &versionsBranch, versionsBranchDigits },
-                                                  { &PHAZITE, &versionsBase, versionsBaseDigits } };
+                                                  { &PHAZITE, &versionsBase, versionsBaseDigits },
+                                                  { &PHAZITE, &idNumbering, idNumberingDigits } };
             return ids;
         }
 
@@ -1265,6 +1268,18 @@ namespace
                 return largest;
             }
 
+            // The song stamped with the numbering its IDs are given anew in (Schema.h: idNumbering), made from the song as it is
+            // before they are: what they are given depends on that alone, so the same song gets the same IDs and the same
+            // stamp, at every opening of its file and every reading of a version of it, and a song given them otherwise
+            // another stamp.
+            static void stampNumbering (juce::ValueTree state)
+            {
+                juce::MemoryOutputStream text;
+                writeProjectText (text, state);
+                const auto hash = juce::SHA256 (text.getData(), text.getDataSize()).toHexString();
+                state.setProperty (schema::idNumbering, hash.substring (0, schema::idNumberingDigits), nullptr);
+            }
+
             bool isToGiveAnew (std::uint64_t id) const { return id == 0 || id >= maxID || (renumbering && id >= maxCountedID); }
             bool isRenumbered (std::uint64_t id) const { return renumbering && id >= maxCountedID && id < maxID; }
 
@@ -1660,7 +1675,8 @@ namespace
 
                 // The song's next ID past what it holds (not past an ID too large to count on from), counted as the song
                 // counts them (findLargestID(), findNextID()), then each its own. A song whose IDs reach the mark (Schema.h:
-                // renumberMark) counts on from below maxCountedID, its IDs past it given anew, and past every ID a name
+                // renumberMark) is stamped with its new numbering first (idNumbering, stampNumbering()), then counts on from
+                // below maxCountedID, its IDs past it given anew, and past every ID a name
                 // below it names (a curve of a device deleted, which goes as the song opens: no new ID may become what it
                 // names); every merge waiting in it (MERGING) goes, as its record names IDs inside its text, which nothing
                 // translates: a merge under way in a file with IDs past the mark is nobody's work.
@@ -1670,6 +1686,7 @@ namespace
 
                 if (renumbering)
                 {
+                    stampNumbering (state);
                     const auto counted = std::max (findLargestID (state, maxCountedID), findLargestName (state, maxCountedID));
                     state.setProperty (schema::nextID, (juce::int64) std::max (counted + 1, saved < maxCountedID ? saved : 0), nullptr);
 

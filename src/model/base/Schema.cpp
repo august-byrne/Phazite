@@ -46,6 +46,11 @@ bool mustGiveIDsAnew (const juce::ValueTree& song)
     return mustGiveIDsAnew (findLargestID (song), readID (song[schema::nextID]));
 }
 
+bool areNumberedAlike (const juce::ValueTree& song, const juce::ValueTree& other)
+{
+    return song[schema::idNumbering].toString() == other[schema::idNumbering].toString();
+}
+
 namespace
 {
     std::uint64_t readNextID (const juce::ValueTree& song)

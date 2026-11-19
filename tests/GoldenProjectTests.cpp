@@ -777,6 +777,7 @@ juce::StringArray getHolders (const juce::String& declared)
     static const std::map<juce::String, juce::StringArray> byName {
         // The song's own.
         { "nextID", { "PHAZITE" } },
+        { "idNumbering", { "PHAZITE" } },
         { "loopFollowsSong", { "PHAZITE" } },
         { "loop", { "PHAZITE" } },
         { "loopStart", { "PHAZITE" } },
@@ -848,6 +849,8 @@ const std::map<juce::String, juce::String>& getNamesNotInTheProject()
 {
     static const std::map<juce::String, juce::String> names {
         { "PHAZITE@playStart", "playback starts at the song's start again as a project opens: a project saved after reopening has none" },
+        { "PHAZITE@idNumbering", "only the loader writes it, as it gives a song's IDs anew, which no song Phazite numbers itself reaches: "
+                                 "tests/InconsistentProjectTests.cpp opens files that cross the mark and saves and opens them again" },
         { "ownDeviceFormat", "the format a device of Phazite's own names in the device lists, never saved" },
         { "fadeIsCurve", "the shape of a fade without a shape of its own, which no clip writes" },
         { "DEVICE@formatID", "a VST3's class ID, as its preset file holds it: the tests' plug-ins are of a format of their own" },

@@ -146,6 +146,15 @@ tables its code reads (`src/model/base/Schema.cpp`), says:
 IDs are 64-bit numbers a song counts up (`nextID` on `PHAZITE`), never given twice. Two lines of history count on from the
 same place, so a merge can find one ID on two different things (section 9).
 
+`idNumbering` on `PHAZITE` says which numbering a song's IDs are in: none, or a stamp of 16 lowercase hexadecimal digits
+that Phazite makes as it gives a song's IDs anew as it opens (a file whose IDs leave too little room to count on:
+[project-format.md](project-format.md), section 7). It is part of the song and goes into a version's song with it. The
+versions saved before a song's IDs were given anew hold them as they were, without that stamp: Phazite matches two songs'
+items by ID only where their stamps are the same (none and none, or one stamp and the same), and restores no line from a
+version, nor merges one, whose song is stamped otherwise than the song, or whose parting with it is (section 9). What
+makes the song another whole (a version opened in its place, a branch switched to, Restore This Version, Restore from
+Local History) matches nothing by ID that way and takes such a song with its stamp.
+
 [`tests/golden/format/devices.json`](../tests/golden/format/devices.json) lists Phazite's own devices' parameters, their
 ranges and defaults, and the name each choice is saved by. The song's elements and properties are described one by one
 in [`src/model/base/internal/Schema.h`](../src/model/base/internal/Schema.h); the project file's format is
@@ -316,7 +325,11 @@ item has can never make two items one.
 
 Where both songs, translated, would still hold an ID twice (an item's anywhere, a note's in one clip: records another tool
 wrote, or a history these translations don't cover), nothing is merged, and the merge says why: two items under one ID
-would be made one.
+would be made one. Nor where the other side's song, or the parting's, is stamped with another numbering than this side's
+(`idNumbering`, section 5): its IDs from 2^61 up were given anew on one side and not the other, so an ID can't be relied on
+to name the same item on both. Nor, once the list shows, where the song has been made another numbering's since (Restore
+This Version, Restore from Local History, Discard All Changes, or Undo of one): Merge keeps the stamp the song had as its
+list was worked out, and takes nothing into a song stamped otherwise.
 
 A record that isn't one to one (an ID 0, or one ID given to two: a damaged one, or one another history wrote) is left out.
 

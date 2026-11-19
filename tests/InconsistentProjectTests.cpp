@@ -295,6 +295,9 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
         else
             CHECK (next == id + 1);
 
+        // Stamped with its new numbering where its IDs were given anew (Schema.h: idNumbering), else not.
+        CHECK (song.getState().hasProperty (schema::idNumbering) == givenAnew);
+
         // By their names, as the IDs given anew aren't known here.
         const auto findNamed = [] (const phazite::Song& s, const juce::String& name)
         {
@@ -548,6 +551,7 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
     auto& song = project->getSong();
     CHECK (phazite::readID (findNamedTrack (song, "Drums")[schema::trackID]) == (std::uint64_t) (mark - 1)); // as it is
     CHECK (phazite::readID (song.getState()[schema::nextID]) == phazite::schema::renumberMark);
+    CHECK_FALSE (song.getState().hasProperty (schema::idNumbering)); // nothing given anew yet
 
     // Made in the session, past the mark: a track with a send to a new return, and its volume's lane and automation.
     const auto track = phazite::addTrackAtEnd (song, false, nullptr);
@@ -562,6 +566,19 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
     const auto file = project->getFile();
     project = nullptr;
 
+    // Opened and closed without a save, as often as it is: given anew the same way, with the same stamp each time
+    // (Schema.h: idNumbering), so that what was kept of it in one session matches it in the next.
+    const auto openUnsaved = [&file]
+    {
+        juce::String error;
+        const auto opened = phazite::Project::open (file, false, error);
+        REQUIRE (opened != nullptr);
+        return std::make_pair (opened->getSong().getState()[schema::idNumbering].toString(),
+                               phazite::readID (findNamedTrack (opened->getSong(), "Added")[schema::trackID]));
+    };
+
+    const auto unsaved = openUnsaved();
+    CHECK (unsaved == openUnsaved());
     juce::String afterFirst;
 
     for (int opening = 0; opening < 2; ++opening)
@@ -572,6 +589,12 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
         auto& again = reopened->getSong();
         checkSong (again);
 
+        // Stamped with its new numbering at the opening that gave its IDs anew, and the same at every opening after.
+        const auto stampNow = again.getState()[schema::idNumbering].toString();
+        CHECK (stampNow.length() == phazite::schema::idNumberingDigits);
+        CHECK (stampNow.containsOnly ("0123456789abcdef"));
+        CHECK (stampNow == unsaved.first);
+
         // Given anew, once: every ID at or past 2^61, the drums' and the session's, from below 2^61.
         const auto drums = findNamedTrack (again, "Drums"), added = findNamedTrack (again, "Added"),
                    returned = findNamedTrack (again, "Return");
@@ -580,6 +603,7 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
         REQUIRE (returned.isValid());
         CHECK (phazite::readID (drums[schema::trackID]) < phazite::schema::maxCountedID);
         CHECK (phazite::readID (added[schema::trackID]) < phazite::schema::maxCountedID);
+        CHECK (phazite::readID (added[schema::trackID]) == unsaved.second); // as at the openings without a save
         CHECK (phazite::readID (again.getState()[schema::nextID]) < phazite::schema::maxCountedID);
 
         // All of it there, what named each naming it.
@@ -627,6 +651,25 @@ int renameValues (juce::XmlElement& element, const juce::String from,
     return renamed;
 }
 } // namespace
+
+TEST_CASE ("A song's numbering that isn't 16 lowercase hexadecimal digits is left out as the file opens, and one that is stays")
+{
+    // Schema.h: idNumbering. Text of any other form names no numbering: too short, too long, a capital letter, not hex.
+    Edited edited;
+    const auto name = schema::idNumbering.toString();
+
+    for (const auto* wrong : { "0123456789abcde", "0123456789abcdef0", "0123456789aBcdef", "0123456789abcdeg", "" })
+    {
+        INFO (wrong);
+        const auto project = edited.open ([&] (juce::XmlElement& song) { song.setAttribute (name, wrong); });
+        REQUIRE (project != nullptr);
+        CHECK_FALSE (project->getSong().getState().hasProperty (schema::idNumbering));
+    }
+
+    const auto project = edited.open ([&] (juce::XmlElement& song) { song.setAttribute (name, "0123456789abcdef"); });
+    REQUIRE (project != nullptr);
+    CHECK (project->getSong().getState()[schema::idNumbering].toString() == "0123456789abcdef");
+}
 
 TEST_CASE ("An ID past 2^61 inside an element Phazite doesn't know neither raises the song's count nor gives its IDs anew")
 {

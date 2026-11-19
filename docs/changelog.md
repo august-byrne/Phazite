@@ -249,6 +249,12 @@ The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed be
 bug has a test that failed before its fix, and a reviewer read each area's changes; what the reviews found is fixed
 too. A line names the bug's number in that list.
 
+- **186 Versions from before a song's IDs were given anew:** a song whose IDs the loader gave anew (a file from
+  another program, with IDs too large to count on from) is stamped with its numbering, and its versions and Local
+  History snapshots hold the stamp their song had. A line's Restore, a line's Discard Changes and Merge refuse a
+  version numbered otherwise, saying why and what to do, where they matched its tracks wrongly before; a merge's
+  list refuses a song that became another numbering's since the list was made. Opening such a version, switching
+  to it and restoring it whole take it as it was numbered.
 - **205 The versions' changes, asked for too early:** the changes since the last version count as worked out only
   once the history has read the project's versions; before, a test that asked just after a project opened again got
   an empty list, on any machine fast or slow enough. The plug-in update's test holds the read to make that order.

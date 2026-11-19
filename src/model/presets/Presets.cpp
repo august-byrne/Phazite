@@ -1282,7 +1282,10 @@ juce::String getPresetFolderName (const ProjectContext& context, DeviceID id)
         return "Containers";
 
     // As its type's in the device lists.
-    return getPresetFolderName (DeviceType { .name = getDeviceName (*song, id), .isBuiltIn = ! isPluginState (device) });
+    DeviceType type;
+    type.name = getDeviceName (*song, id);
+    type.isBuiltIn = ! isPluginState (device);
+    return getPresetFolderName (type);
 }
 
 bool saveDevicePreset (const ProjectContext& context, DeviceID id, const juce::File& file)

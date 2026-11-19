@@ -77,6 +77,7 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
+| Linux: a helper's process number kept after the process was reaped: `Helper::kill()` and JUCE's `ChildProcess` send a signal to that number whoever holds it by then (Linux gives numbers out in turn, so it would take a full round of them) | `src/sandbox/client/Helper.cpp` | S | — | known bug 191's review |
 | Renders name the plug-ins they rendered without: an export, a freeze, a bounce or a DAWproject export plays a plug-in that is missing on this computer, kept off after a crash, or crashed while loading as if it weren't there, and says nothing (it names only plug-ins still loading); the report should name them, for the open song and for an old version's own instances alike | `src/model/project/Export.cpp` | S | 5 | known bug 166's review |
 | The helper's platform code for macOS, and its Linux code tried by a person: the watch of the parent that ends a helper with Phazite, and shared memory unlinked once opened, are built and run only by the tests | `src/host/core/Platform.cpp` | S | — | plugin-hosting 15 |
 | About twenty VST3s tried by hand | `docs/hand-checks.md` | M | 3 | product-gaps 7 |
@@ -142,6 +143,7 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
+| Versions numbered otherwise than the song (`idNumbering`, known bug 186's fix), what is left: the changes list against such a version lists every track given anew as removed and added (match by an ID below 2^61 where both hold it, or one line saying the two can't be compared by track); a merge waiting whose pieces are read again in a session past the mark (`findMergeAgain`, only once its kept copy is dropped) lists clashes that match nothing; a whole song put in the song's place from a version from before takes its count of IDs near the mark, which Undo doesn't put back, so a later session crosses again | `src/model/versions/SongDiff.cpp`, `VersionHistory.cpp` | M | — | known bug 186's reviews |
 | The store swept of what nothing names any more: built, and off until it is sound ([known bug 196](known-bugs.md)); to be turned on for histories one computer alone has written | `src/model/versions/StoreSweep.cpp` | (M) | 4 | model-versions 7 |
 | Another computer's newer versions noticed while the project is open (today they show as it opens again; a version saved meanwhile goes its own way beside them) | `src/model/versions/VersionHistory.cpp` | M | — | S4.5 |
 | A version saved over newer versions that only this computer holds (a project file put back from a backup), as a line of its own; today Save Version is greyed there and Create Branch is the way on | `src/model/versions/VersionHistory.cpp` | S | — | S4.5 |

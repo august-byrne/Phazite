@@ -85,7 +85,13 @@ the file.
 **IDs.** Every track, clip, note (within its clip), device, container, chain, send, modulator, macro and section has an
 ID, a positive 64-bit number the song gives (`nextID` on `PHAZITE` is the next), never twice. What one element says of
 another names it by its ID. Copies get new IDs; the rules of which properties hold or name an ID are data, in
-[`tests/golden/format/song-rules.json`](../tests/golden/format/song-rules.json).
+[`tests/golden/format/song-rules.json`](../tests/golden/format/song-rules.json). `idNumbering` on `PHAZITE` says which
+numbering the IDs are in: none until Phazite gives a song's IDs anew as it opens (section 7, "IDs"), then a stamp of 16
+lowercase hexadecimal digits that Phazite makes each time it does, the first 16 of the SHA-256 of the song's project text
+as it was before. It is part of the song, so a version's song holds it too. Two songs with different stamps (none being
+one of them) are in two numberings: their IDs below 2^61 are as they were, but those from 2^61 up were given anew in one
+of them (or differently in each), so an ID can't be relied on to name the same item in both, and Phazite matches the items
+of two songs by ID only where their stamps are the same ([versions-format.md](versions-format.md), section 5).
 
 **View state and how the song plays** (track heights, the grid, where a device's window was; the loop, the metronome,
 where playback starts), and where it stands in its versions, are saved, but are no change to the song: the rules list them
@@ -141,8 +147,8 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   hand to its parameter's range and every automation point to 0..1 (one that is none or no number is left out,
   and a curve that had points and is left without goes), and a value or a curve of a parameter its device hasn't is left out; a step
   sequencer's steps are held to -1..1 (one that is no finite number becomes 0) and a sampler's slices to 0..1 (one that
-  is none is left out), each in place, the others as they are written; `versionsBranch` and `versionsBase` that aren't
-  ids of their form are left out. First of all, before any number is read, a
+  is none is left out), each in place, the others as they are written; `versionsBranch`, `versionsBase` and
+  `idNumbering` that aren't ids of their form are left out. First of all, before any number is read, a
   number whose exponent has ten digits or more ("1e12345678901", which JUCE's reader of numbers can't count) is taken as
   JUCE's reader takes it, past every number for an exponent above 0 ("0e12345678901" too, which that reader reads as
   infinity) and 0 for one below, and so as no finite number; a name that reads as one stays as it is.
@@ -154,11 +160,13 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   past 2^61 inside an element Phazite doesn't know, which stays as it is, isn't counted). A song whose IDs or `nextID`
   reach 3 * 2^60 gets, once, a new ID for every one at 2^61 or past it (an item's, a fader's, a VCA's, an alias group's,
   a note's, the same in each clip of its alias group), counted on from past every ID it holds or names below 2^61, and
-  what named each names its new one (a name of none of them goes); a merge waiting in it goes. Any other file's IDs and
-  `nextID` stay as they are, so a song can never run out of IDs. A file with IDs just below 3 * 2^60 (another program's,
-  or Phazite's after a session on one) opens as it is, and what that session made gets its new IDs at the next opening,
-  once (`renumberMark` in `src/model/base/internal/Schema.h` says what that costs, and known bug 186 what the versions
-  do wrong after it). An ID written another way ("12.0", "012") is written as its whole number, as it is read (one that
+  what named each names its new one (a name of none of them goes); a merge waiting in it goes; and the song is stamped
+  with its new numbering (`idNumbering`, made from the song as it was, so that the same file gets the same IDs and the
+  same stamp at every opening). Any other file's IDs and `nextID` stay as they are, so a song can never run out of IDs. A
+  file with IDs just below 3 * 2^60 (another program's, or Phazite's after a session on one) opens as it is, and what that
+  session made gets its new IDs at the next opening, once (`renumberMark` in `src/model/base/internal/Schema.h` says what
+  that costs); the versions saved before then keep the IDs as they were, without the stamp, and Phazite restores no line
+  from them and merges none of them. An ID written another way ("12.0", "012") is written as its whole number, as it is read (one that
   reads as no ID, such as "+12", which reads as 0, gets a new one, and what names it is dropped).
 - **References:** a lane, a curve or a modulation of a device the song hasn't, and a send to a return it hasn't, is left
   out, and a sidechain or a pad's

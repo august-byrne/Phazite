@@ -28,6 +28,24 @@ inline const juce::Identifier PHAZITE { "PHAZITE" };
 // same numbers, never one twice. Written without an undo step, and no change of its own (the item it numbers is). state
 inline const juce::Identifier nextID { "nextID" };
 
+// On PHAZITE. Text, 16 lowercase hexadecimal digits (idNumberingDigits): the numbering the song's IDs are in, none until the
+// loader first gives them anew (renumberMark below; model/project/internal/Project.h: makeConsistent()), and then a stamp
+// it makes each time it does, from the song as it was given them (the first 16 digits of the SHA-256 of its project text
+// then), so that one file given its IDs anew gets one stamp at every opening, and two songs given them anew differently get
+// two. A version's song given its IDs anew as the store reads it (one saved in the session that crossed the mark) may get
+// another stamp than the project file's, since the names of where the song stands in its versions are taken out of it
+// before, and a piece that can't be read is read as a placeholder: that only makes for one refusal more, as Restore and
+// Merge refuse a song given its IDs anew as it was read anyway. A stamp, not a count: two lines of one history (two
+// branches, two computers sharing a folder) can each give their IDs anew once, differently. Text of any other form names
+// nothing, and the loader leaves it
+// out. Part of the song, which goes wherever the song goes, a version's song and a Local History snapshot too, so that
+// the versions match a version's items with the song's by ID only where the two are numbered alike (areNumberedAlike()):
+// Restore of a line and Merge refuse the rest. Written by the loader without an undo step, as it gives the IDs anew; else
+// only as the song is made another whole, with it: in Restore This Version's undo step, and outside the undo history
+// where a version is opened or a branch switched to. song
+inline const juce::Identifier idNumbering { "idNumbering" };
+inline constexpr int idNumberingDigits = 16;
+
 // On PHAZITE. bool, default true: the loop follows the song (getSongLoopRange()); false while a range is looped on
 // purpose. Written only when it changes. state
 inline const juce::Identifier loopFollowsSong { "loopFollowsSong" };
@@ -534,7 +552,8 @@ inline constexpr std::uint64_t maxID = (std::uint64_t) 1 << 62;
 // maxID, is given anew, once, as it loads, every ID at or past maxCountedID, 2^61, and below maxID (mustGiveIDsAnew()):
 // counted on from past every ID it holds below maxCountedID and every ID a name names below it; what named each naming
 // its new one, and a name at or past maxCountedID that names none of them left out; an alias group's notes given the same
-// new IDs in each of its clips; a track given a new ID no longer frozen; every merge waiting dropped. Any other song keeps
+// new IDs in each of its clips; a track given a new ID no longer frozen; every merge waiting dropped; and the song stamped
+// with its new numbering (idNumbering). Any other song keeps
 // its IDs and its next ID as they are: as it loads, its next ID is below the mark (at most maxCountedID plus the IDs
 // given anew, where they were), and a session makes far fewer than the 2^60 IDs between.
 // The one way across, accepted in the known-bugs round (2026-11-16): a file whose largest ID or next ID is within one
@@ -543,13 +562,16 @@ inline constexpr std::uint64_t maxID = (std::uint64_t) 1 << 62;
 // once (tests/InconsistentProjectTests.cpp pins it). The song keeps all it holds: names follow, an alias group's clips
 // keep sharing their notes' IDs, and it holds together. What goes: a track's frozen state (freeze it again); a merge
 // waiting. Refused with its reason: Merge and Restore of the commits and Local History snapshots made after the crossing,
-// whose songs are given anew as they are read. Done wrong, not refused, against those made before the crossing (on that
-// file, before and in that session), which hold the IDs as they were: a track restored from one is the song's no
-// longer, so it comes back beside the track it was given anew as, and Restore of a track the song has takes it out as
-// one added since; a Merge whose parting is one of them matches none of the song's items and brings its tracks in again.
-// Either also takes on that commit's count of IDs, just below the mark (model/versions/ApplySong.cpp: countIDsPast()), so
-// that a later session can cross again and the opening after it gives anew again: once for each such Restore or Merge
-// (known bug 186, with what a refusal takes).
+// whose songs are given anew as they are read; and Restore of a line and Merge against those made before it (on that
+// file, before and in that session), which hold the IDs as they were and not the song's stamp (idNumbering): matched by
+// ID, a track restored from one would come back beside the track it was given anew as, and a Merge whose parting is one
+// of them would bring its tracks in again (known bug 186). What makes the song another whole (a version opened, A/B, a
+// branch switch, Restore This Version, Restore from Local History) takes such a song with its numbering, as a switch
+// between two branches that each counted on from one version takes songs whose IDs name different things. Such a whole
+// song from before put in the song's place also takes that version's count of IDs, near the mark, which Undo doesn't put
+// back (nextID is written without an undo step): a later session can cross the mark again, the next opening gives the
+// IDs anew once more with another stamp, and the versions saved between the two crossings are then refused as those from
+// before the first are.
 // The first commit after lists every item given anew as changed, and the history keeps that commit's changes as such. A
 // branch switch to a commit made after the crossing gives its song new IDs as it is read, without the values of its
 // plug-ins' parameters, which the commit keeps by device ID (model/versions/SongPieces.cpp: joinSong()). No rule on the
@@ -1114,6 +1136,10 @@ std::uint64_t findLargestID (const juce::ValueTree&, std::uint64_t below = schem
 // which refuse a commit whose song's IDs are given anew (model/versions/SongPieces.cpp), ask this one rule.
 bool mustGiveIDsAnew (const juce::ValueTree& song);
 bool mustGiveIDsAnew (std::uint64_t largestID, std::uint64_t nextID);
+
+// Whether two songs' IDs are in one numbering (schema::idNumbering): neither given anew, or both by the same renumbering.
+// What the versions ask before they match a version's items with the song's by ID (model/versions/VersionsModel.cpp).
+bool areNumberedAlike (const juce::ValueTree& song, const juce::ValueTree& other);
 
 // The ID a song gives next: past its count (nextID) and every ID it holds.
 std::uint64_t findNextID (const juce::ValueTree& song);

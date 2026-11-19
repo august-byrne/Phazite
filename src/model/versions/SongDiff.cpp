@@ -537,6 +537,7 @@ SongChange findSongChange (const juce::ValueTree& songBefore, const juce::ValueT
     for (const auto& property : findChangedProperties (songBefore, songAfter))
         what.addIfNotAlreadyThere (property == schema::outline                  ? "song outline"
                                    : property == schema::patternsKeepTheirSpeed ? "pattern speed"
+                                   : property == schema::idNumbering            ? "items numbered anew"
                                                                                 : "settings");
 
     // The tempo map's tempos and time signatures.

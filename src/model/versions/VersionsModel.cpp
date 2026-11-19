@@ -168,6 +168,42 @@ namespace
                "(another tool wrote it), so what it holds can't be told from what the song has.";
     }
 
+    // Why a version's song numbered otherwise than the song (Schema.h: idNumbering, areNumberedAlike()) isn't matched with
+    // it by ID, for a line's restore and a merge to say, true whichever of the two is the older: a version from before the
+    // song's IDs were given anew as it opened, or the song itself (after Restore This Version of a version from before, or on
+    // a second computer still on the song from before) against a version saved after. Matched by ID, an item of one would be
+    // taken for another of the other's (known bug 186). What makes the song another whole (a version opened, Restore This
+    // Version) matches nothing that way, and takes it.
+    juce::String numberedOtherwise (const juce::String& version)
+    {
+        return version
+               + " and the song number their tracks and clips differently (one of them is from before the song's items were "
+                 "numbered anew as it opened), so Phazite can't tell which track is which.";
+    }
+
+    juce::String otherNumberingRefusal (const juce::String& version)
+    {
+        return "Nothing was restored: " + numberedOtherwise (version)
+               + " Open the version to hear it, or restore the whole version (Restore This Version).";
+    }
+
+    // A merge's refusal for the same reason, with what does work: on another branch, going on from it there; on the song's
+    // own branch (Merge the Newer Versions), the newer versions taken whole once the song's changes are discarded (which
+    // Local History keeps), as Take the Newer Versions takes them without a match by ID.
+    juce::String mergeNumberingRefusal (const VersionHistory& history, const juce::String& versionID)
+    {
+        const auto* version = history.findVersion (versionID);
+        const auto* branch = history.findCurrentBranch();
+        const auto name = version != nullptr ? "\"" + getDisplayName (*version) + "\"" : juce::String ("that version");
+        const auto ownBranch = version != nullptr && branch != nullptr && version->branch == branch->id;
+
+        return "Nothing was merged: " + numberedOtherwise (name + " (or the version both lines have)")
+               + (ownBranch
+                      ? " To go on from the newer versions: Cancel Merge if its list is open, then Discard All Changes, then Take the "
+                        "Newer Versions (Local History keeps the song as it is now)."
+                      : " Switch to its branch to go on from it, or open it to hear it.");
+    }
+
     // Restore from This Commit, once the commit's song is read.
     VersionHistory::Taken takeInBringBack (ProjectContext& context, const juce::String& versionID, const SongRead& read)
     {
@@ -828,6 +864,25 @@ bool takeBack (ProjectContext& context, const VersionChange& line)
     const auto then = history->getComparedSong();
     const auto* compared = history->findVersion (history->getComparedVersion());
 
+    // Not from a version numbered otherwise (numberedOtherwise()), as the last version itself is until one is saved after the
+    // song's IDs were given anew as it opened.
+    if (! areNumberedAlike (song->getState(), then))
+    {
+        history->restoreRefused = compared != nullptr
+                                      ? otherNumberingRefusal ("\"" + getDisplayName (*compared) + "\"")
+                                      : "Nothing was discarded: " + numberedOtherwise ("the last version")
+                                            + " Discard All Changes makes the whole song the last version again; or save a version "
+                                              "first, and a line's changes can be discarded from then on.";
+        history->tellNow();
+        return false;
+    }
+
+    if (history->restoreRefused.isNotEmpty())
+    {
+        history->restoreRefused.clear();
+        history->tellNow();
+    }
+
     // A change of its own, one undo step: Discard Changes, from the last version; Restore from another version.
     const UndoStep step (*song, compared != nullptr ? "Restore " + line.name + " from \"" + getDisplayName (*compared) + "\""
                                                     : "Discard Changes in " + line.name);
@@ -874,6 +929,9 @@ namespace
 
         if (idsGivenAnew)
             return VersionHistory::Taken::refused (idsTwiceRefusal());
+
+        if (then.isValid() && ! areNumberedAlike (song->getState(), then))
+            return VersionHistory::Taken::refused (otherNumberingRefusal ("\"" + getDisplayName (*version) + "\""));
 
         // As much of it as can be read, as the whole song's restore takes it: what a damaged piece held stays as it is now, and
         // what of the line's that is, is told (getRestoreProblem()).
@@ -1476,8 +1534,9 @@ namespace
         juce::ValueTree baseRead, theirsRead; // as read, to work it out again against the song if it changed meanwhile
         PluginParameterValues theirParametersRead;
         std::uint64_t next = 0;
-        bool idsGivenAnew = false; // as either song was read: then it can't be merged
-        bool heldTwice = false;    // an ID either song holds twice once translated, which would make two items one: refused
+        bool idsGivenAnew = false;      // as either song was read: then it can't be merged
+        bool numberedOtherwise = false; // either song than the song (Schema.h: idNumbering): then it can't either
+        bool heldTwice = false;         // an ID either song holds twice once translated, which would make two items one: refused
     };
 
     void workOutMerge (MergeWorked& worked, const MergeStart& start, const juce::ValueTree& ours,
@@ -1549,7 +1608,14 @@ namespace
         // that what the two lines share no longer has the same IDs: nothing a merge could make of them would be right.
         worked.idsGivenAnew = baseRenumbered || theirsRenumbered;
 
-        if (worked.baseRead.isValid() && worked.theirsRead.isValid() && ! worked.idsGivenAnew)
+        // The other line's song or the parting's (none for two of no common line) numbered otherwise than the song (Schema.h:
+        // idNumbering), one of them from before the song's IDs were given anew as it opened: its items would be matched with
+        // others of the song's.
+        worked.numberedOtherwise = worked.baseRead.isValid() && worked.theirsRead.isValid()
+                                   && (! areNumberedAlike (start.ours, worked.theirsRead)
+                                       || (start.basePiece.isNotEmpty() && ! areNumberedAlike (start.ours, worked.baseRead)));
+
+        if (worked.baseRead.isValid() && worked.theirsRead.isValid() && ! worked.idsGivenAnew && ! worked.numberedOtherwise)
         {
             workOutMerge (worked, start, start.ours, start.ourParameters);
 
@@ -1590,6 +1656,10 @@ namespace
                                                        + " or the version both lines have holds an ID twice, or IDs too large to count "
                                                          "on from, which no Phazite writes (another tool wrote it), so what the two "
                                                          "lines share can't be told apart.");
+
+            // Numbered otherwise than the song as it was read against, or than the song now, made another whole meanwhile.
+            if (worked->numberedOtherwise || ! areNumberedAlike (song->getState(), start.ours))
+                return VersionHistory::Taken::refused (mergeNumberingRefusal (*history, start.version));
 
             if (last == nullptr || last->id != start.head || version == nullptr || history->getMerging().has_value()
                 || history->preview.has_value())
@@ -1632,6 +1702,7 @@ namespace
                 worked->preview.beforeChanges = history->countSongChanges();
             }
 
+            worked->preview.numbering = start.ours[schema::idNumbering].toString(); // the song's, as the list was worked out
             history->preview = std::move (worked->preview);
             history->tellNow();
             return true;
@@ -1836,6 +1907,22 @@ bool canCancelMerge (const ProjectContext& context)
 
 namespace
 {
+    // Merge refused where the song is numbered otherwise now than as the merge's list was worked out against it (Schema.h:
+    // idNumbering; Merge::numbering): the list survives Restore This Version, Restore from Local History, Discard All Changes
+    // and Undo of one, each of which can make the song another numbering's, whose items the list's IDs would be taken for
+    // (known bug 186). Said where a merge says its problems, the list kept and nothing changed. A merge taken and waiting
+    // (Schema.h: MERGING) needs no such check: its element is part of the song, so it goes and comes back with the song's
+    // numbering, never one without the other.
+    bool refuseOtherNumbering (VersionHistory& history, const Song& song, const VersionHistory::Merge& merge)
+    {
+        if (song.getState()[schema::idNumbering].toString() == merge.numbering)
+            return false;
+
+        history.mergeFailure = mergeNumberingRefusal (history, merge.version);
+        history.tellNow();
+        return true;
+    }
+
     // Merge, once the song before it is kept in the store (merge.beforePiece): every line taken, as one undo step.
     bool takeMergeIn (ProjectContext& context, VersionHistory::Merge merge)
     {
@@ -1844,6 +1931,9 @@ namespace
         const auto* last = history != nullptr ? history->findBaseVersion() : nullptr;
 
         if (song == nullptr || last == nullptr || ! history->preview.has_value() || history->getMerging().has_value())
+            return false;
+
+        if (refuseOtherNumbering (*history, *song, merge))
             return false;
 
         merge.head = last->id;
@@ -1904,6 +1994,10 @@ bool finishMerge (ProjectContext& context)
         history->tellNow();
         return false;
     }
+
+    // Nor into a song numbered otherwise than as the list was worked out: before the song is kept in the Versions folder.
+    if (refuseOtherNumbering (*history, *song, *history->preview))
+        return false;
 
     // The song as it was, for Cancel Merge: kept in the store first (where the song's element of the merge names it), and in
     // Local History too. Nothing is taken if the store can't keep it: the merge's list stays, and the view says why. Kept

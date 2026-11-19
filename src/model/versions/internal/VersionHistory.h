@@ -482,6 +482,9 @@ public:
         juce::String beforePiece;
         juce::int64 beforeChanges = -1; // the song's count of changes (countSongChanges()) as before was copied, for its piece
         juce::String head;              // the current branch's last version as the merge was taken
+        // The song's numbering (Schema.h: idNumbering) as the merge's list was worked out against it: Merge takes the list into
+        // no song numbered otherwise, as Restore This Version or its Undo can make the song while the list shows.
+        juce::String numbering;
 
         // Whether its three songs were read whole, so that its clashes are known (none while they are being read on the
         // history's thread, or where one can't be).

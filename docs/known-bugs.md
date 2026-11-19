@@ -40,23 +40,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Versions
 
-- **186. After a song's IDs were given anew as it opened, Restore and Merge against its earlier commits do wrong
-  instead of refusing.** Only a file from another program can lead here: one whose largest ID or next ID lies within one
-  session's count below 3 * 2^60 (`schema::renumberMark`) opens as it is, what the session makes gets IDs past the
-  mark, and the next opening gives every ID from 2^61 up anew (the accepted edge written at `renumberMark` in
-  `src/model/base/internal/Schema.h`; `tests/InconsistentProjectTests.cpp` pins it). The song itself keeps all it
-  holds. But the commits and Local History snapshots made before the crossing hold the IDs as they were, below the
-  mark, so the versions take them for commits of this song: a track restored from one comes back beside the track it
-  became, Restore of a track the song has takes it out as one added since, and a Merge whose parting commit is one of
-  them matches nothing and brings its tracks in a second time. Either also takes on that commit's count of IDs, just
-  below the mark, so a later session can cross again. (Commits made after the crossing are refused with their reason,
-  as they should be.) Why: nothing records that a song's IDs were given anew, so a commit from before can't be told
-  from one of the song as it is. Fix: the loader writes into the song that it gave IDs anew and from which ID up (one
-  saved value, with its entries in `Schema.h`, the loader's table and `tests/SongCheck.cpp`); a commit carries it
-  with its song; Restore and Merge refuse a commit without it when the song has it, and a branch switch refuses such a
-  commit or carries the old-to-new map through `joinSong()` so that the plug-ins' parameter values, kept by device
-  ID, follow. About a day, with tests. Found by the reviews of the loader's IDs (2026-11-16); never seen, and no file
-  Phazite wrote from a project of its own can reach it.
 - **196. The versions' store lets go of nothing yet: a project's `Versions` folder only grows.** An undone version, a
   deleted branch's versions and the song left on it, the snapshots Local History no longer lists, and their bounces and
   edited messages keep their room for ever. Recover Lost Versions stops offering them after 30 days, and the room the
@@ -145,3 +128,16 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   from a helper slow to start: at a start that timed out on Linux, read `/proc/<child>/exe` (still the program
   that started it: it never did `exec`). To fix then: start the helper on Linux with `posix_spawn`, which allocates
   nothing in the child, as a JUCE workaround.
+- **213. Linux: a plug-in asked for just after its helper's process was ended can still be kept off as one that
+  crashed as it loaded** (2026-11-19, CI's Clang job on `e5a255c3`, the first run of the test of known bug 191's
+  fix there: `SandboxedPluginTests`, "A plug-in asked for just after its helper crashed opens in a fresh helper...",
+  round 8 of 24, after eight rounds that passed). The test ends a helper with SIGKILL, waits until `/proc` shows it a
+  zombie or gone, and asks for the plug-in again: the answer was "It crashed as it loaded, and stays off until it is
+  reloaded." On Windows the same test passes every round, and it isn't run on Linux until this is found. Either
+  `Helper::hasProcessEnded()` said the first helper still ran (JUCE's `ChildProcess::isRunning()` on Linux is
+  `waitpid()` with `WNOHANG`, which the watching thread calls too: one of the two reaps the child, and the other
+  gets no child), or the fresh helper's load failed as the first helper was taken down beside it (its pipe closed,
+  its `Running` deleted on the endings' thread, a signal sent to a process number: `Helper::kill()`). To find it:
+  run the test on Linux with the plug-in's status and error said at each step (`TestSong::describePlugin()` shows
+  how), and which of the two helpers the failed load was sent to (`getHelper()`'s second try in
+  `src/model/plugins/PluginHost.cpp`).

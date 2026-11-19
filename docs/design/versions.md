@@ -572,6 +572,26 @@ The history is the `Versions` folder beside the project file. Its format is writ
   curve it brought in of a device the song hasn't taken away again, in the same step), so that the song is what its
   file would open as. A merge, Restore This Version and a line's restore refuse a song that held an ID twice, which its
   line's IDs no longer match once the checks give it new ones (an item would come in as new).
+- **A song whose IDs were given anew:** a file whose IDs leave too little room to count on (another program's) has them
+  given anew once as it opens, and the song is stamped with its new numbering (`idNumbering`,
+  [project-format.md](../project-format.md), section 7). The versions and Local History snapshots saved before hold the
+  IDs as they were, without that stamp, so they can't be matched with the song by ID; nor, the other way round, can the
+  versions saved after with a song made one from before again (by Restore This Version of one, or on a second computer
+  still on the song from before). Where a version and the song are stamped differently, a line's restore from it (and
+  Discard Changes of a line against it, as the last version is until a version is saved after), and a merge whose other
+  side or parting is one, are refused with why ("... and the song number their tracks and clips differently (one of them
+  is from before the song's items were numbered anew as it opened) ...", and what does work for that command), and take
+  on nothing of it, its count of IDs included. A merge's list keeps the stamp the song had as it was worked out, and
+  Merge refuses the same way where the song is stamped otherwise since (Restore This Version, Restore from Local History,
+  Discard All Changes or Undo of one while the list shows), changing nothing. What makes the song another whole matches
+  nothing by ID and takes such a version as it is, numbered as it was: opening it in the song's place and A/B (Back to
+  Now brings the song back exactly), switching to a branch whose last version is one, Restore This Version, Restore from
+  Local History, Discard All Changes and Take the Newer Versions, as a switch between two branches that each counted on
+  from one version takes songs whose IDs name different things. A version saved after the song was given its IDs anew
+  holds the stamp, and restores and merges as ever. A whole version from before put in the song's place brings its count
+  of IDs near the mark back with it, which Undo doesn't take back, so a later session can cross the mark again: the next
+  opening gives the IDs anew once more, with another stamp, and the versions saved between the two crossings are refused
+  as those from before are.
 - Save Project As copies the history with the project. Without a `Versions` folder, a project opens with no history
   and saves its first version.
 

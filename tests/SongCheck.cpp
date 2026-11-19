@@ -510,6 +510,9 @@ std::vector<std::string> findSongProblems (const Song& song)
     checkHexID (schema::versionsBranch, 32);
     checkHexID (schema::versionsBase, 64);
 
+    // The numbering the song's IDs are in: a stamp of 16 lowercase hexadecimal digits, or none (Schema.h: idNumbering).
+    checkHexID (schema::idNumbering, 16);
+
     checker.checkItemIDs (state);
     checker.checkKeys (state);
     checker.checkRanges (state);
