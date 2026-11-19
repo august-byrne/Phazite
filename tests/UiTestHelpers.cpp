@@ -158,7 +158,11 @@ bool isMenuShownAt (juce::Point<int> screenPosition)
 
     constexpr int near = 8; // pixels: JUCE's menu has a border of a few
     const auto bounds = menu->getScreenBounds();
-    const auto nearX = std::abs (bounds.getX() - screenPosition.x) <= near || std::abs (bounds.getRight() - screenPosition.x) <= near;
+    // Its left edge at the pointer, or the whole of it left of the pointer: its right edge at the pointer where it fits
+    // there, and further left where the screen ends first (CI's screen is 1024 pixels wide, narrower than some tests'
+    // windows: the master volume's menu ended 56 pixels left of the click there, 2026-11-19). A menu hung on its component
+    // starts at the component's left and reaches right of the pointer.
+    const auto nearX = std::abs (bounds.getX() - screenPosition.x) <= near || screenPosition.x >= bounds.getRight() - near;
     // Under the pointer or over it; a menu too tall for either JUCE moves up or down as far as it must, beside the pointer.
     const auto nearY = screenPosition.y >= bounds.getY() - near && screenPosition.y <= bounds.getBottom() + near;
 

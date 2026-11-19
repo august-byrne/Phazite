@@ -143,6 +143,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
+- **210. `AppTests`, "A first save's versions are copied by their history's thread, after its writes…", failed once in CI's
+  windows-profile job** (2026-11-19, the run of `4d6b87be`; the other two Windows jobs and every local run passed it): its
+  helper `addToVersions()` could not make the folder `Versions/local` in the untitled project (`AppTests.cpp`, near
+  1598: `createDirectory()` gave false). Not looked into. To start: whether the history's thread, or the first save's
+  copy, has that folder open or is moving it as the test makes it; the test waiting for the history to be at rest first.
+
 - **208. `DeviceEditorTests`, the right-click menu's case: in CI's linux-release job the Saturator's Band read as on
   while its value set by hand was off** (2026-11-18, the run of `7ab6d312`; linux-debug and the three Windows jobs
   passed it): after a right-click on the part's switch, which changes nothing, `ParameterHandle::getValue()` (the value
