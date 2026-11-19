@@ -1,0 +1,27 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Delay",
+    "instrument": false,
+    "type": "phaziteDelay",
+    "parameters": {
+      "sync": 1,
+      "note": "1/16",
+      "time": 375.0,
+      "link": 1,
+      "noteRight": "1/16",
+      "timeRight": 375.0,
+      "feedback": 0.4,
+      "pingPong": 0,
+      "character": "Clean",
+      "modRate": 0.5,
+      "modDepth": 0.0,
+      "duck": 0.0,
+      "freeze": 0,
+      "transition": "Fade",
+      "lowCut": 60.0,
+      "highCut": 16000.0,
+      "mix": 0.5
+    }
+  }
+}

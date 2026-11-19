@@ -75,10 +75,10 @@
       "mod1Amount": 0.5,
       "mod2Source": "LFO 1",
       "mod2Target": "Osc 1 Position",
-      "mod2Amount": -0.375,
+      "mod2Amount": 0.0,
       "mod3Source": "Mod Wheel",
       "mod3Target": "Mod 2 Amount",
-      "mod3Amount": -0.5625,
+      "mod3Amount": -0.45,
       "mod4Source": "None",
       "mod4Target": "None",
       "mod4Amount": 0.0,
@@ -100,7 +100,7 @@
       "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.4,
-      "level": -15.913930000000001,
+      "level": -15.51,
       "quality": "1x"
     },
     "sounds": {

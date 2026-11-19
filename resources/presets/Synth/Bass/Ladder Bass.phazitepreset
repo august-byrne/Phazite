@@ -31,11 +31,11 @@
       "unisonDrift": 0.0,
       "filterOn": 1,
       "filterType": "Low Pass",
-      "cutoff": 113.171570000000003,
+      "cutoff": 105.0,
       "resonance": 0.3,
       "filterSlope": "24 dB",
-      "drive": 8.0,
-      "filterCharacter": "Clean",
+      "drive": 5.0,
+      "filterCharacter": "Driven",
       "keyTracking": 0.33,
       "env1Attack": 1.0,
       "env1Decay": 600.0,
@@ -100,7 +100,7 @@
       "phase": "Free",
       "bendRange": 2.0,
       "velocity": 0.5,
-      "level": -2.5,
+      "level": -11.300000000000001,
       "quality": "1x"
     },
     "sounds": {

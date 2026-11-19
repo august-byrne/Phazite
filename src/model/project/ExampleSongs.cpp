@@ -1409,6 +1409,10 @@ namespace
             }
         }
 
+        // Turned up as far as the preset came down when its bell and bark came in (0.8 LU, its chords held at -3 dBFS), so
+        // that the mix stays as it was.
+        song.setVolume (keys, 0.8f);
+
         // The keys' filter closes for the break and opens again after it.
         song.automate ({ filter, "cutoff" },
                        { { at (bar (28)), 3000.0f }, { at (bar (30)), 700.0f }, { at (bar (31)), 700.0f }, { at (bar (32)), 3000.0f } });

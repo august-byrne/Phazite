@@ -101,7 +101,7 @@
       "bendRange": 2.0,
       "velocity": 0.5,
       "level": -11.0,
-      "quality": "1x"
+      "quality": "2x"
     },
     "sounds": {
       "osc1Wavetable": "Basic Shapes",

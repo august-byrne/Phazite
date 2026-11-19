@@ -16,7 +16,7 @@
       "osc2Position": 0.33333334,
       "osc2Pitch": 0.0,
       "osc2Fine": 0.0,
-      "osc2Level": 0.110532194,
+      "osc2Level": 0.35,
       "osc2Warp": "None",
       "osc2WarpAmount": 0.0,
       "subLevel": 0.0,
@@ -100,7 +100,7 @@
       "phase": "Free",
       "bendRange": 2.0,
       "velocity": 0.25,
-      "level": -6.2650213,
+      "level": -6.67,
       "quality": "1x"
     },
     "sounds": {

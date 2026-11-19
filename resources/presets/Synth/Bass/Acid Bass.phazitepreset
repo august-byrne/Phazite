@@ -35,7 +35,7 @@
       "resonance": 0.78,
       "filterSlope": "24 dB",
       "drive": 4.422928,
-      "filterCharacter": "Clean",
+      "filterCharacter": "Driven",
       "keyTracking": 0.0,
       "env1Attack": 1.0,
       "env1Decay": 3000.0,
@@ -100,7 +100,7 @@
       "phase": "Free",
       "bendRange": 2.0,
       "velocity": 0.4,
-      "level": -5.577072,
+      "level": -9.58,
       "quality": "1x"
     },
     "sounds": {

@@ -100,7 +100,7 @@
       "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.7,
-      "level": -8.0,
+      "level": -10.699999999999999,
       "quality": "1x"
     },
     "sounds": {

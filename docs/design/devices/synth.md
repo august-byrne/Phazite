@@ -8,7 +8,7 @@ and noise, unison, one resonant filter, three envelopes, two LFOs and eight modu
 note on its own. It follows Serum's layout with fewer parts. Its first table, Basic Shapes, holds a classic subtractive
 synth's sine, triangle, saw and square, and Pulse Width its pulses, so it plays an analog poly synth's sounds as well:
 the filter's envelope is Envelope 2 on the cutoff, a pitch envelope Envelope 3 on the pitch, and the filter's velocity, a
-vibrato the mod wheel brings in and an analog voice's drift are slots of the matrix (see "Modulation" below). Fifty of its presets recreate a
+vibrato the mod wheel brings in and an analog voice's drift are slots of the matrix (see "Modulation" below). Forty-nine of its presets recreate a
 subtractive synth's classic sounds ([presets.md](../../presets.md)).
 
 ## Parameters

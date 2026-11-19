@@ -61,6 +61,10 @@ The full text of every step, as it was written when it was built, is in the
   that can be off keeps its switch in its tab; section titles are written in Title Case, faint while their part is
   off; and the rules for where an editor puts things are written down and checked against every editor (Stereo's
   Bass Mono is its part's switch; four editors' outputs moved last in their parts). This ends S6.9.
+- **S6.8 The presets on the finished devices:** Soft E-Piano gains its bell and its bark, Pulse Organ holds steady and
+  Choir Pad stays among the vowels; five Synth presets named for a driven filter play the Driven character and four
+  whose sound is a warp play at Quality 2x; Supersaw Lead, a double of Hypersaw Lead, goes; Mallets is a kind of the
+  Synth's; the Delay gains Stutter Hold; every changed effect's presets were measured against their names.
 - **S6.5 The Reverb's Hall:** a third mode beside the Room and the Plate: sixteen lines (2.3 s at the largest Size)
   through a Hadamard matrix, an all-pass in each loop and sways that run on over a sleep, so that a tail of 20 s
   doesn't ring (its largest peak 12.5 dB over its envelope, where decaying noise measures 10.5 and the Room 17); the

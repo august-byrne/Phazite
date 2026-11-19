@@ -100,8 +100,8 @@
       "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.3,
-      "level": -15.0,
-      "quality": "1x"
+      "level": -14.199999999999999,
+      "quality": "2x"
     },
     "sounds": {
       "osc1Wavetable": "Basic Shapes",
