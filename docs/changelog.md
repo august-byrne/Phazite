@@ -52,6 +52,10 @@ The full text of every step, as it was written when it was built, is in the
   (Shift fine), a double-click for the defaults, a right-click for each parameter's menu with Type a Value..., the
   wheel named in the hint, the values in the corner; the Filter's and Motion's dots no longer jump to a click, and
   the drum pads sound on the press, harder the higher.
+- **S6.9 The editors' frame:** the pages' bar keeps its tabs whole and puts the rest in a More tab's menu; a part
+  that can be off keeps its switch in its tab; section titles are written in Title Case, faint while their part is
+  off; and the rules for where an editor puts things are written down and checked against every editor (Stereo's
+  Bass Mono is its part's switch; four editors' outputs moved last in their parts). This ends S6.9.
 - **S6.5 The Reverb's Hall:** a third mode beside the Room and the Plate: sixteen lines (2.3 s at the largest Size)
   through a Hadamard matrix, an all-pass in each loop and sways that run on over a sleep, so that a tail of 20 s
   doesn't ring (its largest peak 12.5 dB over its envelope, where decaying noise measures 10.5 and the Room 17); the

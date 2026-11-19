@@ -251,6 +251,7 @@ namespace TabTint
     inline constexpr int textInset = 10;
     inline constexpr float pagePillHeight = 20.0f;
     inline constexpr int pageTextInset = 8;
+    inline constexpr float pageMoreIcon = 14.0f; // a pages' bar's More tab (ui/devices/DeviceLayout.h): its icon, so big
 
     // The tab of the editor that the time line's commands act on (the one used last; ui/timeline/TimelineEditor.h): a line this
     // thick in the accent colour along its pill's foot, so far in from the pill's ends.

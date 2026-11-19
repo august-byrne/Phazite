@@ -688,7 +688,7 @@ SaturatorEditor::SaturatorEditor (const DeviceHandle& handle)
     addControl ("shape", buttons);
 
     const auto driveControl = makeControlsPart ("Drive", { "drive" }, 1, ParameterControls::Size::large);
-    const auto colour = makeControlsPart ("Colour", { "colour", "tone", "output", "autoGain" }, 4);
+    const auto colour = makeControlsPart ("Colour", { "colour", "tone", "autoGain", "output" }, 4);
     constexpr int displayWidth = 300;
 
     // The Band, switched at its title's right end, faint while it is off.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The synth's editor (src/ui/devices/SynthEditor.h), driven as the user would: its tables drawn and named,
 // the table menu, a sound dropped on a table, a drag through a table, its controls in their groups (the unison's stack and
-// drift among them), how it fits a shorter Devices view, its filter's dot and an envelope as a note plays, and its pitch
+// drift among them), how it fits a shorter Devices view and a narrower one (its pages' More tab), its filter's dot and an envelope as a note plays, and its pitch
 // knob taking a value typed.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <span>
 #include <vector>
 
@@ -206,6 +207,63 @@ TEST_CASE ("The synth's editor fits the dock: its parts in pages, the modulation
     editor.getLayout().showPage (1);
     CHECK_FALSE (editor.getTableView (0).isShowing());
     CHECK (editor.findControl ("cutoff")->isShowing());
+
+    // Every page's tab fits the dock's bar: no More tab.
+    CHECK (editor.getLayout().getNumPagesInBar() == 4);
+    CHECK_FALSE (editor.getLayout().getMoreTab()->isVisible());
+}
+
+TEST_CASE ("The synth's editor in a dock a third as wide shows its pages' tabs whole, the others in the More tab's menu")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    constexpr int dockWidth = 552 / 3, dockHeight = 268;
+    editor.setSize (dockWidth, dockHeight);
+    auto& layout = editor.getLayout();
+    REQUIRE (layout.usesPages());
+    const auto pages = layout.getNumPages();
+    const auto inBar = layout.getNumPagesInBar();
+    REQUIRE (inBar < pages);
+
+    auto* more = layout.getMoreTab();
+    REQUIRE (more != nullptr);
+    CHECK (more->isShowing());
+    CHECK (editor.getLocalBounds().contains (more->getBounds()));
+
+    for (int page = 0; page < pages; ++page)
+    {
+        CAPTURE (page);
+        auto* tab = layout.getPageTab (page);
+        REQUIRE (tab != nullptr);
+        CHECK (tab->isShowing() == (page < inBar));
+
+        if (page < inBar)
+            CHECK (tab->getRight() <= more->getX());
+    }
+
+    // Its menu: the other pages, in order; one chosen shows, the More tab reading as its name.
+    juce::StringArray items;
+    auto menu = layout.getMorePagesMenu();
+    std::function<void()> lastAction;
+
+    for (juce::PopupMenu::MenuItemIterator item (menu); item.next();)
+    {
+        items.add (item.getItem().text);
+        lastAction = item.getItem().action;
+    }
+
+    juce::StringArray hidden;
+
+    for (int page = inBar; page < pages; ++page)
+        hidden.add (layout.getPageName (page));
+
+    CHECK (items == hidden);
+    REQUIRE (lastAction != nullptr);
+    lastAction();
+    CHECK (layout.getShownPage() == pages - 1);
+    CHECK (more->getButtonText() == layout.getPageName (pages - 1));
+    CHECK (more->getToggleState());
+    CHECK (editor.getLocalBounds().contains (more->getBounds()));
 }
 
 TEST_CASE ("The synth's editor shows the unison's stack and drift with its other controls, on one page of the dock")

@@ -152,11 +152,19 @@ At the default window size (1280 by 800), every built-in device shows whole in t
 (`tests/DevicesViewTests.cpp` checks each one). The editors share a layout that makes this hold
 (`src/ui/devices/DeviceLayout.h`):
 
-- an editor is columns of titled parts, in the order the sound goes through them;
+- an editor is columns of titled parts, in the order the sound goes through them; a title is written in Title Case
+  ("Sub and Noise", "LFO 1") and drawn as given, semibold in the text colour, as the look's section titles are
+  ([vscode-look.md](../vscode-look.md));
 - it is as wide at any height: a column whose parts do not fit the height shows one at a time, under tabs of their
-  titles;
+  titles; a part that can be switched off keeps its switch there, at its tab's left, where a click switches it (one
+  undo step, with its right-click menu as in its title) and a click beside it shows the part; a part that is off has
+  its title, or its tab's name, faint;
 - in a narrower space its graphs narrow first; narrower still, the columns wrap into rows where the height allows, or
-  else show in pages, as many columns on each as fit, under a bar of the pages' names;
+  else show in pages, as many columns on each as fit, under a bar of the pages' names. The bar shows whole the tabs
+  that fit, never one cut short; the others are in a More tab at its end (three dots, as a view's tools overflow into
+  More), whose menu lists them by name, the page shown ticked. While one of those shows, the More tab reads as its
+  name and is lit as the shown page's tab is. The arrow keys move along the bar, and Enter or Space chooses a tab or
+  opens the menu;
 - a tab or a page chosen stays chosen;
 - a device with modes (the Compressor's Compress, Duck and Transient, Motion's Chorus, Flanger and Phaser) has its
   modes as tabs along its top, each a page of parts, and keeps its size from mode to mode.
@@ -243,6 +251,22 @@ At the default window size (1280 by 800), every built-in device shows whole in t
   level meters (`src/ui/components/DisplayTicker.h`), and a picture repaints only when what it draws moved. What goes
   in and out of a device reaches its editor through a lock-free scope that costs nothing while no editor listens
   (`src/devices/core/DeviceScope.h`).
+
+### Where an editor puts things
+
+Every editor is held to these rules, as FabFilter's and Ableton Live's devices keep theirs; what breaks one is a bug of
+the editor's, or a redesign waiting in the backlog.
+
+1. **One place for each parameter.** No parameter has two knobs, nor a handle in a picture and a knob elsewhere. A
+   picture's handle and one knob beside the picture is the rule for what the picture draws.
+2. **The picture first:** at the left, or at the top where parts stack, with beside it only the knobs for what it draws.
+3. **The output last:** its level, then its mix where the editor has one (the device's Mix is its line's, above), at
+   the bottom right: the last controls of the last part, Mix last.
+4. **A modulated value is shown dashed, never in another colour:** a knob's ring for Phazite's modulators, and on the
+   Synth for its own slots, in the knob's own ink.
+5. **A part that can be off has its switch in its title, or its tab, and nowhere else** (`DeviceLayout::Part::titleSwitch`).
+6. **A choice of two or three is buttons** (`ChoiceButtons`), **more is a list**; a mode that changes the whole page
+   is tabs along the top (`DeviceEditorBase::setModes()`).
 
 Each device's page says what its own editor shows and what can be dragged there.
 

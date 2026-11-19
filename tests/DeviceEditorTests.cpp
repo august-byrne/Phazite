@@ -311,6 +311,255 @@ TEST_CASE ("A pinned column leads every page of a device's layout, without namin
     CHECK (second.getX() > picker.getRight());
 }
 
+TEST_CASE ("A layout's pages' bar shows whole the tabs that fit, and the other pages in its More tab's menu, the one shown ticked")
+{
+    // The tabs once shrank to the room left, down to nothing: in a narrow dock a page's name was cut, and the last ones vanished.
+    const phazite::test::ScopedDisplay display; // JUCE places a menu on its display
+    using phazite::ui::DeviceLayout;
+    juce::Component editor;
+    juce::OwnedArray<juce::Component> contents;
+    std::vector<DeviceLayout::Column> columns;
+    const juce::StringArray names { "Alpha Part", "Bravo Part", "Charlie Part", "Delta Part", "Echo Part" };
+
+    for (const auto& name : names)
+        columns.push_back ({ { name, contents.add (new juce::Component()), 200, 120, 120 } });
+
+    DeviceLayout layout (editor, std::move (columns));
+    phazite::test::TestWindow window (editor, 220, 240);
+    layout.layOut ({ 0, 0, 220, 240 });
+    REQUIRE (layout.getNumPages() == 5);
+    const auto inBar = layout.getNumPagesInBar();
+    REQUIRE (inBar >= 1);
+    REQUIRE (inBar < 5);
+
+    // Each tab in the bar whole, as wide as its name at least; the others hidden; the More tab after them, in the bar.
+    const auto font = juce::Font (juce::FontOptions (phazite::ui::TextSize::small));
+    auto* more = layout.getMoreTab();
+    REQUIRE (more != nullptr);
+    CHECK (more->isVisible());
+    CHECK (more->getTitle() == "More Pages");
+    CHECK_FALSE (more->getToggleState());
+
+    for (int page = 0; page < 5; ++page)
+    {
+        CAPTURE (page);
+        auto* tab = layout.getPageTab (page);
+        REQUIRE (tab != nullptr);
+        CHECK (tab->isVisible() == (page < inBar));
+        CHECK (tab->getTitle() == names[page]);
+
+        if (page < inBar)
+        {
+            CHECK ((float) tab->getWidth() >= juce::GlyphArrangement::getStringWidth (font, names[page]));
+            CHECK (tab->getRight() <= more->getX());
+        }
+    }
+
+    CHECK (more->getRight() <= 220);
+
+    // Its menu: the hidden pages in order, none ticked while a page of the bar shows.
+    const auto describe = [&layout]
+    {
+        juce::StringArray items;
+        const auto menu = layout.getMorePagesMenu();
+
+        for (juce::PopupMenu::MenuItemIterator item (menu); item.next();)
+            items.add (item.getItem().text + (item.getItem().isTicked ? " (ticked)" : ""));
+
+        return items;
+    };
+
+    juce::StringArray hidden;
+
+    for (int page = inBar; page < 5; ++page)
+        hidden.add (names[page]);
+
+    CHECK (describe() == hidden);
+
+    // Choosing the last shows its parts; the More tab reads as its name, lit, and its menu ticks it.
+    auto menu = layout.getMorePagesMenu();
+    juce::PopupMenu::MenuItemIterator last (menu);
+    const juce::PopupMenu::Item* chosen = nullptr;
+
+    while (last.next())
+        chosen = &last.getItem();
+
+    REQUIRE (chosen != nullptr);
+    REQUIRE (chosen->action != nullptr);
+    chosen->action();
+    CHECK (layout.getShownPage() == 4);
+    CHECK (contents[4]->isVisible());
+    CHECK_FALSE (contents[0]->isVisible());
+    CHECK (more->getButtonText() == "Echo Part");
+    CHECK (more->getToggleState());
+    CHECK (more->getTitle().contains ("Echo Part"));
+    CHECK (more->getRight() <= 220);
+    CHECK (describe().contains ("Echo Part (ticked)"));
+
+    // The keyboard reaches every page: the arrows along the bar to the More tab, whose menu Space shows.
+    const auto press = [] (juce::Component& tab, int key) { return tab.keyPressed (juce::KeyPress (key)); };
+    auto* first = layout.getPageTab (0);
+    first->grabKeyboardFocus();
+    REQUIRE (first->hasKeyboardFocus (false));
+
+    for (int page = 1; page < layout.getNumPagesInBar(); ++page)
+    {
+        CHECK (press (*layout.getPageTab (page - 1), juce::KeyPress::rightKey));
+        CHECK (layout.getPageTab (page)->hasKeyboardFocus (false));
+    }
+
+    press (*layout.getPageTab (layout.getNumPagesInBar() - 1), juce::KeyPress::rightKey);
+    CHECK (more->hasKeyboardFocus (false));
+    press (*more, juce::KeyPress::leftKey);
+    CHECK (layout.getPageTab (layout.getNumPagesInBar() - 1)->hasKeyboardFocus (false));
+    more->grabKeyboardFocus();
+    REQUIRE (juce::Component::getCurrentlyModalComponent() == nullptr);
+    CHECK (press (*more, juce::KeyPress::spaceKey));
+    phazite::test::dispatchPendingMessages(); // a button's click by a key comes as a message
+    CHECK (juce::Component::getCurrentlyModalComponent() != nullptr);
+    juce::PopupMenu::dismissAllActiveMenus();
+    phazite::test::dispatchPendingMessages();
+
+    // A page of the bar shown by its tab: the More tab is its icon alone again.
+    layout.getPageTab (0)->triggerClick();
+    phazite::test::dispatchPendingMessages();
+    CHECK (layout.getShownPage() == 0);
+    CHECK (more->getButtonText().isEmpty());
+    CHECK_FALSE (more->getToggleState());
+
+    // With room for every tab, no More tab.
+    juce::Component wideEditor, a, b;
+    DeviceLayout wide (wideEditor, { { { "A", &a, 200, 120, 120 } }, { { "B", &b, 200, 120, 120 } } });
+    wide.layOut ({ 0, 0, 300, 240 });
+    REQUIRE (wide.getNumPages() == 2);
+    CHECK (wide.getNumPagesInBar() == 2);
+    CHECK_FALSE (wide.getMoreTab()->isVisible());
+    CHECK (wide.getPageTab (1)->isVisible());
+}
+
+TEST_CASE ("A part's switch shows in its tab where its column shows its parts under tabs, and switches it there, one undo step")
+{
+    using phazite::devices::Saturator;
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto saturator = song.addEffect (song.firstTrack, Saturator::typeID);
+    auto editor = phazite::ui::createDeviceEditor (phazite::getDeviceHandle (song.context, saturator));
+    auto* base = dynamic_cast<phazite::ui::DeviceEditorBase*> (editor.get());
+    REQUIRE (base != nullptr);
+
+    // As short as it goes: its Band and Quality under tabs.
+    phazite::test::TestWindow window (*editor, base->getWidthForHeight (0), base->getMinimumHeight());
+    auto& layout = base->getLayout();
+    constexpr int column = 2, band = 0, quality = 1;
+    REQUIRE (layout.getTitle (column, band) == "Band");
+    REQUIRE (layout.usesTabs (column));
+    phazite::test::checkChildrenApart (*editor);
+
+    auto* tab = layout.getPartTab (column, band);
+    auto* partSwitch = base->findControl ("band");
+    REQUIRE (tab != nullptr);
+    REQUIRE (partSwitch != nullptr);
+    CHECK (partSwitch->getParentComponent() == tab);
+    CHECK (partSwitch->isShowing());
+    CHECK (partSwitch->getX() < tab->getWidth() / 2); // at its left
+    CHECK (partSwitch->getTitle() == "Band");
+    CHECK (phazite::ui::ParameterMenuClicks::getMenuOf (*partSwitch).getNumItems() > 0); // a right-click's menu: Automate, Modulate
+
+    // A click on the switch switches the Band, one undo step, and leaves the part shown as it was.
+    layout.showPart (column, quality);
+    const phazite::ParameterRef parameter { saturator, "band" };
+    const auto before = phazite::getValueSetByHand (s, parameter);
+    s.getUndoManager().clearUndoHistory();
+    phazite::test::Mouse (*partSwitch).click (partSwitch->getLocalBounds().getCentre());
+    CHECK (phazite::getValueSetByHand (s, parameter) != doctest::Approx (before));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Band"));
+    CHECK (layout.getShownPart (column) == quality);
+
+    // Off, its tab's name is faint, as its title would be.
+    if (phazite::getValueSetByHand (s, parameter) > 0.5f)
+        phazite::test::Mouse (*partSwitch).click (partSwitch->getLocalBounds().getCentre());
+
+    CHECK (phazite::getValueSetByHand (s, parameter) < 0.5f);
+    CHECK (layout.isPartOff (column, band));
+    CHECK_FALSE (layout.isPartOff (column, quality));
+
+    // A click beside it shows the part, and switches nothing.
+    const auto value = phazite::getValueSetByHand (s, parameter);
+    phazite::test::Mouse (*tab).click ({ tab->getWidth() - 4, tab->getHeight() / 2 });
+    CHECK (layout.getShownPart (column) == band);
+    CHECK (phazite::getValueSetByHand (s, parameter) == doctest::Approx (value));
+
+    // Tall enough for its parts stacked: the switch back at its title's right end.
+    editor->setSize (base->getWidthForHeight (0), base->getHeightForWidth (base->getWidthForHeight (0)));
+    CHECK_FALSE (layout.usesTabs (column));
+    CHECK (partSwitch->getParentComponent() == editor.get());
+    CHECK (partSwitch->isShowing());
+    phazite::test::checkChildrenApart (*editor);
+    editor = nullptr; // before its song
+}
+
+TEST_CASE ("Every editor's parts are titled in Title Case, as the look's section titles are, and drawn as given")
+{
+    // The frame drew them in capitals (docs/vscode-look.md: section titles in Title Case, as the Modern UI writes them).
+    const juce::StringArray smallWords { "a", "an", "and", "as", "at", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with" };
+    const auto isTitleCase = [&smallWords] (const juce::String& title)
+    {
+        const auto words = juce::StringArray::fromTokens (title, " ", "");
+
+        for (int w = 0; w < words.size(); ++w)
+        {
+            const auto& word = words[w];
+
+            if (w > 0 && smallWords.contains (word.toLowerCase()))
+            {
+                if (word != word.toLowerCase())
+                    return false;
+            }
+            else if (juce::CharacterFunctions::isLetter (word[0]) && ! juce::CharacterFunctions::isUpperCase (word[0]))
+            {
+                return false;
+            }
+        }
+
+        return title.isNotEmpty();
+    };
+
+    CHECK (isTitleCase ("Sub and Noise"));
+    CHECK (isTitleCase ("LFO 1"));
+    CHECK_FALSE (isTitleCase ("Sub And Noise"));
+    CHECK_FALSE (isTitleCase ("filter"));
+
+    for (const auto* info : phazite::getOwnDevices())
+    {
+        CAPTURE (std::string (info->name));
+        SongWithDevice song (std::string (info->typeID).c_str());
+        auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*song.song, song.id));
+        REQUIRE (editor != nullptr);
+
+        if (const auto* base = dynamic_cast<const phazite::ui::DeviceEditorBase*> (editor.get()))
+        {
+            for (int mode = 0; mode < base->getNumLayouts(); ++mode)
+            {
+                const auto& layout = base->getModeLayout (mode);
+
+                for (int column = 0; column < layout.getNumColumns(); ++column)
+                {
+                    for (int part = 0; part < layout.getNumParts (column); ++part)
+                    {
+                        CAPTURE (layout.getTitle (column, part));
+                        CHECK (isTitleCase (layout.getTitle (column, part)));
+
+                        if (auto* tab = layout.getPartTab (column, part))
+                            CHECK (tab->getButtonText() == layout.getTitle (column, part)); // a tab's text as given too
+                    }
+                }
+            }
+        }
+
+        editor = nullptr; // before its song
+    }
+}
+
 TEST_CASE ("A right-click on a switch, a list, a choice's button or tab, or a part's switch shows its parameter's menu, a knob's "
            "but for Type a Value...; a left click still switches or chooses, one undo step")
 {

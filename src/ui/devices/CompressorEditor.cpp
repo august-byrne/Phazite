@@ -261,8 +261,8 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
 
     // Transient: the history, beside its punch and sustain, large, over its speed, makeup and low cut.
     const auto punchAndSustain = makeControlsPart ("Transient", { "punch", "sustain" }, 0, ParameterControls::Size::large);
-    auto transientKnobs = makeControlsPart ("Ear and Out", { "speed", "makeup", "keyLowCut" }, 0, ParameterControls::Size::compact,
-                                            { "Speed", "Out", "Low Cut" });
+    auto transientKnobs = makeControlsPart ("Ear and Out", { "speed", "keyLowCut", "makeup" }, 0, ParameterControls::Size::compact,
+                                            { "Speed", "Low Cut", "Out" });
 
     const DeviceLayout::Part charactersPart { .title = "Character",
                                               .content = &shownCharacters,

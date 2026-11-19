@@ -337,8 +337,8 @@ StereoEditor::StereoEditor (const DeviceHandle& handle)
     // In the order the sound goes through them: four side by side are wider than the dock, so Bass under Width and Output
     // under Sides.
     const auto widthPart = makeControlsPart ("Width", { "width", "spread" }, 2, ParameterControls::Size::large);
-    const auto bass =
-        makeControlsPart ("Bass", { "bassMono", "bassMonoFrequency" }, 2, ParameterControls::Size::compact, { "Bass Mono", "Frequency" });
+    auto bass = makeControlsPart ("Bass", { "bassMonoFrequency" }, 1, ParameterControls::Size::compact, { "Frequency" });
+    bass.titleSwitch = &makePartSwitch ("bassMono", *bass.content); // Bass Mono switches the part, at its title
     const auto sides = makeControlsPart ("Sides", { "balance", "mono", "swap", "invertLeft", "invertRight" }, 3,
                                          ParameterControls::Size::compact, { "Balance", "Mono", "Swap", "Flip Left", "Flip Right" });
     const auto output = makeControlsPart ("Output", { "dcFilter", "gain" }, 2, ParameterControls::Size::compact, { "DC Filter", "Gain" });

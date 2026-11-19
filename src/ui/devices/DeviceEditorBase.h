@@ -35,6 +35,10 @@ public:
     // How its parts are laid out: its mode's, for a device with modes (setModes()).
     DeviceLayout& getLayout() const noexcept { return *layouts[(size_t) shownMode]; }
 
+    // Every mode's layout, shown or not: one, for a device without modes (for tests).
+    int getNumLayouts() const noexcept { return (int) layouts.size(); }
+    const DeviceLayout& getModeLayout (int mode) const { return *layouts[(size_t) mode]; }
+
     // For a device with modes: its modes' tabs along its top (nullptr for one without), and the mode whose parts show.
     ChoiceTabs* getModeTabs() const noexcept { return modeTabs; }
     int getShownMode() const noexcept { return shownMode; }

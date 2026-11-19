@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceLayout.h"
+#include "ui/theme/DesignTokens.h"
+#include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
+#include <functional>
+#include <memory>
 #include <numeric>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -13,21 +18,59 @@ namespace
     constexpr int tabBarHeight = 22, sideTabHeight = 24;
 
     // A page's tab, as a view area's tabs are (LookAndFeel::drawTabButton()), smaller: a pill behind the page that shows and
-    // under the pointer, its name brighter.
+    // under the pointer, its name brighter. Never narrower than its name. The arrows move the keyboard focus along the bar, and
+    // Space clicks it, as Enter does. The bar's More tab shows its icon after its name, which is the page shown while that is
+    // one of those in its menu, and none otherwise.
     class PageTab : public juce::Button
     {
     public:
-        explicit PageTab (const juce::String& name)
-            : juce::Button (name)
+        PageTab (const juce::String& name, bool isMoreTab)
+            : juce::Button (name),
+              more (isMoreTab)
         {
-            setTitle (name);
-            setTooltip ("Shows " + name);
-            setClickingTogglesState (true);
+            setWantsKeyboardFocus (true);
+            setMouseClickGrabsKeyboardFocus (false); // a click leaves the keys where they were: Space still plays
+
+            if (more)
+            {
+                setTitle ("More Pages");
+                setTooltip ("More pages: those whose tabs don't fit");
+            }
+            else
+            {
+                setTitle (name);
+                setTooltip ("Shows " + name);
+                setClickingTogglesState (true);
+            }
         }
+
+        std::function<void (int)> onArrow; // -1 left, 1 right
 
         int getIdealWidth() const
         {
-            return juce::roundToInt (juce::GlyphArrangement::getStringWidth (getFont(), getButtonText())) + 2 * TabTint::pageTextInset;
+            const auto textWidth =
+                getButtonText().isEmpty() ? 0 : juce::roundToInt (juce::GlyphArrangement::getStringWidth (getFont(), getButtonText()));
+            const auto iconWidth = more ? juce::roundToInt (TabTint::pageMoreIcon) + (textWidth > 0 ? Space::xs : 0) : 0;
+            return textWidth + iconWidth + 2 * TabTint::pageTextInset;
+        }
+
+        bool keyPressed (const juce::KeyPress& key) override
+        {
+            if (key.isKeyCode (juce::KeyPress::leftKey) || key.isKeyCode (juce::KeyPress::rightKey))
+            {
+                if (onArrow != nullptr)
+                    onArrow (key.isKeyCode (juce::KeyPress::leftKey) ? -1 : 1);
+
+                return true;
+            }
+
+            if (key.isKeyCode (juce::KeyPress::spaceKey))
+            {
+                triggerClick();
+                return true;
+            }
+
+            return juce::Button::keyPressed (key);
         }
 
         void paintButton (juce::Graphics& g, bool isMouseOver, bool isMouseDown) override
@@ -49,19 +92,109 @@ namespace
                 g.drawRoundedRectangle (pill.reduced (0.5f), cornerRadius, 1.0f);
             }
 
-            g.setColour (front ? p.textBright : isMouseOver ? p.text : p.textMuted);
+            const auto ink = front ? p.textBright : isMouseOver ? p.text : p.textMuted;
+            auto inside = pill.reduced ((float) TabTint::pageTextInset, 0.0f);
+
+            if (more)
+                icon.draw (
+                    g, inside.removeFromRight (TabTint::pageMoreIcon).withSizeKeepingCentre (TabTint::pageMoreIcon, TabTint::pageMoreIcon),
+                    ink);
+
+            g.setColour (ink);
             g.setFont (getFont());
-            g.drawText (getButtonText(), pill, juce::Justification::centred, false);
+            g.drawText (getButtonText(), more ? inside : pill, juce::Justification::centred, true);
         }
 
     private:
+        bool more;
+        TintedIcon icon { Icon::moreActions }; // as a view's tools' More button (ToolRow.h)
+
         static juce::Font getFont() { return juce::Font (juce::FontOptions (TextSize::small)); }
+    };
+
+    // A part's tab, where its column shows its parts one at a time: a button of a row or a list, as a choice's. A part that can
+    // be switched off has its switch here, at the tab's left, as small as in its title, and its name faint while it is off; a
+    // click on the switch switches it, and one beside it shows the part.
+    class PartTab : public juce::TextButton
+    {
+    public:
+        PartTab (const juce::String& name, juce::Button* switchOfPart)
+            : juce::TextButton (name),
+              partSwitch (switchOfPart)
+        {
+            setTitle (name);
+            setTooltip ("Shows " + name);
+        }
+
+        bool isPartOff() const { return partSwitch != nullptr && ! partSwitch->getToggleState(); }
+
+        // Its part's switch, if it has one, into it, as it shows.
+        void holdSwitch()
+        {
+            if (partSwitch == nullptr)
+                return;
+
+            addAndMakeVisible (*partSwitch);
+            resized();
+        }
+
+        void resized() override
+        {
+            if (partSwitch != nullptr && partSwitch->getParentComponent() == this)
+                partSwitch->setBounds (getSwitchArea());
+        }
+
+        void paintButton (juce::Graphics& g, bool isMouseOver, bool isMouseDown) override
+        {
+            auto& lf = getLookAndFeel();
+            lf.drawButtonBackground (g, *this, findColour (getToggleState() ? buttonOnColourId : buttonColourId), isMouseOver, isMouseDown);
+
+            auto area = getLocalBounds().reduced (Space::xs, 0);
+
+            if (partSwitch != nullptr)
+                area.setLeft (getSwitchArea().getRight() + Space::xs);
+
+            g.setFont (lf.getTextButtonFont (*this, getHeight()));
+            g.setColour (findColour (getToggleState() ? textColourOnId : textColourOffId)
+                             .withMultipliedAlpha (isPartOff() ? SwitchTint::partOff : 1.0f));
+            g.drawFittedText (getButtonText(), area, juce::Justification::centred, 1);
+        }
+
+    private:
+        juce::Component::SafePointer<juce::Button> partSwitch;
+
+        juce::Rectangle<int> getSwitchArea() const
+        {
+            const auto size = std::min (DeviceLayout::titleHeight, getHeight());
+            return getLocalBounds().withTrimmedLeft (Space::xs).removeFromLeft (size).withSizeKeepingCentre (size, size);
+        }
+    };
+
+    // A part's switch heard as it switches (a click, an undo, automation as the ticker brings it up to date): its title or
+    // tab shows it.
+    struct SwitchWatch : private juce::Value::Listener
+    {
+        SwitchWatch (juce::Button& button, std::function<void()> switched)
+            : state (button.getToggleStateValue()), // the button's own, not the song's: the same value, shared
+              onSwitched (std::move (switched))
+        {
+            state.addListener (this);
+        }
+
+        ~SwitchWatch() override { state.removeListener (this); }
+
+    private:
+        juce::Value state;
+        std::function<void()> onSwitched;
+
+        void valueChanged (juce::Value&) override { onSwitched(); }
     };
 } // namespace
 
 struct DeviceLayout::ColumnState
 {
-    juce::OwnedArray<juce::TextButton> tabs;
+    juce::OwnedArray<PartTab> tabs;
+    std::vector<std::unique_ptr<SwitchWatch>> switchWatches;
     std::vector<juce::Rectangle<int>> titles; // the parts' titles, while stacked
     juce::Rectangle<int> area;                // none while its page doesn't show
     juce::String name;                        // its page's, where it leads one
@@ -95,15 +228,30 @@ DeviceLayout::DeviceLayout (juce::Component& e, std::vector<Column> c)
                 editor.addAndMakeVisible (part.content);
             }
 
+            auto* partSwitch = dynamic_cast<juce::Button*> (part.titleSwitch);
+            jassert ((partSwitch == nullptr) == (part.titleSwitch == nullptr)); // a switch is a button
+
             if (part.titleSwitch != nullptr)
                 editor.addChildComponent (part.titleSwitch);
+
+            // As it switches, its title, or its tab, faint or not.
+            if (partSwitch != nullptr)
+                state->switchWatches.push_back (std::make_unique<SwitchWatch> (*partSwitch,
+                                                                               [this, column = i, index = p]
+                                                                               {
+                                                                                   const auto& switched = *states[column];
+
+                                                                                   if (index < switched.titles.size())
+                                                                                       editor.repaint (switched.titles[index]);
+
+                                                                                   if (auto* tab = switched.tabs[(int) index])
+                                                                                       tab->repaint();
+                                                                               }));
 
             // Tabs only for a column of several parts.
             if (columns[i].size() > 1)
             {
-                auto* tab = state->tabs.add (new juce::TextButton (part.title));
-                tab->setTitle (part.title);
-                tab->setTooltip ("Shows " + part.title);
+                auto* tab = state->tabs.add (new PartTab (part.title, partSwitch));
                 tab->setClickingTogglesState (true);
                 tab->setRadioGroupId (group);
                 tab->setToggleState (p == 0, juce::dontSendNotification);
@@ -114,6 +262,13 @@ DeviceLayout::DeviceLayout (juce::Component& e, std::vector<Column> c)
 
         states.push_back (std::move (state));
     }
+
+    // The pages' More tab, which shows as the bar runs out of room.
+    auto more = std::make_unique<PageTab> (juce::String(), true);
+    more->onClick = [this] { showMorePagesMenu(); };
+    more->onArrow = [this, tab = more.get()] (int step) { moveFocusAlongBar (*tab, step); };
+    editor.addChildComponent (*more);
+    moreTab = std::move (more);
 }
 
 DeviceLayout::~DeviceLayout() = default;
@@ -444,18 +599,8 @@ void DeviceLayout::layOut (juce::Rectangle<int> area)
         return;
     }
 
-    auto bar = area.removeFromTop (pageBarHeight);
+    placePageBar (area.removeFromTop (pageBarHeight));
     area.removeFromTop (Space::xs);
-
-    for (int i = 0; i < pageTabs.size(); ++i)
-    {
-        auto* tab = pageTabs[i];
-        const auto width = static_cast<PageTab*> (tab)->getIdealWidth();
-        tab->setToggleState (i == shownPage, juce::dontSendNotification);
-        tab->setVisible (true);
-        tab->setBounds (bar.removeFromLeft (std::min (width, std::max (0, bar.getWidth()))));
-        bar.removeFromLeft (Space::xs);
-    }
 
     const auto& shown = pages[(size_t) shownPage];
 
@@ -473,6 +618,125 @@ void DeviceLayout::hide()
 
     for (auto* tab : pageTabs)
         tab->setVisible (false);
+
+    moreTab->setVisible (false);
+}
+
+void DeviceLayout::placePageBar (juce::Rectangle<int> bar)
+{
+    // Every page's tab, each as wide as its name, where they all fit; otherwise as many as fit before the More tab, which holds
+    // the rest, and reads as the page shown while that is one of them.
+    const auto count = pageTabs.size();
+    std::vector<int> widths;
+    auto all = 0;
+
+    for (int i = 0; i < count; ++i)
+    {
+        widths.push_back (static_cast<PageTab*> (pageTabs[i])->getIdealWidth());
+        all += (i > 0 ? Space::xs : 0) + widths.back();
+    }
+
+    auto* more = static_cast<PageTab*> (moreTab.get());
+    const auto fitting = [&] (int moreWidth)
+    {
+        auto used = moreWidth, n = 0;
+
+        while (n < count && used + widths[(size_t) n] + Space::xs <= bar.getWidth())
+            used += widths[(size_t) n++] + Space::xs;
+
+        return n;
+    };
+
+    pagesInBar = count;
+    more->setButtonText ({});
+
+    if (all > bar.getWidth())
+    {
+        pagesInBar = fitting (more->getIdealWidth());
+
+        if (shownPage >= pagesInBar)
+        {
+            more->setButtonText (getPageName (shownPage));
+            pagesInBar = fitting (more->getIdealWidth());
+        }
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto* tab = pageTabs[i];
+        tab->setToggleState (i == shownPage, juce::dontSendNotification);
+        tab->setVisible (i < pagesInBar);
+
+        if (i < pagesInBar)
+        {
+            tab->setBounds (bar.removeFromLeft (widths[(size_t) i]));
+            bar.removeFromLeft (Space::xs);
+        }
+    }
+
+    const auto overflows = pagesInBar < count;
+    const auto hiddenShown = overflows && shownPage >= pagesInBar;
+    more->setTitle (hiddenShown ? "More Pages: " + getPageName (shownPage) : juce::String ("More Pages"));
+    more->setToggleState (hiddenShown, juce::dontSendNotification);
+    more->setVisible (overflows);
+
+    if (overflows)
+        more->setBounds (bar.removeFromLeft (std::min (more->getIdealWidth(), bar.getWidth())));
+}
+
+juce::PopupMenu DeviceLayout::getMorePagesMenu()
+{
+    // Its items call back into the layout once the menu has closed: only while its More tab, which it owns, is there.
+    juce::PopupMenu menu;
+    const juce::Component::SafePointer<juce::Component> tab (moreTab.get());
+
+    for (int i = pagesInBar; i < getNumPages(); ++i)
+        menu.addItem (getPageName (i), true, i == shownPage,
+                      [this, tab, i]
+                      {
+                          if (tab != nullptr)
+                              showPage (i);
+                      });
+
+    return menu;
+}
+
+void DeviceLayout::showMorePagesMenu()
+{
+    getMorePagesMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (moreTab.get()));
+}
+
+void DeviceLayout::moveFocusAlongBar (const juce::Component& from, int step)
+{
+    // The bar's tabs in order, the More tab last, those showing.
+    std::vector<juce::Component*> bar;
+
+    for (auto* tab : pageTabs)
+        if (tab->isVisible())
+            bar.push_back (tab);
+
+    if (moreTab->isVisible())
+        bar.push_back (moreTab.get());
+
+    const auto at = std::find (bar.begin(), bar.end(), &from);
+
+    if (at == bar.end())
+        return;
+
+    const auto index = (int) std::distance (bar.begin(), at) + step;
+
+    if (juce::isPositiveAndBelow (index, (int) bar.size()))
+        bar[(size_t) index]->grabKeyboardFocus();
+}
+
+juce::Button* DeviceLayout::getPageTab (int page) const
+{
+    return pageTabs[page];
+}
+
+juce::Button* DeviceLayout::getMoreTab() const noexcept
+{
+    return pages.empty() ? nullptr : moreTab.get();
 }
 
 void DeviceLayout::hide (size_t index)
@@ -493,10 +757,17 @@ void DeviceLayout::hide (size_t index)
 
 void DeviceLayout::hideSwitches (size_t index)
 {
-    // Under tabs, a part has no title to hold its switch, nor while its page doesn't show.
+    // While its page doesn't show.
     for (auto& part : columns[index])
         if (part.titleSwitch != nullptr)
             part.titleSwitch->setVisible (false);
+}
+
+void DeviceLayout::putSwitchesInTabs (size_t index)
+{
+    // Under tabs, a part's switch is in its tab, which shows whether it is on.
+    for (auto* tab : states[index]->tabs)
+        tab->holdSwitch();
 }
 
 void DeviceLayout::setPages (std::vector<std::vector<size_t>> newPages)
@@ -505,10 +776,13 @@ void DeviceLayout::setPages (std::vector<std::vector<size_t>> newPages)
         newPages.clear();
 
     if (newPages == pages)
-        return;
+        return; // the bar as it is: its More tab keeps the focus it may have
+
+    moreTab->setVisible (false); // until the bar is placed, if it shows
 
     pages = std::move (newPages);
     pageTabs.clear();
+    pagesInBar = 0;
     shownPage = juce::jlimit (0, std::max (0, (int) pages.size() - 1), shownPage);
 
     static int nextRadioGroup = 0x1a6e0000; // each layout's page tabs a group of their own
@@ -516,9 +790,11 @@ void DeviceLayout::setPages (std::vector<std::vector<size_t>> newPages)
 
     for (int i = 0; i < (int) pages.size(); ++i)
     {
-        auto* tab = pageTabs.add (new PageTab (getPageName (i)));
+        auto* tab = new PageTab (getPageName (i), false);
+        pageTabs.add (tab);
         tab->setRadioGroupId (group);
         tab->onClick = [this, i] { showPage (i); };
+        tab->onArrow = [this, tab] (int step) { moveFocusAlongBar (*tab, step); };
         editor.addChildComponent (tab);
     }
 }
@@ -585,9 +861,12 @@ void DeviceLayout::placeStack (int index, juce::Rectangle<int> area)
 
         state.titles.push_back (area.removeFromTop (titleHeight));
 
-        // Its switch at its title's right end.
+        // Its switch at its title's right end (back from its tab, if it was under tabs).
         if (part.titleSwitch != nullptr)
         {
+            if (part.titleSwitch->getParentComponent() != &editor)
+                editor.addChildComponent (part.titleSwitch);
+
             part.titleSwitch->setVisible (true);
             part.titleSwitch->setBounds (
                 state.titles.back().removeFromRight (titleHeight + Space::xs).withSizeKeepingCentre (titleHeight, titleHeight));
@@ -609,7 +888,7 @@ void DeviceLayout::placeStack (int index, juce::Rectangle<int> area)
 
 void DeviceLayout::placeTabs (int index, juce::Rectangle<int> area)
 {
-    hideSwitches ((size_t) index);
+    putSwitchesInTabs ((size_t) index);
     auto& column = columns[(size_t) index];
     auto& state = *states[(size_t) index];
     state.tabbed = true;
@@ -649,7 +928,7 @@ void DeviceLayout::placeTabs (int index, juce::Rectangle<int> area)
 
 void DeviceLayout::placeSideTabs (int index, juce::Rectangle<int> area)
 {
-    hideSwitches ((size_t) index);
+    putSwitchesInTabs ((size_t) index);
     auto& column = columns[(size_t) index];
     auto& state = *states[(size_t) index];
     state.tabbed = true;
@@ -700,13 +979,46 @@ void DeviceLayout::paint (juce::Graphics& g) const
             g.fillRect (state.area.getX() - columnGap / 2, state.area.getY(), 1, state.area.getHeight());
         }
 
-        g.setColour (p.textMuted);
+        // Its parts' titles as given, in Title Case, as the look's pane headers are (SectionHeader.h): semibold, in the text
+        // colour; faint while the part is off.
         g.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
 
         for (size_t t = 0; t < state.titles.size() && t < columns[i].size(); ++t)
-            if (! state.titles[t].isEmpty())
-                g.drawText (columns[i][t].title.toUpperCase(), state.titles[t], juce::Justification::centredLeft, true);
+        {
+            if (state.titles[t].isEmpty())
+                continue;
+
+            g.setColour (p.text.withMultipliedAlpha (isPartOff ((int) i, (int) t) ? SwitchTint::partOff : 1.0f));
+            g.drawText (getTitle ((int) i, (int) t), state.titles[t], juce::Justification::centredLeft, true);
+        }
     }
+}
+
+int DeviceLayout::getNumParts (int column) const
+{
+    return juce::isPositiveAndBelow (column, (int) columns.size()) ? (int) columns[(size_t) column].size() : 0;
+}
+
+juce::String DeviceLayout::getTitle (int column, int part) const
+{
+    if (! juce::isPositiveAndBelow (part, getNumParts (column)))
+        return {};
+
+    return columns[(size_t) column][(size_t) part].title;
+}
+
+juce::Button* DeviceLayout::getPartTab (int column, int part) const
+{
+    return juce::isPositiveAndBelow (column, (int) states.size()) ? states[(size_t) column]->tabs[part] : nullptr;
+}
+
+bool DeviceLayout::isPartOff (int column, int part) const
+{
+    if (! juce::isPositiveAndBelow (part, getNumParts (column)))
+        return false;
+
+    const auto* partSwitch = dynamic_cast<const juce::Button*> (columns[(size_t) column][(size_t) part].titleSwitch);
+    return partSwitch != nullptr && ! partSwitch->getToggleState();
 }
 
 bool DeviceLayout::usesTabs (int column) const

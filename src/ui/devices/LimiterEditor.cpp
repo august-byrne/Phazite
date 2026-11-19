@@ -81,7 +81,7 @@ LimiterEditor::LimiterEditor (const DeviceHandle& handle)
     shownAgain();
 
     const auto gain = makeControlsPart ("Gain", { "gain" }, 1, ParameterControls::Size::large);
-    const auto limit = makeControlsPart ("Limit", { "ceiling", "release" }, 2);
+    const auto limit = makeControlsPart ("Limit", { "release", "ceiling" }, 2);
     setParts ({ { { "History", &shown, 280 + LimiterDisplay::getMetersWidth(), 200, 96, true,
                     GraphTint::minimumWidth + LimiterDisplay::getMetersWidth() } },
                 { gain, limit } });

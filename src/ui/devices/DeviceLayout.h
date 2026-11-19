@@ -7,7 +7,9 @@
 // its graphs narrow first, down to their least; narrower still, the columns wrap into rows, every part showing, where the
 // height there is takes them; where it doesn't, they show in pages, as many columns on each as fit side by side, one page at
 // a time under a bar of their names (the one chosen stays chosen), each part under its title still (the owner, 2026-11-06:
-// every block that works in its own way names itself), so that the editor fits the dock without scrolling.
+// every block that works in its own way names itself), so that the editor fits the dock without scrolling. The bar shows the
+// pages' names that fit whole; the rest are in its More tab's menu, as a view's tools overflow into More (ToolRow.h). A part
+// that can be switched off keeps its switch under tabs, in its tab. Titles are drawn as given, in Title Case.
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -22,14 +24,15 @@ class DeviceLayout
 public:
     struct Part
     {
-        juce::String title;                     // shown over it, or on its tab
+        juce::String title;                     // shown over it, or on its tab, as given: in Title Case ("Sub and Noise")
         juce::Component* content = nullptr;     // the editor's
         int width = 0;                          // its width,
         int height = 0;                         // the height it wants,
         int minimumHeight = 0;                  // and the least it takes (as much, unless it shrinks); titles not included
         bool grows = false;                     // takes what the column has left over (a graph)
         int minimumWidth = 0;                   // the least width it narrows to (a graph's); 0 for one as wide always
-        juce::Component* titleSwitch = nullptr; // at its title's right end: what switches it on or off (a PowerSwitch)
+        juce::Component* titleSwitch = nullptr; // what switches it on or off (a juce::Button: a PowerSwitch): at its title's right
+                                                // end, or under tabs at its tab's left, its title or tab faint while it is off
     };
 
     using Column = std::vector<Part>;
@@ -68,6 +71,14 @@ public:
     int getShownPart (int column) const;
     void showPart (int column, int part);
 
+    // Its columns and their parts' titles, as given and as drawn (for tests); a part's tab, while its column has tabs, or
+    // nullptr; and whether a part is off: it has a switch, off, which shows its title or tab faint.
+    int getNumColumns() const noexcept { return (int) columns.size(); }
+    int getNumParts (int column) const;
+    juce::String getTitle (int column, int part) const;
+    juce::Button* getPartTab (int column, int part) const;
+    bool isPartOff (int column, int part) const;
+
     // Whether it shows its columns in pages now, how many, and the one it shows; and another one shown (its bar's click). A
     // page is named by its columns: each by its name, or by its first part's title.
     bool usesPages() const noexcept { return pages.size() > 1; }
@@ -75,6 +86,14 @@ public:
     int getShownPage() const noexcept { return shownPage; }
     juce::String getPageName (int page) const;
     void showPage (int);
+
+    // The pages' bar: each page's tab, and its More tab, which holds the pages whose tabs don't fit whole (nullptr while it
+    // shows no pages); how many pages have tabs of their own now, the first so many; and the More tab's menu: the others, by
+    // name, the one shown ticked. While one of them shows, the More tab reads as its name and is lit as a page's tab is.
+    juce::Button* getPageTab (int page) const;
+    juce::Button* getMoreTab() const noexcept;
+    int getNumPagesInBar() const noexcept { return pagesInBar; }
+    juce::PopupMenu getMorePagesMenu();
 
     // Makes a column show one part at a time at any height, with its tabs down its left side, as a list: for many short
     // parts, such as a synth's envelopes, LFOs and modulation.
@@ -101,6 +120,8 @@ private:
     std::vector<std::vector<size_t>> pages; // the columns on each page, while it shows pages; none otherwise
     int shownPage = 0;
     juce::OwnedArray<juce::Button> pageTabs;
+    std::unique_ptr<juce::Button> moreTab;
+    int pagesInBar = 0;
     juce::Rectangle<int> laidOut; // the area it was last laid out in
 
     int getStackHeight (size_t column) const;
@@ -119,6 +140,10 @@ private:
     void placeSideTabs (int column, juce::Rectangle<int>);
     void hide (size_t column);
     void hideSwitches (size_t column);
+    void putSwitchesInTabs (size_t column);
     void setPages (std::vector<std::vector<size_t>>);
+    void placePageBar (juce::Rectangle<int>);
+    void showMorePagesMenu();
+    void moveFocusAlongBar (const juce::Component& from, int step);
 };
 } // namespace phazite::ui
