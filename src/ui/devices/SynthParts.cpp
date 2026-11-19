@@ -543,6 +543,18 @@ juce::Point<float> FilterView::getDotPosition() const
              area.getBottom() - juce::jlimit (0.0f, 1.0f, resonance.getValue()) * area.getHeight() };
 }
 
+void FilterView::setReadoutWord (std::function<juce::String (const std::vector<float>&)> word)
+{
+    readoutWord = std::move (word);
+    repaint();
+}
+
+juce::String FilterView::getReadout() const
+{
+    const auto word = readoutWord != nullptr ? readoutWord (readValues()) : juce::String();
+    return (word.isEmpty() ? juce::String() : word + "  ") + graph::formatFrequency (cutoff.getValue());
+}
+
 void FilterView::tick()
 {
     shownPlaying = playing != nullptr ? playing() : 0.0f;
@@ -591,6 +603,6 @@ void FilterView::paint (juce::Graphics& g)
     if (dot.isLit())
         paintLitRing (g, p, at, GraphTint::levelDotRadius);
 
-    graph::paintReadout (g, p, area, graph::formatFrequency (cutoff.getValue()), juce::Justification::topLeft);
+    graph::paintReadout (g, p, area, getReadout(), juce::Justification::topLeft);
 }
 } // namespace phazite::ui

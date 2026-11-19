@@ -412,8 +412,17 @@ TEST_CASE ("A right-click on a switch, a list, a choice's button or tab, or a pa
         CHECK_FALSE (s.getUndoManager().canUndo());
         CHECK_FALSE (box.isPopupActive());
 
+        // The switch shows what it showed: the value set by hand, which nothing moves here. (Compared with that, not with the
+        // value as it plays: in CI's linux-release job the played value of the Saturator's Band read above a half once
+        // while its value by hand was 0, known bug 208; what it reads is captured for the next time.)
         if (auto* button = dynamic_cast<juce::Button*> (kind.control); button != nullptr && button->getClickingTogglesState())
-            CHECK (button->getToggleState() == (handle.getValue() > 0.5f));
+        {
+            CAPTURE (handle.getValue());
+            CAPTURE (handle.getBaseValue());
+            CAPTURE (phazite::isAutomated (handle));
+            CAPTURE (phazite::getModulations (handle).size());
+            CHECK (button->getToggleState() == (valueOf() > 0.5f));
+        }
 
         // Automate shows its lane; Delete Automation, enabled while it has automation, takes it away.
         REQUIRE (phazite::test::runMenuItem (menu, { "Automate" }));

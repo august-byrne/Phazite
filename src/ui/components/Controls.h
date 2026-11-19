@@ -128,6 +128,12 @@ public:
     void setModulation (std::optional<ModulationRange>);
     const std::optional<ModulationRange>& getModulation() const noexcept { return modulation; }
 
+    // A second ring, dashed, in the same colour: what the device's own modulation moves its value over (the Synth's matrix,
+    // whose slots aren't Phazite's modulators), and while isOn a dot where the device plays it now. Or none. Only shown:
+    // the device's own controls set it.
+    void setOwnModulation (std::optional<ModulationRange>);
+    const std::optional<ModulationRange>& getOwnModulation() const noexcept { return ownModulation; }
+
     // Dragging the ring: whether a modulation can be dragged as the drag starts, then the change of its amount (a part of
     // the range: up is more, a fifth as much with Shift), and its end; or, with Escape in the middle, its being taken back
     // (the drag then does nothing more until the mouse goes up, and doesn't end).
@@ -159,7 +165,7 @@ public:
     void itemDropped (const SourceDetails&) override;
 
 private:
-    std::optional<ModulationRange> modulation;
+    std::optional<ModulationRange> modulation, ownModulation;
     bool draggingRing = false, ringCancelled = false, dropping = false;
     bool target = false; // a modulator dragged now could modulate it
 

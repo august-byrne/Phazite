@@ -125,13 +125,12 @@ download. Its installer is not signed yet (4.3 is in stage 8), which the release
 An audit of the device list came first (2026-11-17): twenty devices become sixteen, each generic and whole, by the
 merges in S6.6, S6.7 and S6.10, and S6.11 and S6.12 widen two more ([decisions.md](design/decisions.md), "Sound and
 devices"). The steps that change the list come first, since the listening sets, the presets and the editors follow it.
-Built, each in the [changelog](changelog.md): S6.3 (the Compressor), S6.4 (the EQ), S6.5 (the Reverb's Hall), S6.2 (the devices' bugs), S6.6 (the Saturator, the Delay and the Filter), the one synth of S6.7,
+Built, each in the [changelog](changelog.md): S6.3 (the Compressor), S6.4 (the EQ), S6.5 (the Reverb's Hall), S6.2 (the devices' bugs), S6.6 (the Saturator, the Delay and the Filter), S6.7 (the Synth),
 S6.10 (Motion), S6.11 (Age) and S6.12 (Stereo).
 
 | Step | Size | What | Done when |
 |---|---|---|---|
 | S6.1 | S | A listening set for each device, and at the end a verdict on each | The set and the verdict are in the device's page under [design/devices](design/devices.md) |
-| S6.7 | M | What is left of it: the Driven filter for the Synth, and its editor's picture of the Warp and of its own matrix. Built: the Synth and the Wavetable as one synth, modulation and the filter gliding between control steps, a Quality of 1x, 2x or 4x for sync and the warps | A swept sync shows no aliasing above the level set; a fast LFO on a resonant filter doesn't step |
 | S6.8 | L | The factory presets redone on the finished devices | The preset report passes ([presets.md](presets.md)) |
 | S6.9 | L | Editors: wrong pictures fixed; one grammar for every graph; the compressor and the multiband set precisely; drum pads sound on the press; Automate and Modulate on switches and handles; analyzers for each channel | Every graph answers the same drags, wheel and double-click |
 

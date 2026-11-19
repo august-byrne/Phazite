@@ -62,6 +62,17 @@ class Filter
 public:
     void reset() noexcept { ic1 = ic2 = 0.0f; }
 
+    // Its two states (its integrators'), for another filter of the same form that takes over the sound it holds: the
+    // Driven loop's (MultimodeFilter), whose states are these.
+    float getState1() const noexcept { return ic1; }
+    float getState2() const noexcept { return ic2; }
+
+    void setStates (float state1, float state2) noexcept
+    {
+        ic1 = state1;
+        ic2 = state2;
+    }
+
     float process (float input, const FilterCoefficients& c) noexcept
     {
         const auto v3 = input - ic2;

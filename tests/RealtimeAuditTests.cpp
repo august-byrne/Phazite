@@ -1395,7 +1395,7 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: Phazite's synth, eight unison voices, stacked and drifting, and warps, an envelope "
                "sweeping each note's table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated, "
-               "its Quality switched")
+               "its Quality and its filter's Character switched")
     {
         using phazite::devices::Synth;
         TestSong song;
@@ -1449,13 +1449,28 @@ TEST_SUITE ("realtime-audit")
             phazite::addPoint (getSong (song), quality, { phazite::BeatPosition::fromBeats (beat + 0.9), position, 0.0f });
         }
 
+        // Its filter Driven near singing, and its Character switched by a lane, Clean and Driven in turn, two beats each, a
+        // half beat off the Quality's changes, so that a crossfade plays while chords sound.
+        set ("filterCharacter", (float) Synth::FilterCharacter::driven);
+        set ("resonance", 0.85f);
+        const phazite::ParameterRef character { wavetable, "filterCharacter" };
+        const auto characters = phazite::getControlTravel (getSong (song), character);
+        REQUIRE (characters.has_value());
+
+        for (int beat = 0; beat < 8; beat += 2)
+        {
+            const auto position = phazite::toControlPosition (*characters, (float) ((beat / 2 + 1) % 2));
+            phazite::addPoint (getSong (song), character, { phazite::BeatPosition::fromBeats (beat + 0.5), position, 0.0f });
+            phazite::addPoint (getSong (song), character, { phazite::BeatPosition::fromBeats (beat + 2.4), position, 0.0f });
+        }
+
         // Chords a sixteenth long, as for the synth's unison.
         addChords (song, track);
 
         const auto m = playAndMeasure (song);
         report ("Phazite's synth, eight unison voices, stacked and drifting, and warps, an envelope sweeping each note's "
                 "table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated, its Quality "
-                "switched",
+                "and its filter's Character switched",
                 m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);

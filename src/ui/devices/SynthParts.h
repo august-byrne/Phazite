@@ -153,6 +153,12 @@ public:
 
     juce::Point<float> getDotPosition() const;
 
+    // A word its readout says before the cutoff, for the values (the Synth's "Driven"), or none.
+    void setReadoutWord (std::function<juce::String (const std::vector<float>& values)>);
+
+    // What its readout says now.
+    juce::String getReadout() const;
+
     void paint (juce::Graphics&) override;
 
 private:
@@ -160,6 +166,7 @@ private:
     std::function<std::vector<float>()> readValues;
     Response magnitude;
     std::function<float()> playing;
+    std::function<juce::String (const std::vector<float>&)> readoutWord;
     float shownPlaying = 0.0f;
     DrawnNumbers drawn;
     GraphDot dot { *this, [this] { return getDotPosition(); } }; // which drags the cutoff and the resonance

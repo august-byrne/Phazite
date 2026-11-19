@@ -56,7 +56,8 @@ In the editor: Voices, Detune, Spread, Stack, Drift, Position. The unison is one
 
 ### Filter
 
-In the editor: Type, Cutoff, Resonance, Slope, Drive, Key; the switch is at the right end of the part's title.
+In the editor: Type, Cutoff, Resonance, Key, then Slope, Drive and the Character's two buttons, Clean and Driven, in the
+rest of that row; the switch is at the right end of the part's title.
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -65,7 +66,8 @@ In the editor: Type, Cutoff, Resonance, Slope, Drive, Key; the switch is at the 
 | Filter Cutoff | 20 Hz to 20 kHz | 2.5 kHz | The filter's frequency before key tracking and modulation move it. |
 | Filter Resonance | 0 to 100 % | 10 % | Sharpens the filter at its cutoff (for each type, as on the [Filter](filter.md) page, but a 12 dB section's Q of its own: see "Filter" below). |
 | Filter Slope | 12 dB, 24 dB | 24 dB | The slope per octave of Low Pass, High Pass, Band Pass and Notch. |
-| Filter Drive | 0 to 24 dB | 0 dB | Saturates what goes into the filter. |
+| Filter Drive | 0 to 24 dB | 0 dB | Saturates what goes into the filter (Clean), or drives the sound into the filter's loop (Driven). |
+| Filter Character | Clean, Driven | Clean | Clean: the filter is linear, the drive before it. Driven (low-pass, high-pass, band-pass and notch; the other types play Clean): the [Filter](filter.md) device's loop, its resonance saturating, singing at its cutoff at the top of the Resonance. |
 | Filter Key Tracking | 0 to 100 % | 50 % | How far the cutoff follows the key, around middle C: at 100 %, a semitone for each semitone. |
 
 ### Amp, Envelope 2 and Envelope 3
@@ -192,6 +194,38 @@ tracking and the slots aimed at it, kept between 20 Hz and 0.45 of the sample ra
 into the filter at twice the sample rate through a per-voice oversampler, the curve played by its antiderivative so that
 what it adds doesn't fold back as aliasing; it fades in and out over two thirds of a millisecond, at any rate.
 
+**Filter Character.** Clean is the filter above. Driven is the [Filter](filter.md) device's loop
+(`dsp::MultimodeFilter::processDriven()`), for the low-pass, the high-pass, the band-pass and the notch at 12 and 24 dB
+(the other types play Clean): a state-variable section whose damping passes through a soft curve, so that a loud sound
+saturates its resonance and, at the top of the Resonance, the loop sings at its cutoff with nothing coming in, from a
+tiny kick, at -12 dBFS. Its Q bends from the Synth's own curve (`dsp::makeDriven()` given `dsp::getSynthResonanceQ()`):
+up to a Resonance of 90 % it is Clean's, so a patch switched to Driven keeps its shape (a quiet sound's response within
+0.5 dB of Clean's up to a quarter of the rate), and above it goes on to singing. Each voice's loop plays at the
+Quality's rate, its coefficients made each control step from the cutoff and resonance the Clean filter gets (key
+tracking and the slots included) and glided across the step as the Clean sections' are: the loop's g, its damping for a
+quiet sound, its band-pass's gain and its section in front's g and damping go in straight lines, and each sample's
+coefficients are worked out from them (a = 1 + g², the bend, the band-pass's mix, the front's a1, a2, a3); a 25 Hz LFO on
+the cutoff of the Driven 24 dB low-pass at a Resonance of 80 % leaves -96 dB under the note. Filter Drive goes into the
+loop and half of it, in decibels, is given back after (a quiet sound comes out half the Drive louder), then each side
+goes through the Filter device's ceiling (`dsp::KneeCurve`) at twice the rate by its integral, as the Clean drive is
+played, at a voice's scale: the sound halved into it and doubled out, so that it is straight up to full scale and rounds
+off to twice it. A voice is louder than a track's sound (two saws in unison at the default Level peak at 1.26, two sines
+at 0.81), and at no Drive the ceiling leaves a voice's shape alone: two sines come out as Clean's, nothing the curve
+would add within 90 dB of the note; two saws' harmonics within 0.03 dB (at the Filter device's scale, straight to half
+of full scale only, it bent them: the sines' harmonics 37 dB under the note, the saws' 2.5 dB off). A full-level sine
+driven 24 dB peaks at 1.82, a resonant saw driven as hard at 2.17 (the band-limited ceiling's overshoot). The Clean
+drive's own curve isn't played in Driven. Key tracking at 100 % and the oscillators at 0 play the filter as a sine at the key's pitch, within
+a fifth of a cent from C2 to C7 at every Quality. A filter that sings is heard while its voice is: the amp envelope after
+it ends it with its release, and the synth sleeps only while no key is held. A change of Character while a note sounds
+crossfades over 10 ms along an S, both filters playing meanwhile, without a click. The one coming in takes what the
+other holds rather than starting from rest, whose resonance would take tens of milliseconds to build: the Clean sections
+and the loop are the same trapezoidal section, the loop's states the last section's and its section in front the
+first's, scaled by the drive into the loop (`dsp::MultimodeFilter::handToDriven()`, `handToClean()`). Quiet, at no
+Drive, a resonant note's level at the cutoff stays within 0.2 dB through the change (from rest it fell 5 dB as the fade
+ended); driven 12 dB, where the Characters differ (Clean's drive shapes what goes into its sections, Driven's saturates
+its resonance), it goes from the one's level to the other's, at most 0.7 dB under both or 0.5 dB over (from rest, 4 dB
+under). A change of slope inside a Driven note (12 dB to 24 dB) starts the loop's section in front from rest.
+
 **Envelopes.** Each stage takes exactly its time along its curve and lands on its target; a note that starts or ends in
 the middle of a stage goes on from the level it has reached. Envelope 1 runs at every sample. Envelopes 2 and 3 run at
 the control rate and give each step the value they have at its end.
@@ -259,7 +293,14 @@ it (`tests/SynthTests.cpp`, the loudest component off the note's and the LFO's g
 | Osc 1 Warp Amount (Sync), the LFO at half, within the range | | -40.3 dB |
 | Cutoff of a 24 dB low-pass at a Resonance of 80 %, at the note, two octaves each way | -69.9 dB | -106.2 dB |
 | Resonance of that filter, from 60 to 100 % | -79.7 dB | -121.1 dB |
+| Cutoff of that filter Driven | | -96.0 dB |
 | Pitch, the sub alone (a sine) | -63.4 dB | -95.2 dB |
+| Osc 1 Warp Amount (Sync) at 2x; within the range | | -41.5 dB; -53.0 dB |
+| Osc 1 Warp Amount (Sync) at 4x, the LFO at 20 Hz; within the range | | -56.7 dB; -69.9 dB |
+
+At 4x the steps' images fall 11,025 Hz apart, on the measure's grid of 25 Hz, where it doesn't look: its 4x rows run the
+LFO at 20 Hz, which keeps the note's harmonics and the LFO's sidebands on the grid and puts the images a quarter of the way
+between two lines, as at 1x.
 
 What is left is the line's own error (the LFO is a curve between two steps) and the corners where the LFO is cut off at
 the end of a range (Level, Position and the warp's amount reach theirs). Sync is the most sensitive to it: its place in
@@ -270,15 +311,19 @@ Less would take a shorter step, or a curve through three steps, a step later.
 noise, filter and drive, its envelopes and LFOs), the control grid (16 samples at that rate, on the song's own grid
 there: the song's place and each note's sample counted at it) and the lines between its steps. Their sum is brought
 down to the device's rate once for each side, not for each voice, through JUCE's polyphase IIR half-band filters at their
-best quality (`juce::dsp::Oversampling`, as the Saturator's and the Filter's), made in `prepare()` for every Quality
-with a whole-sample latency; only their way down is played (the way up is given silence, for the buffer at the
-Quality's rate). A table's band limit (its level) is chosen as at the device's rate, at every Quality, so that the
-half-band filters have nothing of the tables' own to take away (what they let through, 75 to 80 dB under, would alias);
-what a warp makes beyond it, above the device's rate's half, is taken away rather than folded back. Every Quality is as
-late as the latest, 5 samples, which the others wait for and the engine makes up: JUCE reports its
-filters' latency only for the way up and down together, so the way down's alone is measured once, and each Quality
-waits the rest, whole samples and a fraction of one by a first-order Thiran all-pass, as JUCE makes its own whole
-([JUCE workaround W54](../../juce-workarounds.md)). At 1x the synth plays exactly what it played before it had a
+best quality (`juce::dsp::Oversampling`, as the Saturator's and the Filter's), made in `prepare()` for every Quality,
+without JUCE's own fraction of a sample that would make their latency whole; only their way down is played (the way up
+is given silence, for the buffer at the Quality's rate). A table's band limit (its level), and the sub's, is chosen as at
+the device's rate, at every Quality, so that the half-band filters have nothing of the tables' own to take away (what
+they let through, 75 to 80 dB under, would alias); what a warp makes beyond it, above the device's rate's half, is taken
+away rather than folded back. Every Quality is as late as a constant latency, 5 samples, which the engine makes up (a
+constant, so that another compiler's maths can't make it another whole number): JUCE reports its filters' latency only
+for the way up and down together, so the way down's alone is measured once (1.49 samples at 2x, 2.08 at 4x), and each
+Quality waits the rest, whole samples and a fraction of one by a first-order Thiran all-pass, as JUCE makes its own whole
+([JUCE workaround W54](../../juce-workarounds.md)): 2x waits 3 whole samples and 0.513 of one, 4x 2 and 0.918, each way
+down and its wait adding up to the constant within a thousandth of a sample. Where a Quality's wait is split is fixed by
+the measure: were 2x's way down 0.013 of a sample longer, its split would flip (a whole sample fewer, the all-pass's a
+whole one more), the delay the same but every render at 2x a little different, which a test catches. At 1x the synth plays exactly what it played before it had a
 Quality, that many samples later. The DC blocker plays on the sum at the device's rate, after the half-band filters (it
 is a linear filter at 5 Hz: before them or after, it takes the same away). Times in seconds (the envelopes, the LFOs, glides, drift,
 fades) come out the same at every Quality, and a plain saw, the sub and noise are as loud. A change of Quality while
@@ -286,7 +331,11 @@ notes sound can't go on with them at another rate: the voices sounding fade out 
 note does, at the rate they play at; the change waits for the fade, the latency and 16 samples more, in which the
 half-band filters' ring dies away, and is made in silence; a note that comes meanwhile starts once it is made (about 4 ms
 later at 44.1 kHz). Nothing clicks and nothing is allocated. Running two rates at once for the 3 ms instead would take
-every voice's parts at either rate and two control grids, for a fade nobody hears differently.
+every voice's parts at either rate and two control grids, for a fade nobody hears differently. The events that wait for
+the change wait in a list of 256: all notes off clears the notes waiting before it, a newer bend or controller replaces
+the older one of its kind, and once the list is full a note-off takes back its note waiting to start, and a note-off, a
+pedal-up or all notes off makes room by dropping the oldest bend or controller, or else the oldest note waiting to start,
+so that no note hangs.
 
 What aliases, on Basic Shapes' saw, unison 1, at about 44.1 kHz: the loudest component that isn't a harmonic of the note,
 in dB under its loudest harmonic (`tests/AntialiasingTests.cpp`), at 1x / 2x / 4x:
@@ -311,11 +360,26 @@ table of one) would take it further. A PolyBLAMP for the slope's jump would not 
 change at the reset, but would help Pulse Width's and Mirror's corners. FM gains least: it reads the other oscillator's
 last sample, and its sidebands go on far above any rate.
 
+The Driven filter, a saw at full level into its 24 dB low-pass at 5 kHz and a Resonance of 50 %, where the loop's curve
+makes harmonics far above the note, a second into the note and from 20 Hz up, at 1x / 2x / 4x:
+
+| Drive | C3 | C5 |
+|---|---|---|
+| 12 dB | 103.6 / 129.4 / 129.5 | 90.0 / 117.9 / 117.9 |
+| 24 dB | 100.5 / 129.9 / 131.0 | 78.0 / 106.9 / 116.4 |
+
+At 1x the loop aliases (at C5 driven 12 dB, its 75th harmonic folds back to 4.78 kHz); 2x takes 20 to 30 dB more away.
+Measured from the note's first tenth of a second and from 0 Hz, every Quality read 73 to 80 dB, the same as Clean: the
+note settling, in the lowest bins (2.7 and 4 Hz), not aliasing. Driven at a low cutoff (one and a half or two and a half
+times the note, a Resonance of 85 %), what the loop makes stays under the measure's floor, 120 to 138 dB under, at every
+Quality.
+
 The cost: a voice plays its per-sample work (its oscillators' copies, sub, noise, filter, drive and Envelope 1) 2 or 4
 times for each of the device's samples, and its control steps (Envelopes 2 and 3, the LFOs, the slots, the tables'
 frames) 2 or 4 times as often; the half-band filters play once for each side, whatever the voices: their way down, and
 their way up on silence for the buffer. The benchmarks name it (`tests/Benchmarks.cpp`: Synth, 1 note and 16 notes, at
-each Quality).
+each Quality; a note Driven at each Quality, and 16 Driven). A voice Driven plays its loop (two Newton steps a sample, each
+with one division) and its ceiling at twice the rate, on each side it plays, in place of the Clean sections and drive.
 
 **Notes.** In Poly every note takes a voice of its own. A key played again while its last note rings out leaves that
 tail ringing and starts a new voice; played again while its key or the sustain pedal still holds a voice, that voice
@@ -359,9 +423,26 @@ over Voice; Unison and Modulation.
   the device's colour, moving as modulation moves it. Dragging across the drawing, right or up, moves the position:
   the drawing's width is the whole table. A button above it names the table and opens a menu of the factory tables
   and Load Wavetable File.... A sound dropped on the drawing, from the browser or the file manager, becomes the
-  table. An oscillator that is off is drawn faint.
-- **Filter** draws the filter's response, which follows the newest note's cutoff as its slots move it. A dot sits at the
-  cutoff, as high as the resonance: dragging it sets both, as one undo step.
+  table. An oscillator that is off is drawn faint. The frame it plays is drawn as the oscillator reads it, through its
+  Warp at its amount (sync's repeats, a bent cycle, a narrowed pulse, the mirror), by the synth's own mapping
+  (`Synth::readWarped()`): at the knob's amount, or while a note plays at the amount the synth's own modulation moves it
+  to (the newest note's, which the synth shows once a block). FM and ring modulation, which depend on the other
+  oscillator's sound, draw the frame as it is, with the warp's name in the corner. It repaints only when what it draws
+  moved.
+- **Filter** draws the filter's response, which follows the newest note's cutoff as its slots move it, Driven's for a
+  quiet sound with the word "Driven" in its readout. A dot sits at the cutoff, as high as the resonance: dragging it sets
+  both, as one undo step. The Character's two buttons, Clean and Driven, follow the Drive.
+- **The matrix on the knobs.** Each knob a slot can move (the oscillators' Position, Warp Amount, Pitch and Level, the
+  sub's and the noise's levels, Cutoff, Resonance, Level for Volume, Unison Detune, and the slots' own amounts; Pitch
+  moves both oscillators' Pitch knobs; Pan has no knob) shows a dashed ring, in the modulation colour of a modulator's
+  ring, just inside where a track's modulators draw their solid one, so that both read, over the range the slots on it
+  move it: the sum of the slots, each by its amount over its source's range (the envelopes, velocity, the mod wheel and
+  Random from 0 to 1, the LFOs and Drift from -1 to 1, the note across the keys), a slot's amount itself as far as the
+  slots on it can move it (held within -100 % to 100 %, as the synth holds it). While a note plays, a dot shows where the
+  newest note plays the Cutoff, each oscillator's Position and Warp Amount, which the synth shows; the other targets have
+  the ring alone. The Cutoff's ring is then about the cutoff the newest note's key tracking and velocity make of the
+  knob's, which hold still for the note (the synth shows it beside the cutoff it plays), so that the dot sits in it at any
+  key: what is heard. It works the rings out again only when a slot, a knob it reads or what the synth shows moved.
 - **Amp, Envelope 2 and Envelope 3** draw their envelopes with a line at the newest note's level. The peak drags
   sideways for the attack, the corner where the decay ends sideways for the decay and up or down for the sustain, the end
   sideways for the release. A hollow handle in the middle of each stage that rises or falls drags up or down to bend it.
@@ -378,7 +459,7 @@ over Voice; Unison and Modulation.
 - Two oscillators and one filter; no third oscillator, no second filter, no filter routing.
 - The unison is shared: both oscillators have the same number of copies, detune, spread, stack and drift.
 - Eight slots and nine sources; no aftertouch or MPE; modulation is set in the Matrix's lists, not dragged onto the
-  knobs it moves. A slot that moves another's amount can't itself be moved.
+  knobs it moves (which show it). A slot that moves another's amount can't itself be moved.
 - The LFOs' shapes are fixed; none can be drawn. No arpeggiator.
 - Warped sounds still alias on high notes, less at a higher Quality (see Quality): Sync's jump is smoothed by a
   two-point PolyBLEP only, Pulse Width's and Mirror's corners not at all, and FM's sidebands go on above any rate.
@@ -388,9 +469,12 @@ over Voice; Unison and Modulation.
 - Envelopes 2 and 3 and the LFOs run at the control rate, every 16 samples; what they move glides in straight lines
   between the steps, which leaves a little of a fast LFO's curve and corners (Glides between steps). The vowel's, the
   phaser's and the sample and hold's settings move at each step.
-- The filter is linear: it never self-oscillates, there is no ladder or diode model, and Filter Drive, before the
-  filter, gives back the gain it adds, so a loud voice driven hard comes out quieter.
-- A held note that is silent for longer than the release lets the synth sleep ([known bug 37](../../known-bugs.md)).
+- Clean, the filter is linear and Filter Drive, before it, gives back the gain it adds, so a loud voice driven hard comes
+  out quieter. Driven is one character, the Filter device's state-variable loop, for four of the nine types: there is no
+  ladder or diode model, and the FM synth and the Sampler have only Clean.
+- The matrix's dashed rings show the range its slots move a knob over from the sources' whole ranges, not where a
+  note's envelope or LFO is (the Cutoff's about the playing note's key tracking and velocity); a dot where the value is
+  now only for the Cutoff, the oscillators' Positions and their Warp Amounts.
 - No effects of its own: Phazite's devices follow it.
 
 ## In the code

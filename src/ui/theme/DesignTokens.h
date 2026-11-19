@@ -678,6 +678,8 @@ namespace ModulationRing
     inline constexpr float targetAlpha = 0.5f;
     inline constexpr float dropWidth = 2.5f;
     inline constexpr float dropWash = 0.2f;
+    inline constexpr float dash = 2.5f, dashGap = 2.0f; // a device's own modulation (the Synth's matrix), dashed
+    inline constexpr float ownInset = 2.0f;             // how far inside the solid ring the dashed one runs, so that both read
 } // namespace ModulationRing
 
 // A modulator being dragged by its grip (ui/mixer/StripParts.h): its grip lit in a wash of the modulation colour under

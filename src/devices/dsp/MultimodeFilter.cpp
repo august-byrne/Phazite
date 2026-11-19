@@ -225,10 +225,10 @@ namespace
     }
 
     // Clean's damping for the loop's section at a Resonance.
-    double getCleanDamping (FilterMode mode, bool steep, double resonance) noexcept
+    double getCleanDamping (FilterMode mode, bool steep, double resonance, ResonanceCurve curve) noexcept
     {
         return isButterworthPair (mode, steep) ? 1.0 / (getButterworthQ (4, 1) * std::pow (2.0, 4.0 * resonance))
-                                               : 1.0 / getResonanceQ ((float) resonance);
+                                               : 1.0 / curve ((float) resonance);
     }
 
     // How much of a sine's amplitude softClip passes as its fundamental, at singingLevel: 1 - 2/9 s^2 + 5/81 s^4 from the
@@ -239,24 +239,24 @@ namespace
     constexpr double drivenFromResonance = 0.9; // where the Driven damping leaves Clean's
 } // namespace
 
-float getDrivenLargeDamping (FilterMode mode, bool steep) noexcept
+float getDrivenLargeDamping (FilterMode mode, bool steep, ResonanceCurve curve) noexcept
 {
-    return (float) getCleanDamping (mode, steep, 0.0);
+    return (float) getCleanDamping (mode, steep, 0.0, curve);
 }
 
-float getDrivenDamping (FilterMode mode, bool steep, float resonance) noexcept
+float getDrivenDamping (FilterMode mode, bool steep, float resonance, ResonanceCurve curve) noexcept
 {
     const auto amount = std::clamp ((double) resonance, 0.0, 1.0);
 
     if (amount <= drivenFromResonance)
-        return (float) getCleanDamping (mode, steep, amount);
+        return (float) getCleanDamping (mode, steep, amount, curve);
 
-    const auto from = getCleanDamping (mode, steep, drivenFromResonance);
-    const auto singing = (double) getDrivenLargeDamping (mode, steep) * (1.0 - 1.0 / singingShare);
+    const auto from = getCleanDamping (mode, steep, drivenFromResonance, curve);
+    const auto singing = (double) getDrivenLargeDamping (mode, steep, curve) * (1.0 - 1.0 / singingShare);
     return (float) (from + (amount - drivenFromResonance) / (1.0 - drivenFromResonance) * (singing - from));
 }
 
-DrivenCoefficients makeDriven (const FilterSettings& settings, double sampleRate)
+DrivenCoefficients makeDriven (const FilterSettings& settings, double sampleRate, ResonanceCurve curve)
 {
     DrivenCoefficients c;
     const auto frequency = std::clamp (settings.frequency, 1.0, 0.49 * sampleRate); // tan() grows without bound at Nyquist
@@ -271,16 +271,16 @@ DrivenCoefficients makeDriven (const FilterSettings& settings, double sampleRate
     {
         c.hasFront = true;
         c.front = makeFilter (shape, frequency, sampleRate,
-                              isButterworthPair (settings.mode, true) ? getButterworthQ (4, 0) : getResonanceQ (settings.resonance));
+                              isButterworthPair (settings.mode, true) ? getButterworthQ (4, 0) : curve (settings.resonance));
     }
 
     const auto g = std::tan (juce::MathConstants<double>::pi * frequency / sampleRate);
     c.g = (float) g;
     c.a = (float) (1.0 + g * g);
-    c.kLarge = getDrivenLargeDamping (settings.mode, settings.steep);
-    c.kSmall = getDrivenDamping (settings.mode, settings.steep, settings.resonance);
+    c.kLarge = getDrivenLargeDamping (settings.mode, settings.steep, curve);
+    c.kSmall = getDrivenDamping (settings.mode, settings.steep, settings.resonance, curve);
     c.bend = c.kLarge - c.kSmall;
-    c.bandGain = (float) getCleanDamping (settings.mode, settings.steep, std::clamp ((double) settings.resonance, 0.0, 1.0));
+    c.bandGain = (float) getCleanDamping (settings.mode, settings.steep, std::clamp ((double) settings.resonance, 0.0, 1.0), curve);
 
     switch (settings.mode)
     {

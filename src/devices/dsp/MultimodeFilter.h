@@ -117,8 +117,8 @@ bool hasResponse (FilterMode) noexcept;
 std::complex<double> getResponse (const MultimodeCoefficients&, double frequency, double sampleRate);
 
 //==============================================================================
-// The Driven character of low-pass, high-pass, band-pass and notch (roadmap step S6.6), which the Filter device plays (and
-// the synths may take later): the same state-variable section, integrated with the trapezoidal rule, with a curve inside its
+// The Driven character of low-pass, high-pass, band-pass and notch (roadmap step S6.6), which the Filter device and the Synth
+// play (the FM synth and the Sampler may take it later): the same state-variable section, integrated with the trapezoidal rule, with a curve inside its
 // loop, as Vadim Zavalishin's "The Art of VA Filter Design" builds the nonlinear state-variable filter: the band-pass state's
 // feedback, the damping, is a Butterworth's (kLarge) less the resonance's share (bend), and that share passes through
 // softClip (Math.h), so that it can't grow past the curve's ceiling. A quiet sound meets the damping kSmall = kLarge - bend,
@@ -148,15 +148,21 @@ struct DrivenCoefficients
     float mx = 0.0f, mv = 0.0f, mlp = 1.0f, md = 0.0f;
 };
 
+// The curve a device's Clean filter takes a 12 dB section's Q from, for its Resonance: getResonanceQ(), the Filter
+// device's, or getSynthResonanceQ(), the Synth's. The Driven filter bends from it, so that a sound switched to Driven
+// keeps its shape.
+using ResonanceCurve = double (*) (float) noexcept;
+
 // The Driven coefficients for some settings (their mode one of the four; the Resonance alone sets the Q, by
 // getDrivenDamping()) at the rate the filter plays at. Real-time safe.
-DrivenCoefficients makeDriven (const FilterSettings&, double sampleRate);
+DrivenCoefficients makeDriven (const FilterSettings&, double sampleRate, ResonanceCurve = getResonanceQ);
 
-// The loop's damping for a quiet sound at a Resonance from 0 to 1 (1 / Q): Clean's (getResonanceQ(), or a 24 dB low-pass's
-// or high-pass's second section's) up to 90 %, the same shape, then on in a straight line to a little below 0 at 100 %,
-// where it sings at singingLevel. And the damping for a loud one, a Butterworth's (the Resonance at 0).
-float getDrivenDamping (FilterMode, bool steep, float resonance) noexcept;
-float getDrivenLargeDamping (FilterMode, bool steep) noexcept;
+// The loop's damping for a quiet sound at a Resonance from 0 to 1 (1 / Q): Clean's (its curve's, or a 24 dB low-pass's or
+// high-pass's second section's) up to 90 %, the same shape, then on in a straight line to a little below 0 at 100 %, where
+// it sings at singingLevel. And the damping for a loud one, Clean's at a Resonance of 0 (a Butterworth's in the Filter
+// device).
+float getDrivenDamping (FilterMode, bool steep, float resonance, ResonanceCurve = getResonanceQ) noexcept;
+float getDrivenLargeDamping (FilterMode, bool steep, ResonanceCurve = getResonanceQ) noexcept;
 
 // The gain (not in decibels) of the Driven filter for a quiet sound, the curve straight, at a frequency: its peak goes off
 // any scale where it sings. For an editor's curve and tests. And the same as a complex gain.
@@ -264,12 +270,55 @@ public:
         guessSlope = 1.0f;
     }
 
+    // Its section in front alone from rest: for a loop that gains it (12 dB to 24 dB), as the sections of another kind of
+    // filter start from silence. Real-time safe.
+    void resetDrivenFront() noexcept { front.reset(); }
+
+    // A change of Character as the sound plays, handing what the filter holds over rather than starting the other from rest
+    // (whose resonance would take tens of milliseconds to build: a dip and a ping). The loop is the same trapezoidal
+    // state-variable section as the low-pass, high-pass, band-pass and notch sections: for a quiet sound, its states s1 and
+    // s2 are its last section's ic1 and ic2 of what goes in, and its section in front (24 dB) is the first section. So with
+    // the states moved over, scaled by `gain`, what goes into the loop over what goes into the sections, both play the same
+    // from that sample on, for a quiet sound under a Resonance of 90 % (handToClean() divides by it). set() was given one of
+    // the four types last, as makeDriven() was. Real-time safe.
+    void handToDriven (float gain) noexcept
+    {
+        resetDriven();
+
+        if (now.numSections <= 0)
+            return;
+
+        const auto& last = sections[(size_t) now.numSections - 1];
+        s1 = gain * last.getState1();
+        s2 = gain * last.getState2();
+        lastV = s1;
+        lastLow = s2;
+
+        if (now.numSections > 1)
+            front.setStates (gain * sections[0].getState1(), gain * sections[0].getState2());
+    }
+
+    void handToClean (float gain) noexcept
+    {
+        reset();
+
+        if (now.numSections <= 0)
+            return;
+
+        sections[(size_t) now.numSections - 1].setStates (s1 / gain, s2 / gain);
+
+        if (now.numSections > 1)
+            sections[0].setStates (front.getState1() / gain, front.getState2() / gain);
+    }
+
     void setDriven (const DrivenCoefficients& next) noexcept { driven = next; }
 
-    float processDriven (float x) noexcept
-    {
-        const auto& c = driven;
+    float processDriven (float x) noexcept { return processDriven (x, driven); }
 
+    // A sample through the loop with other coefficients than setDriven() was given: for a loop whose coefficients are
+    // worked out at each sample elsewhere, as the Synth glides its own across each control step (Synth::DrivenGlide).
+    float processDriven (float x, const DrivenCoefficients& c) noexcept
+    {
         if (c.hasFront)
             x = front.process (x, c.front);
 

@@ -19,7 +19,9 @@
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/SynthEditor.h"
 
+#include <algorithm>
 #include <cmath>
+#include <span>
 #include <vector>
 
 namespace
@@ -426,4 +428,264 @@ TEST_CASE ("The synth's pitch knob takes a value typed at its value, exactly, an
     mouse.release();
     CHECK (pitch() > 7.0f);
     CHECK (juce::exactlyEqual (pitch(), std::round (pitch())));
+}
+
+TEST_CASE ("The synth's filter has its Character as two buttons after its Drive, and its picture says Driven")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    auto* buttons = dynamic_cast<phazite::ui::ChoiceButtons*> (editor.findControl ("filterCharacter"));
+    REQUIRE (buttons != nullptr);
+    REQUIRE (buttons->getNumButtons() == 2);
+    CHECK (buttons->getButton (0).getButtonText() == juce::String ("Clean"));
+    CHECK (buttons->getButton (1).getButtonText() == juce::String ("Driven"));
+    CHECK (buttons->getButton (0).getToggleState());
+
+    // After the Drive: right of it, in its row, each button wider than its word.
+    const auto* drive = editor.findControl ("drive");
+    REQUIRE (drive != nullptr);
+    REQUIRE (buttons->isShowing());
+    CHECK (buttons->getScreenBounds().getX() >= drive->getScreenBounds().getRight());
+    CHECK (buttons->getScreenBounds().getCentreY() > drive->getScreenBounds().getY());
+    CHECK (buttons->getScreenBounds().getCentreY() < drive->getScreenBounds().getBottom());
+
+    for (int i = 0; i < buttons->getNumButtons(); ++i)
+    {
+        auto* button = dynamic_cast<juce::TextButton*> (&buttons->getButton (i));
+        REQUIRE (button != nullptr);
+        const auto font = button->getLookAndFeel().getTextButtonFont (*button, button->getHeight());
+        CHECK ((float) button->getWidth() > juce::GlyphArrangement::getStringWidth (font, button->getButtonText()) + 4.0f);
+    }
+    CHECK_FALSE (editor.getFilter().getReadout().contains ("Driven"));
+
+    // Driven: a click, one undo step, and the picture's readout says so, its curve Driven's small-signal response.
+    phazite::test::Mouse mouse (buttons->getButton (1));
+    mouse.click (buttons->getButton (1).getLocalBounds().getCentre());
+    CHECK (screen.getValue ("filterCharacter") == doctest::Approx (1.0f));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Filter Character"));
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (buttons->getButton (1).getToggleState());
+    CHECK (editor.getFilter().getReadout().startsWith ("Driven  "));
+
+    // A type the Driven character doesn't play (a comb) plays Clean, and the readout says nothing of it.
+    phazite::setValueSetByHand (screen.getSong(), phazite::ParameterRef { screen.synth, "filterType" },
+                                (float) phazite::devices::dsp::FilterMode::combPlus);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK_FALSE (editor.getFilter().getReadout().contains ("Driven"));
+}
+
+TEST_CASE ("The synth's wavetable picture draws the frame it plays through its warp, at the amount it plays it at")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    const auto set = [&screen] (const char* id, float value)
+    { phazite::setValueSetByHand (screen.getSong(), phazite::ParameterRef { screen.synth, id }, value); };
+
+    // The frame drawn as the device reads its place in the cycle (the synth's own mapping, written out here as it plays
+    // it): the saw of Basic Shapes, where the first oscillator plays at first.
+    const auto table = phazite::makeDeviceHandle (screen.getSong(), screen.synth).getWavetable (0);
+    REQUIRE (table != nullptr);
+    const auto place = screen.getValue ("osc1Position") * (float) (table->getNumFrames() - 1);
+    const auto first = std::min ((int) place, table->getNumFrames() - 1);
+    const auto from = table->getFrameForDrawing (first), to = table->getFrameForDrawing (std::min (first + 1, table->getNumFrames() - 1));
+    const auto morph = place - (float) first;
+    const auto readDrawn = [] (std::span<const float> samples, float along)
+    { return samples[std::min (samples.size() - 1, (size_t) (along * (float) samples.size()))]; };
+    const auto read = [&] (float at) { return readDrawn (from, at) + morph * (readDrawn (to, at) - readDrawn (from, at)); };
+    const auto wrap = [] (float x) { return x - std::floor (x) < 1.0f ? x - std::floor (x) : 0.0f; };
+
+    const auto expected = [&] (Synth::Warp warp, float amount, float t)
+    {
+        switch (warp)
+        {
+            case Synth::Warp::sync:
+                return read (wrap (t * std::exp2 (3.0f * amount)));
+            case Synth::Warp::bendUp:
+            case Synth::Warp::bendDown:
+            {
+                const auto bent = warp == Synth::Warp::bendUp ? 1.0f + 7.0f * amount : 1.0f / (1.0f + 7.0f * amount);
+                return read (wrap (t * bent / (1.0f + (bent - 1.0f) * t)));
+            }
+            case Synth::Warp::pulseWidth:
+            {
+                const auto width = 1.0f - 0.95f * amount;
+                return read (t < width ? wrap (t / width) : 0.0f);
+            }
+            case Synth::Warp::mirror:
+                return read (t) + amount * (read (wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t)) - read (t));
+            case Synth::Warp::none:
+            case Synth::Warp::fm:
+            case Synth::Warp::ringMod:
+                break;
+        }
+
+        return read (t);
+    };
+
+    const auto compare = [&] (Synth::Warp warp, float amount)
+    {
+        const auto wave = editor.getPlayedWave (0);
+        REQUIRE (wave.size() > 100);
+        auto mostOff = 0.0f;
+
+        for (size_t i = 0; i < wave.size(); ++i)
+            mostOff = std::max (mostOff, std::abs (wave[i] - expected (warp, amount, (float) i / (float) (wave.size() - 1))));
+
+        return mostOff;
+    };
+
+    for (const auto warp : { Synth::Warp::sync, Synth::Warp::bendUp, Synth::Warp::bendDown, Synth::Warp::pulseWidth, Synth::Warp::mirror,
+                             Synth::Warp::fm, Synth::Warp::ringMod })
+    {
+        for (const auto amount : { 0.3f, 0.8f })
+        {
+            CAPTURE ((int) warp);
+            CAPTURE (amount);
+            set ("osc1Warp", (float) warp);
+            set ("osc1WarpAmount", amount);
+            editor.refresh();
+            CHECK (compare (warp, amount) < 1.0e-5f);
+
+            // FM and ring modulation, which the other oscillator's sound makes, name themselves.
+            const auto readout = editor.getTableReadout (0);
+            CHECK (readout
+                   == (warp == Synth::Warp::fm ? juce::String ("FM")
+                                               : (warp == Synth::Warp::ringMod ? juce::String ("Ring Mod") : juce::String())));
+        }
+    }
+
+    // While a note plays, at the amount its modulation moves it to: sync at 20 %, a Velocity slot moving it by 50 %, a note at
+    // full velocity: drawn at 70 %.
+    set ("osc1Warp", (float) Synth::Warp::sync);
+    set ("osc1WarpAmount", 0.2f);
+    set ("mod2Source", (float) Synth::ModSource::velocity);
+    set ("mod2Target", (float) Synth::ModTarget::osc1Warp);
+    set ("mod2Amount", 0.5f);
+    auto* synth = phazite::makeDeviceHandle (screen.getSong(), screen.synth).getProcessor<Synth>();
+    REQUIRE (synth != nullptr);
+    synth->prepare (48000.0, 4800);
+    std::vector<float> values;
+
+    for (const auto& parameter : Synth::info.parameters)
+        values.push_back (screen.getValue (parameter.id.data()));
+
+    juce::AudioBuffer<float> buffer (2, 4800);
+    buffer.clear();
+    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+    const phazite::devices::NoteEvent note { .type = phazite::devices::NoteEvent::Type::noteOn, .sample = 0, .number = 60, .value = 1.0f };
+    phazite::devices::ProcessContext block;
+    block.channels = channels;
+    block.numChannels = 2;
+    block.numSamples = buffer.getNumSamples();
+    block.parameters = values;
+    block.events = { &note, 1 };
+    synth->process (block);
+    editor.refresh();
+    CHECK (compare (Synth::Warp::sync, 0.7f) < 1.0e-5f);
+}
+
+TEST_CASE ("A knob the synth's matrix moves shows a dashed ring over the range its slots move it, beside Phazite's modulators' ring")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    const auto set = [&screen] (const char* id, float value)
+    { phazite::setValueSetByHand (screen.getSong(), phazite::ParameterRef { screen.synth, id }, value); };
+    auto* cutoff = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("cutoff"));
+    auto* resonance = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("resonance"));
+    REQUIRE (cutoff != nullptr);
+    REQUIRE (resonance != nullptr);
+    const auto at = [cutoff] (double hertz) { return (float) cutoff->valueToProportionOfLength (hertz); };
+
+    // A new synth's first slot: Envelope 2 (0 to 1) on the cutoff by 25 %, two of its eight octaves: from 2.5 to 10 kHz.
+    editor.refresh();
+    REQUIRE (cutoff->getOwnModulation().has_value());
+    CHECK (cutoff->getOwnModulation()->low == doctest::Approx (at (2500.0)).epsilon (0.001));
+    CHECK (cutoff->getOwnModulation()->high == doctest::Approx (at (10000.0)).epsilon (0.001));
+    CHECK_FALSE (cutoff->getOwnModulation()->isOn);    // no note: no dot
+    CHECK_FALSE (cutoff->getModulation().has_value()); // none of Phazite's modulators
+    CHECK_FALSE (resonance->getOwnModulation().has_value());
+
+    // A second slot on it, LFO 1 (-1 to 1) by 12.5 %, an octave each way: the two added, from an octave under to three
+    // over, up to the knob's end.
+    set ("mod2Source", (float) Synth::ModSource::lfo1);
+    set ("mod2Target", (float) Synth::ModTarget::cutoff);
+    set ("mod2Amount", 0.125f);
+    editor.refresh();
+    REQUIRE (cutoff->getOwnModulation().has_value());
+    CHECK (cutoff->getOwnModulation()->low == doctest::Approx (at (1250.0)).epsilon (0.001));
+    CHECK (cutoff->getOwnModulation()->high == doctest::Approx (at (20000.0)).epsilon (0.001));
+
+    // Pitch on both oscillators' Pitch knobs, by its 24 semitones for 100 %; the first slot off: the cutoff's ring goes
+    // with it but for the second slot's.
+    set ("mod3Source", (float) Synth::ModSource::modWheel);
+    set ("mod3Target", (float) Synth::ModTarget::pitch);
+    set ("mod3Amount", 0.5f);
+    set ("mod1Source", (float) Synth::ModSource::none);
+    editor.refresh();
+    auto* pitch = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("osc2Pitch"));
+    REQUIRE (pitch != nullptr);
+    REQUIRE (pitch->getOwnModulation().has_value());
+    CHECK (pitch->getOwnModulation()->low == doctest::Approx (pitch->valueToProportionOfLength (0.0)));
+    CHECK (pitch->getOwnModulation()->high == doctest::Approx (pitch->valueToProportionOfLength (12.0)));
+    CHECK (cutoff->getOwnModulation()->low == doctest::Approx (at (1250.0)).epsilon (0.001));
+    CHECK (cutoff->getOwnModulation()->high == doctest::Approx (at (5000.0)).epsilon (0.001));
+
+    // Every slot off: no ring.
+    set ("mod2Source", (float) Synth::ModSource::none);
+    set ("mod3Source", (float) Synth::ModSource::none);
+    editor.refresh();
+    CHECK_FALSE (cutoff->getOwnModulation().has_value());
+    CHECK_FALSE (pitch->getOwnModulation().has_value());
+}
+
+TEST_CASE ("The synth's matrix ring adds what a slot on another's amount moves, and while a note plays is about its cutoff")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    const auto set = [&screen] (const char* id, float value)
+    { phazite::setValueSetByHand (screen.getSong(), phazite::ParameterRef { screen.synth, id }, value); };
+    auto* cutoff = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("cutoff"));
+    REQUIRE (cutoff != nullptr);
+    const auto at = [cutoff] (double hertz) { return (float) cutoff->valueToProportionOfLength (hertz); };
+
+    // The first slot, Envelope 2 on the cutoff by 25 % (2.5 to 10 kHz), its amount moved by LFO 1 by 50 %: from -25 % to
+    // 75 %, so the cutoff from two octaves under the knob (625 Hz) to the knob's end.
+    set ("mod2Source", (float) Synth::ModSource::lfo1);
+    set ("mod2Target", (float) Synth::ModTarget::slot1Amount);
+    set ("mod2Amount", 0.5f);
+    editor.refresh();
+    REQUIRE (cutoff->getOwnModulation().has_value());
+    CHECK (cutoff->getOwnModulation()->low == doctest::Approx (at (625.0)).epsilon (0.001));
+    CHECK (cutoff->getOwnModulation()->high == doctest::Approx (at (20000.0)).epsilon (0.001));
+
+    // Without the mover, key tracking at 100 % and a note an octave over C4 playing: the ring is about 5 kHz, the cutoff the
+    // note's key makes of the knob's, from it to the knob's end, and the dot where the note plays the cutoff, inside it.
+    set ("mod2Source", (float) Synth::ModSource::none);
+    set ("keyTracking", 1.0f);
+    auto* synth = phazite::makeDeviceHandle (screen.getSong(), screen.synth).getProcessor<Synth>();
+    REQUIRE (synth != nullptr);
+    synth->prepare (48000.0, 4800);
+    std::vector<float> values;
+
+    for (const auto& parameter : Synth::info.parameters)
+        values.push_back (screen.getValue (parameter.id.data()));
+
+    juce::AudioBuffer<float> buffer (2, 4800);
+    buffer.clear();
+    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+    const phazite::devices::NoteEvent note { .type = phazite::devices::NoteEvent::Type::noteOn, .sample = 0, .number = 72, .value = 1.0f };
+    phazite::devices::ProcessContext block;
+    block.channels = channels;
+    block.numChannels = 2;
+    block.numSamples = buffer.getNumSamples();
+    block.parameters = values;
+    block.events = { &note, 1 };
+    synth->process (block);
+    editor.refresh();
+    REQUIRE (cutoff->getOwnModulation().has_value());
+    CHECK (cutoff->getOwnModulation()->low == doctest::Approx (at (5000.0)).epsilon (0.001));
+    CHECK (cutoff->getOwnModulation()->high == doctest::Approx (at (20000.0)).epsilon (0.001));
+    CHECK (cutoff->getOwnModulation()->isOn);
+    CHECK (cutoff->getOwnModulation()->now >= cutoff->getOwnModulation()->low);
+    CHECK (cutoff->getOwnModulation()->now <= cutoff->getOwnModulation()->high);
 }

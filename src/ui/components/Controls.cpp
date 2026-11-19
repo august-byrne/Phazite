@@ -408,9 +408,9 @@ Knob::Knob (const juce::String& title, double defaultValue)
 {
 }
 
-void Knob::setModulation (std::optional<ModulationRange> newModulation)
+namespace
 {
-    const auto same = [] (const std::optional<ModulationRange>& a, const std::optional<ModulationRange>& b)
+    bool isSameRing (const std::optional<ModulationRange>& a, const std::optional<ModulationRange>& b)
     {
         if (a.has_value() != b.has_value())
             return false;
@@ -418,11 +418,23 @@ void Knob::setModulation (std::optional<ModulationRange> newModulation)
         return ! a.has_value()
                || (juce::approximatelyEqual (a->low, b->low) && juce::approximatelyEqual (a->high, b->high)
                    && juce::approximatelyEqual (a->now, b->now) && a->isOn == b->isOn);
-    };
+    }
+} // namespace
 
-    if (! same (modulation, newModulation))
+void Knob::setModulation (std::optional<ModulationRange> newModulation)
+{
+    if (! isSameRing (modulation, newModulation))
     {
         modulation = newModulation;
+        repaint();
+    }
+}
+
+void Knob::setOwnModulation (std::optional<ModulationRange> newModulation)
+{
+    if (! isSameRing (ownModulation, newModulation))
+    {
+        ownModulation = newModulation;
         repaint();
     }
 }
@@ -439,7 +451,7 @@ void Knob::paint (juce::Graphics& g)
 {
     ValueSlider::paint (g);
 
-    if (! modulation.has_value() && ! dropping && ! target)
+    if (! modulation.has_value() && ! ownModulation.has_value() && ! dropping && ! target)
         return;
 
     const auto& p = getPalette (*this);
@@ -481,6 +493,24 @@ void Knob::paint (juce::Graphics& g)
         if (modulation->isOn)
         {
             const auto now = centre.getPointOnCircumference (radius, angleOf (modulation->now));
+            g.fillEllipse (juce::Rectangle<float> (ModulationRing::dotSize, ModulationRing::dotSize).withCentre (now));
+        }
+    }
+
+    // The device's own modulation: the same ring, dashed, just inside the solid one, so that both read.
+    if (ownModulation.has_value())
+    {
+        g.setColour (p.modulation);
+        const auto inside = radius - ModulationRing::ownInset;
+        juce::Path arc, dashed;
+        arc.addCentredArc (centre.x, centre.y, inside, inside, 0.0f, angleOf (ownModulation->low), angleOf (ownModulation->high), true);
+        const float dashes[] = { ModulationRing::dash, ModulationRing::dashGap };
+        juce::PathStrokeType (ModulationRing::width).createDashedStroke (dashed, arc, dashes, 2);
+        g.fillPath (dashed);
+
+        if (ownModulation->isOn)
+        {
+            const auto now = centre.getPointOnCircumference (inside, angleOf (ownModulation->now));
             g.fillEllipse (juce::Rectangle<float> (ModulationRing::dotSize, ModulationRing::dotSize).withCentre (now));
         }
     }

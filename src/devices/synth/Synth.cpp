@@ -2,6 +2,7 @@
 #include "Synth.h"
 #include "devices/dsp/Math.h"
 #include "devices/dsp/NoteValues.h"
+#include "devices/dsp/Saturation.h"
 #include "devices/wavetable/FactoryWavetables.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -32,6 +33,7 @@ namespace
     constexpr std::string_view glideModes[] = { "Always", "Legato" };
     constexpr std::string_view phases[] = { "Reset", "Free" }; // the FM synth's
     constexpr std::string_view qualities[] = { "1x", "2x", "4x" };
+    constexpr std::string_view characters[] = { "Clean", "Driven" }; // the Filter device's
 
     // The note values an LFO in time with the song takes (devices/dsp/NoteValues.h).
     constexpr auto& divisions = dsp::noteValueNames;
@@ -140,6 +142,7 @@ namespace
         makePercent ("resonance", "Filter Resonance", 0.1f),
         makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 1.0f),
         { .id = "drive", .name = "Filter Drive", .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
+        makeChoice ("filterCharacter", "Filter Character", characters, 0.0f),
         makePercent ("keyTracking", "Filter Key Tracking", 0.5f),
         makeTime ("env1Attack", "Envelope 1 Attack", 0.5f, 2.0f), // never instant, so a note doesn't click
         makeTime ("env1Decay", "Envelope 1 Decay", 0.0f, 300.0f),
@@ -217,6 +220,7 @@ namespace
 
     static_assert (std::size (parameters) == (size_t) Synth::quality + 1);
     static_assert (std::size (qualities) == (size_t) Synth::numQualities);
+    static_assert (std::size (characters) == (size_t) Synth::FilterCharacter::driven + 1);
     static_assert (Synth::getParameter (1, Synth::oscWarpAmount) == Synth::osc2WarpAmount);
     static_assert (Synth::getEnvelopeParameter (2, Synth::envReleaseCurve) == Synth::env3ReleaseCurve);
     static_assert (Synth::getLfoParameter (1, Synth::lfoFadeIn) == Synth::lfo2FadeIn);
@@ -300,12 +304,44 @@ namespace
         return morph > 0.0f ? a + morph * (readCubic (to, scaled) - a) : a;
     }
 
-    float wrap (float place) noexcept
+    // Whether a filter type has a Driven character: the four the Filter device drives.
+    bool hasDriven (dsp::FilterMode mode) noexcept
     {
-        place -= std::floor (place);
-        return place < 1.0f ? place : 0.0f;
+        return mode == dsp::FilterMode::lowPass || mode == dsp::FilterMode::highPass || mode == dsp::FilterMode::bandPass
+               || mode == dsp::FilterMode::notch;
     }
+
+    // A change of Character crossfades over this, as the Filter device's does.
+    constexpr double drivenFadeSeconds = 0.01;
 } // namespace
+
+float Synth::getWarpShape (Warp warp, float amount) noexcept
+{
+    switch (warp)
+    {
+        case Warp::sync:
+            return std::exp2 (3.0f * amount);
+        case Warp::bendUp:
+            return 1.0f + 7.0f * amount;
+        case Warp::bendDown:
+            return 1.0f / (1.0f + 7.0f * amount);
+        case Warp::pulseWidth:
+            return 1.0f - 0.95f * amount;
+        case Warp::mirror:
+        case Warp::fm:
+        case Warp::ringMod:
+            return amount;
+        case Warp::none:
+            break;
+    }
+
+    return 0.0f;
+}
+
+bool Synth::isDriven (std::span<const float> values) noexcept
+{
+    return values[filterCharacter] > 0.5f && hasDriven (dsp::toFilterMode (values[filterType]));
+}
 
 void Synth::place (const Wavetable& table, Reader& reader, float frame) noexcept
 {
@@ -397,6 +433,65 @@ void Synth::FilterGlide::advance (int samples) noexcept
     }
 }
 
+void Synth::DrivenGlide::set (const dsp::DrivenCoefficients& next, dsp::FilterMode mode, int samples, bool atOnce) noexcept
+{
+    target = next;
+    played = next;
+    isBandPass = mode == dsp::FilterMode::bandPass;
+    frontBandSign = next.front.m1 > 0.0f ? 1.0f : (next.front.m1 < 0.0f ? -1.0f : 0.0f);
+
+    // As FilterGlide: what doesn't move goes there at once, and what moves goes in lines all of one length.
+    const auto still = juce::exactlyEqual (g.now(), next.g) && juce::exactlyEqual (kSmall.now(), next.kSmall)
+                       && juce::exactlyEqual (bandGain.now(), next.bandGain) && juce::exactlyEqual (frontG.now(), next.front.g)
+                       && juce::exactlyEqual (frontK.now(), next.front.k);
+    glides = ! atOnce && ! still;
+
+    for (auto [line, value] : { std::pair { &g, next.g }, std::pair { &kSmall, next.kSmall }, std::pair { &bandGain, next.bandGain },
+                                std::pair { &frontG, next.front.g }, std::pair { &frontK, next.front.k } })
+    {
+        if (glides)
+            line->glide (value, samples);
+        else
+            line->jump (value);
+    }
+}
+
+const dsp::DrivenCoefficients& Synth::DrivenGlide::at (int ahead) noexcept
+{
+    if (g.done + ahead >= g.length)
+        return target; // where the lines end: the step's own coefficients
+
+    const auto gain = g.at (ahead), damping = kSmall.at (ahead);
+    played.g = gain;
+    played.a = 1.0f + gain * gain;
+    played.kSmall = damping;
+    played.bend = played.kLarge - damping;
+    played.bandGain = bandGain.at (ahead);
+
+    if (isBandPass)
+        played.mv = played.bandGain - damping;
+
+    if (played.hasFront)
+    {
+        const auto frontGain = frontG.at (ahead), frontDamping = frontK.at (ahead);
+        auto& front = played.front;
+        front.g = frontGain;
+        front.k = frontDamping;
+        front.a1 = 1.0f / (1.0f + frontGain * (frontGain + frontDamping));
+        front.a2 = frontGain * front.a1;
+        front.a3 = frontGain * front.a2;
+        front.m1 = frontBandSign * frontDamping;
+    }
+
+    return played;
+}
+
+void Synth::DrivenGlide::advance (int samples) noexcept
+{
+    for (auto* line : { &g, &kSmall, &bandGain, &frontG, &frontK })
+        line->advance (samples);
+}
+
 // One oscillator's unison voice over a stretch, its warp chosen once rather than at each sample, as render() plays it sample
 // by sample. Not for FM, which reads the other oscillator's last sample. Its increment, its place in the table, what its warp
 // reads by and what it leaves off centre each where their lines have got to at each sample.
@@ -427,7 +522,7 @@ void Synth::renderStep (const OscillatorRun& run, Reader& reader, float* out, in
             for (int i = 0; i < length; ++i)
             {
                 const auto dt = next (i), ratio = shape.at (i + 1);
-                out[i] = readAt (reader.from, reader.to, reader.morph, wrap (t * ratio));
+                out[i] = readAt (reader.from, reader.to, reader.morph, getSyncedPlace (t, ratio));
 
                 // The jump back to the wave's start when the note's cycle ends, smoothed (PolyBLEP).
                 if (t < dt || t > 1.0f - dt)
@@ -447,7 +542,7 @@ void Synth::renderStep (const OscillatorRun& run, Reader& reader, float* out, in
             for (int i = 0; i < length; ++i)
             {
                 const auto dt = next (i), bent = shape.at (i + 1);
-                out[i] = readAt (reader.from, reader.to, reader.morph, wrap (t * bent / (1.0f + (bent - 1.0f) * t)));
+                out[i] = readAt (reader.from, reader.to, reader.morph, getBentPlace (t, bent));
                 advance (dt);
             }
 
@@ -457,7 +552,7 @@ void Synth::renderStep (const OscillatorRun& run, Reader& reader, float* out, in
             for (int i = 0; i < length; ++i)
             {
                 const auto dt = next (i), width = shape.at (i + 1);
-                out[i] = readAt (reader.from, reader.to, reader.morph, t < width ? wrap (t / width) : 0.0f);
+                out[i] = readAt (reader.from, reader.to, reader.morph, getPulsePlace (t, width));
                 advance (dt);
             }
 
@@ -471,8 +566,7 @@ void Synth::renderStep (const OscillatorRun& run, Reader& reader, float* out, in
                 out[i] = readAt (reader.from, reader.to, reader.morph, t);
 
                 if (amount > 0.0f)
-                    out[i] +=
-                        amount * (readAt (reader.from, reader.to, reader.morph, wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t)) - out[i]);
+                    out[i] += amount * (readAt (reader.from, reader.to, reader.morph, getMirroredPlace (t)) - out[i]);
 
                 advance (dt);
             }
@@ -534,7 +628,7 @@ namespace
         std::array<float, Synth::maxUnison> places {}, lefts {}, rights {};
         std::span<const float> stack; // the semitones above the note its copies take in turn (Synth::getStackSteps())
         bool stereo = false;
-        bool filterOn = false, steep = true;
+        bool filterOn = false, steep = true, driven = false; // driven: Filter Character on Driven, whatever the type
         dsp::FilterMode filterMode = dsp::FilterMode::lowPass;
         float cutoff = 20000.0f, resonance = 0.0f, driveGain = 1.0f, keyTracking = 0.0f;
         std::array<dsp::LfoShape, 2> lfoShapes {};
@@ -598,6 +692,7 @@ namespace
         settings.cutoff = values[Synth::cutoff];
         settings.resonance = values[Synth::resonance];
         settings.driveGain = dsp::decibelsToGain (values[Synth::drive]);
+        settings.driven = values[Synth::filterCharacter] > 0.5f;
         settings.keyTracking = values[Synth::keyTracking];
 
         for (int lfo = 0; lfo < 2; ++lfo)
@@ -678,14 +773,19 @@ void Synth::freeRetired()
 
 double Synth::getFilterMagnitude (std::span<const float> values, double cutoffHertz, double frequency, double rate)
 {
-    // As render() sets its voices' filters up, before modulation.
-    return dsp::getMagnitude (dsp::makeMultimode ({ .mode = dsp::toFilterMode (values[filterType]),
-                                                    .frequency = cutoffHertz,
-                                                    .resonance = values[resonance],
-                                                    .steep = dsp::isSteep (values[filterSlope]),
-                                                    .q = dsp::getSynthResonanceQ (values[resonance]) },
-                                                  rate),
-                              frequency, rate);
+    // As render() sets its voices' filters up, before modulation, at the rate its Quality plays them at: Driven, its
+    // response to a quiet sound.
+    const auto played = rate * getFactor ((Quality) std::clamp ((int) std::lround (values[quality]), 0, numQualities - 1));
+    const dsp::FilterSettings settings { .mode = dsp::toFilterMode (values[filterType]),
+                                         .frequency = cutoffHertz,
+                                         .resonance = values[resonance],
+                                         .steep = dsp::isSteep (values[filterSlope]),
+                                         .q = dsp::getSynthResonanceQ (values[resonance]) };
+
+    if (isDriven (values))
+        return dsp::getMagnitude (dsp::makeDriven (settings, played, dsp::getSynthResonanceQ), frequency, played);
+
+    return dsp::getMagnitude (dsp::makeMultimode (settings, played), frequency, played);
 }
 
 float Synth::getPlayedPosition (int osc) const noexcept
@@ -696,14 +796,16 @@ float Synth::getPlayedPosition (int osc) const noexcept
 namespace
 {
     // Each Quality's half-band filters down to the device's rate (none at 1x): polyphase IIR ones, as the Saturator's, which
-    // keep the latency short and whole. Only their way down is played; the way up gives the buffer at the Quality's rate.
+    // keep the latency short. Only their way down is played; the way up gives the buffer at the Quality's rate. Without
+    // JUCE's own fraction of a sample to make their latency whole (useIntegerLatency off): the wait after them makes it whole
+    // with one all-pass rather than two, and the way down comes about a sample sooner.
     std::unique_ptr<juce::dsp::Oversampling<float>> makeHalfBands (int index, int capacity)
     {
         if (index == 0)
             return nullptr;
 
         auto filters = std::make_unique<juce::dsp::Oversampling<float>> (
-            2, (size_t) index, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, true);
+            2, (size_t) index, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
         filters->initProcessing ((size_t) capacity);
         return filters;
     }
@@ -713,7 +815,7 @@ namespace
 {
     // How late each Quality's half-band filters' way down alone makes the sound, in the device's samples, at any rate:
     // measured once, as the phase of a slow sine they bring down (where JUCE measures its filters' latency, which it
-    // reports for the way up and the way down together, made whole between them). 0 at 1x. JUCE workaround 54
+    // reports for the way up and the way down together). 0 at 1x. JUCE workaround 54
     // (docs/juce-workarounds.md)
     const std::array<double, Synth::numQualities>& getDownDelays()
     {
@@ -764,19 +866,23 @@ namespace
     }
 } // namespace
 
-int Synth::getLatency()
+double Synth::getDownDelay (Quality q)
 {
-    // The same at any rate and any block size: the latest way down's, and at least half a sample more, so that every
-    // Quality's fraction of a sample is played by its all-pass between half a sample and one and a half (Path).
-    const auto& delays = getDownDelays();
-    return (int) std::ceil (*std::max_element (delays.begin(), delays.end()) + 0.5);
+    return getDownDelays()[(size_t) std::clamp ((int) q, 0, numQualities - 1)];
+}
+
+Synth::Wait Synth::getWait (Quality q) const noexcept
+{
+    const auto& path = paths[(size_t) std::clamp ((int) q, 0, numQualities - 1)];
+    const auto a = (double) path.allPass;
+    return { path.delay, path.filters == nullptr ? 0.0 : (1.0 - a) / (1.0 + a) };
 }
 
 void Synth::prepare (double newSampleRate, int maximumBlockSize)
 {
     deviceRate = newSampleRate;
     capacity = std::max (1, maximumBlockSize);
-    latency = getLatency();
+    constexpr auto latency = latencySamples;
 
     // Every Quality's way out, each as late as the latest.
     for (int index = 0; index < numQualities; ++index)
@@ -834,6 +940,7 @@ void Synth::setQuality (int index) noexcept
     driftWanderSteps = (float) (driftWanderSeconds * controlRate);
     driftFollow = (float) (1.0 - std::exp (-1.0 / (driftGlideSeconds * controlRate)));
     driveFadeStep = (float) std::min (1.0, 1.0 / (driveFadeSeconds * sampleRate));
+    drivenFadeStep = (float) std::min (1.0, 1.0 / (drivenFadeSeconds * sampleRate));
 
     for (auto& voice : voices)
     {
@@ -849,7 +956,10 @@ void Synth::setQuality (int index) noexcept
         }
 
         for (auto& filter : voice.filters)
+        {
             filter.reset();
+            filter.resetDriven();
+        }
     }
 
     // The LFOs that run free go on from where they are, at the new rate.
@@ -899,7 +1009,10 @@ void Synth::reset()
             oscillator.wanders = {};
 
         for (auto& filter : voice.filters)
+        {
             filter.reset();
+            filter.resetDriven();
+        }
     }
 
     for (size_t i = 0; i < freeLfos.size(); ++i)
@@ -1035,9 +1148,15 @@ void Synth::startVoice (Voice& voice, bool resets)
     voice.hasPlayed = true;
 
     for (auto& filter : voice.filters)
+    {
         filter.reset();
+        filter.resetDriven();
+    }
 
     for (auto& shaper : voice.drives)
+        shaper.reset();
+
+    for (auto& shaper : voice.ceilings)
         shaper.reset();
 
     voice.driveBlend = 0.0f;
@@ -1577,29 +1696,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                              std::clamp (settings.level[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Level)), 0.0f, 1.0f),
                              ! wasOn);
 
-                    const auto shape = [&run]
-                    {
-                        switch (run.warp)
-                        {
-                            case Warp::sync:
-                                return run.syncRatio;
-                            case Warp::bendUp:
-                            case Warp::bendDown:
-                                return run.bend;
-                            case Warp::pulseWidth:
-                                return run.pulseWidth;
-                            case Warp::mirror:
-                            case Warp::fm:
-                            case Warp::ringMod:
-                                return run.warpAmount;
-                            case Warp::none:
-                                break;
-                        }
-
-                        return 0.0f;
-                    }();
-
-                    setLine (run.shape, shape, ! wasOn || wasWarp != run.warp);
+                    setLine (run.shape, getWarpShape (run.warp, run.warpAmount), ! wasOn || wasWarp != run.warp);
 
                     const auto semitones =
                         (double) (basePitch + settings.pitch[(size_t) osc] + pitchRange * moveOf (moves, targetOf (ModTarget::osc1Pitch)));
@@ -1701,7 +1798,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 // at its pitch), its wave's band limit chosen once a step.
                 if (const auto wasSounding = voice.subGain.now() > 0.0f && ! starts; subGain > 0.0f || wasSounding)
                 {
-                    voice.sub.setFrequency (dsp::noteToFrequency ((double) basePitch - 12.0 * settings.subOctaves), sampleRate);
+                    voice.sub.setFrequency (dsp::noteToFrequency ((double) basePitch - 12.0 * settings.subOctaves), sampleRate, factor);
                     setLine (voice.subIncrement, voice.sub.getIncrement(), ! wasSounding);
                 }
 
@@ -1732,6 +1829,87 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 
                     voice.driveGain = settings.driveGain;
                     voice.cutoffNow = (float) frequency;
+
+                    // What the editor centres the matrix's ring on the Cutoff on: the cutoff of the knob, key tracking and
+                    // the velocity's slots, which hold still for the note, alone.
+                    auto byVelocity = 0.0f;
+
+                    for (size_t slot = 0; slot < (size_t) numModSlots; ++slot)
+                        if (settings.sources[slot] == ModSource::velocity && settings.targets[slot] == ModTarget::cutoff)
+                            byVelocity += voice.velocity * amounts[slot];
+
+                    voice.cutoffCentre = (float) std::clamp (
+                        (double) settings.cutoff
+                            * std::exp2 ((double) (settings.keyTracking * (voice.pitch - 60.0f) + cutoffRange * byVelocity) / 12.0),
+                        lowestCutoff, nyquistLimit);
+
+                    // Driven: the loop's coefficients from the same cutoff and resonance, gliding across the step as the
+                    // Clean sections' do, at once as the note starts or the loop comes in; the drive into it gliding too. A
+                    // voice that starts, or whose filter comes on, plays its character at once. A change of Character as the
+                    // note sounds crossfades from the other, which hands the sound its sections hold to the loop (or back):
+                    // started from rest, a resonant filter's ring would take tens of milliseconds to build again, a dip and a
+                    // ping under the fade. Scaled by the drive into the loop (the half given back comes after it): for a
+                    // quiet sound under a Resonance of 90 % both then play what they would have played, and the fade
+                    // covers what differs (Clean's drive shapes what goes into its sections, the loop its resonance).
+                    // (Scaled instead so that their outputs met at the switch, the incoming one rang up to 2.4 dB over
+                    // both, driven 12 dB.)
+                    const auto wasDriven = voice.drivenWanted && wasFiltering;
+                    voice.drivenWanted = settings.driven && hasDriven (settings.filterMode);
+
+                    if (! wasFiltering)
+                        voice.drivenBlend = voice.drivenWanted ? 1.0f : 0.0f;
+
+                    if (voice.drivenWanted || voice.drivenBlend > 0.0f)
+                    {
+                        const auto loopComesIn = ! wasFiltering || (! wasDriven && voice.drivenBlend <= 0.0f);
+
+                        if (loopComesIn && ! starts)
+                        {
+                            for (auto& side : voice.filters)
+                            {
+                                if (wasFiltering)
+                                    side.handToDriven (settings.driveGain);
+                                else
+                                    side.resetDriven();
+                            }
+
+                            for (auto& ceiling : voice.ceilings)
+                                ceiling.reset();
+                        }
+
+                        const auto loop = dsp::makeDriven (
+                            { .mode = settings.filterMode, .frequency = frequency, .resonance = filterResonance, .steep = settings.steep },
+                            sampleRate, dsp::getSynthResonanceQ);
+                        // Another type or slope (another mix, front or damping for a loud sound) goes there at once, as the
+                        // Clean sections do; a section in front that comes back (12 dB to 24 dB) from rest.
+                        const auto& was = voice.drivenGlide.target;
+                        const auto sameKind = loop.hasFront == was.hasFront && juce::exactlyEqual (loop.kLarge, was.kLarge)
+                                              && juce::exactlyEqual (loop.mx, was.mx) && juce::exactlyEqual (loop.mlp, was.mlp)
+                                              && juce::exactlyEqual (loop.md, was.md);
+
+                        if (loop.hasFront && ! was.hasFront && ! loopComesIn)
+                            for (auto& side : voice.filters)
+                                side.resetDrivenFront();
+
+                        voice.drivenGlide.set (loop, settings.filterMode, glideLength, loopComesIn || ! sameKind);
+                        setLine (voice.drivenDrive, settings.driveGain, loopComesIn);
+                    }
+
+                    // Back to Clean from Driven alone: its sections take what the loop holds, scaled back by the drive the
+                    // loop was given, and its drive starts from rest, under the crossfade.
+                    if (wasDriven && ! voice.drivenWanted && voice.drivenBlend >= 1.0f)
+                    {
+                        for (auto& side : voice.filters)
+                            side.handToClean (voice.drivenDrive.now());
+
+                        for (auto& shaper : voice.drives)
+                            shaper.reset();
+                    }
+                }
+                else
+                {
+                    voice.drivenWanted = false;
+                    voice.drivenBlend = 0.0f;
                 }
 
                 const auto volume = std::clamp (1.0f + moveOf (moves, ModTarget::volume), 0.0f, 2.0f);
@@ -1824,16 +2002,16 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                         switch (run.warp)
                         {
                             case Warp::sync:
-                                at = wrap (t * amount);
+                                at = getSyncedPlace (t, amount);
                                 break;
 
                             case Warp::bendUp:
                             case Warp::bendDown:
-                                at = wrap (t * amount / (1.0f + (amount - 1.0f) * t));
+                                at = getBentPlace (t, amount);
                                 break;
 
                             case Warp::pulseWidth:
-                                at = t < amount ? wrap (t / amount) : 0.0f;
+                                at = getPulsePlace (t, amount);
                                 break;
 
                             case Warp::fm:
@@ -1851,8 +2029,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                         if (run.warp == Warp::mirror && amount > 0.0f)
                         {
                             // Read forward to the middle, then back: heard as much as the amount says.
-                            const auto mirrored =
-                                readAt (reader.from, reader.to, reader.morph, wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t));
+                            const auto mirrored = readAt (reader.from, reader.to, reader.morph, getMirroredPlace (t));
                             value += amount * (mirrored - value);
                         }
                         else if (run.warp == Warp::sync && (t < dt || t > 1.0f - dt))
@@ -1921,8 +2098,27 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 const auto driveWanted = voice.filtering && voice.driveGain > 1.0001f ? 1.0f : 0.0f;
                 voice.driveBlend += std::clamp (driveWanted - voice.driveBlend, -driveFadeStep, driveFadeStep);
 
-                // The sections' coefficients where their lines have got to, worked out once for both sides.
-                const auto* gliding = voice.filtering && voice.filterGlide.isMoving() ? &voice.filterGlide.at (i + 1) : nullptr;
+                // Driven: the loop's coefficients where their lines have got to, and the drive into it, half of it, in
+                // decibels, given back after it, as the Filter device's; crossfaded from or to Clean along an S over
+                // drivenFadeSeconds as the Character changes.
+                const dsp::DrivenCoefficients* loop = nullptr;
+                auto drivenWeight = 0.0f, driveIn = 1.0f, giveBack = 1.0f;
+
+                if (voice.filtering && (voice.drivenWanted || voice.drivenBlend > 0.0f))
+                {
+                    voice.drivenBlend =
+                        std::clamp (voice.drivenBlend + (voice.drivenWanted ? drivenFadeStep : -drivenFadeStep), 0.0f, 1.0f);
+                    drivenWeight =
+                        voice.drivenBlend >= 1.0f ? 1.0f : 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * voice.drivenBlend);
+                    loop = voice.drivenGlide.isMoving() ? &voice.drivenGlide.at (i + 1) : &voice.drivenGlide.target;
+                    driveIn = voice.drivenDrive.at (i + 1);
+                    giveBack = 1.0f / std::sqrt (driveIn);
+                }
+
+                // The Clean sections' coefficients where their lines have got to, worked out once for both sides, while
+                // Clean is heard.
+                const auto* gliding =
+                    voice.filtering && drivenWeight < 1.0f && voice.filterGlide.isMoving() ? &voice.filterGlide.at (i + 1) : nullptr;
 
                 for (int channel = 0; channel < channels; ++channel)
                 {
@@ -1930,15 +2126,34 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 
                     if (voice.filtering)
                     {
-                        if (voice.driveBlend > 0.0f)
+                        auto& filter = voice.filters[(size_t) channel];
+                        auto clean = x;
+
+                        if (drivenWeight < 1.0f)
                         {
-                            const auto gain = std::max (1.0f, voice.driveGain);
-                            const auto driven = voice.drives[(size_t) channel].process (x * gain, dsp::SoftCurve {}) / gain;
-                            x += voice.driveBlend * (driven - x);
+                            if (voice.driveBlend > 0.0f)
+                            {
+                                const auto gain = std::max (1.0f, voice.driveGain);
+                                const auto driven = voice.drives[(size_t) channel].process (clean * gain, dsp::SoftCurve {}) / gain;
+                                clean += voice.driveBlend * (driven - clean);
+                            }
+
+                            clean = gliding != nullptr ? filter.processSections (clean, *gliding) : filter.process (clean);
                         }
 
-                        auto& filter = voice.filters[(size_t) channel];
-                        x = gliding != nullptr ? filter.processSections (x, *gliding) : filter.process (x);
+                        if (loop != nullptr)
+                        {
+                            // The ceiling: the Filter device's knee, at twice the rate, after the loop, at a voice's scale
+                            // (straight to 1, rounding off to 2): a voice is louder than a track's sound (two oscillators
+                            // at their default Level peak near 1.5), and at no Drive the ceiling leaves its shape alone.
+                            const auto looped = filter.processDriven (x * driveIn, *loop) * giveBack;
+                            const auto driven = 2.0f * voice.ceilings[(size_t) channel].process (0.5f * looped, dsp::KneeCurve {});
+                            x = drivenWeight >= 1.0f ? driven : clean + drivenWeight * (driven - clean);
+                        }
+                        else
+                        {
+                            x = clean;
+                        }
                     }
 
                     sides[(size_t) channel] = x;
@@ -1983,6 +2198,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
             voice.subGain.advance (length);
             voice.subIncrement.advance (length);
             voice.filterGlide.advance (length);
+            voice.drivenGlide.advance (length);
+            voice.drivenDrive.advance (length);
             voice.noiseGain.advance (length);
             voice.gainLeft.advance (length);
             voice.gainRight.advance (length);
@@ -2018,7 +2235,7 @@ void Synth::playOut (const ProcessContext& block, int from, int to)
     }
     else
     {
-        // Both sides, as the filters are made for (their fractional delay takes no fewer), the second silent for a mono block.
+        // Both sides, as the filters are made for, the second silent for a mono block.
         const juce::dsp::AudioBlock<float> quiet (silence.getArrayOfWritePointers(), 2, (size_t) length);
         auto up = path.filters->processSamplesUp (quiet);
         up.clear();
@@ -2071,27 +2288,104 @@ void Synth::playOut (const ProcessContext& block, int from, int to)
 
 void Synth::hold (const NoteEvent& event) noexcept
 {
-    if (numWaiting < maxWaiting)
+    using Type = NoteEvent::Type;
+    const auto isPedal = [] (const NoteEvent& e) { return e.type == Type::controller && e.number == sustainPedal; };
+    const auto isPedalUp = [&isPedal] (const NoteEvent& e) { return isPedal (e) && e.value < 0.5f; };
+    const auto isNote = [] (const NoteEvent& e)
+    { return e.type == Type::noteOn || e.type == Type::portamentoOn || e.type == Type::noteOff || e.type == Type::slide; };
+
+    const auto removeAt = [this] (int i)
     {
-        waiting[(size_t) numWaiting++] = event;
-        return;
-    }
+        std::move (waiting.begin() + i + 1, waiting.begin() + numWaiting, waiting.begin() + i);
+        --numWaiting;
+    };
 
-    // Full: a note that would start is let go of; a note-off takes back a note waiting to start, as if neither came.
-    if (event.type != NoteEvent::Type::noteOff)
-        return;
-
-    for (auto i = numWaiting - 1; i >= 0; --i)
+    const auto removeIf = [this] (auto&& matches)
     {
-        const auto& early = waiting[(size_t) i];
+        auto kept = 0;
 
-        if (early.number == event.number && (early.type == NoteEvent::Type::noteOn || early.type == NoteEvent::Type::portamentoOn))
-        {
-            std::move (waiting.begin() + i + 1, waiting.begin() + numWaiting, waiting.begin() + i);
-            --numWaiting;
+        for (int i = 0; i < numWaiting; ++i)
+            if (! matches (waiting[(size_t) i]))
+                waiting[(size_t) kept++] = waiting[(size_t) i];
+
+        numWaiting = kept;
+    };
+
+    const auto findFirst = [this] (auto&& matches)
+    {
+        for (int i = 0; i < numWaiting; ++i)
+            if (matches (waiting[(size_t) i]))
+                return i;
+
+        return -1;
+    };
+
+    switch (event.type)
+    {
+        case Type::aftertouch: // it doesn't play by pressure
+        case Type::channelPressure:
             return;
-        }
+
+        case Type::allNotesOff:
+            // Every note and the pedal let go: the notes waiting to start, stop or slide before it, and the pedal's moves, go
+            // with it, so that it always finds room and nothing it lets go of starts after it.
+            removeIf ([&] (const NoteEvent& e) { return isNote (e) || isPedal (e) || e.type == Type::allNotesOff; });
+            break;
+
+        case Type::pitchBend:
+            // Only the newest bend and the newest of each controller matter: a newer one replaces the older.
+            removeIf ([] (const NoteEvent& e) { return e.type == Type::pitchBend; });
+            break;
+
+        case Type::controller:
+            if (! isPedal (event))
+                removeIf ([&event] (const NoteEvent& e) { return e.type == Type::controller && e.number == event.number; });
+
+            break;
+
+        case Type::noteOn:
+        case Type::portamentoOn:
+        case Type::noteOff:
+        case Type::slide:
+            break;
     }
+
+    if (numWaiting == maxWaiting)
+    {
+        // Full: a note that would start or slide, a bend or a controller is let go of. What lets go must not be lost: a note-off
+        // takes back its note waiting to start, as if neither came; otherwise it, a pedal-up or all notes off makes room by
+        // dropping the oldest bend or controller (but a pedal-up), or else the oldest note waiting to start.
+        if (event.type != Type::noteOff && event.type != Type::allNotesOff && ! isPedalUp (event))
+            return;
+
+        if (event.type == Type::noteOff)
+        {
+            for (auto i = numWaiting - 1; i >= 0; --i)
+            {
+                const auto& early = waiting[(size_t) i];
+
+                if (early.number == event.number && (early.type == Type::noteOn || early.type == Type::portamentoOn))
+                {
+                    removeAt (i);
+                    return;
+                }
+            }
+        }
+
+        auto room =
+            findFirst ([&] (const NoteEvent& e) { return e.type == Type::pitchBend || (e.type == Type::controller && ! isPedalUp (e)); });
+
+        if (room < 0)
+            room = findFirst ([] (const NoteEvent& e)
+                              { return e.type == Type::noteOn || e.type == Type::portamentoOn || e.type == Type::slide; });
+
+        if (room < 0)
+            return; // only note-offs and pedal-ups wait: of notes that sounded before the change, whose voices it let go
+
+        removeAt (room);
+    }
+
+    waiting[(size_t) numWaiting++] = event;
 }
 
 void Synth::process (const ProcessContext& block)
@@ -2180,7 +2474,7 @@ void Synth::process (const ProcessContext& block)
 
             numHeld = 0;
             switchingTo = wanted;
-            switchLeft = (int) std::ceil (stealFadeSeconds * deviceRate) + 1 + latency + switchSettling;
+            switchLeft = (int) std::ceil (stealFadeSeconds * deviceRate) + 1 + latencySamples + switchSettling;
         }
         else
         {
@@ -2268,15 +2562,20 @@ void Synth::process (const ProcessContext& block)
     }
 
     for (int osc = 0; osc < numOscillators; ++osc)
+    {
+        const auto* run = newest != nullptr && newest->oscillators[(size_t) osc].on ? &newest->oscillators[(size_t) osc] : nullptr;
         playedPositions[(size_t) osc].store (newest != nullptr ? newest->oscillators[(size_t) osc].position
                                                                : values[(size_t) getParameter (osc, oscPosition)],
                                              std::memory_order_relaxed);
+        shown.warpAmounts[(size_t) osc].set (run != nullptr ? run->warpAmount : values[(size_t) getParameter (osc, oscWarpAmount)]);
+    }
 
     // The newest note's envelopes and cutoff, and where each LFO is: the newest note's, for one that starts again with each.
     shown.envelopes[0].set (newest != nullptr ? newest->amp.getLevel() : 0.0f);
     shown.envelopes[1].set (newest != nullptr ? newest->envelope2.getLevel() : 0.0f);
     shown.envelopes[2].set (newest != nullptr ? newest->envelope3.getLevel() : 0.0f);
     shown.cutoff.set (newest != nullptr && newest->filtering ? newest->cutoffNow : 0.0f);
+    shown.cutoffCentre.set (newest != nullptr && newest->filtering ? newest->cutoffCentre : 0.0f);
 
     for (size_t i = 0; i < freeLfos.size(); ++i)
     {

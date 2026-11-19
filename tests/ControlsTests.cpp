@@ -922,3 +922,56 @@ TEST_CASE ("A burst of the wheel on a knob or a fader is one undo step, which a 
     phazite::ui::WheelBurst::endAll();
     phazite::setSong (context, nullptr);
 }
+
+TEST_CASE ("A knob shows a device's own modulation as a second, dashed ring beside its modulators' ring, which a drag doesn't take")
+{
+    // A knob in a window, with nothing modulating it: neither ring. A device's own range set: the dashed ring alone, drawn
+    // in the modulation colour on the knob's edge; Phazite's modulators' ring stays as it was.
+    juce::Component holder;
+    phazite::ui::Knob knob ("Cutoff", 0.5);
+    knob.setRange (0.0, 1.0);
+    knob.setValue (0.5, juce::dontSendNotification);
+    holder.addAndMakeVisible (knob);
+    knob.setBounds (40, 40, 48, 48);
+    phazite::test::TestWindow window (holder, 140, 140);
+    CHECK_FALSE (knob.getModulation().has_value());
+    CHECK_FALSE (knob.getOwnModulation().has_value());
+
+    const auto colouredOnRing = [&knob]
+    {
+        const auto image = knob.createComponentSnapshot (knob.getLocalBounds());
+        const auto ring = phazite::ui::getPalette (knob).modulation;
+        auto count = 0;
+
+        for (int y = 0; y < image.getHeight(); ++y)
+            for (int x = 0; x < image.getWidth(); ++x)
+                if (const auto pixel = image.getPixelAt (x, y); pixel.getAlpha() > 200 && std::abs (pixel.getHue() - ring.getHue()) < 0.02f
+                                                                && pixel.getSaturation() > 0.5f * ring.getSaturation())
+                    ++count;
+
+        return count;
+    };
+
+    const auto plain = colouredOnRing();
+    knob.setOwnModulation (phazite::ModulationRange { .low = 0.5f, .high = 1.0f, .now = 0.0f, .isOn = false });
+    REQUIRE (knob.getOwnModulation().has_value());
+    CHECK (knob.getOwnModulation()->high == doctest::Approx (1.0f));
+    CHECK_FALSE (knob.getModulation().has_value());
+    const auto dashed = colouredOnRing();
+    CHECK (dashed > plain);
+
+    // Dashed: fewer of its pixels lit than the solid ring's over the same range (its modulators on, its dot at an end).
+    knob.setOwnModulation (std::nullopt);
+    knob.setModulation (phazite::ModulationRange { .low = 0.5f, .high = 1.0f, .now = 0.5f, .isOn = true });
+    const auto solid = colouredOnRing();
+    CHECK (solid > dashed);
+
+    // A drag across the knob's edge with only the device's ring turns the knob, not a ring: it has no modulator to change.
+    knob.setModulation (std::nullopt);
+    knob.setOwnModulation (phazite::ModulationRange { .low = 0.0f, .high = 1.0f, .now = 0.0f, .isOn = false });
+    phazite::test::Mouse mouse (knob);
+    mouse.press ({ knob.getWidth() / 2, 3 });
+    mouse.dragTo ({ knob.getWidth() / 2, -40 });
+    mouse.release();
+    CHECK (knob.getValue() > 0.5);
+}

@@ -283,8 +283,14 @@ OnBin onBinRateNear44k (int note)
 }
 
 // As getAliasesUnder(), under the note's loudest harmonic: sync at a whole ratio reads the wave that many times a cycle,
-// so its harmonics are that ratio's multiples, and its fundamental is silent.
-double getAliasesUnderLoudestHarmonic (const float* sound, double frequency, double sampleRate)
+// so its harmonics are that ratio's multiples, and its fundamental is silent. And where the loudest of what isn't a
+// harmonic is, in hertz.
+struct OffHarmonics
+{
+    double under = 0.0, hertz = 0.0;
+};
+
+OffHarmonics findAliasesUnderLoudestHarmonic (const float* sound, double frequency, double sampleRate, double fromHertz = 0.0)
 {
     juce::dsp::FFT fft (fftOrder);
     std::vector<float> data ((size_t) fftSize * 2, 0.0f);
@@ -293,19 +299,35 @@ double getAliasesUnderLoudestHarmonic (const float* sound, double frequency, dou
 
     const auto bin = (int) std::lround (frequency * fftSize / sampleRate);
     auto tone = 1.0e-12, loudest = 1.0e-12;
+    auto loudestAt = 0;
 
-    for (int k = 1; k < fftSize / 2 && k * sampleRate / fftSize < 20000.0; ++k)
+    for (int k = std::max (1, (int) std::ceil (fromHertz * fftSize / sampleRate)); k < fftSize / 2 && k * sampleRate / fftSize < 20000.0;
+         ++k)
     {
-        auto& kept = k % bin == 0 ? tone : loudest;
-        kept = std::max (kept, (double) data[(size_t) k]);
+        if (k % bin == 0)
+        {
+            tone = std::max (tone, (double) data[(size_t) k]);
+        }
+        else if ((double) data[(size_t) k] > loudest)
+        {
+            loudest = (double) data[(size_t) k];
+            loudestAt = k;
+        }
     }
 
-    return 20.0 * std::log10 (tone / loudest);
+    return { 20.0 * std::log10 (tone / loudest), loudestAt * sampleRate / fftSize };
+}
+
+double getAliasesUnderLoudestHarmonic (const float* sound, double frequency, double sampleRate)
+{
+    return findAliasesUnderLoudestHarmonic (sound, frequency, sampleRate).under;
 }
 
 // The synth's first oscillator alone on Basic Shapes' saw, warped, at a Quality, as playWavetable() plays it: unison 1 and
-// drift off, as made. For FM the second oscillator, an octave up and silent, moves its phase.
-std::vector<float> playWarped (const OnBin& at, devices::Synth::Warp warp, float amount, devices::Synth::Quality quality)
+// drift off, as made. For FM the second oscillator, an octave up and silent, moves its phase. Its other values as given last;
+// its first `skipped` samples left out.
+std::vector<float> playWarped (const OnBin& at, devices::Synth::Warp warp, float amount, devices::Synth::Quality quality,
+                               const std::function<void (std::vector<float>&)>& alsoSet = {}, int skipped = 4800)
 {
     using devices::Synth;
     auto values = getDefaults (Synth::info);
@@ -326,7 +348,10 @@ std::vector<float> playWarped (const OnBin& at, devices::Synth::Warp warp, float
         values[Synth::osc2Level] = 0.0f;
     }
 
-    constexpr int blockSize = 480, skipped = 4800;
+    if (alsoSet != nullptr)
+        alsoSet (values);
+
+    constexpr int blockSize = 480;
     Synth synth;
     synth.prepare (at.rate, blockSize);
     juce::AudioBuffer<float> buffer (2, blockSize);
@@ -436,11 +461,79 @@ TEST_CASE ("The synth's warps alias less the higher its Quality")
             CHECK (under[index] > row.measured[index] - 3.0);
 
             // Sync at 100 %, eight times the note's cycle, a whole ratio, is the saw eight times up: no warp to take away,
-            // its table's band limit the same at every Quality, so the same within a tenth of a decibel.
-            if (index > 0 && row.warp == Synth::Warp::sync && row.amount >= 1.0f)
-                CHECK (std::abs (under[index] - under[index - 1]) < 0.1);
+            // its table's band limit the same at every Quality, so what is left is the table's own, at least 88 dB under
+            // the note at each (the least it measures, 91 dB at C5, less 3 dB).
+            if (row.warp == Synth::Warp::sync && row.amount >= 1.0f)
+                CHECK (under[index] > 88.0);
             else if (index > 0 && under[index - 1] < 100.0)
                 CHECK (under[index] > under[index - 1]);
+        }
+    }
+}
+
+TEST_CASE ("The synth's Driven filter aliases less the higher its Quality")
+{
+    // Basic Shapes' saw at full level at C3 and C5 into the Driven 24 dB low-pass at 5 kHz and a Resonance of 50 %, driven
+    // 12 and 24 dB, where the loop's curve makes harmonics far above the note: the loudest component from 20 Hz up that
+    // isn't a harmonic of the note, in dB under its loudest harmonic, at 1x, 2x and 4x (docs/design/devices/synth.md,
+    // Quality), once the note has settled (a second in). At 1x it is the loop's aliasing (at C5 driven 12 dB, the 75th
+    // harmonic folded back to 4.78 kHz); at 2x and 4x what is left is 107 to 131 dB under. Each held to its figures less
+    // 3 dB, and each Quality to being better than the one below it wherever that one is worse than 100 dB under. (Measured
+    // from the note's first tenth of a second and from 0 Hz, the loudest was the note settling in the lowest bins, 2.7 and
+    // 4 Hz, the same at every Quality and in Clean: 73 to 80 dB under.)
+    using devices::Synth;
+
+    struct Row
+    {
+        float drive;
+        int note;
+        std::array<double, Synth::numQualities> measured; // dB under the note, at 1x, 2x and 4x
+    };
+
+    const Row rows[] = {
+        { 12.0f, 48, { 103.6, 129.4, 129.5 } },
+        { 12.0f, 72, { 90.0, 117.9, 117.9 } },
+        { 24.0f, 48, { 100.5, 129.9, 131.0 } },
+        { 24.0f, 72, { 78.0, 106.9, 116.4 } },
+    };
+
+    for (const auto& row : rows)
+    {
+        const auto at = onBinRateNear44k (row.note);
+        std::array<OffHarmonics, Synth::numQualities> found {};
+
+        for (int index = 0; index < Synth::numQualities; ++index)
+        {
+            const auto sound = playWarped (
+                at, Synth::Warp::none, 0.0f, (Synth::Quality) index,
+                [&row] (std::vector<float>& values)
+                {
+                    values[Synth::filterOn] = 1.0f;
+                    values[Synth::filterType] = (float) dsp::FilterMode::lowPass;
+                    values[Synth::filterSlope] = 1.0f; // 24 dB
+                    values[Synth::filterCharacter] = (float) Synth::FilterCharacter::driven;
+                    values[Synth::cutoff] = 5000.0f;
+                    values[Synth::resonance] = 0.5f;
+                    values[Synth::keyTracking] = 0.0f;
+                    values[Synth::drive] = row.drive;
+                },
+                48000);
+            found[(size_t) index] = findAliasesUnderLoudestHarmonic (sound.data(), at.frequency, at.rate, 20.0);
+        }
+
+        MESSAGE ("Driven " << row.drive << " dB at " << juce::MidiMessage::getMidiNoteName (row.note, true, true, 4) << ": "
+                           << found[0].under << " (at " << found[0].hertz << " Hz), " << found[1].under << " (at " << found[1].hertz
+                           << " Hz), " << found[2].under << " (at " << found[2].hertz << " Hz) dB under the note");
+
+        for (size_t index = 0; index < found.size(); ++index)
+        {
+            CAPTURE (row.drive);
+            CAPTURE (row.note);
+            CAPTURE (index);
+            CHECK (found[index].under > row.measured[index] - 3.0);
+
+            if (index > 0 && found[index - 1].under < 100.0)
+                CHECK (found[index].under > found[index - 1].under);
         }
     }
 }

@@ -308,6 +308,18 @@
         "default": 0.0
       },
       {
+        "id": "filterCharacter",
+        "name": "Filter Character",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Clean",
+        "choices": [
+          "Clean",
+          "Driven"
+        ]
+      },
+      {
         "id": "keyTracking",
         "name": "Filter Key Tracking",
         "unit": "percent",

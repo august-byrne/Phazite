@@ -8,7 +8,8 @@
 // or a fifth, as Serum's unison stack and Vital's stack styles do (an octave pile or a power chord from one key), and its
 // drift lets each copy's pitch wander on its own, as ZynAddSubFX's unison vibrato does. A resonant filter with drive
 // follows, of any type of dsp/MultimodeFilter.h (low-pass, high-pass, band-pass or notch at 12 or 24 dB, comb, vowel,
-// phaser, sample and hold); three envelopes (the first shapes the level) and two LFOs, free or starting again with each
+// phaser, sample and hold), Clean or, for the first four, Driven (the Filter device's loop, its resonance saturating and
+// singing at the top); three envelopes (the first shapes the level) and two LFOs, free or starting again with each
 // note, each note's share of them coming in over a fade as a Juno's LFO delay does; and eight modulation slots, each a
 // source moving a destination by an amount, for each voice on its own, so an envelope sweeps every note's table, its cutoff
 // or its pitch from its start (an 808's drop); a slot may move another's amount, as the mod wheel brings an LFO's vibrato
@@ -41,6 +42,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -87,6 +89,7 @@ public:
         resonance,
         filterSlope,
         drive,
+        filterCharacter, // a FilterCharacter
         keyTracking,
         env1Attack,
         env1Decay,
@@ -287,6 +290,65 @@ public:
     // The target that moves a slot's amount, from the first slot.
     static constexpr ModTarget getAmountTarget (int slot) noexcept { return (ModTarget) ((int) ModTarget::slot1Amount + slot); }
 
+    // What a warp reads its wave by at an amount (0 to 1, to maxSyncAmount for sync by modulation), its "shape": sync's ratio
+    // of the note's cycle, bend's ratio, the pulse width, or for the mirror, FM and ring modulation the amount itself.
+    static float getWarpShape (Warp, float amount) noexcept;
+
+    // Where a warp reads a frame at a place in the note's cycle, t from 0 to 1, by its shape: sync's repeats, a bent cycle, a
+    // narrowed pulse; and the mirror's place, read forward to the middle, then back. The same for the synth as it plays and
+    // for its editor's picture.
+    static float wrap (float place) noexcept
+    {
+        place -= std::floor (place);
+        return place < 1.0f ? place : 0.0f;
+    }
+
+    static float getSyncedPlace (float t, float ratio) noexcept { return wrap (t * ratio); }
+    static float getBentPlace (float t, float bent) noexcept { return wrap (t * bent / (1.0f + (bent - 1.0f) * t)); }
+    static float getPulsePlace (float t, float width) noexcept { return t < width ? wrap (t / width) : 0.0f; }
+    static float getMirroredPlace (float t) noexcept { return wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t); }
+
+    // A frame read through a warp at a place in the note's cycle: read (place) gives the frame's wave at a place from 0 to 1.
+    // The mirror heard as much as its amount says. FM and ring modulation, which depend on the other oscillator, and no warp
+    // read the frame as it is. Without sync's smoothed jump and what the warp leaves off centre, which the synth adds.
+    template <typename Read>
+    static float readWarped (Warp warp, float shape, float t, Read&& read)
+    {
+        switch (warp)
+        {
+            case Warp::sync:
+                return read (getSyncedPlace (t, shape));
+            case Warp::bendUp:
+            case Warp::bendDown:
+                return read (getBentPlace (t, shape));
+            case Warp::pulseWidth:
+                return read (getPulsePlace (t, shape));
+            case Warp::mirror:
+            {
+                const auto value = read (t);
+                return shape > 0.0f ? value + shape * (read (getMirroredPlace (t)) - value) : value;
+            }
+            case Warp::none:
+            case Warp::fm:
+            case Warp::ringMod:
+                break;
+        }
+
+        return read (t);
+    }
+
+    // Its filter's character, as the Filter device's: Clean, the filter as it is with the drive before it; or Driven, for
+    // the low-pass, the high-pass, the band-pass and the notch, the drive into the filter's own loop, where its resonance
+    // saturates and, at the top of the Resonance, sings (dsp::makeDriven()). The other types play Clean.
+    enum class FilterCharacter
+    {
+        clean,
+        driven
+    };
+
+    // Whether its filter plays Driven, for the parameters' values.
+    static bool isDriven (std::span<const float> parameters) noexcept;
+
     enum class GlideMode
     {
         always, // every note glides from the one before
@@ -316,9 +378,25 @@ public:
 
     static const DeviceInfo info;
 
-    // How late its sound comes, in samples, at any rate and every Quality: the latest Quality's half-band filters', which
-    // the others wait for, so that the Quality can change while the song plays.
-    static int getLatency();
+    // How late its sound comes, in samples, at any rate and every Quality: more than the latest Quality's half-band filters'
+    // way down, which every Quality waits up to, so that the Quality can change while the song plays. A constant, so that
+    // another compiler's maths can't make it another whole number.
+    static constexpr int latencySamples = 5;
+    static constexpr int getLatency() noexcept { return latencySamples; }
+
+    // How late a Quality's half-band filters' way down alone makes the sound, in the device's samples, as measured: 0 at 1x.
+    // For tests.
+    static double getDownDelay (Quality);
+
+    // What a Quality waits after its way down, as prepare() made it: whole samples, and the fraction of one (from 0.5 to 1.5)
+    // its all-pass takes at low frequencies, as its coefficient gives it (0 at 1x, which waits the whole latency). For tests.
+    struct Wait
+    {
+        int samples = 0;
+        double fraction = 0.0;
+    };
+
+    Wait getWait (Quality) const noexcept;
 
     Synth(); // its oscillators on the first factory table
     ~Synth() override;
@@ -336,13 +414,16 @@ public:
     int getActiveVoices() const noexcept { return activeVoices.load (std::memory_order_relaxed); }
 
     // What its editor shows playing, once a block (devices/core/LiveValue.h): the newest note's three envelopes (from 0 to 1)
-    // and the cutoff it plays (in hertz; 0 while no note plays or the filter is off), and where each LFO is in its cycle (0 to
-    // 1; below 0 for one that starts with each note while none plays).
+    // and the cutoff it plays (in hertz; 0 while no note plays or the filter is off), and the cutoff its key tracking and its
+    // velocity's slots alone make of the knob's (the same; what the other slots move it from), where each LFO is in its cycle
+    // (0 to 1; below 0 for one that starts with each note while none plays), and each oscillator's warp amount as the newest
+    // note plays it (moved by its modulation; without a note, the knob's).
     struct Shown
     {
         std::array<LiveValue, 3> envelopes;
-        LiveValue cutoff;
+        LiveValue cutoff, cutoffCentre;
         std::array<LiveValue, 2> lfoPhases;
+        std::array<LiveValue, 2> warpAmounts;
     };
 
     const Shown& getShown() const noexcept { return shown; }
@@ -356,7 +437,7 @@ public:
     void process (const ProcessContext&) override;
     double getTailSeconds() const override;
     void releaseUnused() override { freeRetired(); }
-    int getLatencySamples() const override { return latency; }
+    int getLatencySamples() const override { return latencySamples; }
 
     // The Quality it plays at, as its last block left it. Any thread.
     Quality getPlayingQuality() const noexcept { return (Quality) playingQuality.load (std::memory_order_relaxed); }
@@ -433,6 +514,25 @@ private:
         void advance (int samples) noexcept;
     };
 
+    // The Driven filter's loop (dsp::DrivenCoefficients), gliding across each control step as FilterGlide glides the Clean
+    // sections: the numbers the loop's coefficients are made of, g (the integrators' gain), the damping for a quiet sound and
+    // the band-pass's gain, and the section in front's g and damping, in straight lines, each sample's coefficients worked out
+    // from them (a = 1 + g^2, the bend kLarge - kSmall, the band-pass's mix, the front's a1, a2, a3 and band mix). While
+    // nothing moves, the step's own coefficients.
+    struct DrivenGlide
+    {
+        Line g, kSmall, bandGain, frontG, frontK;
+        dsp::DrivenCoefficients target {}, played {};
+        float frontBandSign = 0.0f; // the front's band mix over its damping: 0, 1 or -1
+        bool isBandPass = false;    // its band-pass's mix follows the damping
+        bool glides = false;
+
+        void set (const dsp::DrivenCoefficients&, dsp::FilterMode, int samples, bool atOnce) noexcept;
+        bool isMoving() const noexcept { return glides && g.isMoving(); }
+        const dsp::DrivenCoefficients& at (int ahead) noexcept;
+        void advance (int samples) noexcept;
+    };
+
     // An oscillator's unison voice: where it is in its cycle, and what it reads, each gliding to what the control step worked out.
     struct Reader
     {
@@ -496,6 +596,11 @@ private:
         FilterGlide filterGlide;                         // both sides' sections, gliding
         std::array<dsp::AntialiasedShaper, 2> drives;    // the filter's drive, each side, at twice the rate
         float driveBlend = 0.0f;                         // how far the sound goes through them: fades as the drive comes on or off
+        DrivenGlide drivenGlide;                         // the Driven loop's coefficients, both sides', gliding
+        Line drivenDrive;                                // the drive into the loop, gliding
+        std::array<dsp::AntialiasedShaper, 2> ceilings;  // after the Driven loop, each side, at twice the rate
+        float drivenBlend = 0.0f;                        // from Clean (0) to Driven (1), crossfading over drivenFadeSeconds
+        bool drivenWanted = false;                       // its last control step chose Driven
         bool filtering = false;                          // the filter is on
         bool stepPending = true;                         // it (re)started since the last control step: its values are due
         bool hasPlayed = false;                          // it played a note since the synth was prepared or reset (Phase::free)
@@ -507,7 +612,8 @@ private:
         Line subGain, noiseGain, gainLeft, gainRight; // gliding to what each control step works out
         Line subIncrement;                            // of the sub's phase each sample, gliding as the readers' do
         float driveGain = 1.0f;
-        float cutoffNow = 0.0f; // its filter's frequency, as it was last set
+        float cutoffNow = 0.0f;    // its filter's frequency, as it was last set
+        float cutoffCentre = 0.0f; // the same from its key tracking and its velocity's slots alone
     };
 
     struct Retired
@@ -536,7 +642,6 @@ private:
     std::array<Path, numQualities> paths;
     std::array<dsp::DelayLine, 2> late;       // the wait, each side: the Quality playing's, read as long as its path says
     int capacity = 1;                         // the most samples of the device's rate it plays at once
-    int latency = 0;                          // the latest Quality's, which every Quality takes
     juce::AudioBuffer<float> silence, voiced; // what the up filters take (their buffer at the Quality's rate is where it
                                               // plays), and what it plays at the device's rate before its wait
     std::array<double, 2> lfoRates {};        // as the block set them, in hertz
@@ -561,8 +666,8 @@ private:
     float driftWanderSteps = 1.0f, driftFollow = 1.0f;
 
     // Worked out from seconds as it is prepared, so that it keeps at any rate: how far the drive fades in a sample as
-    // it comes on or off.
-    float driveFadeStep = 1.0f / 32.0f;
+    // it comes on or off, and how far a change of Character crossfades.
+    float driveFadeStep = 1.0f / 32.0f, drivenFadeStep = 1.0f / 441.0f;
 
     // The first maxVoices play notes; the rest fade out what voices played when other notes took them (stealVoice()), each
     // where it was copied, so that a chord that takes several at once fades each of them out.

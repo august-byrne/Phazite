@@ -79,6 +79,12 @@ The full text of every step, as it was written when it was built, is in the
   synth at that multiple of the rate, down through half-band filters, every Quality 5 samples late: a swept sync at
   C5 is 39, 60 and 74 dB under the note, a bent wave 42, 62 and 77. A change of Quality cuts the notes sounding, with
   a 3 ms fade.
+- **S6.7 The Synth's filter drives:** a Character for its filter, Clean or Driven, the Filter device's loop on every
+  voice at the Quality's rate: the resonance saturates, the top of the Resonance sings in tune (within a sixth of a
+  cent from C2 to C7), a change of Character hands the filter's ring over without a dip, and its ceiling works at a
+  voice's level, so that Driven at no Drive leaves a patch's shape alone. Its editor draws the wavetable through its
+  Warp, and shows its own matrix on the knobs it moves as a dashed ring inside Phazite's solid one. Three presets:
+  Sync Sweep, Acid Line, Singing Filter. This ends S6.7.
 - **S6.7 One synth, part A:** the Wavetable gains what only the Synth had, so that the two can become one: each
   LFO's Fade In, Glide Mode, a Drift source, slots that move other slots' amounts (the mod wheel brings a vibrato in),
   a Sync that modulation takes to 16 times, and tables that keep 16 samples a cycle, so that its basic waves alias

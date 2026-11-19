@@ -5,8 +5,10 @@
 // drift), sub, noise, filter (its slopes, combs, notch, drive and what moves its cutoff), pitch bend, glides and slides, the
 // sustain pedal and voices (stolen, a key played again, as it rings out, while it is held or under the pedal, each note on
 // a voice of its own), that it doesn't alias, that its warps leave nothing off centre (with what a part of a frame's cycle
-// adds up to), that it lets go of the tables it no longer plays only once no control step reads them, and that it plays the
-// same every time.
+// adds up to), that it lets go of the tables it no longer plays only once no control step reads them, that it plays the
+// same every time, its Quality, and its filter's Driven character (Clean's response while quiet, singing in tune, its drive
+// and ceiling, a voice that sings ending with its envelope, a change of Character crossfaded).
+#include "DspProbe.h"
 #include "TestHelpers.h"
 #include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
@@ -2871,21 +2873,22 @@ enum class Moved
     level,
     position,
     warp,
-    warpWithin, // the warp's amount at half: from 0 to 100 %, never cut off at the end of its range
-    cutoff,     // a 24 dB low-pass's, at a Resonance of 80 %, from the note, two octaves each way
-    resonance,  // the same filter's, from 60 to 100 %
-    subPitch    // the pitch, the sub alone playing (a sine, at the note)
+    warpWithin,   // the warp's amount at half: from 0 to 100 %, never cut off at the end of its range
+    cutoff,       // a 24 dB low-pass's, at a Resonance of 80 %, from the note, two octaves each way
+    drivenCutoff, // the same, the filter Driven
+    resonance,    // the same filter's, from 60 to 100 %
+    subPitch      // the pitch, the sub alone playing (a sine, at the note)
 };
 
-// A sine's note at 1 kHz (B5 tuned up by its Fine) at 44.1 kHz, with LFO 1 (a sine at 25 Hz) moving one thing at full
-// amount, or nothing: what the left side plays from a quarter of a second on, 2^17 samples.
-std::vector<float> playZipperNote (Moved moved, bool moving, Synth::Quality quality = Synth::Quality::once)
+// A sine's note at 1 kHz (B5 tuned up by its Fine) at 44.1 kHz, with LFO 1 (a sine at 25 Hz, or another rate that divides
+// 1 kHz) moving one thing at full amount, or nothing: what the left side plays from a quarter of a second on, 2^17 samples.
+std::vector<float> playZipperNote (Moved moved, bool moving, Synth::Quality quality = Synth::Quality::once, float lfoRate = 25.0f)
 {
     constexpr double rate = 44100.0;
     auto values = getPlainValues (0.0f);
     values[Synth::osc1Fine] = (float) (1200.0 * std::log2 (1000.0 / noteFrequency (83)));
     values[Synth::lfo1Shape] = 0.0f; // a sine
-    values[Synth::lfo1Rate] = 25.0f;
+    values[Synth::lfo1Rate] = lfoRate;
     values[Synth::lfo1Sync] = 0.0f;
     values[Synth::mod1Source] = moving ? (float) Synth::ModSource::lfo1 : 0.0f;
     values[Synth::mod1Amount] = 1.0f;
@@ -2926,15 +2929,17 @@ std::vector<float> playZipperNote (Moved moved, bool moving, Synth::Quality qual
                 values[Synth::mod1Amount] = moved == Moved::warp ? 1.0f : 0.5f;
                 return Synth::ModTarget::osc1Warp;
             case Moved::cutoff:
+            case Moved::drivenCutoff:
             case Moved::resonance:
                 values[Synth::filterOn] = 1.0f;
                 values[Synth::filterType] = (float) devices::dsp::FilterMode::lowPass;
                 values[Synth::filterSlope] = 1.0f; // 24 dB
+                values[Synth::filterCharacter] = moved == Moved::drivenCutoff ? 1.0f : 0.0f;
                 values[Synth::cutoff] = 1000.0f;
                 values[Synth::resonance] = 0.8f;
                 values[Synth::keyTracking] = 0.0f;
-                values[Synth::mod1Amount] = moved == Moved::cutoff ? 0.25f : 0.2f; // 24 of the 96 semitones; 20 %
-                return moved == Moved::cutoff ? Synth::ModTarget::cutoff : Synth::ModTarget::resonance;
+                values[Synth::mod1Amount] = moved == Moved::resonance ? 0.2f : 0.25f; // 20 %; 24 of the 96 semitones
+                return moved == Moved::resonance ? Synth::ModTarget::resonance : Synth::ModTarget::cutoff;
             case Moved::subPitch:
                 values[Synth::osc1On] = 0.0f;
                 values[Synth::subLevel] = 1.0f;
@@ -2990,15 +2995,16 @@ std::vector<double> getAmplitudes (const std::vector<float>& sound, double rate,
 // grid is the note's harmonics, at 1 kHz, but for the pitch moved, whose sidebands are about the mean of the frequencies it
 // moves through: so it is laid through the loudest component. The control steps' images fall between: at 44.1 kHz a step is
 // 2756.25 Hz, 110.25 times 25 Hz, so each of its first three multiples lands a quarter, a half or three quarters of the way
-// between two lines of the grid (the fourth, 11,025 Hz, falls on it, and the fifth a quarter off again).
-double measureZipper (Moved moved, Synth::Quality quality = Synth::Quality::once)
+// between two lines of the grid (the fourth, 11,025 Hz, falls on it, and the fifth a quarter off again). With the LFO at
+// another rate, the grid is that rate's.
+double measureZipper (Moved moved, Synth::Quality quality = Synth::Quality::once, float lfoRate = 25.0f)
 {
     constexpr double rate = 44100.0;
     auto binHertz = 0.0;
-    const auto still = getAmplitudes (playZipperNote (moved, false, quality), rate, binHertz);
+    const auto still = getAmplitudes (playZipperNote (moved, false, quality, lfoRate), rate, binHertz);
     const auto noteBin = (size_t) std::lround ((moved == Moved::subPitch ? noteFrequency (83) : 1000.0) / binHertz);
     const auto note = *std::max_element (still.begin() + (long) noteBin - 10, still.begin() + (long) noteBin + 10);
-    const auto amplitudes = getAmplitudes (playZipperNote (moved, true, quality), rate, binHertz);
+    const auto amplitudes = getAmplitudes (playZipperNote (moved, true, quality, lfoRate), rate, binHertz);
     const auto first = (size_t) (50.0 / binHertz), last = (size_t) (15000.0 / binHertz);
 
     // Where the loudest component is, between its bins (a parabola through the decibels of the three about it).
@@ -3006,10 +3012,10 @@ double measureZipper (Moved moved, Synth::Quality quality = Synth::Quality::once
         (size_t) std::distance (amplitudes.begin(), std::max_element (amplitudes.begin() + (long) first, amplitudes.begin() + (long) last));
     const auto a = std::log (amplitudes[peak - 1]), b = std::log (amplitudes[peak]), c = std::log (amplitudes[peak + 1]);
     const auto peakHertz = ((double) peak + 0.5 * (a - c) / (a - 2.0 * b + c)) * binHertz;
-    const auto offGrid = [peakHertz] (double hertz)
+    const auto offGrid = [peakHertz, grid = (double) lfoRate] (double hertz)
     {
         const auto from = hertz - peakHertz;
-        return std::abs (from - 25.0 * std::round (from / 25.0)) > 2.6;
+        return std::abs (from - grid * std::round (from / grid)) > 2.6;
     };
 
     auto loudest = 0.0;
@@ -3152,25 +3158,39 @@ TEST_CASE ("The synth's filter and its sub's pitch glide across each control ste
     }
 }
 
+TEST_CASE ("The synth's Driven filter glides its loop across each control step: no zipper under the note")
+{
+    // The same measure, the 25 Hz LFO on the Driven 24 dB low-pass's cutoff at a Resonance of 80 %, by two octaves each way
+    // from the note: the loop's coefficients glide as the Clean sections' do. Under -80 dB.
+    const auto zipper = measureZipper (Moved::drivenCutoff);
+    MESSAGE ("Driven cutoff: " << zipper << " dB under the note");
+    CHECK (zipper < -80.0);
+}
+
 TEST_CASE ("The synth's sync zipper at each Quality")
 {
     // The first glides' two worst rows, Sync's amount moved by the LFO at full and at half, at 2x and 4x, where the control
-    // steps are as many samples at a higher rate. At 4x the steps' images (11,025 Hz apart) fall on the measure's grid of 25 Hz,
-    // so what it finds there is what is left between them. Each held to what it measures less 6 dB.
+    // steps are as many samples at a higher rate. At 4x the steps' images (11,025 Hz apart) would fall on the measure's grid
+    // of 25 Hz (11,025 is 441 times 25), where it doesn't look: so at 4x the LFO runs at 20 Hz, which divides the note's
+    // 1 kHz as 25 Hz does (its harmonics and the LFO's sidebands stay on the grid) while 11,025 Hz is 551.25 times 20 Hz,
+    // and the steps' images about the note (at 11,025 Hz less and more 1 kHz and the sidebands) land a quarter of the way
+    // between two lines, as the 1x rows' first images do. Each held to what it measures less 6 dB.
     struct Expected
     {
         Moved moved;
         Synth::Quality quality;
+        float lfoRate;
         double measured; // dB under the note
     };
 
-    for (const auto& [moved, quality, measured] :
-         { Expected { Moved::warp, Synth::Quality::twice, -41.5 }, Expected { Moved::warpWithin, Synth::Quality::twice, -53.0 },
-           Expected { Moved::warp, Synth::Quality::fourTimes, -118.1 }, Expected { Moved::warpWithin, Synth::Quality::fourTimes, -114.2 } })
+    for (const auto& [moved, quality, lfoRate, measured] : { Expected { Moved::warp, Synth::Quality::twice, 25.0f, -41.5 },
+                                                             Expected { Moved::warpWithin, Synth::Quality::twice, 25.0f, -53.0 },
+                                                             Expected { Moved::warp, Synth::Quality::fourTimes, 20.0f, -56.7 },
+                                                             Expected { Moved::warpWithin, Synth::Quality::fourTimes, 20.0f, -69.9 } })
     {
-        const auto zipper = measureZipper (moved, quality);
+        const auto zipper = measureZipper (moved, quality, lfoRate);
         MESSAGE (std::string (moved == Moved::warp ? "Sync's amount" : "Sync's amount, within its range")
-                 << " at " << Synth::getFactor (quality) << "x: " << zipper << " dB under the note");
+                 << " at " << Synth::getFactor (quality) << "x, the LFO at " << lfoRate << " Hz: " << zipper << " dB under the note");
         CHECK (zipper < measured + 6.0);
     }
 }
@@ -3325,6 +3345,7 @@ TEST_CASE ("The synth's Quality: a plain saw, the sub and the noise are as loud 
     {
         const char* name;
         std::vector<float> values;
+        int note;
     };
 
     auto saw = getPlainValues (2.0f / 3.0f);
@@ -3335,7 +3356,13 @@ TEST_CASE ("The synth's Quality: a plain saw, the sub and the noise are as loud 
     noise[Synth::subLevel] = 0.0f;
     noise[Synth::noiseLevel] = 1.0f;
 
-    for (const auto& [name, values] : { Sound { "saw", saw }, Sound { "sub", sub }, Sound { "noise", noise } })
+    // The sub as a saw too, whose band limit is chosen as at the device's rate at every Quality (it played harmonics up to
+    // four times as high at 4x until 2026-11-18), and an octave down from C6, where that limit leaves out the most.
+    auto subSaw = sub;
+    subSaw[Synth::subShape] = 2.0f; // a saw
+
+    for (const auto& [name, values, note] : { Sound { "saw", saw, 60 }, Sound { "sub", sub, 60 }, Sound { "noise", noise, 60 },
+                                              Sound { "sub saw", subSaw, 60 }, Sound { "sub saw, high", subSaw, 84 } })
     {
         CAPTURE (name);
         auto atOnce = 0.0;
@@ -3344,7 +3371,7 @@ TEST_CASE ("The synth's Quality: a plain saw, the sub and the noise are as loud 
         {
             auto withQuality = values;
             withQuality[Synth::quality] = (float) quality;
-            const auto played = play (*makeSynth(), withQuality, 48000, { noteOn (0, 60) });
+            const auto played = play (*makeSynth(), withQuality, 48000, { noteOn (0, note) });
             const auto level = getLevelOf (played.left, 4800, 48000);
 
             if (quality == Synth::Quality::once)
@@ -3408,8 +3435,7 @@ TEST_CASE ("The synth's Quality changed while a chord is held: its voices fade o
     // late note at 2x, a saw with more of its top, steps a little further between samples than the chord at 1x did.)
     const auto own = largestJump (4800, (size_t) changeAt);
     const auto aboutTheChange = largestJump ((size_t) (changeAt - testBlockSize), (size_t) changeAt + 240);
-    CAPTURE (own);
-    CAPTURE (aboutTheChange);
+    MESSAGE ("the chord's own largest step " << own << ", about the change " << aboutTheChange);
     CHECK (aboutTheChange <= own);
 
     // It changed after the fade, the latency and the filters' settling (within the block it was asked for), and the late
@@ -3420,7 +3446,126 @@ TEST_CASE ("The synth's Quality changed while a chord is held: its voices fade o
     CHECK (peakOf (played, (size_t) changeAt + 2400, played.size()) > 0.05f);
 }
 
-TEST_CASE ("The synth at 2x and 4x plays the same samples in blocks of 7, 32 and 512")
+TEST_CASE ("The synth's latency is a constant: each Quality's way down and its wait add up to it, split as it was built for")
+{
+    // Each Quality waits after its half-band filters' way down for the rest of the latency: whole samples, then a fraction of
+    // one by its all-pass. As the device was prepared, the way down measured, the whole samples and the fraction its
+    // all-pass's coefficient gives add up to the constant within a thousandth of a sample at each Quality.
+    CHECK (Synth::getLatency() == 5);
+    const auto synth = makeSynth();
+
+    for (const auto quality : { Synth::Quality::once, Synth::Quality::twice, Synth::Quality::fourTimes })
+    {
+        const auto wait = synth->getWait (quality);
+        MESSAGE (Synth::getFactor (quality) << "x: the way down " << Synth::getDownDelay (quality) << " samples, then " << wait.samples
+                                            << " whole and " << wait.fraction << " by the all-pass");
+        CAPTURE (Synth::getFactor (quality));
+        CHECK (std::abs (Synth::getDownDelay (quality) + wait.samples + wait.fraction - Synth::getLatency()) < 1.0e-3);
+    }
+
+    // The split is the one the synth was built for (its renders are made with it): 2x waits 3 samples and 0.513 of one, 4x 2
+    // samples and 0.918. Were 2x's way down 0.013 of a sample longer, its split would flip (a whole sample fewer, the
+    // all-pass's fraction a whole sample more, the delay as a whole the same but every render at 2x a little different):
+    // each held with a margin of 0.005 on the side toward a flip, so that another compiler's rounding that crosses it shows
+    // here, not as a golden render that moved.
+    CHECK (synth->getWait (Synth::Quality::once).samples == Synth::getLatency());
+    CHECK (synth->getWait (Synth::Quality::twice).samples == 3);
+    CHECK (synth->getWait (Synth::Quality::twice).fraction > 0.513 - 0.005);
+    CHECK (synth->getWait (Synth::Quality::fourTimes).samples == 2);
+    CHECK (synth->getWait (Synth::Quality::fourTimes).fraction > 0.918 - 0.005);
+}
+
+TEST_CASE ("A change of Quality's waiting list keeps all notes off, the note-offs and the pedal-ups, however full")
+{
+    // A chord held at 1x; the Quality goes to 2x, and while the change waits, 300 note-ons and then all notes off come in
+    // one block: the list holds 256, and all notes off, which comes last, lets every note waiting before it go. Nothing
+    // sounds after the change. (It was dropped once the list was full, and the 256 notes before it played on.)
+    auto values = getDefaults();
+    auto synth = makeSynth();
+    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    std::vector<float> played;
+
+    for (int done = 0; done < 48000; done += testBlockSize)
+    {
+        buffer.clear();
+        std::vector<NoteEvent> events;
+
+        if (done == 0)
+            events = { noteOn (0, 48), noteOn (0, 55), noteOn (0, 60) };
+
+        if (done == 4800)
+        {
+            for (int n = 0; n < 300; ++n)
+                events.push_back (noteOn (1 + n / 10, 20 + n % 100));
+
+            events.push_back ({ NoteEvent::Type::allNotesOff, 40, 0, 0.0f });
+        }
+
+        values[Synth::quality] = done >= 4800 ? 1.0f : 0.0f;
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = testBlockSize;
+        block.parameters = values;
+        block.events = events;
+        synth->process (block);
+        played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + testBlockSize);
+    }
+
+    CHECK ((int) synth->getPlayingQuality() == (int) Synth::Quality::twice);
+    CHECK (synth->getActiveVoices() == 0);
+    CHECK (peakOf (played, 4800 + 2400, played.size()) == 0.0f);
+
+    // And a pedal-up that comes when the list is full makes room (here by dropping the pedal-down before it), and a note-off
+    // takes back its note waiting to start: the pedal goes down, a note plays, 253 others, the first note lets go, the
+    // pedal comes up, the others let go, all while the change waits. Nothing hangs. (The pedal-up was dropped once the list
+    // was full, and the first note was held by the pedal for ever.)
+    values[Synth::quality] = 0.0f;
+    synth = makeSynth();
+    played.clear();
+
+    for (int done = 0; done < 48000; done += testBlockSize)
+    {
+        buffer.clear();
+        std::vector<NoteEvent> events;
+
+        if (done == 0)
+            events = { noteOn (0, 48) };
+
+        if (done == 4800)
+        {
+            events.push_back ({ NoteEvent::Type::controller, 1, 64, 1.0f });
+            events.push_back (noteOn (1, 48));
+
+            for (int n = 0; n < 253; ++n)
+                events.push_back (noteOn (2, 60 + n % 60));
+
+            events.push_back (noteOff (3, 48));
+            events.push_back ({ NoteEvent::Type::controller, 3, 64, 0.0f });
+
+            for (int n = 0; n < 253; ++n)
+                events.push_back (noteOff (4, 60 + n % 60));
+        }
+
+        values[Synth::quality] = done >= 4800 ? 1.0f : 0.0f;
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = testBlockSize;
+        block.parameters = values;
+        block.events = events;
+        synth->process (block);
+        played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + testBlockSize);
+    }
+
+    // The default release is 200 ms: everything has rung out within the second.
+    CHECK (synth->getActiveVoices() == 0);
+    CHECK (peakOf (played, 48000 - 4800, played.size()) == 0.0f);
+}
+
+TEST_CASE ("The synth at 2x and 4x, and Driven at 2x, plays the same samples in blocks of 7, 32 and 512")
 {
     auto values = getDefaults();
     values[Synth::lfo1Rate] = 7.0f;
@@ -3429,19 +3574,515 @@ TEST_CASE ("The synth at 2x and 4x plays the same samples in blocks of 7, 32 and
     values[Synth::mod2Amount] = 0.5f;
     values[Synth::osc1Warp] = (float) Synth::Warp::sync;
 
-    for (const auto quality : { Synth::Quality::twice, Synth::Quality::fourTimes })
+    // Driven: near singing, driven 12 dB, its cutoff swept by Envelope 2 (the first slot) and by LFO 1 too.
+    auto driven = values;
+    driven[Synth::filterCharacter] = (float) Synth::FilterCharacter::driven;
+    driven[Synth::resonance] = 0.88f;
+    driven[Synth::drive] = 12.0f;
+    driven[Synth::mod3Source] = (float) Synth::ModSource::lfo1;
+    driven[Synth::mod3Target] = (float) Synth::ModTarget::cutoff;
+    driven[Synth::mod3Amount] = 0.2f;
+
+    for (const auto& [quality, character] :
+         { std::pair { Synth::Quality::twice, &values }, std::pair { Synth::Quality::fourTimes, &values },
+           std::pair { Synth::Quality::twice, &driven } })
     {
         CAPTURE (Synth::getFactor (quality));
-        values[Synth::quality] = (float) quality;
+        CAPTURE (character == &driven);
+        auto& patch = *character;
+        patch[Synth::quality] = (float) quality;
         const std::vector events { noteOn (0, 48), noteOn (1000, 60), noteOff (9000, 48), noteOff (9100, 60) };
-        const auto in512 = play (*makeSynth(), values, 14400, events, 512);
+        const auto in512 = play (*makeSynth(), patch, 14400, events, 512);
 
         for (const auto blockSize : { 7, 32 })
         {
             CAPTURE (blockSize);
-            const auto other = play (*makeSynth(), values, 14400, events, blockSize);
+            const auto other = play (*makeSynth(), patch, 14400, events, blockSize);
             CHECK (other.left == in512.left);
             CHECK (other.right == in512.right);
         }
     }
+}
+
+namespace
+{
+// A patch for the Driven filter: the first oscillator's saw at full level, into the filter Driven or Clean, of a type and a
+// slope, at a cutoff and a resonance, with a drive, nothing moving it (no key tracking, no slots).
+std::vector<float> getFilterPatch (bool driven, devices::dsp::FilterMode mode, bool steep, float hertz, float resonance,
+                                   float driveDecibels)
+{
+    auto values = getPlainValues (2.0f / 3.0f);
+    values[Synth::filterOn] = 1.0f;
+    values[Synth::filterType] = (float) mode;
+    values[Synth::filterSlope] = steep ? 1.0f : 0.0f;
+    values[Synth::filterCharacter] = (float) (driven ? Synth::FilterCharacter::driven : Synth::FilterCharacter::clean);
+    values[Synth::cutoff] = hertz;
+    values[Synth::resonance] = resonance;
+    values[Synth::drive] = driveDecibels;
+    values[Synth::keyTracking] = 0.0f;
+    return values;
+}
+
+// The singing patch: the oscillator's level at 0, the 12 dB low-pass Driven at a Resonance of 100 %, at C4's frequency,
+// following the key at 100 %, so that each key plays its filter as a sine at the key's pitch.
+std::vector<float> getSingingPatch (Synth::Quality quality)
+{
+    auto values = getFilterPatch (true, devices::dsp::FilterMode::lowPass, false, (float) noteFrequency (60), 1.0f, 0.0f);
+    values[Synth::osc1Level] = 0.0f;
+    values[Synth::keyTracking] = 1.0f;
+    values[Synth::quality] = (float) quality;
+    return values;
+}
+
+// A sound's level in each third of an octave from 100 Hz up to a frequency, in decibels: the sum of its power spectra over
+// windows of 2^14 samples, half overlapping, through a Hann window.
+std::vector<double> getThirdOctaveLevels (const std::vector<float>& sound, size_t from, double upTo)
+{
+    constexpr int order = 14, size = 1 << order;
+    juce::dsp::FFT fft (order);
+    std::vector<double> power ((size_t) size / 2, 0.0);
+    std::vector<float> data (2 * (size_t) size);
+
+    for (auto start = from; start + (size_t) size <= sound.size(); start += (size_t) size / 2)
+    {
+        for (size_t n = 0; n < (size_t) size; ++n)
+            data[n] = sound[start + n] * (float) (0.5 - 0.5 * std::cos (twoPi * (double) n / size));
+
+        std::fill (data.begin() + size, data.end(), 0.0f);
+        fft.performFrequencyOnlyForwardTransform (data.data());
+
+        for (size_t bin = 0; bin < power.size(); ++bin)
+            power[bin] += (double) data[bin] * (double) data[bin];
+    }
+
+    std::vector<double> levels;
+    const auto third = std::pow (2.0, 1.0 / 3.0);
+
+    for (auto low = 100.0; low * third <= upTo; low *= third)
+    {
+        auto sum = 1.0e-30;
+
+        for (auto bin = (size_t) std::ceil (low * size / testRate); bin < (size_t) (low * third * size / testRate); ++bin)
+            sum += power[bin];
+
+        levels.push_back (10.0 * std::log10 (sum));
+    }
+
+    return levels;
+}
+} // namespace
+
+TEST_CASE ("The synth's Driven filter has Clean's response for a quiet sound at a low Resonance and no Drive")
+{
+    // Quiet noise (the oscillator's level at 0) through each type the Driven character plays, at 12 and 24 dB, at 2 kHz and a
+    // Resonance of 20 %: Driven and Clean hear the same noise, and each third of an octave up to a quarter of the rate comes
+    // out within 0.5 dB, wherever Clean lets through more than 50 dB under its loudest third. Up to a Resonance of 90 % the
+    // loop has the Q the Synth's Clean filter has (dsp::getSynthResonanceQ()).
+    using devices::dsp::FilterMode;
+
+    for (const auto mode : { FilterMode::lowPass, FilterMode::highPass, FilterMode::bandPass, FilterMode::notch })
+    {
+        for (const auto steep : { false, true })
+        {
+            CAPTURE ((int) mode);
+            CAPTURE (steep);
+            std::array<std::vector<double>, 2> levels;
+
+            for (const auto driven : { false, true })
+            {
+                auto values = getFilterPatch (driven, mode, steep, 2000.0f, 0.2f, 0.0f);
+                values[Synth::osc1Level] = 0.0f;
+                values[Synth::noiseLevel] = 0.03f;
+                const auto played = play (*makeSynth(), values, 96000, { noteOn (0, 60) });
+                levels[driven ? 1 : 0] = getThirdOctaveLevels (played.left, 4800, testRate / 4.0);
+            }
+
+            const auto loudest = *std::max_element (levels[0].begin(), levels[0].end());
+            auto mostOff = 0.0;
+
+            for (size_t band = 0; band < levels[0].size(); ++band)
+                if (levels[0][band] > loudest - 50.0)
+                    mostOff = std::max (mostOff, std::abs (levels[1][band] - levels[0][band]));
+
+            CAPTURE (mostOff);
+            CHECK (mostOff < 0.5);
+        }
+    }
+
+    // And the editor's picture of Driven at that Resonance is Clean's, within the same.
+    const auto values = getFilterPatch (true, FilterMode::lowPass, true, 2000.0f, 0.2f, 0.0f);
+    auto clean = values;
+    clean[Synth::filterCharacter] = 0.0f;
+
+    for (const auto hertz : { 200.0, 1000.0, 2000.0, 4000.0, 8000.0 })
+        CHECK (std::abs (20.0
+                         * std::log10 (Synth::getFilterMagnitude (values, 2000.0, hertz, testRate)
+                                       / Synth::getFilterMagnitude (clean, 2000.0, hertz, testRate)))
+               < 0.5);
+}
+
+TEST_CASE ("The synth's Driven filter sings at the key's pitch with key tracking at 100 %, from silence, at -12 dBFS")
+{
+    // The singing patch's keys from C2 to C7, held four seconds (from the loop's kick, a low key's ring takes two to grow):
+    // its pitch over the last half second within 5 cents of the key's at 2x and 4x, and its peak the loop's singing level,
+    // -12 dBFS, within a decibel. 1x is measured and reported.
+    for (const auto quality : { Synth::Quality::once, Synth::Quality::twice, Synth::Quality::fourTimes })
+    {
+        for (const auto note : { 36, 48, 60, 72, 84, 96 })
+        {
+            const auto played = play (*makeSynth(), getSingingPatch (quality), 4 * 48000, { noteOn (0, note) });
+            const auto from = (size_t) (3.5 * testRate), to = played.left.size();
+            const auto cents = 1200.0 * std::log2 (measureFrequency (played.left, from, to) / noteFrequency (note));
+            const auto peak = 20.0 * std::log10 (std::max (1.0e-9f, peakOf (played.left, from, to)));
+            MESSAGE (Synth::getFactor (quality) << "x, note " << note << ": " << cents << " cents, peak " << peak << " dBFS");
+
+            if (quality == Synth::Quality::once)
+                continue;
+
+            CAPTURE (Synth::getFactor (quality));
+            CAPTURE (note);
+            CHECK (std::abs (cents) < 5.0);
+            CHECK (std::abs (peak + 12.0) < 1.0);
+        }
+    }
+}
+
+TEST_CASE ("A driven synth note grows by half its Drive while quiet, and stays under the ceiling however loud")
+{
+    using devices::dsp::FilterMode;
+
+    // A quiet saw (-40 dB) through the Driven low-pass, open at 10 kHz: 12 dB of drive makes it 6 dB louder, the half not
+    // given back, within half a decibel.
+    const auto levelWith = [] (float driveDecibels)
+    {
+        auto values = getFilterPatch (true, FilterMode::lowPass, false, 10000.0f, 0.1f, driveDecibels);
+        values[Synth::osc1Level] = 0.01f;
+        const auto played = play (*makeSynth(), values, 24000, { noteOn (0, 48) });
+        return getLevelOf (played.left, 4800, 24000);
+    };
+
+    const auto grown = levelWith (12.0f) - levelWith (0.0f);
+    CAPTURE (grown);
+    CHECK (std::abs (grown - 6.0) < 0.5);
+
+    // Loud: a sine (Basic Shapes' first frame) at full level, driven 24 dB into the open low-pass: the ceiling, at a voice's
+    // scale, holds the voice to twice full scale, which the ceiling's way down from twice the rate may overshoot a little, as
+    // the Filter device's does its own (held to the same share of it, 5 %), and it comes out louder than undriven.
+    const auto loud = [] (float driveDecibels)
+    {
+        auto values = getFilterPatch (true, FilterMode::lowPass, false, 10000.0f, 0.1f, driveDecibels);
+        values[Synth::osc1Position] = 0.0f;
+        return play (*makeSynth(), values, 24000, { noteOn (0, 69) });
+    };
+
+    const auto driven = loud (24.0f);
+    const auto peak = peakOf (driven.left, 4800, driven.left.size());
+    MESSAGE ("a full-level sine driven 24 dB peaks at " << peak);
+    CHECK (peak < 2.0f * 1.05f);
+    CHECK (getLevelOf (driven.left, 4800, 24000) > getLevelOf (loud (0.0f).left, 4800, 24000));
+
+    // A saw, resonant and driven as hard, rounded at the ceiling into nearly a square, overshoots it further (its edges
+    // band-limited): reported.
+    const auto saw =
+        play (*makeSynth(), getFilterPatch (true, FilterMode::lowPass, true, 2000.0f, 0.85f, 24.0f), 24000, { noteOn (0, 48) });
+    MESSAGE ("a full-level saw driven 24 dB into a 24 dB low-pass at 2 kHz, Resonance 85 %, peaks at "
+             << peakOf (saw.left, 0, saw.left.size()));
+}
+
+TEST_CASE ("A synth voice whose filter sings ends with its amp envelope, and a held note that only sings never sleeps")
+{
+    // Directly: the singing patch's note held two seconds, then let go: once its release (200 ms) is over, nothing sounds and
+    // no voice plays.
+    {
+        auto synth = makeSynth();
+        const auto played = play (*synth, getSingingPatch (Synth::Quality::once), 3 * 48000, { noteOn (0, 72), noteOff (96000, 72) });
+        CHECK (peakOf (played.left, 96000 - 4800, 96000) > 0.1f);
+        CHECK (peakOf (played.left, 96000 + 24000, played.left.size()) == 0.0f);
+        CHECK (synth->getActiveVoices() == 0);
+    }
+
+    // Through its runner, live (it may sleep on silence): a note held six seconds whose oscillator is silent, its filter
+    // growing from the loop's kick for a second or two under the runner's floor for silence, then singing. An instrument
+    // sleeps only while no key is held: it sings to the end.
+    {
+        phazite::test::probe::Device device (Synth::info);
+        device.setAll (getSingingPatch (Synth::Quality::once));
+        device.isRendering = false;
+        device.prepare (testRate, 480);
+        const devices::NoteEvent notes[] = { noteOn (0, 48) };
+        const auto played = device.played (phazite::test::probe::makeSilence (6 * 48000), 480, notes);
+        CHECK (phazite::test::probe::getPeak (played, 5 * 48000, 48000) > 0.1);
+    }
+}
+
+TEST_CASE ("The synth's Character changed while a note sounds crossfades, without a click")
+{
+    // A note held, the Character switched from Clean to Driven a quarter of a second in and back half a second in, with 12 dB
+    // of drive (Driven 6 dB louder, a step a fade must hide): no step between samples about either change larger than the
+    // note's own largest.
+    auto values = getFilterPatch (false, devices::dsp::FilterMode::lowPass, true, 1500.0f, 0.3f, 12.0f);
+    values[Synth::osc1Level] = 0.5f;
+    auto synth = makeSynth();
+    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    std::vector<float> played;
+    constexpr int toDriven = 12032, toClean = 24064; // at blocks' starts
+
+    for (int done = 0; done < 36096; done += testBlockSize)
+    {
+        buffer.clear();
+        std::vector<NoteEvent> events;
+
+        if (done == 0)
+            events = { noteOn (0, 48) };
+
+        values[Synth::filterCharacter] = done >= toDriven && done < toClean ? 1.0f : 0.0f;
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = testBlockSize;
+        block.parameters = values;
+        block.events = events;
+        synth->process (block);
+        played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + testBlockSize);
+    }
+
+    const auto own = std::max (largestStep (played, 4800, (size_t) toDriven - 256),
+                               largestStep (played, (size_t) toDriven + 2400, (size_t) toClean - 256));
+    const auto aboutDriven = largestStep (played, (size_t) toDriven - 256, (size_t) toDriven + 2400);
+    const auto aboutClean = largestStep (played, (size_t) toClean - 256, (size_t) toClean + 2400);
+    MESSAGE ("own " << own << ", about the change to Driven " << aboutDriven << ", back to Clean " << aboutClean);
+    CHECK (aboutDriven <= own);
+    CHECK (aboutClean <= own);
+
+    // And it did change: Driven is louder.
+    CHECK (getLevelOf (played, (size_t) toDriven + 4800, (size_t) toClean) > getLevelOf (played, 4800, (size_t) toDriven) + 3.0);
+}
+
+namespace
+{
+// A held note of 200 Hz (G3 35 cents up: a cycle every 5 ms at 48 kHz) through the 24 dB low-pass at a Resonance of 85 %,
+// its cutoff on the note's third harmonic, at an oscillator Level and a Drive; its Character `before` up to the block that
+// starts at switchAt, then `after`.
+constexpr int characterSwitchAt = 12032; // a block's start, a quarter of a second in
+constexpr double characterNote = 200.0;
+constexpr size_t characterCycle = 240;
+
+std::vector<float> playCharacters (float oscillatorLevel, float driveDecibels, Synth::FilterCharacter before, Synth::FilterCharacter after)
+{
+    auto values = getFilterPatch (false, devices::dsp::FilterMode::lowPass, true, (float) (3.0 * characterNote), 0.85f, driveDecibels);
+    values[Synth::osc1Level] = oscillatorLevel;
+    values[Synth::osc1Fine] = (float) (1200.0 * std::log2 (characterNote / noteFrequency (55)));
+    auto synth = makeSynth();
+    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    std::vector<float> played;
+
+    for (int done = 0; done < characterSwitchAt + 24 * testBlockSize; done += testBlockSize)
+    {
+        buffer.clear();
+        std::vector<NoteEvent> events;
+
+        if (done == 0)
+            events = { noteOn (0, 55) };
+
+        values[Synth::filterCharacter] = (float) (done >= characterSwitchAt ? after : before);
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = testBlockSize;
+        block.parameters = values;
+        block.events = events;
+        synth->process (block);
+        played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + testBlockSize);
+    }
+
+    return played;
+}
+
+// The level at the cutoff (the note's third harmonic), in decibels, over each 5 ms from 20 ms before the switch to 60 ms
+// after it: a cycle of the note at a time, by its third harmonic's term in the cycle's Fourier series, which none of the
+// other harmonics touch.
+std::vector<double> getLevelsAboutSwitch (const std::vector<float>& sound)
+{
+    std::vector<double> levels;
+
+    for (auto from = (size_t) characterSwitchAt - 4 * characterCycle; from < (size_t) characterSwitchAt + 12 * characterCycle;
+         from += characterCycle)
+    {
+        std::complex<double> sum;
+
+        for (size_t n = 0; n < characterCycle; ++n)
+            sum += (double) sound[from + n] * std::polar (1.0, -twoPi * 3.0 * (double) n / (double) characterCycle);
+
+        levels.push_back (20.0 * std::log10 (std::max (1.0e-12, 2.0 * std::abs (sum) / (double) characterCycle)));
+    }
+
+    return levels;
+}
+
+// The largest step between samples about the switch, and the note's own largest, before it and after the fade.
+float getStepAboutSwitch (const std::vector<float>& sound)
+{
+    return largestStep (sound, (size_t) characterSwitchAt - 256, (size_t) characterSwitchAt + 2400);
+}
+
+float getOwnStep (const std::vector<float>& sound)
+{
+    return std::max (largestStep (sound, 4800, (size_t) characterSwitchAt - 256),
+                     largestStep (sound, (size_t) characterSwitchAt + 2400, sound.size()));
+}
+} // namespace
+
+TEST_CASE ("The synth's Character changed under a resonant note hands its filter's state over: no dip, no ping")
+{
+    using Character = Synth::FilterCharacter;
+
+    // Quiet (the loop's curve straight) and with no Drive, the two Characters play the same sound: switched each way while
+    // the note sounds, the level at the cutoff over each 5 ms from 20 ms before to 60 ms after stays within 1 dB of what the
+    // note plays unswitched, and no step between samples about the switch is larger than the note's own largest, before the
+    // switch or after its fade, by more than a hundredth (a click is many times it; the fade between the two ways, the Driven
+    // one later by its ceiling's fraction of a sample, adds a few ten-thousandths). (Started from rest, the incoming
+    // filter's resonance was half built as the 10 ms fade ended: 5.3 dB under to Driven, 5.0 dB to Clean; driven 12 dB,
+    // 1.2 dB under both to Driven, 4.0 dB to Clean.)
+    for (const auto& [from, to] : { std::pair { Character::clean, Character::driven }, std::pair { Character::driven, Character::clean } })
+    {
+        CAPTURE ((int) from);
+        const auto switched = playCharacters (0.02f, 0.0f, from, to);
+        const auto unswitched = playCharacters (0.02f, 0.0f, from, from);
+        const auto levels = getLevelsAboutSwitch (switched), steady = getLevelsAboutSwitch (unswitched);
+        auto mostOff = 0.0;
+
+        for (size_t w = 0; w < levels.size(); ++w)
+            mostOff = std::max (mostOff, std::abs (levels[w] - steady[w]));
+
+        MESSAGE (std::string (from == Character::clean ? "to Driven" : "to Clean")
+                 << ", quiet: the level at the cutoff at most " << mostOff << " dB off");
+        CHECK (mostOff < 1.0);
+        CHECK (getStepAboutSwitch (switched) <= 1.01f * getOwnStep (switched));
+    }
+
+    // At the default Level and a Drive of 12 dB, where the Characters differ (Clean's drive shapes what goes into its
+    // sections, Driven's saturates its resonance): no click, and over each 5 ms the level at the cutoff goes from the one's to
+    // the other's within 1 dB of the two, never further under or over both (0.7 dB under in the first 5 ms to Driven, 0.5 dB
+    // over to Clean, then each way in one direction).
+    for (const auto& [from, to] : { std::pair { Character::clean, Character::driven }, std::pair { Character::driven, Character::clean } })
+    {
+        CAPTURE ((int) from);
+        const auto switched = playCharacters (0.75f, 12.0f, from, to);
+        const auto levels = getLevelsAboutSwitch (switched);
+        const auto before = getLevelsAboutSwitch (playCharacters (0.75f, 12.0f, from, from));
+        const auto after = getLevelsAboutSwitch (playCharacters (0.75f, 12.0f, to, to));
+        auto deepest = 0.0, highest = 0.0; // under both, over both
+
+        for (size_t w = 0; w < levels.size(); ++w)
+        {
+            deepest = std::max (deepest, std::min (before[w], after[w]) - levels[w]);
+            highest = std::max (highest, levels[w] - std::max (before[w], after[w]));
+        }
+
+        MESSAGE (std::string (from == Character::clean ? "to Driven" : "to Clean")
+                 << ", driven 12 dB: at most " << deepest << " dB under both, " << highest << " dB over both");
+        CHECK (deepest < 1.0);
+        CHECK (highest < 1.0);
+        CHECK (getStepAboutSwitch (switched) <= 1.01f * getOwnStep (switched));
+    }
+}
+
+TEST_CASE ("A change of slope inside one Driven note starts the section in front of the loop from rest")
+{
+    // A Driven note at 24 dB, then 12 dB, then 24 dB again plays from its return to 24 dB as a note that played 12 dB before it
+    // (whose section in front was never used): the front starts from rest, not from what it held when it last played. The
+    // Resonance low, so that what the loop held before has long gone.
+    const auto playSlopes = [] (bool steepFirst)
+    {
+        auto values = getFilterPatch (true, devices::dsp::FilterMode::lowPass, true, 300.0f, 0.3f, 0.0f);
+        auto synth = makeSynth();
+        juce::AudioBuffer<float> buffer (2, testBlockSize);
+        std::vector<float> played;
+
+        for (int done = 0; done < 36096; done += testBlockSize)
+        {
+            buffer.clear();
+            std::vector<NoteEvent> events;
+
+            if (done == 0)
+                events = { noteOn (0, 48) };
+
+            values[Synth::filterSlope] = done >= 24064 || (steepFirst && done < 12032) ? 1.0f : 0.0f;
+            float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+            devices::ProcessContext block;
+            block.channels = channels;
+            block.numChannels = 2;
+            block.numSamples = testBlockSize;
+            block.parameters = values;
+            block.events = events;
+            synth->process (block);
+            played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + testBlockSize);
+        }
+
+        return played;
+    };
+
+    const auto twice = playSlopes (true), once = playSlopes (false);
+    auto largest = 0.0f;
+
+    for (size_t i = 24064; i < twice.size(); ++i)
+        largest = std::max (largest, std::abs (twice[i] - once[i]));
+
+    CAPTURE (largest);
+    CHECK (largest < 1.0e-4f * peakOf (once, 24064, once.size()));
+}
+
+TEST_CASE ("The synth's Driven filter at no Drive leaves a voice of two oscillators alone")
+{
+    // Both oscillators at their default Level on Basic Shapes' sine at A3, in unison and an octave apart (so that what a
+    // curve adds, odd harmonics of the note, stands apart from what plays), through the 12 dB low-pass open at 10 kHz at a
+    // Resonance of 0 and no Drive: Driven plays what Clean plays, the note within 0.05 dB, every harmonic the ceiling would
+    // add more than 90 dB under the note. (With the ceiling at a track's scale, straight to half of full scale only, it bent
+    // these voices, which peak at 0.81 and 0.71: the note 0.19 and 0.06 dB down, what it added 37 and 44 dB under.)
+    const auto playBoth = [] (bool driven, float osc2Pitch, float position)
+    {
+        auto values = getFilterPatch (driven, devices::dsp::FilterMode::lowPass, false, 10000.0f, 0.0f, 0.0f);
+        const auto defaults = getDefaults();
+        values[Synth::osc1Level] = defaults[Synth::osc1Level];
+        values[Synth::osc2Level] = defaults[Synth::osc2Level];
+        values[Synth::osc2On] = 1.0f;
+        values[Synth::osc1Position] = position;
+        values[Synth::osc2Position] = position;
+        values[Synth::osc2Pitch] = osc2Pitch;
+        return play (*makeSynth(), values, 48000, { noteOn (0, 57) }).left;
+    };
+
+    const auto f0 = noteFrequency (57);
+
+    for (const auto osc2Pitch : { 0.0f, 12.0f })
+    {
+        CAPTURE (osc2Pitch);
+        const auto clean = playBoth (false, osc2Pitch, 0.0f), driven = playBoth (true, osc2Pitch, 0.0f);
+        const auto note = measureLevelAt (clean, 9600, 48000, f0);
+        const auto offBy = 20.0 * std::log10 (measureLevelAt (driven, 9600, 48000, f0) / note);
+        auto added = -200.0;
+
+        for (const auto harmonic : { 3.0, 5.0, 7.0 })
+            added = std::max (added, 20.0 * std::log10 (std::max (1.0e-12, measureLevelAt (driven, 9600, 48000, harmonic * f0)) / note));
+
+        MESSAGE ("two sines " << osc2Pitch << " semitones apart, peaking at " << peakOf (clean, 9600, 48000) << ": the note " << offBy
+                              << " dB off, the most a curve would add " << added << " dB");
+        CHECK (std::abs (offBy) < 0.05);
+        CHECK (added < -90.0);
+    }
+
+    // Two saws in unison at their default Level peak higher, over a voice's full level, into the ceiling's knee: reported,
+    // each harmonic's level Driven against Clean (0.03 dB at most; 2.5 dB with the ceiling at a track's scale).
+    const auto clean = playBoth (false, 0.0f, 2.0f / 3.0f), driven = playBoth (true, 0.0f, 2.0f / 3.0f);
+    auto mostOff = 0.0;
+
+    for (int harmonic = 1; harmonic <= 40; ++harmonic)
+        mostOff = std::max (mostOff, std::abs (20.0
+                                               * std::log10 (measureLevelAt (driven, 9600, 48000, harmonic * f0)
+                                                             / measureLevelAt (clean, 9600, 48000, harmonic * f0))));
+
+    MESSAGE ("two saws in unison peak at " << peakOf (clean, 9600, 48000) << "; Driven's harmonics at most " << mostOff
+                                           << " dB off Clean's");
 }

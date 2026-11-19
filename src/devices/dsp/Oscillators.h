@@ -71,13 +71,15 @@ class Oscillator
 public:
     Oscillator();
 
-    // Up to just below half the sample rate. Each wave plays every harmonic whose alias stays above 20 kHz.
-    void setFrequency (double frequency, double sampleRate) noexcept
+    // Up to just below half the sample rate. Each wave plays every harmonic whose alias stays above 20 kHz. Played at a
+    // multiple (factor) of a device's rate, its sound later brought down to it (the Synth's Quality), the harmonics it plays
+    // are those it would play at the device's rate, so that it is the same at every multiple.
+    void setFrequency (double frequency, double sampleRate, int factor = 1) noexcept
     {
         const auto step = frequency / sampleRate;
         increment = (float) (step < 0.0 ? 0.0 : (step > 0.49 ? 0.49 : step));
 
-        const auto limit = std::clamp (1.0 - 20000.0 / sampleRate, 0.45, 0.9);
+        const auto limit = std::clamp (1.0 - 20000.0 * factor / sampleRate, 0.45, 0.9) / factor;
         level = Wavetable::chooseLevel (limit / std::max (1.0e-9, (double) increment));
         sawLevel = saw->getLevel (0, level);
         triangleLevel = triangle->getLevel (0, level);

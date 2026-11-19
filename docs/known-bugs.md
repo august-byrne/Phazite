@@ -136,6 +136,16 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
+- **208. `DeviceEditorTests`, the right-click menu's case: in CI's linux-release job the Saturator's Band read as on
+  while its value set by hand was off** (2026-11-18, the run of `7ab6d312`; linux-debug and the three Windows jobs
+  passed it): after a right-click on the part's switch, which changes nothing, `ParameterHandle::getValue()` (the value
+  as it plays) was above a half, the value set by hand 0 and the switch off. Nothing automated or modulated that
+  parameter then; three parameters of another device on the track had been modulated and the modulation undone, in
+  the test's earlier rounds. So either the value as it plays is read for a parameter nothing moves (a leftover of
+  what moved another), or it is read before it was ever written. The test compares the switch with the value set by
+  hand since, and captures the played value, the base value and what moves the parameter for the next time. To find
+  it: `getCurrentValue()` (`src/model/devices/`) and what it reads of the engine's played values for a parameter that
+  nothing moves, after a modulation on its track was undone, with no block played.
 - **207. `PerformanceGateTests`, "what an edit and a save allocate grows as the song does", failed once in CI's linux-tsan
   job** (2026-11-18, the run of `367e9321`): a note added "with its new plan" allocated 867 times in the song of 16
   tracks and 10,056 in the one of 64, where it measures about 28,000 and 119,000: in neither count was the plan

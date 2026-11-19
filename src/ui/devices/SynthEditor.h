@@ -4,18 +4,22 @@
 // Live's Wavetable draw theirs, the frame it plays lit as the newest note moves through the table; above, a button with the
 // table's name opens a menu of the factory tables and Load Wavetable File..., a sound dropped on the drawing (from the
 // browser or Explorer) becomes the table, and a drag across it moves the oscillator's position (the grabbing hand over it,
-// the frame it plays ringed). Then its filter's response,
-// which follows the newest note, with the cutoff a dot to drag, and the amp's envelope; then the sub and noise over the
-// unison, and how it plays. Last, its other envelopes and LFOs, each drawn with how far the newest note has got, and the
-// modulation matrix, in a list down the side. A dock narrower than them shows them in pages.
+// the frame it plays ringed); the frame it plays is drawn as its warp reads it. Then its filter's response, which follows
+// the newest note, with the cutoff a dot to drag, and its Character, Clean or Driven, as two buttons; and the amp's
+// envelope; then the sub and noise over the unison, and how it plays. Last, its other envelopes and LFOs, each drawn with how
+// far the newest note has got, and the modulation matrix, in a list down the side; each knob a slot moves shows the range it
+// moves it over as a dashed ring. A dock narrower than them shows them in pages.
 #pragma once
 
 #include "DeviceEditorBase.h"
 #include "SynthParts.h"
 #include "devices/wavetable/Wavetable.h"
+#include "model/devices/ParameterHandle.h"
+#include "ui/components/Controls.h"
 
 #include <array>
 #include <memory>
+#include <vector>
 
 namespace phazite::ui
 {
@@ -30,6 +34,11 @@ public:
 
     // An oscillator's drawing of its table.
     juce::Component& getTableView (int osc) const;
+
+    // The frame an oscillator plays as its drawing shows it, through its warp at the amount it plays it at, from the start of
+    // its cycle to its end; and what the drawing's readout says (a warp's name that the drawing can't show: FM, Ring Mod).
+    std::vector<float> getPlayedWave (int osc) const;
+    juce::String getTableReadout (int osc) const;
 
     // The button that names an oscillator's table, and the menu it opens: the factory tables, the one playing ticked, then
     // Load Wavetable File....
@@ -60,5 +69,15 @@ private:
 
     void chooseFile (int osc);
     void tick() override { refresh(); }
+
+    // Each knob a slot of the matrix can move: a dashed ring for the range the slots on it move it over, each by its amount
+    // (as the slots that move it can move it) over its source's range, and while a note plays a dot where the synth plays
+    // it, for what it shows (the cutoff, the oscillators' positions and warp amounts), the Cutoff's ring about the cutoff the
+    // note's key tracking and velocity make of it. Worked out again only when what it is worked out from moved.
+    void showOwnModulation();
+
+    std::vector<ParameterHandle> slotParameters; // each slot's source, target and amount
+    std::vector<Knob*> ringKnobs;                // each ring target's knob, or none
+    std::vector<float> ringInputs, lastRingInputs;
 };
 } // namespace phazite::ui

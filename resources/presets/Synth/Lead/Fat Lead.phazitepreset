@@ -35,6 +35,7 @@
       "resonance": 0.45,
       "filterSlope": "24 dB",
       "drive": 6.0,
+      "filterCharacter": "Clean",
       "keyTracking": 0.66,
       "env1Attack": 2.0,
       "env1Decay": 300.0,

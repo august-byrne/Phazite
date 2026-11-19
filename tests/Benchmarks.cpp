@@ -295,7 +295,23 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Synth, idle", maker<dev::Synth>(), &dev::Synth::info, 0 },
         { "Synth, 1 note, 2x", maker<dev::Synth>(), &dev::Synth::info, 1, [] (std::vector<float>& v) { v[dev::Synth::quality] = 1.0f; } },
         { "Synth, 1 note, 4x", maker<dev::Synth>(), &dev::Synth::info, 1, [] (std::vector<float>& v) { v[dev::Synth::quality] = 2.0f; } },
+        { "Synth, 1 note, Driven", maker<dev::Synth>(), &dev::Synth::info, 1,
+          [] (std::vector<float>& v) { v[dev::Synth::filterCharacter] = 1.0f; } },
+        { "Synth, 1 note, Driven, 2x", maker<dev::Synth>(), &dev::Synth::info, 1,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Synth::filterCharacter] = 1.0f;
+              v[dev::Synth::quality] = 1.0f;
+          } },
+        { "Synth, 1 note, Driven, 4x", maker<dev::Synth>(), &dev::Synth::info, 1,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Synth::filterCharacter] = 1.0f;
+              v[dev::Synth::quality] = 2.0f;
+          } },
         { "Synth, 16 notes", maker<dev::Synth>(), &dev::Synth::info, 16 },
+        { "Synth, 16 notes, Driven", maker<dev::Synth>(), &dev::Synth::info, 16,
+          [] (std::vector<float>& v) { v[dev::Synth::filterCharacter] = 1.0f; } },
         { "Synth, 16 notes, 2x", maker<dev::Synth>(), &dev::Synth::info, 16,
           [] (std::vector<float>& v) { v[dev::Synth::quality] = 1.0f; } },
         { "Synth, 16 notes, 4x", maker<dev::Synth>(), &dev::Synth::info, 16,
