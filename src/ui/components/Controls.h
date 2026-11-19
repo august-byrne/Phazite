@@ -226,6 +226,10 @@ public:
     double snapValue (double attemptedValue, DragMode) override; // a drag moves in whole steps
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool keyPressed (const juce::KeyPress&) override; // up and right step up, down and left down
+
+    // In a list that the wheel scrolls (the settings): the wheel steps it only while it has the keys, and scrolls the list
+    // otherwise, so that a scroll past it changes nothing.
+    bool wheelNeedsFocus = false;
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
 
 private:

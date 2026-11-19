@@ -97,7 +97,7 @@ and nothing is listed in both.
 | The formats named and versioned when compatibility starts: a file that names the store's format, its version and its hash, room for a pack's entries to grow, a format name and version on the project file | `src/model/versions/PieceStore.cpp` | (L) | 8 | format audit, product-gaps 12 |
 | Save As copies the project's folders in the background with progress, as the first save does | `src/model/project/Project.cpp` | S | — | plan |
 | A preset's Sounds folder swept of the files its preset no longer names | `src/model/presets/Presets.cpp` | S | — | plan |
-| The undo history's depth in the Settings window, which needs a General tab; and its memory measured in a large song, as it keeps its 1000 steps whatever their size | `src/ui/shell/SettingsPanel.cpp` | S | — | plan |
+| The undo history's memory measured in a large song, as it keeps its 1000 steps whatever their size | `src/ui/shell/SettingsPanel.cpp` | S | — | plan |
 
 ### Recording
 
@@ -205,7 +205,8 @@ and nothing is listed in both.
 | The top bar's readouts (position, tempo, time signature, grid) as plain large numbers with a small unit and no box of their own, and the transport's buttons in one well: it is the most boxed part of the window | `src/ui/shell/TopBar.cpp` | M | 5 | comparison with another DAW, 2026-11-17 |
 | What is switched on or picked drawn apart from what is playing or recording: a soft tint of the accent for the first (Snap, the tool, Ghost Notes), the solid accent for the second alone, so that the eye finds what runs | `src/ui/theme/DesignTokens.h` | M | 5 | comparison with another DAW, 2026-11-17 |
 | Secondary windows that don't block the main one: Settings, the plug-in scan, Chord Progressions and the rest | `src/app/MainWindow.cpp` | M | 5 | ui-shell-browser 2, ui-core-mixer-app 6 |
-| One Settings window that holds what is spread over three tabs and four menus | `src/ui/shell/SettingsPanel.cpp` | L | 5 | ui-shell-browser 9 |
+| The Settings window: one refresh a turn of the message loop, not one for each setting written (a device change makes seven); a row greyed while its command is (Count-In without a song); the light theme's modified line darker (2.4:1 now); the window fitted again when Interface Size changes | `src/ui/shell/SettingsPanel.cpp` | S | — | owner's round 2026-11-19 |
+| Plug-in instances that opening a version removes kept alive until Back to Now, so that the way back is instant with heavy plug-ins | `src/model/plugins/` | M | — | owner's round 2026-11-19 |
 | Rename and Delete for the user's own presets, from their rows in the browser (there are none; found 2026-11-19) | `src/ui/browser/Browser.cpp` | S | — | owner's round 2026-11-19 |
 | The Devices view's Presets menu as the browser lists a device's presets: one list, no "Your Presets" heading | `src/ui/mixer/DevicesView.cpp` | S | — | owner's round 2026-11-19 |
 | The device menus' list of devices built once a menu, not once for each menu and submenu; a pen's or a touch's press read for where a right-click's menu opens; the transport bar's widths as tokens | `src/ui/devices/DeviceMenus.cpp` | S | — | owner's round 2026-11-19 |

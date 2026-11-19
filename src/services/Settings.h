@@ -113,8 +113,9 @@ public:
     static constexpr BoolSetting autoSave { "phaziteAutoSave", true, SaveTiming::now };
 
     // How many steps each project's undo history keeps (model/base/Song.h: setUndoSteps(), which keeps it from 10 to
-    // 100000), for the projects opened from then on; no window shows it yet: the settings file holds it. The steps are
-    // kept whatever their size, as in the DAWs that count steps: a thousand large edits hold their memory until they go.
+    // 100000), for the projects opened from then on (app/AppServices.h sets it as it changes; the Settings window's Editing
+    // group shows it). The steps are kept whatever their size, as in the DAWs that count steps: a thousand large edits hold
+    // their memory until they go.
     static constexpr NumberSetting undoSteps { "phaziteUndoSteps", 1000.0, SaveTiming::now };
 
     // This computer, as projects' histories know it (model/versions/VersionsModel.h: setThisComputer()): an ID made the first
@@ -153,12 +154,25 @@ public:
     // Writes what has changed to the file now, the changes waiting to be saved soon included. Nothing in memory.
     void saveNow();
 
+    // Hears each setting set, by its key (a keymap's changes by keyChangesPrefix and the keymap's name), right after it is
+    // kept: what shows a setting in two places (a menu's tick and the Settings window's row) shows it the same. Message
+    // thread.
+    struct Listener
+    {
+        virtual ~Listener() = default;
+        virtual void settingChanged (const juce::String& key) = 0;
+    };
+
+    void addListener (Listener*);
+    void removeListener (Listener*);
+
 private:
     std::unique_ptr<juce::PropertySet> inMemory;
     juce::PropertySet* storage = nullptr;
     juce::PropertiesFile* file = nullptr;
+    juce::ListenerList<Listener> listeners;
 
-    void changed (SaveTiming);
+    void changed (const juce::String& key, SaveTiming);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Settings)
 };

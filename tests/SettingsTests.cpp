@@ -202,3 +202,25 @@ TEST_CASE ("Recent projects list the newest first and skip missing ones")
     CHECK_FALSE (projects.contains (newestFirst.getLast())); // the oldest of them
     CHECK_FALSE (projects.contains (a));
 }
+
+TEST_CASE ("Settings tell their listeners of each setting set, by its key")
+{
+    Settings settings;
+
+    struct Heard : Settings::Listener
+    {
+        juce::StringArray keys;
+        void settingChanged (const juce::String& key) override { keys.add (key); }
+    } heard;
+
+    settings.addListener (&heard);
+    settings.set (Settings::hoverHelp, false);
+    settings.set (Settings::undoSteps, 50.0);
+    settings.set (Settings::theme, "light");
+    settings.setKeyChanges ("Phazite", "<KEYMAPPINGS/>");
+    CHECK (heard.keys == juce::StringArray { "phaziteHoverHelp", "phaziteUndoSteps", "phaziteTheme", "phaziteKeyChanges.Phazite" });
+
+    settings.removeListener (&heard);
+    settings.set (Settings::hoverHelp, true);
+    CHECK (heard.keys.size() == 4);
+}

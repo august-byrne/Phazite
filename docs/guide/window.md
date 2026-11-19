@@ -79,6 +79,16 @@ that shows hides the panel.
 **MIDI Settings**, **Keyboard Shortcuts**, **Scan for Plug-ins**, **Theme**, **Keymap**, **Startup Sound** and **Check
 for Updates...**.
 
+**Settings** is one page of every preference Phazite keeps, grouped: **Audio** (the driver, the output and input devices,
+their channels, the sample rate, the buffer size with the delay it makes, a test sound), **MIDI** (each MIDI input, and
+the computer keyboard), **Recording**, **Appearance** (the theme and the interface's size), **Help**, **Editing** (how far
+Undo goes back, scrolling while the song plays), **Files** (Auto Save), **Versions** and **Updates**. Type in the search
+at the top to see only the settings with those words; the list at the left counts what each group has left, and a click
+there scrolls to a group. A setting changed from its default has a thin line at its left; its gear, or a right-click,
+has **Reset Setting**. **Shortcuts**, at the foot of that list, shows the keymap and every command's keys. Audio
+Settings, MIDI Settings and Keyboard Shortcuts open it at their group. The settings that a menu also switches (Overdub,
+Auto Save, the theme...) show the same in both places.
+
 ## The upper and lower panels
 
 The centre has two rows of tabs. By default the upper panel shows the song as the **Playlist** or the **Mixer**, and

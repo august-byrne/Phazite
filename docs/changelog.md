@@ -21,6 +21,13 @@ The full text of every step, as it was written when it was built, is in the
   instrument's and effect's row opens by its chevron to Phazite's and your presets as one list, containers' presets
   show under Container and Instrument Container, tracks' under Track Presets, your presets of no device listed under
   Other Presets, and a device's Swap tries that same list.
+- **A version opens live:** a double-click on a version, or A/B, makes the song that version in place with no bounce, and
+  Back to Now brings the song back exactly, undo and redo with it; an edit there makes a branch when it ends with
+  changes, recording as it starts; nothing writes an old version as the song; bounces became an extra. Redo never offers
+  a step that was thrown away (also after Escape in a drag and a swap put back).
+- **The Settings window as VS Code's Settings editor:** one page with a search, the groups' contents and a row for every
+  preference Phazite keeps (the audio device in Phazite's own rows, MIDI, recording, the look, editing, saving, versions,
+  startup and updates), each with its modified line and Reset Setting, and Shortcuts a page of its own.
 - **No new audio, video or picture files in the repository:** the pre-commit hook refuses them.
 
 ## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)

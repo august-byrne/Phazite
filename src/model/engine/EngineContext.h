@@ -42,6 +42,50 @@ public:
     // Whether any ASIO driver is installed (Windows): an audio interface's own gives the lowest delay.
     bool hasAsioDrivers() const;
 
+    // What the audio settings offer (ui/shell/SettingsPanel.h): the drivers (JUCE's device types: "Windows Audio", "ASIO"),
+    // the devices of the one in use and those chosen, and what the device open now offers, with what it plays at. A driver
+    // whose devices are each an output and an input at once (ASIO) has no inputs apart: its output names the device. The
+    // channels go two by two, as stereo pairs ("Out 1 + 2"), each on or off. Without a device open, the device's part is
+    // empty.
+    struct AudioChoices
+    {
+        juce::StringArray drivers;
+        juce::String driver;
+        juce::StringArray outputs, inputs;
+        juce::String output, input; // input empty for none
+        bool inputsApart = true;
+        bool isOpen = false;
+        juce::Array<double> sampleRates;
+        double sampleRate = 0.0;
+        juce::Array<int> bufferSizes;
+        int bufferSize = 0;
+        juce::StringArray outputPairs, inputPairs;
+        juce::Array<bool> outputPairsOn, inputPairsOn;
+        bool hasControlPanel = false;
+    };
+
+    AudioChoices getAudioChoices() const;
+
+    // Each opens the audio device so, as the settings choose it (what Phazite's settings keep from then on). Where it doesn't
+    // open, what played before opens again, and the answer is why (empty when it opened). A driver opens its default
+    // device; an output its default channels, and, under a driver without inputs apart, its inputs too; an input, empty for
+    // none, its default channels. The last output pair can't be turned off: something must play; an input pair needs an input
+    // device (under a driver without inputs apart, the output's).
+    juce::String chooseAudioDriver (const juce::String& driver);
+    juce::String chooseAudioOutput (const juce::String& device);
+    juce::String chooseAudioInput (const juce::String& device);
+    juce::String chooseSampleRate (double);
+    juce::String chooseBufferSize (int samples);
+    juce::String setChannelPairOn (bool input, int pair, bool on);
+
+    // A short tone through the output, to hear that it works.
+    void playTestSound();
+
+    // The driver's own window (an ASIO driver's control panel), where the device has one: it returns once the window
+    // closes, and the device opens again where the driver says something may have changed (the answer). The caller keeps
+    // its own windows from input meanwhile, as the window is the driver's.
+    bool showDriverControlPanel();
+
     // Whether the Low Latency switch is on (the command transport.lowLatency; model/playback/internal/PlaybackHost.h).
     bool isLowLatency() const;
 

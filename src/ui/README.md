@@ -214,8 +214,8 @@ The window's content and everything around the views.
 | `CommandPalette.*` | The command palette. |
 | `Panels.*` | The two areas of views, one over the other, their tabs drawn as VS Code's editor tabs and the shown editor's tools after a line beside them: by default the Playlist and Mixer tabs over the clip editor's tab (which shows the piano roll or the audio clip editor as the selection asks) and the Instrument and Effects tabs (the Devices view's two pages). Each view moves between the areas by its tab, and the settings keep where. |
 | `PanelLayout.*` | Which panels show, which one fills the window and their sizes, with the buttons in each panel's corner. |
-| `SettingsPanel.*` | The settings window's tabs. |
-| `ShortcutsEditor.*` | The Shortcuts tab's list, as VS Code's Keyboard Shortcuts editor: search by name or key, the keys of every command, changed in a card that says what else a key does. |
+| `SettingsPanel.*` | The Settings window, as VS Code's Settings editor: a search, the table of contents and one list of every setting under its group's title, each a row with its control, its modified line and Reset Setting; the Audio rows set the device through the engine context; Shortcuts is a page of its own. |
+| `ShortcutsEditor.*` | The Shortcuts page's list, as VS Code's Keyboard Shortcuts editor: search by name or key, the keys of every command, changed in a card that says what else a key does. |
 | `Welcome.*` | The welcome window. |
 | `NewProjectPanel.*` | The new-project window. |
 | `ExportPanel.*` | The export window, for the song or its stems. |

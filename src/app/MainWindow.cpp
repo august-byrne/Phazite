@@ -30,8 +30,8 @@ namespace phazite
 {
 namespace
 {
-    // Interface sizes, on top of the operating system's display scaling.
-    constexpr std::array<float, 8> interfaceScales { 0.75f, 0.9f, 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f };
+    // Interface sizes, on top of the operating system's display scaling (ui/shell/SettingsPanel.h, whose Interface Size picks one).
+    using ui::interfaceScales;
     constexpr int firstRecentItemID = 100;
 
     juce::String toString (ui::ThemeName theme)
@@ -558,7 +558,9 @@ void MainWindow::addCommands()
     registry.add ({ .id = "options.settings",
                     .name = "Settings",
                     .category = "Options",
-                    .description = "The audio device, MIDI inputs and keyboard shortcuts.",
+                    .description =
+                        "Every preference Phazite keeps: the audio device, MIDI inputs, recording, the look, saving, and the keyboard "
+                        "shortcuts.",
                     .synonyms = { "preferences", "options", "setup" },
                     .perform = [this] { showSettings (std::nullopt); } });
 
@@ -567,14 +569,14 @@ void MainWindow::addCommands()
                     .category = "Options",
                     .description = "Chooses the audio device (ASIO on Windows, for an audio interface), sample rate and buffer size.",
                     .synonyms = { "device", "asio", "latency", "buffer", "sound card", "interface", "output" },
-                    .perform = [this] { showSettings (ui::SettingsPanel::audio); } });
+                    .perform = [this] { showSettings (juce::String (ui::SettingsPanel::audio)); } });
 
     registry.add ({ .id = "options.midiSettings",
                     .name = "MIDI Settings",
                     .category = "Options",
                     .description = "Turns MIDI inputs and the computer keyboard on or off.",
                     .synonyms = { "midi keyboard", "controller", "inputs", "devices" },
-                    .perform = [this] { showSettings (ui::SettingsPanel::midi); } });
+                    .perform = [this] { showSettings (juce::String (ui::SettingsPanel::midi)); } });
 
     registry.add ({ .id = "chords.progressions",
                     .name = "Chord Progressions",
@@ -608,7 +610,7 @@ void MainWindow::addCommands()
                     .category = "Options",
                     .description = "Changes the keys of any command. Each keymap keeps its own changes.",
                     .synonyms = { "keys", "hotkeys", "keymap", "bindings", "rebind" },
-                    .perform = [this] { showSettings (ui::SettingsPanel::shortcuts); } });
+                    .perform = [this] { showSettings (juce::String (ui::SettingsPanel::shortcuts)); } });
 
     for (const auto& keymap : ui::Keymap::getBuiltIn())
     {
@@ -746,21 +748,24 @@ void MainWindow::addCommands()
 }
 
 //==============================================================================
-void MainWindow::showSettings (std::optional<ui::SettingsPanel::Tab> tab)
+void MainWindow::showSettings (std::optional<juce::String> group)
 {
     if (settingsWindow != nullptr)
     {
-        if (tab.has_value() && settingsPanel != nullptr)
-            settingsPanel->showTab (*tab);
+        if (group.has_value() && settingsPanel != nullptr)
+            settingsPanel->showGroup (*group);
 
         settingsWindow->toFront (true);
         return;
     }
 
-    auto* panel = new ui::SettingsPanel (services.engineContext, commands, computerKeyboard, session.getContext(),
-                                         [this] (const juce::String& name) { setKeymap (name); });
-    panel->setSize (640, 600);
-    panel->showTab (tab.value_or (ui::SettingsPanel::audio));
+    ui::SettingsPanel::Actions actions;
+    actions.chooseKeymap = [this] (const juce::String& name) { setKeymap (name); };
+    actions.setInterfaceScale = [this] (float scale) { setInterfaceScale (scale); };
+    auto* panel = new ui::SettingsPanel (services.engineContext, commands, computerKeyboard, session.getContext(), services.settings,
+                                         std::move (actions));
+    panel->setSize (ui::SettingsTint::windowWidth, ui::SettingsTint::windowHeight);
+    panel->showGroup (group.value_or (ui::SettingsPanel::audio));
     settingsPanel = panel;
 
     juce::DialogWindow::LaunchOptions o;

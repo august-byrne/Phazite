@@ -24,6 +24,9 @@ TestAudioDevice* TestAudioDevice::findIn (juce::AudioDeviceManager& devices)
 juce::String TestAudioDevice::open (const juce::BigInteger& inputChannels, const juce::BigInteger& outputChannels, double rate,
                                     int bufferSizeSamples)
 {
+    if (rate > 0.0 && juce::exactlyEqual (rate, refusedSampleRate))
+        return "The driver refused " + juce::String (juce::roundToInt (rate)) + " Hz.";
+
     inputs = inputChannels & juce::BigInteger ((1 << numChannels) - 1);
     outputs = outputChannels & juce::BigInteger ((1 << numChannels) - 1);
     sampleRate = rate > 0.0 ? rate : 48000.0;

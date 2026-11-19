@@ -398,3 +398,8 @@ what they show. FL Studio's keymap shows and hides the left panel with Alt+F8 an
 - `src/ui/theme/DesignTokens.h`, `LookAndFeel.h`, `Popups.h`, `Icons.h`; `resources/logo/phazite.svg`;
   `src/model/engine/StartupSound.h`.
 - `src/services/Settings.h`: the keys that keep the theme, the panels' layout and the views' places.
+- `src/ui/shell/SettingsPanel.h`: the Settings window, every preference on one page as VS Code's Settings editor lays out
+  its own (a search, the groups' contents, a row for each setting with its modified line and Reset Setting; Shortcuts a
+  page of its own), each bound to what the menus switch so that both show the same ([vscode-look.md](../vscode-look.md)).
+  Settings that are window state, remembered folders or lists (the browser's, the export window's last choices) have no
+  row.

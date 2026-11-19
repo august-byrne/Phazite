@@ -49,6 +49,11 @@ struct AppServices
     struct PluginLists;
     std::unique_ptr<PluginLists> pluginLists;
 
+    // The undo history's depth (Settings::undoSteps), for every song made from then on, as the settings keep it and as it
+    // changes there.
+    struct UndoDepth;
+    std::unique_ptr<UndoDepth> undoDepth;
+
     // Opens the audio device and the MIDI inputs as the settings saved them (or as a first run chooses), with the
     // recordings' options, and keeps them there from then on as they change (model/engine/internal/AudioIO.h): the app's,
     // as it starts. Tests open devices of their own, and their services save none.

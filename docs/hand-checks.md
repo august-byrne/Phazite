@@ -27,7 +27,7 @@ Needs an audio interface with an ASIO® driver, a microphone or a guitar, and a 
 | H4 | With a drum loop on another track, turn on Count-In, press R, play or sing four bars, press Space | A bar of clicks, then a clip that grows with its waveform as it records; played back, it is in time with the loop | |
 | H5 | Select a range of two bars in the playlist and press Ctrl+L to loop it, turn on Punch In (Record's menu), play from a bar before the loop and record | Only what was played inside the loop is kept, without a click at its edges | |
 | H6 | Keep recording round the loop three times, then stop | One clip with three takes; its menu, or Previous Take and Next Take, choose between them | |
-| H7 | Play a loud click from a speaker into the microphone while recording the metronome's beat; compare the recorded click with the grid, then set Recording correction in the Audio settings | The recording lands on the beat once the correction is set | |
+| H7 | Play a loud click from a speaker into the microphone while recording the metronome's beat; compare the recorded click with the grid, then set Recording Correction in the settings (Recording) | The recording lands on the beat once the correction is set | |
 | H8 | Pull the interface's cable while the song plays, then plug it in again | Phazite does not crash; a card in the bottom right corner offers to switch to the device | |
 | H9 | Plug in a MIDI keyboard with an instrument track selected, and play | Notes sound at once, with no setup; velocity is heard | |
 | H10 | Press R, play eight bars on the keyboard with the sustain pedal, stop | The notes are in a clip, in time. (The pedal is not recorded yet: roadmap step S5.3) | |
@@ -234,7 +234,7 @@ the [changelog](changelog.md).
 
 | # | Check | Proves | Checked on |
 |---|---|---|---|
-| D1 | In the Versions view, double-click an older version that has a bounce, then one without | The first plays in place of the song at once (the transport bar says Hearing); the second is bounced first, the transport bar showing its progress, and then plays; the branch and the song's changes stay | |
+| D1 | In the Versions view, click the play mark of a version that has a bounce; look at Hear It on one without | The first plays in place of the song at once (the transport bar says Hearing); the second is greyed, "No bounce: Open Version plays it live" | |
 | D2 | Merge Branch... from a branch that changed two tracks; click a line, then Merge | The list shows both lines with their letters and no tick boxes; a click changes nothing; Merge takes both | |
 | D3 | Create a branch, rename it "Half time chorus", and reopen the project | The picker, the branch button and the status bar show "Half time chorus", spaces and all | |
 | D4 | Read the Versions view from top to bottom: its menu, the field, the button, the sections, a version's right-click menu, a line's tooltip | Every word is one a producer would use: Save Version, History, Switch Branch, Restore This Version; nothing says commit, checkout or staged | |
@@ -306,6 +306,14 @@ the [changelog](changelog.md).
 | X15 | Without Phazite Sounds installed, open Sounds; install them | A row that downloads them; then Drums, Loops and the rest, nothing named "Phazite" | |
 | X16 | Put a preset file at the top of Documents/Phazite/Presets; with presets saved for a plug-in, run the app with that plug-in not scanned, then scan | Other Presets shows after Track Presets and holds them; after the scan the plug-in's folder is under its row, with no restart | |
 | X17 | Save a preset from a plug-in's own window while its row is open under Effects | It appears in the row at once; what was open and selected stays | |
+| X18 | Play the song with unsaved changes and double-click an older version; press Back to Now; press N several times while playing | It changes at once on the beat with no bounce, "Looking at …" in the view, the transport bar and the status bar, the title's star as it was; Back to Now gives the song, Undo and Redo as before; N switches with no gap | |
+| X19 | With a version open: click a knob, scroll one at its end, press Escape in the middle of a drag; then drag a knob | Nothing happens for the first three ("Looking at …" stays); the drag shows "this is now the branch idea-N", Undo once returns to the version and is then greyed, Back to main gives the song | |
+| X20 | With a version open: press Ctrl+S; close and open the project | The bar goes; the project is your song, never the old version | |
+| X21 | With a version open: arm a track and record; drop a sound file on the playlist | The branch notice shows as recording starts and the take survives Ctrl+S; the clip lands on a new branch and the window still takes clicks | |
+| X22 | A track in Latch, play, move a knob, press N; select a time range by hand, open a version, Back to Now; start a Swap on an open version | A/B is greyed, "Stop first", and after Stop the lane holds the move; the same range is selected; Back to Now reads "Finish swapping first" | |
+| X23 | Settings: type "save" in the search; click Recording in the contents; scroll the list with the wheel across Recording Correction | Only the matching settings show, with counts in the contents; the list scrolls there and the marked group follows; the wheel scrolls past the field without changing it | |
+| X24 | Settings, Audio, on real hardware: change the output device, the sample rate and the buffer while a song plays; Test Sound; with an ASIO interface, Driver Control Panel; plug a USB interface in and out with the window open; pick a device another program holds | Sound carries on at each change; a tone; the driver's window opens and the buffer shows after; the lists follow; the row says why and what played plays on, and Phazite starts with sound next time | |
+| X25 | Settings: switch Theme to Light in its row, then back from the gear menu; change a setting and Reset Setting from its row's menu; Tab through the page | The window and the menu's tick follow each other; the thin line shows and goes; search, contents, then each row's control | |
 
 ## Performance on other machines
 

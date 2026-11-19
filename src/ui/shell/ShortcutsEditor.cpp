@@ -519,8 +519,8 @@ void ShortcutsEditor::paint (juce::Graphics& g)
 void ShortcutsEditor::resized()
 {
     auto area = getLocalBounds();
-    auto top = area.removeFromTop (controlHeight);
-    const auto resetWidth = resetAllButton.getBestWidthForHeight (controlHeight);
+    auto top = area.removeFromTop (SettingsTint::controlHeight);
+    const auto resetWidth = resetAllButton.getBestWidthForHeight (SettingsTint::controlHeight);
     resetAllButton.setBounds (top.removeFromRight (resetWidth));
     top.removeFromRight (Space::s);
     recordButton.setBounds (top.removeFromRight (ShortcutsTint::recordWidth));
@@ -528,7 +528,7 @@ void ShortcutsEditor::resized()
     searchField.setBounds (top);
 
     area.removeFromTop (Space::s + ListRow::height); // the headings
-    auto buttons = area.removeFromBottom (controlHeight);
+    auto buttons = area.removeFromBottom (SettingsTint::controlHeight);
     area.removeFromBottom (Space::s);
     help.setBounds (area.removeFromBottom (ShortcutsTint::helpLines * ListRow::height));
     area.removeFromBottom (Space::s);
@@ -536,7 +536,7 @@ void ShortcutsEditor::resized()
 
     for (auto* button : { &changeButton, &addButton, &removeButton, &resetButton })
     {
-        button->setBounds (buttons.removeFromLeft (button->getBestWidthForHeight (controlHeight)));
+        button->setBounds (buttons.removeFromLeft (button->getBestWidthForHeight (SettingsTint::controlHeight)));
         buttons.removeFromLeft (Space::s);
     }
 

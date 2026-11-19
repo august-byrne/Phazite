@@ -118,8 +118,8 @@ private:
     void maximizeIfWaiting();
     juce::Array<juce::Rectangle<int>> getScreens() const;
 
-    void showSettings (std::optional<ui::SettingsPanel::Tab>); // no tab: Audio, or the open window's tab
-    void showPluginList();                                     // the plug-ins scanning found, with a scan for VST3s
+    void showSettings (std::optional<juce::String> group); // the list scrolled to a group (ui::SettingsPanel::audio...), or as it was
+    void showPluginList();                                 // the plug-ins scanning found, with a scan for VST3s
     void showWelcome (ui::WelcomePanel::Page);
     void showExport();       // for the open project's song
     void showCleanUp();      // Clean Up Unused Audio..., for the open project

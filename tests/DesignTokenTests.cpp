@@ -29,6 +29,9 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
 
         CHECK (getContrastRatio (p.textOnAccent, p.accent) >= 4.5);
 
+        // The settings' names and groups' titles, on the editor's background they show on.
+        CHECK (getContrastRatio (p.heading, p.background) >= 4.5);
+
         // The accent marks selection and focus on panels: 3:1, like other parts of controls.
         CHECK (getContrastRatio (p.accent, p.surface) >= 3.0);
         CHECK (getContrastRatio (p.warning, p.surface) >= 3.0);

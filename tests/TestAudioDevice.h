@@ -53,6 +53,10 @@ public:
     int getOutputLatencyInSamples() override { return 0; }
     int getInputLatencyInSamples() override { return inputLatency; }
 
+    // A sample rate its driver refuses to open at, as one that a device lists but can't take (0 for none): the settings' test of a
+    // device that doesn't open.
+    static inline double refusedSampleRate = 0.0;
+
     // How late what comes in is, as its driver would report it (for recording through a loopback).
     void setInputLatency (int samples) noexcept { inputLatency = samples; }
 

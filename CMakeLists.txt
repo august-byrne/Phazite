@@ -1419,6 +1419,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ScrollingFrameTests.cpp
         tests/SectionTests.cpp
         tests/SelectionTests.cpp
+        tests/SettingsPanelTests.cpp
         tests/SettingsTests.cpp
         tests/ShippedProgramsTests.cpp
         tests/ShortcutTests.cpp

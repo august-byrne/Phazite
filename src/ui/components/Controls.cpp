@@ -742,6 +742,12 @@ double NumberField::snapValue (double attemptedValue, DragMode dragMode)
 
 void NumberField::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
+    if (wheelNeedsFocus && ! hasKeyboardFocus (true))
+    {
+        juce::Component::mouseWheelMove (e, wheel); // to the list around it. NOLINT(bugprone-parent-virtual-call)
+        return;
+    }
+
     if (! isEnabled() || e.mods.isAnyMouseButtonDown())
         return;
 

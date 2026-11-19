@@ -63,31 +63,31 @@ juce::StringArray Settings::get (const ListSetting& setting) const
 void Settings::set (const BoolSetting& setting, bool value)
 {
     storage->setValue (setting.key, value);
-    changed (setting.save);
+    changed (setting.key, setting.save);
 }
 
 void Settings::set (const NumberSetting& setting, double value)
 {
     storage->setValue (setting.key, value);
-    changed (setting.save);
+    changed (setting.key, setting.save);
 }
 
 void Settings::set (const NumberSettingWithoutDefault& setting, double value)
 {
     storage->setValue (setting.key, value);
-    changed (setting.save);
+    changed (setting.key, setting.save);
 }
 
 void Settings::set (const TextSetting& setting, const juce::String& value)
 {
     storage->setValue (setting.key, value);
-    changed (setting.save);
+    changed (setting.key, setting.save);
 }
 
 void Settings::set (const ListSetting& setting, const juce::StringArray& lines)
 {
     storage->setValue (setting.key, lines.joinIntoString ("\n"));
-    changed (setting.save);
+    changed (setting.key, setting.save);
 }
 
 juce::String Settings::getKeyChanges (const juce::String& keymapName) const
@@ -98,7 +98,7 @@ juce::String Settings::getKeyChanges (const juce::String& keymapName) const
 void Settings::setKeyChanges (const juce::String& keymapName, const juce::String& xml)
 {
     storage->setValue (keyChangesPrefix + keymapName, xml);
-    changed (SaveTiming::now);
+    changed (keyChangesPrefix + keymapName, SaveTiming::now);
 }
 
 void Settings::saveNow()
@@ -109,10 +109,23 @@ void Settings::saveNow()
         file->saveIfNeeded();
 }
 
-void Settings::changed (SaveTiming timing)
+void Settings::changed (const juce::String& key, SaveTiming timing)
 {
     // A setting saved soon waits for the file's own timer (PropertiesFile saves a while after the last change).
     if (timing == SaveTiming::now)
         saveNow();
+
+    listeners.call ([&key] (Listener& listener) { listener.settingChanged (key); });
+}
+
+void Settings::addListener (Listener* listener)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    listeners.add (listener);
+}
+
+void Settings::removeListener (Listener* listener)
+{
+    listeners.remove (listener);
 }
 } // namespace phazite

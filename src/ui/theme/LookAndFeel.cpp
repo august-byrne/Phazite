@@ -856,6 +856,7 @@ namespace
         &Palette::loop,          &Palette::modulation,
         &Palette::frozen,        &Palette::boost,
         &Palette::playing,       &Palette::soloed,
+        &Palette::heading,       &Palette::modified,
     };
     static_assert (sizeof (Palette) == std::size (paletteRoles) * sizeof (juce::Colour), "paletteRoles lists every colour of Palette's");
 

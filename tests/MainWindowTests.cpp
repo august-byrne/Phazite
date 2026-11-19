@@ -42,6 +42,7 @@
 #include "ui/input/Keymap.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/ExportPanel.h"
+#include "ui/shell/SettingsPanel.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <array>
@@ -1188,4 +1189,68 @@ TEST_CASE ("The main window closed while a wait holds it cancels the wait first,
     hold = nullptr;
     dispatchPendingMessages();
     CHECK_FALSE (context.isHoldingForWork());
+}
+
+TEST_CASE ("The Settings window opens at the group its command names, and its rows switch what the main window's menus switch")
+{
+    MainScreen screen;
+    const auto ticked = [&screen] (const char* id) { return screen.registry.find (id)->isTicked(); };
+    auto* dialog = openDialog (screen, "options.midiSettings");
+    auto* panel = dynamic_cast<phazite::ui::SettingsPanel*> (dialog->getContentComponent());
+    REQUIRE (panel != nullptr);
+    CHECK (panel->getMarkedGroup() == phazite::ui::SettingsPanel::midi);
+    REQUIRE (screen.registry.invoke ("options.keyboardShortcuts"));
+    dispatchPendingMessages();
+    CHECK (panel->showsShortcuts());
+    REQUIRE (screen.registry.invoke ("options.audioSettings"));
+    dispatchPendingMessages();
+    CHECK_FALSE (panel->showsShortcuts());
+    CHECK (panel->getMarkedGroup() == phazite::ui::SettingsPanel::audio);
+
+    // The main window's own preferences have rows here.
+    for (const auto* title : { "Theme", "Interface Size", "Hover Help", "Startup Sound", "Check for Updates When Phazite Opens" })
+    {
+        INFO (title);
+        CHECK (panel->findRow (title) != nullptr);
+    }
+
+    // The theme: picked here, the command runs; run from its menu, the row shows it.
+    auto* theme = dynamic_cast<juce::ComboBox*> (panel->findRow ("Theme")->getControl());
+    REQUIRE (theme != nullptr);
+    CHECK (theme->getText() == "Dark");
+    theme->setText ("Light", juce::sendNotificationSync);
+    dispatchPendingMessages();
+    CHECK (screen.lookAndFeel.getTheme() == phazite::ui::ThemeName::light);
+    CHECK (ticked ("options.theme.light"));
+    CHECK (panel->findRow ("Theme")->isModified());
+    REQUIRE (screen.registry.invoke ("options.theme.dark"));
+    dispatchPendingMessages();
+    CHECK (theme->getText() == "Dark");
+    CHECK_FALSE (panel->findRow ("Theme")->isModified());
+
+    // Hover Help, switched off in the Help menu: off here, modified, and Reset Setting turns it on again.
+    auto& hover = *panel->findRow ("Hover Help");
+    auto* hoverSwitch = dynamic_cast<juce::Button*> (hover.getControl());
+    REQUIRE (hoverSwitch != nullptr);
+    CHECK (hoverSwitch->getToggleState());
+    REQUIRE (screen.registry.invoke ("view.hoverHelp"));
+    dispatchPendingMessages();
+    CHECK_FALSE (hoverSwitch->getToggleState());
+    CHECK (hover.isModified());
+    CHECK (phazite::test::runMenuItem (hover.getMenu(), { "Reset Setting" }));
+    CHECK (ticked ("view.hoverHelp"));
+    CHECK (hoverSwitch->getToggleState());
+
+    // The interface's size, picked here and set back from the View menu.
+    auto* size = dynamic_cast<juce::ComboBox*> (panel->findRow ("Interface Size")->getControl());
+    REQUIRE (size != nullptr);
+    size->setText ("125 %", juce::sendNotificationSync);
+    dispatchPendingMessages();
+    CHECK (juce::Desktop::getInstance().getGlobalScaleFactor() == doctest::Approx (1.25f));
+    REQUIRE (screen.registry.invoke ("view.interfaceNormal"));
+    dispatchPendingMessages();
+    CHECK (juce::Desktop::getInstance().getGlobalScaleFactor() == doctest::Approx (1.0f));
+    CHECK (size->getText() == "100 %");
+
+    closeDialog (screen, dialog);
 }

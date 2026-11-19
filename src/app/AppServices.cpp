@@ -92,6 +92,28 @@ struct AppServices::DeviceSettings final : private juce::ChangeListener
     void changeListenerCallback (juce::ChangeBroadcaster*) override { save(); }
 };
 
+struct AppServices::UndoDepth final : private Settings::Listener
+{
+    explicit UndoDepth (Settings& s)
+        : settings (s)
+    {
+        apply();
+        settings.addListener (this);
+    }
+
+    ~UndoDepth() override { settings.removeListener (this); }
+
+    Settings& settings;
+
+    void apply() { Song::setUndoSteps (roundToNearestInt (settings.get (Settings::undoSteps))); } // a setting's file may say 1e300
+
+    void settingChanged (const juce::String& key) override
+    {
+        if (key == Settings::undoSteps.key)
+            apply();
+    }
+};
+
 AppServices::AppServices (EngineContext& context, AppServicesOptions options)
     : engineContext (context),
       settingsFile (options.settingsInMemory ? nullptr : std::make_unique<juce::PropertiesFile> (Settings::getFileOptions())),
@@ -118,7 +140,7 @@ AppServices::AppServices (EngineContext& context, AppServicesOptions options)
     setThisComputer (computer);
 
     // The undo history's depth, for every song made from now on.
-    Song::setUndoSteps (roundToNearestInt (settings.get (Settings::undoSteps))); // a setting's file may say 1e300
+    undoDepth = std::make_unique<UndoDepth> (settings);
 }
 
 void AppServices::openAudioDevices()

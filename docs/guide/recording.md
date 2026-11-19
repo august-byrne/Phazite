@@ -63,8 +63,8 @@ track" and offers **Record an Input on a New Track**.
 
 While it records, a clip grows on each track that records, with the input's waveform or the notes drawn as they come
 in. Audio is written as a WAV file into the project's Audio folder, named after the track ("Vocals Take 1.wav"), and it
-lands in the song where you played it. If the audio device's driver reports its delays wrongly, **Correction**, under
-**Recording** in the audio settings, moves recordings earlier or later by a number of milliseconds.
+lands in the song where you played it. If the audio device's driver reports its delays wrongly, **Recording Correction**, in the
+**Recording** group of **Settings**, moves recordings earlier or later by a number of milliseconds.
 
 What you play on a MIDI keyboard is recorded with its sustain pedal, mod wheel, other controllers, pitch bend and the
 keys' pressure (aftertouch, a note's or the whole keyboard's), and a note played a moment before the count-in ends starts
