@@ -560,8 +560,7 @@ std::optional<BeatRange> PianoRoll::getSelectedRange() const
     std::optional<BeatRange> shown;
 
     for (const auto& note : getSelectedNotesHere())
-        shown = shown.has_value() ? BeatRange (std::min (shown->getStart(), note.start), std::max (shown->getEnd(), note.getEnd()))
-                                  : BeatRange (note.start, note.getEnd());
+        shown = shown.has_value() ? shown->getUnionWith ({ note.start, note.getEnd() }) : BeatRange (note.start, note.getEnd());
 
     return shown;
 }
@@ -616,7 +615,7 @@ BeatRange PianoRoll::getContentRange() const
     auto range = shown.front().range;
 
     for (const auto& clip : shown)
-        range = { std::min (range.getStart(), clip.range.getStart()), std::max (range.getEnd(), clip.range.getEnd()) };
+        range = range.getUnionWith (clip.range);
 
     return range;
 }

@@ -69,8 +69,7 @@ std::vector<ConsolidatePart> getConsolidateParts (const Song& song, const Select
             if (const auto found = ranges.find (track); found == ranges.end())
                 ranges.emplace (track, clipRange);
             else
-                found->second = BeatRange (std::min (found->second.getStart(), clipRange.getStart()),
-                                           std::max (found->second.getEnd(), clipRange.getEnd()));
+                found->second = found->second.getUnionWith (clipRange);
         }
     }
 
@@ -113,8 +112,10 @@ std::vector<ClipID> consolidatePart (Song& song, const ConsolidatePart& part, co
     for (const auto& clipState : midiClips)
     {
         const auto clipRange = getClipRange (song, clipState);
-        const auto played =
-            BeatRange (std::max (clipRange.getStart(), part.range.getStart()), std::min (clipRange.getEnd(), part.range.getEnd()));
+        // The range's own function, not a BeatRange made of std::max() and std::min() of what two getters return: the
+        // MSVC of CI's Windows release build made that one empty (its end the range's start), and the joined clip lost
+        // its notes there and nowhere else (known bug 204).
+        const auto played = clipRange.getIntersectionWith (part.range);
 
         for (auto note : getClipNotes (song, getClipID (clipState)))
         {

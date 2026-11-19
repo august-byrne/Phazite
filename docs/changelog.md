@@ -249,6 +249,11 @@ The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed be
 bug has a test that failed before its fix, and a reviewer read each area's changes; what the reviews found is fixed
 too. A line names the bug's number in that list.
 
+- **204 Consolidate over part of a clip, in CI's Windows release build:** the joined clip had no notes there, and
+  nowhere else. A test that takes the join's steps one at a time named the step on CI: the part of the clip in the
+  range, made as `BeatRange (std::max (...), std::min (...))` of what the two ranges' getters return, came out empty
+  (its end the range's start) with that compiler. The join asks the range for its intersection now, and the five
+  other places that made a range so ask it for its union.
 - **208 The switch read before a tick:** the right-click menu's test read a part's switch before the displays' ticker
   had shown it a click made on another control of its parameter; a release build runs the whole case within one
   frame, so CI's linux-release job failed it in every run. The test ticks the displays first. Nothing was wrong with

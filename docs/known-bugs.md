@@ -143,17 +143,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
-- **204. `ConsolidateTests`, "With a time range selected across tracks, Consolidate joins what lies in it on each...",
-  fails in CI's windows-release job in most runs** (from 2026-11-18; once in its windows-profile job; never in a
-  Linux job, and never on this PC: 300 runs of a windows-profile build and 20 of a windows-release one passed): the
-  joined clip on the first track is where it should be, from beat 2 to 6, named as the clip it came of, and holds no
-  notes, while the parts before and after hold theirs (CI's log of `b663b7e3`). The path is on the message thread
-  alone (`consolidatePart()`, `src/model/arrangement/Consolidate.cpp`: the notes read and cut at the range's edges,
-  `clearClipsIn()`, `insertMidiClip()`, `setClipNotes()`), with nothing random and no thread in it, so it is
-  something only that compiler's optimized build shows: a value read before it is set, or the compiler's own fault.
-  The test file has a case since that takes the same steps one at a time and checks each ("The steps of a join over
-  part of a MIDI clip, each checked"): CI's log of it names the step that goes wrong (whether the notes were cut
-  away, or set and not kept). To fix: read that log, then the step.
 - **205. `VersionsTests`, the plug-in update's case, failed once in CI's linux-clang job** (2026-11-18, the run of
   `4ff18a92`): after the project opened again, its plug-ins loaded and their settings stored as a save stores them,
   the changes didn't name the update ("updated 1.0 → 2.0", its last check). `39633f06` made that case wait for the

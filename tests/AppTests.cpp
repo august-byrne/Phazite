@@ -1598,8 +1598,13 @@ juce::File addToVersions (FirstSave& s, juce::int64 bytes)
 
     // The history's thread may be making its own folder, local/<computer>, at this moment: of two threads that make the same
     // folder, JUCE's createDirectory() tells the one that came second that it failed (the folder "already exists"), as
-    // it told this test twice on CI. So what counts is that the folder is there.
-    const auto made = file.getParentDirectory().createDirectory();
+    // it told this test on CI, and of a folder above this one (Versions), so that this one was not made at all. Asked again,
+    // it finds the folder the other thread made and goes on from there.
+    auto made = file.getParentDirectory().createDirectory();
+
+    for (int tries = 0; made.failed() && tries < 4; ++tries)
+        made = file.getParentDirectory().createDirectory();
+
     INFO (made.getErrorMessage());
     REQUIRE (file.getParentDirectory().isDirectory());
 

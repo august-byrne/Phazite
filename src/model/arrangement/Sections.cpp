@@ -331,7 +331,7 @@ BeatRange getSectionsRange (const std::vector<Section>& sections)
     auto range = sections.front().range;
 
     for (const auto& section : sections)
-        range = { std::min (range.getStart(), section.range.getStart()), std::max (range.getEnd(), section.range.getEnd()) };
+        range = range.getUnionWith (section.range);
 
     return range;
 }

@@ -258,9 +258,7 @@ std::optional<BeatRange> Playlist::getSelectedRange() const
 
     for (const auto id : selection.getClips())
         if (const auto clip = getClip (context, id))
-            shown = shown.has_value()
-                        ? BeatRange (std::min (shown->getStart(), clip->range.getStart()), std::max (shown->getEnd(), clip->range.getEnd()))
-                        : clip->range;
+            shown = shown.has_value() ? shown->getUnionWith (clip->range) : clip->range;
 
     return shown;
 }

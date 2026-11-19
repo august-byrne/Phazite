@@ -941,9 +941,7 @@ void Playlist::AutomationLaneView::paintTo (const juce::MouseEvent& e)
 void Playlist::AutomationLaneView::replaceDrawn (BeatRange drawnRange, std::vector<AutomationPoint> newPoints)
 {
     // What a drag drew before, outside what it draws now, goes back to the points that were there.
-    const auto replaced =
-        drawn.has_value() ? BeatRange (std::min (drawn->getStart(), drawnRange.getStart()), std::max (drawn->getEnd(), drawnRange.getEnd()))
-                          : drawnRange;
+    const auto replaced = drawn.has_value() ? drawn->getUnionWith (drawnRange) : drawnRange;
 
     for (const auto& point : before)
         if (point.beat >= replaced.getStart() && point.beat <= replaced.getEnd()

@@ -250,9 +250,10 @@ TEST_CASE ("With a time range selected across tracks, Consolidate joins what lie
 
 TEST_CASE ("The steps of a join over part of a MIDI clip, each checked: the notes read, the range cleared, the clip made, its notes set")
 {
-    // Known bug 204: in CI's Windows release builds the range's case above finds the joined clip without notes, and no
-    // build elsewhere does. The same steps as consolidatePart() takes (model/arrangement/Consolidate.cpp), one at a time,
-    // so that a failure there names the step that went wrong.
+    // In CI's Windows release builds the range's case above found the joined clip without notes, and no build elsewhere
+    // did (known bug 204). The same steps as consolidatePart() takes (model/arrangement/Consolidate.cpp), one at a time,
+    // named the step: the part of the clip in the range, made as BeatRange (std::max (...), std::min (...)) of what the
+    // ranges' getters return, came out empty there. Kept, so that a failure names its step again.
     Song song;
     auto& model = song.getSong();
     const auto clip = phazite::test::addMidiClip (model, song.keys, { at (0.0), at (8.0) });
