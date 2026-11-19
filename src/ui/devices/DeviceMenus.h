@@ -19,21 +19,22 @@ namespace phazite::ui
 {
 class CommandBridge;
 
+// Each menu's items act themselves while target is there, so that a menu works as well as a submenu of another (a device's
+// Replace); show...() drops it from target, a button.
+
 // The instruments. The one chosen replaces the track's instrument, if it has one; an instrument container comes first,
 // into which the instrument the track has goes (addInstrumentContainer()). makeInstrumentMenu() is the menu it shows, as
 // makeEffectMenu() is the effects'.
 void showInstrumentMenu (ProjectContext&, TrackID, juce::Component& target);
-juce::PopupMenu makeInstrumentMenu (ProjectContext&, TrackID, juce::Component& target, const std::vector<DeviceType>& types);
+juce::PopupMenu makeInstrumentMenu (ProjectContext&, TrackID, juce::Component& target);
 
 // The effects. The one chosen goes on the track, or with an empty ID on the master, after its other effects; an empty
-// container comes first (addContainer()). makeEffectMenu() is the menu it shows: an item of one of types (as
-// getDeviceTypes() lists them) has its index in types, plus one, as its ID; the others act themselves, while target is
-// there.
+// container comes first (addContainer()). For a track whose notes have no instrument, the instruments come first.
 void showEffectMenu (ProjectContext&, TrackID, juce::Component& target);
-juce::PopupMenu makeEffectMenu (ProjectContext&, TrackID, juce::Component& target, const std::vector<DeviceType>& types);
+juce::PopupMenu makeEffectMenu (ProjectContext&, TrackID, juce::Component& target);
 
 // The effects, for one to replace: the one chosen takes its place (replaceEffect()).
-void showReplaceEffectMenu (ProjectContext&, DeviceID effect, juce::Component& target);
+juce::PopupMenu makeReplaceEffectMenu (ProjectContext&, DeviceID effect, juce::Component& target);
 
 // The effects, for a new return track that the track sends to: the return holds the effect chosen and is named after it.
 void showNewReturnMenu (ProjectContext&, TrackID sender, juce::Component& target);
@@ -42,6 +43,7 @@ void showNewReturnMenu (ProjectContext&, TrackID sender, juce::Component& target
 // instrument container's chain's instruments, the one chosen in place of its instrument.
 void showChainEffectMenu (ProjectContext&, DeviceID chain, juce::Component& target);
 void showChainInstrumentMenu (ProjectContext&, DeviceID chain, juce::Component& target);
+juce::PopupMenu makeChainInstrumentMenu (ProjectContext&, DeviceID chain, juce::Component& target);
 
 // What a click on a device's name does, in the mixer, the piano roll and the Devices view: selects the device alone and
 // shows it in the Devices view (the "device.show" command, where the window has one), and opens a plug-in's own window,

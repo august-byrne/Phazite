@@ -17,12 +17,26 @@ namespace phazite::ui
 {
 namespace
 {
-    // The farthest a place or a time can be typed; the position and time fields' widths; and the arrows joined to Record and
-    // the metronome.
+    // The farthest a place or a time can be typed; and the widths of the controls with text, each as its text needs: the tempo
+    // ("120 BPM"), the time signature, the position ("100.4.4") and the time ("12:34.5"), A/B, the master's meter and volume,
+    // and the computer keyboard ("C#4", "Off"). Buttons with an icon are Shell::transportButtonWidth wide.
     constexpr double latestBeat = 1.0e6, latestSeconds = 1.0e6;
-    constexpr int positionWidth = 84, timeWidth = 72; // "100.4.4", "12:34.5", with room
-    constexpr int optionsArrowWidth = 18;
+    constexpr int tempoWidth = 96, timeSignatureWidth = 52, positionWidth = 84, timeWidth = 72, compareWidth = 44;
+    constexpr int meterWidth = 64, meterHeight = 12, volumeWidth = 120, keyboardWidth = 76;
 } // namespace
+
+void TopBar::JoinedButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown)
+{
+    IconButton::paintButton (g, isHighlighted || (partner != nullptr && (partner->isOver() || partner->isDown())), isDown);
+}
+
+void TopBar::JoinedButton::buttonStateChanged()
+{
+    IconButton::buttonStateChanged();
+
+    if (partner != nullptr)
+        partner->repaint();
+}
 
 // Hears every press in the app while what the tempo stretches shows: one anywhere but on it or on the tempo field hides it.
 struct TopBar::OutsideClick : public juce::MouseListener
@@ -88,7 +102,6 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
         commands.invoke ("transport.metronome");
         metronomeButton.setToggleState (isCommandTicked ("transport.metronome"), juce::dontSendNotification);
     };
-    lowLatencyButton.onClick = [this] { commands.invoke ("transport.lowLatency"); };
     keyboardButton.onClick = [this] { commands.invoke ("input.computerKeyboard"); };
 
     // Each options arrow joined to its button's right, as one split button.
@@ -98,9 +111,11 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     metronomeMenuButton.onClick = [this] { showMetronomeMenu(); };
     metronomeMenuButton.setTooltip ("The metronome's options: the count-in before recording");
 
-    for (auto [button, arrow] : { std::pair<juce::Button*, juce::Button*> { &recordButton, &recordMenuButton },
-                                  std::pair<juce::Button*, juce::Button*> { &metronomeButton, &metronomeMenuButton } })
+    for (auto [button, arrow] : { std::pair<JoinedButton*, JoinedButton*> { &recordButton, &recordMenuButton },
+                                  std::pair<JoinedButton*, JoinedButton*> { &metronomeButton, &metronomeMenuButton } })
     {
+        button->partner = arrow;
+        arrow->partner = button;
         button->setConnectedEdges (juce::Button::ConnectedOnRight);
         arrow->setConnectedEdges (juce::Button::ConnectedOnLeft);
         arrow->setMouseClickGrabsKeyboardFocus (false);
@@ -210,7 +225,7 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
     for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &captureButton, &loopButton, &metronomeButton,
-                                                               &lowLatencyButton, &timeSignatureButton, &keyboardButton })
+                                                               &timeSignatureButton, &keyboardButton })
     {
         button->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (button);
@@ -223,7 +238,7 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     compareButton.setTitle ("A/B");
     compareButton.setMouseClickGrabsKeyboardFocus (false);
     compareButton.onClick = [this] { commands.invoke ("version.compare"); };
-    addAndMakeVisible (compareButton);
+    addChildComponent (compareButton);
 
     hearing.setTitle ("Hearing");
     hearing.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
@@ -264,8 +279,14 @@ void TopBar::updateCompare()
     if (hearing.getText() != text)
         hearing.setText (text, juce::dontSendNotification);
 
+    // A/B only while there is something to compare: a version, and changes since it (or it heard).
+    const auto wasShown = std::pair (compareButton.isVisible(), hearing.isVisible());
     hearing.setVisible (text.isNotEmpty());
-    compareButton.setEnabled (canCompare (projectContext));
+    compareButton.setVisible (canCompare (projectContext));
+
+    if (std::pair (compareButton.isVisible(), hearing.isVisible()) != wasShown)
+        resized();
+
     compareButton.setToggleState (waiting || getHeardVersion (projectContext).isNotEmpty(), juce::dontSendNotification);
 
     if (const auto tip = withShortcut (commands, describeCompare (projectContext), "version.compare"); compareButton.getTooltip() != tip)
@@ -302,10 +323,6 @@ void TopBar::refreshTooltips()
     metronomeButton.setTooltip (
         withShortcut (commands, "Metronome: clicks on every beat while the song plays. Its arrow, or a right-click, has the count-in",
                       "transport.metronome"));
-    lowLatencyButton.setTooltip (withShortcut (commands,
-                                               "Low latency: while on, what you play has no delay to wait for. Devices that look ahead "
-                                               "are bypassed, delay compensation is off and the buffer shrinks. Turn it off to mix",
-                                               "transport.lowLatency"));
 
     shownKeyboardState = -1; // its tooltip names a shortcut too
     updateKeyboardButton();
@@ -544,52 +561,65 @@ void TopBar::paint (juce::Graphics& g)
 
 void TopBar::resized()
 {
-    // Along its top, under the title bar's controls, with the room under them that Shell::transportBarHeight keeps.
+    // Along its top, under the title bar's controls, with the room under them that Shell::transportBarHeight keeps: groups of
+    // controls Shell::transportGroupGap apart, the controls in a group Shell::transportGap apart, a button and its options
+    // arrow joined as one control. From the left: play, record and capture; the loop and the metronome; the tempo and the
+    // time signature; where the playhead is; A/B. From the right: the computer keyboard; the master's volume and meter.
+    using Shell::transportGap, Shell::transportGroupGap;
+    const auto button = Shell::transportButtonWidth, arrow = Shell::transportArrowWidth;
     auto area = getLocalBounds().reduced (Space::s, 0).removeFromTop (controlHeight);
+    const auto place = [&area] (juce::Component& control, int gapBefore, int width)
+    {
+        area.removeFromLeft (gapBefore);
+        control.setBounds (area.removeFromLeft (width));
+    };
 
-    playButton.setBounds (area.removeFromLeft (44));
-    recordButton.setBounds (area.removeFromLeft (40));
-    recordMenuButton.setBounds (area.removeFromLeft (optionsArrowWidth));
-    captureButton.setBounds (area.removeFromLeft (44));
-    loopButton.setBounds (area.removeFromLeft (44));
-    metronomeButton.setBounds (area.removeFromLeft (40));
-    metronomeMenuButton.setBounds (area.removeFromLeft (optionsArrowWidth));
-    lowLatencyButton.setBounds (area.removeFromLeft (44));
-    area.removeFromLeft (Space::m);
-    tempoField.setBounds (area.removeFromLeft (96));
-    area.removeFromLeft (Space::xs);
-    timeSignatureButton.setBounds (area.removeFromLeft (52));
-    area.removeFromLeft (Space::m);
+    place (playButton, 0, button);
+    place (recordButton, transportGap, button);
+    place (recordMenuButton, 0, arrow);
+    place (captureButton, transportGap, button);
 
-    keyboardButton.setBounds (area.removeFromRight (76));
-    area.removeFromRight (Space::m);
-    masterVolume.setBounds (area.removeFromRight (120));
-    area.removeFromRight (Space::xs);
-    masterMeter.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 12));
-    area.removeFromRight (Space::m);
+    place (loopButton, transportGroupGap, button);
+    place (metronomeButton, transportGap, button);
+    place (metronomeMenuButton, 0, arrow);
 
-    // Where the playhead is, after the time signature, while there is room for it before A/B: in a narrow window the time
-    // goes first, then the bars, as VS Code's status bar drops its items.
-    const auto compareWidth = 44 + Space::s;
-    const auto showsPosition = area.getWidth() >= positionWidth + Space::m + compareWidth;
-    const auto showsTime = area.getWidth() >= positionWidth + Space::xs + timeWidth + Space::m + compareWidth;
+    place (tempoField, transportGroupGap, tempoWidth);
+    place (timeSignatureButton, transportGap, timeSignatureWidth);
+
+    keyboardButton.setBounds (area.removeFromRight (keyboardWidth));
+    area.removeFromRight (transportGroupGap);
+    masterVolume.setBounds (area.removeFromRight (volumeWidth));
+    area.removeFromRight (transportGap);
+    masterMeter.setBounds (area.removeFromRight (meterWidth).withSizeKeepingCentre (meterWidth, meterHeight));
+    area.removeFromRight (transportGroupGap); // the least room before the master's group
+
+    // Where the playhead is, while there is room for it before what compares versions: in a narrow window the time goes
+    // first, then the bars, as VS Code's status bar drops its items.
+    const auto comparing = compareButton.isVisible() || hearing.isVisible();
+    const auto compareRoom = comparing ? transportGroupGap + compareWidth : 0;
+    const auto showsPosition = area.getWidth() >= transportGroupGap + positionWidth + compareRoom;
+    const auto showsTime = area.getWidth() >= transportGroupGap + positionWidth + transportGap + timeWidth + compareRoom;
     positionField.setVisible (showsPosition);
     timeField.setVisible (showsTime);
 
     if (showsPosition)
-    {
-        positionField.setBounds (area.removeFromLeft (positionWidth));
-        area.removeFromLeft (Space::xs);
-    }
+        place (positionField, transportGroupGap, positionWidth);
 
     if (showsTime)
-        timeField.setBounds (area.removeFromLeft (timeWidth));
+        place (timeField, transportGap, timeWidth);
 
-    if (showsPosition)
-        area.removeFromLeft (Space::m - Space::xs);
+    // A/B, and what is heard beside it.
+    if (! comparing)
+        return;
 
-    compareButton.setBounds (area.removeFromLeft (44));
-    area.removeFromLeft (Space::s);
+    area.removeFromLeft (transportGroupGap);
+
+    if (compareButton.isVisible())
+    {
+        compareButton.setBounds (area.removeFromLeft (compareWidth));
+        area.removeFromLeft (transportGap);
+    }
+
     hearing.setBounds (area);
 }
 
@@ -625,8 +655,6 @@ void TopBar::timerCallback()
     loopButton.setToggleState (isLoopOn (projectContext), juce::dontSendNotification);
     metronomeButton.setEnabled (open);
     metronomeButton.setToggleState (isCommandTicked ("transport.metronome"), juce::dontSendNotification);
-    lowLatencyButton.setEnabled (open);
-    lowLatencyButton.setToggleState (isCommandTicked ("transport.lowLatency"), juce::dontSendNotification);
     updateTempo();
 
     if (! playing) // while it plays, the display's frames move it (positionFrames)

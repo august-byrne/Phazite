@@ -23,6 +23,10 @@
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/shell/TopBar.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
+
+#include <algorithm>
+#include <vector>
 
 namespace
 {
@@ -297,11 +301,119 @@ TEST_CASE ("The top bar shows where the playhead is, in bars and in time, and a 
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return shown (*bars) == "2.2.1"; }));
 
     // A narrower bar: the time goes first, then the bars, as the rest of the bar needs its room.
-    screen.topBar.setSize (960, screen.topBar.getHeight());
-    CHECK (bars->isVisible());
-    CHECK_FALSE (time->isVisible());
-    screen.topBar.setSize (900, screen.topBar.getHeight());
+    auto barsAlone = false;
+
+    for (auto width = screen.topBar.getWidth(); width >= 600; width -= 4)
+    {
+        CAPTURE (width);
+        screen.topBar.setSize (width, screen.topBar.getHeight());
+        CHECK ((bars->isVisible() || ! time->isVisible()));
+        barsAlone = barsAlone || (bars->isVisible() && ! time->isVisible());
+    }
+
+    CHECK (barsAlone);
     CHECK_FALSE (bars->isVisible());
+}
+
+TEST_CASE ("The transport bar's controls are in groups, one gap within a group and a larger one between groups, a button and its "
+           "arrow one control")
+{
+    // The owner, 2026-11-19: "the spacing between the button strip (play, record, etc) is not great. uneven and some have no
+    // spacing". The groups: play, record and capture; the loop and the metronome; the tempo and the time signature; where the
+    // playhead is; and at the right the master's level and volume; the computer keyboard.
+    using phazite::ui::Shell::transportGap;
+    using phazite::ui::Shell::transportGroupGap;
+    TopBarScreen screen;
+    auto& bar = screen.topBar;
+
+    const auto boundsOf = [&bar] (const char* title)
+    {
+        auto* control = phazite::test::findComponentWithTitle (bar, title);
+        REQUIRE (control != nullptr);
+        CHECK (control->isVisible());
+        return bar.getLocalArea (control, control->getLocalBounds());
+    };
+
+    const auto gap = [&boundsOf] (const char* left, const char* right)
+    {
+        CAPTURE (left);
+        CAPTURE (right);
+        return boundsOf (right).getX() - boundsOf (left).getRight();
+    };
+
+    // Within a group.
+    CHECK (gap ("Play", "Record") == transportGap);
+    CHECK (gap ("Record options", "Capture") == transportGap);
+    CHECK (gap ("Loop", "Metronome") == transportGap);
+    CHECK (gap ("Tempo", "Time signature") == transportGap);
+    CHECK (gap ("Playhead position", "Playhead time") == transportGap);
+    CHECK (gap ("Master level", "Master volume") == transportGap);
+
+    // A button and its options arrow: one control.
+    CHECK (gap ("Record", "Record options") == 0);
+    CHECK (gap ("Metronome", "Metronome options") == 0);
+
+    // Between groups: all the same, and more than within one.
+    CHECK (transportGroupGap > transportGap);
+    CHECK (gap ("Capture", "Loop") == transportGroupGap);
+    CHECK (gap ("Metronome options", "Tempo") == transportGroupGap);
+    CHECK (gap ("Time signature", "Playhead position") == transportGroupGap);
+    CHECK (gap ("Master volume", "Computer keyboard") == transportGroupGap);
+
+    // The buttons with an icon alone, all as wide.
+    for (const auto* title : { "Record", "Capture", "Loop", "Metronome" })
+        CHECK (boundsOf (title).getWidth() == boundsOf ("Play").getWidth());
+
+    // Nothing that can't be used: Low Latency is the status bar's, and A/B shows only while there is a version to compare with
+    // (ActivityBarTests.cpp).
+    CHECK (phazite::test::findComponentWithTitle (bar, "Low latency") == nullptr);
+    auto* compare = phazite::test::findComponentWithTitle (bar, "A/B");
+    REQUIRE (compare != nullptr);
+    CHECK_FALSE (compare->isVisible());
+
+    // No two controls touch but a button and its arrow.
+    std::vector<juce::Component*> shown;
+
+    for (auto* child : bar.getChildren())
+        if (child->isVisible())
+            shown.push_back (child);
+
+    std::sort (shown.begin(), shown.end(), [] (auto* a, auto* b) { return a->getX() < b->getX(); });
+
+    for (size_t i = 1; i < shown.size(); ++i)
+    {
+        CAPTURE (shown[i - 1]->getTitle());
+        CAPTURE (shown[i]->getTitle());
+        const auto between = shown[i]->getX() - shown[i - 1]->getRight();
+
+        if (shown[i]->getTitle().endsWith (" options"))
+            CHECK (between == 0);
+        else
+            CHECK (between >= transportGap);
+    }
+}
+
+TEST_CASE ("A right-click on the master volume shows its menu at the pointer, not under the whole fader")
+{
+    // The owner, 2026-11-19: a right-click's menu "appears way off target from where it should be (near your pointer/the element
+    // it is referencing). for instance master volume".
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    const phazite::test::ScopedDisplay display; // JUCE places a menu on its display
+    TopBarScreen screen (300);
+    phazite::ui::setPopupsInside (screen.window); // as in the main window, on frosted glass
+    auto* volume = phazite::test::findComponentWithTitle (screen.topBar, "Master volume");
+    REQUIRE (volume != nullptr);
+
+    // Low on it, near its right end.
+    const juce::Point<int> at (volume->getWidth() * 3 / 4, volume->getHeight() - 3);
+    phazite::test::Mouse mouse (*volume);
+    mouse.press (at, juce::ModifierKeys::rightButtonModifier);
+    CHECK (phazite::test::isMenuShownAt (volume->localPointToGlobal (at)));
+    juce::PopupMenu::dismissAllActiveMenus();
+    mouse.release();
+    phazite::test::dispatchPendingMessages();
 }
 
 TEST_CASE ("While recording, a drag of the playhead's place takes the playhead only where it is let go, and Escape leaves it")

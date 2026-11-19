@@ -9,6 +9,7 @@
 #include "model/mixer/MixerModel.h"
 #include "ui/theme/DesignTokens.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <cmath>
 #include <vector>
@@ -892,7 +893,7 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s)
 void ParameterAttachment::showMenu()
 {
     if (auto menu = getMenu(); menu.getNumItems() > 0)
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&slider));
+        menu.showMenuAsync (getContextMenuOptions (slider));
 }
 
 juce::PopupMenu ParameterAttachment::getMenu()
@@ -1122,7 +1123,7 @@ void ParameterMenuClicks::mouseDown (const juce::MouseEvent& e)
         return;
 
     if (auto menu = getMenu(); menu.getNumItems() > 0)
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (e.eventComponent));
+        menu.showMenuAsync (getContextMenuOptions (*e.eventComponent));
 }
 
 void ParameterMenuClicks::mouseUp (const juce::MouseEvent&)

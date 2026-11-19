@@ -24,6 +24,13 @@ void setPopupsInside (juce::Component& window);
 juce::Component* findWindowForPopups (const juce::Component&);
 juce::Component* findWindowForPopups (juce::Point<int> screenPosition);
 
+// The options of a component's context menu, the one a right-click opens: at the pointer, where the press was, when the
+// mouse was last pressed on the component (JUCE moves the menu where it wouldn't fit), as every DAW opens one; on the
+// component otherwise. It opens inside the window the component is in, as every menu from it does
+// (LookAndFeel::getParentComponentForMenuOptions()). A menu a button drops (a menu button, More, a picker) hangs from its
+// button instead: juce::PopupMenu::Options().withTargetComponent().
+juce::PopupMenu::Options getContextMenuOptions (juce::Component& target);
+
 // What is behind a component in its parent, as the parent paints an area of its own there (an area which may reach beyond
 // the component): the parent's own paint and its children's that come before the component, at so many pixels a unit, in
 // a software image of that area.

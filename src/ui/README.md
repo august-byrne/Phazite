@@ -15,7 +15,7 @@ File names ending in `.*` stand for a header and its `.cpp`.
 | `LookAndFeel.*` | `ui::LookAndFeel`, and `ui::setThemeColour()` and `ui::refreshTheme()`, which set the palette's colours again on a theme switch. |
 | `DesignTokens.h` | The design tokens: colours, text sizes, spacing. Read with `ui::getPalette (component)`. |
 | `Icons.*` | The icons (`ui::Icon`, shown with `ui::IconButton`) and Phazite's logo, its own drawing in its own colours (`createLogo()`). The icons are Lucide's (ISC; `resources/icons/lucide/LICENSE`). |
-| `Popups.*` | What pops up over the window: menus, tooltips and the pickers. Inside the main window they show on frosted glass, blurred by Phazite itself; elsewhere they are solid. |
+| `Popups.*` | What pops up over the window: menus, tooltips and the pickers. Inside the main window they show on frosted glass, blurred by Phazite itself; elsewhere they are solid. `getContextMenuOptions()` places a right-click's menu at the pointer (a button's menu hangs from its button). |
 
 The dark and light themes are VS Code's 2026 Dark and Light, and the sizes those of its Modern UI, under its MIT notice;
 [docs/vscode-look.md](../../docs/vscode-look.md) says where each comes from.
@@ -38,7 +38,7 @@ The base controls and what the left panel's views share.
 | `ScrollBarFade.*` | Shows an overlay scroll bar while the pointer is over what it scrolls, and fades it out after. |
 | `DisplayTicker.*` | The one timer that brings the displays up to date (meters, device editors), with what tells them whether to repaint (`ui::DrawnNumbers`), and what starts a display afresh when it shows again (`Display::shownAgain()`). |
 | `ToolRow.*` | A row of a view's controls laid out from the left, which puts the least needed into its More menu where it is too narrow; each editor's tools show in its area's tab row this way. |
-| `ViewTitle.*` | The title along a left-panel view's top, with its actions (as VS Code's side bar). |
+| `ViewTitle.*` | The title along a side panel view's top, with its actions (as VS Code's side bar): the left panel's views', and the inspector's, which names what it shows. |
 | `SectionHeader.*` | A section's header that folds it: a group's row or a pane's, with its count's badge. |
 | `ListRowHover.h` | Which row of a list is under the pointer. |
 
@@ -65,7 +65,7 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 
 | File | What it holds |
 |---|---|
-| `DeviceMenus.*` | The menus that add instruments and effects. |
+| `DeviceMenus.*` | The menus that add instruments and effects, or replace one: each dropped from its button, or as a submenu of a device's menu (Replace). |
 | `DeviceEditors.*` | The editor of each of Phazite's own devices: its own, or, for one without, a knob for each of its parameters. They work through the model's `DeviceHandle` and `ParameterHandle`s. |
 | `DeviceEditorBase.*`, `DeviceLayout.*` | The frame every editor is built on: columns of titled parts (Title Case, drawn as given) that stack, show under tabs (a part's switch in its tab) or narrow, and pages of them where the dock is narrower, under a bar whose tabs that don't fit whole go into its More tab's menu, so that every editor fits the default dock without scrolling. `DeviceEditorBase::setModes()` gives an editor modes, a page of parts for each, as tabs along its top (a choice's tabs, `ChoiceTabs`). |
 | `DeviceWindowContent.*` | An editor in a window of its own, out of the Devices view (`src/app/PluginWindow.h`): as wide as the window, its parts wrapping into rows, scrolling when the window is shorter. |
@@ -201,9 +201,9 @@ The window's content and everything around the views.
 | `AppShell.*` | The window's content. |
 | `ActivityBar.*` | The activity bar down the window's left edge, whose icons show the left panel's views: the browser, the project and the versions. |
 | `TitleBar.*` | The title bar: Phazite's logo, the menus, Undo and Redo beside the command search, the panels' switches and, on Windows, where it is the window's own, the window's buttons and what its frame does where. |
-| `TopBar.*` | The transport bar, with the playhead's place and time as fields that move it, and A/B, which hears the last version in place of the song and back. |
+| `TopBar.*` | The transport bar, its controls in groups, with the playhead's place and time as fields that move it, and A/B, which hears the last version in place of the song and back, while there is one to compare with. |
 | `TempoStretchPanel.*` | What a tempo change stretches, under the transport bar's tempo field while the tempo changes. |
-| `StatusBar.*` | The status bar: the save state, the audio output, the CPU, and between them the hint bar. |
+| `StatusBar.*` | The status bar: the save state, the audio output, Low Latency's switch, the CPU, and between them the hint bar. |
 | `HintBar.*` | The hint bar, which shows a drag's readout while one moves something, for a few seconds what a command made that its name doesn't say (copies that didn't fit), and otherwise the guide's next step. |
 | `Guide.*` | The guide whose next step the hint bar shows. |
 | `Lessons.*` | The lessons of Help > Lessons. |
@@ -212,7 +212,7 @@ The window's content and everything around the views.
 | `NoticeCard.*` | The card the lessons and the device notices show in, in the bottom right corner, where VS Code shows its notifications. |
 | `Notices.*` | What Phazite tells without asking anything (a song exported, a problem saving), in cards over the others, each with a button for what to do next, in place of dialogs. |
 | `CommandPalette.*` | The command palette. |
-| `Panels.*` | The two areas of views, one over the other: by default the Playlist and Mixer tabs over the clip editor's tab (which shows the piano roll or the audio clip editor as the selection asks) and the Instrument and Effects tabs (the Devices view's two pages). Each view moves between the areas by its tab, and the settings keep where. |
+| `Panels.*` | The two areas of views, one over the other, their tabs drawn as VS Code's editor tabs and the shown editor's tools after a line beside them: by default the Playlist and Mixer tabs over the clip editor's tab (which shows the piano roll or the audio clip editor as the selection asks) and the Instrument and Effects tabs (the Devices view's two pages). Each view moves between the areas by its tab, and the settings keep where. |
 | `PanelLayout.*` | Which panels show, which one fills the window and their sizes, with the buttons in each panel's corner. |
 | `SettingsPanel.*` | The settings window's tabs. |
 | `ShortcutsEditor.*` | The Shortcuts tab's list, as VS Code's Keyboard Shortcuts editor: search by name or key, the keys of every command, changed in a card that says what else a key does. |

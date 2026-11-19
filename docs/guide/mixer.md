@@ -139,8 +139,9 @@ presets drag in from the browser. An instrument chosen for a track that has one 
 effects, plug-ins and containers alike.
 
 **A device's menu** (right-click its name) has, as they apply: **Reload** (for a plug-in that crashed), **Open
-Window**, **On**, **Automate**, **Replace...**, **Move Up** and **Move Down**, **Move to Chain**, **Group into
-Container** or **Ungroup Container**, **Save Device Preset...** and **Remove**.
+Window**, **On**, **Automate**, **Replace** (point at it for what can take the device's place, and click one),
+**Move Up** and **Move Down**, **Move to Chain**, **Group into Container** or **Ungroup Container**, **Save Device
+Preset...** and **Remove**.
 
 **Presets.** A device's **Presets** button lists the presets that come with Phazite for it, by kind of sound, then
 yours under **Your Presets**, and has **Save Preset...**. For Phazite's own devices its first item, **Swap: Try Them

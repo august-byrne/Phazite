@@ -15,6 +15,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/browser/Browser.h"
+#include "ui/components/ViewTitle.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/input/KeyboardLayout.h"
@@ -232,6 +233,59 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); })); // copied in the background
     CHECK (screen.session.getProject()->getFile() == screen.temp.folder.getChildFile ("Projects/Untitled/Untitled.phazite"));
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
+}
+
+TEST_CASE ("The inspector's title is laid out as the browser's: as far in, as tall, in the same text, its X where their actions are")
+{
+    // The owner, 2026-11-19: "the right wing (inspector) doesn't have the same padding/spacing for its header elements as every
+    // other panel". Its title was its own label, larger and lower, its name further in.
+    namespace SideBar = phazite::ui::SideBar;
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    phazite::test::dispatchPendingMessages();
+
+    const auto titleOf = [] (juce::Component& view) -> phazite::ui::ViewTitle*
+    {
+        for (auto* title : phazite::test::findAll<phazite::ui::ViewTitle> (view))
+            if (title->isShowing())
+                return title;
+
+        return nullptr;
+    };
+
+    auto* inspector = phazite::test::findAll<phazite::ui::Inspector> (screen.shell).getFirst();
+    auto* browser = phazite::test::findAll<phazite::ui::Browser> (screen.shell).getFirst();
+    REQUIRE (inspector != nullptr);
+    REQUIRE (browser != nullptr);
+    REQUIRE (inspector->isShowing());
+    REQUIRE (browser->isShowing());
+    auto* inspectorTitle = titleOf (*inspector);
+    auto* browserTitle = titleOf (*browser);
+    REQUIRE (inspectorTitle != nullptr);
+    REQUIRE (browserTitle != nullptr);
+
+    // Each along its view's top from its left edge, as tall: its name drawn as far in, in the same text (ViewTitle).
+    const auto inView = [] (juce::Component& title, juce::Component& view) { return view.getLocalArea (&title, title.getLocalBounds()); };
+    CHECK (inView (*inspectorTitle, *inspector).getTopLeft() == inView (*browserTitle, *browser).getTopLeft());
+    CHECK (inspectorTitle->getHeight() == browserTitle->getHeight());
+    CHECK (inspectorTitle->getHeight() == SideBar::titleHeight);
+
+    // Its X as big as the browser's actions, as far from the edge, in the middle of the title's height.
+    juce::Component* inspectorHide = nullptr;
+
+    for (auto* buttons : phazite::test::findAll<phazite::ui::PanelButtons> (screen.shell))
+        if (buttons->isShowing() && inspector->getScreenBounds().contains (buttons->getScreenBounds()))
+            inspectorHide = phazite::test::findComponentWithTitle (*buttons, "Hide");
+
+    REQUIRE (inspectorHide != nullptr);
+    const auto x = inspectorHide->getScreenBounds();
+    const auto titleBounds = inspectorTitle->getScreenBounds();
+    CHECK (x.getWidth() == SideBar::actionSize);
+    CHECK (x.getHeight() == SideBar::actionSize);
+    CHECK (x.getRight() == inspector->getScreenBounds().getRight() - SideBar::titlePadding);
+    CHECK (x.getCentreY() == titleBounds.getCentreY());
+    CHECK (titleBounds.getRight() <= x.getX());
 }
 
 TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel's; the inspector's X hides it; the other "

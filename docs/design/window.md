@@ -73,19 +73,24 @@ layouts, each panel, Maximize the Panel in Use, Full Screen); then the window's 
 
 ## Transport bar
 
-A row under the title bar, for what belongs to the song as a whole:
+A row under the title bar, for what belongs to the song as a whole, in groups: the controls of a group a small gap apart,
+the groups a larger one, every button with an icon as wide.
 
-- Play, Record, Capture, Loop, the metronome and Low Latency. Record and the metronome each have an arrow joined to
-  their right, which opens their options (the recording's commands; the count-in), as a right-click on the button does.
+- Play, Record and Capture. Record has an arrow joined to its right, one control with it (lit together under the
+  pointer), which opens its options (the recording's commands), as a right-click on the button does.
+- Loop and the metronome, whose arrow opens its count-in in the same way.
 - The tempo and the time signature. The tempo field is dragged, scrolled or typed in; the time signature is a menu.
 - The playhead's place in bars, beats and sixteenths ("17.3.2", each counted from 1) and its time ("1:23.4"). Each is a
   field that moves the playhead when dragged, scrolled or typed in ("17.3", "1:05"). While the song plays they follow
   the playhead at the display's frames. A narrow window hides the time first, then the place.
 - A/B, which plays the last version's bounce in place of the song and the song again, with what is heard beside it
-  ([../versions.md](versions.md)).
-- The master level and volume, and the computer keyboard's switch.
+  ([../versions.md](versions.md)). It shows only while there is a version to compare with: the bar holds nothing that
+  can't be used.
+- At the right, the master level and volume; then the computer keyboard's switch.
 
-A key belongs to a track, so the piano roll shows it and the transport bar does not.
+A key belongs to a track, so the piano roll shows it and the transport bar does not. Low Latency is a state of the
+audio engine that is set once and left, so it is in the status bar, beside how busy the engine is, as Logic keeps it
+out of its default control bar.
 
 ### What a tempo change stretches
 
@@ -190,14 +195,20 @@ together).
 
 The playlist, the piano roll and the audio clip editor have no toolbar of their own. Their tools, Snap, the grid (a
 button that names the grid's size, such as "1/4 auto", and opens its menu) and Follow Playback sit in the tab row of
-the area that shows the editor, right of its tabs. Where the row is too narrow, the least needed go into a More menu
-(…) at its end. The tab of the editor used last, which the time line's commands act on, has a line in the accent
-colour along its foot.
+the area that shows the editor, right of its tabs, after a gap with a thin line in its middle that sets the tools apart
+from the tabs. Where the row is too narrow, the least needed go into a More menu (…) at its end.
+
+The tabs are drawn as VS Code's editor tabs, so that they don't look like the tools: the tab that shows is on its
+view's own background, joined to the view under it, with a line in the accent colour along its top; the others are
+names on the row's background, quieter. The tab of the editor used last, which the time line's commands act on, also
+has a line in the accent colour along its foot.
 
 ## Inspector
 
 The right panel shows the properties of what is selected, a name and a value on each row. It is not a copy of a mixer
-channel.
+channel. Its title, which names what it shows ("Bass", "3 clips", "Song") with the colour of a track or a section
+beside it, is laid out as the left panel's views' titles are: as tall, its name as far in and in the same text, its X
+where their actions are.
 
 | Selected | Shows |
 | --- | --- |
@@ -228,6 +239,7 @@ channel.
 | Right | "Stretching 2 clips" with a progress bar, while clips are rendered in the background | |
 | Right | The song's delay compensation, while it has some | Opens the audio settings |
 | Right | The audio output's sample rate and delay ("48 kHz · 10 ms"; a Bluetooth output's in the warning colour) | Opens the audio settings |
+| Right | Low Latency, lit in the accent colour while it is on | Turns it on or off |
 | Right | How busy the engine is (CPU), in the warning colour near its limit | |
 
 Each item says more under the pointer. In a narrow window the items leave the hints room, what is selected going
@@ -321,6 +333,13 @@ what they show. FL Studio's keymap shows and hides the left panel with Alt+F8 an
   inside the main window and blur what is behind them under their own colour at 80 %. They are solid in the
   high-contrast theme, where the system is set to reduce transparency, and in Phazite's other windows. An editor in a
   call-out (a modulator's) stays opaque.
+- **Menus where they are asked for:** a right-click's menu opens at the pointer (JUCE moves it where it would not fit),
+  on a knob, a fader, a graph's handle, a tab or a device's name alike; a menu a button drops (a menu button, More, a
+  picker, Record's arrow) hangs from its button. A choice that leads to more choices is a submenu that opens under the
+  pointer, as Automate and Replace are in a device's menu, never an item that opens a second menu.
+- **Switches in a column:** in a list of devices each switch is in the same place, whatever the name's length and
+  whatever else the row shows (a mixer slot's reduction meter goes between its name and its switch); in a title, the
+  switch comes first, before the name (a modulator's editor).
 - **Spacing:** a 4-pixel grid, standard control heights and consistent padding.
 - **One on/off switch:** whatever switches on and off has the track's switch, a round light filled green when on and a
   hollow ring when off: an effect, a modulator, an EQ band, a part of an instrument (which dims while it is off). A

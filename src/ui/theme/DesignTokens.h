@@ -243,11 +243,14 @@ namespace SwapTint
     inline constexpr float fill = 0.16f;
 } // namespace SwapTint
 
-// A view area's tabs (ui/shell/Panels.h), as VS Code's panels' in its Modern UI: pills so tall in the middle of the bar, so far
-// apart, their names this far from their ends. A device editor's pages' tabs (ui/devices/DeviceLayout.h) are the same, smaller.
+// Tabs, as VS Code's panels' in its Modern UI (the settings' and a list's of choices): pills so tall in the middle of the bar,
+// so far apart, their names this far from their ends. A view area's tabs (ui/shell/Panels.h) are VS Code's editor tabs
+// instead, as wide: each as tall as the bar, the one that shows on the view's own background (the editor's), joined to the
+// view under it, with a line in the accent this thick along its top (tab.activeBorderTop); the others on the bar's, their
+// names quieter. A device editor's pages' tabs (ui/devices/DeviceLayout.h) are pills, smaller.
 namespace TabTint
 {
-    inline constexpr float pillHeight = 24.0f, pillInset = 2.0f;
+    inline constexpr float pillHeight = 24.0f, pillInset = 2.0f, activeLine = 1.0f;
     inline constexpr int textInset = 10;
     inline constexpr float pagePillHeight = 20.0f;
     inline constexpr int pageTextInset = 8;
@@ -261,10 +264,12 @@ namespace TabTint
 // A view's controls in its area's tab row, right of its tabs (ui/components/ToolRow.h), as Bitwig 6 puts each panel's tools
 // at its top and VS Code an editor's actions beside its tabs: each button so big, square (a tool's, the snap's, the More
 // button), so far from the next, a group (the grid, the tools, Follow) this much further from the one before; and the room
-// between the tabs and the row.
+// between the tabs and the row, with a hairline in its middle in the border colour, so wide, as tall as the row less this
+// much at each end, which tells the tools from the tabs.
 namespace ToolRowTint
 {
     inline constexpr int button = 24, gap = 2, groupGap = 10, fromTabs = 12;
+    inline constexpr int divider = 1, dividerInset = Space::s;
 } // namespace ToolRowTint
 
 // The grid's button in an editor's row (ui/timeline/TimelineEditor.h: GridButton): its menu's arrow, so big, so far from its
@@ -306,12 +311,20 @@ namespace Shell
     // much room under it, which with the cards' gap leaves as much room between it and the panels' cards as shows between the
     // title bar's names and icons and it (the owner, 2026-11-07: centred in 44 pixels, it showed more room above than below).
     inline constexpr int transportBarHeight = controlHeight + Space::s;
+
+    // Its controls in groups (play, record and capture; the loop and the metronome; the tempo and the time signature; where
+    // the playhead is; A/B; the master's meter and volume; the computer keyboard), so far apart in a group and the groups so
+    // far apart; each button with an icon so wide (one with text as wide as its text), and the options arrow joined to Record
+    // and to the metronome, as one control with it, so wide.
+    inline constexpr int transportGap = Space::xs, transportGroupGap = Space::m;
+    inline constexpr int transportButtonWidth = 36, transportArrowWidth = 18;
     inline constexpr int tempoStretchWidth = 320; // what a tempo change stretches, under the tempo field as it changes
     inline constexpr int tempoStretchSeconds = 4; // how long that stays once the tempo stops changing
 
     // Whether the project is saved, the selection, the hints, the audio output...: as VS Code's status bar, its items so
-    // tall in the middle of it, each lit under the pointer in the hover wash, rounded.
-    inline constexpr int statusBarHeight = 28, statusItemHeight = 22;
+    // tall in the middle of it, each lit under the pointer in the hover wash, rounded; an item's icon before its text so big
+    // (Low Latency's, which is lit in the accent while on).
+    inline constexpr int statusBarHeight = 28, statusItemHeight = 22, statusIconSize = 14;
 
     // As VS Code's Modern UI lays out its parts: each panel a card, rounded (cardCornerRadius) and outlined in the border
     // colour, so far apart and from the window's sides and foot, on the window's frame (the surface).

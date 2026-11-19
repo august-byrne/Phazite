@@ -134,6 +134,7 @@ public:
     void refreshTooltips();           // with the commands' keys, after the keymap changed
 
     int getPreferredWidth() const noexcept;
+    int getButtonSize() const noexcept; // and how tall the buttons are
     void resized() override;
 
 private:

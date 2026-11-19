@@ -8,6 +8,14 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## The owner's round after stage 6 (from 2026-11-19)
+
+- **The window's small things:** a right-click's menu opens at the pointer, Replace is a submenu, the effects'
+  switches stand in one column, the velocity lane leaves nothing behind as it is sized, the inspector's title matches
+  the side panels', the transport bar is in evenly spaced groups with Low Latency in the status bar and A/B only when
+  it can be used, and the areas' tabs look like tabs, with a line before the tools.
+- **No new audio, video or picture files in the repository:** the pre-commit hook refuses them.
+
 ## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)
 
 - **S6.1 A listening set and a verdict for each device:** each of the sixteen devices' pages ends with what to play

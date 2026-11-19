@@ -7,6 +7,7 @@
 #include "ui/mixer/DevicesView.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 #include <utility>
@@ -341,6 +342,15 @@ public:
         juce::TabBarButton::mouseUp (e);
     }
 
+    // A tab as VS Code's editor tabs, which the tools beside them don't look like (LookAndFeel::drawViewTab()).
+    void paintButton (juce::Graphics& g, bool isMouseOver, bool isMouseDown) override
+    {
+        if (auto* look = dynamic_cast<LookAndFeel*> (&getLookAndFeel()))
+            look->drawViewTab (*this, g, isMouseOver, isMouseDown);
+        else
+            juce::TabBarButton::paintButton (g, isMouseOver, isMouseDown);
+    }
+
 private:
     ViewArea& viewArea;
     bool dragging = false;
@@ -606,7 +616,8 @@ void ViewArea::popupMenuClickOnTab (int index, const juce::String&)
                       if (safeThis != nullptr && safeThis->onReset != nullptr)
                           safeThis->onReset();
                   });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (getTabbedButtonBar().getTabButton (index)));
+    if (auto* tab = getTabbedButtonBar().getTabButton (index))
+        menu.showMenuAsync (getContextMenuOptions (*tab));
 }
 
 void ViewArea::resized()
@@ -614,8 +625,8 @@ void ViewArea::resized()
     juce::TabbedComponent::resized();
     leaveCorner (*this, cornerButtons); // the lower row's maximize, own window and hide, in its right area
 
-    // While the shown view has controls: the tabs as wide as they need, and the controls in the rest of the row up to the
-    // corner, the tabs leaving room for the controls' More button at least.
+    // While the shown view has controls: the tabs as wide as they need, and after a gap, a hairline and another gap, the
+    // controls in the rest of the row up to the corner, the tabs leaving room for the controls' More button at least.
     if (shownTools != nullptr && shownTools->getParentComponent() == this)
     {
         auto& bar = getTabbedButtonBar();
@@ -625,8 +636,36 @@ void ViewArea::resized()
         shownTools->setBounds (row.withTrimmedLeft (tabsWidth + ToolRowTint::fromTabs));
     }
 
+    repaint (getLocalBounds().withHeight (getTabBarDepth())); // the line between them, which moves with the tabs
+
     for (auto& holder : holders)
         holder.resized();
+}
+
+juce::Rectangle<int> ViewArea::getToolsDivider() const
+{
+    if (shownTools == nullptr || shownTools->getParentComponent() != this || ! shownTools->isVisible())
+        return {};
+
+    // In the middle of the room between the last tab and the first control.
+    const auto row = getTabbedButtonBar().getBounds();
+    const auto x = row.getRight() + (ToolRowTint::fromTabs - ToolRowTint::divider) / 2;
+    return { x, row.getY() + ToolRowTint::dividerInset, ToolRowTint::divider,
+             std::max (0, row.getHeight() - 2 * ToolRowTint::dividerInset) };
+}
+
+void ViewArea::paint (juce::Graphics& g)
+{
+    {
+        const juce::Graphics::ScopedSaveState state (g); // which keeps the clip JUCE's paint leaves to the views' area
+        juce::TabbedComponent::paint (g);
+    }
+
+    if (const auto divider = getToolsDivider(); ! divider.isEmpty())
+    {
+        g.setColour (getPalette (*this).border);
+        g.fillRect (divider);
+    }
 }
 
 //==============================================================================

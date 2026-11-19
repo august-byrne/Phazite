@@ -812,8 +812,7 @@ TEST_CASE ("The effects' menu offers an empty container first, which shows its o
     REQUIRE (add != nullptr);
 
     // First in the menu, before the effects, apart from them.
-    const auto types = phazite::getDeviceTypes (screen.context);
-    const auto menu = phazite::ui::makeEffectMenu (screen.context, screen.track (0), *add, types);
+    const auto menu = phazite::ui::makeEffectMenu (screen.context, screen.track (0), *add);
     juce::PopupMenu::MenuItemIterator first (menu);
     REQUIRE (first.next());
     CHECK (first.getItem().text == juce::String ("Container"));
@@ -985,7 +984,7 @@ TEST_CASE (
     CHECK (picture.getPixelAt (1, slot->getHeight() / 2) == other->colour);
 }
 
-TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, along its edge, as the sound plays")
+TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, beside its switch, as the sound plays")
 {
     Screen screen;
     const auto effects = screen.effects (0);
@@ -1006,7 +1005,9 @@ TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, al
     auto* compressorName = phazite::test::findComponentWithTitle (strip, "Compressor");
     REQUIRE (compressorName != nullptr);
     CHECK (meter->getParentComponent() == compressorName->getParentComponent());
-    CHECK (meter->getRight() == compressorName->getParentComponent()->getWidth());
+    auto* compressorSwitch = phazite::test::findAll<phazite::ui::PowerSwitch> (*meter->getParentComponent()).getFirst();
+    REQUIRE (compressorSwitch != nullptr);
+    CHECK (meter->getRight() == compressorSwitch->getX()); // between its name and its switch, which keeps its neighbours' column
     phazite::test::checkChildrenApart (*meter->getParentComponent());
 
     // Nothing at first; then 12 dB over the compressor's threshold, at 4:1, settles 9 dB down, as the audio thread plays it.
@@ -1389,8 +1390,7 @@ TEST_CASE (
     phazite::test::dispatchPendingMessages();
 
     // First in the menu, apart from the instruments.
-    const auto types = phazite::getDeviceTypes (context);
-    const auto menu = phazite::ui::makeInstrumentMenu (context, track, view, types);
+    const auto menu = phazite::ui::makeInstrumentMenu (context, track, view);
     juce::PopupMenu::MenuItemIterator first (menu);
     REQUIRE (first.next());
     CHECK (first.getItem().text == juce::String ("Container"));

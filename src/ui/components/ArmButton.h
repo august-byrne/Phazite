@@ -45,7 +45,7 @@ public:
     std::function<void()> onChange;
 
     // The input list, as a click on a track without an input or a right-click opens it (a track that records MIDI has none).
-    void showMenu();
+    void showMenu (bool atPointer); // at the pointer for a right-click, else under the button
 
     void clicked (const juce::ModifierKeys&) override;
     void paintButton (juce::Graphics&, bool isHighlighted, bool isDown) override;

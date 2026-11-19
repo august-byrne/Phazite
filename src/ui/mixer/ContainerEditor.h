@@ -56,7 +56,8 @@ private:
 // A chain's menu, as its card shows it: Rename (rename(), which edits its name where it shows), Duplicate, Move Left and
 // Move Right (not in a container split into bands, whose chains are in their bands' order), and Remove (not its container's
 // last chain). changed() runs after an edit, so that what shows it shows it at once.
-void showChainMenu (ProjectContext&, DeviceID chain, juce::Component& target, std::function<void()> rename, std::function<void()> changed);
+void showChainMenu (ProjectContext&, DeviceID chain, juce::Component& target, bool atPointer, std::function<void()> rename,
+                    std::function<void()> changed);
 
 // A range of keys or of velocities, an instrument container's chain's, as a bar along its scale, dragged by its ends (each
 // drag one undo step): two values of a slider, as JUCE's two-value sliders take them, so that keys and screen readers work

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "UiTestHelpers.h"
 
+#include <cstdlib>
+
 // juce_events' own function, declared the same way in juce_MessageManager.cpp, whose dispatch loops call it
 // (on Windows and Linux; macOS will need another way): delivers the next message on the system queue, or
 // returns false if there is none and returnIfNoPendingMessages is set. JUCE workaround T1 (docs/juce-workarounds.md).
@@ -139,6 +141,29 @@ bool runMenuItem (const juce::PopupMenu& menu, const std::vector<juce::String>& 
 
     item->action();
     return true;
+}
+
+bool isMenuShownAt (juce::Point<int> screenPosition)
+{
+    auto* menu = juce::Component::getCurrentlyModalComponent();
+
+    // The menu shows as it is asked for, before JUCE could take it down (where the program isn't the foreground one, at a tick).
+    if (menu == nullptr)
+    {
+        MESSAGE ("no menu shows");
+        return false;
+    }
+
+    constexpr int near = 8; // pixels: JUCE's menu has a border of a few
+    const auto bounds = menu->getScreenBounds();
+    const auto nearX = std::abs (bounds.getX() - screenPosition.x) <= near || std::abs (bounds.getRight() - screenPosition.x) <= near;
+    // Under the pointer or over it; a menu too tall for either JUCE moves up or down as far as it must, beside the pointer.
+    const auto nearY = screenPosition.y >= bounds.getY() - near && screenPosition.y <= bounds.getBottom() + near;
+
+    if (! (nearX && nearY))
+        MESSAGE ("the menu at " << bounds.toString() << ", the pointer at " << screenPosition.toString());
+
+    return nearX && nearY;
 }
 
 //==============================================================================

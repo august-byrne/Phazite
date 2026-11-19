@@ -3,6 +3,7 @@
 #include "ui/input/CommandUI.h"
 #include "ui/input/KeyShares.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 
@@ -369,7 +370,7 @@ void ShortcutsEditor::showMenu (int row)
     menu.addItem (removeItem, "Remove Key", shown.key.has_value());
     menu.addItem (resetItem, "Reset", resetButton.isEnabled());
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&list),
+    menu.showMenuAsync (getContextMenuOptions (list),
                         [safe = juce::Component::SafePointer<ShortcutsEditor> (this)] (int result)
                         {
                             if (safe == nullptr)

@@ -100,10 +100,13 @@ enum class DevicePlace
 // unless it is one of them): Reload for a plug-in that crashed, a plug-in's window, On, Automate, moving it among its
 // neighbours (it is index of count; left and right where they show in a row, up and down in a strip), and in a container
 // into another of its chains, grouping effects (or the instrument with them) into a container or ungrouping one, a preset,
-// and Remove; for an instrument (a chain's too), Replace instead of the moves. changed() runs after an edit, so that what
-// shows the device shows it at once.
+// and Remove; Replace, a submenu of what can take its place, and for an instrument (a chain's too) no moves. changed() runs
+// after an edit, so that what shows the device shows it at once. It shows at the pointer, as a right-click's menu does
+// (getContextMenuOptions()); makeDeviceMenu() is the menu it shows.
 void showDeviceMenu (ProjectContext&, CommandBridge&, const DeviceSlot&, DevicePlace, TrackID track, int index, int count, bool inRow,
                      juce::Component& target, std::function<void()> changed);
+juce::PopupMenu makeDeviceMenu (ProjectContext&, CommandBridge&, const DeviceSlot&, DevicePlace, TrackID track, int index, int count,
+                                bool inRow, juce::Component& target, std::function<void()> changed);
 
 // A plug-in that crashed (DeviceSlot::crashed) reloaded, as its slot's click and its menu's Reload do; one that didn't
 // load says why, over the target.

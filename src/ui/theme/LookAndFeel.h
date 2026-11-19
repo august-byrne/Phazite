@@ -122,6 +122,11 @@ public:
     void drawTabbedButtonBarBackground (juce::TabbedButtonBar&, juce::Graphics&) override {}
     void drawTabAreaBehindFrontButton (juce::TabbedButtonBar&, juce::Graphics&, int, int) override {}
 
+    // A view area's tab (ui/shell/Panels.h), as VS Code's editor tabs (TabTint): the one that shows on the views' background,
+    // joined to the view under it, with the accent's line along its top; the others on the bar's, quieter, washed under the
+    // pointer. The tab of the editor the time line's commands act on has its line along its foot too (setTabInUse()).
+    void drawViewTab (juce::TabBarButton&, juce::Graphics&, bool isMouseOver, bool isMouseDown);
+
 private:
     ThemeName theme = ThemeName::dark;
     bool transparencyReduced = false;
@@ -145,7 +150,7 @@ void setThemeColour (juce::Component&, int colourId, juce::Colour Palette::* rol
 void refreshTheme (juce::Component& window);
 
 // A view area's tab that shows the editor the time line's commands act on (ui/shell/Panels.h: ViewArea::markEditorInUse()),
-// which drawTabButton() marks with a line in the accent colour along its pill's foot (TabTint::inUseLine). Setting it
+// which drawViewTab() marks with a line in the accent colour along its foot (TabTint::inUseLine). Setting it
 // repaints the tab only when it changes.
 void setTabInUse (juce::TabBarButton&, bool);
 bool isTabInUse (const juce::TabBarButton&);

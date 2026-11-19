@@ -23,7 +23,7 @@ choice is in the code as described; what is not built says so.
 | 12 | The piano roll and the audio clip editor | In the audio clip editor the clip's edges are brackets, its fades have round handles and a handle in the middle that bends them, and a right-click switches a fade between a curve and an S-curve. | Built. | |
 | 13 | The piano roll and the audio clip editor | Linked clips share the piano roll's view: an alias opens with the zoom, the notes in view and the rows its links were left with. | Built. | |
 | 14 | The mixer | A bus can be a sidechain's source (a plain folder cannot), and an edit that would close a loop turns that sidechain off in the same undo step. | Built. | |
-| 15 | The mixer | The mixer slot of a device that turns the sound down shows how far, along the slot's right edge. | Built. | |
+| 15 | The mixer | The mixer slot of a device that turns the sound down shows how far, between its name and its switch. | Built. | |
 | 16 | The mixer | The meter beside a fader reads on the fader's own scale. | Built. | |
 | 20 | Devices | The Sampler plays one sound across the keys in three modes, Classic, One-Shot and Slice, with its root key found as the sound loads, a crossfaded loop and slices that can be moved by hand. Many recordings across the keys are planned as a part of this Sampler (roadmap step 4.10). | Built. | |
 | 21 | Devices | The FM synth has four operators in eight algorithms, feedback on every operator, Spread, and an editor that shows the operators side by side. Six operators, DX7 patches, a modulation matrix and effects of its own are left out. | Built. | |

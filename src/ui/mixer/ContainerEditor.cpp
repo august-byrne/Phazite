@@ -11,6 +11,7 @@
 #include "ui/devices/DeviceMenus.h"
 #include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 #include <cmath>
@@ -121,7 +122,7 @@ void ChainSwitch::paintButton (juce::Graphics& g, bool isHighlighted, bool isDow
 }
 
 //==============================================================================
-void showChainMenu (ProjectContext& context, DeviceID chain, juce::Component& target, std::function<void()> rename,
+void showChainMenu (ProjectContext& context, DeviceID chain, juce::Component& target, bool atPointer, std::function<void()> rename,
                     std::function<void()> changed)
 {
     const auto info = getChain (context, chain);
@@ -164,7 +165,7 @@ void showChainMenu (ProjectContext& context, DeviceID chain, juce::Component& ta
     menu.addSeparator();
     menu.addItem ("Remove", canRemoveChain (context, chain), false,
                   act ([&projectContext, chain] { removeChain (projectContext, chain); }));
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+    menu.showMenuAsync (atPointer ? getContextMenuOptions (target) : juce::PopupMenu::Options().withTargetComponent (&target));
 }
 
 //==============================================================================
@@ -584,7 +585,7 @@ struct ContainerEditor::ChainCard : public juce::Component,
         const juce::Component::SafePointer<ChainCard> safeThis (this);
         const juce::Component::SafePointer<ContainerEditor> safeEditor (&editor);
         showChainMenu (
-            context, chain, target,
+            context, chain, target, &target != &menuButton,
             [safeThis]
             {
                 if (safeThis != nullptr)

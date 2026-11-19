@@ -710,6 +710,57 @@ TEST_CASE ("The piano roll's settings show down its left, and its velocity lane 
     CHECK (screen.notesArea().getHeight() == notesHeight);
 }
 
+TEST_CASE ("Each frame of a drag of the velocity lane's edge shows what a fresh paint shows: no name left behind where the lane was")
+{
+    // The owner, 2026-11-19: "dragging the velocity track larger or smaller creates a visual glitch with the velocity text". The
+    // piano roll paints the lane's corner under the keys with its name, and the line over it; nothing that moved with the lane
+    // repainted where they had been, so the name stayed there, drawn twice.
+    PianoRollScreen screen;
+    auto& roll = screen.pianoRoll;
+    screen.select (screen.addClip (0, 0.0, 8.0));
+    auto* edge = phazite::test::findComponentWithTitle (roll, "Velocity lane's edge");
+    REQUIRE (edge != nullptr);
+
+    // What the screen shows: the last frame, with what was asked to repaint since painted again over it, as a window keeps it.
+    const juce::SoftwareImageType software;
+    auto frame = screen.window.paintEverything (software);
+    screen.window.takeRepaintedArea();
+
+    const auto differingPixels = [] (const juce::Image& a, const juce::Image& b)
+    {
+        REQUIRE (a.getBounds() == b.getBounds());
+        const juce::Image::BitmapData first (a, juce::Image::BitmapData::readOnly), second (b, juce::Image::BitmapData::readOnly);
+        auto count = 0;
+
+        for (int y = 0; y < a.getHeight(); ++y)
+            for (int x = 0; x < a.getWidth(); ++x)
+                count += first.getPixelColour (x, y) != second.getPixelColour (x, y) ? 1 : 0;
+
+        return count;
+    };
+
+    const auto edgeCentre = roll.getLocalArea (edge, edge->getLocalBounds()).getCentre();
+    phazite::test::Mouse mouse (roll);
+    mouse.press (edgeCentre);
+
+    // Taller in steps, then shorter in steps past where it began.
+    for (const auto offset : { -6, -13, -25, -40, -31, -18, -4, 9, 22, 30 })
+    {
+        CAPTURE (offset);
+        mouse.dragTo (edgeCentre + juce::Point<int> (0, offset));
+
+        {
+            juce::Graphics g (frame);
+            g.reduceClipRegion (screen.window.takeRepaintedArea());
+            screen.window.paintEntireComponent (g, true);
+        }
+
+        CHECK (differingPixels (frame, screen.window.paintEverything (software)) == 0);
+    }
+
+    mouse.release();
+}
+
 TEST_CASE ("A clip opens zoomed to fit with room after it, never smaller than the usual zoom, and opens again as it was left")
 {
     PianoRollScreen screen;

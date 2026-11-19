@@ -6,37 +6,56 @@
 #include "model/project/ProjectContext.h"
 #include "ui/input/CommandBridge.h"
 
+#include <functional>
 #include <map>
+#include <memory>
+#include <vector>
 
 namespace phazite::ui
 {
 namespace
 {
-    // The device types of one kind, after what the menu holds already: the built-in ones, then the plug-ins in a submenu
-    // for each maker. An item's ID is its type's index in types, plus one.
-    juce::PopupMenu makeMenu (const std::vector<DeviceType>& types, bool instruments, const juce::String& noPluginsText,
-                              juce::PopupMenu menu = {})
+    using Chosen = std::function<void (const DeviceType&)>;
+
+    const juce::String noInstrumentPlugins = "No instrument plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, "
+                                             "finds them";
+    const juce::String noEffectPlugins = "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them";
+
+    // The device types of one kind, after what the menu holds already: the built-in ones, then the plug-ins in a submenu for
+    // each maker. Each item calls chosen with its type, unless its target has gone (the app closes menus when another project
+    // opens, whose items could have the IDs chosen captures), so the menu works as well inside another as a submenu.
+    juce::PopupMenu makeMenu (ProjectContext& context, bool instruments, juce::Component& target, Chosen chosen, juce::PopupMenu menu = {})
     {
+        const auto types = std::make_shared<const std::vector<DeviceType>> (getDeviceTypes (context));
+        const auto onChosen = std::make_shared<const Chosen> (std::move (chosen));
+        const juce::Component::SafePointer<juce::Component> safeTarget (&target);
         std::map<juce::String, juce::PopupMenu> plugins;
 
-        for (size_t i = 0; i < types.size(); ++i)
+        for (size_t i = 0; i < types->size(); ++i)
         {
-            const auto& type = types[i];
+            const auto& type = (*types)[i];
 
             if (type.isInstrument != instruments)
                 continue;
 
+            auto item = juce::PopupMenu::Item (type.name).setAction (
+                [types, onChosen, safeTarget, i]
+                {
+                    if (safeTarget != nullptr)
+                        (*onChosen) ((*types)[i]);
+                });
+
             if (type.isBuiltIn)
-                menu.addItem ((int) i + 1, type.name);
+                menu.addItem (std::move (item));
             else
                 plugins[type.description.manufacturerName.isNotEmpty() ? type.description.manufacturerName : juce::String ("Other")]
-                    .addItem ((int) i + 1, type.name);
+                    .addItem (std::move (item));
         }
 
         menu.addSectionHeader ("Plug-ins");
 
         if (plugins.empty())
-            menu.addItem (noPluginsText, false, false, [] {});
+            menu.addItem (instruments ? noInstrumentPlugins : noEffectPlugins, false, false, [] {});
 
         for (auto& [maker, list] : plugins)
             menu.addSubMenu (maker, list);
@@ -44,21 +63,14 @@ namespace
         return menu;
     }
 
-    // Calls chosen with the type picked, unless the menu was dismissed or its target has gone. (The app closes menus
-    // when another project opens, whose items could have the IDs chosen captures.)
-    void show (juce::PopupMenu menu, juce::Component& target, std::vector<DeviceType> types, std::function<void (const DeviceType&)> chosen)
+    // Dropped from the button that asks for it.
+    void show (juce::PopupMenu menu, juce::Component& target)
     {
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target),
-                            [safeTarget = juce::Component::SafePointer<juce::Component> (&target), choices = std::move (types),
-                             onChosen = std::move (chosen)] (int result)
-                            {
-                                if (safeTarget != nullptr && result > 0 && result <= (int) choices.size()) // 0: dismissed
-                                    onChosen (choices[(size_t) result - 1]);
-                            });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
     }
 } // namespace
 
-juce::PopupMenu makeInstrumentMenu (ProjectContext& context, TrackID track, juce::Component& target, const std::vector<DeviceType>& types)
+juce::PopupMenu makeInstrumentMenu (ProjectContext& context, TrackID track, juce::Component& target)
 {
     // An instrument container first, as the effects' menu starts with a container of effects: it layers instruments, or
     // plays each on keys of its own; the instrument the track has goes into it, for others to be added beside it. Not while
@@ -73,20 +85,16 @@ juce::PopupMenu makeInstrumentMenu (ProjectContext& context, TrackID track, juce
                    });
     start.addSeparator();
 
-    return makeMenu (types, true, "No instrument plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them",
-                     std::move (start));
+    return makeMenu (
+        context, true, target, [&context, track] (const DeviceType& type) { chooseInstrument (context, track, type); }, std::move (start));
 }
 
 void showInstrumentMenu (ProjectContext& context, TrackID track, juce::Component& target)
 {
-    auto types = getDeviceTypes (context);
-    auto menu = makeInstrumentMenu (context, track, target, types);
-
-    show (std::move (menu), target, std::move (types),
-          [&context, track] (const DeviceType& type) { chooseInstrument (context, track, type); });
+    show (makeInstrumentMenu (context, track, target), target);
 }
 
-juce::PopupMenu makeEffectMenu (ProjectContext& context, TrackID track, juce::Component& target, const std::vector<DeviceType>& types)
+juce::PopupMenu makeEffectMenu (ProjectContext& context, TrackID track, juce::Component& target)
 {
     const juce::Component::SafePointer<juce::Component> safeTarget (&target);
 
@@ -101,8 +109,8 @@ juce::PopupMenu makeEffectMenu (ProjectContext& context, TrackID track, juce::Co
                    });
     start.addSeparator();
 
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them",
-                          std::move (start));
+    auto menu = makeMenu (
+        context, false, target, [&context, track] (const DeviceType& type) { addEffect (context, track, type); }, std::move (start));
 
     // Effects change a sound. A track whose notes have no instrument makes none for them to change, so the menu
     // offers the instrument first, and the effects after it.
@@ -111,12 +119,7 @@ juce::PopupMenu makeEffectMenu (ProjectContext& context, TrackID track, juce::Co
         auto effects = std::move (menu);
         menu = juce::PopupMenu();
         menu.addSectionHeader ("Notes make no sound without an instrument");
-        menu.addItem ("Choose Instrument...",
-                      [&context, track, safeTarget]
-                      {
-                          if (safeTarget != nullptr)
-                              showInstrumentMenu (context, track, *safeTarget);
-                      });
+        menu.addSubMenu ("Choose Instrument", makeInstrumentMenu (context, track, target));
         menu.addSeparator();
         menu.addSubMenu ("Effects, Which Change the Sound", effects);
     }
@@ -126,45 +129,34 @@ juce::PopupMenu makeEffectMenu (ProjectContext& context, TrackID track, juce::Co
 
 void showEffectMenu (ProjectContext& context, TrackID track, juce::Component& target)
 {
-    auto types = getDeviceTypes (context);
-    auto menu = makeEffectMenu (context, track, target, types);
-    show (std::move (menu), target, std::move (types), [&context, track] (const DeviceType& type) { addEffect (context, track, type); });
+    show (makeEffectMenu (context, track, target), target);
 }
 
-void showReplaceEffectMenu (ProjectContext& context, DeviceID effect, juce::Component& target)
+juce::PopupMenu makeReplaceEffectMenu (ProjectContext& context, DeviceID effect, juce::Component& target)
 {
-    auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
-
-    show (std::move (menu), target, std::move (types),
-          [&context, effect] (const DeviceType& type) { replaceEffect (context, effect, type); });
+    return makeMenu (context, false, target, [&context, effect] (const DeviceType& type) { replaceEffect (context, effect, type); });
 }
 
 void showNewReturnMenu (ProjectContext& context, TrackID sender, juce::Component& target)
 {
-    auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
-
-    show (std::move (menu), target, std::move (types),
-          [&context, sender] (const DeviceType& type) { addReturnWith (context, sender, type); });
+    show (makeMenu (context, false, target, [&context, sender] (const DeviceType& type) { addReturnWith (context, sender, type); }),
+          target);
 }
 
 void showChainEffectMenu (ProjectContext& context, DeviceID chain, juce::Component& target)
 {
-    auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
+    show (makeMenu (context, false, target, [&context, chain] (const DeviceType& type) { addEffectToChain (context, chain, type); }),
+          target);
+}
 
-    show (std::move (menu), target, std::move (types),
-          [&context, chain] (const DeviceType& type) { addEffectToChain (context, chain, type); });
+juce::PopupMenu makeChainInstrumentMenu (ProjectContext& context, DeviceID chain, juce::Component& target)
+{
+    return makeMenu (context, true, target, [&context, chain] (const DeviceType& type) { chooseChainInstrument (context, chain, type); });
 }
 
 void showChainInstrumentMenu (ProjectContext& context, DeviceID chain, juce::Component& target)
 {
-    auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, true, "No instrument plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
-
-    show (std::move (menu), target, std::move (types),
-          [&context, chain] (const DeviceType& type) { chooseChainInstrument (context, chain, type); });
+    show (makeChainInstrumentMenu (context, chain, target), target);
 }
 
 void showDevice (ProjectContext& context, CommandBridge& commands, const DeviceSlot& device)

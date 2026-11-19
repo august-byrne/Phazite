@@ -16,7 +16,7 @@ panel of views is on the left, and the properties of what is selected are on the
 | Upper panel | Centre | The **Playlist** and the **Mixer** |
 | Lower panel | Under the upper panel | The clip editor (the **Piano roll** or the **Audio clip** editor), **Instrument** and **Effects** |
 | Inspector | Right | The properties of what is selected |
-| Status bar | Bottom | Whether the project is saved, hints, the audio output, the CPU |
+| Status bar | Bottom | Whether the project is saved, hints, the audio output, Low Latency, the CPU |
 
 ## The title bar
 
@@ -35,7 +35,8 @@ There is no Options menu: the settings are in the menu of the gear at the bottom
 
 ## The transport bar
 
-The transport bar holds what belongs to the song as a whole.
+The transport bar holds what belongs to the song as a whole, in groups: playing and recording, the loop and the
+metronome, the tempo, where the playhead is, and at the right the master and the computer keyboard.
 
 | Control | Does |
 |---|---|
@@ -44,11 +45,10 @@ The transport bar holds what belongs to the song as a whole.
 | Capture | Turns what you played in the last 30 seconds into a clip (**Ctrl+Shift+C**) |
 | Loop | Turns looping on or off (**L**) ([The playlist](playlist.md#the-loop-and-the-playhead)) |
 | Metronome, and its arrow | Clicks on every beat (**O**). The arrow, or a right-click, has the count-in |
-| Low latency | While on, what you play has no delay: devices that look ahead are bypassed, delay compensation is off and the buffer shrinks. Turn it off to mix |
 | Tempo | Drag it, scroll it or type in it |
 | Time signature | A menu |
 | Place and time | Where the playhead is, in bars, beats and sixteenths ("17.3.2") and in minutes and seconds ("1:23.4"). Drag, scroll or type in either to move the playhead ("17.3", "1:05") |
-| A/B | Hears the last version in place of the song, and the song again (**N**) ([Versions](versions.md)) |
+| A/B | Hears the last version in place of the song, and the song again (**N**) ([Versions](versions.md)). It shows once the song has a version to compare with |
 | Master volume and level | The master's volume and how loud it plays |
 | Computer keyboard | Turns the typing keyboard into a piano (**M**) ([Keyboard shortcuts](keyboard.md#the-computer-keyboard-plays-notes)) |
 
@@ -103,9 +103,10 @@ to put it beside that area, or along its own row to change its place. A right-cl
 Lower Panel** (or **Move to the Upper Panel**) and **Reset View Places**, which puts every view back where it started.
 **View > Reset View Places** does the same. Phazite remembers where each view is.
 
-**Each editor's tools** are in its tab row, right of the tabs: the tools, **Snap**, the grid and **Follow Playback**.
-Where the row is too narrow, the ones needed least go into a More menu (…) at its end. The tab of the editor you used
-last has a line along its foot: the zoom, grid and tool commands act on that editor.
+**Each editor's tools** are in its tab row, right of the tabs after a thin line: the tools, **Snap**, the grid and
+**Follow Playback**. Where the row is too narrow, the ones needed least go into a More menu (…) at its end. The tab that
+shows is joined to its view, with a line along its top; the tab of the editor you used last also has a line along its
+foot: the zoom, grid and tool commands act on that editor.
 
 ## The inspector
 
@@ -133,6 +134,7 @@ typed.
 | MIDI | Which track live MIDI plays: "MIDI → Bass" | Opens the MIDI settings |
 | Hint bar | What clicking, dragging and the modifier keys do under the pointer | |
 | Audio output | Its sample rate and delay ("48 kHz · 10 ms") | Opens the audio settings |
+| Low latency | Lit while it is on. While on, what you play has no delay: devices that look ahead are bypassed, delay compensation is off and the buffer shrinks. Turn it on to play or record, off to mix | Turns it on or off |
 | CPU | How busy the engine is, in the warning colour near its limit | |
 
 **The hint bar,** in the middle, always says what the control under the pointer does and how to work it. While you

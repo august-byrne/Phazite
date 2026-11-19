@@ -96,6 +96,19 @@ juce::Component* findWindowForPopups (juce::Point<int> screenPosition)
     return component != nullptr ? findWindowForPopups (*component) : nullptr;
 }
 
+juce::PopupMenu::Options getContextMenuOptions (juce::Component& target)
+{
+    // The main mouse's last press, on the screen: the press that opens the menu (on the component or on a part of it beside
+    // it, a slider's readout), or the click on the component that it opens at. Otherwise a key opened it.
+    const auto options = juce::PopupMenu::Options().withTargetComponent (&target);
+    const auto press = juce::Desktop::getLastMouseDownPosition();
+
+    if (! juce::Desktop::getInstance().getMainMouseSource().isDragging() && ! target.getScreenBounds().contains (press))
+        return options;
+
+    return options.withTargetScreenArea (juce::Rectangle<int>().withPosition (press));
+}
+
 juce::Image paintBehind (const juce::Component& front, juce::Rectangle<int> area, float scale)
 {
     juce::Image image (juce::Image::ARGB, juce::jmax (1, (int) std::ceil ((float) area.getWidth() * scale)),

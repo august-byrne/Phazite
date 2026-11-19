@@ -9,6 +9,7 @@
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <cmath>
 
@@ -18,7 +19,7 @@ using namespace strip;
 
 namespace
 {
-    // How far a device turns the sound down now, hanging from the top along its slot's right edge, as mixers show it beside
+    // How far a device turns the sound down now, hanging from the top between its slot's name and switch, as mixers show it beside
     // a compressor (roadmap step 2.17): the device's own reading (devices/core/FallingValue.h), at each tick of the displays'
     // ticker, repainted only when it moves.
     struct ReductionMeter : public ValueMeter,
@@ -191,13 +192,15 @@ struct DeviceSlots::Slot : public juce::Component
 
     void resized() override
     {
+        // The switch at the right edge, in the same column in every slot whatever else the slot shows; how far the device
+        // turns the sound down between it and the name.
         auto area = getLocalBounds();
-
-        if (reductionMeter != nullptr)
-            reductionMeter->setBounds (area.removeFromRight (reductionMeterWidth).reduced (0, 2));
 
         if (power.isVisible())
             power.setBounds (area.removeFromRight (slotPowerWidth));
+
+        if (reductionMeter != nullptr)
+            reductionMeter->setBounds (area.removeFromRight (reductionMeterWidth).reduced (0, 2));
 
         nameButton.setBounds (area.withTrimmedRight (2));
     }
@@ -515,6 +518,13 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
     if (! context.getSongSelection().isSelected (device.id))
         context.getSongSelection().selectOnly (device.id);
 
+    makeDeviceMenu (context, commands, device, place, track, index, count, inRow, target, std::move (changed))
+        .showMenuAsync (getContextMenuOptions (target));
+}
+
+juce::PopupMenu makeDeviceMenu (ProjectContext& context, CommandBridge& commands, const DeviceSlot& device, DevicePlace place,
+                                TrackID track, int index, int count, bool inRow, juce::Component& target, std::function<void()> changed)
+{
     const auto id = device.id;
     const juce::Component::SafePointer<juce::Component> safeTarget (&target);
 
@@ -594,35 +604,21 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
 
     menu.addSeparator();
 
+    // Replace opens what can take the device's place as a submenu, as Automate does.
     if (place == DevicePlace::instrument)
     {
-        menu.addItem ("Replace...",
-                      [&projectContext, track, safeTarget]
-                      {
-                          if (safeTarget != nullptr)
-                              showInstrumentMenu (projectContext, track, *safeTarget);
-                      });
+        menu.addSubMenu ("Replace", makeInstrumentMenu (projectContext, track, target));
     }
     else if (device.isInstrument)
     {
         // An instrument container's chain's instrument, replaced in its chain; it stays first, before the chain's effects.
-        menu.addItem ("Replace...",
-                      [&projectContext, id, safeTarget]
-                      {
-                          if (safeTarget != nullptr)
-                              showChainInstrumentMenu (projectContext, getChainOf (projectContext, id), *safeTarget);
-                      });
+        menu.addSubMenu ("Replace", makeChainInstrumentMenu (projectContext, getChainOf (projectContext, id), target));
     }
     else
     {
         // An effect is replaced in its place by another (a container holds devices of its own, which stay its own).
         if (! device.isContainer)
-            menu.addItem ("Replace...",
-                          [&projectContext, id, safeTarget]
-                          {
-                              if (safeTarget != nullptr)
-                                  showReplaceEffectMenu (projectContext, id, *safeTarget);
-                          });
+            menu.addSubMenu ("Replace", makeReplaceEffectMenu (projectContext, id, target));
 
         // Effects move among the channel's effects, or the container's devices; the Devices view shows them in a row.
         menu.addItem (inRow ? "Move Left" : "Move Up", index > 0, false,
@@ -655,6 +651,6 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
     addCommandItem (menu, commands, "device.savePreset");
     menu.addSeparator();
     menu.addItem ("Remove", act ([&projectContext, id] { removeDevice (projectContext, id); }));
-    menu.showMenuAsync (juce::PopupMenu::Options());
+    return menu;
 }
 } // namespace phazite::ui

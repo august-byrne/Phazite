@@ -688,7 +688,13 @@ void PianoRoll::resized()
         transformBar->setBounds (area.removeFromBottom (transformBarHeight));
 
     // The overview of the notes over the bar numbers, over the notes; the velocities under them, or a thin row while folded.
+    // What this paints of the lane (its corner with its name, the line over it) moves with it: where it was and where it is
+    // now are painted again, as no child that moves covers them all (its name was left behind under the keys).
+    const auto oldVelocityRow = velocityRow;
     velocityRow = area.removeFromBottom (getVelocityLaneHeight());
+
+    if (velocityRow != oldVelocityRow)
+        repaint (velocityRow.getUnion (oldVelocityRow).withTrimmedTop (-1));
     getOverview().setBounds (area.removeFromTop (overviewHeight).withTrimmedLeft (keysWidth));
     auto rulerArea = area.removeFromTop (rulerHeight);
     keys->setBounds (area.removeFromLeft (keysWidth));

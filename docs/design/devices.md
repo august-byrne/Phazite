@@ -93,12 +93,16 @@ Motion's three modes share an LFO that follows the song's place, so that a sweep
   Phazite's devices and then the plug-ins found by scanning, by maker. Add Instrument or Effect (F8) opens the plug-in
   picker, and the browser's devices drag onto tracks ([browser.md](browser.md)). An instrument chosen for a track that
   has one replaces it. Each is one undo step ("Add Reverb", "Replace Instrument with Synth").
-- **A device's menu** (right-click its name): Replace..., Move Up and Move Down (Move Left and Move Right where devices
-  show in a row), Move to Chain for a device in a container, Group into Container or Ungroup Container, Save Device
-  Preset... and Remove.
+- **A device's menu** (right-click its name, at the pointer): Replace, a submenu of what can take its place (the effects,
+  or the instruments with an instrument container first), as Automate is a submenu of its parameters; Move Up and Move
+  Down (Move Left and Move Right where devices show in a row), Move to Chain for a device in a container, Group into
+  Container or Ungroup Container, Save Device Preset... and Remove. The piano roll's instrument button has Replace
+  Instrument as the same submenu.
 - **Moving:** an effect's name dragged up or down the Devices view's column, or along a mixer strip's slots, moves it
   there as one undo step ("Move Device"), with a line where it would go.
-- **On and off:** every effect has a switch. An instrument has none: its track's mute silences it.
+- **On and off:** every effect has a switch. An instrument has none: its track's mute silences it. In a list of devices
+  the switches stand in one column whatever the names' lengths: at a mixer slot's right edge, a reduction meter between
+  the name and the switch; at the start of a row in the Devices view's column and a container's chains.
 - **Selecting:** a click on a device's name shows it; Ctrl-click or Shift-click selects devices together, to group
   them. Devices are selected on their own: selecting one deselects tracks and clips, and the other way round.
 - A device on a frozen track shows faint, with its controls off, until the track is unfrozen.

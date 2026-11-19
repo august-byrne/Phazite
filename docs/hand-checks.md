@@ -32,7 +32,7 @@ Needs an audio interface with an ASIO® driver, a microphone or a guitar, and a 
 | H9 | Plug in a MIDI keyboard with an instrument track selected, and play | Notes sound at once, with no setup; velocity is heard | |
 | H10 | Press R, play eight bars on the keyboard with the sustain pedal, stop | The notes are in a clip, in time. (The pedal is not recorded yet: roadmap step S5.3) | |
 | H11 | Without recording, play a phrase, then press Ctrl+Shift+C | Capture turns what was just played into a clip | |
-| H12 | Turn on Low Latency in the transport bar and play the keyboard through a track with a Limiter | The delay between key and sound gets shorter | |
+| H12 | Turn on Low Latency in the status bar and play the keyboard through a track with a Limiter | The delay between key and sound gets shorter | |
 | H13 | Press M and play A S D F on the computer keyboard; then click into a text field and type | The letters play notes, and typing in a field plays none | |
 
 ## Plug-ins (roadmap step S3.4)
@@ -284,6 +284,18 @@ the [changelog](changelog.md).
 | E23 | Synth presets: Keys > Soft E-Piano soft then hard; Keys > Pulse Organ with the mod wheel; Pad > Choir Pad with the wheel to full; Lead > Scream Lead and Bass > Ladder Bass; Lead > Sync Lead high with the wheel up. Compressor > Transient > More Punch on a drum loop. EQ > Dynamic > Boom Control on a bass. Delay > Creative > Stutter Hold: Freeze on at a phrase's end. Motion > Subtle Chorus | A bell at the start, a bark when hit hard. A steady tone; the wheel brings a slow sweep. Vowels, never a whistle. Bite and thickness at the loudness they had. A clean sync sweep. Sharper attacks, tails as they were (it peaks 4 dB over the loop: is that too much?). Only the boomy notes tamed. The last sixteenth repeats. Is Subtle Chorus subtle enough? | |
 | E15 | EQ, Phase on Linear. A kick through a 48 dB low cut at 100 Hz, Linear against Minimum. A snare on two tracks (or a copy of one), one of them through a Linear EQ with a low cut and a bell, then the same in Minimum. EQ > Linear Phase > Master Air on a whole song. Switch Phase while the song plays. A bell's Gain swept by a lane in Linear | Linear: a faint swell just before each kick, none in Minimum, the low end thinned alike. The two snares add up full in Linear and thin or hollow in Minimum. Master Air: the rumble goes, a little air comes, the punch and the image stay; the editor shows the latency (85 ms at 48 kHz) and every track stays in time. The switch of Phase makes a short gap (the device is made anew) and no click after it. The swept bell moves in time with its lane, without steps or clicks | |
 | E16 | A Filter on a track with no sound: Clean, Resonance at 100 %, and a lane on its Character that switches to Driven a few seconds in. Play; then export the same bars. A Delay at 2 s, Repitch: change its time while a click plays, then Freeze | The filter starts to sing at the lane's switch, live as in the export. The delay's echoes land on the new time, and the frozen loop is as long as the time shown | |
+
+## What the owner's round after stage 6 built (from 2026-11-19)
+
+| # | Check | Proves | Checked on |
+|---|---|---|---|
+| F1 | Right-click the master volume, a mixer fader, an EQ dot, a knob and a view's tab | Each menu opens at the pointer | |
+| F2 | Right-click an effect's name in a mixer strip and point at Replace; pick one. The same on an instrument | The list opens without a click, and the pick replaces the device | |
+| F3 | A mixer strip with a Compressor, an EQ and an effect with a long name | The green switches are in one column | |
+| F4 | Drag the piano roll's velocity lane's edge up and down | "Velocity" is drawn once, never left behind | |
+| F5 | Look at the inspector's title beside the browser's | Same inset, height and size | |
+| F6 | Look along the transport bar; click Low Latency beside the CPU in the status bar, and press its key | Even gaps in groups; Low Latency lights while on; A/B shows once there is a version to compare with | |
+| F7 | Look at the playlist's area: its tabs and its tools | The tabs read as tabs, the shown one joined to its view; a thin line stands before the tools | |
 
 ## Performance on other machines
 

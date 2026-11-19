@@ -583,8 +583,12 @@ Knob* ModulatorEditor::findKnob (const juce::String& parameterID) const
 void ModulatorEditor::resized()
 {
     auto area = getLocalBounds().reduced (Space::m);
+    // Its switch at the title's start, before its name, as a device's title bar has it in Ableton Live.
     auto top = area.removeFromTop (titleHeight);
-    power.setBounds (top.removeFromRight (titleHeight));
+
+    if (power.isVisible())
+        power.setBounds (top.removeFromLeft (titleHeight));
+
     title.setBounds (top);
 
     for (auto* graph : std::initializer_list<juce::Component*> { scope.get(), steps.get(), breakpoints.get() })

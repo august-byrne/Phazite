@@ -9,6 +9,7 @@
 #include "ui/components/ValueText.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 
@@ -1336,9 +1337,8 @@ void Playlist::AutomationLaneHeader::showModeMenu()
 //==============================================================================
 void Playlist::showLaneMenu (TrackID track, const ParameterRef& parameter, bool onPoint)
 {
-    // At the mouse, and named as the playlist's: a menu finds the window it opens in by what it is for (LookAndFeel::
-    // getParentComponentForMenuOptions()), and one for nothing by what the mouse is over.
-    makeLaneMenu (track, parameter, onPoint).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    // At the mouse, and named as the playlist's, which the window it opens in is found by.
+    makeLaneMenu (track, parameter, onPoint).showMenuAsync (getContextMenuOptions (*this));
 }
 
 juce::PopupMenu Playlist::makeLaneMenu (TrackID track, const ParameterRef& parameter, bool onPoint)

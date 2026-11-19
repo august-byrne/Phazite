@@ -1,22 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer, as it lays out in the window (the inspector: InspectorTests.cpp).
+#include "EnginePlayback.h"
 #include "TestClips.h"
 #include "UiTestHelpers.h"
+#include "devices/dynamics/Compressor.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/components/PowerSwitch.h"
 #include "ui/mixer/ChannelStrip.h"
+#include "ui/mixer/DeviceSlots.h"
 #include "ui/mixer/MasterStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/mixer/StripParts.h"
 #include "ui/theme/DesignTokens.h"
+#include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <stdexcept>
 
@@ -148,6 +156,135 @@ TEST_CASE ("A strip lists its devices a line each, with no knobs, over a fader a
         phazite::test::checkChildrenApart (*strips[0]);
     }
 
+    setSong (context, nullptr);
+}
+
+TEST_CASE ("A strip's effects have their switches in one column, whatever their names and whatever else their slots show")
+{
+    // The owner, 2026-11-19: "those green bubble should be steady at a specific x location, and not shift". A slot with a
+    // reduction meter took the meter off its right first, which put its switch further left than its neighbours'.
+    auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1)[0];
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    REQUIRE (phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Equalizer::typeID)).isValid());
+    const auto container = phazite::addContainer (context, track);
+    REQUIRE (container.isValid());
+    phazite::renameContainer (context, container, "A container with a name far longer than its slot");
+    REQUIRE (
+        phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Compressor::typeID)).isValid());
+
+    // Played by Phazite's engine, which the devices' readings come from.
+    phazite::test::EnginePlayback playback;
+    playback.play (0.05);
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::ChannelStrip strip { commands, context };
+    phazite::test::TestWindow window { strip, phazite::ui::ChannelStrip::width, 700 };
+    strip.setTrack (track);
+    phazite::test::dispatchPendingMessages();
+
+    auto* effects = phazite::test::findComponentWithTitle (strip, "Effects");
+    REQUIRE (effects != nullptr);
+    const auto switches = phazite::test::findAll<phazite::ui::PowerSwitch> (*effects);
+    REQUIRE (switches.size() == 3);
+
+    // The compressor's slot shows how far it turns the sound down: between its name and its switch.
+    auto* meter = phazite::test::findComponentWithTitle (*effects, "Gain reduction");
+    REQUIRE (meter != nullptr);
+    auto* meterSwitch = phazite::test::findAll<phazite::ui::PowerSwitch> (*meter->getParentComponent()).getFirst();
+    REQUIRE (meterSwitch != nullptr);
+    const auto inStrip = [&strip] (juce::Component& c) { return strip.getLocalArea (&c, c.getLocalBounds()); };
+    CHECK (inStrip (*meter).getRight() <= inStrip (*meterSwitch).getX());
+
+    for (auto* powerSwitch : switches)
+    {
+        CHECK (powerSwitch->isShowing());
+        CHECK (inStrip (*powerSwitch).getX() == inStrip (*switches[0]).getX());
+        CHECK (inStrip (*powerSwitch).getWidth() == inStrip (*switches[0]).getWidth());
+    }
+
+    setSong (context, nullptr);
+}
+
+TEST_CASE ("A device's Replace opens what can take its place as a submenu, as Automate does, and choosing one there replaces it")
+{
+    // The owner, 2026-11-19: "the replace... item for the effect or instrument menu should be a hover to expand the options (like
+    // the automate option above it), rather than requiring a click to access".
+    auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1)[0];
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    REQUIRE (phazite::setInstrument (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID)).isValid());
+    REQUIRE (phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Reverb::typeID)).isValid());
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::ChannelStrip strip { commands, context };
+    phazite::test::TestWindow window { strip, phazite::ui::ChannelStrip::width, 700 };
+    strip.setTrack (track);
+
+    const auto menuOf = [&] (const phazite::DeviceSlot& device, phazite::ui::DevicePlace place)
+    { return phazite::ui::makeDeviceMenu (context, commands, device, place, track, 0, 1, false, strip, nullptr); };
+
+    // An effect: the other effects, as the add menu has them, and no item that opens another menu.
+    {
+        const auto menu = menuOf (phazite::getEffects (context, track).front(), phazite::ui::DevicePlace::effect);
+        const auto* replace = phazite::test::findMenuItem (menu, { "Replace" });
+        REQUIRE (replace != nullptr);
+        CHECK (replace->subMenu != nullptr);
+        CHECK (phazite::test::findMenuItem (menu, { "Replace..." }) == nullptr);
+        CHECK (phazite::test::findMenuItem (menu, { "Replace", "Synth" }) == nullptr);
+        REQUIRE (phazite::test::runMenuItem (menu, { "Replace", "Delay" }));
+        REQUIRE (phazite::getEffects (context, track).size() == 1);
+        CHECK (phazite::getEffects (context, track).front().name == juce::String ("Delay"));
+    }
+
+    // The instrument: the instruments, an instrument container first.
+    {
+        const auto instrument = phazite::getInstrument (context, track);
+        REQUIRE (instrument.has_value());
+        const auto menu = menuOf (*instrument, phazite::ui::DevicePlace::instrument);
+        juce::PopupMenu::MenuItemIterator first (*phazite::test::findMenuItem (menu, { "Replace" })->subMenu);
+        REQUIRE (first.next());
+        CHECK (first.getItem().text == juce::String ("Container"));
+        REQUIRE (phazite::test::runMenuItem (menu, { "Replace", "Sampler" }));
+        CHECK (phazite::getInstrument (context, track)->name == juce::String ("Sampler"));
+    }
+
+    setSong (context, nullptr);
+}
+
+TEST_CASE ("A right-click on a strip's fader shows its menu at the pointer, not beside the whole fader")
+{
+    // The owner, 2026-11-19: a right-click's menu "appears way off target from where it should be (near your pointer...)".
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    const phazite::test::ScopedDisplay display; // JUCE places a menu on its display
+    auto song = phazite::createSong();
+    phazite::ensureTracks (*song, 2);
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::MixerView mixer { commands, context };
+    phazite::test::TestWindow window { mixer, 900, 700 };
+    phazite::ui::setPopupsInside (window); // as in the main window, on frosted glass
+    phazite::test::dispatchPendingMessages();
+
+    const auto strips = phazite::test::findAll<phazite::ui::ChannelStrip> (mixer);
+    REQUIRE (! strips.isEmpty());
+    auto* fader = phazite::test::findComponentWithTitle (*strips[0], "Volume");
+    REQUIRE (fader != nullptr);
+
+    // Low on it.
+    const juce::Point<int> at (fader->getWidth() / 2, fader->getHeight() - 8);
+    phazite::test::Mouse mouse (*fader);
+    mouse.press (at, juce::ModifierKeys::rightButtonModifier);
+    CHECK (phazite::test::isMenuShownAt (fader->localPointToGlobal (at)));
+    juce::PopupMenu::dismissAllActiveMenus();
+    mouse.release();
+    phazite::test::dispatchPendingMessages();
     setSong (context, nullptr);
 }
 

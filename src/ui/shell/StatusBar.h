@@ -3,9 +3,10 @@
 // project is saved, what is selected and where MIDI goes; in the middle, the hint bar (HintBar.h: what the control under
 // the pointer does, or the guide's next step, and alerts such as no audio output); on the right, while clips are being
 // stretched in the background, how far that has come, as a bar; the song's delay compensation, when it has some; the audio
-// output (its sample rate and delay); and how busy the engine is. Each item says more under the pointer, and a click on
-// one does what it is about: saves, or opens the audio or MIDI settings. Items that don't fit leave the hints room, the
-// least needed first.
+// output (its sample rate and delay); Low Latency, a state of the audio engine set once and left (as Logic keeps it out
+// of its control bar), lit while it is on; and how busy the engine is. Each item says more under the pointer, and a click on
+// one does what it is about: saves, opens the audio or MIDI settings, or switches Low Latency. Items that don't fit leave
+// the hints room, the least needed first.
 #pragma once
 
 #include "HintBar.h"
@@ -57,6 +58,10 @@ public:
     juce::String getDelayText() const;
     juce::String getAudioText() const;
     juce::String getCpuText() const;
+    juce::Button& getLowLatencySwitch() noexcept; // which shows whether Low Latency is on (its toggle state)
+
+    // Puts the current shortcuts into the tooltips; call after adding commands or changing keymap.
+    void refreshTooltips();
 
     // Brings what the timer shows up to date now: the CPU, the renders, where MIDI goes and the delay compensation. For tests.
     void refreshNow() { timerCallback(); }
@@ -71,16 +76,18 @@ private:
     CommandBridge& commands;
     ProjectContext& context;
     HintBar hintBar;
-    std::unique_ptr<Item> saveItem, branchItem, selectionItem, midiItem, renderItem, delayItem, audioItem, cpuItem;
+    std::unique_ptr<Item> saveItem, branchItem, selectionItem, midiItem, renderItem, delayItem, audioItem, lowLatencyItem, cpuItem;
     int shownCpu = -1;         // the percentage shown, to repaint only on changes
     double polledDelay = -1.0; // the engine's delay as the delay shown was worked out, to work it out again only on changes
     bool polledLowLatency = false;
+    int shownLowLatency = -1; // whether Low Latency shows on (1) or off (0), to change the switch only on changes
 
     void showSelection();
     void showBranch();
     void showMidi();
     void showRenders();
     void showDelay();
+    void showLowLatency();
 
     void projectChanged() override;
     void songChanged (const SongChanges&) override;

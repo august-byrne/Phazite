@@ -227,16 +227,10 @@ void PianoRoll::instrumentClicked()
         return;
     }
 
-    const juce::Component::SafePointer<juce::Component> safeButton (&instrumentButton);
     juce::PopupMenu menu;
     menu.addItem ("Show " + instrument->name,
                   [&c = context, &bridge = getCommands(), shown = *instrument] { showDevice (c, bridge, shown); });
-    menu.addItem ("Replace Instrument...",
-                  [&c = context, trackID, safeButton]
-                  {
-                      if (safeButton != nullptr)
-                          showInstrumentMenu (c, trackID, *safeButton);
-                  });
+    menu.addSubMenu ("Replace Instrument", makeInstrumentMenu (context, trackID, instrumentButton));
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&instrumentButton));
 }

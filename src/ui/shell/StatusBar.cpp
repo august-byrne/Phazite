@@ -6,11 +6,13 @@
 #include "model/transport/TransportModel.h"
 #include "model/versions/VersionsModel.h"
 #include "ui/input/CommandUI.h"
+#include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite::ui
@@ -126,11 +128,20 @@ struct StatusBar::Item : public juce::Button
         repaint();
     }
 
+    // An icon before its text, as VS Code's status bar items have.
+    void setIcon (Icon shownIcon)
+    {
+        icon = std::make_unique<TintedIcon> (shownIcon);
+        measured = false;
+        repaint();
+    }
+
     juce::Font getFont() const { return LookAndFeel::getNumberFont (TextSize::small); }
 
     int getWidthFor (const juce::String& shown) const
     {
         return (int) std::ceil (juce::GlyphArrangement::getStringWidth (getFont(), shown)) + 2 * Space::s
+               + (icon != nullptr ? Shell::statusIconSize + Space::xs : 0)
                + (progress.has_value() ? Shell::statusProgressWidth + Space::s : 0);
     }
 
@@ -158,17 +169,40 @@ struct StatusBar::Item : public juce::Button
     void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
     {
         const auto& p = getPalette (*this);
+        const auto pill =
+            getLocalBounds().toFloat().withSizeKeepingCentre ((float) getWidth() - (float) Space::xs, (float) Shell::statusItemHeight);
+
+        // Switched on (Low Latency): on the accent, as a button switched on is, so that it shows from afar.
+        const auto on = getToggleState();
+
+        if (on)
+        {
+            g.setColour (p.accent);
+            g.fillRoundedRectangle (pill, cornerRadius);
+        }
 
         // As VS Code's status bar items: a rounded pill under the pointer, as tall as the items, a little in from its sides.
         if ((isHighlighted || isDown) && onClick != nullptr)
         {
             g.setColour (isDown ? p.selected : p.hover);
-            g.fillRoundedRectangle (
-                getLocalBounds().toFloat().withSizeKeepingCentre ((float) getWidth() - (float) Space::xs, (float) Shell::statusItemHeight),
-                cornerRadius);
+            g.fillRoundedRectangle (pill, cornerRadius);
         }
 
         auto area = getLocalBounds().reduced (Space::s, 0);
+        const auto ink = on                              ? p.textOnAccent
+                         : emphasis == Emphasis::warning ? p.warning
+                         : emphasis == Emphasis::normal  ? p.text
+                                                         : p.textMuted;
+
+        if (icon != nullptr)
+        {
+            icon->draw (g,
+                        area.removeFromLeft (Shell::statusIconSize)
+                            .toFloat()
+                            .withSizeKeepingCentre ((float) Shell::statusIconSize, (float) Shell::statusIconSize),
+                        ink);
+            area.removeFromLeft (Space::xs);
+        }
 
         if (progress.has_value())
         {
@@ -183,7 +217,7 @@ struct StatusBar::Item : public juce::Button
             g.fillRoundedRectangle (bar.withWidth (std::max (bar.getHeight(), bar.getWidth() * (float) *progress)), corner);
         }
 
-        g.setColour (emphasis == Emphasis::warning ? p.warning : emphasis == Emphasis::normal ? p.text : p.textMuted);
+        g.setColour (ink);
         g.setFont (getFont());
         g.drawText (getButtonText(), area, juce::Justification::centred, false);
     }
@@ -192,6 +226,7 @@ struct StatusBar::Item : public juce::Button
     std::optional<double> progress;
 
 private:
+    std::unique_ptr<TintedIcon> icon;
     mutable juce::String measuredText;
     mutable int measuredWidth = 0;
     mutable bool measured = false, measuredWithProgress = false;
@@ -209,6 +244,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
       renderItem (std::make_unique<Item> ("Stretching")),
       delayItem (std::make_unique<Item> ("Delay compensation")),
       audioItem (std::make_unique<Item> ("Audio output")),
+      lowLatencyItem (std::make_unique<Item> ("Low latency")),
       cpuItem (std::make_unique<Item> ("CPU"))
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
@@ -218,6 +254,13 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
     midiItem->onClick = [this] { commands.invoke ("options.midiSettings"); };
     delayItem->onClick = [this] { commands.invoke ("options.audioSettings"); };
     audioItem->onClick = [this] { commands.invoke ("options.audioSettings"); };
+    lowLatencyItem->setIcon (Icon::lowLatency);
+    lowLatencyItem->show ("Low latency", Item::Emphasis::quiet);
+    lowLatencyItem->onClick = [this]
+    {
+        commands.invoke ("transport.lowLatency");
+        showLowLatency();
+    };
     selectionItem->setTooltip ("What is selected in the song: what Delete, Duplicate, the arrow keys and the other edits act on");
     renderItem->setTooltip ("Audio clips that follow the tempo, or are pitched or reversed, are being made again in the background "
                             "after a change: each one is silent until it is ready");
@@ -230,6 +273,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
         addChildComponent (*item);
 
     addAndMakeVisible (*audioItem);
+    addAndMakeVisible (*lowLatencyItem);
     addAndMakeVisible (*cpuItem);
 
     context.addListener (this);
@@ -240,8 +284,44 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
     showAudioOutput (engine.getAudioOutput());
     showSelection();
     showBranch();
+    refreshTooltips();
     timerCallback();
     startTimerHz (4);
+}
+
+void StatusBar::refreshTooltips()
+{
+    const auto on = engine.isLowLatency();
+    lowLatencyItem->setTooltip (withShortcut (commands,
+                                              juce::String ("Low latency, ") + (on ? "on" : "off")
+                                                  + ": while on, what you play has no delay to wait for. Devices that look ahead "
+                                                    "are bypassed, delay compensation is off and the buffer shrinks. Turn it on "
+                                                    "to play or record, off to mix. Click to turn it "
+                                                  + (on ? "off" : "on"),
+                                              "transport.lowLatency"));
+}
+
+void StatusBar::showLowLatency()
+{
+    // Its command needs a song: without one it neither lights under the pointer nor takes a click.
+    if (const auto open = context.hasProject(); lowLatencyItem->isEnabled() != open)
+        lowLatencyItem->setEnabled (open);
+
+    // Lit while on, and said so to screen readers.
+    const auto on = engine.isLowLatency();
+
+    if (std::exchange (shownLowLatency, on ? 1 : 0) == (on ? 1 : 0))
+        return;
+
+    lowLatencyItem->setToggleState (on, juce::dontSendNotification);
+    lowLatencyItem->setTitle (juce::String ("Low latency: ") + (on ? "on" : "off"));
+    refreshTooltips();
+    lowLatencyItem->repaint();
+}
+
+juce::Button& StatusBar::getLowLatencySwitch() noexcept
+{
+    return *lowLatencyItem;
 }
 
 StatusBar::~StatusBar()
@@ -455,7 +535,7 @@ void StatusBar::showDelay()
         delayItem->show ("Delay comp. " + delay, Item::Emphasis::quiet);
         delayItem->setTooltip ("The song plays " + delay + " late, so that every track lines up with the devices that look ahead"
                                + (devices.isEmpty() ? juce::String() : ": " + devices.joinIntoString (", "))
-                               + ". What you play live comes out as late: turn on Low Latency in the transport bar while you play. "
+                               + ". What you play live comes out as late: turn on Low Latency, beside the CPU, while you play. "
                                  "Click for the audio settings");
     }
 
@@ -538,6 +618,7 @@ void StatusBar::timerCallback()
 {
     showRenders();
     showMidi();
+    showLowLatency(); // switched by its key too
 
     // The delay is worked out as the song's tracks and devices change (songChanged()), which goes through the song; here
     // only once what the engine waits has changed without them, or Low Latency was switched.
@@ -567,6 +648,7 @@ void StatusBar::resized()
     // as the panels' cards are.
     auto area = getLocalBounds().reduced (Shell::cardGap, 0);
     cpuItem->setBounds (area.removeFromRight (cpuItem->getWidthFor ("CPU 100%")));
+    lowLatencyItem->setBounds (area.removeFromRight (lowLatencyItem->getPreferredWidth()));
     audioItem->setBounds (area.removeFromRight (audioItem->getPreferredWidth()));
 
     // The others as they fit, leaving the hints room: what is selected goes first, then where MIDI goes, the delay

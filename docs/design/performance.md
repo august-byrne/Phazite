@@ -111,7 +111,7 @@ The engine's design is in [engine.md](engine.md). The parts that matter for spee
 - **Phazite does not pick ASIO® by itself.** An ASIO driver takes its device from every other app, and which driver
   belongs to the output in use is only a guess from names. Where ASIO drivers are installed, the audio settings say
   that an audio interface's own driver gives less delay.
-- **Low Latency** (`transport.lowLatency`, a switch in the transport bar), off at first: while it is on, what is
+- **Low Latency** (`transport.lowLatency`, a switch in the status bar beside the CPU, lit while on), off at first: while it is on, what is
   played live has no delay compensation to wait for. Devices that look ahead by more than a millisecond, Phazite's
   own and plug-ins that report latency, are left out of what plays, and the output's buffer shrinks where the device
   offers a smaller one. Turning it off puts the buffer back. Nothing of it is saved.

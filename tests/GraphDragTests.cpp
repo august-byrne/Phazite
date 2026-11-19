@@ -61,7 +61,10 @@
 #include "ui/devices/SynthParts.h"
 #include "ui/input/WindowKeys.h"
 #include "ui/theme/DesignTokens.h"
+#include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -2010,4 +2013,28 @@ TEST_CASE ("The samplers' waveforms keep every graph's grammar: the Sampler's ma
                               std::nullopt,
                               std::nullopt });
     }
+}
+
+TEST_CASE ("A right-click on an EQ band's dot shows its menu at the pointer, not beside the whole graph")
+{
+    // The owner, 2026-11-19: a right-click's menu "appears way off target from where it should be (near your pointer/the element
+    // it is referencing). for instance master volume or command points in effects".
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    const phazite::test::ScopedDisplay display; // JUCE places a menu on its display
+    TestSong song;
+    const auto eq = song.addEffect (song.firstTrack, phazite::devices::Equalizer::typeID);
+    phazite::ui::EqEditor editor (phazite::getDeviceHandle (song.context, eq));
+    TestWindow window (editor, std::max (editor.getWidth(), 900), std::max (editor.getHeight(), 600));
+    phazite::ui::setPopupsInside (window); // as in the main window, on frosted glass
+    auto& graph = editor.getGraph();
+    const auto dot = editor.getDotPosition (3).roundToInt();
+
+    Mouse mouse (graph);
+    mouse.press (dot, juce::ModifierKeys::rightButtonModifier);
+    CHECK (phazite::test::isMenuShownAt (graph.localPointToGlobal (dot)));
+    juce::PopupMenu::dismissAllActiveMenus();
+    mouse.release();
+    phazite::test::dispatchPendingMessages();
 }

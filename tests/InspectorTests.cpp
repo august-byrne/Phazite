@@ -20,6 +20,7 @@
 #include "model/transport/TempoModel.h"
 #include "model/transport/TransportModel.h"
 #include "ui/components/Controls.h"
+#include "ui/components/ViewTitle.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/Inspector.h"
 #include "ui/theme/DesignTokens.h"
@@ -48,14 +49,16 @@ struct Screen
 
     TrackID track (int index) const { return phazite::getTrackIDs (*song)[(size_t) index]; }
 
-    // A label's or a button's text anywhere in the inspector.
+    // A label's, a button's or the title's text anywhere in the inspector.
     bool shows (const juce::String& text)
     {
         const auto labels = phazite::test::findAll<juce::Label> (inspector);
         const auto buttons = phazite::test::findAll<juce::TextButton> (inspector);
+        const auto titles = phazite::test::findAll<phazite::ui::ViewTitle> (inspector);
         return std::any_of (labels.begin(), labels.end(), [&text] (juce::Label* label) { return label->getText() == text; })
                || std::any_of (buttons.begin(), buttons.end(),
-                               [&text] (juce::TextButton* button) { return button->getButtonText() == text; });
+                               [&text] (juce::TextButton* button) { return button->getButtonText() == text; })
+               || std::any_of (titles.begin(), titles.end(), [&text] (phazite::ui::ViewTitle* title) { return title->getName() == text; });
     }
 
     phazite::Song::Ptr song = phazite::createSong(); // 120 BPM, 4/4
@@ -476,14 +479,14 @@ TEST_CASE ("The inspector fills its panel, and scrolls up and down when the pane
     CHECK (viewport->getY() > 0);
     CHECK (viewport->getBottom() == screen.inspector.getHeight());
     CHECK (page->getHeight() >= viewport->getHeight());
-    juce::Label* title = nullptr;
+    phazite::ui::ViewTitle* title = nullptr;
 
     for (auto* child : screen.inspector.getChildren())
-        if (auto* label = dynamic_cast<juce::Label*> (child))
-            title = label;
+        if (auto* viewTitle = dynamic_cast<phazite::ui::ViewTitle*> (child))
+            title = viewTitle;
 
     REQUIRE (title != nullptr);
-    CHECK (title->getText().isNotEmpty()); // the track's name
+    CHECK (title->getName().isNotEmpty()); // the track's name
     CHECK (title->getBottom() <= viewport->getY());
 
     // In its title's row, short of the panel's X at its right end, which the shell puts there.
@@ -493,7 +496,7 @@ TEST_CASE ("The inspector fills its panel, and scrolls up and down when the pane
     screen.inspector.setTitleRoom (40);
     CHECK (title->getRight() == screen.inspector.getWidth() - 40);
     screen.inspector.setTitleRoom (0);
-    CHECK (title->getRight() == screen.inspector.getWidth() - phazite::ui::Space::m);
+    CHECK (title->getRight() == screen.inspector.getWidth() - phazite::ui::SideBar::titlePadding);
 
     screen.window.setSize (300, 200);
     CHECK (page->getHeight() > 200); // it scrolls

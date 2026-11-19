@@ -442,6 +442,15 @@ TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it
         phazite::test::addMidiClip (*phazite::findSong (context), track, { phazite::test::at (0.0), phazite::test::at (4.0) }).isValid());
     auto& view = screen.getVersionsView();
 
+    // The transport bar's A/B shows only while there is a version to compare with: it has nothing that can't be used.
+    const auto compareShows = [&screen]
+    {
+        auto* compare = phazite::test::findComponentWithTitle (screen.shell, "A/B");
+        return compare != nullptr && compare->isVisible();
+    };
+
+    CHECK_FALSE (compareShows());
+
     // Bounce Each Version, in Save Version's menu, which the settings keep.
     CHECK_FALSE (screen.registry.find ("version.bounceEach")->isTicked());
     REQUIRE (screen.registry.invoke ("version.bounceEach"));
@@ -475,6 +484,7 @@ TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it
     };
 
     CHECK (hearing() == "Hearing: Bounced");
+    CHECK (compareShows()); // a press hears the song again
     mouse.click (view.getPlayMarkPosition (0).getCentre());
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::getHeardVersion (context).isEmpty());

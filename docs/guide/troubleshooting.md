@@ -14,7 +14,7 @@ sidebar:
 
 - **Bluetooth** headphones and speakers add about 150 to 250 ms between a key and its sound, which no driver reports: fine for listening, too slow for playing. Phazite says so in Audio Settings and in the status bar. Plug in wired headphones or an audio interface to play in time.
 - With an audio interface, choose its ASIO® driver in Audio Settings: it comes out sooner than Windows' own.
-- **Low Latency**, on the transport bar, takes away what adds a delay while you play: devices that look ahead are bypassed, delay compensation is off and the buffer shrinks. Turn it off again to mix.
+- **Low Latency**, in the status bar beside the CPU, takes away what adds a delay while you play: devices that look ahead are bypassed, delay compensation is off and the buffer shrinks. Turn it off again to mix.
 
 ## A plug-in is missing
 

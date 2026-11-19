@@ -170,6 +170,10 @@ public:
     void markEditorInUse();
     juce::Component* getShownTools() const noexcept { return shownTools.getComponent(); } // for tests
 
+    // The hairline between the tabs and the controls, as tall as the tab row less an inset at each end: empty while the shown
+    // view has no controls.
+    juce::Rectangle<int> getToolsDivider() const;
+
     // Where a view dragged over it can go besides its tabs (the shell says, as the places change): beside it, while its row
     // has room; and into the other row, while that has no views. And how many of the row's panel buttons its tab bar leaves
     // room for in its corner: the row's right area holds them.
@@ -196,6 +200,7 @@ public:
     std::optional<int> getDropIndex() const noexcept { return drop == Drop::tabs ? dropIndex : std::nullopt; }
 
     void resized() override;                           // its tabs leave the panel's buttons their corner
+    void paint (juce::Graphics&) override;             // the row's background, and the line between the tabs and the controls
     void paintOverChildren (juce::Graphics&) override; // a view dragged over it: a tint where it would go, and a line among the tabs
 
     bool isInterestedInDragSource (const SourceDetails&) override;

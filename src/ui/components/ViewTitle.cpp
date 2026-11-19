@@ -11,6 +11,16 @@ ViewTitle::ViewTitle (const juce::String& viewName)
     setInterceptsMouseClicks (false, true); // its actions take theirs
 }
 
+void ViewTitle::setText (const juce::String& newName)
+{
+    if (newName == name)
+        return;
+
+    name = newName;
+    setTitle (name);
+    repaint();
+}
+
 void ViewTitle::addAction (juce::Button& action)
 {
     actions.emplace_back (&action);

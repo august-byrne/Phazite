@@ -5,6 +5,7 @@
 #include "ui/components/TypedField.h"
 #include "ui/components/ValueText.h"
 #include "ui/theme/DesignTokens.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 #include <cmath>
@@ -801,7 +802,7 @@ void HandleDrag::mouseDown (const juce::MouseEvent& e)
 
     if (const auto handle = getHandleAt (e.position))
         if (auto menu = getMenu (*handle); menu.getNumItems() > 0)
-            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&graph));
+            menu.showMenuAsync (getContextMenuOptions (graph));
 }
 
 void HandleDrag::mouseDrag (const juce::MouseEvent& e)

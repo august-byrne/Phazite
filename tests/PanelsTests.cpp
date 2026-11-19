@@ -316,3 +316,55 @@ TEST_CASE ("Each editor's tools are in its area's tab row: all of them at the de
     CHECK (pianoTools->getParentComponent() == &upper);
     CHECK (lower.getShownTools() == nullptr);
 }
+
+TEST_CASE ("A view area's tabs look like tabs and its tools like tools: a hairline stands between them, where there are tools")
+{
+    // The owner, 2026-11-19: "there is no visual separation or indication that the tabs in a panel (playlist, mixer) are
+    // different from the actionable buttons that show up in certain views like the playlist (draw, cut, etc)". As VS Code's
+    // editor group: tabs at the left, the shown one joined to its view; after a gap and a line, the actions.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& upper = dynamic_cast<ViewRow&> (screen.shell.getPanel (Panel::song)).getArea (0);
+    REQUIRE (upper.getShownTab() == ViewTab::playlist);
+    const auto& p = phazite::ui::getPalette (upper);
+
+    // With tools: the line, in the border colour, as tall as the row less an inset at each end, right of the last tab; the first
+    // tool right of it.
+    auto* tools = upper.getShownTools();
+    REQUIRE (tools != nullptr);
+    const auto divider = upper.getToolsDivider();
+    REQUIRE (! divider.isEmpty());
+    auto& bar = upper.getTabbedButtonBar();
+    CHECK (divider.getX() > bar.getTabButton (bar.getNumTabs() - 1)->getScreenBounds().getRight() - upper.getScreenX());
+    CHECK (divider.getWidth() == phazite::ui::ToolRowTint::divider);
+    CHECK (divider.getY() == phazite::ui::ToolRowTint::dividerInset);
+    CHECK (divider.getBottom() == upper.getTabBarDepth() - phazite::ui::ToolRowTint::dividerInset);
+    CHECK (tools->getX() > divider.getRight());
+
+    for (auto* tool : tools->getChildren())
+        if (tool->isVisible())
+            CHECK (upper.getLocalArea (tool, tool->getLocalBounds()).getX() > divider.getRight());
+
+    const auto row = upper.createComponentSnapshot ({ 0, 0, upper.getWidth(), upper.getTabBarDepth() });
+    CHECK (row.getPixelAt (divider.getX(), divider.getCentreY()) == p.border);
+
+    // The shown tab on the view's own background, with the accent's line along its top; another on the row's.
+    auto* shown = bar.getTabButton (upper.getCurrentTabIndex());
+    auto* other = bar.getTabButton (upper.getCurrentTabIndex() == 0 ? 1 : 0);
+    REQUIRE (shown != nullptr);
+    REQUIRE (other != nullptr);
+    const auto tabImage = [] (juce::Component& tab) { return tab.createComponentSnapshot (tab.getLocalBounds()); };
+    const auto shownTab = shown->getActiveArea();
+    CHECK (tabImage (*shown).getPixelAt (shownTab.getX() + 2, shownTab.getBottom() - 6) == p.background);
+    CHECK (tabImage (*shown).getPixelAt (shownTab.getCentreX(), shownTab.getY()) == p.accent);
+    CHECK (tabImage (*other).getPixelAt (other->getActiveArea().getX() + 2, other->getActiveArea().getBottom() - 6).getAlpha() == 0);
+
+    // Without tools (the mixer), no line.
+    upper.showTab (ViewTab::mixer);
+    CHECK (upper.getShownTools() == nullptr);
+    CHECK (upper.getToolsDivider().isEmpty());
+}

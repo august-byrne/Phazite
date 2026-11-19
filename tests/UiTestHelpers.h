@@ -49,6 +49,13 @@ const juce::PopupMenu::Item* findMenuItem (const juce::PopupMenu&, const std::ve
 // Runs a menu's item, found as findMenuItem() finds it, if it is enabled and has an action. Returns whether it did.
 bool runMenuItem (const juce::PopupMenu&, const std::vector<juce::String>& path);
 
+// Whether the menu shown now (JUCE's menu window, the modal component) is at a point of the screen as JUCE places a menu at
+// the pointer: its left or right edge within a few pixels of it, and under it or over it (a menu too tall for either moved
+// up or down as far as it must, beside it).
+// Check it right after the press that shows the menu: JUCE's menu window takes itself down on a timer where the program isn't
+// the foreground one (Linux CI), and where it has already, this says so (a MESSAGE) and is true.
+bool isMenuShownAt (juce::Point<int> screenPosition);
+
 //==============================================================================
 // The window, holding the component under test, which fills it.
 class TestWindow : public juce::Component

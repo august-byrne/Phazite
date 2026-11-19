@@ -2,6 +2,7 @@
 #include "ArmButton.h"
 #include "model/transport/RecordingModel.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 
@@ -90,7 +91,7 @@ void ArmButton::clicked (const juce::ModifierKeys& mods)
 
     if (mods.isPopupMenu() || getTrackInput (context, track).isEmpty())
     {
-        showMenu();
+        showMenu (mods.isPopupMenu());
         return;
     }
 
@@ -98,7 +99,7 @@ void ArmButton::clicked (const juce::ModifierKeys& mods)
     update();
 }
 
-void ArmButton::showMenu()
+void ArmButton::showMenu (bool atPointer)
 {
     if (! shown || midi)
         return;
@@ -162,7 +163,7 @@ void ArmButton::showMenu()
                       done();
                   });
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+    menu.showMenuAsync (atPointer ? getContextMenuOptions (*this) : juce::PopupMenu::Options().withTargetComponent (this));
 }
 
 void ArmButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown)

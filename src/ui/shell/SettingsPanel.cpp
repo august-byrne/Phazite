@@ -72,7 +72,7 @@ DelayDescription describeDelay (const EngineContext::AudioOutput& output, const 
                 late.add (name + " (" + ms (seconds) + ")");
 
         lines.add ("Delay compensation: " + ms (compensation.seconds) + ", for " + late.joinIntoString (", ")
-                   + ". Low Latency, in the top bar, turns it off while you play.");
+                   + ". Low Latency, in the status bar, turns it off while you play.");
     }
     else
     {

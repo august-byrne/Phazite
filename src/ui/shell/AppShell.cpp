@@ -1236,16 +1236,17 @@ void AppShell::placePanelButtons()
         editorButtons.setBounds (bounds.getRight() - width - Space::xs, bounds.getY() + Space::xs / 2, width, Shell::panelButtonSize);
     }
 
-    // At the right end of the inspector's title while it is docked, as far from its edge, the title short of it.
+    // At the right end of the inspector's title while it is docked, where a side panel's view's title has its actions
+    // (ViewTitle), the title short of it.
     if (inspectorWindow == nullptr)
     {
         const auto row = inspector.getTitleRow() + inspector.getPosition();
         const auto width = inspectorButtons.getPreferredWidth();
-        inspectorButtons.setBounds (row.getRight() - width - Space::xs, row.getCentreY() - Shell::panelButtonSize / 2, width,
-                                    Shell::panelButtonSize);
+        const auto size = inspectorButtons.getButtonSize();
+        inspectorButtons.setBounds (row.getRight() - width - SideBar::titlePadding, row.getCentreY() - size / 2, width, size);
     }
 
-    inspector.setTitleRoom (inspectorWindow == nullptr ? inspectorButtons.getPreferredWidth() + 2 * Space::xs : 0);
+    inspector.setTitleRoom (inspectorWindow == nullptr ? inspectorButtons.getPreferredWidth() + SideBar::titlePadding + Space::xs : 0);
 }
 
 //==============================================================================
@@ -1518,6 +1519,7 @@ void AppShell::refreshShortcutTexts()
 {
     titleBar.refreshTooltips();
     topBar.refreshTooltips();
+    statusBar.refreshTooltips();
     activityBar.refreshTooltips();
     projectView.refreshTooltips();
     versionsView.refreshTooltips();

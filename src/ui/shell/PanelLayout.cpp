@@ -375,10 +375,16 @@ void PanelButtons::refreshTooltips()
                                          getPanelCommandID ("toggle", panel)));
 }
 
+int PanelButtons::getButtonSize() const noexcept
+{
+    // The inspector's X as big as the actions of a side panel's view's title, which its title is (ViewTitle).
+    return panel == Panel::editor ? Shell::panelButtonSize : SideBar::actionSize;
+}
+
 int PanelButtons::getPreferredWidth() const noexcept
 {
     const auto buttons = panel == Panel::editor ? Shell::panelCornerButtons : 1;
-    return Shell::getPanelCornerWidth (buttons) - Space::xs / 2; // its margin from the panel's edge aside
+    return buttons * getButtonSize() + (buttons - 1) * (Space::xs / 2);
 }
 
 void PanelButtons::resized()
@@ -390,7 +396,7 @@ void PanelButtons::resized()
         if (! button->isVisible())
             continue;
 
-        button->setBounds (area.removeFromLeft (Shell::panelButtonSize));
+        button->setBounds (area.removeFromLeft (getButtonSize()));
         area.removeFromLeft (Space::xs / 2);
     }
 }

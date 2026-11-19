@@ -762,17 +762,49 @@ void LookAndFeel::drawTabButton (juce::TabBarButton& button, juce::Graphics& g, 
         g.drawRoundedRectangle (pill.reduced (0.5f), cornerRadius, 1.0f);
     }
 
-    // The editor the time line's commands act on: a line in the accent colour along the pill's foot.
+    g.setColour (front ? p.textBright : isMouseOver ? p.text : p.textMuted);
+    g.setFont (getTabButtonFont (button, pill.getHeight()));
+    g.drawText (button.getButtonText().trim(), pill, juce::Justification::centred, false);
+}
+
+void LookAndFeel::drawViewTab (juce::TabBarButton& button, juce::Graphics& g, bool isMouseOver, bool isMouseDown)
+{
+    const auto& p = palette;
+    const auto front = button.isFrontTab();
+    const auto area = button.getActiveArea().toFloat();
+
+    // The one that shows: the view's own background, from the bar's top to the view under it, which it joins, as VS Code's
+    // editor tab shows on the editor's background; the accent's line along its top.
+    if (front)
+    {
+        g.setColour (p.background);
+        g.fillRect (area);
+        g.setColour (p.accent);
+        g.fillRect (area.withHeight (TabTint::activeLine));
+    }
+    else if (isMouseOver || isMouseDown)
+    {
+        g.setColour (p.hover);
+        g.fillRect (area);
+    }
+
+    if (button.hasKeyboardFocus (false))
+    {
+        g.setColour (p.focus);
+        g.drawRoundedRectangle (area.reduced (0.5f), cornerRadius, 1.0f);
+    }
+
+    // The editor the time line's commands act on: a line in the accent colour along its foot.
     if (front && isTabInUse (button))
     {
         g.setColour (p.accent);
-        g.fillRoundedRectangle (pill.reduced (TabTint::inUseInset, 0.0f).withTrimmedTop (pill.getHeight() - TabTint::inUseLine),
+        g.fillRoundedRectangle (area.reduced (TabTint::inUseInset, 0.0f).withTrimmedTop (area.getHeight() - TabTint::inUseLine),
                                 TabTint::inUseLine / 2.0f);
     }
 
     g.setColour (front ? p.textBright : isMouseOver ? p.text : p.textMuted);
-    g.setFont (getTabButtonFont (button, pill.getHeight()));
-    g.drawText (button.getButtonText().trim(), pill, juce::Justification::centred, false);
+    g.setFont (getTabButtonFont (button, area.getHeight()));
+    g.drawText (button.getButtonText().trim(), area, juce::Justification::centred, false);
 }
 
 void setTabInUse (juce::TabBarButton& button, bool inUse)

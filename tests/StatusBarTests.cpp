@@ -17,6 +17,7 @@
 #include "model/transport/TransportModel.h"
 #include "ui/shell/StatusBar.h"
 #include "ui/theme/DesignTokens.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace
 {
@@ -224,6 +225,52 @@ TEST_CASE ("The status bar shows the song's delay compensation, while it has som
     status.refreshNow();
     CHECK (status.getDelayText().isEmpty());
     phazite::getPlaybackHost (phazite::test::getEngineContext()).setLowLatency (false);
+}
+
+TEST_CASE ("Low Latency is a switch beside the CPU, lit in the accent while it is on, which a click turns on and off")
+{
+    // The owner, 2026-11-19, of the transport bar: "the elements that live here might also need a sanity check". Low Latency is a
+    // state of the audio engine that is set once and left, as Logic keeps it out of its default control bar: it moved here.
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& status = screen.shell.getStatusBar();
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    host.setLowLatency (false);
+    const juce::ScopeGuard off { [&host] { host.setLowLatency (false); } }; // the tests' engine is every test's
+    status.refreshNow();
+
+    auto& lowLatency = status.getLowLatencySwitch();
+    CHECK (lowLatency.isShowing());
+    CHECK_FALSE (lowLatency.getToggleState());
+    CHECK (lowLatency.getTitle() == juce::String ("Low latency: off"));
+    CHECK (lowLatency.getTooltip().contains ("Click to turn it on"));
+
+    // Beside the CPU, at the bar's right end.
+    auto* cpu = phazite::test::findComponentWithTitle (status, status.getCpuText());
+    REQUIRE (cpu != nullptr);
+    CHECK (lowLatency.getRight() == cpu->getX());
+
+    // A click turns it on, as its command does; lit in the accent meanwhile. Another turns it off.
+    const auto litAt = [&lowLatency]
+    {
+        const auto image = lowLatency.createComponentSnapshot (lowLatency.getLocalBounds());
+        return image.getPixelAt (phazite::ui::Space::xs, lowLatency.getHeight() / 2) == phazite::ui::getPalette (lowLatency).accent;
+    };
+
+    CHECK_FALSE (litAt());
+    phazite::test::Mouse mouse (lowLatency);
+    mouse.click (lowLatency.getLocalBounds().getCentre());
+    CHECK (phazite::test::getEngineContext().isLowLatency());
+    CHECK (lowLatency.getToggleState());
+    CHECK (lowLatency.getTitle() == juce::String ("Low latency: on"));
+    mouse.moveTo ({ -10, -10 }); // not lit by the pointer's wash
+    CHECK (litAt());
+
+    mouse.pause();
+    mouse.click (lowLatency.getLocalBounds().getCentre());
+    CHECK_FALSE (phazite::test::getEngineContext().isLowLatency());
+    CHECK_FALSE (lowLatency.getToggleState());
 }
 
 TEST_CASE ("While clips are stretched in the background after a tempo change, the status bar shows how far, as a bar")

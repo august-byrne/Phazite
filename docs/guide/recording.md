@@ -15,7 +15,7 @@ press Record. **Help > Lessons > Record Audio** walks you through a first record
   chooses the audio device, its sample rate and its buffer size. On Windows, an audio interface usually plays with
   the least delay through its ASIO® driver.
 - **MIDI Settings** turns MIDI inputs on or off. A MIDI keyboard plays as soon as it is plugged in.
-- **Low latency**, on the transport bar, takes away the delay you hear while you play: devices that look ahead are
+- **Low latency**, in the status bar beside the CPU, takes away the delay you hear while you play: devices that look ahead are
   bypassed, delay compensation is off and the buffer shrinks. Turn it off again to mix. Switch it before you record:
   where the buffer changes, the audio device starts again, which stops a recording.
 

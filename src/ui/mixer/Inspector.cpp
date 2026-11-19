@@ -18,6 +18,7 @@
 #include "ui/components/ParameterText.h"
 #include "ui/components/TrackSwitch.h"
 #include "ui/components/ValueText.h"
+#include "ui/components/ViewTitle.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/CommandUI.h"
@@ -43,8 +44,7 @@ namespace
     constexpr int nameWidth = 84;         // a row's name, on its left
     constexpr int stackWidth = 140;       // a control needs this much beside its name, or the name goes above it
     constexpr int stackedNameHeight = 16; // a name above its control
-    constexpr int titleHeight = 32;
-    constexpr int tipLines = 3; // a section's tip, wrapped
+    constexpr int tipLines = 3;           // a section's tip, wrapped
 
     // "Bar 5", or "Bar 5, beat 3" for a place after a bar's first beat, its beats its time signature's (eighths in 6/8); bars
     // count from 1, as the time line's do.
@@ -462,8 +462,6 @@ struct Inspector::Page : public juce::Component
           colour (stripe)
     {
         setTitle (kindName);
-        title.setFont (juce::FontOptions (TextSize::title, juce::Font::bold));
-        title.setMinimumHorizontalScale (1.0f); // the inspector shows it, over the rows, which scroll
     }
 
     virtual void refresh() {}      // the song changed: what it shows, as it is now
@@ -547,7 +545,7 @@ struct Inspector::Page : public juce::Component
 
     const juce::String kind;
     juce::Colour colour;
-    juce::Label title;
+    ViewTitle title { {} }; // the inspector shows it, over the rows, which scroll
     std::vector<Row> rows;
 };
 
@@ -708,7 +706,7 @@ namespace
             if (! channel.has_value())
                 return;
 
-            title.setText (channel->name, juce::dontSendNotification);
+            title.setText (channel->name);
             colour = channel->colour;
             colourButton.colour = channel->colour;
             colourButton.repaint();
@@ -983,8 +981,7 @@ namespace
             const auto row = getTrackRow (context, first.track);
             colour = row.has_value() ? row->colour : juce::Colours::transparentBlack;
             title.setText (infos.size() == 1 ? (first.name.isNotEmpty() ? first.name : juce::String ("Clip"))
-                                             : juce::String ((int) infos.size()) + " clips",
-                           juce::dontSendNotification);
+                                             : juce::String ((int) infos.size()) + " clips");
 
             const auto allAudio =
                 std::all_of (infos.begin(), infos.end(), [] (const ClipInfo& info) { return info.kind == ClipType::audio; });
@@ -1194,8 +1191,7 @@ namespace
             mutedToggle.setToggleState (std::all_of (shown.begin(), shown.end(), [] (const NoteData& note) { return note.muted; }),
                                         juce::dontSendNotification);
 
-            title.setText (shown.size() == 1 ? getPitchName (shown.front().pitch) : juce::String ((int) shown.size()) + " notes",
-                           juce::dontSendNotification);
+            title.setText (shown.size() == 1 ? getPitchName (shown.front().pitch) : juce::String ((int) shown.size()) + " notes");
 
             // Their clip's (the first's, of several), in its track's color.
             const auto clip = getNoteClip (context, shown.front().clip);
@@ -1333,8 +1329,7 @@ namespace
 
             const auto name = target.has_value() ? target->deviceName + ": " + target->name : handle.getName();
             parameterLabel.setText (name, juce::dontSendNotification);
-            title.setText (shown.size() == 1 ? juce::String ("Automation point") : juce::String ((int) shown.size()) + " points",
-                           juce::dontSendNotification);
+            title.setText (shown.size() == 1 ? juce::String ("Automation point") : juce::String ((int) shown.size()) + " points");
 
             if (const auto row = target.has_value() ? getTrackRow (context, target->track) : std::nullopt)
                 colour = row->colour;
@@ -1399,7 +1394,7 @@ namespace
             if (! shown.has_value())
                 return;
 
-            title.setText (shown->name, juce::dontSendNotification);
+            title.setText (shown->name);
             colour = shown->colour;
             colourButton.colour = shown->colour;
             colourButton.repaint();
@@ -1430,7 +1425,7 @@ namespace
             : Page ("Song", juce::Colours::transparentBlack),
               context (c)
         {
-            title.setText ("Song", juce::dontSendNotification);
+            title.setText ("Song");
 
             for (auto* label : { &tempoLabel, &signatureLabel, &lengthLabel, &tracksLabel, &sectionsLabel, &hintLabel })
                 setUpValueLabel (*label);
@@ -1609,22 +1604,24 @@ void Inspector::paint (juce::Graphics& g)
 {
     g.fillAll (getPalette (*this).surface);
 
-    // The color of what it shows, beside its title, as a track's header has its track's.
+    // The color of what it shows, beside its title, as a track's header has its track's: along the panel's edge, as tall as
+    // the name, in the room before it.
     if (page != nullptr && ! page->colour.isTransparent())
     {
         g.setColour (page->colour);
-        g.fillRect (page->title.getBounds().withX (0).withWidth (colourBarHeight));
+        g.fillRect (getTitleRow().withWidth (colourBarHeight).reduced (0, Space::s));
     }
 }
 
 void Inspector::resized()
 {
-    // The page's title over its rows, which scroll under it.
+    // The page's title over its rows, which scroll under it: a title as the left panel's views have (ViewTitle), its name as
+    // far in, as tall and in the same text, the panel's X where their actions are.
     auto area = getLocalBounds();
-    area.removeFromTop (Space::m + titleHeight + Space::s);
+    area.removeFromTop (SideBar::titleHeight + Space::xs);
 
     if (page != nullptr)
-        page->title.setBounds (getTitleRow().withTrimmedLeft (Space::m).withTrimmedRight (std::max (Space::m, titleRoom)));
+        page->title.setBounds (getTitleRow().withTrimmedRight (std::max (SideBar::titlePadding, titleRoom)));
 
     view.setBounds (area);
     layOutPage();
@@ -1632,7 +1629,7 @@ void Inspector::resized()
 
 juce::Rectangle<int> Inspector::getTitleRow() const
 {
-    return getLocalBounds().withTrimmedTop (Space::m).withHeight (titleHeight);
+    return getLocalBounds().withHeight (SideBar::titleHeight);
 }
 
 void Inspector::setTitleRoom (int room)

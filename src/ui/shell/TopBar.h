@@ -17,9 +17,10 @@
 
 namespace phazite::ui
 {
-// The transport bar, under the title bar (TitleBar.h): play, loop, the metronome, low latency, the tempo and time
-// signature, where the playhead is, the master level and volume, and the computer keyboard. (A key is a track's, so the
-// piano roll shows it; how busy the engine is, the status bar.)
+// The transport bar, under the title bar (TitleBar.h), its controls in groups: play, record and capture; the loop and the
+// metronome; the tempo and the time signature; where the playhead is; A/B, while there is a version to compare with; and at
+// its right the master level and volume, and the computer keyboard. (A key is a track's, so the piano roll shows it; how
+// busy the engine is and Low Latency, which is set once and left, the status bar.)
 class TopBar : public juce::Component,
                private ProjectContext::Listener,
                private juce::Timer
@@ -44,11 +45,21 @@ private:
     ComputerKeyboard& computerKeyboard;
     ProjectContext& projectContext;
 
-    // A transport button whose right-click opens its options, rather than clicking it.
-    struct OptionsButton : public IconButton
+    // A button joined to another as one control, a button and its options arrow: under the pointer, both are lit.
+    struct JoinedButton : public IconButton
     {
-        using IconButton::clicked;
         using IconButton::IconButton;
+        juce::Button* partner = nullptr;
+
+        void paintButton (juce::Graphics&, bool isHighlighted, bool isDown) override;
+        void buttonStateChanged() override; // the partner lit, or not, with it
+    };
+
+    // A transport button whose right-click opens its options, rather than clicking it.
+    struct OptionsButton : public JoinedButton
+    {
+        using JoinedButton::clicked;
+        using JoinedButton::JoinedButton;
         std::function<void (bool isMenuClick)> onClicked;
 
         void clicked (const juce::ModifierKeys& mods) override
@@ -59,13 +70,13 @@ private:
     };
 
     IconButton playButton { "Play", Icon::play }, captureButton { "Capture", Icon::capture }, loopButton { "Loop", Icon::loop },
-        lowLatencyButton { "Low latency", Icon::lowLatency }, keyboardButton { "Computer keyboard", Icon::keyboard };
+        keyboardButton { "Computer keyboard", Icon::keyboard };
     OptionsButton recordButton { "Record", Icon::record }, metronomeButton { "Metronome", Icon::metronome };
 
     // Record's and the metronome's options, which a right-click also opens: an arrow joined to each, as a split button's
     // (the owner's UX audit, 2026-11-12: nothing showed they were there), as Ableton Live has its metronome's pull-down
     // switch beside it.
-    IconButton recordMenuButton { "Record options", Icon::expanded }, metronomeMenuButton { "Metronome options", Icon::expanded };
+    JoinedButton recordMenuButton { "Record options", Icon::expanded }, metronomeMenuButton { "Metronome options", Icon::expanded };
     NumberField tempoField;               // dragged, scrolled or typed, a drag being one undo step
     TempoHandle tempo;                    // the open project's, which owns those steps
     TempoStretchPanel tempoStretch;       // what a tempo change stretches, under the field while the tempo changes
@@ -97,8 +108,9 @@ private:
     juce::uint32 shownKeyboardLayout = 0; // and the layout its tooltip names the keys of (KeyboardLayout::getFingerprint())
 
     // A/B (version.compare): a press hears the last version's bounce in place of the song, at the same point and as loud, and
-    // another the song again; lit while it is heard, or bounced to be. And beside it what is heard ("Hearing: Verse 2"), or
-    // bounced to be, while that isn't the song: nothing hidden.
+    // another the song again; lit while it is heard, or bounced to be; shown only while there is a version to compare with, so
+    // that the bar has nothing on it that can't be used. And beside it what is heard ("Hearing: Verse 2"), or bounced to be,
+    // while that isn't the song: nothing hidden.
     juce::TextButton compareButton { "A/B" };
     juce::Label hearing;
     void updateCompare();
