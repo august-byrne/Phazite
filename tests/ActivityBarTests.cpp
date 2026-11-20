@@ -1036,7 +1036,8 @@ TEST_CASE ("An automatic save stays selected as its row moves, gives the selecti
     REQUIRE (phazite::getSelectedSnapshot (context) == selected);
     REQUIRE (screen.registry.invoke ("version.showAutomatic"));
     CHECK (phazite::getSelectedSnapshot (context) == 0);
-    CHECK (list.getSelectedRow() == 0);
+    CHECK (phazite::getSelectedVersion (context).isEmpty());
+    CHECK (list.getSelectedRow() == 0); // its row's number still names a row (the project's "First version"), so one stays selected
     CHECK_FALSE (phazite::CommandRegistry::isEnabled (*restore));
     REQUIRE (screen.registry.invoke ("version.showAutomatic")); // on again, as the settings had it
 }

@@ -408,7 +408,8 @@ std::vector<SnapshotInfo> getSnapshots (const ProjectContext&);
 bool restoreSnapshot (ProjectContext&, juce::int64 time); // "Restore the Automatic Save of 14:02"
 
 // The snapshot the Versions view selects (0 for none), which version.restoreSnapshot restores: what it is called now, and
-// whether it can. They are rows of one list: selecting a version (selectVersion(), selectVersionChange()) selects no snapshot.
+// whether it can. They are rows of one list: selecting a version or Now (selectVersion(), selectVersionChange()) selects
+// no snapshot, so a snapshot is selected after them.
 void selectSnapshot (ProjectContext&, juce::int64 time);
 juce::int64 getSelectedSnapshot (const ProjectContext&);
 juce::String describeRestoreSnapshot (const ProjectContext&);

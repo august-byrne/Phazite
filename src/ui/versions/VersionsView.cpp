@@ -648,13 +648,6 @@ public:
 
     void selectedRowsChanged (int row) override
     {
-        // An automatic save, which version.restoreSnapshot restores (none while another row is selected); or a group of them,
-        // which the view keeps selected as its rows move.
-        const auto* snapshot = view.getRowSnapshot (row);
-        const auto* group = view.getRowGroup (row);
-        selectSnapshot (view.context, snapshot != nullptr ? snapshot->time : 0);
-        view.selectedGroup = group != nullptr ? std::optional (group->since) : std::nullopt;
-
         // The changes' row, a version, or a line under one, which the commands act on.
         if (const auto* change = view.getRowChange (row))
             selectVersionChange (view.context, view.getLineVersion (row)->id, *change);
@@ -662,6 +655,13 @@ public:
             selectVersion (view.context, version->id);
         else
             selectVersion (view.context, {});
+
+        // Or an automatic save, which version.restoreSnapshot restores (selected after the version, which selects none); or
+        // a group of them, which the view keeps selected as its rows move.
+        const auto* snapshot = view.getRowSnapshot (row);
+        const auto* group = view.getRowGroup (row);
+        selectSnapshot (view.context, snapshot != nullptr ? snapshot->time : 0);
+        view.selectedGroup = group != nullptr ? std::optional (group->since) : std::nullopt;
 
         view.historyList.repaint(); // the actions on the row selected now
     }
@@ -1244,12 +1244,10 @@ void VersionsView::refreshHistoryRows()
 
 void VersionsView::selectHistoryRow()
 {
-    // A version selected from elsewhere (the bar of the version open, a picker) takes the selection from an automatic save.
+    // A version selected from elsewhere (the bar of the version open, a picker) takes the selection from a group of automatic
+    // saves, as the model takes it from an automatic save (selectVersion()).
     if (getSelectedVersion (context).isNotEmpty())
-    {
-        selectSnapshot (context, 0);
         selectedGroup.reset();
-    }
 
     // An automatic save selected, wherever its row went. Folded into a group since (another was taken beside it), its
     // group's row is selected in its place; gone (thinned away, or Show Automatic Saves switched off), nothing of it stays

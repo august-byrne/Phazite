@@ -1053,9 +1053,7 @@ void selectVersion (ProjectContext& context, const juce::String& versionID)
     {
         history->selectedVersion = versionID;
         history->selectedVersionChange.reset();
-
-        if (versionID.isNotEmpty())
-            history->selectedSnapshot = 0; // one row of the history is selected: a version, or an automatic save
+        history->selectedSnapshot = 0; // one row of the history is selected: a version (or Now), or an automatic save
     }
 }
 
@@ -1065,9 +1063,7 @@ void selectVersionChange (ProjectContext& context, const juce::String& versionID
     {
         history->selectedVersion = versionID;
         history->selectedVersionChange = line.has_value() ? std::optional<SongChange> (fromLine (*line)) : std::nullopt;
-
-        if (versionID.isNotEmpty())
-            history->selectedSnapshot = 0;
+        history->selectedSnapshot = 0;
     }
 }
 
