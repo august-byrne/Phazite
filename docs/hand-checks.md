@@ -317,6 +317,16 @@ the [changelog](changelog.md).
 | X26 | With any plug-in (best: one named as one of Phazite's devices, such as a VST3 called "Reverb"): save a preset from its window; look under the plug-in's row and under Phazite's device of that name in the browser, and in Swap on Phazite's device | The preset is in `Documents/Phazite/Presets/Plug-ins/<name>`, shows under the plug-in alone, and Phazite's device lists its own presets alone | |
 | X27 | A song plays a sound file from its `Audio` folder, once plainly and once in a clip that is reversed or has a tempo of its own: write over that file with another sound from another program, wait a second, add a note anywhere | Both clips play the new sound (the reversed or stretched one after it shows "preparing" for a moment), and their waveforms show it | |
 
+## What One history built (2026-11-20)
+
+| # | Check | Proves | Checked on |
+|---|---|---|---|
+| Z1 | Open a project with a few versions, work for half an hour with changes, and open the Versions view | No list called Local History; grey rows with a clock between the versions, each above the versions saved before it; the versions still read first | |
+| Z2 | Click a row that says "N automatic saves"; click it again; press Return on it | It unfolds to a row for each, newest first, and folds again; the lines of the branches run through them unbroken | |
+| Z3 | Point at an automatic save and click its arrow; press Ctrl+Z | The song is as it was then; Undo ("Restore the Automatic Save of ...") brings it back | |
+| Z4 | The view's ... menu: untick Show Automatic Saves; look in Settings under Versions; tick it again there | The grey rows go and come back, and the menu and the setting follow each other | |
+| Z5 | Switch to another branch, change something, discard it, and switch back | That automatic save's ring is in the other branch's column, and its row says "on" that branch | |
+
 ## Performance on other machines
 
 Numbers and how to run the benchmarks are in [performance.md](performance.md).

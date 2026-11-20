@@ -868,7 +868,7 @@ TEST_CASE ("Verify History walks Local History's songs and the songs left on bra
 
     verify (s.context);
     const auto said = phazite::describeHistoryCheck (s.context);
-    CHECK (said.contains ("Local History of "));
+    CHECK (said.contains ("The automatic save of "));
     CHECK (said.contains ("The song left on "));
     CHECK (said.contains ("can't be read whole"));
 }

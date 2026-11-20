@@ -12,7 +12,7 @@ fixed (2026-11-15 and 16), and those from 191 on since. Each fix has a line in t
 "The known bugs". A round on 2026-11-19 fixed what could be fixed without the owner (186, 198, 199, 200, 204 to 210)
 and entered what it and its reviews found (211 to 214). What stays, each entry saying why: 136 is the written reason of a
 test's exception; 137 and 197 wait for the owner's answer; 185, 191 and 213 can only be built and tried on Linux;
-196 turns on the deleting of what the versions hold, which needs a decision and a review of its own first; 211
+196 is decided (2026-11-20: nothing is deleted by itself, and Free Up Space, roadmap step S4.4, frees the room by hand), and not built; 211
 and 212 are new; and 214 is a fault of the compiler on CI, which waits for the owner's choice of what to do about it.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
@@ -42,7 +42,10 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Versions
 
-- **196. The versions' store lets go of nothing yet: a project's `Versions` folder only grows.** An undone version, a
+- **196. Nothing frees the room of the versions' store yet: a project's `Versions` folder only grows.** Decided on
+  2026-11-20 (the owner): the store deletes nothing by itself, ever; the room is freed by hand, by a command, Free Up
+  Space (roadmap step S4.4), which lists what it would remove and works only in a history one computer has written.
+  What follows is the state of the code, and why the sweep's own letting go stays off. An undone version, a
   deleted branch's versions and the song left on it, the snapshots Local History no longer lists, and their bounces and
   edited messages keep their room for ever. Recover Lost Versions stops offering them after 30 days, and the room the
   Project view shows never falls but by Delete Bounce. The weekly sweep runs (it walks what is named, says when it can't
@@ -69,7 +72,7 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   - what a project's file, its autosave and its backups name as the version the song grew from
     (`findVersionsNamedByProject()`) is not yet among what the sweep's walk takes as named.
 
-  To fix, the plan: let go only in a history that one computer alone has ever written to (every pack's writer, every
+  To fix, the plan (Free Up Space, by hand): let go only in a history that one computer alone has ever written to (every pack's writer, every
   branch record, log and `local/` folder is this computer's), which takes the two-computer cases out by construction
   and covers most projects; a history two computers share is not swept until collaboration is designed. That still
   needs the list of what a computer's records name taken from one place that the walk uses, with a test for each

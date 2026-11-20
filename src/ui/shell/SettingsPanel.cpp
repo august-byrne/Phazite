@@ -1314,6 +1314,9 @@ void SettingsPanel::addPreferenceRows()
     addSwitch (versions, "Bounce Each Version",
                "Bounces the song to audio as each version is saved, so that it can be played later against the song.", "version.bounceEach",
                Settings::versionBounce.defaultValue);
+    addSwitch (versions, "Show Automatic Saves",
+               "Lists the automatic saves in the history, between the versions: the song as it was at times while it had changes.",
+               "version.showAutomatic", Settings::versionShowAutomatic.defaultValue);
 
     addSwitch (startup, "Startup Sound",
                "Plays Phazite's sound once it has opened: a quick blip with echoes, at the browser's preview volume.",

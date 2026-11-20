@@ -18,8 +18,12 @@
 //   and, under the pointer, its Restore from This Version; another click folds it; a double-click opens it in the song's
 //   place, live (Open Version), its row marked "Open", with a bar across the view's top that says so, with Back to Now and
 //   Create Branch Here (Escape goes back too);
-// - Local History, the song as it was while it differed from its last version, and Undo History, the song's undo steps, a
-//   click going back or forth to one (docs/design.md, open question 22), each folded at first;
+//   Between the versions, the automatic saves (the song as it was while it differed from its last version, kept without
+//   asking: the model's snapshots), as Figma's and Google Docs' histories list theirs: in grey, by when each was taken
+//   (above the versions saved before it, whichever branch they are on), those between two versions folded into one row
+//   ("6 automatic saves") that a click unfolds, each with its Restore under the pointer; Show Automatic Saves
+//   (version.showAutomatic, in the view's menu) hides them all;
+// - Undo History, the song's undo steps, a click going back or forth to one, folded at first;
 // - and the room the history takes.
 // The sections fold under their headings. By the model's functions (model/versions/VersionsModel.h) and the commands.
 #pragma once
@@ -35,6 +39,10 @@
 #include "ui/theme/Icons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
+
+#include <optional>
+#include <set>
+#include <vector>
 
 namespace phazite::ui
 {
@@ -89,13 +97,18 @@ public:
 
     juce::ListBox& getHistoryList() noexcept { return historyList; }
 
-    // Local History, under the history (folded at first): its section, its list, a row of it as screen readers say it, and
-    // where a row's Restore is, under the pointer or selected.
-    juce::Button& getLocalHistorySection() noexcept;
-    juce::ListBox& getLocalHistoryList() noexcept { return localList; }
+    // The automatic saves, newest first, in the history between the versions: how many there are, one as screen readers say
+    // it ("Automatic save, Before Restore, 5 min, on main"), its row in the history (none while its group is folded, or while
+    // Show Automatic Saves is off), the row of the group it is folded into (none for one that stands alone between two
+    // versions), a group's row unfolded or folded as a click on it does, and where a row's Restore is, under the pointer or
+    // selected.
     int getNumSnapshots() const noexcept { return (int) snapshots.size(); }
-    juce::String describeSnapshot (int row) const;
+    juce::String describeSnapshot (int snapshot) const;
+    int getSnapshotRow (int snapshot) const;
+    int getSnapshotGroupRow (int snapshot) const;
+    void unfoldAutomaticSaves (int row);
     juce::Rectangle<int> getSnapshotRestorePosition (int row) const;
+    void showAutomaticSavesChanged() { refresh(); } // the setting switched (version.showAutomatic)
     juce::String getChangesHeading() const;
     juce::String getRoomText() const { return roomText.getText(); }
 
@@ -112,7 +125,7 @@ public:
     juce::Button& getOpenBounceButton() noexcept { return openBounceButton; }
     bool keyPressed (const juce::KeyPress&) override;
 
-    // Undo History, at the foot (folded at first, as Local History; as Ableton Live 12.1's, Logic Pro's and Studio One's): the
+    // Undo History, at the foot (folded at first; as Ableton Live 12.1's, Logic Pro's and Studio One's): the
     // song's undo steps newest first, those undone (which Redo would do again) dimmed above the one the song is at, and under
     // the oldest, the song before them all. A click on a row, or Return on the one selected, goes back or forth to it, undoing
     // or redoing as Undo and Redo do (model/commands/UndoHistory.h). Its section, its list, its rows (none while it has no
@@ -143,7 +156,6 @@ public:
 private:
     class ChangesModel;
     class HistoryModel;
-    class LocalHistoryModel;
     class UndoHistoryModel;
     class MessageField;
     class BranchButton;
@@ -158,7 +170,7 @@ private:
     IconButton moreButton { "More Actions", Icon::moreActions };
     std::unique_ptr<MessageField> messageField;
     IconButton saveButton { "Save Version", Icon::check }, saveMenuButton { "Save Version's choices", Icon::expanded };
-    std::unique_ptr<SectionHeader> changesSection, historySection, localSection, undoSection;
+    std::unique_ptr<SectionHeader> changesSection, historySection, undoSection;
     juce::TextButton doneButton;                // from another version's differences back to the changes
     juce::TextButton mergeButton, cancelButton; // a merge's list's
 
@@ -174,10 +186,9 @@ private:
     void refreshOpenBar();
     std::unique_ptr<ChangesModel> changesModel;
     std::unique_ptr<HistoryModel> historyModel;
-    std::unique_ptr<LocalHistoryModel> localModel;
     std::unique_ptr<UndoHistoryModel> undoModel;
-    juce::ListBox changesList, historyList, localList, undoList;
-    std::unique_ptr<ListRowHover> changesHover, historyHover, localHover, undoHover;
+    juce::ListBox changesList, historyList, undoList;
+    std::unique_ptr<ListRowHover> changesHover, historyHover, undoHover;
     std::vector<SnapshotInfo> snapshots;
 
     // The song's undo history as the list last showed it, read again as the song changes; and going to a row's step.
@@ -198,14 +209,32 @@ private:
     float bounceProgress = 0.0f;
     bool hasPlayMark (int row) const;
 
-    // The history's rows: the changes, then each version, and under the one opened, a row for each line it changed.
+    // The history's rows: the changes, then each version, and under the one opened, a row for each line it changed; and
+    // before each version, the automatic saves taken since it: one alone as its own row, more as a group's row, with a row
+    // for each under it while the group is unfolded.
     struct HistoryRow
     {
-        int version = -1; // its version's place in versions; none for the changes' row
-        int change = -1;  // its line's place in openedChanges; none for the version itself
+        int version = -1;  // its version's place in versions; none for the changes' row and the automatic saves'
+        int change = -1;   // its line's place in openedChanges; none for the version itself
+        int snapshot = -1; // an automatic save's place in snapshots
+        int group = -1;    // a group's place in snapshotGroups: its own row (no snapshot), or the row of one in it
+    };
+
+    // The automatic saves between two versions, folded into one row: its first, how many, and the version they were taken
+    // since (none for those older than every version), which names the group while it is unfolded or selected.
+    struct SnapshotGroup
+    {
+        int first = 0, count = 0;
+        juce::String since;
     };
 
     std::vector<HistoryRow> historyRows;
+    std::vector<SnapshotGroup> snapshotGroups;
+    std::set<juce::String> unfoldedGroups;              // by SnapshotGroup::since
+    std::optional<juce::String> selectedGroup;          // the group whose row is selected, by the same
+    juce::String changesFollow;                         // the version the changes' row's line goes to
+    const SnapshotInfo* getRowSnapshot (int row) const; // an automatic save's row's
+    const SnapshotGroup* getRowGroup (int row) const;   // a group's own row's
     juce::String openedVersion;
     std::vector<VersionChange> openedChanges;
     const VersionInfo* getRowVersion (int row) const;  // a version's row's version (not a line's under it)
@@ -219,7 +248,7 @@ private:
     TintedIcon trackIcon { Icon::sound }, masterIcon { Icon::effect }, songIcon { Icon::song };
     TintedIcon discardIcon { Icon::undo };
     TintedIcon openIcon { Icon::expanded }, foldedIcon { Icon::folded };
-    TintedIcon clockIcon { Icon::recent }; // a snapshot of Local History's
+    TintedIcon clockIcon { Icon::recent }; // an automatic save's
     TintedIcon redoIcon { Icon::redo };    // an undone step of Undo History's, which Redo would do again
 
     // The history's lines, from a row to the row of a version it follows: down the column of the newer row's branch, turning
@@ -236,7 +265,7 @@ private:
     std::vector<HistoryLine> historyLines;
 
     void refresh(); // what the model holds now
-    void refreshHistoryLines (const juce::String& nowFollows);
+    void refreshHistoryLines();
 
     // The field as typed, the model's draft: its first line the name, the rest the note. And the draft as one text, and as it
     // was when the view last took or showed it, so that the view shows the draft again only when it changed in the model.
@@ -251,7 +280,12 @@ private:
     juce::Colour getBranchColour (const juce::String& branchID) const;
     juce::String getBranchName (const juce::String& branchID) const;
 
-    void projectChanged() override { refresh(); }
+    void projectChanged() override
+    {
+        unfoldedGroups.clear(); // another project's
+        selectedGroup.reset();
+        refresh();
+    }
     void versionsChanged() override { refresh(); }
     void songChanged (const SongChanges& changed) override
     {

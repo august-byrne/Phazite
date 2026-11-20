@@ -32,7 +32,7 @@ Changed your mind? A line's arrow (**Discard Changes**) makes that track what th
 - **The whole song:** right-click the version and choose **Restore This Version**.
 - **Compare first:** right-click a version and choose **Compare with the Song** to list what differs from the song now, each line with its own arrow. **Done** goes back to the changes.
 
-Each restore is one undo step, so Ctrl+Z takes it back, and restoring the whole song keeps the song as it was in Local History first. Every version stays in the history, so nothing is lost by going back. Save a version afterwards to keep the song as it is now.
+Each restore is one undo step, so Ctrl+Z takes it back, and restoring the whole song keeps the song as it was as an automatic save first (below). Every version stays in the history, so nothing is lost by going back. Save a version afterwards to keep the song as it is now.
 
 To rename a version, for example to mark the one you sent to the label, right-click it and choose **Rename Version...**.
 
@@ -57,19 +57,23 @@ A **branch** is an alternate version of the song, such as a radio edit, a remix 
 
 Nothing you take off a branch is gone at once. A version you undid, and a branch you deleted with its versions and the changes left on it, are offered for 30 days by **Recover Lost Versions...** (in the **...** menu), which lists them newest first, each with when and why it went: "Undone on 12 Nov, from main", "On idea-3, deleted on 14 Nov, with the changes left on it". Click one to bring it back as a branch, named after the one it was on ("idea-3 (recovered)"). Switch to it, and the song is as you left it there.
 
-After 30 days, they are no longer listed. This version of Phazite still keeps them in the project's `Versions` folder, with their bounces: nothing there is deleted yet, so the folder only grows.
+After 30 days, they are no longer listed. Phazite still keeps them in the project's `Versions` folder, with their bounces: it deletes nothing there by itself, so the folder only grows. A command that frees that room by hand, listing what it would remove, is planned.
 
-## Local History: saved without asking
+## Automatic saves: a history without asking
 
-While the song differs from its last version, Phazite keeps snapshots of it without asking. It takes one:
+You don't have to save versions to have a history. While the song differs from its last version, Phazite keeps it as it was, without asking. It takes an automatic save:
 
 - when the project opens;
 - every 10 minutes while you work;
 - just before anything that replaces the song, such as a restore, discarding every change, or a merge.
 
-Open **Local History** near the bottom of the view. Each row's arrow makes the song what it was then, as one undo step. The list shows snapshots of the last 30 days, fewer as they grow older.
+They show in **History**, in grey, between the versions, by when each was taken: with a clock, why it was taken ("Auto-saved", "Before Restore") and when. Several between two versions fold into one row ("6 automatic saves"): click it to unfold them, and again to fold them. Point at one and click its arrow to make the song what it was then, as one undo step.
 
-**Undo History**, at the very bottom, lists each change you made since the project opened, newest first, by name ("Move Clip", "Change Volume"). The one the song is at says "now". Click an older change to go back to it, as if you had pressed Undo that many times; the undone changes stay in the list, dimmed, until a new change clears them.
+Saving a version, then, is naming a point of that history: one you want to find again, compare with, or branch from.
+
+Phazite lists every automatic save of the last two hours, then one an hour for a day, then one a day for 30 days. To see the versions alone, untick **Show Automatic Saves** in the **...** menu.
+
+**Undo History**, at the very bottom and folded until you click it, lists each change you made since the project opened, newest first, by name ("Move Clip", "Change Volume"). The one the song is at says "now". Click an older change to go back to it, as if you had pressed Undo that many times; the undone changes stay in the list, dimmed, until a new change clears them.
 
 ## Newer versions
 
@@ -92,6 +96,6 @@ Each computer writes files of its own into the project's `Versions` folder, so t
 
 - **A version that can't be read:** if a piece of the branch's last version is missing or damaged in the project's `Versions` folder (a sync that hasn't finished, a disk error), the view says so and names the newest version of the branch that reads. No version is saved on top of the damaged one. Choose **Reset Branch to Last Readable Version** (in the **...** menu) to take the branch back to it: the song stays as it is, and its changes since that version show as usual. If the damaged version's pieces arrive within 30 days, **Recover Lost Versions...** brings it back.
 - **The version the song grew from can't be read** (damaged, or not synced yet): the view says so once, and the changes are shown against the branch's newest version instead. Nothing of the song is lost.
-- **Verify History** (in the **...** menu) reads every piece of the history, every version's song, and the songs Local History and your branches keep, and checks that the audio files every version plays are still there and unchanged. It says which version misses which file ("Audio/Kick.wav missing", "changed since", "can't be read"), what is damaged, which versions follow one that can't be read, and which versions no branch holds, which **Recover Lost Versions...** then lists too. Checking the audio takes a while on a big project: the view shows how far it has come, and choosing **Verify History** again (now **Stop Verifying History**) stops it. Saving a version, switching branches or anything else that reads a version stops it too, rather than waiting for it, and the view then says it was stopped, never that the history is whole.
+- **Verify History** (in the **...** menu) reads every piece of the history, every version's song, and the songs the automatic saves and your branches keep, and checks that the audio files every version plays are still there and unchanged. It says which version misses which file ("Audio/Kick.wav missing", "changed since", "can't be read"), what is damaged, which versions follow one that can't be read, and which versions no branch holds, which **Recover Lost Versions...** then lists too. Checking the audio takes a while on a big project: the view shows how far it has come, and choosing **Verify History** again (now **Stop Verifying History**) stops it. Saving a version, switching branches or anything else that reads a version stops it too, rather than waiting for it, and the view then says it was stopped, never that the history is whole.
 - **A file that doesn't read whole:** if a file of the history that says what it keeps doesn't read whole, Phazite says so where Verify History says what it found: "Phazite is keeping everything in the Versions folder, because ...".
 - Versions don't copy your audio: they name the files in the project's `Audio` folder. **Clean Up Unused Audio...** never offers a file that a version you can still get back plays.

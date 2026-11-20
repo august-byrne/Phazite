@@ -130,10 +130,12 @@ TEST_CASE ("A search filters the settings by their names, descriptions and group
     SettingsScreen s;
     const auto all = s.getShownTitles();
 
+    // Both settings that words beginning so name: the project's Auto Save, and the history's automatic saves.
     s.panel.search ("auto save");
-    CHECK (s.getShownTitles() == juce::StringArray ("Auto Save"));
-    CHECK (s.panel.getListedGroups() == juce::StringArray (SettingsPanel::files));
+    CHECK (s.getShownTitles() == juce::StringArray { "Auto Save", "Show Automatic Saves" });
+    CHECK (s.panel.getListedGroups() == juce::StringArray { SettingsPanel::files, SettingsPanel::versions });
     CHECK (s.panel.getCount (SettingsPanel::files) == 1);
+    CHECK (s.panel.getCount (SettingsPanel::versions) == 1);
     CHECK_FALSE (s.panel.showsNoResults());
 
     // By description, and by group.
@@ -233,12 +235,14 @@ TEST_CASE ("A preference switched in a menu shows in its row at once, as the men
     auto* overdub = dynamic_cast<juce::Button*> (s.row ("Overdub").getControl());
     auto* autoSave = dynamic_cast<juce::Button*> (s.row ("Auto Save").getControl());
     auto* bounce = dynamic_cast<juce::Button*> (s.row ("Bounce Each Version").getControl());
+    auto* automatic = dynamic_cast<juce::Button*> (s.row ("Show Automatic Saves").getControl());
     REQUIRE (overdub != nullptr);
     REQUIRE (autoSave != nullptr);
     REQUIRE (bounce != nullptr);
+    REQUIRE (automatic != nullptr);
 
     for (const auto& [command, button] : { std::pair { "transport.overdub", overdub }, std::pair { "project.autoSave", autoSave },
-                                           std::pair { "version.bounceEach", bounce } })
+                                           std::pair { "version.bounceEach", bounce }, std::pair { "version.showAutomatic", automatic } })
     {
         INFO (juce::String (command).toStdString());
         const auto ticked = [&s, command = juce::String (command)] { return s.screen.registry.find (command)->isTicked(); };

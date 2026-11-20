@@ -110,6 +110,8 @@ public:
     // Bounce Each Version, in Save Version's menu (ui/versions/VersionsView.h); and Auto Save (File > Auto Save, as VS Code's: a
     // saved project saves itself a moment after each change, app/ProjectSession.h).
     static constexpr BoolSetting versionBounce { "phaziteVersionBounce", false, SaveTiming::now };
+    // Show Automatic Saves, in the Versions view's menu: whether its history lists the automatic saves between the versions.
+    static constexpr BoolSetting versionShowAutomatic { "phaziteVersionShowAutomatic", true, SaveTiming::now };
     static constexpr BoolSetting autoSave { "phaziteAutoSave", true, SaveTiming::now };
 
     // How many steps each project's undo history keeps (model/base/Song.h: setUndoSteps(), which keeps it from 10 to

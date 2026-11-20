@@ -189,7 +189,7 @@ The project's versions ([docs/design/versions.md](../../docs/design/versions.md)
 
 | File | What it holds |
 |---|---|
-| `VersionsView.*` | The Versions view in the left panel. The branch, with its menu; a version saved with its name and note; the changes since the last one, by track (or a merge's lines, what it will take whole, then its conflicts, each switched between its three values); the history of every branch's versions, each on its branch's line, a version opened by a click to show what it changed, each line restorable from it, and heard by a double-click. Then Local History, the song as it was while it differed from its last version; then Undo History, the song's undo steps, a click going back or forth to one. |
+| `VersionsView.*` | The Versions view in the left panel. The branch, with its menu; a version saved with its name and note; the changes since the last one, by track (or a merge's lines, what it will take whole, then its conflicts, each switched between its three values); the history of every branch's versions, each on its branch's line, a version opened by a click to show what it changed, each line restorable from it, and opened in the song's place by a double-click; between the versions, the automatic saves (the song as it was while it differed from its last version), folded into a row where there are several. Then Undo History, the song's undo steps, a click going back or forth to one. |
 | `BranchPicker.*` | The versions' quick inputs: Switch Branch..., Rename Branch..., Merge Branch..., Delete Branch... and Rename Version.... |
 
 ## shell/

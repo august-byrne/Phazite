@@ -94,6 +94,7 @@ public:
     // Each Version, as the settings keep it, for the song open now too.
     void showBranchPicker (BranchPicker::Mode);
     void toggleBounceEachVersion();
+    void toggleShowAutomaticSaves(); // the history's automatic saves shown or not, as the settings keep it
 
     // Adds the commands for panels, layouts and the palette (the "view." commands), the plug-in picker, the branch picker,
     // and saving presets, which the browser shows.

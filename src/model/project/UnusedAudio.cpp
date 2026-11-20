@@ -150,7 +150,7 @@ juce::String getWhyNotCleanUpAudio (const ProjectContext& context)
         return "Phazite is still reading the project's versions.";
 
     if (history != nullptr && history->isWriting())
-        return "Not while a version or a snapshot of Local History is being written: it may hold files the Versions folder "
+        return "Not while a version or an automatic save is being written: it may hold files the Versions folder "
                "doesn't name yet.";
 
     return {};

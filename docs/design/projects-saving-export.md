@@ -14,7 +14,7 @@ DAWproject for another DAW. A project's history of versions is in [versions.md](
 | A new project untitled until its first save | Built | |
 | Save, Save Project As | Built | |
 | Files written whole or not at all | Built | |
-| Backups of the project file | Built | Kept by age, as Local History is |
+| Backups of the project file | Built | Kept by age, as the versions' automatic saves are |
 | Auto Save | Built | On by default, for a project that has been saved once |
 | Autosave for a crash, and restoring it | Built | |
 | A project file that can't be read: its backup or its last version offered | Built | |
@@ -156,7 +156,7 @@ that can't be read.
 - **By when it was saved:** each backup is named and dated by when its version was saved ("*project*
   2026-11-17 14-02-00", with "_2" and on for more of one second). Only files so named are the project's backups:
   anything else in `Backups/` is left alone, and never offered in the project's place.
-- **How long:** as Local History ([versions.md](versions.md#local-history)): every backup of the last two hours, then
+- **How long:** as the automatic saves ([versions.md](versions.md#automatic-saves)): every backup of the last two hours, then
   the newest of each hour for a day, then the newest of each day for 30 days. So a day's work leaves backups from an
   hour, a day and a week before.
 - **And the one before that:** the newest backup older than 30 days is kept too. A backup's age is its version's, so
@@ -377,7 +377,7 @@ is, or the version selected in the history, into the project's `Renders` folder 
 - A project is a folder, not a single file, so that recordings and renders have a place and the song stays small.
 - A new project is untitled until its first save asks where it goes, so that starting a song asks nothing.
 - Auto Save is on by default, and a project keeps versions from its start, so that work is neither lost nor needs
-  remembering. Backups are made at most every 10 minutes under Auto Save, and kept by age on Local History's schedule,
+  remembering. Backups are made at most every 10 minutes under Auto Save, and kept by age on the automatic saves' schedule,
   so that they reach back a month and there is one rule to learn; a count of ten turned over in under two hours.
 - Files are written whole or not at all, with a flush to the disk, because a failed write must never leave a cut
   file where a whole one was, nor pass for one that worked.

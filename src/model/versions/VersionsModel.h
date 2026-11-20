@@ -390,23 +390,25 @@ std::optional<float> getBounceProgress (const ProjectContext&, const juce::Strin
 juce::String getBounceProblem (const ProjectContext&);
 
 //==============================================================================
-// Local History (docs/design/versions.md: Local History), as VS Code's and JetBrains' keep a file's saves: the song as it was at
-// times while it differed from its last version, taken without asking (as the project opens with changes, every few minutes
-// while it changes, and before Restore This Version, Discard All Changes, a merge taken or a snapshot restored), kept in
-// the project's Versions folder on this computer, newest first, thinned as they grow old. Each restored as one undo step,
-// the song as it is taken first.
+// The automatic saves (docs/design/versions.md: Automatic saves; in the code and the format, Local History and its snapshots),
+// as Figma's and Google Docs' histories keep them beside the versions that were named: the song as it was at times while it
+// differed from its last version, taken without asking (as the project opens with changes, every few minutes while it
+// changes, and before Restore This Version, Discard All Changes, a merge taken or an automatic save restored), kept in the
+// project's Versions folder on this computer, newest first, thinned as they grow old. The history shows them between the
+// versions (ui/versions/VersionsView.h). Each restored as one undo step, the song as it is taken first.
 struct SnapshotInfo
 {
-    juce::int64 time = 0; // when it was taken, which names it
-    juce::String branch;  // the name of the branch the song was on, none for one deleted since
-    juce::String reason;  // why it was taken, as the view says it: "Auto-saved", "Before Restore"
+    juce::int64 time = 0;  // when it was taken, which names it
+    juce::String branch;   // the name of the branch the song was on, none for one deleted since
+    juce::String reason;   // why it was taken, as the view says it: "Auto-saved", "Before Restore"
+    juce::String branchID; // that branch, whose line the history shows it on: none for one deleted since
 };
 
 std::vector<SnapshotInfo> getSnapshots (const ProjectContext&);
-bool restoreSnapshot (ProjectContext&, juce::int64 time); // "Restore Local History of 14:02"
+bool restoreSnapshot (ProjectContext&, juce::int64 time); // "Restore the Automatic Save of 14:02"
 
 // The snapshot the Versions view selects (0 for none), which version.restoreSnapshot restores: what it is called now, and
-// whether it can.
+// whether it can. They are rows of one list: selecting a version (selectVersion(), selectVersionChange()) selects no snapshot.
 void selectSnapshot (ProjectContext&, juce::int64 time);
 juce::int64 getSelectedSnapshot (const ProjectContext&);
 juce::String describeRestoreSnapshot (const ProjectContext&);

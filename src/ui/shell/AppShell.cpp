@@ -680,6 +680,12 @@ void AppShell::toggleBounceEachVersion()
     setBounceWithVersion (projectContext, bounces);
 }
 
+void AppShell::toggleShowAutomaticSaves()
+{
+    settings.set (Settings::versionShowAutomatic, ! settings.get (Settings::versionShowAutomatic));
+    versionsView.showAutomaticSavesChanged();
+}
+
 void AppShell::showPluginPicker()
 {
     PluginPicker::show (library, titleBar.getSearchBox(),
@@ -1380,6 +1386,15 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .synonyms = { "bounce", "render", "audio", "with a bounce", "mixdown" },
                     .perform = [this] { toggleBounceEachVersion(); },
                     .isTicked = [this] { return settings.get (Settings::versionBounce); } });
+
+    registry.add ({ .id = "version.showAutomatic",
+                    .name = "Show Automatic Saves",
+                    .category = "Versions",
+                    .description = "Lists the automatic saves in the history, between the versions: the song as it was at times "
+                                   "while it had changes, kept without asking. Off, the history lists the versions alone.",
+                    .synonyms = { "local history", "autosave", "auto save", "snapshots", "named versions only", "filter", "hide" },
+                    .perform = [this] { toggleShowAutomaticSaves(); },
+                    .isTicked = [this] { return settings.get (Settings::versionShowAutomatic); } });
 
     registry.add ({ .id = "device.add",
                     .name = "Add Instrument or Effect",

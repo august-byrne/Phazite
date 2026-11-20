@@ -1201,11 +1201,11 @@ TEST_CASE (
     // Restored: the change back, one undo step.
     phazite::selectSnapshot (s.context, snapshots.front().time);
     REQUIRE (phazite::canRestoreSelectedSnapshot (s.context));
-    CHECK (phazite::describeRestoreSnapshot (s.context).startsWith ("Restore Local History of "));
+    CHECK (phazite::describeRestoreSnapshot (s.context).startsWith ("Restore the Automatic Save of "));
     commands.run ("version.restoreSnapshot");
     REQUIRE (waitForVersionHistory (s.context));
     CHECK (phazite::getChannelVolume (song, bass) == doctest::Approx (-6.0f));
-    CHECK (phazite::describeUndo (&song).startsWith ("Undo Restore Local History of "));
+    CHECK (phazite::describeUndo (&song).startsWith ("Undo Restore the Automatic Save of "));
 
     // Restore from a commit keeps the song as it is first.
     phazite::setChannelVolume (song, bass, -9.0f);
