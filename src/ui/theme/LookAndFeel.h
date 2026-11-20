@@ -7,6 +7,17 @@
 
 namespace phazite::ui
 {
+// Colours Phazite's look takes from a control where they are set on it (setThemeColour()), beyond JUCE's own IDs: a tick box's
+// fill and edge (with an edge set, it doesn't brighten under the pointer, as VS Code's settings' tick boxes don't), and a
+// number field's edge (ui::NumberField, whose fill is juce::Slider::textBoxBackgroundColourId). The settings' controls take
+// the settings' colours so (ui/shell/SettingsPanel.h).
+enum ColourIds
+{
+    tickBoxFillColourId = 0x7fa50001,
+    tickBoxEdgeColourId = 0x7fa50002,
+    numberFieldEdgeColourId = 0x7fa50003
+};
+
 // Phazite's look: the design tokens applied to JUCE's components, and the Inter typeface; JUCE's controls drawn as VS Code's
 // Modern UI draws its own (docs/vscode-look.md). While it lives (the app's, for the whole session), it keeps every one of
 // JUCE's standard mouse pointers: JUCE keeps a pointer only while something holds it, so a view that switches between two (a

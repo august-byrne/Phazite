@@ -41,13 +41,14 @@ The base controls and what the left panel's views share.
 | `ViewTitle.*` | The title along a side panel view's top, with its actions (as VS Code's side bar): the left panel's views', and the inspector's, which names what it shows. |
 | `SectionHeader.*` | A section's header that folds it: a group's row or a pane's, with its count's badge. |
 | `ListRowHover.h` | Which row of a list is under the pointer. |
+| `ModalCard.*` | A card over the whole window, as VS Code's modal editor: the window dimmed behind it, its header (icon, title, Maximize, Close), its size following the window's; modal while it shows, its keys kept in it (the settings show in one: `AppShell::showModal()`). Two siblings in the window: a see-through backdrop and the card's opaque part in front of it, so that a repaint in the card paints nothing behind it. |
 
 ## input/
 
 | File | What it holds |
 |---|---|
 | `CommandBridge.*` | The commands as JUCE's menus and key mappings see them, and the user's changes to their keys. |
-| `KeyDispatcher.*` | The keys that run commands: priorities, held keys, the Shift rule, keys over plug-in windows, keys on other layouts. |
+| `KeyDispatcher.*` | The keys that run commands: priorities, held keys, the Shift rule, keys over plug-in windows and over the settings' card, keys on other layouts. |
 | `KeyShares.*` | What else a key does, as the shortcuts editor says it: the other commands it runs, which runs when, the computer keyboard's notes. |
 | `KeyboardLayout.*` | The keys by their places, and what the layout in use types at each (JUCE workarounds W47, W48). |
 | `Keymap.*` | The keymaps. |
@@ -214,7 +215,7 @@ The window's content and everything around the views.
 | `CommandPalette.*` | The command palette. |
 | `Panels.*` | The two areas of views, one over the other, their tabs drawn as VS Code's editor tabs and the shown editor's tools after a line beside them: by default the Playlist and Mixer tabs over the clip editor's tab (which shows the piano roll or the audio clip editor as the selection asks) and the Instrument and Effects tabs (the Devices view's two pages). Each view moves between the areas by its tab, and the settings keep where. |
 | `PanelLayout.*` | Which panels show, which one fills the window and their sizes, with the buttons in each panel's corner. |
-| `SettingsPanel.*` | The Settings window, as VS Code's Settings editor: a search, the table of contents and one list of every setting under its group's title, each a row with its control, its modified line and Reset Setting; the Audio rows set the device through the engine context; Shortcuts is a page of its own. |
+| `SettingsPanel.*` | The Settings, as VS Code's Settings editor, in the window's modal card: a search with its count, Clear and Filter (@modified), the table of contents beside a sash and one list of every setting under its group's title, each a row with its control in the settings' colours, its modified line and Reset Setting; the Audio rows set the device through the engine context; Shortcuts is a page of its own. |
 | `ShortcutsEditor.*` | The Shortcuts page's list, as VS Code's Keyboard Shortcuts editor: search by name or key, the keys of every command, changed in a card that says what else a key does. |
 | `Welcome.*` | The welcome window. |
 | `NewProjectPanel.*` | The new-project window. |

@@ -1056,6 +1056,49 @@ void AppShell::keepOverlaysInFront()
     lessonCard.toFront (false);
     deviceNotices.toFront (false);
     notices.toFront (false);
+
+    if (modal != nullptr)
+        modal->keepInFront(); // its backdrop too
+}
+
+ModalCard& AppShell::showModal (std::unique_ptr<juce::Component> content, const juce::String& title, Icon icon)
+{
+    closeModal();
+
+    // The keys held now go up under the card, which takes their releases: the notes they play end, the tools spring back.
+    computerKeyboard.releaseAll();
+    shortcutKeys.releaseHeldKeys();
+
+#if JUCE_WINDOWS
+    const auto titleBarHeight = Shell::titleBarHeight; // Phazite's own title bar, which the card dims and keeps clear of
+#else
+    const auto titleBarHeight = 0; // the system draws it, above this
+#endif
+
+    modal = std::make_unique<ModalCard> (
+        std::move (content),
+        ModalCard::Options { .title = title,
+                             .icon = icon,
+                             .titleBarHeight = titleBarHeight,
+                             .passKey = [this] (const juce::KeyPress& key) { return shortcutKeys.keyPressedOverModal (key); },
+                             .keysChanged = [this] (bool isKeyDown) { shortcutKeys.keyStateChanged (isKeyDown, nullptr); },
+                             .onClose = [this] { closeModal(); },
+                             .closeWindow = [this] { commands.invoke ("app.quit"); } }); // as closing the window
+    addAndMakeVisible (*modal); // it covers this, its backdrop behind it, as this is resized
+    keepOverlaysInFront();
+    modal->open();
+    return *modal;
+}
+
+void AppShell::closeModal()
+{
+    if (modal == nullptr)
+        return;
+
+    // Called from the card's own Close, Escape or press: it goes as this returns.
+    const auto closing = std::move (modal);
+    closing->finish();
+    removeChildComponent (closing.get());
 }
 
 void AppShell::placeNotices()
@@ -1120,6 +1163,10 @@ void AppShell::setEdgeInset (int inset)
 
 juce::Component::WindowControlKind AppShell::getWindowControlAt (juce::Point<int> point) const
 {
+    // Under a modal card, the title bar is the card's backdrop, which a press closes: neither the caption nor its buttons.
+    if (modal != nullptr)
+        return juce::Component::WindowControlKind::client;
+
     return titleBar.getControlAt (point - titleBar.getPosition());
 }
 

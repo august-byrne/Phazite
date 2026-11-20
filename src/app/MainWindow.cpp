@@ -295,7 +295,6 @@ MainWindow::~MainWindow()
     delete renderWindow.getComponent();
     delete progressionsWindow.getComponent();
     delete cleanUpWindow.getComponent();
-    delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
     delete welcomeWindow.getComponent();
     delete aboutWindow.getComponent();
@@ -750,34 +749,25 @@ void MainWindow::addCommands()
 //==============================================================================
 void MainWindow::showSettings (std::optional<juce::String> group)
 {
-    if (settingsWindow != nullptr)
+    // In a card over the window, as VS Code's Settings in its modal editor (ui/components/ModalCard.h); asked again while it
+    // shows, it goes to the group.
+    if (settingsPanel != nullptr)
     {
-        if (group.has_value() && settingsPanel != nullptr)
+        if (group.has_value())
             settingsPanel->showGroup (*group);
 
-        settingsWindow->toFront (true);
         return;
     }
 
     ui::SettingsPanel::Actions actions;
     actions.chooseKeymap = [this] (const juce::String& name) { setKeymap (name); };
     actions.setInterfaceScale = [this] (float scale) { setInterfaceScale (scale); };
-    auto* panel = new ui::SettingsPanel (services.engineContext, commands, computerKeyboard, session.getContext(), services.settings,
-                                         std::move (actions));
-    panel->setSize (ui::SettingsTint::windowWidth, ui::SettingsTint::windowHeight);
-    panel->showGroup (group.value_or (ui::SettingsPanel::audio));
-    settingsPanel = panel;
-
-    juce::DialogWindow::LaunchOptions o;
-    o.dialogTitle = "Settings";
-    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.componentToCentreAround = this;
-    o.content.setOwned (panel);
-
-    settingsWindow = launch (o);
+    auto panel = std::make_unique<ui::SettingsPanel> (services.engineContext, commands, computerKeyboard, session.getContext(),
+                                                      services.settings, std::move (actions));
+    auto& shown = *panel;
+    settingsPanel = panel.get();
+    shell->showModal (std::move (panel), "Settings", ui::Icon::settings);
+    shown.showGroup (group.value_or (ui::SettingsPanel::audio));
 }
 
 void MainWindow::showWelcome (ui::WelcomePanel::Page page)

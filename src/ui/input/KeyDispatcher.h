@@ -75,6 +75,11 @@ public:
     // in the song, its history or its files. Whether it ran one.
     bool keyPressedWhileHeld (const juce::KeyPress&);
 
+    // While a modal card shows over the window (the settings: ui/components/ModalCard.h), whose controls take the keys first:
+    // runs the key's command only if it is one that also runs over VS Code's modal editor, named in KeyDispatcher.cpp (the
+    // commands that open the settings at a group, Full Screen, the interface's size, Save and Quit). Whether it ran one.
+    bool keyPressedOverModal (const juce::KeyPress&);
+
     // Forgets the held keys, as if they were let go: when the window loses the keyboard, their release goes
     // elsewhere.
     void releaseHeldKeys();

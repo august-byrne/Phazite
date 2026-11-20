@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Settings window's Audio group (src/ui/shell/SettingsPanel.h): what it says of delay, about the output, the song's delay
+// The Settings' Audio group (src/ui/shell/SettingsPanel.h): what it says of delay, about the output, the song's delay
 // compensation, low latency and Bluetooth (docs/design.md, section 20); and its rows, which open the device through the
 // engine context (model/engine/EngineContext.h), on the tests' own device (TestAudioDevice.h), never the computer's.
 #include "AppScreen.h"
@@ -88,13 +88,14 @@ struct OpenDevice
     static juce::AudioDeviceManager& devices() { return phazite::test::getEngineContext().getAudioDeviceManager(); }
 };
 
-// The settings over the whole window's services and commands (AppScreen.h), as the main window shows them.
+// The settings over the whole window's services and commands (AppScreen.h), as the main window shows them, as large as its
+// card holds them in a window of 1280 by 800 (SettingsModalTests.cpp).
 struct SettingsScreen
 {
     phazite::test::AppScreen screen;
     phazite::ui::SettingsPanel panel { screen.services.engineContext, screen.commands,          screen.keyboard,
                                        screen.session.getContext(),   screen.services.settings, {} };
-    phazite::test::TestWindow window { panel, phazite::ui::SettingsTint::windowWidth, phazite::ui::SettingsTint::windowHeight };
+    phazite::test::TestWindow window { panel, 1022, 570 };
 
     phazite::ui::SettingRow& row (const juce::String& title)
     {

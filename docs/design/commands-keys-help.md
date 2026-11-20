@@ -327,7 +327,7 @@ Help > Lessons, and the welcome window's last page, start one of five short less
   `TextFieldRelease.h`; `KeyShares.h` (what else a key does, as the shortcuts editor says it).
 - `src/model/arrangement/internal/Clipboard.h`: Cut, Copy and Paste.
 - `src/app/MainWindow.cpp`: the menu bar (`getMenuForIndex()`); `src/ui/shell/ActivityBar.h`: the gear's menu.
-- `src/ui/shell/CommandPalette.h`, `SettingsPanel.h` and `ShortcutsEditor.h` (the Settings window's Shortcuts page), `HintBar.h`,
+- `src/ui/shell/CommandPalette.h`, `SettingsPanel.h` and `ShortcutsEditor.h` (the Settings' Shortcuts page), `HintBar.h`,
   `Lessons.h`, `LessonCard.h`.
 - `tests/golden/commands/app-catalogue.txt`: every command the app registers, in order, with its keys.
 - Tests: `tests/CommandTests.cpp`, `CommandGoldenTests.cpp`, `ShortcutTests.cpp`, `ShortcutsEditorTests.cpp`, `WindowKeysTests.cpp`,

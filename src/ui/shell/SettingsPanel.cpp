@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -89,6 +90,36 @@ namespace
         auto words = juce::StringArray::fromTokens (text.toLowerCase(), " \t", {});
         words.removeEmptyStrings();
         return words;
+    }
+
+    // A control and what it holds in the settings' own colours, as VS Code's settings colour theirs (settings.dropdown*,
+    // settings.textInput* and numberInput*, settings.checkbox*), set again as the theme changes.
+    void takeSettingsColours (juce::Component& component)
+    {
+        if (auto* box = dynamic_cast<juce::ComboBox*> (&component))
+        {
+            setThemeColour (*box, juce::ComboBox::backgroundColourId, &Palette::settingsDropdown);
+            setThemeColour (*box, juce::ComboBox::outlineColourId, &Palette::settingsDropdownBorder);
+        }
+        else if (auto* tick = dynamic_cast<juce::ToggleButton*> (&component))
+        {
+            setThemeColour (*tick, tickBoxFillColourId, &Palette::checkbox);
+            setThemeColour (*tick, tickBoxEdgeColourId, &Palette::checkboxBorder);
+            setThemeColour (*tick, juce::ToggleButton::tickColourId, &Palette::checkboxTick);
+        }
+        else if (auto* slider = dynamic_cast<juce::Slider*> (&component); slider != nullptr && slider->isBar())
+        {
+            setThemeColour (*slider, juce::Slider::textBoxBackgroundColourId, &Palette::settingsField);
+            setThemeColour (*slider, numberFieldEdgeColourId, &Palette::settingsFieldBorder);
+        }
+        else if (auto* field = dynamic_cast<juce::TextEditor*> (&component))
+        {
+            setThemeColour (*field, juce::TextEditor::backgroundColourId, &Palette::settingsField);
+            setThemeColour (*field, juce::TextEditor::outlineColourId, &Palette::settingsFieldBorder);
+        }
+
+        for (auto* child : component.getChildren())
+            takeSettingsColours (*child);
     }
 
     const juce::StringArray themeValues { "dark", "light", "highContrast", "system" }; // as Settings::theme keeps them
@@ -239,6 +270,7 @@ void SettingRow::setControl (std::unique_ptr<juce::Component> newControl, int wi
 {
     control = std::move (newControl);
     controlWidth = width;
+    takeSettingsColours (*control);
     addAndMakeVisible (*control);
     controlsChanged();
 }
@@ -277,9 +309,19 @@ bool SettingRow::matches (const juce::StringArray& words) const
     return true;
 }
 
+void SettingRow::setLeftInset (int inset)
+{
+    if (inset != leftInset)
+    {
+        leftInset = inset;
+        resized();
+        repaint();
+    }
+}
+
 juce::Rectangle<int> SettingRow::getContents() const
 {
-    return getLocalBounds().reduced (SettingsTint::rowInset, 0);
+    return getLocalBounds().withTrimmedLeft (leftInset).withTrimmedRight (SettingsTint::rowInset);
 }
 
 int SettingRow::getTextHeight (const juce::String& text, int width) const
@@ -301,7 +343,7 @@ juce::Rectangle<int> SettingRow::getDescriptionArea() const
 
 int SettingRow::getHeightForWidth (int width) const
 {
-    const auto textWidth = width - 2 * (SettingsTint::rowInset + SettingsTint::padSide);
+    const auto textWidth = width - leftInset - SettingsTint::rowInset - 2 * SettingsTint::padSide;
     auto height = SettingsTint::padTop + SettingsTint::lineHeight + SettingsTint::titleGap;
 
     if (switchRow)
@@ -350,19 +392,23 @@ void SettingRow::paint (juce::Graphics& g)
     const auto& p = getPalette (*this);
     const auto contents = getContents();
 
-    // Washed under the pointer, more with the keyboard focus, and then outlined (settings.rowHoverBackground,
-    // focusedRowBackground, focusedRowBorder).
-    if (focused)
+    // The row focused last washed, and outlined while the keyboard focus is in it; another under the pointer washed less
+    // (settings.focusedRowBackground, focusedRowBorder, rowHoverBackground).
+    if (focusedRow)
     {
         g.setColour (p.hover.withMultipliedAlpha (SettingsTint::focusWash));
         g.fillRect (contents);
-        g.setColour (p.focus);
-        g.drawRect (contents, 1);
     }
     else if (hovered)
     {
         g.setColour (p.hover.withMultipliedAlpha (SettingsTint::hoverWash));
         g.fillRect (contents);
+    }
+
+    if (focusedRow && focused)
+    {
+        g.setColour (p.focus);
+        g.drawRect (contents, 1);
     }
 
     // Changed from its default: the line at its left.
@@ -376,10 +422,14 @@ void SettingRow::paint (juce::Graphics& g)
                     contents.getHeight() - SettingsTint::modifiedTop - bottom);
     }
 
+    // "Audio: Driver", both semibold in the heading colour, the group fainter (setting-item-category).
     const auto inner = contents.reduced (SettingsTint::padSide, 0);
-    g.setColour (p.heading);
-    g.setFont (getNameFont());
-    g.drawText (title, inner.withY (SettingsTint::padTop).withHeight (SettingsTint::lineHeight), juce::Justification::centredLeft, true);
+    juce::AttributedString name;
+    name.setJustification (juce::Justification::centredLeft);
+    name.setWordWrap (juce::AttributedString::none);
+    name.append (group + ": ", getNameFont(), p.heading.withMultipliedAlpha (SettingsTint::groupAlpha));
+    name.append (title, getNameFont(), p.heading);
+    name.draw (g, inner.withY (SettingsTint::padTop).withHeight (SettingsTint::lineHeight).toFloat());
 
     const auto text = getDescriptionArea();
     drawLines (g, description, getBodyFont(), warning ? p.warning : p.text.withMultipliedAlpha (SettingsTint::descriptionAlpha), text);
@@ -410,11 +460,20 @@ void SettingRow::focusOfChildComponentChanged (FocusChangeType)
     if (has != focused)
     {
         focused = has;
-        gear->setVisible (reset != nullptr && isHighlighted());
         repaint();
 
         if (focused && onFocused != nullptr)
             onFocused (*this);
+    }
+}
+
+void SettingRow::setFocusedRow (bool isFocused)
+{
+    if (isFocused != focusedRow)
+    {
+        focusedRow = isFocused;
+        gear->setVisible (reset != nullptr && isHighlighted());
+        repaint();
     }
 }
 
@@ -443,6 +502,8 @@ void SettingRow::showMenu()
     if (menu.getNumItems() == 0)
         return;
 
+    ++menusShown;
+
     // From the gear, under it, as a menu a button drops; from a right-click or the keys, at the pointer or the row.
     if (gear->isMouseButtonDown() || gear->isMouseOver())
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (gear.get()));
@@ -469,7 +530,10 @@ void SettingRow::mouseUp (const juce::MouseEvent& e)
 
 bool SettingRow::keyPressed (const juce::KeyPress& key)
 {
-    if (key == juce::KeyPress (juce::KeyPress::F10Key, juce::ModifierKeys::shiftModifier, 0) && reset != nullptr)
+    // Shift+F9, as VS Code's settings; Shift+F10, Windows' own key for a context menu.
+    if ((key == juce::KeyPress (juce::KeyPress::F9Key, juce::ModifierKeys::shiftModifier, 0)
+         || key == juce::KeyPress (juce::KeyPress::F10Key, juce::ModifierKeys::shiftModifier, 0))
+        && reset != nullptr)
     {
         showMenu();
         return true;
@@ -484,7 +548,8 @@ std::unique_ptr<juce::AccessibilityHandler> SettingRow::createAccessibilityHandl
 }
 
 //==============================================================================
-// A group's title in the list (settings-group-title-label): big and semibold.
+// A group's title in the list (settings-group-title-label): big and semibold, in the middle of its row's first line (the
+// row's line, 1.4 em of the body text, as VS Code's group titles keep it), 42 px tall.
 class SettingsPanel::GroupTitle : public juce::Component
 {
 public:
@@ -496,11 +561,19 @@ public:
 
     static int getTitleHeight() { return 2 * SettingsTint::groupTitlePadding + SettingsTint::groupTitleLine; }
 
+    void setLeftInset (int inset)
+    {
+        if (std::exchange (leftInset, inset) != inset)
+            repaint();
+    }
+
     void paint (juce::Graphics& g) override
     {
+        const auto middle = (float) SettingsTint::groupTitlePadding + (float) SettingsTint::lineHeight / 2.0f;
+        const auto area = getLocalBounds().toFloat().withTrimmedLeft ((float) (leftInset + SettingsTint::groupTitleLeft));
         g.setColour (getPalette (*this).heading);
         g.setFont (juce::FontOptions (SettingsTint::groupTitleSize, juce::Font::bold));
-        g.drawText (getTitle(), getLocalBounds().withTrimmedLeft (SettingsTint::rowInset + SettingsTint::groupTitleLeft),
+        g.drawText (getTitle(), area.withY (middle - SettingsTint::groupTitleSize / 2.0f).withHeight (SettingsTint::groupTitleSize),
                     juce::Justification::centredLeft, true);
     }
 
@@ -508,6 +581,9 @@ public:
     {
         return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::staticText);
     }
+
+private:
+    int leftInset = SettingsTint::rowInset;
 };
 
 //==============================================================================
@@ -603,7 +679,7 @@ public:
         if (auto* last = find (shortcuts))
         {
             g.setColour (getPalette (*this).border);
-            g.fillRect (0, last->getY() - SettingsTint::tocSeparator - 1, getWidth() - SettingsTint::sideInset, 1);
+            g.fillRect (0, last->getY() - SettingsTint::tocSeparator - 1, getWidth() - Space::xs, 1); // as wide as the entries' outlines
         }
     }
 
@@ -735,6 +811,7 @@ namespace
                 {
                     auto* button = buttons.add (std::make_unique<juce::ToggleButton> (names[i]));
                     button->setTitle (names[i]);
+                    takeSettingsColours (*button);
                     button->onClick = [this, i, button]
                     {
                         if (onSwitch != nullptr)
@@ -776,6 +853,47 @@ struct SettingsPanel::AudioRows
 };
 
 //==============================================================================
+// Clear and Filter as VS Code's action bar takes the keys (actionbar.ts): Left and Right go from the one focused to the other
+// (going round; one that is off is never landed on), Space presses as Enter does.
+struct SettingsPanel::SearchButtonKeys : public juce::KeyListener
+{
+    explicit SearchButtonKeys (SettingsPanel& owner)
+        : panel (owner)
+    {
+    }
+
+    bool keyPressed (const juce::KeyPress& key, juce::Component* origin) override
+    {
+        auto* from = dynamic_cast<juce::Button*> (origin);
+
+        if (from == nullptr)
+            return false;
+
+        if (key == juce::KeyPress::spaceKey)
+        {
+            from->triggerClick();
+            return true;
+        }
+
+        if (key != juce::KeyPress::leftKey && key != juce::KeyPress::rightKey)
+            return false;
+
+        auto& other = from == &panel.clearButton ? static_cast<juce::Button&> (panel.filterButton) : panel.clearButton;
+
+        if (other.isEnabled())
+        {
+            other.setWantsKeyboardFocus (true);
+            other.grabKeyboardFocus();
+            from->setWantsKeyboardFocus (false);
+        }
+
+        return true;
+    }
+
+    SettingsPanel& panel;
+};
+
+//==============================================================================
 SettingsPanel::SettingsPanel (EngineContext& e, CommandBridge& c, ComputerKeyboard& keyboard, const ProjectContext& context, Settings& s,
                               Actions a)
     : engine (e),
@@ -786,37 +904,84 @@ SettingsPanel::SettingsPanel (EngineContext& e, CommandBridge& c, ComputerKeyboa
       actions (std::move (a))
 {
     setTitle ("Settings");
-    setOpaque (true);
+    setOpaque (true); // it paints the editor's background, so that a repaint here paints nothing behind it (ModalCard.h)
     const auto& p = getPalette (*this);
 
-    // The search, as VS Code's: its count at its right end while it searches.
+    // The search, as VS Code's, in the settings' field colours: its count at its right end while it searches, then Clear and
+    // Filter.
     searchField.setTitle ("Search settings");
     searchField.setDescription ("Shows only the settings whose name, description or group have each word typed");
     searchField.setTextToShowWhenEmpty ("Search settings", p.textMuted);
     searchField.setFont (getBodyFont());
     searchField.setIndents (Space::s - 2, (SettingsTint::searchHeight - (int) TextSize::body) / 2 - 1);
+    takeSettingsColours (searchField);
     searchField.onTextChange = [this] { search (searchField.getText()); };
 
-    // Escape clears a search; with none, it goes to the window, which closes.
+    // Escape clears a search and keeps the keys here, and with none does nothing: it never closes the settings, as in VS Code,
+    // where the search's Escape outranks the modal's.
     searchField.onEscapeKey = [this]
     {
-        if (searchField.isEmpty())
-        {
-            if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
-                top->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
-
-            return;
-        }
-
-        searchField.setText ({}, true);
+        if (! searchField.isEmpty())
+            search ({});
     };
     addAndMakeVisible (searchField);
 
-    countLabel.setFont (getBodyFont());
+    countLabel.setFont (juce::FontOptions (SettingsTint::countTextSize));
+    countLabel.setBorderSize ({});
     countLabel.setJustificationType (juce::Justification::centredRight);
     countLabel.setInterceptsMouseClicks (false, false);
     setThemeColour (countLabel, juce::Label::textColourId, &Palette::textMuted);
     addAndMakeVisible (countLabel);
+
+    // Clear and Filter: a press leaves the keys in the field, as VS Code's do; by the keys, one Tab stop after the field
+    // (resetSearchStop(), SearchButtonKeys).
+    searchButtonKeys = std::make_unique<SearchButtonKeys> (*this);
+
+    for (auto* button : { &clearButton, &filterButton })
+    {
+        button->setToolbarStyle (true);
+        button->setMouseClickGrabsKeyboardFocus (false);
+        button->setTooltip (button->getTitle());
+        button->addKeyListener (searchButtonKeys.get());
+        addAndMakeVisible (*button);
+
+        // The keys gone from both: the next Tab into them lands on Clear again, or on Filter while Clear is off.
+        button->onFocusLost = [this]
+        {
+            if (! clearButton.hasKeyboardFocus (false) && ! filterButton.hasKeyboardFocus (false))
+                resetSearchStop();
+        };
+    }
+
+    clearButton.setEnabled (false);
+    resetSearchStop();
+    clearButton.onClick = [this]
+    {
+        search ({});
+        searchField.grabKeyboardFocus();
+    };
+    filterButton.onClick = [this] { getFilterMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&filterButton)); };
+
+    // Contents, in the narrow layout (resized()), first in Tab's order.
+    contentsButton.setToolbarStyle (true);
+    contentsButton.setTooltip (contentsButton.getTitle());
+    contentsButton.setDescription ("Lists the groups of settings and Shortcuts, to go to one");
+    contentsButton.setExplicitFocusOrder (1);
+    contentsButton.onClick = [this] { getContentsMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&contentsButton)); };
+    addChildComponent (contentsButton);
+
+    // The sash between the table of contents and the list, at the width the settings keep.
+    if (const auto kept = settings.get (Settings::settingsContentsWidth); std::isfinite (kept))
+        contentsWidth = juce::jmax (SettingsTint::tocMinimumWidth, juce::roundToInt (kept));
+
+    sash.onDragStart = [this] { widthAtDragStart = shownContentsWidth; };
+    sash.onDrag = [this] (int distance) { setContentsWidth (widthAtDragStart + distance); };
+    sash.onDragEnd = [this] { settings.set (Settings::settingsContentsWidth, (double) contentsWidth); };
+    sash.onDoubleClick = [this]
+    {
+        setContentsWidth (SettingsTint::tocWidth);
+        settings.set (Settings::settingsContentsWidth, (double) contentsWidth);
+    };
 
     noResults.setText ("No Settings Found", juce::dontSendNotification);
     noResults.setFont (getBodyFont());
@@ -834,6 +999,7 @@ SettingsPanel::SettingsPanel (EngineContext& e, CommandBridge& c, ComputerKeyboa
 
     shortcutPage = std::make_unique<ShortcutSettings> (commands, computerKeyboard, actions.chooseKeymap);
     addChildComponent (*shortcutPage);
+    addAndMakeVisible (sash);
 
     addAudioRows();
     addMidiRows();
@@ -853,7 +1019,7 @@ SettingsPanel::SettingsPanel (EngineContext& e, CommandBridge& c, ComputerKeyboa
 
     for (auto& row : rows)
     {
-        row->onFocused = [this] (SettingRow& focusedRow) { scrollRowIntoView (focusedRow); };
+        row->onFocused = [this] (SettingRow& focused) { rowFocused (focused); };
         list->addAndMakeVisible (*row);
     }
 
@@ -865,6 +1031,9 @@ SettingsPanel::SettingsPanel (EngineContext& e, CommandBridge& c, ComputerKeyboa
 
 SettingsPanel::~SettingsPanel()
 {
+    for (auto* button : { &clearButton, &filterButton })
+        button->removeKeyListener (searchButtonKeys.get());
+
     engine.removeChangeListener (this);
     settings.removeListener (this);
 }
@@ -1160,7 +1329,7 @@ void SettingsPanel::updateMidi()
             row->refresh = [&button, isOn] { button.setToggleState (isOn(), juce::dontSendNotification); };
             row->isModified = [isOn] { return ! isOn(); }; // every MIDI input plays, until it is switched off
             row->reset = [this, id] { engine.setMidiInputOn (id, true); };
-            row->onFocused = [this] (SettingRow& focusedRow) { scrollRowIntoView (focusedRow); };
+            row->onFocused = [this] (SettingRow& focused) { rowFocused (focused); };
             list->addAndMakeVisible (*row);
             at = std::next (rows.insert (at, std::move (row)));
         }
@@ -1377,7 +1546,15 @@ void SettingsPanel::search (const juce::String& text)
     if (searchField.getText() != text)
         searchField.setText (text, false);
 
+    // The filter VS Code's Filter puts in its search, and the words.
     searchWords = getWords (text);
+    searching = ! searchWords.isEmpty();
+    modifiedOnly = searchWords.contains (modifiedFilter);
+    searchWords.removeString (modifiedFilter);
+    clearButton.setEnabled (text.isNotEmpty());
+
+    if (! clearButton.hasKeyboardFocus (false) && ! filterButton.hasKeyboardFocus (false))
+        resetSearchStop();
 
     if (onShortcuts)
     {
@@ -1405,7 +1582,7 @@ void SettingsPanel::showGroup (const juce::String& group)
     }
 
     // A group the search hides: the search goes.
-    if (getGroupTop (group) < 0 && ! searchWords.isEmpty())
+    if (getGroupTop (group) < 0 && searching)
         search ({});
 
     layOutList();
@@ -1477,6 +1654,7 @@ bool SettingsPanel::showsNoResults() const
 void SettingsPanel::layOutList()
 {
     const auto width = juce::jmax (0, listView->getWidth() - listView->getScrollBarThickness());
+    const auto leftInset = isNarrow() ? SettingsTint::narrowRowInset : SettingsTint::rowInset;
     auto y = 0;
     auto found = 0;
 
@@ -1484,18 +1662,20 @@ void SettingsPanel::layOutList()
     {
         auto count = 0;
         auto top = y + GroupTitle::getTitleHeight();
+        titles[i]->setLeftInset (leftInset);
 
         for (auto& row : rows)
         {
             if (row->group != groups[i])
                 continue;
 
-            const auto shown = row->isAvailable() && row->matches (searchWords);
+            const auto shown = row->isAvailable() && row->matches (searchWords) && (! modifiedOnly || row->isModifiedNow());
             row->setVisible (shown);
 
             if (! shown)
                 continue;
 
+            row->setLeftInset (leftInset);
             const auto height = row->getHeightForWidth (width);
             row->setBounds (0, top, width, height);
             top += height;
@@ -1503,7 +1683,7 @@ void SettingsPanel::layOutList()
         }
 
         titles[i]->setVisible (count > 0);
-        contents->show (groups[i], count > 0, searchWords.isEmpty() ? 0 : count);
+        contents->show (groups[i], count > 0, searching ? count : 0);
 
         if (count > 0)
         {
@@ -1517,14 +1697,140 @@ void SettingsPanel::layOutList()
     list->setSize (width, y);
     contents->resized();
 
-    const auto none = ! searchWords.isEmpty() && found == 0;
+    const auto none = searching && found == 0;
     noResults.setVisible (none && ! onShortcuts);
-    countLabel.setText (searchWords.isEmpty() ? juce::String()
-                        : found == 0          ? juce::String ("No Settings Found")
-                        : found == 1          ? juce::String ("1 Setting Found")
-                                              : juce::String (found) + " Settings Found",
+    countLabel.setText (! searching  ? juce::String()
+                        : found == 0 ? juce::String ("No Settings Found")
+                        : found == 1 ? juce::String ("1 Setting Found")
+                                     : juce::String (found) + " Settings Found",
                         juce::dontSendNotification);
+    placeSearchEnd();
     markGroupInView();
+}
+
+juce::String SettingsPanel::getCountText() const
+{
+    return countLabel.getText();
+}
+
+void SettingsPanel::placeSearchEnd()
+{
+    // Inside the field's right end, as VS Code's search-container-widgets: Filter, Clear before it, and the count before
+    // them, raised as its badge's padding raises it; the text typed stops before them.
+    const auto field = searchField.getBounds();
+    const auto size = SettingsTint::searchButtonSize, inset = SettingsTint::searchButtonInset;
+    filterButton.setBounds (field.getRight() - inset - size, field.getY() + inset, size, size);
+    clearButton.setBounds (filterButton.getX() - size, field.getY() + inset, size, size);
+
+    const auto text = countLabel.getText();
+    const auto textWidth = text.isEmpty() ? 0 : (int) std::ceil (juce::GlyphArrangement::getStringWidth (countLabel.getFont(), text));
+    const auto countRight = clearButton.getX() - SettingsTint::countGap;
+    countLabel.setBounds (countRight - textWidth, field.getY(), textWidth, field.getHeight() - SettingsTint::countRaise);
+    searchField.setBorder ({ 0, 0, 0, field.getRight() - (text.isEmpty() ? clearButton.getX() : countLabel.getX()) });
+}
+
+juce::PopupMenu SettingsPanel::getFilterMenu()
+{
+    // As VS Code's Filter's menu, of which Phazite has the one filter that means something here.
+    juce::PopupMenu menu;
+    juce::PopupMenu::Item item ("Modified");
+    item.action = [safeThis = juce::Component::SafePointer<SettingsPanel> (this)]
+    {
+        if (safeThis != nullptr)
+            safeThis->addFilter (modifiedFilter);
+    };
+    menu.addItem (std::move (item));
+    return menu;
+}
+
+juce::PopupMenu SettingsPanel::getContentsMenu()
+{
+    // What the table of contents lists, the one shown ticked; Phazite's own, as VS Code hides its table of contents when narrow.
+    juce::PopupMenu menu;
+    const auto marked = getMarkedGroup();
+    const auto addEntry = [this, &menu, &marked] (const juce::String& group, const juce::String& text)
+    {
+        juce::PopupMenu::Item item (text);
+        item.isTicked = group == marked;
+        item.action = [safeThis = juce::Component::SafePointer<SettingsPanel> (this), group]
+        {
+            if (safeThis != nullptr)
+                safeThis->showGroup (group);
+        };
+        menu.addItem (std::move (item));
+    };
+
+    for (const auto& group : getListedGroups())
+    {
+        const auto count = getCount (group);
+        addEntry (group, count > 0 ? group + " (" + juce::String (count) + ")" : group);
+    }
+
+    menu.addSeparator();
+    addEntry (shortcuts, shortcuts);
+    return menu;
+}
+
+void SettingsPanel::resetSearchStop()
+{
+    clearButton.setWantsKeyboardFocus (clearButton.isEnabled());
+    filterButton.setWantsKeyboardFocus (! clearButton.isEnabled());
+}
+
+std::unique_ptr<juce::ComponentTraverser> SettingsPanel::createKeyboardFocusTraverser()
+{
+    // The order the card's (ModalCard.h), but the keys go to the search as the settings open, not to Contents before it.
+    struct SearchFirst : public juce::KeyboardFocusTraverser
+    {
+        explicit SearchFirst (SettingsPanel& owner)
+            : panel (owner)
+        {
+        }
+
+        juce::Component* getDefaultComponent (juce::Component* parent) override
+        {
+            if (parent == &panel && panel.searchField.isShowing())
+                return &panel.searchField;
+
+            if (auto* outer = panel.getParentComponent())
+                if (auto traverser = outer->createKeyboardFocusTraverser())
+                    return traverser->getDefaultComponent (parent);
+
+            return juce::KeyboardFocusTraverser::getDefaultComponent (parent);
+        }
+
+        SettingsPanel& panel;
+    };
+
+    return std::make_unique<SearchFirst> (*this);
+}
+
+void SettingsPanel::addFilter (const juce::String& filter)
+{
+    // Into the search, once, after what is typed there; the keys back in the field.
+    if (! getWords (searchField.getText()).contains (filter))
+        search ((searchField.getText().trimEnd() + " " + filter).trimStart());
+
+    searchField.grabKeyboardFocus();
+    searchField.moveCaretToEnd();
+}
+
+void SettingsPanel::setContentsWidth (int width)
+{
+    contentsWidth = juce::jlimit (SettingsTint::tocMinimumWidth,
+                                  juce::jmax (SettingsTint::tocMinimumWidth, getWidth() - SettingsTint::listMinimumWidth), width);
+    resized();
+}
+
+void SettingsPanel::rowFocused (SettingRow& row)
+{
+    // The row focused last, washed until another is (VS Code's list's focused row).
+    if (auto* before = focusedRow.getComponent(); before != nullptr && before != &row)
+        before->setFocusedRow (false);
+
+    focusedRow = &row;
+    row.setFocusedRow (true);
+    scrollRowIntoView (row);
 }
 
 void SettingsPanel::markGroupInView()
@@ -1566,32 +1872,55 @@ void SettingsPanel::scrollRowIntoView (SettingRow& row)
 
 void SettingsPanel::paint (juce::Graphics& g)
 {
-    // On the editor's background, as VS Code's Settings editor; a line under the search.
+    // On the editor's background, as the card's body and VS Code's Settings editor: a line under the search
+    // (settings.headerBorder), and the sash's between the table of contents and the list (settings.sashBorder).
     const auto& p = getPalette (*this);
     g.fillAll (p.background);
-    g.setColour (p.border);
+    g.setColour (p.panelBorder);
     g.fillRect (SettingsTint::sideInset, searchField.getBottom() + SettingsTint::lineGap, getWidth() - 2 * SettingsTint::sideInset, 1);
+
+    if (! isNarrow())
+        g.fillRect (shownContentsWidth, listView->getY(), 1, listView->getHeight());
 }
 
 void SettingsPanel::resized()
 {
     const auto width = getWidth();
-    searchField.setBounds (SettingsTint::sideInset, SettingsTint::headerTop, width - 2 * SettingsTint::sideInset,
-                           SettingsTint::searchHeight);
-    countLabel.setBounds (searchField.getBounds().withTrimmedRight (Space::s).withTrimmedLeft (searchField.getWidth() / 2));
+
+    // The table of contents at the width kept, as far as the list keeps its least; none where both don't fit at their least
+    // (VS Code's narrow-width), the rows' contents further in then, and Contents at the search's left in its place.
+    const auto narrow = width < SettingsTint::tocWidth + SettingsTint::listMinimumWidth;
+    auto search = juce::Rectangle<int> (SettingsTint::sideInset, SettingsTint::headerTop, width - 2 * SettingsTint::sideInset,
+                                        SettingsTint::searchHeight);
+    contentsButton.setVisible (narrow);
+
+    if (narrow)
+    {
+        const auto size = SettingsTint::searchButtonSize;
+        contentsButton.setBounds (search.getX(), search.getCentreY() - size / 2, size, size);
+        search.removeFromLeft (size + Space::xs);
+    }
+
+    searchField.setBounds (search);
 
     const auto line = searchField.getBottom() + SettingsTint::lineGap;
     const auto body = line + 1 + SettingsTint::bodyTop;
+    const auto bodyHeight = juce::jmax (0, getHeight() - body);
     noResults.setBounds (SettingsTint::sideInset, line + 1 + SettingsTint::noResultsTop, width - 2 * SettingsTint::sideInset,
                          SettingsTint::lineHeight);
-    contents->setBounds (SettingsTint::sideInset, body, SettingsTint::tocWidth, juce::jmax (0, getHeight() - body));
+    shownContentsWidth = narrow ? 0 : juce::jlimit (SettingsTint::tocMinimumWidth, width - SettingsTint::listMinimumWidth, contentsWidth);
+    contents->setVisible (! narrow);
+    contents->setBounds (SettingsTint::sideInset, body, juce::jmax (0, shownContentsWidth - SettingsTint::sideInset), bodyHeight);
+    sash.setVisible (! narrow);
 
-    const auto right =
-        juce::Rectangle<int> (SettingsTint::sideInset + SettingsTint::tocWidth, body,
-                              juce::jmax (0, width - SettingsTint::sideInset - SettingsTint::tocWidth), juce::jmax (0, getHeight() - body));
+    if (! narrow)
+        sash.place ({ shownContentsWidth, body, 1, bodyHeight });
+
+    const auto right = juce::Rectangle<int> (shownContentsWidth, body, width - shownContentsWidth, bodyHeight);
     listView->setBounds (right);
     shortcutPage->setBounds (right);
     layOutList();
+    repaint();
 }
 
 //==============================================================================
@@ -1623,11 +1952,6 @@ ShortcutSettings::ShortcutSettings (CommandBridge& commands, const ComputerKeybo
     addAndMakeVisible (keymapLabel);
     addAndMakeVisible (keymapBox);
     addAndMakeVisible (editor);
-}
-
-void ShortcutSettings::paint (juce::Graphics& g)
-{
-    g.fillAll (getPalette (*this).background);
 }
 
 void ShortcutSettings::resized()

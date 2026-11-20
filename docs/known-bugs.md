@@ -14,6 +14,7 @@ and entered what it and its reviews found (211 to 214). What stays, each entry s
 test's exception; 137 and 197 wait for the owner's answer; 185, 191 and 213 can only be built and tried on Linux;
 196 turns on the deleting of what the versions hold, which needs a decision and a review of its own first; 211
 and 212 are new; and 214 is a fault of the compiler on CI, which waits for the owner's choice of what to do about it.
+215 to 217 are the settings' card's, from its review (2026-11-20).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -112,6 +113,25 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
+
+## The window
+
+- **215. While the settings show, the system's own Close of the window does nothing** (the taskbar's Close and the
+  window's menu on Windows, the window manager's close button on Linux), a click on its taskbar button or Win+Down
+  doesn't minimize it, and its sides and bottom don't resize it: each only brings the window forward; Alt+F4 quits,
+  and macOS's close button does. JUCE ignores a close request for a window that holds a modal component (`WM_CLOSE` and `WM_DELETE_WINDOW` call nothing; `SC_CLOSE` calls `inputAttemptWhenModal()`, which
+  a click on another window calls too), and its resize border takes no input under a modal component. To fix: take
+  the close request in the window's own message handling while a card shows (a JUCE workaround), or show the card
+  without JUCE's modal state, with its own gate for the mouse and the screen readers.
+- **216. While the settings show, a key a plug-in's own window passes back still plays its note or starts and stops
+  the song** (`PluginKeys::keyPressed()`, `src/app/`): the plug-in's window is the helper's, outside the card's
+  gate. The dialog the settings were before had the same gap. To fix: pass those keys through
+  `KeyDispatcher::keyPressedOverModal()` while a card shows.
+- **217. During a save that waits for plug-ins' states with the settings open, Space starts the song behind the
+  card**: the hold of the window's input becomes the top modal component for the wait and lets its own keys through
+  (play and stop among them). To fix: the hold's key gate asks whether a card shows, and passes only what the card's
+  list passes.
+
 ## Tests
 
 - **191. `SandboxedPluginTests`: under AddressSanitizer on CI, a plug-in's load now and then ends without the

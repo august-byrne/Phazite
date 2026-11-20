@@ -79,15 +79,23 @@ that shows hides the panel.
 **MIDI Settings**, **Keyboard Shortcuts**, **Scan for Plug-ins**, **Theme**, **Keymap**, **Startup Sound** and **Check
 for Updates...**.
 
-**Settings** is one page of every preference Phazite keeps, grouped: **Audio** (the driver, the output and input devices,
-their channels, the sample rate, the buffer size with the delay it makes, a test sound), **MIDI** (each MIDI input, and
-the computer keyboard), **Recording**, **Appearance** (the theme and the interface's size), **Help**, **Editing** (how far
-Undo goes back, scrolling while the song plays), **Files** (Auto Save), **Versions** and **Updates**. Type in the search
-at the top to see only the settings with those words; the list at the left counts what each group has left, and a click
-there scrolls to a group. A setting changed from its default has a thin line at its left; its gear, or a right-click,
-has **Reset Setting**. **Shortcuts**, at the foot of that list, shows the keymap and every command's keys. Audio
+**Settings** opens in a card over the window, which dims behind it. It is one page of every preference Phazite keeps,
+grouped: **Audio** (the driver, the output and input devices, their channels, the sample rate, the buffer size with the
+delay it makes, a test sound), **MIDI** (each MIDI input, and the computer keyboard), **Recording**, **Appearance** (the
+theme and the interface's size), **Help**, **Editing** (how far Undo goes back, scrolling while the song plays), **Files**
+(Auto Save), **Versions** and **Updates**. Type in the search at the top to see only the settings with those words; the
+list at the left counts what each group has left, and a click there scrolls to a group. Drag the line beside that list
+to widen it; a double-click puts it back. The funnel at the search's end has **Modified**, which shows only the settings
+changed from their defaults. A setting changed from its default has a thin line at its left; its gear, a right-click, or
+Shift+F9 has **Reset Setting**. **Shortcuts**, at the foot of that list, shows the keymap and every command's keys. Audio
 Settings, MIDI Settings and Keyboard Shortcuts open it at their group. The settings that a menu also switches (Overdub,
 Auto Save, the theme...) show the same in both places.
+
+Close the settings with the X in the card's corner, a click on the dimmed window around it, or Escape in the list (in the
+search, Escape clears what you typed and stays there). The button beside the X, or a double-click on the card's title,
+makes the card fill the window. In a small window the list of groups hides; the button at the search's left lists them
+instead, with Shortcuts. While the settings show, Space plays nothing and the computer keyboard plays no notes; Save, Full
+Screen, the interface's size and Alt+F4 still work.
 
 ## The upper and lower panels
 

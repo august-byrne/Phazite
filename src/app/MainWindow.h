@@ -96,9 +96,9 @@ private:
     // Hover help: tips inside this window, on frosted glass, and those of the other windows (ui::Tooltips); null when it is
     // turned off.
     std::unique_ptr<ui::Tooltips> tipsInside, tipsElsewhere;
-    juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow, progressionsWindow,
-        renderWindow, cleanUpWindow, aboutWindow, updatesWindow;
-    juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
+    juce::Component::SafePointer<juce::DialogWindow> pluginListWindow, welcomeWindow, exportWindow, progressionsWindow, renderWindow,
+        cleanUpWindow, aboutWindow, updatesWindow;
+    juce::Component::SafePointer<ui::SettingsPanel> settingsPanel; // in the shell's modal card while the settings show
     juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
 
     // Renders waiting for the one that shows to end (one at a time).

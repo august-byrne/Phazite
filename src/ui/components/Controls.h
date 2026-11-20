@@ -457,5 +457,9 @@ public:
     {
         return (onNavigationKey != nullptr && onNavigationKey (key)) || juce::TextEditor::keyPressed (key);
     }
+
+    // What it shows while empty stays until something is typed, with the keys in it too: a search field has them from the
+    // moment its list opens (the settings', the command search), and would never show what to type.
+    void paintOverChildren (juce::Graphics&) override;
 };
 } // namespace phazite::ui

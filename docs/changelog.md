@@ -8,6 +8,22 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## The owner's round of 2026-11-20
+
+- **Stop leaves what rings on as it was:** a Stop that sends the playhead back keeps every automated control, and the
+  song's place the devices are given, where the song stopped, until it plays again or the playhead is put somewhere by
+  hand, so a reverb's tail through a filter its lane had closed no longer blips open.
+- **A sidechain's key that comes late is waited for:** a device whose key comes later than its own sound (a kick through
+  a linear-phase EQ keying a compressor on a bass) has its track held back to meet it, so the duck stays on its kick;
+  choosing or removing a sidechain while the song plays leaves the track's sound as it was.
+- **The settings as VS Code's settings modal:** a card inside the window, which dims behind it, title bar included, with
+  a themed header, Maximize and Close, sized as VS Code sizes its modal and following the window, the keys and clicks
+  kept in it and nothing behind repainted as it changes; the search's count, Clear and Filter (`@modified`), "Group:
+  Name" titles, a sash that sizes the contents, the narrow layout with a Contents button, the settings' own control
+  colours and the Modern themes' heading and modified-line colours; Alt+F4 quits over it.
+- **A search field says what to type while it has the keys:** the hint of every search field (the settings', the command
+  search's, the browser's) stays until something is typed.
+
 ## The owner's round after stage 6 (from 2026-11-19)
 
 - **The window's small things:** a right-click's menu opens at the pointer, Replace is a submenu, the effects'

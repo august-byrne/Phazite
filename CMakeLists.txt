@@ -617,6 +617,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/folder-open.svg
         resources/icons/lucide/folder-plus.svg
         resources/icons/lucide/folder.svg
+        resources/icons/lucide/funnel.svg
         resources/icons/lucide/git-branch.svg
         resources/icons/lucide/headphones.svg
         resources/icons/lucide/info.svg
@@ -624,6 +625,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/layout-dashboard.svg
         resources/icons/lucide/library.svg
         resources/icons/lucide/link.svg
+        resources/icons/lucide/list-x.svg
         resources/icons/lucide/locate-fixed.svg
         resources/icons/lucide/magnet.svg
         resources/icons/lucide/maximize-2.svg
@@ -807,6 +809,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/DisplayTicker.cpp
     src/ui/components/DisplayTicker.h
     src/ui/components/ListRowHover.h
+    src/ui/components/ModalCard.cpp
+    src/ui/components/ModalCard.h
     src/ui/components/ModulatorDrag.h
     src/ui/components/ParameterText.cpp
     src/ui/components/ParameterText.h
@@ -1420,6 +1424,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ScrollingFrameTests.cpp
         tests/SectionTests.cpp
         tests/SelectionTests.cpp
+        tests/SettingsModalTests.cpp
         tests/SettingsPanelTests.cpp
         tests/SettingsTests.cpp
         tests/ShippedProgramsTests.cpp

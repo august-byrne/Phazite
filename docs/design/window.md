@@ -42,6 +42,7 @@ arranged, and the look they share.
 | Inspector | Built | |
 | Status bar with the hint bar | Built | |
 | Notices in place of dialogs | Built | |
+| The settings in a card over the window, as VS Code's modal | Built | Not dragged or resized by hand |
 | Panels hidden, maximized, in a window of their own | Built | The upper panel always stays in the main window |
 | The window opens where it was closed | Built | Only on a screen that still exists |
 | Layouts: Beat, Mix, Full | Built | |
@@ -266,6 +267,29 @@ and nothing stops meanwhile.
 - At most three show, the oldest news going first. The audio devices' notices show under them.
 - A question that cannot wait, such as "Save changes?", is still a dialog.
 
+## Settings
+
+The settings open in a card over the window, as VS Code opens its Settings in its modal editor
+([vscode-look.md](../vscode-look.md), "Settings"), not in a window of their own: **Options > Settings** (Ctrl+,), the
+activity bar's gear, or the commands that open them at Audio, MIDI or Shortcuts.
+
+- The whole window, its title bar and window buttons included, is dimmed behind the card (black at 50 %). The card is
+  80 % of the window's width and of its height under the title bar, at most 1400 by 900, centred, and follows the window
+  as it is resized; **Maximize** in its header, or a double-click on the header, makes it the window less a margin.
+- A press on the dimmed window, **Close** (X), or Escape in the list or the table of contents closes it. Escape in the
+  search clears the search and stays there; in an empty search it does nothing. An open drop-down or a value being typed
+  takes Escape first.
+- While it shows, the keys stay in it: Tab goes round its controls, and of the window's commands only these run from their
+  keys: the commands that open the settings at a group, Full Screen, the interface's size, Save and Quit; Alt+F4 quits, as
+  it does without the card. Space plays nothing and the computer keyboard plays no note. As it opens the keys go to its
+  search, and as it closes back to where they were. A click on another of Phazite's windows meanwhile, or Phazite started
+  again, brings the main window forward with the keys where they were in the card.
+- Narrower than the table of contents and the list need, the table of contents hides, and **Contents** at the search's
+  left lists the groups and Shortcuts in a menu (Phazite's own: VS Code hides them with nothing in their place).
+- The card can't be dragged or resized by hand; neither is kept between openings. Screen readers find it as a dialog named
+  Settings, and nothing behind it while it shows.
+- The other dialogs (Welcome, Export, the plug-in list, About...) stay windows of their own.
+
 ## Panels and layouts
 
 The panels are the left panel, the upper panel, the lower panel and the inspector.
@@ -400,8 +424,10 @@ what they show. FL Studio's keymap shows and hides the left panel with Alt+F8 an
 - `src/ui/theme/DesignTokens.h`, `LookAndFeel.h`, `Popups.h`, `Icons.h`; `resources/logo/phazite.svg`;
   `src/model/engine/StartupSound.h`.
 - `src/services/Settings.h`: the keys that keep the theme, the panels' layout and the views' places.
-- `src/ui/shell/SettingsPanel.h`: the Settings window, every preference on one page as VS Code's Settings editor lays out
-  its own (a search, the groups' contents, a row for each setting with its modified line and Reset Setting; Shortcuts a
-  page of its own), each bound to what the menus switch so that both show the same ([vscode-look.md](../vscode-look.md)).
-  Settings that are window state, remembered folders or lists (the browser's, the export window's last choices) have no
-  row.
+- `src/ui/shell/SettingsPanel.h`: the Settings, every preference on one page as VS Code's Settings editor lays out its own
+  (a search with its count, Clear and Filter's @modified, the groups' contents beside a sash, a row for each setting with
+  its modified line and Reset Setting; Shortcuts a page of its own), each bound to what the menus switch so that both show
+  the same ([vscode-look.md](../vscode-look.md)). Settings that are window state, remembered folders or lists (the
+  browser's, the export window's last choices) have no row.
+- `src/ui/components/ModalCard.h`, `AppShell::showModal()`: the card over the window the settings show in;
+  `KeyDispatcher::keyPressedOverModal()`: the commands that run over it.

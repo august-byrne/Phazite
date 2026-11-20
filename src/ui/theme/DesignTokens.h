@@ -49,6 +49,18 @@ struct Palette
     juce::Colour soloed;           // a soloed track's switch, in the yellow most DAWs light solo with
     juce::Colour heading;          // a settings group's title and setting's name, the contents' entry in view (settings.headerForeground)
     juce::Colour modified;         // the line beside a setting changed from its default (settings.modifiedItemIndicator)
+
+    // The settings, in their modal card (ui/components/ModalCard.h, ui/shell/SettingsPanel.h), as VS Code colours its own:
+    juce::Colour panelBorder;         // the card's header line, the settings' header line and their sash (titleBar.border, panel.border)
+    juce::Colour toolbarHover;        // an action bar's button under the pointer: the card's header, the search's (toolbar.hoverBackground)
+    juce::Colour toolbarActive;       // and pressed (toolbar.activeBackground)
+    juce::Colour settingsField;       // a field of the settings and their search (settings.textInputBackground, numberInputBackground)
+    juce::Colour settingsFieldBorder; // (settings.textInputBorder, settings.numberInputBorder)
+    juce::Colour settingsDropdown;    // a list to pick from in the settings (settings.dropdownBackground)
+    juce::Colour settingsDropdownBorder; // (settings.dropdownBorder)
+    juce::Colour checkbox;               // a tick box in the settings (settings.checkboxBackground)
+    juce::Colour checkboxBorder;         // (settings.checkboxBorder)
+    juce::Colour checkboxTick;           // (settings.checkboxForeground)
 };
 
 inline Palette getPalette (ThemeName theme)
@@ -82,8 +94,18 @@ inline Palette getPalette (ThemeName theme)
                      .boost = Colour (0xff1e7d3c),
                      .playing = Colour (0xff1f8a43),
                      .soloed = Colour (0xffb07d00),
-                     .heading = Colour (0xff444444),
-                     .modified = Colour (0xff66afe0) };
+                     .heading = Colour (0xff1f1f1f),
+                     .modified = Colour (0x66bb8009),
+                     .panelBorder = Colour (0xfff0f1f2),
+                     .toolbarHover = Colour (0x1f000000),
+                     .toolbarActive = Colour (0xffd6d6d8),
+                     .settingsField = Colour (0xffffffff),
+                     .settingsFieldBorder = Colour (0xffcecece),
+                     .settingsDropdown = Colour (0xffffffff),
+                     .settingsDropdownBorder = Colour (0xffcecece),
+                     .checkbox = Colour (0xffeaeaea),
+                     .checkboxBorder = Colour (0xff868686),
+                     .checkboxTick = Colour (0xff606060) };
 
         case ThemeName::highContrast:
             return { .background = Colour (0xff000000),
@@ -111,7 +133,17 @@ inline Palette getPalette (ThemeName theme)
                      .playing = Colour (0xff3dff7a),
                      .soloed = Colour (0xffffe14d),
                      .heading = Colour (0xffffffff),
-                     .modified = Colour (0xffffd400) };
+                     .modified = Colour (0xffffd400),
+                     .panelBorder = Colour (0xffffffff),
+                     .toolbarHover = Colour (0x33ffffff),
+                     .toolbarActive = Colour (0x4dffffff),
+                     .settingsField = Colour (0xff000000),
+                     .settingsFieldBorder = Colour (0xffffffff),
+                     .settingsDropdown = Colour (0xff000000),
+                     .settingsDropdownBorder = Colour (0xffffffff),
+                     .checkbox = Colour (0xff1a1a1a),
+                     .checkboxBorder = Colour (0xffffffff),
+                     .checkboxTick = Colour (0xffffffff) };
 
         case ThemeName::dark:
         default:
@@ -139,8 +171,18 @@ inline Palette getPalette (ThemeName theme)
                      .boost = Colour (0xff6fdc8c),
                      .playing = Colour (0xff4fd47c),
                      .soloed = Colour (0xfff7c948),
-                     .heading = Colour (0xffe7e7e7),
-                     .modified = Colour (0xff0c7d9d) };
+                     .heading = Colour (0xffffffff),
+                     .modified = Colour (0x66bb8009),
+                     .panelBorder = Colour (0xff2a2b2c),
+                     .toolbarHover = Colour (0x505a5d5e),
+                     .toolbarActive = Colour (0x33ffffff),
+                     .settingsField = Colour (0xff191a1b),
+                     .settingsFieldBorder = Colour (0xff333536),
+                     .settingsDropdown = Colour (0xff313131),
+                     .settingsDropdownBorder = Colour (0xff3c3c3c),
+                     .checkbox = Colour (0xff242526),
+                     .checkboxBorder = Colour (0xff707070),
+                     .checkboxTick = Colour (0xff8c8c8c) };
     }
 }
 
@@ -310,39 +352,68 @@ namespace ShortcutsTint
     inline constexpr int keymapLabelWidth = 80, keymapBoxWidth = 220;
 } // namespace ShortcutsTint
 
-// The Settings window (ui/shell/SettingsPanel.h), as VS Code's Settings editor (settingsEditor2.css, settingsEditor2.ts,
-// tocTree.ts, settingsEditorColorRegistry.ts; docs/vscode-look.md), on the editor's background:
-// - the header: the search field so far from the top and the sides, as tall as VS Code's input boxes, and a line in the border
-//   colour this far under it, the body this far under the line; "N Settings Found" in the field's right end while it searches;
-// - the table of contents so wide at the left, its rows so tall, the others' names at this much of the text colour, the one under
-//   the pointer the heading colour at this much, a group's count while searching at this much; hidden where the window is
-//   narrower than this; the Shortcuts entry set apart below a line this far from the entries above (Phazite's own);
-// - a group's title so big, semibold, this far inside its row, its left this far in, its line so tall;
+// A modal card over the main window (ui/components/ModalCard.h), as VS Code's modal editor, which its Settings open in
+// (modalEditorPart.css and .ts; docs/vscode-look.md): the whole window under black this opaque, in every theme (the colour,
+// as juce::Colour takes it), with no blur; the card this share of the window's width and of its height under the title bar,
+// at most so wide and so tall, centred in the whole window but never over its title bar; maximized, the window's width less
+// this much, and its height under the title bar less as much or the title bar's height, whichever is more. The card rounded
+// (cardCornerRadius), edged 1 px in the border colour (editorWidget.border), over a shadow this dark and this wide around it
+// (--vscode-shadow-xl: 0 0 20px), its body on the editor's background; its header so tall over a 1 px line in the panel
+// border's colour (titleBar.border), on the title bar's colour, padded so at its left and right; its icon so big and this far
+// from its title, which is TextSize::small, semibold, in the title bar's text colour (the muted text); its buttons so big,
+// so far apart, rounded (itemCornerRadius).
+namespace ModalTint
+{
+    inline constexpr juce::uint32 backdrop = 0x80000000, shadow = 0x26000000;
+    inline constexpr int shadowRadius = 20;
+    inline constexpr float share = 0.8f;
+    inline constexpr int maximumWidth = 1400, maximumHeight = 900, maximizedMargin = 16;
+    inline constexpr int headerHeight = 32, headerLeft = 10, headerRight = 8, iconGap = 6;
+    inline constexpr float iconSize = 16.0f;
+    inline constexpr int buttonSize = 22, buttonGap = 4;
+} // namespace ModalTint
+
+// The Settings (ui/shell/SettingsPanel.h), as VS Code's Settings editor (settingsEditor2.css, settingsEditor2.ts,
+// tocTree.ts, settingsEditorColorRegistry.ts; docs/vscode-look.md), in the modal card (ModalTint), on the editor's background:
+// - the header: the search field so far from the top and the sides, as tall as VS Code's input boxes, and a line in the panel
+//   border's colour this far under it, the body this far under the line; at the field's right end, inside it, its count while
+//   it searches ("N Settings Found") so big in the muted text colour, this far before its buttons (its badge's padding and
+//   margin), raised by this much (its widget's padding-bottom), and the buttons (Clear and Filter), each so big, the last this
+//   far inside the field's edge and top;
+// - the table of contents so wide at the left as it starts, at least so wide, its entries sideInset from the card's edge, its
+//   rows so tall, the others' names at this much of the text colour, the one under the pointer the heading colour at this much,
+//   a group's count while searching at this much; the Shortcuts entry set apart below a line this far from the entries above
+//   (Phazite's own); the list beside it at least so wide, a 1 px line in the panel border's colour between them, which a drag
+//   moves (the sash); narrower than both at their least, the table of contents hides and the rows' contents start this far in;
+// - a group's title so big, semibold, this far inside its row, its left this far in, its line so tall (the row 42 px tall),
+//   the text in the middle of the row's first line (lineHeight);
 // - a setting's row: its contents this far inside the list's sides, padded so (top, sides, bottom; a switch's bottom more, as
-//   its sentence is beside its tick box), its name this far over its description, lines so tall, the description at this much
-//   of the text colour (VS Code's foreground at 90 %), the control this far under the description and so tall, a list to pick
-//   from so wide, a number field so wide, a tick box this far before its sentence; washed in list.hoverBackground at this much
-//   under the pointer and this much while it has the keyboard focus, outlined then in the focus colour;
+//   its sentence is beside its tick box), its group and its name ("Audio: Driver") this far over its description, the group
+//   at this much of the heading colour, lines so tall, the description at this much of the text colour (VS Code's foreground
+//   at 90 %), the control this far under the description and so tall, a list to pick from so wide, a number field so wide, a
+//   tick box this far before its sentence; washed in list.hoverBackground at this much under the pointer and this much while it
+//   is the row focused last, outlined then in the focus colour while the keyboard is in the list;
 // - the modified line so wide, this far from the contents' left, from this far below its top to this far above its foot (a
 //   switch's further up);
 // - the gear that opens a row's menu: so big, this far down, in the gutter left of the contents;
-// - "No Settings Found" this far under the header's line;
-// - the window, so big as it opens (Phazite's own: it was 640 x 600, too narrow for the contents beside the list).
+// - "No Settings Found" this far under the header's line.
 namespace SettingsTint
 {
     inline constexpr int headerTop = 14, sideInset = 24, searchHeight = 26, lineGap = 10, bodyTop = 14;
-    inline constexpr int tocWidth = 200, tocRowHeight = ListRow::height, narrowWidth = 700, tocSeparator = Space::s;
+    inline constexpr float countTextSize = 11.0f;
+    inline constexpr int countGap = 6, countRaise = 3, searchButtonSize = 22, searchButtonInset = 2;
+    inline constexpr int tocWidth = 200, tocMinimumWidth = 100, listMinimumWidth = 500, narrowRowInset = 33;
+    inline constexpr int tocRowHeight = ListRow::height, tocSeparator = Space::s;
     inline constexpr float tocOtherAlpha = 0.9f, tocHoverAlpha = 0.7f, tocCountAlpha = 0.8f;
     inline constexpr float groupTitleSize = 26.0f;
-    inline constexpr int groupTitlePadding = 10, groupTitleLeft = 15, groupTitleLine = 36;
+    inline constexpr int groupTitlePadding = 10, groupTitleLeft = 15, groupTitleLine = 22;
     inline constexpr int rowInset = 24, padTop = 12, padSide = 14, padBottom = 18, switchPadBottom = 26;
     inline constexpr int titleGap = 2, lineHeight = 18, valueGap = 9, controlHeight = 26;
     inline constexpr int choiceWidth = 320, numberWidth = 200, tickGap = 9;
-    inline constexpr float descriptionAlpha = 0.9f, hoverWash = 0.3f, focusWash = 0.6f;
+    inline constexpr float groupAlpha = 0.9f, descriptionAlpha = 0.9f, hoverWash = 0.3f, focusWash = 0.6f;
     inline constexpr int modifiedWidth = 2, modifiedLeft = 5, modifiedTop = 15, modifiedBottom = 18, switchModifiedBottom = 23;
     inline constexpr int gearSize = 22, gearTop = 8;
     inline constexpr int noResultsTop = 20;
-    inline constexpr int windowWidth = 880, windowHeight = 640;
 } // namespace SettingsTint
 
 // The main window's bars and panels (ui/shell/AppShell.h, PanelLayout.h, TitleBar.h, StatusBar.h).

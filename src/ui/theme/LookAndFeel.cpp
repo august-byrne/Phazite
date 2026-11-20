@@ -229,9 +229,11 @@ void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int width, 
     {
         const auto box = juce::Rectangle<int> (x, y, width, height).toFloat();
         const bool focused = slider.hasKeyboardFocus (true);
-        g.setColour (palette.surface);
+        g.setColour (slider.findColour (juce::Slider::textBoxBackgroundColourId));
         g.fillRoundedRectangle (box, cornerRadius);
-        g.setColour (focused ? palette.focus : palette.controlBorder);
+        g.setColour (focused                                              ? palette.focus
+                     : slider.isColourSpecified (numberFieldEdgeColourId) ? slider.findColour (numberFieldEdgeColourId)
+                                                                          : palette.controlBorder);
         g.drawRoundedRectangle (box.reduced (0.5f), cornerRadius, 1.0f);
         return;
     }
@@ -374,14 +376,17 @@ void LookAndFeel::drawTickBox (juce::Graphics& g, juce::Component& component, fl
                                bool isEnabled, bool isHighlighted, bool)
 {
     // As VS Code's tick boxes: a rounded box on the raised surface in the muted text colour (brighter under the pointer, the
-    // focus colour while it has the keyboard focus), its tick in the text colour.
+    // focus colour while it has the keyboard focus), its tick in the text colour; or in the colours set on it (the settings'),
+    // the same under the pointer.
     const auto& p = palette;
     const auto box = juce::Rectangle<float> (x, y, width, height);
     const auto alpha = isEnabled ? 1.0f : 0.5f;
+    const auto edgeSet = component.isColourSpecified (tickBoxEdgeColourId);
 
-    g.setColour (p.surfaceRaised);
+    g.setColour (component.isColourSpecified (tickBoxFillColourId) ? component.findColour (tickBoxFillColourId) : p.surfaceRaised);
     g.fillRoundedRectangle (box, ButtonTint::tickBoxCorner);
     g.setColour ((component.hasKeyboardFocus (false) ? p.focus
+                  : edgeSet                          ? component.findColour (tickBoxEdgeColourId)
                   : isHighlighted && isEnabled       ? p.text
                                                      : p.textMuted)
                      .withMultipliedAlpha (alpha));
@@ -844,19 +849,42 @@ namespace
 {
     // The palette's colours by their places, which a component keeps of a colour set by role (setThemeColour()).
     constexpr juce::Colour Palette::* paletteRoles[] = {
-        &Palette::background,    &Palette::surface,
-        &Palette::surfaceRaised, &Palette::border,
-        &Palette::controlBorder, &Palette::text,
-        &Palette::textMuted,     &Palette::textBright,
-        &Palette::accent,        &Palette::textOnAccent,
-        &Palette::focus,         &Palette::hover,
-        &Palette::selected,      &Palette::selectedInactive,
-        &Palette::scrollThumb,   &Palette::indentGuide,
-        &Palette::warning,       &Palette::danger,
-        &Palette::loop,          &Palette::modulation,
-        &Palette::frozen,        &Palette::boost,
-        &Palette::playing,       &Palette::soloed,
-        &Palette::heading,       &Palette::modified,
+        &Palette::background,
+        &Palette::surface,
+        &Palette::surfaceRaised,
+        &Palette::border,
+        &Palette::controlBorder,
+        &Palette::text,
+        &Palette::textMuted,
+        &Palette::textBright,
+        &Palette::accent,
+        &Palette::textOnAccent,
+        &Palette::focus,
+        &Palette::hover,
+        &Palette::selected,
+        &Palette::selectedInactive,
+        &Palette::scrollThumb,
+        &Palette::indentGuide,
+        &Palette::warning,
+        &Palette::danger,
+        &Palette::loop,
+        &Palette::modulation,
+        &Palette::frozen,
+        &Palette::boost,
+        &Palette::playing,
+        &Palette::soloed,
+        &Palette::heading,
+        &Palette::modified,
+        &Palette::panelBorder,
+        &Palette::toolbarHover,
+        &Palette::toolbarActive,
+        &Palette::settingsField,
+        &Palette::settingsFieldBorder,
+        &Palette::settingsDropdown,
+        &Palette::settingsDropdownBorder,
+        &Palette::checkbox,
+        &Palette::checkboxBorder,
+        &Palette::checkboxTick,
     };
     static_assert (sizeof (Palette) == std::size (paletteRoles) * sizeof (juce::Colour), "paletteRoles lists every colour of Palette's");
 

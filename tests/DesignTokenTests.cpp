@@ -29,8 +29,14 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
 
         CHECK (getContrastRatio (p.textOnAccent, p.accent) >= 4.5);
 
-        // The settings' names and groups' titles, on the editor's background they show on.
+        // The settings' names and groups' titles, on the editor's background they show on; the text of their fields and lists to
+        // pick from; their tick boxes' ticks and edges, parts of controls. (The modified line, VS Code's amber at 40 %, is a mark
+        // beside a row whose menu also says it is modified, not text or a control's part.)
         CHECK (getContrastRatio (p.heading, p.background) >= 4.5);
+        CHECK (getContrastRatio (p.text, p.settingsField) >= 4.5);
+        CHECK (getContrastRatio (p.text, p.settingsDropdown) >= 4.5);
+        CHECK (getContrastRatio (p.checkboxTick, p.checkbox) >= 3.0);
+        CHECK (getContrastRatio (p.checkboxBorder, p.background) >= 3.0);
 
         // The accent marks selection and focus on panels: 3:1, like other parts of controls.
         CHECK (getContrastRatio (p.accent, p.surface) >= 3.0);

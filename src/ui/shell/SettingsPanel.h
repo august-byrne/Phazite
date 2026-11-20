@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Settings window's content, as VS Code's Settings editor (docs/vscode-look.md, "Settings"): a search field across the
-// top; under it, at the left, the table of contents (the groups, and Shortcuts set apart at its foot), at the right one
-// scrolling list of every setting under its group's title. A setting is a row: its name, a sentence or two of what it does,
-// and its control (a tick box with its sentence beside it, a list to pick from, a number, a button). The row under the
-// pointer or holding the keyboard focus is washed; one changed from its default has the modified line at its left, and its
-// menu (its gear, a right-click, or Shift+F10) has Reset Setting. Shortcuts shows the keymap and every command's keys
-// (ShortcutsEditor.h) in the list's place.
+// The Settings, as VS Code's Settings editor (docs/vscode-look.md, "Settings"), in a card over the main window as VS Code's
+// modal editor (ui/components/ModalCard.h; MainWindow::showSettings()): a search field across the top, with its count, Clear
+// and Filter at its right end; under it, at the left, the table of contents (the groups, and Shortcuts set apart at its foot),
+// a sash that sizes it, and at the right one scrolling list of every setting under its group's title. A setting is a row: its
+// group and name ("Audio: Driver"), a sentence or two of what it does, and its control (a tick box with its sentence beside
+// it, a list to pick from, a number, a button), in the settings' own colours. The row under the pointer or focused last is
+// washed; one changed from its default has the modified line at its left, and its menu (its gear, a right-click, Shift+F9 or
+// Shift+F10) has Reset Setting. Shortcuts shows the keymap and every command's keys (ShortcutsEditor.h) in the list's place.
+// Narrower than the table of contents and the list at their least, the table of contents hides, and a button at the search's
+// left (Contents, Phazite's own) lists the groups and Shortcuts in a menu instead. It is opaque, on the editor's background,
+// as the card's body is (ModalCard.h).
 #pragma once
 
+#include "PanelLayout.h"
 #include "ShortcutsEditor.h"
 #include "model/engine/EngineContext.h"
 #include "model/mixer/MixerModel.h"
@@ -50,7 +55,8 @@ inline constexpr std::array<float, 8> interfaceScales { 0.75f, 0.9f, 1.0f, 1.1f,
 // One setting's row (SettingsPanel). Its group, name and description; its control, which it owns: a tick box (made with
 // makeSwitch(), its sentence the description, beside it, a click on which switches it too), or any other control under the
 // description; or none, for a row that only says something. A note under the control says why the last choice failed, in
-// the warning colour; a warning row says all of it so.
+// the warning colour; a warning row says all of it so. Its control takes the settings' colours (Palette::settingsDropdown,
+// settingsField, checkbox...), set again as the theme changes.
 class SettingRow : public juce::Component
 {
 public:
@@ -81,17 +87,31 @@ public:
     void update();
 
     // Whether the row is there at all (a device's channels are only where it has them), and whether a search finds it: each
-    // word in its name, its description or its group.
+    // word in its name, its description or its group; and whether it differs from its default now.
     void setAvailable (bool);
     bool isAvailable() const noexcept { return available; }
     bool matches (const juce::StringArray& words) const;
+    bool isModifiedNow() const { return isModified != nullptr && isModified(); }
 
+    // How far in its contents start from the list's left side: SettingsTint::rowInset, or narrowRowInset where the table of
+    // contents is hidden. Its height for a width.
+    void setLeftInset (int);
     int getHeightForWidth (int width) const;
+
     juce::PopupMenu getMenu(); // Reset Setting, enabled while it is modified
     juce::Button& getGearButton() noexcept;
-    bool isHighlighted() const noexcept { return hovered || focused; }
 
-    // As the keyboard focus comes to one of its controls: the list scrolls it into view.
+    // How many times its menu has shown, from its gear, a right-click or the keys: for tests, as a menu shown is gone again
+    // at once where the program isn't the foreground one.
+    int getMenusShown() const noexcept { return menusShown; }
+
+    // The row focused last (VS Code's list's focused row): washed, its gear shown, until another row is focused; outlined while
+    // the keyboard focus is in it. Under the pointer, washed less.
+    void setFocusedRow (bool);
+    bool isFocusedRow() const noexcept { return focusedRow; }
+    bool isHighlighted() const noexcept { return hovered || focusedRow; }
+
+    // As the keyboard focus comes to one of its controls: the panel makes it the focused row and scrolls it into view.
     std::function<void (SettingRow&)> onFocused;
 
     void paint (juce::Graphics&) override;
@@ -104,9 +124,9 @@ public:
 
 private:
     juce::String description, note;
-    bool warning = false, available = true, switchRow = false, hovered = false, focused = false, shownModified = false;
+    bool warning = false, available = true, switchRow = false, hovered = false, focused = false, focusedRow = false, shownModified = false;
     std::unique_ptr<juce::Component> control;
-    int controlWidth = 0;
+    int controlWidth = 0, leftInset = SettingsTint::rowInset, menusShown = 0;
     std::unique_ptr<juce::Button> gear;
     struct HoverWatch; // hears the pointer come and go over its controls too, for its wash
     std::unique_ptr<HoverWatch> hoverWatch;
@@ -129,7 +149,6 @@ public:
     ShortcutsEditor& getEditor() noexcept { return editor; }
     juce::ComboBox& getKeymapBox() noexcept { return keymapBox; }
 
-    void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
@@ -176,13 +195,36 @@ public:
     bool showsShortcuts() const noexcept { return onShortcuts; }
 
     // Filters the list to the settings whose name, description or group have each word, the table of contents counting those
-    // left in each group; with none, one line says so.
+    // left in each group, the count at the field's end saying how many in all; with none, one line says so. "@modified" among
+    // the words (Filter's Modified puts it there) keeps only the settings that differ from their defaults.
     void search (const juce::String& text);
+    static constexpr const char* modifiedFilter = "@modified";
 
+    // The search's end: its count ("3 Settings Found", or nothing while it doesn't search), Clear (enabled while there is
+    // something to clear) and Filter, whose menu has Modified. Clear and Filter are one Tab stop after the search, as VS Code's
+    // action bar is: Clear, or Filter while Clear is off; Left and Right go from one to the other, Enter and Space press.
     juce::TextEditor& getSearchField() noexcept { return searchField; }
+    juce::String getCountText() const;
+    juce::Button& getClearButton() noexcept { return clearButton; }
+    juce::Button& getFilterButton() noexcept { return filterButton; }
+    juce::PopupMenu getFilterMenu();
+
+    // In the narrow layout alone, at the search's left (before it in Tab's order): Contents, whose menu lists what the table of
+    // contents lists (the groups, with their counts while searching, and Shortcuts), the one shown ticked; an item goes there
+    // as a click on its entry does.
+    juce::Button& getContentsButton() noexcept { return contentsButton; }
+    juce::PopupMenu getContentsMenu();
+
     juce::Viewport& getList() noexcept;
     juce::Component& getContents() noexcept;
     ShortcutSettings& getShortcuts() noexcept { return *shortcutPage; }
+
+    // The table of contents' width as it shows, with the list's left side there (0 while it is hidden, narrower than both at
+    // their least); and the sash between them, which a drag moves (each at least its least) and a double-click puts back at
+    // SettingsTint::tocWidth. The settings keep its width (Settings::settingsContentsWidth).
+    int getContentsWidth() const noexcept { return shownContentsWidth; }
+    bool isNarrow() const noexcept { return shownContentsWidth == 0; }
+    PanelDivider& getSash() noexcept { return sash; }
 
     // The groups the table of contents lists now (not Shortcuts), with the count of each while searching; the one marked
     // as the list scrolls (or Shortcuts); where a group's entry is, in the panel's coordinates.
@@ -203,6 +245,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    std::unique_ptr<juce::ComponentTraverser> createKeyboardFocusTraverser() override; // the search first, as it opens
 
 private:
     class Contents;
@@ -217,8 +260,27 @@ private:
     Settings& settings;
     Actions actions;
 
+    // Clear or Filter, which tells as the keys leave it (resetSearchStop()).
+    struct SearchButton : public IconButton
+    {
+        using IconButton::IconButton;
+        std::function<void()> onFocusLost;
+
+        void focusLost (FocusChangeType cause) override
+        {
+            IconButton::focusLost (cause);
+
+            if (onFocusLost != nullptr)
+                onFocusLost();
+        }
+    };
+
     SearchField searchField;
     juce::Label countLabel, noResults;
+    SearchButton clearButton { "Clear Settings Search Input", Icon::clearSearch }, filterButton { "Filter Settings", Icon::filter };
+    IconButton contentsButton { "Contents", Icon::menu };
+    PanelDivider sash { "Table of contents' edge", true };
+    int contentsWidth = SettingsTint::tocWidth, shownContentsWidth = SettingsTint::tocWidth, widthAtDragStart = 0;
     std::unique_ptr<Contents> contents;
     std::unique_ptr<ListView> listView;
     std::unique_ptr<juce::Component> list; // the rows, under their groups' titles, which the list view scrolls
@@ -230,8 +292,10 @@ private:
     std::unique_ptr<AudioRows> audioRows;
     juce::OwnedArray<juce::ToggleButton> midiSwitches; // made again as MIDI inputs come and go
     juce::StringArray shownMidiInputs;
-    juce::StringArray searchWords;
+    juce::StringArray searchWords; // without "@modified"
+    bool searching = false, modifiedOnly = false;
     juce::String clickedGroup; // the last entry clicked, marked while the list can't scroll its title to the top
+    juce::Component::SafePointer<SettingRow> focusedRow;
     bool onShortcuts = false;
 
     SettingRow& addRow (const char* group, const juce::String& title, const juce::String& description);
@@ -244,8 +308,15 @@ private:
     void updateMidi();
     void refreshAll();
     void layOutList();
+    void placeSearchEnd();   // the count and the buttons inside the field's right end, its text stopping before them
+    void resetSearchStop();  // Clear the Tab stop of the search's buttons while it is on, else Filter
+    struct SearchButtonKeys; // the arrows and Space on Clear and Filter
+    std::unique_ptr<SearchButtonKeys> searchButtonKeys;
     void markGroupInView();
+    void rowFocused (SettingRow&); // the row focused last, scrolled into view
     void scrollRowIntoView (SettingRow&);
+    void addFilter (const juce::String& filter);
+    void setContentsWidth (int); // as the sash sets it
 
     void settingChanged (const juce::String& key) override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the devices changed

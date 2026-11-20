@@ -13,6 +13,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/UnsavedProjects.h"
 #include "model/versions/VersionsModel.h"
+#include "ui/components/ModalCard.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/theme/LookAndFeel.h"
@@ -105,9 +106,15 @@ public:
         }
 
         // A project double-clicked while Phazite runs opens here, once the user has answered what an open dialog asks, which
-        // comes forward (ProjectSession::openFile() waits for it).
+        // comes forward (ProjectSession::openFile() waits for it); the settings' card over the window brings the window forward
+        // and leaves the keys where they are in it (toFront() would give them to its first control).
         if (auto* modal = juce::Component::getCurrentlyModalComponent())
-            modal->toFront (true);
+        {
+            if (auto* card = dynamic_cast<phazite::ui::ModalCard*> (modal))
+                card->bringWindowForward();
+            else
+                modal->toFront (true);
+        }
 
         if (const auto file = ProjectSession::findFileToOpen (commandLine); file != juce::File() && session != nullptr)
             session->openFile (file);
@@ -288,11 +295,12 @@ public:
     }
 
     // A dialog the user is to finish first (such as "Save changes?"): not the window's hold on its input while a command
-    // waits for the plug-ins' states, after which a quit asked meanwhile goes on.
+    // waits for the plug-ins' states, after which a quit asked meanwhile goes on, nor the settings' card over the window,
+    // which has nothing to finish (Quit runs over it, as over VS Code's modal editor).
     bool isDialogShowing() const
     {
         auto* modal = juce::Component::getCurrentlyModalComponent();
-        return modal != nullptr && (session == nullptr || ! session->isHoldingInput (modal));
+        return modal != nullptr && ! phazite::ui::isModalCard (modal) && (session == nullptr || ! session->isHoldingInput (modal));
     }
 
     void systemRequestedQuit() override

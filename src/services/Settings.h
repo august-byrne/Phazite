@@ -106,6 +106,8 @@ public:
     // The piano roll's velocity lane: its height as dragged, and whether its chevron folds it (ui/pianoroll/PianoRoll.h).
     static constexpr NumberSetting pianoRollVelocityHeight { "phazitePianoRollVelocityHeight", 72.0, SaveTiming::soon };
     static constexpr BoolSetting pianoRollVelocityFolded { "phazitePianoRollVelocityFolded", false, SaveTiming::soon };
+    // The settings' table of contents' width, as its sash was dragged (ui/shell/SettingsPanel.h), in pixels: view state.
+    static constexpr NumberSetting settingsContentsWidth { "phaziteSettingsContentsWidth", 200.0, SaveTiming::soon };
 
     // Bounce Each Version, in Save Version's menu (ui/versions/VersionsView.h); and Auto Save (File > Auto Save, as VS Code's: a
     // saved project saves itself a moment after each change, app/ProjectSession.h).

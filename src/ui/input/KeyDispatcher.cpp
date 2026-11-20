@@ -38,6 +38,19 @@ namespace
         return ids.contains (command.id);
     }
 
+    // The commands a key runs while a modal card shows over the window (the settings), as VS Code lets through its modal editor
+    // only the keys of quitting, full screen, zooming, saving and the settings' own commands (modalEditorPart.ts): no other
+    // command of the window behind runs, so that Space plays nothing and a letter edits nothing under the card.
+    bool runsOverModal (const Command& command)
+    {
+        static const juce::StringArray ids { "options.settings",      "options.audioSettings",
+                                             "options.midiSettings",  "options.keyboardShortcuts",
+                                             "view.fullScreen",       "view.interfaceLarger",
+                                             "view.interfaceSmaller", "view.interfaceNormal",
+                                             "project.save",          "app.quit" };
+        return ids.contains (command.id);
+    }
+
     bool isMouseButtonDown()
     {
         return juce::Desktop::getInstance().getNumDraggingMouseSources() > 0;
@@ -141,6 +154,14 @@ std::vector<juce::KeyPress> KeyDispatcher::getKeysOverPlugins() const
 bool KeyDispatcher::keyPressedWhileHeld (const juce::KeyPress& key)
 {
     if (const auto* command = findCommandForKey (key); command != nullptr && runsWhileMouseIsDown (*command))
+        return runForKey (*command, key);
+
+    return false;
+}
+
+bool KeyDispatcher::keyPressedOverModal (const juce::KeyPress& key)
+{
+    if (const auto* command = findCommandForKey (key); command != nullptr && runsOverModal (*command))
         return runForKey (*command, key);
 
     return false;

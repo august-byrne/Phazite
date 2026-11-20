@@ -17,6 +17,7 @@
 #include "TopBar.h"
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/browser/Browser.h"
+#include "ui/components/ModalCard.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/input/TextFieldRelease.h"
 #include "ui/mixer/DevicesView.h"
@@ -69,6 +70,15 @@ public:
 
     // What Phazite tells without asking, news or a problem, in a card over the bottom right corner (Notices.h).
     Notices& getNotices() noexcept { return notices; }
+
+    // A card over the whole window, the title bar included (ui/components/ModalCard.h: the settings, as VS Code's modal
+    // editor), in front of everything else here, which takes the window's clicks and keys until it closes: by its Close,
+    // Escape, a press around it, or closeModal(). The keys it lets through run the few commands of the window that run over it
+    // (KeyDispatcher::keyPressedOverModal()), and the window's close key (Alt+F4) runs Quit (app.quit), as closing the window
+    // does. One at a time: showing another closes the one that shows.
+    ModalCard& showModal (std::unique_ptr<juce::Component> content, const juce::String& title, Icon);
+    ModalCard* getModal() const noexcept { return modal.get(); }
+    void closeModal();
 
     // How far the panels keep from the window's sides: the band there that resizes a restored window on Windows, whose
     // scroll bars it would take (app/MainWindow.h). The bars across the top and the bottom reach the sides.
@@ -262,5 +272,7 @@ private:
     void versionsChanged() override;                     // what the versions tell (an edit that started a branch), as a notice
 
     std::unique_ptr<PanelWindow>& getWindow (Panel); // a detachable panel's (not the song's views)
+
+    std::unique_ptr<ModalCard> modal; // showModal(): last, so that it goes first
 };
 } // namespace phazite::ui

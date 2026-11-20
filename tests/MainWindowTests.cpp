@@ -35,6 +35,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/NewProject.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
@@ -415,9 +416,10 @@ TEST_CASE ("The main window's dialogs open by their commands, show their panels 
     REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); }));
 
     // Each once, in each theme, then the dark one again; a second time while it is open, it stays the one. Scan for Plug-ins
-    // isn't among them: it scans the machine's VST3 folders.
-    for (const auto* id : { "options.settings", "project.export", "help.about", "help.checkForUpdates", "chords.progressions",
-                            "project.cleanUpAudio", "help.welcome" })
+    // isn't among them: it scans the machine's VST3 folders. The settings aren't a dialog: they show in a card over the window
+    // (below).
+    for (const auto* id :
+         { "project.export", "help.about", "help.checkForUpdates", "chords.progressions", "project.cleanUpAudio", "help.welcome" })
     {
         INFO ("command " << std::string (id));
         auto* dialog = openDialog (screen, id);
@@ -436,19 +438,7 @@ TEST_CASE ("The main window's dialogs open by their commands, show their panels 
         closeDialog (screen, dialog);
     }
 
-    // The settings' other tabs, and the welcome window's other page, while they are open.
-    auto* settings = openDialog (screen, "options.settings");
-
-    for (const auto* id : { "options.audioSettings", "options.midiSettings", "options.keyboardShortcuts" })
-    {
-        INFO ("command " << std::string (id));
-        REQUIRE (screen.registry.invoke (id));
-        dispatchPendingMessages();
-        CHECK (screen.getOpenDialogs().size() == 1);
-        phazite::test::checkPaints (*settings->getContentComponent(), id);
-    }
-
-    closeDialog (screen, settings);
+    // The welcome window's other page.
     auto* sounds = openDialog (screen, "help.phaziteSounds");
     phazite::test::checkPaints (*sounds->getContentComponent(), "Phazite Sounds");
     closeDialog (screen, sounds);
@@ -1199,14 +1189,24 @@ TEST_CASE ("The main window closed while a wait holds it cancels the wait first,
     CHECK_FALSE (context.isHoldingForWork());
 }
 
-TEST_CASE ("The Settings window opens at the group its command names, and its rows switch what the main window's menus switch")
+TEST_CASE ("The Settings open in a card over the window at the group their command names, go to another group by its command while "
+           "they show, take the keys of the few commands that run over them, and their rows switch what the window's menus switch")
 {
     MainScreen screen;
+    auto& shell = screen.window->getShell();
     const auto ticked = [&screen] (const char* id) { return screen.registry.find (id)->isTicked(); };
-    auto* dialog = openDialog (screen, "options.midiSettings");
-    auto* panel = dynamic_cast<phazite::ui::SettingsPanel*> (dialog->getContentComponent());
+    REQUIRE (screen.registry.invoke ("options.midiSettings"));
+    dispatchPendingMessages();
+    CHECK (screen.getOpenDialogs().isEmpty()); // no window of their own
+    REQUIRE (shell.getModal() != nullptr);
+    auto* panel = dynamic_cast<phazite::ui::SettingsPanel*> (&shell.getModal()->getContent());
     REQUIRE (panel != nullptr);
+    CHECK (shell.getModal()->getCardTitle() == "Settings");
     CHECK (panel->getMarkedGroup() == phazite::ui::SettingsPanel::midi);
+    CHECK (panel->getSearchField().hasKeyboardFocus (false));
+
+    // Each group's command while they show: the same card, at the group.
+    auto* card = shell.getModal();
     REQUIRE (screen.registry.invoke ("options.keyboardShortcuts"));
     dispatchPendingMessages();
     CHECK (panel->showsShortcuts());
@@ -1214,6 +1214,33 @@ TEST_CASE ("The Settings window opens at the group its command names, and its ro
     dispatchPendingMessages();
     CHECK_FALSE (panel->showsShortcuts());
     CHECK (panel->getMarkedGroup() == phazite::ui::SettingsPanel::audio);
+    REQUIRE (screen.registry.invoke ("options.settings"));
+    dispatchPendingMessages();
+    CHECK (shell.getModal() == card);
+    CHECK (panel->getMarkedGroup() == phazite::ui::SettingsPanel::audio);
+
+    // Painted in each theme, inside the window.
+    for (const auto& [theme, name] : themeCommands)
+    {
+        REQUIRE (screen.registry.invoke (theme));
+        dispatchPendingMessages();
+        CHECK (screen.lookAndFeel.getTheme() == name);
+        phazite::test::checkPaints (*card, juce::String ("the settings in ") + theme);
+    }
+
+    // The window's keys: Larger Interface (Ctrl+=) runs over them; Space doesn't play.
+    auto* peer = screen.window->getPeer();
+    REQUIRE (peer != nullptr);
+    peer->handleKeyPress (juce::KeyPress ('=', juce::ModifierKeys::commandModifier, 0));
+    dispatchPendingMessages();
+    CHECK (juce::Desktop::getInstance().getGlobalScaleFactor() == doctest::Approx (1.1f));
+    peer->handleKeyUpOrDown (false);
+    REQUIRE (screen.registry.invoke ("view.interfaceNormal"));
+    peer->handleKeyPress (juce::KeyPress (juce::KeyPress::spaceKey));
+    dispatchPendingMessages();
+    CHECK_FALSE (phazite::isPlaying (screen.session.getContext()));
+    peer->handleKeyUpOrDown (false);
+    REQUIRE (shell.getModal() == card);
 
     // The main window's own preferences have rows here.
     for (const auto* title : { "Theme", "Interface Size", "Hover Help", "Startup Sound", "Check for Updates When Phazite Opens" })
@@ -1260,5 +1287,27 @@ TEST_CASE ("The Settings window opens at the group its command names, and its ro
     CHECK (juce::Desktop::getInstance().getGlobalScaleFactor() == doctest::Approx (1.0f));
     CHECK (size->getText() == "100 %");
 
-    closeDialog (screen, dialog);
+#if ! JUCE_MAC
+    // Alt+F4 quits as closing the window does: with unsaved changes, the question first, over the card (Cancel keeps both).
+    screen.addNotes();
+    const auto asked = screen.askedToSave;
+    size->grabKeyboardFocus();
+    CHECK (peer->handleKeyPress (juce::KeyPress (juce::KeyPress::F4Key, juce::ModifierKeys::altModifier, 0)));
+    dispatchPendingMessages();
+    CHECK (screen.askedToSave == asked + 1);
+    CHECK_FALSE (screen.quitting);
+    REQUIRE (shell.getModal() == card);
+    peer->handleKeyUpOrDown (false);
+#endif
+
+    // Escape from the list closes them; their command opens them again, new.
+    size->grabKeyboardFocus();
+    peer->handleKeyPress (juce::KeyPress (juce::KeyPress::escapeKey));
+    dispatchPendingMessages();
+    CHECK (shell.getModal() == nullptr);
+    REQUIRE (screen.registry.invoke ("options.settings"));
+    dispatchPendingMessages();
+    REQUIRE (shell.getModal() != nullptr);
+    CHECK (dynamic_cast<phazite::ui::SettingsPanel*> (&shell.getModal()->getContent()) != nullptr);
+    shell.closeModal();
 }

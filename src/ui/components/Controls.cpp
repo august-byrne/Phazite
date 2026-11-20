@@ -1483,4 +1483,21 @@ std::unique_ptr<juce::AccessibilityHandler> ValueMeter::createAccessibilityHandl
     return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::progressBar, juce::AccessibilityActions(),
                                                          juce::AccessibilityHandler::Interfaces { std::make_unique<Value> (*this) });
 }
+
+//==============================================================================
+void SearchField::paintOverChildren (juce::Graphics& g)
+{
+    // JUCE's field hides the text it shows while empty as soon as it has the keys (TextEditor::paintOverChildren(),
+    // juce_gui_basics/widgets/juce_TextEditor.cpp), and has no option to keep it: drawn here meanwhile, where JUCE draws it,
+    // in the colour every search field gives it. JUCE workaround W57 (docs/juce-workarounds.md)
+    if (hasKeyboardFocus (false) && getTotalNumChars() == 0 && getTextToShowWhenEmpty().isNotEmpty())
+    {
+        const auto bounds = getBorder().subtractedFrom (getLocalBounds()).withTrimmedLeft (getLeftIndent()).withTrimmedTop (getTopIndent());
+        g.setColour (getPalette (*this).textMuted);
+        g.setFont (getFont());
+        g.drawText (getTextToShowWhenEmpty(), bounds, getJustificationType(), true);
+    }
+
+    juce::TextEditor::paintOverChildren (g);
+}
 } // namespace phazite::ui

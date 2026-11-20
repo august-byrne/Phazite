@@ -142,6 +142,10 @@ namespace
                 return "square.svg";
             case Icon::restoreWindow:
                 return "copy.svg";
+            case Icon::clearSearch:
+                return "list-x.svg";
+            case Icon::filter:
+                return "funnel.svg";
         }
 
         return "";
@@ -276,6 +280,12 @@ void IconButton::setQuiet (bool shouldBeQuiet)
     repaint();
 }
 
+void IconButton::setToolbarStyle (bool isToolbar)
+{
+    toolbar = isToolbar;
+    repaint();
+}
+
 void IconButton::setAccented (bool shouldBeAccented)
 {
     accented = shouldBeAccented;
@@ -297,6 +307,22 @@ void IconButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown
     {
         getLookAndFeel().drawButtonBackground (g, *this, p.surfaceRaised.interpolatedWith (p.warning, attentionTint), isHighlighted,
                                                isDown);
+    }
+    else if (toolbar && ! on)
+    {
+        const auto bounds = getLocalBounds().toFloat();
+
+        if (isEnabled() && (isHighlighted || isDown))
+        {
+            g.setColour (isDown ? p.toolbarActive : p.toolbarHover);
+            g.fillRoundedRectangle (bounds, itemCornerRadius);
+        }
+
+        if (hasKeyboardFocus (false))
+        {
+            g.setColour (p.focus);
+            g.drawRoundedRectangle (bounds.reduced (0.5f), itemCornerRadius, 1.0f);
+        }
     }
     else if (quiet && ! on)
     {
@@ -321,7 +347,7 @@ void IconButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown
             g, *this, findColour (on ? juce::TextButton::buttonOnColourId : juce::TextButton::buttonColourId), isHighlighted, isDown);
     }
 
-    const auto colour = (on ? p.textOnAccent : p.text).withMultipliedAlpha (isEnabled() ? 1.0f : 0.5f);
+    const auto colour = (on ? p.textOnAccent : toolbar ? p.textMuted : p.text).withMultipliedAlpha (isEnabled() ? 1.0f : 0.5f);
     const auto label = getButtonText();
     const auto font = juce::Font (juce::FontOptions (TextSize::body));
     const auto gap = label.isEmpty() ? 0.0f : (float) Space::s;

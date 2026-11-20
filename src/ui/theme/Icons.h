@@ -77,7 +77,10 @@ enum class Icon
     restoreWindow,
     // The notices (ui/shell/Notices.h), as VS Code marks its notifications: something done, and something that went wrong
     info,
-    error
+    error,
+    // The settings' search (ui/shell/SettingsPanel.h), as VS Code's: Clear (a list with an x) and Filter (a funnel)
+    clearSearch,
+    filter
 };
 
 // The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read. A filled icon has its shape
@@ -117,6 +120,11 @@ public:
     // inside other controls, such as the chevron that collapses a track.
     void setQuiet (bool);
 
+    // A button of an action bar as VS Code's (the modal card's header, the settings' search): no border, its icon in the muted
+    // text colour (icon.foreground), toolbar.hoverBackground under the pointer and toolbar.activeBackground pressed, rounded as a
+    // menu's items (itemCornerRadius).
+    void setToolbarStyle (bool);
+
     // An accented button is a view's main one, in the accent color, as Save Version is.
     void setAccented (bool);
 
@@ -128,7 +136,7 @@ public:
 
 private:
     Icon icon;
-    bool quiet = false, accented = false, attention = false;
+    bool quiet = false, toolbar = false, accented = false, attention = false;
     std::unique_ptr<juce::Drawable> drawable;
     juce::Colour drawableColour { juce::Colours::black }; // the color the drawing is in now
 };
