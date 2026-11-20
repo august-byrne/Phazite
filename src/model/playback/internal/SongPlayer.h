@@ -239,7 +239,12 @@ private:
     // the next plan's.
     struct Changes
     {
-        std::set<std::int64_t> notes, channels, sounds; // sounds: the devices whose SOUNDS changed, which a kept node loads again
+        std::set<std::int64_t> notes, channels;
+        // The devices whose sounds changed (SOUNDS), which a kept node loads again: sounds that came whole or otherwise
+        // changed under it (an undo, a song applied); those set by hand (a property of SOUNDS itself); and of those, the ones
+        // its session has loaded at once (takeValue()), which aren't loaded again. Two kinds apart, and what was loaded, so
+        // that the order the song's listeners hear a change in (the player's own, the session's) doesn't matter.
+        std::set<std::int64_t> sounds, soundsSet, soundsTaken;
         std::set<CurveKey> curves;
         bool allNotes = false, allChannels = false, allCurves = false, tempo = false;
 

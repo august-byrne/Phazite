@@ -70,18 +70,15 @@ void CombFilter::prepare (int maximumDelay)
     mask = size - 1;
     writeIndex = 0;
     longest = (float) std::max (2, maximumDelay);
-    used = false;
+    held = 0;
     fresh = true;
     stepsLeft = 0;
 }
 
 void CombFilter::reset() noexcept
 {
-    // Only if something was written: voices reset their combs at every note, most of them unused.
-    if (used)
-        std::fill (buffer.begin(), buffer.end(), 0.0f);
-
-    used = false;
+    // Nothing written, whatever its length: voices reset their combs at every note, and every Play resets every device.
+    held = 0;
     fresh = true;
     stepsLeft = 0;
 }

@@ -240,7 +240,7 @@ private:
         {
             const juce::ScopedLock held (owner.lock);
 
-            if (owner.isWaiting())
+            if (owner.isWaiting (now))
             {
                 beatSent = now;
                 return false;
@@ -415,13 +415,18 @@ void Helper::finish (Reply& reply, const juce::MemoryBlock& message)
     reply.answered.signal();
 }
 
-bool Helper::isWaiting()
+bool Helper::isWaiting (double now)
 {
     return std::any_of (waiting.begin(), waiting.end(),
-                        [] (const auto& wanted)
+                        [now] (const auto& wanted)
                         {
                             const auto reply = wanted.lock();
-                            return reply != nullptr && ! reply->isDone() && reply->holdsOffHang;
+
+                            if (reply == nullptr || reply->isDone() || ! reply->holdsOffHang)
+                                return false;
+
+                            const auto ends = reply->holdOffEnds.load();
+                            return ends <= 0.0 || now < ends;
                         });
 }
 

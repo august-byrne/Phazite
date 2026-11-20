@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SandboxedInstance.h"
+#include "devices/core/AudioThreads.h"
 #include "devices/core/Clock.h"
 #include "model/base/Json.h"
 #include "model/transport/TempoValues.h"
@@ -21,18 +22,23 @@ namespace
     // heartbeat (sandbox/client/Helper.h).
     constexpr int defaultPrepareMilliseconds = 60000;
     std::atomic<int> prepareMilliseconds { defaultPrepareMilliseconds };
-    constexpr double quietMilliseconds = 250.0;          // how long a plug-in that said it changed is left alone before it is asked
-    constexpr double latestAskMilliseconds = 1000.0;     // how long after its first change it is asked at the latest
-    constexpr double answerSpacing = 10.0;               // and no sooner after its last ask than so many times its last answer took
-    constexpr int textLookMilliseconds = 10;             // how often the answers to the texts asked are looked at
-    constexpr size_t textsKept = 4096;                   // the values' texts kept at most, before they are forgotten
-    constexpr size_t maxCallsWaiting = 64;               // the calls one text asked keeps at most, for those that show it
-    constexpr size_t maxNoticesWaiting = 1024;           // a plug-in's editor's keys kept at most between turns
-    constexpr int smallestChannel = 4096;                // the longest block a channel takes at least
-    constexpr std::int64_t smallestDeadline = 1'000'000; // a millisecond, which a round trip to the helper takes well within
-    constexpr std::int64_t waitNanoseconds = 50'000'000; // how long a wait for a block goes before it looks whether to go on
-    constexpr int waitMilliseconds = 50;                 // and a wait for a channel
-    constexpr int preparingLookMilliseconds = 10;        // how often the message thread looks at a channel that waits
+    // How long a state or a program given may take to be set while the helper's message thread answers nothing, as long as a
+    // plug-in may take to load (PluginHost::defaultLoadMilliseconds).
+    constexpr int defaultSettingMilliseconds = 60000;
+    std::atomic<int> settingMilliseconds { defaultSettingMilliseconds };
+    constexpr double quietMilliseconds = 250.0;                // how long a plug-in that said it changed is left alone before it is asked
+    constexpr double latestAskMilliseconds = 1000.0;           // how long after its first change it is asked at the latest
+    constexpr double answerSpacing = 10.0;                     // and no sooner after its last ask than so many times its last answer took
+    constexpr int textLookMilliseconds = 10;                   // how often the answers to the texts asked are looked at
+    constexpr size_t textsKept = 4096;                         // the values' texts kept at most, before they are forgotten
+    constexpr size_t maxCallsWaiting = 64;                     // the calls one text asked keeps at most, for those that show it
+    constexpr size_t maxNoticesWaiting = 1024;                 // a plug-in's editor's keys kept at most between turns
+    constexpr int smallestChannel = 4096;                      // the longest block a channel takes at least
+    constexpr std::int64_t smallestDeadline = 1'000'000;       // a millisecond, which a round trip to the helper takes well within
+    constexpr std::int64_t waitNanoseconds = 50'000'000;       // how long a wait for a block goes before it looks whether to go on
+    constexpr int waitMilliseconds = 50;                       // and a wait for a channel
+    constexpr int preparingLookMilliseconds = 10;              // how often the message thread looks at a channel that waits
+    constexpr std::int64_t minimumHoldNanoseconds = 1'000'000; // how long preparing tries for the channel at least
 } // namespace
 
 juce::AudioProcessor::BusesProperties SandboxedInstance::getBuses (const sandbox::PluginInfo& info)
@@ -129,6 +135,14 @@ public:
 
         newValue = pending.load (std::memory_order_relaxed);
         return true;
+    }
+
+    // A value for the next block, as one set while a block played is kept, leaving the value set by hand as it is (on the
+    // thread that plays the blocks).
+    void keepPending (float newValue) noexcept
+    {
+        pending.store (newValue, std::memory_order_relaxed);
+        isPending.store (true, std::memory_order_release);
     }
 
 private:
@@ -262,6 +276,7 @@ void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> 
 
     // Opened again from the state it last had, which it has now; an answer the helper that went owed never comes.
     stateAsked = nullptr;
+    given = nullptr;
     stateTakenAt = stateChanges;
 
     // Its values as the plug-in has them now, as if it had set them itself; and its latency.
@@ -299,6 +314,15 @@ void SandboxedInstance::takeChanges (sandbox::BlockInfo& info, sandbox::Paramete
     // value was set, however long that was).
     if (i < parameters.size())
         anyPending.store (true, std::memory_order_release);
+}
+
+void SandboxedInstance::keepChange (int parameter, float value) noexcept
+{
+    if (! juce::isPositiveAndBelow (parameter, (int) parameters.size()) || ! std::isfinite (value))
+        return;
+
+    parameters[(size_t) parameter]->keepPending (juce::jlimit (0.0f, 1.0f, value));
+    anyPending.store (true, std::memory_order_release);
 }
 
 void SandboxedInstance::setMovedByEngine (std::span<const int> moved)
@@ -548,9 +572,42 @@ void SandboxedInstance::prepareToPlay (double sampleRate, int maximumBlockSize)
     // A new channel only for another rate or a longer block than it takes, asked of the helper without waiting (known bug
     // 166: the message thread waited for it, behind whatever else the helper did): the engine skips its blocks until it has
     // come. Not asked while the helper keeps a block, which it can't prepare the plug-in before it gives back: the channel
-    // waits for that block first.
-    hold();
+    // waits for that block first. Not waited for while a render holds the channel, which it may for as long as a plug-in
+    // takes over a block (the live plan made again on the message thread as the render switched a plug-in to play offline
+    // and it said another latency): the engine skips its blocks from now on, and the timer prepares it once the channel is
+    // let go of (timerCallback()), unless the render has prepared it first (finishPreparing()). The audio thread holds it for
+    // most of every block and lets go within one: tried for a block's length first, spinning, so that a plug-in that
+    // changed its latency as it played (its processor made anew) isn't skipped until the timer's next look.
+    auto isHeld = tryHold();
 
+    if (! isHeld)
+    {
+        const auto blockNanoseconds = (std::int64_t) (1.0e9 * std::max (1, maximumBlockSize) / std::max (1.0, sampleRate));
+        const auto until = sandbox::getNanoseconds() + std::max (minimumHoldNanoseconds, blockNanoseconds);
+
+        while (! isHeld && sandbox::getNanoseconds() < until)
+        {
+            devices::pauseInSpin();
+            isHeld = tryHold();
+        }
+    }
+
+    if (! isHeld)
+    {
+        if (! isPreparing())
+            preparingSince = sandbox::getNanoseconds();
+
+        preparing.store (true, std::memory_order_release);
+        startTimer (preparingLookMilliseconds);
+        return;
+    }
+
+    prepareHeld();
+    let();
+}
+
+void SandboxedInstance::prepareHeld()
+{
     if (isPrepared() && prepareAsked == nullptr)
     {
         preparing.store (false, std::memory_order_release);
@@ -567,8 +624,6 @@ void SandboxedInstance::prepareToPlay (double sampleRate, int maximumBlockSize)
         if (isPreparing())
             startTimer (preparingLookMilliseconds);
     }
-
-    let();
 }
 
 bool SandboxedInstance::isPrepared() noexcept
@@ -774,7 +829,12 @@ void SandboxedInstance::playBlock (juce::AudioBuffer<float>& buffer, const juce:
     // helper that has gone, which nothing tells the channel of.
     const auto hangNanoseconds = (std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000;
 
-    if (! channel.handOver() || waitForAnswer (hangNanoseconds) != Answer::played)
+    const auto handedOver = channel.handOver();
+
+    if (handedOver)
+        noteHandOver();
+
+    if (! handedOver || waitForAnswer (hangNanoseconds) != Answer::played)
     {
         buffer.clear();
         return;
@@ -800,8 +860,16 @@ void SandboxedInstance::setCurrentProgram (int index)
     if (! hasCrashed() && juce::isPositiveAndBelow (index, (int) remote->getInfo().programs.size()))
     {
         noteStateChange();
-        remote->setProgram (index, 0);
+        keepGiven (remote->askToSetProgram (index));
     }
+}
+
+void SandboxedInstance::keepGiven (std::shared_ptr<sandbox::Helper::Reply> reply)
+{
+    // Its answer kept until the next is given (the helper takes them in turn): a plug-in may take long to take a state, its
+    // helper's message thread answering nothing meanwhile, which isn't a hang until the setting's time is up.
+    reply->stopHoldingOffHangAfter (settingMilliseconds.load());
+    given = std::move (reply);
 }
 
 const juce::String SandboxedInstance::getProgramName (int index)
@@ -850,7 +918,7 @@ void SandboxedInstance::setStateInformation (const void* data, int size)
 
     // Without waiting for the helper (known bug 166): what is asked of it after this, it answers after it.
     if (! hasCrashed())
-        remote->setState (lastState, 0);
+        keepGiven (remote->askToSetState (lastState));
 }
 
 void SandboxedInstance::keepStateAsOpened() noexcept
@@ -1000,6 +1068,16 @@ int SandboxedInstance::getPrepareMilliseconds() noexcept
 int SandboxedInstance::getStateMilliseconds() noexcept
 {
     return stateMilliseconds.load();
+}
+
+void SandboxedInstance::setSettingMilliseconds (int milliseconds) noexcept
+{
+    settingMilliseconds = milliseconds > 0 ? milliseconds : defaultSettingMilliseconds;
+}
+
+int SandboxedInstance::getSettingMilliseconds() noexcept
+{
+    return settingMilliseconds.load();
 }
 
 //==============================================================================

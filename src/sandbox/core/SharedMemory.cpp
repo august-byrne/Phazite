@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -255,10 +256,31 @@ bool Bell::waitWhile (std::uint32_t value, std::int64_t spinNanoseconds, std::in
     return sleepWhile (value, left);
 }
 
+void Bell::wake() noexcept
+{
+    woken.store (true, std::memory_order_seq_cst);
+
+#if defined(_WIN32)
+    // The event stays set until its waiter takes it, if it doesn't sleep yet: it can't sleep through it.
+    if (event != nullptr)
+        SetEvent (event);
+#elif defined(__linux__)
+    // The futex word is the counter, which this doesn't move: a waiter that looked at the flag before it was set and has
+    // yet to sleep would sleep through a single wake, so it is woken until it has taken the wake (or left its wait), and
+    // no longer: one that goes straight into another wait stays waiting.
+    while (waiting.load (std::memory_order_seq_cst) && woken.load (std::memory_order_seq_cst))
+    {
+        syscall (SYS_futex, reinterpret_cast<std::uint32_t*> (&state.value), FUTEX_WAKE, 1, nullptr, nullptr, 0);
+        std::this_thread::yield();
+    }
+#endif
+}
+
 bool Bell::sleepWhile (std::uint32_t value, std::int64_t timeoutNanoseconds) noexcept
 {
     const auto deadline = timeoutNanoseconds < 0 ? -1 : getNanoseconds() + timeoutNanoseconds;
     auto changed = false;
+    waiting.store (true, std::memory_order_seq_cst);
     state.sleeping.store (1, std::memory_order_seq_cst);
 
     for (;;)
@@ -271,6 +293,10 @@ bool Bell::sleepWhile (std::uint32_t value, std::int64_t timeoutNanoseconds) noe
             changed = true;
             break;
         }
+
+        // Woken by its own process (wake()): as though its time were up.
+        if (woken.exchange (false, std::memory_order_seq_cst))
+            break;
 
         const auto left = deadline < 0 ? -1 : deadline - getNanoseconds();
 
@@ -288,7 +314,12 @@ bool Bell::sleepWhile (std::uint32_t value, std::int64_t timeoutNanoseconds) noe
             due.QuadPart = -std::max<std::int64_t> (1, left / 100); // relative, in 100 ns
             SetWaitableTimer (timer, &due, 0, nullptr, nullptr, FALSE);
             HANDLE handles[] = { event, timer };
-            WaitForMultipleObjects (2, handles, FALSE, INFINITE);
+
+            // Woken by the event first: the timer stopped, which would otherwise still fire, an interrupt for nothing at
+            // every block. One that fired before this was stopped is left signalled, and ends the next wait's sleep early
+            // at most: that wait looks at the counter and its own time again, and sleeps on.
+            if (WaitForMultipleObjects (2, handles, FALSE, INFINITE) == WAIT_OBJECT_0)
+                CancelWaitableTimer (timer);
         }
         else
         {
@@ -312,6 +343,7 @@ bool Bell::sleepWhile (std::uint32_t value, std::int64_t timeoutNanoseconds) noe
     }
 
     state.sleeping.store (0, std::memory_order_seq_cst);
+    waiting.store (false, std::memory_order_seq_cst);
     return changed;
 }
 } // namespace phazite::sandbox

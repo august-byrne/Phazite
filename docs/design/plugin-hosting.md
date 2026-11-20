@@ -70,6 +70,11 @@ helper with it, and Phazite, the song and the other plug-ins go on.
   again as it plays again. An effect is not passed through dry: a limiter or a fully wet reverb passed dry is worse
   than a gap. The notes of a block that could not be handed over go with the next that is, so that no note that ended
   sounds on.
+- **A block that comes while the plug-in is being set** (given a state or a program, or switched to or from playing
+  offline, on the helper's message thread, under the plug-in's lock) waits for it half the block's length at most, which a
+  quick preset is set within (so that auditioning presets as the song plays doesn't cut the sound), and is then answered as
+  one it didn't play, rather than kept until that is done: silent as a late block is, its notes and the values its parameters' changes left them at going
+  with the next block it plays, and no hang counted. A sampler that reads its library as it is given a state plays again once it has. A render's block waits for it.
 - Phazite reads back only what it handed over (the block's channels and samples), never what the helper's side of the
   shared memory says: a block that says otherwise is as one the helper did not play.
 - A plug-in's switch is a switch: a parameter of two steps, as JUCE's VST3 host tells a VST3's switch, with the
@@ -83,7 +88,8 @@ helper with it, and Phazite, the song and the other plug-ins go on.
   are crashed, and nothing else is.
 - **A hang:** a helper whose message thread has not answered its heartbeat for 10 seconds, or whose audio thread has
   kept a block for 5 seconds, is ended, and its instances are crashed as a crashed helper's are. Nothing of Phazite's
-  waits for it.
+  waits for it. While a plug-in is given a state or a program, its helper's message thread isn't taken for hung for not
+  answering, for up to a minute (as long as a plug-in may take to load); past that, the heartbeat's 10 seconds later, it is.
 - **What shows:** the plug-in's slot reads "*name* - Crashed" in the danger colour. It plays nothing: an effect's
   sound fades out, as for a late block.
 - **Reloading:** a click on the slot, or **Reload** in its menu, opens the plug-in again in a new helper with the
@@ -209,6 +215,8 @@ one (an older version's bounce) gets plug-in instances of its own.
 - **A plug-in's own state** (its settings, program and channel layout) is stored into the song before the song is
   saved or copied. It is outside the undo history, and a change made in the plug-in's window counts as an unsaved
   change. A VST3's state is kept as the format's own preset file, a `.vstpreset`.
+- **A meter a plug-in has as a parameter** (a gain-reduction meter: a parameter that can't be automated, which the plug-in
+  tells as it plays) changes nothing of the song: it isn't a value set by hand, nor an unsaved change.
 - **Latency** that a plug-in reports goes into the song's delay compensation ([engine.md](engine.md)).
 - **A value's text and a value typed** are asked of the helper without waiting: a value's text the plug-in wrote before
   shows at once, else the value as a number until the answer comes (never another value's text), one value of a parameter

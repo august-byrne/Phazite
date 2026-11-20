@@ -57,6 +57,13 @@ private:
 // time so far, in seconds, and its memory: what of it is in memory and no other process's, in bytes. Its ID, which it
 // tells Phazite as it starts.
 void endQuietlyOnCrashes();
+
+// On Windows, the helper process kept out of Windows' power throttling, which it would otherwise be in while none of its
+// windows shows (no plug-in's editor open): neither run at reduced speed, nor its timer asks ignored (Windows 11), which
+// would make its sleeps of a millisecond (a render's wait for the offline switch) last a whole tick of 15.6 ms. A Windows
+// that doesn't know either is left as it is. Nothing elsewhere.
+void keepFullSpeed();
+
 double getProcessCpuSeconds();
 std::int64_t getProcessMemoryBytes();
 std::int64_t getProcessID();

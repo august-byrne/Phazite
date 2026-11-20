@@ -183,6 +183,9 @@ private:
     // What came in, for its delayed copy, and the stretch's.
     std::array<std::vector<float>, 2> history;
     int historyMask = 0, historyAt = 0;
+    // Each side's samples kept since the reset, up to the history's length: what is older is silence, and a reset writes
+    // none. A side that a stretch didn't play (the right, of a stretch in mono) holds nothing after it.
+    std::array<int, 2> historyHeld {};
     std::array<std::array<float, maxLength>, 2> delayed {}, glided {};
 
     Compared compare (std::span<const float> values, int numChannels) const noexcept;

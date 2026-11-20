@@ -59,16 +59,31 @@ namespace
         return needed;
     }
 
-    // Renders newly made play: Phazite's engine plays them from its next plan.
-    void announce (const Song& song, const juce::Array<juce::File>& renders)
-    {
-        if (renders.isEmpty() || ! juce::MessageManager::existsAndIsCurrentThread())
-            return;
+    // How many renders renderClipAudio() made, on the message thread and elsewhere (countClipRendersMade()).
+    std::atomic<int> madeOnMessageThread { 0 }, madeElsewhere { 0 };
 
-        if (auto* session = findSession (song))
-            session->update();
-    }
+    // What the tests have called as the stretcher asks whether to stop (setClipRenderStopSeam()).
+    std::function<void (const std::function<bool()>&)> clipRenderStopSeam;
 } // namespace
+
+void setClipRenderStopSeam (std::function<void (const std::function<bool()>&)> seam)
+{
+    clipRenderStopSeam = std::move (seam);
+}
+
+void announceClipRenders (const Song& song, const juce::Array<juce::File>& made)
+{
+    if (made.isEmpty() || ! juce::MessageManager::existsAndIsCurrentThread())
+        return;
+
+    if (auto* session = findSession (song))
+        session->update();
+}
+
+ClipRendersMade countClipRendersMade()
+{
+    return { madeOnMessageThread.load(), madeElsewhere.load() };
+}
 
 bool renderClipAudio (const juce::File& source, const stretch::Settings& settings, const juce::File& render,
                       const std::function<bool()>& shouldStop, std::atomic<juce::int64>* framesWritten)
@@ -122,35 +137,74 @@ bool renderClipAudio (const juce::File& source, const stretch::Settings& setting
 
     // Someone else may have made it meanwhile: theirs is the same.
     if (rendered && ! render.existsAsFile())
+    {
         rendered = part.moveFileTo (render);
+
+        if (rendered)
+            ++(juce::MessageManager::existsAndIsCurrentThread() ? madeOnMessageThread : madeElsewhere);
+    }
 
     part.deleteFile();
     return render.existsAsFile();
 }
 
-bool renderMissingClipAudio (const Song& song, const std::function<bool()>& shouldStop)
+std::vector<ClipRenderToMake> findMissingClipRenders (const Song& song)
 {
-    auto allRendered = true;
-    juce::Array<juce::File> made;
+    std::vector<ClipRenderToMake> missing;
 
-    // Their sources asked about now, as the fresh player of the render that plays them next asks about each file it doesn't
-    // know yet: each render named as that player will name it (a source written again within the second, under another).
     for (const auto& [render, recipe] : getNeededRenders (song, true))
+        if (! render.existsAsFile())
+            missing.push_back ({ render, recipe.source, recipe.settings, getAudioFileInfo (recipe.source).lengthInSamples });
+
+    return missing;
+}
+
+juce::Array<juce::File> makeClipRenders (const std::vector<ClipRenderToMake>& renders, const std::function<bool()>& shouldStop,
+                                         const std::function<void (double)>& progress)
+{
+    juce::Array<juce::File> made;
+    std::vector<juce::int64> lengths;
+    juce::int64 all = 0, before = 0;
+
+    for (const auto& toMake : renders)
     {
-        if (render.existsAsFile())
-            continue;
-
-        if (shouldStop != nullptr && shouldStop())
-            return false;
-
-        if (renderClipAudio (recipe.source, recipe.settings, render, shouldStop))
-            made.add (render);
-        else
-            allRendered = false;
+        lengths.push_back (std::max<juce::int64> (1, stretch::getStretchedLength (toMake.sourceLength, toMake.settings)));
+        all += lengths.back();
     }
 
-    announce (song, made);
-    return allRendered;
+    for (size_t i = 0; i < renders.size(); ++i)
+    {
+        if (shouldStop != nullptr && shouldStop())
+            break;
+
+        // How far it has come told as the stretcher asks whether to stop, between its blocks.
+        std::atomic<juce::int64> written { 0 };
+        const auto asking = [&]
+        {
+            if (progress != nullptr)
+                progress (juce::jlimit (0.0, 1.0, (double) (before + std::min (written.load(), lengths[i])) / (double) all));
+
+            if (clipRenderStopSeam != nullptr)
+                clipRenderStopSeam (shouldStop);
+
+            return shouldStop != nullptr && shouldStop();
+        };
+
+        if (renderClipAudio (renders[i].source, renders[i].settings, renders[i].render, asking, &written))
+            made.add (renders[i].render);
+
+        before += lengths[i];
+    }
+
+    return made;
+}
+
+bool renderMissingClipAudio (const Song& song, const std::function<bool()>& shouldStop)
+{
+    const auto missing = findMissingClipRenders (song);
+    const auto made = makeClipRenders (missing, shouldStop);
+    announceClipRenders (song, made);
+    return made.size() == (int) missing.size() && ! (shouldStop != nullptr && shouldStop());
 }
 
 void purgeClipRenders (const Song& song)
@@ -393,7 +447,7 @@ void ClipRenders::handleAsyncUpdate()
             failed[job.render] = { job.folderShut }; // not tried again until its source or its folder changes
     }
 
-    announce (song, made);
+    announceClipRenders (song, made);
     update(); // starts what waited for one that stopped
 
     if (! failed.empty() && ! isTimerRunning())

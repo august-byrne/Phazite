@@ -132,6 +132,15 @@ namespace
             return reader->read (&buffer, 0, numSamples, start, true, true);
         }
 
+        // JUCE's WAV, AIFF and FLAC readers give a place read again exactly as before (without loss, sought to the sample);
+        // its MP3 reader starts decoding again from a frame before the place, and Windows Media's seeks by time: not those,
+        // nor Ogg Vorbis, whose decoder isn't shown to give the same after a seek.
+        bool readsAgainTheSame() const override
+        {
+            const auto& name = reader->getFormatName();
+            return name == "WAV file" || name == "AIFF file" || name == "FLAC file";
+        }
+
     private:
         std::unique_ptr<juce::AudioFormatReader> reader;
     };
@@ -280,9 +289,10 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
         if (element.hasType (schema::AUTOMATION))
             return (void) (changes.allCurves = true);
 
-        // A device's sounds (a pad's, an oscillator's table, a sampler's): loaded again by a kept node (getDevice()).
+        // A device's sounds (a pad's, an oscillator's table, a sampler's): loaded again by a kept node (getDevice()); one set by
+        // hand (a property of the SOUNDS element), unless its session loaded it at once (takeValue()).
         if (element.hasType (schema::SOUNDS) && element.getParent().hasType (schema::DEVICE))
-            changes.sounds.insert (getID (element.getParent(), schema::deviceID));
+            (! structure && element == changed ? changes.soundsSet : changes.sounds).insert (getID (element.getParent(), schema::deviceID));
 
         if (element.hasType (schema::VALUE) || schema::isUncountedElement (element.getParent(), element))
             return; // a plug-in's value, or view state (a track's lanes)
@@ -772,10 +782,12 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
         node->getRunner().prepare (preparedRate, preparedBlockSize);
         loadSounds (*node, deviceState);
     }
-    else if (compiling.sounds.contains (id))
+    else if (compiling.sounds.contains (id) || (compiling.soundsSet.contains (id) && ! compiling.soundsTaken.contains (id)))
     {
-        // Its sounds changed since the plan before: as the song holds them now. (A session loads one set by hand at once,
-        // takeValue(); not sounds that came whole, with an undo or a song applied, nor a player's without a session.)
+        // Its sounds changed since the plan before: as the song holds them now. Not a sound set by hand that its session loaded
+        // at once (takeValue()): read again, every pad's or oscillator's, a sound file's comes back as a new sound, and every hit
+        // of it still ringing fades out. Sounds that came whole (an undo, a song applied), and a player's without a session (a
+        // render's), are loaded here.
         loadSounds (*node, deviceState);
     }
 
@@ -2262,11 +2274,16 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
     if (tree.hasType (schema::DEVICE) && (property == schema::pluginState || property == schema::pluginProgram))
         return true;
 
-    // A pad's sound or an oscillator's table.
+    // A pad's sound or an oscillator's table: loaded now into the node the next plan keeps, which doesn't load it again.
     if (tree.hasType (schema::SOUNDS))
     {
-        if (auto* node = findDevice (getID (tree.getParent(), schema::deviceID)))
+        const auto id = getID (tree.getParent(), schema::deviceID);
+
+        if (auto* node = findDevice (id))
+        {
             loadSound (*node, tree.getParent(), property);
+            changes.soundsTaken.insert (id);
+        }
 
         return true;
     }

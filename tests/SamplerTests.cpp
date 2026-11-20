@@ -12,11 +12,14 @@
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/SampleAnalysis.h"
 #include "devices/sampler/Sampler.h"
+#include "engine/nodes/DeviceRunner.h"
 
 #include <juce_dsp/juce_dsp.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <span>
 #include <vector>
 
 namespace
@@ -586,6 +589,62 @@ TEST_CASE ("One-Shot plays to the end whatever the note, and with Gate lets go o
     const auto faded = play (*sampler, values, 12000, { noteOn (0, 60) });
     CHECK (peakOf (faded, 0, 480) < 0.1f);
     CHECK (peakOf (faded, 6000, 8000) > 0.4f);
+}
+
+TEST_CASE ("A one-shot transposed down plays the silence inside its sound through, as a render does: it never sleeps under a note")
+{
+    // The audit of 2026-11-20: the runner lets a device sleep once it has been silent for as long as the tail it reports, and
+    // the sampler's covered a one-shot played an octave down, though Transpose goes down four. A sound with a stretch of
+    // silence inside it, transposed three octaves down, slept in the middle of its note and lost what came after, which a
+    // render (that never sleeps) played. A sound of 0.7 s: a tenth of a second of a sine, half a second of silence, a tenth
+    // again; at -36 semitones, the second tenth from 4.8 s.
+    const auto gapped = makeSound ((int) (0.7 * testRate),
+                                   [] (int i)
+                                   {
+                                       const auto inGap = i >= (int) (0.1 * testRate) && i < (int) (0.6 * testRate);
+                                       return inGap ? 0.0f : 0.5f * (float) std::sin (twoPi * 440.0 * i / testRate);
+                                   });
+    auto values = getPlainValues();
+    values[Sampler::mode] = (float) Sampler::Mode::oneShot;
+    values[Sampler::transpose] = -36.0f;
+
+    const auto played = [&] (bool rendering)
+    {
+        phazite::engine::DeviceRunner runner (Sampler::info, std::make_unique<Sampler>());
+        runner.prepare (testRate, testBlockSize);
+        static_cast<Sampler&> (runner.getProcessor()).setSound (gapped);
+        phazite::engine::DeviceRunner::Block block;
+        block.values = values;
+        block.isPlaying = true;
+        block.isRendering = rendering;
+        juce::AudioBuffer<float> buffer (2, testBlockSize);
+        std::array<NoteEvent, 2> note { noteOn (0, 60), noteOff (100, 60) };
+        std::vector<float> left;
+
+        for (int done = 0; done < (int) (6.0 * testRate); done += testBlockSize)
+        {
+            buffer.clear();
+            block.events = done == 0 ? std::span<NoteEvent> (note) : std::span<NoteEvent>();
+            runner.process (buffer, 0, testBlockSize, block);
+
+            for (int i = 0; i < testBlockSize; ++i)
+                left.push_back (buffer.getSample (0, i));
+        }
+
+        return left;
+    };
+
+    const auto live = played (false), rendered = played (true);
+    const auto secondTenth = [] (const std::vector<float>& sound)
+    { return peakOf (sound, (size_t) (4.9 * testRate), (size_t) (5.5 * testRate)); };
+    REQUIRE (secondTenth (rendered) > 0.1f);
+    CHECK (secondTenth (live) > 0.1f);
+    auto largest = 0.0f;
+
+    for (size_t i = 0; i < live.size(); ++i)
+        largest = std::max (largest, std::abs (live[i] - rendered[i]));
+
+    CHECK (largest == 0.0f);
 }
 
 TEST_CASE ("Slice mode puts each slice on its note from 36 up, by transients, beats, equal parts or by hand")

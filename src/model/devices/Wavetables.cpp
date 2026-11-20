@@ -10,7 +10,11 @@
 #include "model/playback/internal/PlaybackSession.h"
 
 #include <algorithm>
+#include <iterator>
+#include <map>
+#include <memory>
 #include <optional>
+#include <tuple>
 #include <vector>
 
 namespace phazite
@@ -88,30 +92,67 @@ namespace
 
         return 0;
     }
+
+    // A sound file read as a wavetable, each time it is asked.
+    std::shared_ptr<const devices::Wavetable> readTableFile (const juce::File& file)
+    {
+        const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
+
+        if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0)
+            return {};
+
+        const auto length = (int) std::min (reader->lengthInSamples, longestSound);
+        const auto channels = (int) std::min (reader->numChannels, 2u);
+        juce::AudioBuffer<float> audio (channels, length);
+
+        if (! reader->read (&audio, 0, length, 0, true, channels > 1))
+            return {};
+
+        clearWhatIsNotSound (audio);
+        std::vector<float> mono ((size_t) length, 0.0f);
+
+        for (int channel = 0; channel < channels; ++channel)
+            for (int i = 0; i < length; ++i)
+                mono[(size_t) i] += audio.getSample (channel, i) / (float) channels;
+
+        return devices::Wavetable::fromSound (file.getFileNameWithoutExtension(), mono, findSerumFrameLength (file));
+    }
 } // namespace
 
 std::shared_ptr<const devices::Wavetable> readWavetable (const juce::File& file)
 {
-    const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
+    // Each file read once, while anything holds what was read, by its path, its size and when it was last written, as a
+    // sampler's sound is (readSampleSound()): a synth loaded again (an undo that puts its sounds back, a song applied) gets
+    // the same table back, which it doesn't take anew.
+    struct FileKey
+    {
+        juce::String path;
+        juce::int64 size = 0, written = 0;
 
-    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0)
+        bool operator< (const FileKey& other) const
+        {
+            return std::tie (path, size, written) < std::tie (other.path, other.size, other.written);
+        }
+    };
+
+    static std::map<FileKey, std::weak_ptr<const devices::Wavetable>> read; // message thread
+    const FileKey key { file.getFullPathName(), file.getSize(), file.getLastModificationTime().toMilliseconds() };
+
+    if (const auto found = read.find (key); found != read.end())
+        if (auto table = found->second.lock())
+            return table;
+
+    auto table = readTableFile (file);
+
+    if (table == nullptr)
         return {};
 
-    const auto length = (int) std::min (reader->lengthInSamples, longestSound);
-    const auto channels = (int) std::min (reader->numChannels, 2u);
-    juce::AudioBuffer<float> audio (channels, length);
+    // Forget what nothing holds any more.
+    for (auto each = read.begin(); each != read.end();)
+        each = each->second.expired() ? read.erase (each) : std::next (each);
 
-    if (! reader->read (&audio, 0, length, 0, true, channels > 1))
-        return {};
-
-    clearWhatIsNotSound (audio);
-    std::vector<float> mono ((size_t) length, 0.0f);
-
-    for (int channel = 0; channel < channels; ++channel)
-        for (int i = 0; i < length; ++i)
-            mono[(size_t) i] += audio.getSample (channel, i) / (float) channels;
-
-    return devices::Wavetable::fromSound (file.getFileNameWithoutExtension(), mono, findSerumFrameLength (file));
+    read[key] = table;
+    return table;
 }
 
 bool isSynth (const Song& song, DeviceID id)

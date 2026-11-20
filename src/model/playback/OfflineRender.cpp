@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/OfflineRender.h"
+#include "engine/audio/AudioFile.h"
 #include "engine/core/Engine.h"
 #include "internal/PlaybackSession.h"
 #include "model/base/Numbers.h"
@@ -15,6 +16,7 @@ namespace
 {
     constexpr float silence = 0.000316f; // -70 dB, under which a tail's block is silent
     constexpr int partSamples = 8192;    // rendered and written at a time
+    constexpr double makingShare = 0.5;  // of a job's progress, its clips' renders, where it has any to make
 
     // The longest tail a plan's devices report, in seconds: its plug-ins' (the devices that take their blocks whole), which
     // say theirs as they open, asked on the message thread, where a plug-in is made anew; or Phazite's own devices', which
@@ -78,14 +80,38 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
     }
 
     // Each job compiled as its turn comes (known bug 125: an export of stems compiled them all here, and held them all): the
-    // first now, so that it starts at once.
+    // first now, so that it starts at once, unless clips' renders must be made for it first, on the render's thread.
     for (const auto& job : toRender)
         jobs.push_back ({ job });
 
     if (! jobs.empty())
-        compile (0);
+        takeTurn (0, false);
 
     startThread (setup.background ? juce::Thread::Priority::low : juce::Thread::Priority::normal);
+}
+
+void OfflineRender::takeTurn (size_t index, bool rendersMade)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    auto& job = jobs[index];
+
+    // Those this thread made, told; or those it needs, found now, the song read here alone (known bug 198: a source written
+    // again while the job before played names a render of its own, made now): with none to make, it is compiled at once.
+    if (rendersMade)
+    {
+        if (setup.clipsOf != nullptr)
+            announceClipRenders (*setup.clipsOf, job.made);
+
+        job.toMake.clear();
+        job.made.clear();
+    }
+    else if (setup.clipsOf != nullptr)
+    {
+        job.toMake = findMissingClipRenders (*setup.clipsOf);
+    }
+
+    if (job.toMake.empty())
+        compile (index);
 }
 
 void OfflineRender::compile (size_t index)
@@ -131,22 +157,33 @@ void OfflineRender::compile (size_t index)
     }
 }
 
-bool OfflineRender::waitForCompile (size_t index)
+bool OfflineRender::waitForTurn (size_t index, bool rendersMade)
 {
-    // On the message thread, where a song is read, unless this has gone by then; this thread waits, woken by the compile or
-    // by its end (~OfflineRender()), never ended by force.
+    // On the message thread, where a song is read, unless this has gone by then; this thread waits, woken by the turn or by
+    // its end (~OfflineRender()), never ended by force.
     juce::MessageManager::callAsync (
-        [token = alive, index]
+        [token = alive, index, rendersMade]
         {
             if (auto* render = *token)
             {
-                render->compile (index);
-                render->jobCompiled.signal();
+                render->takeTurn (index, rendersMade);
+                render->turnTaken.signal();
             }
         });
 
-    jobCompiled.wait (-1);
-    return ! threadShouldExit() && jobs[index].plan != nullptr;
+    turnTaken.wait (-1);
+    return ! threadShouldExit();
+}
+
+void OfflineRender::makeRendersOf (size_t index)
+{
+    // Off the message thread, which stays free (the window, its Cancel), each stopping between the stretcher's blocks once
+    // this is cancelled, and leaving no part of its file: its share of the job's progress first. One that fails plays as
+    // silence, as it does live (ClipRenders.h), and fails nothing.
+    auto& job = jobs[index];
+    playedFrom = makingShare;
+    job.made = phazite::makeClipRenders (
+        job.toMake, [this] { return threadShouldExit(); }, [this, index] (double done) { showProgress ((int) index, makingShare * done); });
 }
 
 std::optional<OfflineRender::Wait> OfflineRender::findWait() const
@@ -178,11 +215,12 @@ std::optional<OfflineRender::Wait> OfflineRender::findWait() const
 OfflineRender::~OfflineRender()
 {
     JUCE_ASSERT_MESSAGE_THREAD
-    // It looks at threadShouldExit() between blocks, and waits no longer for a plug-in to play the one it is in, nor for a
-    // job's compile, which no longer comes: never ended by force, which can leave a lock it held held for ever.
+    // It looks at threadShouldExit() between blocks (and between the stretcher's, making clips' renders), and waits no longer
+    // for a plug-in to play the one it is in, nor for a job's turn, which no longer comes: never ended by force, which can
+    // leave a lock it held held for ever.
     signalThreadShouldExit();
     *alive = nullptr;
-    jobCompiled.signal();
+    turnTaken.signal();
 
     for (const auto& job : jobs)
         for (auto* plugin : job.plugins)
@@ -203,8 +241,14 @@ OfflineRender::~OfflineRender()
 }
 void OfflineRender::setProgress (int job, double ofJob) noexcept
 {
-    const auto share = juce::jlimit (0.0, 1.0, ofJob);
-    progress.store ((float) ((job + share) / (double) std::max<size_t> (1, jobs.size())), std::memory_order_relaxed);
+    // After the share its clips' renders took, if it made any.
+    showProgress (job, playedFrom + (1.0 - playedFrom) * juce::jlimit (0.0, 1.0, ofJob));
+}
+
+void OfflineRender::showProgress (int job, double share) noexcept
+{
+    progress.store ((float) ((job + juce::jlimit (0.0, 1.0, share)) / (double) std::max<size_t> (1, jobs.size())),
+                    std::memory_order_relaxed);
 }
 
 void OfflineRender::run()
@@ -213,7 +257,22 @@ void OfflineRender::run()
 
     for (size_t i = 0; i < jobs.size() && result.wasOk() && ! threadShouldExit(); ++i)
     {
-        if (i > 0 && ! waitForCompile (i))
+        playedFrom = 0.0;
+
+        // Its turn (the first's was taken as this was made): the clips' renders it needs made here, then told and it
+        // compiled on the message thread.
+        if (i > 0 && ! waitForTurn (i, false))
+            break;
+
+        if (! jobs[i].toMake.empty())
+        {
+            makeRendersOf (i);
+
+            if (threadShouldExit() || ! waitForTurn (i, true))
+                break;
+        }
+
+        if (jobs[i].plan == nullptr)
             break;
 
         result = play (jobs[i], (int) i);
@@ -249,6 +308,35 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
     engine.prepare (setup.sampleRate, setup.blockSize);
     engine.setPlan (std::move (compiled.plan));
     engine.locate (firstBeat);
+
+    // The sound files its plan plays, each once (two clips can play one, in two places), and a version's bounce compared:
+    // between two parts, when no thread plays (the engine's workers wait for the next part), each lets go of what it read
+    // before the part just played and not in it, at once. A clip plays on forward into what it read last or what follows;
+    // one that comes back to what was let go of reads it from the disk again, the same samples (a file that may read other
+    // samples there, or a short one, lets go of nothing: AudioFile::letGoOfUnread()).
+    std::vector<engine::AudioFile*> files;
+
+    if (const auto* played = engine.getPlan())
+    {
+        const auto addFile = [&files] (const std::shared_ptr<engine::AudioFile>& file)
+        {
+            if (file != nullptr && std::find (files.begin(), files.end(), file.get()) == files.end())
+                files.push_back (file.get());
+        };
+
+        for (const auto& strip : played->strips)
+            for (const auto& region : strip.audio)
+                addFile (region.file);
+
+        if (played->comparison.has_value())
+            addFile (played->comparison->bounce.file);
+    }
+
+    const auto letGo = [&files]
+    {
+        for (auto* file : files)
+            file->letGoOfUnread();
+    };
 
     engine::LoudnessMeter meter;
     meter.prepare (setup.sampleRate, partSamples);
@@ -290,6 +378,7 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
     {
         const auto length = (int) std::min<std::int64_t> (partSamples, endSample - done);
         engine.renderPart (part.getArrayOfWritePointers(), length);
+        letGo();
 
         if (const auto* plugin = findFailedPlugin())
             return failedFor (*plugin);
@@ -308,9 +397,16 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
     juce::AudioBuffer<float> quiet;
     auto numQuiet = 0;
 
-    for (auto played = done; ! threadShouldExit() && played < lastSample; played += blockLength)
+    for (auto played = done, sinceLetGo = (std::int64_t) 0; ! threadShouldExit() && played < lastSample; played += blockLength)
     {
         engine.renderPart (part.getArrayOfWritePointers(), blockLength);
+
+        // As often as between the song's parts, not after each block.
+        if ((sinceLetGo += blockLength) >= partSamples)
+        {
+            letGo();
+            sinceLetGo = 0;
+        }
 
         if (const auto* plugin = findFailedPlugin())
             return failedFor (*plugin);

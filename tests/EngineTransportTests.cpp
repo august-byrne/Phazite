@@ -771,6 +771,89 @@ TEST_CASE ("The plans a session lets go of while a block stalls are freed only o
     phazite::test::dispatchPendingMessages();
 }
 
+namespace
+{
+// An effect that counts the blocks it plays: which plan plays.
+struct BlockCounter final : dev::Processor
+{
+    static constexpr const char* typeID = "testBlockCounter";
+    static constexpr dev::DeviceInfo info { .typeID = typeID, .name = "Block Counter", .kind = dev::DeviceKind::effect };
+    std::atomic<int> blocks { 0 };
+
+    void prepare (double, int) override {}
+    void reset() override {}
+    bool sleepsOnSilence() const noexcept override { return false; }
+    void process (const dev::ProcessContext&) override { blocks.fetch_add (1); }
+};
+} // namespace
+
+TEST_CASE ("With its device stopped, a plan given frees the one it replaces at once, and the device started again plays the last")
+{
+    // The threading audit of 2026-11-20: a plan replaced was freed once the audio thread had finished two blocks since, and
+    // none plays while the device is stopped, or before any has started: every edit's plan was kept until blocks played
+    // again. Now, while no device plays the engine, the one replaced goes as the next is given, as dropPlans() lets go of
+    // them. Each plan's master holds a state of its own, which only the plan holds.
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    auto& player = host.getEngine();
+    constexpr auto deviceRate = phazite::test::HostedDevice::sampleRate;
+    constexpr auto deviceBlock = phazite::test::HostedDevice::blockSize;
+    std::vector<std::weak_ptr<engine::StripState>> masters;
+    std::shared_ptr<engine::DeviceNode> counter;
+
+    const auto makeCountedPlan = [&]
+    {
+        auto plan = std::make_unique<engine::Plan>();
+        plan->tempo = engine::TempoMap ({ { 0.0, 120.0 } }, { { 0.0, 4, 4 } }, deviceRate);
+        plan->maximumBlockSize = deviceBlock;
+        engine::Plan::Strip master;
+        master.state = std::make_shared<engine::StripState>();
+        master.state->prepare (deviceRate, deviceBlock);
+        masters.push_back (master.state);
+        counter = std::make_shared<engine::DeviceNode> (BlockCounter::info, std::make_unique<BlockCounter>());
+        counter->getRunner().prepare (deviceRate, deviceBlock);
+        master.devices.push_back ({ counter, {} });
+        plan->strips.push_back (std::move (master));
+        return plan;
+    };
+
+    const auto countAlive = [&masters]
+    { return std::count_if (masters.begin(), masters.end(), [] (const auto& master) { return ! master.expired(); }); };
+
+    // A device plays a plan, and stops.
+    {
+        phazite::test::HostedDevice device;
+        player.setPlan (makeCountedPlan());
+        device.process (4);
+        REQUIRE (static_cast<BlockCounter&> (counter->getRunner().getProcessor()).blocks.load() > 0);
+    }
+
+    // A hundred plans given while it is stopped: the last alone is kept.
+    for (int i = 0; i < 100; ++i)
+        player.setPlan (makeCountedPlan());
+
+    CHECK (countAlive() == 1);
+    CHECK_FALSE (masters.back().expired());
+
+    // Started again, the device plays the last plan given.
+    {
+        phazite::test::HostedDevice device;
+        device.process (4);
+        CHECK (static_cast<BlockCounter&> (counter->getRunner().getProcessor()).blocks.load() > 0);
+
+        // And while it plays, a plan replaced is kept until the audio thread has finished two blocks since, as before.
+        player.setPlan (makeCountedPlan());
+        player.setPlan (makeCountedPlan());
+        CHECK (countAlive() == 3);
+        device.process (3);
+        player.setPlan (makeCountedPlan());
+        CHECK (countAlive() == 2); // the one given last before and the new one; the plan they replaced went
+    }
+
+    player.setPlan (nullptr);
+    CHECK (countAlive() == 0);
+    phazite::test::dispatchPendingMessages();
+}
+
 TEST_CASE ("A render takes the project's plug-ins only once a block that stalls in them has finished")
 {
     // lendToRender() let go of the plans after half a second, whatever the audio thread did, and the render then played

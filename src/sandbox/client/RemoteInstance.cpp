@@ -18,6 +18,12 @@ namespace
         message.add (juce::String (name)).add (limits.maxSamples).add (limits.maxChannels).add (limits.maxSidechainChannels);
         message.add (limits.maxEvents).add (limits.maxChanges).add (sampleRate);
     }
+
+    // Answered within the time, as Helper::request() takes an answer: none if the helper went first.
+    bool isAnswered (Helper::Reply& reply, int timeoutMilliseconds)
+    {
+        return reply.wait (timeoutMilliseconds) && ! reply.getReply().isEmpty();
+    }
 } // namespace
 
 RemoteInstance::RemoteInstance (Helper& h, std::int64_t instanceID, std::unique_ptr<BlockChannel> blockChannel)
@@ -156,18 +162,28 @@ std::optional<juce::MemoryBlock> RemoteInstance::readState (const Helper::Reply&
 
 bool RemoteInstance::setState (const juce::MemoryBlock& state, int timeoutMilliseconds)
 {
+    return isAnswered (*askToSetState (state), timeoutMilliseconds);
+}
+
+std::shared_ptr<Helper::Reply> RemoteInstance::askToSetState (const juce::MemoryBlock& state)
+{
     auto message = helper.makeRequest (MessageType::setState);
     message.add (id).add (state);
-    return helper.request (message, timeoutMilliseconds).has_value();
+    return helper.send (message);
 }
 
 bool RemoteInstance::setProgram (int index, int timeoutMilliseconds)
 {
-    // Its program from now on, as the helper sets it in turn (asked without waiting too).
+    return isAnswered (*askToSetProgram (index), timeoutMilliseconds);
+}
+
+std::shared_ptr<Helper::Reply> RemoteInstance::askToSetProgram (int index)
+{
+    // Its program from now on, as the helper sets it in turn.
     auto message = helper.makeRequest (MessageType::setProgram);
     message.add (id).add ((std::int32_t) index);
     program = index;
-    return helper.request (message, timeoutMilliseconds).has_value();
+    return helper.send (message);
 }
 
 std::shared_ptr<Helper::Reply> RemoteInstance::askToOpenEditor()

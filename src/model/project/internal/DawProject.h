@@ -51,8 +51,15 @@ DawProjectContent describeDawProject (const Song&, const juce::String& title, co
 
 // Writes it into a file, its bounces taken from a folder (<the track's ID>.wav): into a temporary file next to it, which
 // takes its place once complete; refused before anything is written where the archive wouldn't fit what the zip writer
-// can hold (checkArchiveFits()). Any thread.
-juce::Result writeDawProject (DawProjectContent&, const juce::File& bouncesFolder, const juce::File& file);
+// can hold (checkArchiveFits()). Each file goes in a part at a time, never held whole, and shouldStop is asked before
+// each part: once it says stop, the write stops there, and leaves neither the archive nor its temporary file ("Cancelled.").
+// Any thread.
+juce::Result writeDawProject (DawProjectContent&, const juce::File& bouncesFolder, const juce::File& file,
+                              const std::function<bool()>& shouldStop = {});
+
+// For the tests: what is called on the thread that writes a DAWproject's archive before each part of a file it copies
+// into it, with what says whether the write is to stop; none if not set. Set while no archive is written.
+void setArchivePartSeam (std::function<void (const std::function<bool()>& shouldStop)>);
 
 // An entry of a DAWproject's archive: its path in it, how many bytes it holds, and whether it is packed (deflated) or
 // stored as it is (audio, which barely packs).
@@ -63,11 +70,10 @@ struct ArchiveEntry
     bool packed = false;
 };
 
-// Whether the archive of these entries fits what JUCE's zip writer can hold: it writes each size and place in 32 bits and
-// the count of entries in 16, without ZIP64, so that an archive or an entry of 4 GB or more, or more than 65,535 entries,
-// comes out damaged while the write says it worked; and 0xFFFF entries, or 0xFFFFFFFF bytes, are what a reader takes for
-// ZIP64's marker (Java's, which Bitwig Studio's is, among them): so at most 65,534 entries, and less than 4 GB. JUCE
-// workaround W41 (docs/juce-workarounds.md). If not, why, and what to do instead.
+// Whether the archive of these entries fits what Phazite's zip writer can hold (writeDawProject()): it writes each size and
+// place in 32 bits and the count of entries in 16, without ZIP64, as JUCE's does; and 0xFFFF entries, or 0xFFFFFFFF bytes,
+// are what a reader takes for ZIP64's marker (Java's, which Bitwig Studio's is, among them): so at most 65,534 entries, and
+// less than 4 GB. JUCE workaround W41 (docs/juce-workarounds.md). If not, why, and what to do instead.
 inline constexpr juce::int64 maxArchiveBytes = (juce::int64) 0xfffffffe;
 inline constexpr int maxArchiveEntries = 0xfffe;
 juce::Result checkArchiveFits (const std::vector<ArchiveEntry>&);

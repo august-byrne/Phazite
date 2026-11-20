@@ -305,6 +305,9 @@ private:
     dsp::SincReader reader;
     dsp::Random startPlaces; // where notes start at random (startRandom), the same every time
     std::atomic<float> tailSeconds { 0.05f };
+    // In seconds: how long its voices that play to their sounds' ends last, each from its start to its end at its step now,
+    // the longest; its tail while it is longer than tailSeconds (process()).
+    std::atomic<float> playingTail { 0.0f };
     std::atomic<int> activeVoices { 0 };
     Shown shown;
 

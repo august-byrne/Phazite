@@ -245,6 +245,43 @@ TEST_CASE ("A block answered late stays the helper's: the next finds the channel
     CHECK_FALSE (engineSide->isBusy());
 }
 
+TEST_CASE ("A wait for a block is woken by its own process at once, as a thread told to stop is, not once its time is up")
+{
+    // The audit of 2026-11-20: an instance's thread in the helper slept up to a tenth of a second before it saw it was to
+    // stop, and re-preparing or closing a helper's instances waited that long for each, one after another.
+    const auto name = makeChannelName();
+    auto engineSide = sandbox::BlockChannel::create (name, phazite::test::makeLimits());
+    auto helperSide = sandbox::BlockChannel::open (name, phazite::test::makeLimits());
+    REQUIRE (engineSide != nullptr);
+    REQUIRE (helperSide != nullptr);
+
+    // Waiting for as long as twenty seconds: woken, it returns as though its time were up, well before it (half of it tells
+    // them apart however busy the machine is), whether the wake came as it waited or just before.
+    constexpr std::int64_t limit = 20'000'000'000;
+    std::atomic<bool> finished { false }, waiting { false }, got { true };
+    std::atomic<double> took { 0.0 };
+    JoinedThread waiter (finished,
+                         [&]
+                         {
+                             waiting = true;
+                             const auto from = juce::Time::getMillisecondCounterHiRes();
+                             got = helperSide->waitForBlock (limit);
+                             took = juce::Time::getMillisecondCounterHiRes() - from;
+                         });
+
+    REQUIRE (waitFor ([&waiting] { return waiting.load(); }));
+    helperSide->wakeWaiter();
+    waiter.join();
+    CHECK_FALSE (got.load());
+    CHECK (took.load() < (double) limit / 1.0e6 / 2.0);
+
+    // A block handed over after it is waited for as ever.
+    REQUIRE (engineSide->handOver());
+    CHECK (helperSide->waitForBlock (limit));
+    helperSide->finish();
+    CHECK (engineSide->waitForAnswer (0, limit) == sandbox::BlockChannel::Played::done);
+}
+
 TEST_CASE ("A helper's process ID is taken only as that of the child Phazite started, running its program")
 {
     // Known bug 181's review: the ID a helper told in its hello was put in the job that ends its processes with Phazite's,

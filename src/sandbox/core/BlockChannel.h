@@ -42,6 +42,12 @@ struct BlockInfo
     std::int32_t timeSignatureNumerator = 4, timeSignatureDenominator = 4;
     std::int32_t isPlaying = 0, isRendering = 0;
     std::int32_t reset = 0; // the plug-in reset before it plays the block: what rings on from before stops
+
+    // The helper's answer: whether the plug-in played the block. 0 for one answered at once without being played, as the
+    // helper's message thread was setting the plug-in (a state, a program, the switch to or from playing offline), which a
+    // live block doesn't wait for: Phazite plays it as one that came late, and hands its notes and changes on with the next.
+    std::int32_t played = 0;
+
     double tempo = 120.0;
     double beat = 0.0;       // where the song is at the block's start, in quarter notes
     std::int64_t sample = 0; // and in samples
@@ -104,6 +110,10 @@ public:
     // The helper's side: waits for the next block, at most for timeoutNanoseconds (negative: no limit); then answers it.
     bool waitForBlock (std::int64_t timeoutNanoseconds) noexcept;
     void finish() noexcept;
+
+    // Its own wait for a block woken from another thread of its process, as though the time were up (false), for the thread
+    // that waits to see it is to stop, at once rather than once its time is up (Bell::wake()).
+    void wakeWaiter() noexcept { requestBell->wake(); }
 
     BlockChannel (const BlockChannel&) = delete;
     BlockChannel& operator= (const BlockChannel&) = delete;

@@ -17,8 +17,15 @@ PlaybackHost::PlaybackHost (AudioIO& a, PluginHost& p, int threads)
       taking (512)
 {
     engine.setNumThreads (numThreads);
+    setIdle (true);                  // no device has started
     devices.addAudioCallback (this); // which prepares the engines at once, if a device is open
     startTimerHz (4);
+}
+
+void PlaybackHost::setIdle (bool isIdle)
+{
+    engine.setIdle (isIdle);
+    previews.setIdle (isIdle);
 }
 
 PlaybackHost::~PlaybackHost()
@@ -157,6 +164,7 @@ PlaybackSession* PlaybackHost::getPlayingSession() const noexcept
 void PlaybackHost::prepare (double sampleRate, int maximumBlockSize, int deviceInputs, int deviceInputLatency, int deviceOutputLatency)
 {
     running = false; // the tests call the engine from the message thread
+    setIdle (false); // and keep a plan across their blocks for its fades, as a device's are
     prepareEngines (sampleRate, maximumBlockSize);
     numInputs = deviceInputs;
     inputLatency = deviceInputLatency;
@@ -170,7 +178,9 @@ void PlaybackHost::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     // The device is stopped meanwhile, so the engine plays nothing. The song is given again for the new rate once the
     // message loop turns: until then a plan for another rate plays silence, and records nothing (a take recorded at another
-    // rate ends then: PlaybackSession::deviceStarted()).
+    // rate ends then: PlaybackSession::deviceStarted()). Not idle from here, before its first block: a plan replaced from
+    // now waits for its blocks.
+    setIdle (false);
     prepareEngines (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
 
     // Its inputs: the channel of each open one, in the order it hands them.
@@ -193,6 +203,16 @@ void PlaybackHost::audioDeviceAboutToStart (juce::AudioIODevice* device)
                 if (auto* session = host->getPlayingSession())
                     session->deviceStarted();
         });
+}
+
+void PlaybackHost::audioDeviceStopped()
+{
+    // JUCE calls this once the device's last block for this callback has ended (as the device stops, its callbacks are
+    // removed, or taken away a while under the device manager's lock), and calls no block after it until it is about to
+    // start again (audioDeviceAboutToStart()): the engines are idle, and a plan given from now lets go at once of those it
+    // replaces, which no block will play (engine::Engine::setIdle()).
+    running = false;
+    setIdle (true);
 }
 
 void PlaybackHost::audioDeviceIOCallbackWithContext (const float* const* open, int numOpen, float* const* outputs, int numOutputs,

@@ -3,7 +3,6 @@
 #include "Export.h"
 #include "engine/automation/Curve.h"
 #include "model/arrangement/internal/AudioClips.h"
-#include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -35,13 +34,16 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <set>
+#include <span>
 #include <vector>
 
 namespace phazite
@@ -822,7 +824,200 @@ DawProjectContent describeDawProject (const Song& song, const juce::String& titl
     return content;
 }
 
-juce::Result writeDawProject (DawProjectContent& content, const juce::File& bouncesFolder, const juce::File& file)
+namespace
+{
+    // What the tests have called before each part of a file the archive copies (setArchivePartSeam()).
+    std::function<void (const std::function<bool()>&)> archivePartSeam;
+
+    // The CRC-32 a zip keeps of each entry (ISO 3309's, as zlib's crc32()), taken on from what it was for the bytes before.
+    std::uint32_t continueCrc (std::uint32_t crc, const void* data, size_t numBytes)
+    {
+        static const auto table = []
+        {
+            std::array<std::uint32_t, 256> values {};
+
+            for (std::uint32_t n = 0; n < 256; ++n)
+            {
+                auto c = n;
+
+                for (int k = 0; k < 8; ++k)
+                    c = (c & 1) != 0 ? 0xedb88320u ^ (c >> 1) : c >> 1;
+
+                values[n] = c;
+            }
+
+            return values;
+        }();
+
+        crc = ~crc;
+
+        for (const auto byte : std::span (static_cast<const std::uint8_t*> (data), numBytes))
+            crc = table[(crc ^ byte) & 0xffu] ^ (crc >> 8);
+
+        return ~crc;
+    }
+
+    //==============================================================================
+    // A zip written as it goes, in place of JUCE's ZipFile::Builder, which holds each entry whole in memory before it writes
+    // it, can't be stopped, and goes on past a write that failed: an entry packed with deflate from memory (a text, a
+    // preset), or a file from the disk stored as it is, a part at a time, its CRC and sizes written into its header once it
+    // is all there; then the central directory. Sizes and places in 32 bits, without ZIP64, as JUCE's (checkArchiveFits()).
+    // Each part of a file waits for shouldStop to say go on. JUCE workaround W41 (docs/juce-workarounds.md).
+    class ArchiveWriter
+    {
+    public:
+        ArchiveWriter (juce::FileOutputStream& stream, const std::function<bool()>& stop)
+            : out (stream),
+              shouldStop (stop)
+        {
+        }
+
+        bool addPacked (const juce::String& path, const void* data, size_t numBytes, juce::Time time)
+        {
+            juce::MemoryOutputStream packed;
+
+            {
+                juce::GZIPCompressorOutputStream compressor (packed, 9, juce::GZIPCompressorOutputStream::windowBitsRaw);
+
+                // Nothing written for nothing (the compressor takes no empty buffer): it packs it all the same.
+                if (numBytes > 0 && ! compressor.write (data, numBytes))
+                    return false;
+
+                compressor.flush();
+            }
+
+            Entry entry { path,
+                          time,
+                          deflated,
+                          continueCrc (0, data, numBytes),
+                          (juce::int64) packed.getDataSize(),
+                          (juce::int64) numBytes,
+                          out.getPosition() };
+            return writeHeader (entry) && out.write (packed.getData(), packed.getDataSize()) && keep (entry);
+        }
+
+        bool addStored (const juce::String& path, const juce::File& source)
+        {
+            juce::FileInputStream in (source);
+
+            if (in.failedToOpen())
+                return false;
+
+            Entry entry { path, source.getLastModificationTime(), stored, 0, 0, 0, out.getPosition() };
+
+            if (! writeHeader (entry))
+                return false;
+
+            juce::HeapBlock<char> part (partBytes);
+
+            for (;;)
+            {
+                if (archivePartSeam != nullptr)
+                    archivePartSeam (shouldStop);
+
+                if (isStopped())
+                    return false;
+
+                const auto numRead = in.read (part, partBytes);
+
+                if (numRead < 0)
+                    return false;
+
+                if (numRead == 0)
+                    break;
+
+                entry.crc = continueCrc (entry.crc, part, (size_t) numRead);
+                entry.size += numRead;
+
+                if (entry.size > maxArchiveBytes || ! out.write (part, (size_t) numRead))
+                    return false;
+            }
+
+            // Its CRC and sizes into its header, now that they are known.
+            entry.packedSize = entry.size;
+            const auto end = out.getPosition();
+            return out.setPosition (entry.offset + 14) && writeSizes (entry) && out.setPosition (end) && keep (entry);
+        }
+
+        // The central directory, and its end.
+        bool finish()
+        {
+            const auto start = out.getPosition();
+            auto ok = true;
+
+            for (const auto& entry : entries)
+            {
+                ok = out.writeInt (0x02014b50) && out.writeShort (versionNeeded) && writeFlagsTo (entry) && out.writeShort (0)
+                     && out.writeShort (0) && out.writeShort (0) && out.writeInt (0) && out.writeInt ((int) (std::uint32_t) entry.offset)
+                     && writePath (entry) && ok;
+            }
+
+            const auto end = out.getPosition();
+            ok = out.writeInt (0x06054b50) && out.writeShort (0) && out.writeShort (0) && out.writeShort ((short) entries.size())
+                 && out.writeShort ((short) entries.size()) && out.writeInt ((int) (std::uint32_t) (end - start))
+                 && out.writeInt ((int) (std::uint32_t) start) && out.writeShort (0) && ok;
+
+            out.flush();
+            return ok && out.getStatus().wasOk();
+        }
+
+        bool isStopped() const { return shouldStop != nullptr && shouldStop(); }
+
+    private:
+        static constexpr short stored = 0, deflated = 8;
+        static constexpr short versionNeeded = 20; // 2.0: deflate
+        static constexpr int partBytes = 1 << 20;
+
+        struct Entry
+        {
+            juce::String path;
+            juce::Time time;
+            short method = stored;
+            std::uint32_t crc = 0;
+            juce::int64 packedSize = 0, size = 0, offset = 0;
+        };
+
+        juce::FileOutputStream& out;
+        const std::function<bool()>& shouldStop;
+        std::vector<Entry> entries;
+
+        bool keep (const Entry& entry)
+        {
+            entries.push_back (entry);
+            return true;
+        }
+
+        // From the version needed on, as a local header and the central directory have them: the version, the flags (the
+        // path in UTF-8), the method, the time and date (as MS-DOS keeps them), the CRC, the sizes and the path's length,
+        // and no extra field.
+        bool writeFlagsTo (const Entry& entry)
+        {
+            const auto& t = entry.time;
+            return out.writeShort (versionNeeded) && out.writeShort ((short) (1 << 11)) && out.writeShort (entry.method)
+                   && out.writeShort ((short) ((t.getSeconds() / 2) + (t.getMinutes() << 5) + (t.getHours() << 11)))
+                   && out.writeShort ((short) (t.getDayOfMonth() + ((t.getMonth() + 1) << 5) + ((t.getYear() - 1980) << 9)))
+                   && writeSizes (entry) && out.writeShort ((short) entry.path.getNumBytesAsUTF8()) && out.writeShort (0);
+        }
+
+        bool writeSizes (const Entry& entry)
+        {
+            return out.writeInt ((int) entry.crc) && out.writeInt ((int) (std::uint32_t) entry.packedSize)
+                   && out.writeInt ((int) (std::uint32_t) entry.size);
+        }
+
+        bool writePath (const Entry& entry) { return out.write (entry.path.toRawUTF8(), entry.path.getNumBytesAsUTF8()); }
+
+        bool writeHeader (const Entry& entry) { return out.writeInt (0x04034b50) && writeFlagsTo (entry) && writePath (entry); }
+    };
+} // namespace
+
+void setArchivePartSeam (std::function<void (const std::function<bool()>&)> seam)
+{
+    archivePartSeam = std::move (seam);
+}
+
+juce::Result writeDawProject (DawProjectContent& content, const juce::File& bouncesFolder, const juce::File& file,
+                              const std::function<bool()>& shouldStop)
 {
     // Each bounce's clip as long as its file: its length in seconds, and in beats from the song's start.
     for (const auto& [track, clip] : content.bounces)
@@ -847,33 +1042,25 @@ juce::Result writeDawProject (DawProjectContent& content, const juce::File& boun
     // project.xml and metadata.xml, the files (stored: audio barely compresses) and the presets; refused at once if the archive
     // wouldn't fit what the zip writer holds. JUCE workaround W41 (docs/juce-workarounds.md).
     const auto now = juce::Time::getCurrentTime();
-    juce::ZipFile::Builder zip;
     std::vector<ArchiveEntry> entries;
+    std::vector<juce::String> texts;
 
-    for (const auto& [xml, path] :
-         { std::pair { content.project.get(), "project.xml" }, std::pair { content.metadata.get(), "metadata.xml" } })
+    for (const auto* xml : { content.project.get(), content.metadata.get() })
     {
-        const auto text = xml->toString();
-        entries.push_back ({ path, (juce::int64) text.getNumBytesAsUTF8(), true });
-        zip.addEntry (std::make_unique<juce::MemoryInputStream> (text.toRawUTF8(), text.getNumBytesAsUTF8(), true), 9, path, now);
+        texts.push_back (xml->toString());
+        entries.push_back ({ texts.size() == 1 ? "project.xml" : "metadata.xml", (juce::int64) texts.back().getNumBytesAsUTF8(), true });
     }
 
     for (const auto& [path, source] : content.files)
-    {
         entries.push_back ({ path, source.getSize(), false });
-        zip.addFile (source, 0, path);
-    }
 
     for (const auto& [path, blob] : content.blobs)
-    {
         entries.push_back ({ path, (juce::int64) blob.getSize(), true });
-        zip.addEntry (std::make_unique<juce::MemoryInputStream> (blob, true), 9, path, now);
-    }
 
     if (const auto fits = checkArchiveFits (entries); fits.failed())
         return fits;
 
-    // Into a temporary file next to it, which takes its place once complete.
+    // Into a temporary file next to it, which takes its place once complete, and goes if it never does.
     const auto failed = juce::Result::fail ("Phazite couldn't write " + file.getFileName() + ".");
     file.getParentDirectory().createDirectory();
     juce::TemporaryFile temporary (file);
@@ -881,8 +1068,23 @@ juce::Result writeDawProject (DawProjectContent& content, const juce::File& boun
     {
         juce::FileOutputStream out (temporary.getFile());
 
-        if (! out.openedOk() || ! zip.writeToStream (out, nullptr))
+        if (! out.openedOk())
             return failed;
+
+        ArchiveWriter archive (out, shouldStop);
+        auto written = true;
+
+        for (size_t i = 0; i < texts.size() && written; ++i)
+            written = archive.addPacked (entries[i].path, texts[i].toRawUTF8(), texts[i].getNumBytesAsUTF8(), now);
+
+        for (size_t i = 0; i < content.files.size() && written; ++i)
+            written = archive.addStored (content.files[i].first, content.files[i].second);
+
+        for (size_t i = 0; i < content.blobs.size() && written; ++i)
+            written = archive.addPacked (content.blobs[i].first, content.blobs[i].second.getData(), content.blobs[i].second.getSize(), now);
+
+        if (! written || ! archive.finish())
+            return archive.isStopped() ? juce::Result::fail ("Cancelled.") : failed;
     }
 
     // A file that grew while it was packed could still take it past: never one that says it worked.
@@ -969,6 +1171,7 @@ namespace
         ~DawProjectExport() override
         {
             alive = nullptr;  // no call back from here on
+            cancelled = true; // an archive being written stops soon
             render = nullptr; // cancels what is left, and waits for its thread
             ownPlugins = nullptr;
             bouncesFolder.deleteRecursively();
@@ -1034,31 +1237,32 @@ namespace
 
                 if (session != nullptr && isSongPlaying (song))
                     stopAndReturn (song);
-
-                renderMissingClipAudio (song); // the engine plays a clip whose render isn't there silent
             }
 
+            // The bounces' clips' renders that aren't there yet made on the render's thread first (OfflineRender.h).
             const OfflineRender::Setup setup { .session = jobs.empty() ? nullptr : session,
                                                .makePlayer = [this, instances] { return std::make_unique<SongPlayer> (song, instances); },
+                                               .clipsOf = jobs.empty() ? nullptr : &song,
                                                .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
                                                .sampleRate = bounceRate,
                                                .blockSize = bounceBlockSize,
                                                .background = session == nullptr };
 
-            render =
-                std::make_unique<OfflineRender> (setup, jobs, OfflineRender::Rendered(),
-                                                 [this, weakAlive = std::weak_ptr<DawProjectExport*> (alive)] (const juce::Result& rendered)
-                                                 {
-                                                     // On the render's thread, once the bounces are: the zip.
-                                                     const auto result =
-                                                         rendered.wasOk() ? writeDawProject (content, bouncesFolder, file) : rendered;
-                                                     juce::MessageManager::callAsync (
-                                                         [weakAlive, result]
-                                                         {
-                                                             if (const auto locked = weakAlive.lock())
-                                                                 (*locked)->finish (result);
-                                                         });
-                                                 });
+            render = std::make_unique<OfflineRender> (
+                setup, jobs, OfflineRender::Rendered(),
+                [this, weakAlive = std::weak_ptr<DawProjectExport*> (alive)] (const juce::Result& rendered)
+                {
+                    // On the render's thread, once the bounces are: the zip, which
+                    // stops between two parts of a file once this is cancelled.
+                    const auto result =
+                        rendered.wasOk() ? writeDawProject (content, bouncesFolder, file, [this] { return cancelled.load(); }) : rendered;
+                    juce::MessageManager::callAsync (
+                        [weakAlive, result]
+                        {
+                            if (const auto locked = weakAlive.lock())
+                                (*locked)->finish (result);
+                        });
+                });
         }
 
         float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
@@ -1074,6 +1278,7 @@ namespace
         const juce::File bouncesFolder =
             juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("Phazite DAWproject", {}, false);
         DawProjectContent content;
+        std::atomic<bool> cancelled { false };       // what the archive's write asks, on the render's thread
         std::unique_ptr<PluginInstances> ownPlugins; // goes after the render that plays them
         std::unique_ptr<OfflineRender> render;
 

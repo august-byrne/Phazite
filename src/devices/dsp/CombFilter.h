@@ -48,7 +48,8 @@ public:
     // Room for delays up to maximumDelay samples. Allocates: call it before playback.
     void prepare (int maximumDelay);
 
-    // Silence: what it holds goes, and it takes the next coefficients at once. Real-time safe.
+    // Silence: what it holds is never read again, and nothing of it is written (as a delay line's reset: DelayLine.h); and it
+    // takes the next coefficients at once. Real-time safe.
     void reset() noexcept;
 
     // Moves to new coefficients over the next `samples` samples, or at once after reset(). Real-time safe.
@@ -85,7 +86,7 @@ public:
         const auto written = std::clamp (now.input * x + now.feedback * delayed, -guard, guard);
         writeIndex = (writeIndex + 1) & mask;
         buffer[(size_t) writeIndex] = written;
-        used = true;
+        held = std::min (held + 1, mask + 1);
         return now.output * (written + now.sign * delayed);
     }
 
@@ -94,12 +95,17 @@ private:
 
     std::vector<float> buffer { 0.0f, 0.0f, 0.0f, 0.0f };
     int mask = 3, writeIndex = 0;
+    int held = 0;         // written since the reset, up to its length: what is older reads as silence
     float longest = 2.0f; // the longest delay it has room for
     CombCoefficients now, target, step;
     int stepsLeft = 0;
-    bool fresh = true, used = false;
+    bool fresh = true;
 
-    // A sample written before: 0 is the last one, 1 the one before it.
-    float at (int delay) const noexcept { return buffer[(size_t) ((writeIndex - delay) & mask)]; }
+    // A sample written before: 0 is the last one, 1 the one before it; silence for one written before the reset.
+    float at (int delay) const noexcept
+    {
+        const auto back = delay & mask;
+        return back < held ? buffer[(size_t) ((writeIndex - back) & mask)] : 0.0f;
+    }
 };
 } // namespace phazite::devices::dsp

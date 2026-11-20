@@ -24,7 +24,9 @@ AudioFile::AudioFile (std::unique_ptr<SampleReader> r, const std::atomic<std::ui
     sampleRate = reader->getSampleRate() > 0.0 ? reader->getSampleRate() : 44100.0;
     length = std::max<std::int64_t> (0, reader->getLength());
     numChunks = (int) ((length + chunkSamples - 1) / chunkSamples);
-    whole = blocks == nullptr || (double) length <= shortSeconds * sampleRate;
+    const auto isShort = (double) length <= shortSeconds * sampleRate;
+    whole = blocks == nullptr || isShort;
+    rendersLetGo = blocks == nullptr && ! isShort && reader->readsAgainTheSame();
     chunks = std::make_unique<std::atomic<const Chunk*>[]> ((size_t) std::max (1, numChunks));
     playedIn = std::make_unique<std::atomic<std::uint64_t>[]> ((size_t) std::max (1, numChunks));
 
@@ -240,5 +242,35 @@ void AudioFile::readNow (std::int64_t start, std::int64_t numSamples)
     for (int i = first; i < last; ++i)
         if (read[(size_t) i] == nullptr)
             readChunk (i);
+}
+
+void AudioFile::letGoOfUnread()
+{
+    if (! rendersLetGo)
+        return;
+
+    // A render's file stamps each chunk it reads as read in block 0 (getSamples(), expect()): those stamped since the last
+    // look stay, and the stamps start over.
+    const std::lock_guard lock (mutex);
+
+    for (int i = 0; i < numChunks; ++i)
+    {
+        if (playedIn[(size_t) i].exchange (0, std::memory_order_relaxed) == 0 && read[(size_t) i] != nullptr)
+        {
+            chunks[(size_t) i].store (nullptr, std::memory_order_release);
+            read[(size_t) i] = nullptr;
+        }
+    }
+}
+
+int AudioFile::countChunksHeld() const noexcept
+{
+    auto held = 0;
+
+    for (int i = 0; i < numChunks; ++i)
+        if (chunks[(size_t) i].load (std::memory_order_acquire) != nullptr)
+            ++held;
+
+    return held;
 }
 } // namespace phazite::engine

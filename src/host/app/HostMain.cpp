@@ -18,6 +18,7 @@ public:
     {
         writeErrorsTo (commandLine);
         endQuietlyOnCrashes();
+        keepFullSpeed();
         host = std::make_unique<Host>();
 
         // Started by anything else than Phazite: nothing to do.

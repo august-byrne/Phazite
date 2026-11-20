@@ -7,12 +7,14 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/playback/internal/SongPlayer.h"
 #include "model/project/Export.h"
 #include "model/project/ProjectContext.h"
@@ -22,7 +24,9 @@
 #include "services/Settings.h"
 #include "ui/shell/ExportPanel.h"
 
+#include <atomic>
 #include <cmath>
+#include <functional>
 #include <optional>
 
 using phazite::ExportReport;
@@ -556,6 +560,99 @@ TEST_CASE ("A cancelled export of stems leaves no stems, and the folder that was
     CHECK (report.result.failed());
     CHECK (report.result.getErrorMessage() == "No channel plays anything, so there are no stems to export.");
     CHECK (getFileNames (band.renders) == juce::StringArray { "Band Stems" });
+}
+
+TEST_CASE ("An export makes the render of a clip that isn't there yet on its own thread, and plays it")
+{
+    // The audit of 2026-11-20: an export, a freeze, a bounce and a DAWproject's bounces made the clips' renders that weren't
+    // there (with Rubber Band, seconds to minutes) on the message thread as each job's player was made, the window dead and
+    // Cancel out of reach meanwhile. They are made on the render's thread now.
+    SineSong sine;
+    phazite::setClipPitch (*sine.song, sine.clip, 12.0f); // the A an octave up: 440 Hz
+    const auto before = phazite::countClipRendersMade();
+
+    const auto report = exportAndWait (*sine.song, sine.renders.getChildFile ("Song.wav"), {});
+    REQUIRE (report.result.wasOk());
+    const auto after = phazite::countClipRendersMade();
+    CHECK (after.onMessageThread == before.onMessageThread);
+    CHECK (after.elsewhere == before.elsewhere + 1);
+
+    const auto audio = readAll (report.file);
+    CHECK (getLevel (audio, 44100.0, 0.1, 1.4) > 0.08);
+    CHECK (getFrequency (audio, 44100.0, 0.1, 1.1) == doctest::Approx (440.0).epsilon (0.01));
+}
+
+TEST_CASE ("An export cancelled while it makes a clip's render stops between the stretcher's blocks, and leaves no part of it")
+{
+    // A pitched clip whose render isn't made: the test's seam holds the making at the stretcher's first question whether to
+    // stop, its part file written, until the export is cancelled. The message thread goes on taking messages meanwhile.
+    phazite::test::TemporaryFolder temp;
+    const auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1)[0];
+    const auto clip = phazite::test::addAudioClip (*song, track, "Long",
+                                                   phazite::test::writeSound (temp.folder.getChildFile ("Long.wav"), 10.0), 0.0, 10.0);
+    REQUIRE (clip.isValid());
+    phazite::setClipPitch (*song, clip, 12.0f);
+    const auto cache = song->getCacheFolder();
+    const auto before = phazite::countClipRendersMade();
+    const auto file = temp.folder.getChildFile ("Renders").getChildFile ("Song.wav");
+
+    std::atomic<int> asked { 0 };
+    phazite::setClipRenderStopSeam (
+        [&asked] (const std::function<bool()>& shouldStop)
+        {
+            if (++asked > 1 || shouldStop == nullptr)
+                return;
+
+            for (int waited = 0; ! shouldStop() && waited < phazite::test::hangTimeout; ++waited)
+                juce::Thread::sleep (1);
+        });
+
+    auto running = phazite::startExport (*song, file, {}, [] (const ExportReport&) { FAIL ("a cancelled export reports nothing"); });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&asked] { return asked.load() > 0; }));
+    CHECK (cache.findChildFiles (juce::File::findFiles, false, "*.part").size() == 1); // being made
+    running = nullptr;                                                                 // cancels it, and waits for its thread
+    phazite::setClipRenderStopSeam ({});
+    phazite::test::dispatchPendingMessages();
+
+    CHECK (asked.load() == 1);                                             // it stopped at the question
+    CHECK (cache.findChildFiles (juce::File::findFiles, false).isEmpty()); // neither the render nor a part of it
+    CHECK (phazite::countClipRendersMade().elsewhere == before.elsewhere);
+    CHECK (phazite::countClipRendersMade().onMessageThread == before.onMessageThread);
+    CHECK_FALSE (file.exists());
+}
+
+TEST_CASE ("An export plays a long audio clip as it did while its render kept every part of its file it had read")
+{
+    // The audit of 2026-11-20: a render's files let go of what they read before its last part (AudioFile::letGoOfUnread()).
+    // A clip of 20 s of a file at another rate than the song's (a resampler, made ready ahead of its start), and a second
+    // playing the same file further in, at once (4.5 s on, a whole number of the sine's cycles, so that the two don't cancel
+    // out): the export, in floats, is the same to the last bit as the song rendered in
+    // one go by an engine of its own, whose files keep all they read.
+    phazite::test::TemporaryFolder temp;
+    const auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    // Longer than a short file (engine::AudioFile::shortSeconds), which a render keeps whole; at 44.1 kHz.
+    const auto sound = phazite::test::writeSound (temp.folder.getChildFile ("Long.wav"), 40.0, 330.0);
+    REQUIRE (phazite::test::addAudioClip (*song, tracks[0], "First", sound, 0.5, 20.0).isValid());
+    REQUIRE (phazite::test::addAudioClip (*song, tracks[1], "Second", sound, 3.0, 20.0, 7.0).isValid());
+
+    ExportSettings settings;
+    settings.sampleRate = 48000.0;
+    settings.bitDepth = 32;
+    const auto report = exportAndWait (*song, temp.folder.getChildFile ("Song.wav"), settings);
+    REQUIRE (report.result.wasOk());
+    const auto exported = readAll (report.file);
+    const auto expected = phazite::renderWithOwnEngine (*song, exported.getNumSamples(), 48000.0, 512);
+
+    auto different = 0;
+
+    for (int channel = 0; channel < 2; ++channel)
+        for (int i = 0; i < exported.getNumSamples(); ++i)
+            different += juce::exactlyEqual (exported.getSample (channel, i), expected.getSample (channel, i)) ? 0 : 1;
+
+    CHECK (different == 0);
+    CHECK (getLevel (exported, 48000.0, 4.0, 20.0) > 0.1);
 }
 
 //==============================================================================

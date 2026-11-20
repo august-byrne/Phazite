@@ -22,7 +22,9 @@ struct TestPlugins
                         // turns its Level to 0.75 itself, in a gesture held while the note is (as a control of its window would).
                         // It takes no controller, all notes off included, as a VST3 that maps none gets none from JUCE's host;
                         // the keys' pressure turns its notes down, the channel's all of them and a note's (aftertouch) its own: by
-                        // half at full pressure, by nothing at none
+                        // half at full pressure, by nothing at none. Given a state whose Level a value of 1 follows, it waits
+                        // while the state gate is shut (getStateGate()), as a sampler that reads its library; of 2, it takes
+                        // half a millisecond, a tenth of a block of 256 at 48 kHz, as a quick preset does
         crash,          // an effect that crashes as it plays a block while its Crash ("20") is on, and plays what isn't a number
                         // (NaN) in place of its sound while its NaN ("21") is on; its Wild ("23") has NaN for its default, a name
                         // and a label thousands of characters long, a text of 100,000 for any value, and reads any text as
@@ -31,7 +33,9 @@ struct TestPlugins
                         // long, differ only in their last
         hang,           // an effect that plays nothing back while its Hang ("30") is on: it loops for ever; and its Stall ("31")
                         // stops the thread that turns it on for ever (the helper's message thread, set by hand)
-        latency,        // delays its sound by 64 samples, or 128 while its Latency ("40") is on, and says so
+        latency,        // delays its sound by 64 samples, or 128 while its Latency ("40") is on, and says so; its Meter ("41"),
+                        // which can't be automated, it sets to the peak of each block it plays, telling the host, as a plug-in
+                        // tells a gain-reduction meter it has as a parameter
         sidechain,      // plays what comes into its sidechain bus in place of its sound
         crashLoading,   // crashes as it is made: in the helper, never in the tests' process
         playhead,       // passes its sound, and keeps as its state where its playhead said the song was as the last piece of a
@@ -62,6 +66,11 @@ struct TestPlugins
 
     // The file the hanging stand-in leaves while it keeps a block (its Hang on), for a test to see it has begun to keep one.
     static juce::File getHangKeeping();
+
+    // While the state gate is there, the synth given a state that asks it to wait waits (on the helper's message thread), and
+    // leaves its setting file meanwhile, for a test to see it has begun.
+    static juce::File getStateGate();
+    static juce::File getStateSetting();
 
     // The playhead stand-in's state: its place in quarter notes (ppqPosition), its time in samples, its tempo, its time
     // signature, whether the song played, and where the bar it is in starts, in quarter notes, and which bar that is; each

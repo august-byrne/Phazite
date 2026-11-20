@@ -9,6 +9,7 @@
 #include "TestSong.h"
 #include "UndoCheck.h"
 #include "devices/delay/Delay.h"
+#include "devices/dsp/ClearedSamples.h"
 #include "devices/dsp/NoteValues.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
@@ -51,6 +52,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -1697,6 +1699,54 @@ TEST_CASE ("A reverb's tail through a filter that closed before Stop rings on as
     CHECK (paused.getMagnitude (0, 0, 4800) > 1.0e-4f);                                   // the tail rings
     CHECK (phazite::test::getDifference (sentBack, paused, 48000.0).peakDb <= -100.0f);   // none
     CHECK (sentBack.getMagnitude (0, 24000, 24000) <= paused.getMagnitude (0, 0, 24000)); // no rise
+}
+
+TEST_CASE ("Play, and a jump while the song plays, reset every device without writing over its delay lines")
+{
+    // The audit of 2026-11-20: a start and a jump reset every device of every strip in the block that starts or lands
+    // (Engine::flushStrip()), and a delay line's reset wrote silence over the whole of it: a Delay's two lines of five seconds
+    // (2 MiB at 48 kHz), a Reverb's lines of all three modes (1.3 MiB) and the EQ's linear phase (0.3 MiB, and its runner's
+    // copy for the mix as late). Ten such devices wrote some 33 MiB in one block. Now a reset forgets what a line held by a
+    // count of what came in since: what the devices' resets clear through the count (devices/dsp/ClearedSamples.h: the linear
+    // phase's convolution, and whatever large comes to be cleared so) stays small in that block, whatever the lines hold.
+    // The count doesn't see a plain loop: that a delay line's and a comb's reset write nothing is DspTests' to keep.
+    // A synth's chord rather than an audio clip, so that a jump lands at once rather than when the clip's file is read there.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::Synth::typeID);
+    song.addChord (song.addMidiClip (track, 0.0, 16.0), { 60, 64, 67 }, 0.0, 16.0);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        song.addEffect (track, phazite::devices::Delay::typeID);
+        const auto reverb = song.addEffect (track, phazite::devices::Reverb::typeID);
+        song.setParameter (reverb, "mode", (float) i);
+    }
+
+    const auto linear = song.addEffect (track, phazite::devices::Equalizer::typeID);
+    song.setParameter (linear, "phase", 1.0f);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+
+    // Played a second, so that every line holds sound, then stopped a while.
+    song.run ("transport.playStop");
+    REQUIRE (playback.play (1.0).getMagnitude (0, 0, (int) EnginePlayback::sampleRate) > 0.01f);
+    song.run ("transport.playStop");
+    playback.play (0.25);
+
+    const auto clearedIn = [&playback] (const std::function<void()>& asked)
+    {
+        asked();
+        const auto before = phazite::devices::dsp::ClearedSamples::get();
+        playback.playSamples (2 * EnginePlayback::blockSize); // a jump fades out before it lands
+        return phazite::devices::dsp::ClearedSamples::get() - before;
+    };
+
+    // The linear phase's partitions in and out (2,048 values at 48 kHz) are what a reset still clears.
+    CHECK (clearedIn ([&song] { song.run ("transport.playStop"); }) < 16384);
+    playback.play (0.5);
+    CHECK (clearedIn ([&song] { phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (0.5)); }) < 16384);
+    CHECK (phazite::isPlaying (song.context));
 }
 
 TEST_CASE ("A send that follows its lane and an LFO plays the same in blocks of 441 samples as in blocks of 512")

@@ -17,7 +17,7 @@ namespace phazite::sandbox
 // have.
 inline constexpr const char* helperProcessID = "PhaziteSandbox";
 inline constexpr const char* helperErrorsID = "PhaziteSandboxErrors";
-inline constexpr std::int32_t protocolVersion = 8;
+inline constexpr std::int32_t protocolVersion = 9;
 
 enum class MessageType : std::int32_t
 {
