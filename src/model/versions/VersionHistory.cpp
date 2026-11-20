@@ -506,12 +506,12 @@ struct VersionsAudio
         // The songs kept without a commit, every piece of each read, and the songs before the merges they hold: every one the
         // files list whose piece the store still holds, whatever the clock says.
         for (const auto& kept : store.findKeptSongs (0))
-            songsToo.push_back ({ kept.piece, kept.kind == KeptSong::Kind::snapshot
-                                                  ? "a snapshot of Local History of " + juce::Time (kept.time).toString (true, true, false)
-                                                        + " (computer " + kept.computer + ")"
-                                              : kept.kind == KeptSong::Kind::deleted
-                                                  ? "the song computer " + kept.computer + " left on a branch deleted since"
-                                                  : "the song computer " + kept.computer + " left on a branch" });
+            songsToo.push_back (
+                { kept.piece,
+                  kept.kind == KeptSong::Kind::snapshot
+                      ? "the automatic save of " + juce::Time (kept.time).toString (true, true, false) + " (computer " + kept.computer + ")"
+                  : kept.kind == KeptSong::Kind::deleted ? "the song computer " + kept.computer + " left on a branch deleted since"
+                                                         : "the song computer " + kept.computer + " left on a branch" });
 
         for (size_t i = 0; i < songsToo.size() && ! look.stopped; ++i)
         {

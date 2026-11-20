@@ -200,7 +200,7 @@ namespace
         return "Nothing was merged: " + numberedOtherwise (name + " (or the version both lines have)")
                + (ownBranch
                       ? " To go on from the newer versions: Cancel Merge if its list is open, then Discard All Changes, then Take the "
-                        "Newer Versions (Local History keeps the song as it is now)."
+                        "Newer Versions (an automatic save keeps the song as it is now)."
                       : " Switch to its branch to go on from it, or open it to hear it.");
     }
 
@@ -1053,6 +1053,7 @@ void selectVersion (ProjectContext& context, const juce::String& versionID)
     {
         history->selectedVersion = versionID;
         history->selectedVersionChange.reset();
+        history->selectedSnapshot = 0; // one row of the history is selected: a version (or Now), or an automatic save
     }
 }
 
@@ -1062,6 +1063,7 @@ void selectVersionChange (ProjectContext& context, const juce::String& versionID
     {
         history->selectedVersion = versionID;
         history->selectedVersionChange = line.has_value() ? std::optional<SongChange> (fromLine (*line)) : std::nullopt;
+        history->selectedSnapshot = 0;
     }
 }
 
@@ -2542,7 +2544,7 @@ namespace
                : reason == "restore" ? "Before Restore"
                : reason == "discard" ? "Before Discard All Changes"
                : reason == "merge"   ? "Before Merge"
-               : reason == "history" ? "Before Restoring Local History"
+               : reason == "history" ? "Before Restoring an Automatic Save"
                : reason == "abort"   ? "Before Cancel Merge"
                : reason == "look"    ? "Before Opening a Version"
                                      : reason;
@@ -2576,7 +2578,8 @@ std::vector<SnapshotInfo> getSnapshots (const ProjectContext& context)
         {
             const auto branch =
                 std::find_if (branches.begin(), branches.end(), [&snapshot] (const auto& b) { return b.id == snapshot.branch; });
-            infos.push_back ({ snapshot.time, branch != branches.end() ? branch->name : juce::String(), describeReason (snapshot.reason) });
+            infos.push_back ({ snapshot.time, branch != branches.end() ? branch->name : juce::String(), describeReason (snapshot.reason),
+                               branch != branches.end() ? branch->id : juce::String() });
         }
     }
 
@@ -2606,7 +2609,7 @@ bool restoreSnapshot (ProjectContext& context, juce::int64 time)
         return false;
 
     return startSongRead (
-        context, *history, "Reading Local History of " + describeSnapshotTime (time), snapshot->song, false,
+        context, *history, "Reading the automatic save of " + describeSnapshotTime (time), snapshot->song, false,
         [&context, time] (SongRead& read) { return takeInSnapshot (context, time, read.song); }, Kept::asItIs);
 }
 
@@ -2622,15 +2625,15 @@ namespace
 
         if (! then.isValid())
             return VersionHistory::Taken::refused (
-                "That snapshot of Local History can't be read from the Versions folder: a piece of it is "
-                "damaged or missing. Nothing was restored.");
+                "That automatic save can't be read from the Versions folder: a piece of it is damaged or missing. Nothing was "
+                "restored.");
 
         if (const auto why = whyNotChangeSongNow (context, "nothing was restored."); why.isNotEmpty())
             return VersionHistory::Taken::refused (why);
 
         // The song as it is kept first; then a change of its own, one undo step, as VS Code's Local History restores a file's save.
         keepSongBefore (*history, "history");
-        const UndoStep step (*song, "Restore Local History of " + describeSnapshotTime (time));
+        const UndoStep step (*song, "Restore the Automatic Save of " + describeSnapshotTime (time));
         song->storeDeviceStates();
         makeSongLike (*song, then);
         removeBrokenReferences (*song);
@@ -2653,7 +2656,7 @@ juce::int64 getSelectedSnapshot (const ProjectContext& context)
 juce::String describeRestoreSnapshot (const ProjectContext& context)
 {
     const auto time = getSelectedSnapshot (context);
-    return canRestoreSelectedSnapshot (context) ? "Restore Local History of " + describeSnapshotTime (time) : juce::String();
+    return canRestoreSelectedSnapshot (context) ? "Restore the Automatic Save of " + describeSnapshotTime (time) : juce::String();
 }
 
 bool canRestoreSelectedSnapshot (const ProjectContext& context)
@@ -2821,7 +2824,7 @@ juce::String describeHistoryCheck (const ProjectContext& context)
 
         const auto mine = damaged.song.computer == makeUsableFileName (getThisComputer());
         const auto what = damaged.song.kind == KeptSong::Kind::snapshot
-                              ? "Local History of " + describeSnapshotTime (damaged.song.time) + (mine ? "" : " on another computer")
+                              ? "The automatic save of " + describeSnapshotTime (damaged.song.time) + (mine ? "" : " on another computer")
                               : "The song " + juce::String (mine ? "" : "another computer ")
                                     + (damaged.song.kind == KeptSong::Kind::deleted
                                            ? "left on a deleted branch"
@@ -4033,12 +4036,12 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .currentName = [&context] { return describeDawProjectExport (context); },
            .needsPluginStates = true });
 
-    // Local History.
+    // The automatic saves (Local History).
     add ({ .id = "version.restoreSnapshot",
-           .name = "Restore from Local History",
-           .description = "Makes the song what it was when the selected snapshot of Local History was taken, as one undo step; "
-                          "the song as it is goes into Local History first.",
-           .synonyms = { "local history", "auto save", "backup", "snapshot", "timeline", "go back", "recover" },
+           .name = "Restore This Automatic Save",
+           .description = "Makes the song what it was at the automatic save selected in the history, as one undo step; the song "
+                          "as it is is kept as an automatic save first.",
+           .synonyms = { "local history", "auto save", "autosave", "backup", "snapshot", "timeline", "go back", "recover" },
            .perform = [&context] { restoreSelectedSnapshot (context); },
            .isEnabled = [&context] { return canRestoreSelectedSnapshot (context); },
            .currentName = [&context] { return describeRestoreSnapshot (context); },
@@ -4048,7 +4051,7 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
     add ({ .id = "version.verify",
            .name = "Verify History",
            .description = "Reads every piece of the project's history and checks it against its name, reads every version's song "
-                          "and the songs Local History and the branches keep, checks that every version's audio files are as "
+                          "and the songs the automatic saves and the branches keep, checks that every version's audio files are as "
                           "it recorded them, and finds the versions no branch holds. The Versions view says what it found; "
                           "while it runs, the command stops it.",
            .synonyms = { "fsck", "check", "integrity", "damaged", "corrupt", "repair", "missing audio", "cancel" },

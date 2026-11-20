@@ -4,6 +4,7 @@
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace phazite::ui
@@ -79,6 +80,12 @@ namespace
     juce::Rectangle<int> getRowContent (int width, int height)
     {
         return juce::Rectangle<int> (width, height).withTrimmedLeft (History::rowIcon).withTrimmedRight (Space::s);
+    }
+
+    // A group of automatic saves, as its row says it: "6 automatic saves".
+    juce::String describeAutomaticSaves (int count)
+    {
+        return juce::String (count) + " automatic saves";
     }
 
     // The column of a row's icon, where a chevron would be, and the gap after it.
@@ -323,7 +330,8 @@ private:
 //==============================================================================
 // The graph: the changes since the last version, the song as it is, then every branch's versions, newest first, each a dot on its
 // branch's line, in its branch's column, and on a branch's last version the branch's name; under a version opened, what it
-// changed, a row a line.
+// changed, a row a line. Between the versions, by when each was taken, the automatic saves in grey: a ring in its branch's
+// column, or a group's row for those between two versions, with a row for each under it while it is unfolded.
 class VersionsView::HistoryModel : public juce::ListBoxModel
 {
 public:
@@ -369,6 +377,65 @@ public:
 
         const auto dotAt = [&] (const juce::String& branch)
         { return juce::Rectangle<float> (History::dotSize, History::dotSize).withCentre ({ laneCentre (view.getLane (branch)), middle }); };
+
+        // The automatic saves, in grey: when each was taken at its row's end, where the versions' times are (before the play
+        // marks' column, while any version has a bounce).
+        const auto drawWhen = [&g, &p, &area, this] (juce::int64 time)
+        {
+            if (view.anyBounce)
+                area.removeFromRight (History::playWidth);
+
+            g.setColour (p.textMuted);
+            g.setFont (juce::FontOptions (TextSize::small));
+            const auto when = describeWhen (juce::Time (time), juce::Time::getCurrentTime());
+            g.drawText (when,
+                        area.removeFromRight (juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), when)) + Space::xs),
+                        juce::Justification::centredRight, false);
+        };
+
+        // Those between two versions, folded into one row: its chevron, how many they are, and when the newest was taken.
+        if (const auto* group = view.getRowGroup (row))
+        {
+            (view.unfoldedGroups.count (group->since) > 0 ? view.openIcon : view.foldedIcon)
+                .draw (
+                    g,
+                    area.removeFromLeft (SideBar::chevronSize).toFloat().withSizeKeepingCentre (History::rowIconSize, History::rowIconSize),
+                    p.textMuted);
+            drawWhen (view.snapshots[(size_t) group->first].time);
+            g.setColour (p.textMuted);
+            g.setFont (juce::FontOptions (TextSize::body));
+            g.drawText (describeAutomaticSaves (group->count), area, juce::Justification::centredLeft, true);
+            return;
+        }
+
+        // One of them: a ring on its branch's line, its clock, why it was taken (and its branch, where that isn't the song's),
+        // and its Restore under the pointer; one level in under its group's row.
+        if (const auto* snapshot = view.getRowSnapshot (row))
+        {
+            if (view.getBranchName (snapshot->branchID).isNotEmpty())
+            {
+                g.setColour (view.getBranchColour (snapshot->branchID));
+                g.drawEllipse (dotAt (snapshot->branchID).reduced (History::lineWidth), History::lineWidth / 2.0f);
+            }
+
+            if (view.historyRows[(size_t) row].group >= 0)
+                area.removeFromLeft (SideBar::chevronSize + SideBar::indent);
+
+            view.clockIcon.draw (g, takeIconColumn (area, History::rowIconSize), p.textMuted);
+            drawWhen (snapshot->time);
+
+            if (view.historyHover != nullptr && (row == view.historyHover->row || selected))
+                view.discardIcon.draw (g,
+                                       area.removeFromRight (History::actionWidth)
+                                           .toFloat()
+                                           .withSizeKeepingCentre (History::rowIconSize, History::rowIconSize),
+                                       p.text);
+
+            drawLine (g, area, p.textMuted, p.textMuted, snapshot->reason,
+                      snapshot->branchID != view.currentBranch && snapshot->branch.isNotEmpty() ? "on " + snapshot->branch
+                                                                                                : juce::String());
+            return;
+        }
 
         // A line under its version, one level in from the version's name: its icon, its name and what changed, its Restore under
         // the pointer, and its letter.
@@ -487,6 +554,15 @@ public:
         if (const auto* version = view.getLineVersion (row))
             return view.describeHistoryRow (row) + ". Its arrow restores it from \"" + version->name + "\"; right-click for more.";
 
+        if (view.getRowGroup (row) != nullptr)
+            return view.describeHistoryRow (row)
+                   + ": the song as it was at times between these versions, kept without asking. Click to show or fold them.";
+
+        if (view.getRowSnapshot (row) != nullptr)
+            return view.describeHistoryRow (row)
+                   + ": the song as it was then, kept without asking. Its arrow restores the song to it, as one undo step; "
+                     "right-click for more.";
+
         return view.describeHistoryRow (row)
                + ". Click to show what it changed, double-click to open it in place of the song, live; right-click for what can be "
                  "done with it."
@@ -500,7 +576,24 @@ public:
 
         if (e.mods.isPopupMenu())
         {
-            view.makeHistoryMenu (row).showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+            if (auto menu = view.makeHistoryMenu (row); menu.getNumItems() > 0)
+                menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+
+            return;
+        }
+
+        // A group of automatic saves unfolds, or folds; one of them: its arrow restores the song to it, as one undo step.
+        if (view.getRowGroup (row) != nullptr)
+        {
+            view.unfoldAutomaticSaves (row);
+            return;
+        }
+
+        if (view.getRowSnapshot (row) != nullptr)
+        {
+            if (view.getSnapshotRestorePosition (row).contains (at))
+                view.commands.invoke ("version.restoreSnapshot");
+
             return;
         }
 
@@ -549,6 +642,8 @@ public:
     {
         if (const auto* version = view.getRowVersion (row))
             view.unfoldVersion (version->id);
+        else if (view.getRowGroup (row) != nullptr)
+            view.unfoldAutomaticSaves (row);
     }
 
     void selectedRowsChanged (int row) override
@@ -561,80 +656,14 @@ public:
         else
             selectVersion (view.context, {});
 
+        // Or an automatic save, which version.restoreSnapshot restores (selected after the version, which selects none); or
+        // a group of them, which the view keeps selected as its rows move.
+        const auto* snapshot = view.getRowSnapshot (row);
+        const auto* group = view.getRowGroup (row);
+        selectSnapshot (view.context, snapshot != nullptr ? snapshot->time : 0);
+        view.selectedGroup = group != nullptr ? std::optional (group->since) : std::nullopt;
+
         view.historyList.repaint(); // the actions on the row selected now
-    }
-
-private:
-    VersionsView& view;
-};
-
-//==============================================================================
-// Local History: the song as it was at times while it differed from its last version, newest first, each with why it was
-// taken, the branch it was on and when; its Restore under the pointer or on the row selected.
-class VersionsView::LocalHistoryModel : public juce::ListBoxModel
-{
-public:
-    explicit LocalHistoryModel (VersionsView& v)
-        : view (v)
-    {
-    }
-
-    int getNumRows() override { return view.getNumSnapshots(); }
-
-    void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
-    {
-        if (! juce::isPositiveAndBelow (row, getNumRows()))
-            return;
-
-        const auto& p = getPalette (view);
-        const auto& snapshot = view.snapshots[(size_t) row];
-        drawListRow (g, view, juce::Rectangle<int> (width, height).toFloat(), selected,
-                     view.localHover != nullptr && row == view.localHover->row);
-        auto area = getRowContent (width, height);
-
-        // Its clock, its time at its end, its Restore before it, and why it was taken with its branch.
-        view.clockIcon.draw (g, takeIconColumn (area, History::rowIconSize), p.textMuted);
-        g.setColour (p.textMuted);
-        g.setFont (juce::FontOptions (TextSize::small));
-        const auto when = describeWhen (juce::Time (snapshot.time), juce::Time::getCurrentTime());
-        g.drawText (when, area.removeFromRight (juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), when)) + Space::xs),
-                    juce::Justification::centredRight, false);
-
-        if (view.localHover != nullptr && (row == view.localHover->row || selected))
-            view.discardIcon.draw (
-                g, area.removeFromRight (History::actionWidth).toFloat().withSizeKeepingCentre (History::rowIconSize, History::rowIconSize),
-                p.text);
-
-        drawLine (g, area, p.text, p.textMuted, snapshot.reason, snapshot.branch);
-    }
-
-    juce::String getNameForRow (int row) override { return view.describeSnapshot (row); }
-
-    juce::String getTooltipForRow (int row) override
-    {
-        return view.describeSnapshot (row) + ". Its arrow restores the song to it, as one undo step; right-click for more.";
-    }
-
-    void listBoxItemClicked (int row, const juce::MouseEvent& e) override
-    {
-        selectedRowsChanged (row);
-
-        if (e.mods.isPopupMenu())
-        {
-            juce::PopupMenu menu;
-            addCommandItems (menu, view.commands, { "version.restoreSnapshot" });
-            menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
-            return;
-        }
-
-        if (view.getSnapshotRestorePosition (row).contains (e.getEventRelativeTo (&view.localList).getPosition()))
-            view.commands.invoke ("version.restoreSnapshot");
-    }
-
-    void selectedRowsChanged (int row) override
-    {
-        selectSnapshot (view.context, juce::isPositiveAndBelow (row, getNumRows()) ? view.snapshots[(size_t) row].time : 0);
-        view.localList.repaint(); // the actions on the row selected now
     }
 
 private:
@@ -731,15 +760,12 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
       messageField (std::make_unique<MessageField>()),
       changesSection (std::make_unique<SectionHeader> ("Changes", SectionHeader::Style::group)),
       historySection (std::make_unique<SectionHeader> ("History", SectionHeader::Style::pane)),
-      localSection (std::make_unique<SectionHeader> ("Local History", SectionHeader::Style::pane)),
       undoSection (std::make_unique<SectionHeader> ("Undo History", SectionHeader::Style::pane)),
       changesModel (std::make_unique<ChangesModel> (*this)),
       historyModel (std::make_unique<HistoryModel> (*this)),
-      localModel (std::make_unique<LocalHistoryModel> (*this)),
       undoModel (std::make_unique<UndoHistoryModel> (*this)),
       changesList ("Changes", changesModel.get()),
       historyList ("History", historyModel.get()),
-      localList ("Local History", localModel.get()),
       undoList ("Undo History", undoModel.get())
 {
     setTitle ("Versions");
@@ -790,11 +816,10 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     // The group's action under the pointer, as VS Code's.
     changesSection->addAction (Icon::undo, "Discard All Changes", [this] { commands.invoke ("version.discardAll"); });
 
-    for (auto* section : { changesSection.get(), historySection.get(), localSection.get(), undoSection.get() })
+    for (auto* section : { changesSection.get(), historySection.get(), undoSection.get() })
         section->onClick = [this] { resized(); };
 
-    localSection->setToggleState (false, juce::dontSendNotification); // folded at first, its count on its badge
-    undoSection->setToggleState (false, juce::dontSendNotification);
+    undoSection->setToggleState (false, juce::dontSendNotification); // folded at first, its count on its badge
     undoSection->onClick = [this]
     {
         resized();
@@ -832,7 +857,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
         commands.invoke ("version.hear");
     };
 
-    for (auto* list : { &changesList, &historyList, &localList, &undoList })
+    for (auto* list : { &changesList, &historyList, &undoList })
     {
         list->setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
         list->setTitle (list->getName());
@@ -840,7 +865,6 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
 
     changesList.setRowHeight (History::changeRowHeight);
     historyList.setRowHeight (History::versionRowHeight);
-    localList.setRowHeight (History::changeRowHeight);
     undoList.setRowHeight (History::changeRowHeight);
 
     const auto repaintRows = [] (juce::ListBox& list)
@@ -854,12 +878,11 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
 
     changesHover = std::make_unique<ListRowHover> (changesList, repaintRows (changesList));
     historyHover = std::make_unique<ListRowHover> (historyList, repaintRows (historyList));
-    localHover = std::make_unique<ListRowHover> (localList, repaintRows (localList));
     undoHover = std::make_unique<ListRowHover> (undoList, repaintRows (undoList));
 
-    for (auto* c : std::initializer_list<juce::Component*> { &title, branchButton.get(), messageField.get(), &saveButton, &saveMenuButton,
-                                                             changesSection.get(), &changesList, historySection.get(), &historyList,
-                                                             localSection.get(), &localList, &undoList })
+    for (auto* c :
+         std::initializer_list<juce::Component*> { &title, branchButton.get(), messageField.get(), &saveButton, &saveMenuButton,
+                                                   changesSection.get(), &changesList, historySection.get(), &historyList, &undoList })
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText, &newerText,
@@ -876,14 +899,8 @@ VersionsView::~VersionsView()
 {
     changesHover = nullptr;
     historyHover = nullptr;
-    localHover = nullptr;
     undoHover = nullptr;
     context.removeListener (this);
-}
-
-juce::Button& VersionsView::getLocalHistorySection() noexcept
-{
-    return *localSection;
 }
 
 juce::Button& VersionsView::getUndoHistorySection() noexcept
@@ -940,27 +957,91 @@ void VersionsView::refreshUndoHistory()
     undoList.repaint();
 }
 
-juce::String VersionsView::describeSnapshot (int row) const
+juce::String VersionsView::describeSnapshot (int index) const
 {
-    if (! juce::isPositiveAndBelow (row, (int) snapshots.size()))
+    if (! juce::isPositiveAndBelow (index, (int) snapshots.size()))
         return {};
 
-    const auto& snapshot = snapshots[(size_t) row];
-    return snapshot.reason + ", " + describeWhen (juce::Time (snapshot.time), juce::Time::getCurrentTime())
+    // "Automatic save, 5 min, on main"; with why it was taken where that says more: "Automatic save, Before Restore, now".
+    const auto& snapshot = snapshots[(size_t) index];
+    return "Automatic save, " + (snapshot.reason != "Auto-saved" ? snapshot.reason + ", " : juce::String())
+           + describeWhen (juce::Time (snapshot.time), juce::Time::getCurrentTime())
            + (snapshot.branch.isNotEmpty() ? ", on " + snapshot.branch : juce::String());
+}
+
+const SnapshotInfo* VersionsView::getRowSnapshot (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, (int) historyRows.size()))
+        return nullptr;
+
+    const auto index = historyRows[(size_t) row].snapshot;
+    return juce::isPositiveAndBelow (index, (int) snapshots.size()) ? &snapshots[(size_t) index] : nullptr;
+}
+
+const VersionsView::SnapshotGroup* VersionsView::getRowGroup (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, (int) historyRows.size()))
+        return nullptr;
+
+    const auto& place = historyRows[(size_t) row];
+    return place.snapshot < 0 && juce::isPositiveAndBelow (place.group, (int) snapshotGroups.size()) ? &snapshotGroups[(size_t) place.group]
+                                                                                                     : nullptr;
+}
+
+int VersionsView::getSnapshotRow (int index) const
+{
+    for (int row = 0; row < (int) historyRows.size(); ++row)
+        if (index >= 0 && historyRows[(size_t) row].snapshot == index)
+            return row;
+
+    return -1;
+}
+
+int VersionsView::getSnapshotGroupRow (int index) const
+{
+    for (int row = 0; row < (int) historyRows.size(); ++row)
+        if (const auto* group = getRowGroup (row); group != nullptr && index >= group->first && index < group->first + group->count)
+            return row;
+
+    return -1;
+}
+
+void VersionsView::unfoldAutomaticSaves (int row)
+{
+    const auto* group = getRowGroup (row);
+
+    if (group == nullptr)
+        return;
+
+    // Another click folds it. Its row stays where it is, and selected.
+    const auto since = group->since;
+
+    if (unfoldedGroups.erase (since) == 0)
+        unfoldedGroups.insert (since);
+
+    selectSnapshot (context, 0); // one of its rows, selected, goes out of sight as it folds
+    selectedGroup = since;
+    refreshHistoryRows();
+    refreshHistoryLines();
+    historyList.updateContent();
+    historyList.selectRow (row, true, true);
+    historyList.repaint();
 }
 
 juce::Rectangle<int> VersionsView::getSnapshotRestorePosition (int row) const
 {
-    // Before the time at its end (LocalHistoryModel::paintListBoxItem()), under the pointer or on the row selected.
-    if (! juce::isPositiveAndBelow (row, (int) snapshots.size()) || localHover == nullptr
-        || (row != localHover->row && ! localList.isRowSelected (row)))
+    // Before the time at its end (HistoryModel::paintListBoxItem()), under the pointer or on the row selected.
+    const auto* snapshot = getRowSnapshot (row);
+
+    if (snapshot == nullptr || historyHover == nullptr || (row != historyHover->row && ! historyList.isRowSelected (row)))
         return {};
 
-    const auto when = describeWhen (juce::Time (snapshots[(size_t) row].time), juce::Time::getCurrentTime());
+    const auto when = describeWhen (juce::Time (snapshot->time), juce::Time::getCurrentTime());
     const auto whenWidth =
         juce::roundToInt (juce::TextLayout::getStringWidth (juce::Font (juce::FontOptions (TextSize::small)), when)) + Space::xs;
-    return localList.getRowPosition (row, true).withTrimmedRight (Space::s + whenWidth).removeFromRight (History::actionWidth);
+    return historyList.getRowPosition (row, true)
+        .withTrimmedRight (Space::s + (anyBounce ? History::playWidth : 0) + whenWidth)
+        .removeFromRight (History::actionWidth);
 }
 
 juce::TextEditor& VersionsView::getMessageField() noexcept
@@ -1011,10 +1092,8 @@ void VersionsView::refreshTooltips()
     moreButton.setTooltip ("More Actions: versions, changes, branches, DAWproject, clean up");
     historySection->setTooltip ("The song's versions: each on its branch's line, where branches part and where they merge");
     historyList.setTooltip (
-        "Every version, newest first, each on its branch's line: click one to show what it changed, double-click to open it in the song's place");
-    localSection->setTooltip ("The song as it was while it differed from its last version, kept without asking: as the project "
-                              "opened, every few minutes while it changed, and before what made it another");
-    localList.setTooltip ("Local History, newest first: each one's arrow restores the song to it, as one undo step");
+        "Every version, newest first, each on its branch's line: click one to show what it changed, double-click to open it in the song's "
+        "place. In grey between them, the automatic saves: the song as it was at times while it had changes");
     undoSection->setTooltip (
         "The changes made to the song since it opened, as Undo and Redo go through them: click one to go back or forth to it");
     undoList.setTooltip ("Undo History, newest first: the dimmed steps are undone, and Redo would do them again. Click a step to go "
@@ -1044,6 +1123,8 @@ juce::PopupMenu VersionsView::makeMoreMenu()
     menu.addSubMenu ("Version", versionMenu);
     menu.addSubMenu ("Changes", changesMenu);
     menu.addSubMenu ("Branch", branchMenu);
+    menu.addSeparator();
+    addCommandItems (menu, commands, { "version.showAutomatic" });
     menu.addSeparator();
     addCommandItems (menu, commands, { "version.exportDawProject", "project.importDawProject" });
     menu.addSeparator();
@@ -1116,20 +1197,97 @@ void VersionsView::refreshHistoryRows()
     }
 
     historyRows.clear();
+    snapshotGroups.clear();
     historyRows.push_back ({});
+
+    // The automatic saves taken after a version was saved (on whichever branch), before its row, newest first as they are
+    // listed, so that the rows go back in time from the top: one alone as a row of its own; more as their group's row, and a row each under it while it is unfolded. None while they are switched off.
+    const auto shown = settings.get (Settings::versionShowAutomatic);
+    int next = 0;
+    const auto addSnapshotsSince = [this, shown, &next] (juce::int64 time, const juce::String& versionID)
+    {
+        const auto first = next;
+
+        while (next < (int) snapshots.size() && snapshots[(size_t) next].time > time)
+            ++next;
+
+        if (! shown || next == first)
+            return;
+
+        if (next == first + 1)
+        {
+            historyRows.push_back ({ .snapshot = first });
+            return;
+        }
+
+        const auto group = (int) snapshotGroups.size();
+        snapshotGroups.push_back ({ first, next - first, versionID });
+        historyRows.push_back ({ .group = group });
+
+        if (unfoldedGroups.count (versionID) > 0)
+            for (int i = first; i < next; ++i)
+                historyRows.push_back ({ .snapshot = i, .group = group });
+    };
 
     for (int i = 0; i < (int) versions.size(); ++i)
     {
-        historyRows.push_back ({ i, -1 });
+        addSnapshotsSince (versions[(size_t) i].saved.toMilliseconds(), versions[(size_t) i].id);
+        historyRows.push_back ({ .version = i });
 
         if (versions[(size_t) i].id == openedVersion)
             for (int c = 0; c < (int) openedChanges.size(); ++c)
-                historyRows.push_back ({ i, c });
+                historyRows.push_back ({ .version = i, .change = c });
     }
+
+    addSnapshotsSince (std::numeric_limits<juce::int64>::min(), {}); // those older than every version
 }
 
 void VersionsView::selectHistoryRow()
 {
+    // A version selected from elsewhere (the bar of the version open, a picker) takes the selection from a group of automatic
+    // saves, as the model takes it from an automatic save (selectVersion()).
+    if (getSelectedVersion (context).isNotEmpty())
+        selectedGroup.reset();
+
+    // An automatic save selected, wherever its row went. Folded into a group since (another was taken beside it), its
+    // group's row is selected in its place; gone (thinned away, or Show Automatic Saves switched off), nothing of it stays
+    // selected, so that its command is never there for a row nobody sees.
+    if (const auto time = getSelectedSnapshot (context); time != 0)
+    {
+        const auto found = std::find_if (snapshots.begin(), snapshots.end(), [time] (const SnapshotInfo& s) { return s.time == time; });
+        const auto index = found != snapshots.end() ? (int) (found - snapshots.begin()) : -1;
+
+        if (const auto row = getSnapshotRow (index); row >= 0)
+        {
+            if (historyList.getSelectedRow() != row && historyList.getNumSelectedRows() > 0)
+                historyList.selectRow (row, true, true);
+
+            return;
+        }
+
+        selectSnapshot (context, 0);
+
+        if (const auto* group = getRowGroup (getSnapshotGroupRow (index)))
+            selectedGroup = group->since;
+    }
+
+    // A group of them selected, wherever its row went.
+    if (selectedGroup.has_value())
+    {
+        for (int row = 0; row < (int) historyRows.size(); ++row)
+        {
+            if (const auto* group = getRowGroup (row); group != nullptr && group->since == *selectedGroup)
+            {
+                if (historyList.getSelectedRow() != row && historyList.getNumSelectedRows() > 0)
+                    historyList.selectRow (row, true, true);
+
+                return;
+            }
+        }
+
+        selectedGroup.reset(); // its group went (a version saved since it was taken, its saves thinned to one, or all hidden)
+    }
+
     // What the model selects, wherever its row went: a line under a version, the version, or the changes' row.
     const auto selected = getSelectedVersion (context);
     const auto line = getSelectedVersionChange (context);
@@ -1155,7 +1313,7 @@ void VersionsView::unfoldVersion (const juce::String& versionID)
     // Another click folds it; one version unfolds at a time.
     openedVersion = openedVersion == versionID ? juce::String() : versionID;
     refreshHistoryRows();
-    refreshHistoryLines (getCurrentBranch (context).has_value() ? getCurrentBranch (context)->head : juce::String());
+    refreshHistoryLines();
     historyList.updateContent();
 
     if (const auto row = getHistoryRow (versionID); row >= 0)
@@ -1191,6 +1349,16 @@ juce::PopupMenu VersionsView::makeHistoryMenu (int row)
         group ({ "version.restoreChange" });
         return menu;
     }
+
+    // An automatic save: restoring the song to it. A group of them: nothing, as a click unfolds it.
+    if (getRowSnapshot (row) != nullptr)
+    {
+        group ({ "version.restoreSnapshot" });
+        return menu;
+    }
+
+    if (getRowGroup (row) != nullptr)
+        return menu;
 
     if (const auto* version = getRowVersion (row))
     {
@@ -1314,6 +1482,15 @@ juce::String VersionsView::describeHistoryRow (int row) const
         return change->name + ", " + status + (change->what.isEmpty() ? juce::String() : ": " + change->what);
     }
 
+    // The automatic saves: "6 automatic saves, 5 min, open", "Automatic save, 5 min, on main".
+    if (const auto* group = getRowGroup (row))
+        return describeAutomaticSaves (group->count) + ", "
+               + describeWhen (juce::Time (snapshots[(size_t) group->first].time), juce::Time::getCurrentTime())
+               + (unfoldedGroups.count (group->since) > 0 ? ", open" : "");
+
+    if (getRowSnapshot (row) != nullptr)
+        return describeSnapshot (historyRows[(size_t) row].snapshot);
+
     const auto* found = getRowVersion (row);
 
     if (found == nullptr)
@@ -1430,8 +1607,9 @@ void VersionsView::refresh()
     const auto branch = getCurrentBranch (context);
     const auto base = getBaseVersion (context);
     currentBranch = branch.has_value() ? branch->id : juce::String();
+    changesFollow = base.has_value() ? base->id : branch.has_value() ? branch->head : juce::String();
     refreshHistoryRows();
-    refreshHistoryLines (base.has_value() ? base->id : branch.has_value() ? branch->head : juce::String());
+    refreshHistoryLines();
     branchButton->setBranch (branch.has_value() ? branch->name : juce::String(),
                              branch.has_value() ? branch->colour : getPalette (*this).textMuted);
     branchButton->setVisible (branch.has_value());
@@ -1458,8 +1636,6 @@ void VersionsView::refresh()
         changesSection->set ("Changes", {}, getNumChanges());
 
     historySection->set ("History", {}, 0);
-    localSection->set ("Local History", {}, (int) snapshots.size());
-    localSection->setVisible (keeps);
     changesSection->setActionsAllowed (lines == Lines::changes && compared.isEmpty());
     doneButton.setVisible (lines == Lines::changes && compared.isNotEmpty());
     mergeButton.setVisible (lines == Lines::merge);
@@ -1515,18 +1691,9 @@ void VersionsView::refresh()
 
     changesList.updateContent();
     historyList.updateContent();
-    localList.updateContent();
     selectHistoryRow();
-
-    // The snapshot selected, wherever its row went as new ones came.
-    if (localList.getNumSelectedRows() > 0)
-        for (int row = 0; row < (int) snapshots.size(); ++row)
-            if (snapshots[(size_t) row].time == getSelectedSnapshot (context) && localList.getSelectedRow() != row)
-                localList.selectRow (row, true, true);
-
     changesList.repaint();
     historyList.repaint();
-    localList.repaint();
     refreshUndoHistory();
     resized();
 }
@@ -1579,7 +1746,7 @@ bool VersionsView::keyPressed (const juce::KeyPress& key)
     return false;
 }
 
-void VersionsView::refreshHistoryLines (const juce::String& nowFollows)
+void VersionsView::refreshHistoryLines()
 {
     // Each version's lines to the versions it follows, and the changes' row's to the current branch's last version (or, on a
     // branch without versions yet, the one it was made from).
@@ -1604,7 +1771,7 @@ void VersionsView::refreshHistoryLines (const juce::String& nowFollows)
             { row, parentRow, getLane (branch), getLane (parentBranch), first, getBranchColour (first ? branch : parentBranch) });
     };
 
-    addLine (0, currentBranch, nowFollows, true);
+    addLine (0, currentBranch, changesFollow, true);
 
     for (const auto& [id, place] : rows)
         if (const auto* version = getRowVersion (place.first))
@@ -1745,8 +1912,7 @@ void VersionsView::resized()
     const auto listHeight = juce::jmin (juce::jmax (listsRoom, History::changeRowHeight), rows * History::changeRowHeight);
     changesList.setBounds (rows == 0 ? juce::Rectangle<int>() : area.removeFromTop (listHeight));
 
-    // Undo History at the foot and Local History above it, each one's rows (while open) up to a third of what is left, then the
-    // history above them.
+    // Undo History at the foot, its rows (while open) up to a third of what is left, then the history above it.
     const auto placeAtFoot = [&area] (SectionHeader& section, juce::ListBox& list, int numRows)
     {
         if (! section.isVisible())
@@ -1764,7 +1930,6 @@ void VersionsView::resized()
     };
 
     placeAtFoot (*undoSection, undoList, getNumUndoRows());
-    placeAtFoot (*localSection, localList, (int) snapshots.size());
 
     historySection->setBounds (area.removeFromTop (historySection->getPreferredHeight()));
     historyList.setBounds (historySection->getToggleState() ? area : juce::Rectangle<int>());

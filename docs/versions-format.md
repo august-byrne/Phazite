@@ -328,7 +328,7 @@ wrote, or a history these translations don't cover), nothing is merged, and the 
 would be made one. Nor where the other side's song, or the parting's, is stamped with another numbering than this side's
 (`idNumbering`, section 5): its IDs from 2^61 up were given anew on one side and not the other, so an ID can't be relied on
 to name the same item on both. Nor, once the list shows, where the song has been made another numbering's since (Restore
-This Version, Restore from Local History, Discard All Changes, or Undo of one): Merge keeps the stamp the song had as its
+This Version, Restore This Automatic Save, Discard All Changes, or Undo of one): Merge keeps the stamp the song had as its
 list was worked out, and takes nothing into a song stamped otherwise.
 
 A record that isn't one to one (an ID 0, or one ID given to two: a damaged one, or one another history wrote) is left out.

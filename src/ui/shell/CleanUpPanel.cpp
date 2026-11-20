@@ -88,11 +88,11 @@ void CleanUpPanel::refreshSummary()
         }
     }
 
-    // While it looks, or why it can't; what it found; and that what a version or Local History still plays is kept, which a
+    // While it looks, or why it can't; what it found; and that what a version or an automatic save still plays is kept, which a
     // file once saved in a version always is (model/project/UnusedAudio.h).
     const auto& found = finder.getFound();
     const auto why = getWhyNotCleanUpAudio (context);
-    const juce::String kept ("Files a version or Local History still plays are kept.");
+    const juce::String kept ("Files a version or an automatic save still plays are kept.");
     juce::String said;
 
     if (found.has_value() && ! found->unreadable.isEmpty())

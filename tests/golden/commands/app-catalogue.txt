@@ -135,6 +135,7 @@ version.deleteBranch
 version.recover
 version.editMessage
 version.bounceEach
+version.showAutomatic
 device.add | F8
 device.savePreset
 track.savePreset

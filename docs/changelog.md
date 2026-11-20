@@ -24,6 +24,17 @@ The full text of every step, as it was written when it was built, is in the
 - **A search field says what to type while it has the keys:** the hint of every search field (the settings', the command
   search's, the browser's) stays until something is typed.
 
+## One history (2026-11-20)
+
+- **The automatic saves in the History:** what was the Local History list, under the history and under another name, is
+  now in the History itself: the song as it was at times while it had changes, in grey between the versions, by when
+  each was taken, those between two versions folded into one row ("6 automatic saves") that a click unfolds, each with
+  its Restore under the pointer. **Show Automatic Saves** (the view's menu and the settings)
+  hides them. The words Local History are gone from the window ("Restore the Automatic Save of 14:02"). Undo History
+  stays at the view's foot, folded.
+- **Decided, not built:** the versions' store deletes nothing by itself; Free Up Space (S4.4) will free its room by
+  hand ([decisions.md](design/decisions.md)).
+
 ## The owner's round after stage 6 (from 2026-11-19)
 
 - **The window's small things:** a right-click's menu opens at the pointer, Replace is a submenu, the effects'

@@ -901,7 +901,8 @@ TEST_CASE ("Rename Version names the version the history selects anew in a picke
     CHECK (phazite::getLastVersion (context)->id == first);
 }
 
-TEST_CASE ("Local History lists the song as it was before Discard All Changes, folded at first, and its arrow restores it")
+TEST_CASE ("The history lists the song as it was before Discard All Changes as an automatic save, above the version it was taken since, "
+           "and its arrow restores it")
 {
     Screen screen;
     auto& context = screen.session.getContext();
@@ -910,8 +911,8 @@ TEST_CASE ("Local History lists the song as it was before Discard All Changes, f
     auto& view = screen.getVersionsView();
     screen.saveVersion ("First");
     CHECK (view.getNumSnapshots() == 0);
-    CHECK_FALSE (view.getLocalHistorySection().getToggleState());
-    CHECK (view.getLocalHistoryList().getBounds().isEmpty());
+    const auto rows = view.getNumHistoryRows(); // the changes' row and the versions'
+    REQUIRE (view.describeHistoryRow (1).startsWith ("First, "));
 
     // A change discarded: kept first.
     screen.setFirstTrackVolume (0.4f);
@@ -920,19 +921,203 @@ TEST_CASE ("Local History lists the song as it was before Discard All Changes, f
     screen.waitForVersions();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumSnapshots() == 1; }));
     CHECK (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 0; }));
-    CHECK (view.describeSnapshot (0).startsWith ("Before Discard All Changes, now, on main"));
+    CHECK (view.describeSnapshot (0).startsWith ("Automatic save, Before Discard All Changes, now, on main"));
 
-    // Opened, its arrow under the pointer brings the change back, one undo step.
-    screen.click (view.getLocalHistorySection());
-    REQUIRE_FALSE (view.getLocalHistoryList().getBounds().isEmpty());
-    auto& list = view.getLocalHistoryList();
+    // One alone is a row of its own, in no group, between the changes' row and the version it was taken since.
+    CHECK (view.getNumHistoryRows() == rows + 1);
+    CHECK (view.getSnapshotGroupRow (0) < 0);
+    const auto row = view.getSnapshotRow (0);
+    REQUIRE (row == 1);
+    CHECK (view.describeHistoryRow (row) == view.describeSnapshot (0));
+    CHECK (view.describeHistoryRow (row + 1).startsWith ("First, "));
+    CHECK (view.getHistoryRow (phazite::getLastVersion (context)->id) == row + 1);
+
+    // Its arrow under the pointer brings the change back, one undo step; a click elsewhere on its row only selects it.
+    auto& list = view.getHistoryList();
     phazite::test::Mouse mouse (list);
-    mouse.moveTo (list.getRowPosition (0, true).getCentre());
-    REQUIRE_FALSE (view.getSnapshotRestorePosition (0).isEmpty());
+    mouse.moveTo (list.getRowPosition (row, true).getCentre());
+    REQUIRE_FALSE (view.getSnapshotRestorePosition (row).isEmpty());
+    CHECK (view.getSnapshotRestorePosition (row + 1).isEmpty());               // a version's row has none
     juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds())); // its row drawn, lit
-    mouse.click (view.getSnapshotRestorePosition (0).getCentre());
+    CHECK_FALSE (view.getSnapshotRestorePosition (row).contains (list.getRowPosition (row, true).getCentre()));
+    mouse.click (list.getRowPosition (row, true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (view.getNumChanges() == 0);
+    CHECK (phazite::getSelectedSnapshot (context) != 0);
+    CHECK (phazite::getSelectedVersion (context).isEmpty());
+    CHECK (phazite::CommandRegistry::isEnabled (*screen.registry.find ("version.restoreSnapshot")));
+
+    mouse.click (view.getSnapshotRestorePosition (row).getCentre());
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
-    CHECK (phazite::describeUndo (phazite::findSong (context)).startsWith ("Undo Restore Local History of "));
+    CHECK (phazite::describeUndo (phazite::findSong (context)).startsWith ("Undo Restore the Automatic Save of "));
+
+    // A version's row selected: no automatic save is, so its command is greyed.
+    mouse.click (list.getRowPosition (view.getHistoryRow (phazite::getLastVersion (context)->id), true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getSelectedSnapshot (context) == 0);
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*screen.registry.find ("version.restoreSnapshot")));
+}
+
+TEST_CASE ("An automatic save stays selected as its row moves, gives the selection to its group as it folds into one, and loses it "
+           "as Show Automatic Saves hides it")
+{
+    Screen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    auto& view = screen.getVersionsView();
+    const auto first = screen.saveVersion ("First");
+    auto& list = view.getHistoryList();
+    phazite::test::Mouse mouse (list);
+    const auto* restore = screen.registry.find ("version.restoreSnapshot");
+
+    const auto takeOne = [&] (float volume)
+    {
+        const auto taken = view.getNumSnapshots();
+        screen.setFirstTrackVolume (volume);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
+        REQUIRE (screen.registry.invoke ("version.discardAll"));
+        screen.waitForVersions();
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&view, taken] { return view.getNumSnapshots() == taken + 1; }));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 0; }));
+    };
+
+    // One, alone and selected; then a version saved above it: its row moves down, and it stays the one selected.
+    takeOne (0.4f);
+    REQUIRE (view.getSnapshotRow (0) == 1);
+    mouse.click (list.getRowPosition (1, true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    const auto selected = phazite::getSelectedSnapshot (context);
+    REQUIRE (selected != 0);
+    screen.setFirstTrackVolume (0.5f);
+    const auto second = screen.saveVersion ("Second");
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view, second] { return view.getHistoryRow (second) == 1; }));
+    CHECK (view.getSnapshotRow (0) == 2);
+    CHECK (list.getSelectedRow() == 2);
+    CHECK (phazite::getSelectedSnapshot (context) == selected);
+    CHECK (phazite::CommandRegistry::isEnabled (*restore));
+
+    // A version selected from elsewhere (as the bar of a version open does) takes the selection from it, at once for its
+    // command and in the list as the view next looks.
+    phazite::selectVersion (context, first);
+    CHECK (phazite::getSelectedSnapshot (context) == 0);
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*restore));
+    view.showAutomaticSavesChanged(); // the view reads the model again
+    CHECK (list.getSelectedRow() == view.getHistoryRow (first));
+
+    // Selected again, and another taken since "Second", alone above it: its row moves down again, selected still.
+    mouse.click (list.getRowPosition (view.getSnapshotRow (0), true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::getSelectedSnapshot (context) == selected);
+    takeOne (0.3f);
+    REQUIRE (view.getSnapshotRow (0) == 1);
+    CHECK (view.getSnapshotRow (1) == 3);
+    CHECK (list.getSelectedRow() == 3);
+    CHECK (phazite::getSelectedSnapshot (context) == selected);
+
+    // The new one selected, and one more taken beside it: the two fold into a group, whose row is selected in its place, and
+    // nothing out of sight can be restored.
+    mouse.click (list.getRowPosition (1, true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::getSelectedSnapshot (context) != 0);
+    REQUIRE (phazite::getSelectedSnapshot (context) != selected);
+    takeOne (0.2f);
+    REQUIRE (view.getSnapshotGroupRow (1) == 1);
+    CHECK (view.getSnapshotRow (1) < 0);
+    CHECK (list.getSelectedRow() == 1);
+    CHECK (phazite::getSelectedSnapshot (context) == 0);
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*restore));
+
+    // The one alone selected again, and all of them hidden: the selection goes to the changes' row, its command greyed.
+    const auto alone = view.getSnapshotRow (2);
+    REQUIRE (alone > 0);
+    mouse.click (list.getRowPosition (alone, true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::getSelectedSnapshot (context) == selected);
+    REQUIRE (screen.registry.invoke ("version.showAutomatic"));
+    CHECK (phazite::getSelectedSnapshot (context) == 0);
+    CHECK (phazite::getSelectedVersion (context).isEmpty());
+    CHECK (list.getSelectedRow() == 0); // its row's number still names a row (the project's "First version"), so one stays selected
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*restore));
+    REQUIRE (screen.registry.invoke ("version.showAutomatic")); // on again, as the settings had it
+}
+
+TEST_CASE ("The automatic saves between two versions fold into one row of the history, which a click unfolds, and Show Automatic "
+           "Saves hides them all")
+{
+    Screen screen;
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    auto& view = screen.getVersionsView();
+    const auto first = screen.saveVersion ("First");
+    const auto rows = view.getNumHistoryRows();
+
+    // Two changes, each discarded: two automatic saves since "First".
+    for (const auto volume : { 0.4f, 0.3f })
+    {
+        const auto taken = view.getNumSnapshots();
+        screen.setFirstTrackVolume (volume);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
+        REQUIRE (screen.registry.invoke ("version.discardAll"));
+        screen.waitForVersions();
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&view, taken] { return view.getNumSnapshots() == taken + 1; }));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 0; }));
+    }
+
+    // Folded: one row for both, above the version they were taken since.
+    REQUIRE (view.getNumHistoryRows() == rows + 1);
+    CHECK (view.describeHistoryRow (1).startsWith ("2 automatic saves, now"));
+    CHECK_FALSE (view.describeHistoryRow (1).endsWith (", open"));
+    CHECK (view.getSnapshotGroupRow (0) == 1);
+    CHECK (view.getSnapshotGroupRow (1) == 1);
+    CHECK (view.getSnapshotRow (0) < 0);
+    CHECK (view.getHistoryRow (first) == 2);
+
+    // A click unfolds it: a row each under it, newest first, the group's row still selected; no menu for the group's row.
+    auto& list = view.getHistoryList();
+    phazite::test::Mouse mouse (list);
+    mouse.click (list.getRowPosition (1, true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (view.getNumHistoryRows() == rows + 3);
+    CHECK (view.describeHistoryRow (1).endsWith (", open"));
+    CHECK (view.getSnapshotRow (0) == 2);
+    CHECK (view.getSnapshotRow (1) == 3);
+    CHECK (view.describeHistoryRow (2) == view.describeSnapshot (0));
+    CHECK (view.getHistoryRow (first) == 4);
+    CHECK (list.getSelectedRow() == 1);
+    CHECK (view.makeHistoryMenu (1).getNumItems() == 0);
+    CHECK (view.makeHistoryMenu (2).getNumItems() == 1);                       // Restore This Automatic Save
+    juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds())); // its rows drawn
+
+    // A version saved since: the group is between the two versions now, unfolded as it was, its row selected still.
+    screen.setFirstTrackVolume (0.2f);
+    const auto second = screen.saveVersion ("Second");
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view, second] { return view.getHistoryRow (second) == 1; }));
+    CHECK (view.getSnapshotGroupRow (0) == 2);
+    CHECK (view.getSnapshotRow (0) == 3);
+    CHECK (view.getHistoryRow (first) == 5);
+    CHECK (list.getSelectedRow() == 2);
+
+    // Return folds it again, as a click does.
+    list.keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
+    phazite::test::dispatchPendingMessages();
+    CHECK (view.getNumHistoryRows() == rows + 2);
+    CHECK (view.getSnapshotRow (0) < 0);
+    CHECK (view.getHistoryRow (first) == 3);
+
+    // Show Automatic Saves off: the versions alone, and the settings keep it; on again, they are back.
+    REQUIRE (screen.registry.find ("version.showAutomatic")->isTicked());
+    REQUIRE (screen.registry.invoke ("version.showAutomatic"));
+    CHECK_FALSE (screen.services.settings.get (phazite::Settings::versionShowAutomatic));
+    CHECK_FALSE (screen.registry.find ("version.showAutomatic")->isTicked());
+    CHECK (view.getNumHistoryRows() == rows + 1);
+    CHECK (view.getSnapshotGroupRow (0) < 0);
+    CHECK (view.getNumSnapshots() == 2);
+    CHECK (view.getHistoryRow (first) == 2);
+
+    REQUIRE (screen.registry.invoke ("version.showAutomatic"));
+    CHECK (screen.services.settings.get (phazite::Settings::versionShowAutomatic));
+    CHECK (view.getSnapshotGroupRow (0) == 2);
 }
 
 TEST_CASE ("Undo History lists the song's steps newest first, folded at first, and a click on one goes back or forth to it")
