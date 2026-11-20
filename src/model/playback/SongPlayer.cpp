@@ -148,6 +148,10 @@ namespace
         return values;
     }
 
+    // The second half of the key of a device's own sound held back for its sidechain (Plan::Device::inputDelay): no track,
+    // chain or part has it.
+    constexpr std::int64_t ownSound = -1;
+
     // The room a path's ring has besides its delay: a third of a second at a rate, as a power of two (16,384 samples at 44.1
     // and 48 kHz, 65,536 at 192 kHz).
     int getRingRoom (double sampleRate)
@@ -658,15 +662,25 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     for (const auto& [key, delay] : delays)
     {
-        if (usedDelays.count (key) == 0 && delay != nullptr)
-        {
-            delay->setDeparture (departures + 1);
-            departs = true;
+        if (usedDelays.count (key) != 0 || delay == nullptr)
+            continue;
 
-            // What it went into holds what it added as it faded (markWhatReadsLeaving()).
-            if (const auto into = pathDestinations.find (key); into != pathDestinations.end())
-                leftInto[into->second] = juce::Time::getMillisecondCounter();
+        // A device's own sound held back for its sidechain never leaves: its strip plays on without it. Where it waited
+        // (its sidechain taken away, its key's track or the device deleted), the sound comes that much earlier from this
+        // plan on, which the plans' alignment moves on for, whether or not another path's delay changed with it (a song of
+        // the two tracks alone: the master's latency fell as much as the strip's, and no other path moved).
+        if (key.second == ownSound)
+        {
+            realigned = realigned || delay->getLength() > 0;
+            continue;
         }
+
+        delay->setDeparture (departures + 1);
+        departs = true;
+
+        // What it went into holds what it added as it faded (markWhatReadsLeaving()).
+        if (const auto into = pathDestinations.find (key); into != pathDestinations.end())
+            leftInto[into->second] = juce::Time::getMillisecondCounter();
     }
 
     if (departs)
@@ -898,26 +912,47 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
         if (strip.devices.empty() && node->getDeviceInfo().kind == devices::DeviceKind::instrument)
             strip.hasInstrument = true;
 
-        // Its parameters' automation, as late as its sound comes: the song's curves of the device (a plug-in can have
-        // thousands of parameters, few automated).
-        engine::Plan::Device device { std::move (node), {}, strip.latency };
+        engine::Plan::Device device { std::move (node) };
         const auto id = getDeviceID (deviceState).getRaw();
 
-        for (auto curve = curves.lower_bound ({ id, juce::String() }); curve != curves.end() && curve->first.first == id; ++curve)
-            if (const auto index = findParameter (*device.node, curve->first.second); index >= 0)
-                device.automation.push_back ({ index, curve->second });
-
-        // What its sidechain listens to, lined up with its sound where it can be (a track that comes later than the device
-        // can't be heard earlier).
+        // What its sidechain listens to, lined up with its sound. One that comes later than the device's own sound (a kick
+        // through a linear-phase EQ keying a compressor on a bass) holds back what comes into the device by as much, so that
+        // the duck meets its kick: the strip's sound waits for the key, and comes out as much later (its latency counts the
+        // wait, which what is after it follows). The key's delay then needs none. The delay of its own is keyed by the
+        // device's ID and ownSound (-1), which no other path has: a sidechain's is keyed by the device's ID and the track's (an ID,
+        // never negative), a chain's and an input's by a chain's or a strip's ID, which no device has (the song gives each
+        // item an ID of its own: Song::makeID()). Live, a device with a sidechain keeps one, as every path keeps a ring
+        // (getDelay()), so that a wait that comes has its past. It is the strip's own sound, which goes on with or without it:
+        // never a path that comes (it doesn't fade in as its sidechain is chosen) or leaves (compile() marks it with no
+        // departure: with the sidechain taken away, the next plan plays the sound as it comes, across the realigning dip
+        // where it had waited). An instrument's sound isn't held back (it takes notes): its
+        // sidechain is lined up where it can be, a later track not heard earlier; nor is one that is off, which doesn't play
+        // and so isn't waited for, as its latency isn't.
         if (const auto source = (std::int64_t) getID (deviceState, schema::deviceSidechain);
             source != 0 && places.contains (source) && ! channel.refuses (source))
         {
             auto& heard = plan.strips[(size_t) places.at (source)];
             heard.feedsSidechain = true;
             device.sidechain = places.at (source);
+
+            if (device.node->getDeviceInfo().kind != devices::DeviceKind::instrument)
+            {
+                const auto wait = device.node->isOn() ? std::max (0, heard.latency - strip.latency) : 0;
+                device.inputDelay = getDelay ({ (std::int64_t) id, ownSound }, wait, std::nullopt, {}, false);
+                strip.latency += wait;
+            }
+
             device.sidechainDelay = getDelay ({ (std::int64_t) id, source }, strip.latency - heard.latency,
                                               TapKey { source, engine::Plan::Strip::TapPoint::beforeMute });
         }
+
+        // Its parameters' automation, as late as its sound comes (after a wait for its sidechain too): the song's curves of
+        // the device (a plug-in can have thousands of parameters, few automated).
+        device.latency = strip.latency;
+
+        for (auto curve = curves.lower_bound ({ id, juce::String() }); curve != curves.end() && curve->first.first == id; ++curve)
+            if (const auto index = findParameter (*device.node, curve->first.second); index >= 0)
+                device.automation.push_back ({ index, curve->second });
 
         // Its pads on mixer channels of their own, each played into an output of its own, as late as the device's sound comes.
         if (const auto pads = separatedPads.find ((std::int64_t) id); pads != separatedPads.end())
@@ -1218,15 +1253,16 @@ void SongPlayer::addInputs (engine::Plan& plan, engine::Plan::Strip& strip, std:
 }
 
 std::shared_ptr<engine::Delay> SongPlayer::getDelay (std::pair<std::int64_t, std::int64_t> key, int length, std::optional<TapKey> tap,
-                                                     std::shared_ptr<engine::PartOutput> part)
+                                                     std::shared_ptr<engine::PartOutput> part, bool comesAndGoes)
 {
     // A path the last plan lined up otherwise (a device's latency changed, or one with latency came or went): the plans'
     // alignment moves on (compile()). A new path isn't one: its delay plays nothing until it holds as much of the past as it
-    // reaches back, and fades in then.
+    // reaches back, and fades in then. Nor is one that doesn't come and go with what the song routes (a device's own sound held back
+    // for its sidechain): it never fades in as a path new to a song that plays does.
     const auto samples = std::max (0, length);
 
     const auto found = pathLengths.find (key);
-    const auto isNew = found == pathLengths.end() && ! compilingAfresh;
+    const auto isNew = comesAndGoes && found == pathLengths.end() && ! compilingAfresh;
 
     if (found != pathLengths.end() && found->second != samples)
         realigned = true;
@@ -1308,7 +1344,10 @@ void SongPlayer::finishRings (engine::Plan& plan)
                 take (input.delay);
 
             for (auto& device : strip.devices)
+            {
                 take (device.sidechainDelay);
+                take (device.inputDelay);
+            }
 
             for (auto& container : strip.containers)
                 for (auto& chain : container.chains)
@@ -1438,8 +1477,14 @@ void SongPlayer::markWhatReadsLeaving (engine::Plan& plan)
         }
 
         for (auto& device : strip.devices)
+        {
             if (device.sidechain >= 0 && device.sidechainDelay != nullptr && holding.contains (plan.strips[(size_t) device.sidechain].id))
                 device.sidechainDelay->markReadsLeaving();
+
+            // What a device holds back for its sidechain is its strip's own sound.
+            if (device.inputDelay != nullptr && holding.contains (strip.id))
+                device.inputDelay->markReadsLeaving();
+        }
 
         if (holding.contains (strip.id))
             for (auto& container : strip.containers)

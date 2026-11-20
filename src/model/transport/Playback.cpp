@@ -236,8 +236,10 @@ void stopAndReturn (Song& song)
 {
     stopPlaying (song);
 
+    // What rings on after the stop rings on as it was where the song stopped (its automation stays there) until it plays
+    // again or the playhead is put elsewhere.
     if (auto* session = findPlayingSession (song))
-        session->locate (getPlayStartBeat (song));
+        session->returnTo (getPlayStartBeat (song));
 }
 
 bool isSongPlaying (const Song& song)

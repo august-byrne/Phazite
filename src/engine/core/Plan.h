@@ -97,6 +97,12 @@ struct Plan
         int sidechain = -1;
         std::shared_ptr<Delay> sidechainDelay {};
 
+        // What comes into it, held back so that it meets a sidechain that comes later than its own sound (a kick through a
+        // linear-phase EQ keying a compressor on a bass): its strip's sound waits for the key, and comes out as much later
+        // (its latency counts the wait); none when it needs none. An instrument's isn't held back (it takes notes): its
+        // sidechain is lined up with its sound where it can be.
+        std::shared_ptr<Delay> inputDelay {};
+
         // Its parts that play into outputs of their own, which other strips add up (Input::part): each one's buffer, and the
         // same as the device takes them; none for most devices.
         std::vector<std::shared_ptr<PartOutput>> partOutputs {};
@@ -159,8 +165,9 @@ struct Plan
         bool feedsBeforeFader = false, feedsSidechain = false, feedsBeforeMute = false;
 
         // Its taps: rings it writes what comes out of it at a point into, once a stretch, which the paths from it read
-        // through their delays (Input::delay, Device::sidechainDelay, tapped: nodes/Strip.h): its output after its mute,
-        // its sound before its fader, its sound after its fader and before its mute, or a device's part.
+        // through their delays (Input::delay, Device::sidechainDelay, tapped: nodes/Strip.h; a Device::inputDelay and a
+        // chain's delay have rings of their own): its output after its mute, its sound before its fader, its sound after its
+        // fader and before its mute, or a device's part.
         enum class TapPoint
         {
             output,

@@ -15,7 +15,7 @@ between them, which compiles the song into what plays. The layers and where the 
 | The song as Phazite's own document, with one undo history | Built | |
 | Playback by Phazite's own engine | Built | |
 | The same sound at any buffer size | Built | |
-| Delay compensation on every path, sends and sidechains too | Built | |
+| Delay compensation on every path, sends and sidechains too (a key that comes later waited for) | Built | |
 | Several threads playing each block | Built | |
 | Audio files streamed from disk, and resampled where their rate differs | Built | |
 | Tempo changes, ramps and time signatures along the song | Built | |
@@ -64,7 +64,9 @@ sends, automation, modulators and macros, sections and the chord lane.
   as long as its time signature makes it. A "1 bar" LFO or delay is three quarter notes in 6/8, and a bar's LFO
   starts its cycle with each bar, across a change of time signature too.
 - **A plug-in's playhead** has the song's place in quarter notes, its time in samples, the time signature, and the
-  bar it is in. While the song is stopped, every piece of a block is where the playhead is.
+  bar it is in. While the song is stopped, every piece of a block is where the playhead is, but after a Stop that sends
+  the playhead back (to where playback started, or from the song's end): then what plays stays where the song stopped
+  (below, "The transport").
 
 ## From the song to what plays
 
@@ -119,6 +121,16 @@ r8brain-free-src and Phazite's devices only.
 - **The transport** is driven by the message thread through the state it last asked for, in atomic values that can't
   overflow however fast it asks, and read back through the engine's playhead. The window reads where the playhead was
   at its frames' own times, from a clock smoothed over the last blocks.
+- **Stop leaves what rings on as it was.** A Stop that sends the playhead back (Stop going back to where playback
+  started, and the song's end) asks the engine for a return (`Engine::returnTo()`), not a locate: the playhead goes
+  back, but what plays stays where the song stopped (every automated value, a device's parameters, a fader's volume and
+  pan, a send's level, a chain's fader and crossover, and the song's place the devices and the modulators are given),
+  so that a reverb's tail through a filter its lane had closed rings on closed, rather than blip as the lane's value at
+  the start opens it again. FL Studio leaves its controls at their last values as it stops, and Ableton Live's song
+  stays where it stopped. The values go to the playhead when the song plays again, or when the playhead is put
+  somewhere by hand (a click in a ruler, Go to Start: a locate). What the transport itself does (the playhead shown,
+  the audio clips' reading ahead and their fade after the stop) follows the playhead. A render never stops and
+  returns.
 - **Fades at Stop, at a jump and at the loop's end,** as other DAWs make them: a jump while playing fades what sounds
   out over 3 ms, then in after it; a stop and the loop's end fade out the audio clips they cut, the rest ringing on as
   its notes end. A stop asked while a jump fades out waits for the fade to end, and stops where the jump lands. A song
@@ -186,6 +198,18 @@ r8brain-free-src and Phazite's devices only.
   ([automation-and-modulation.md](automation-and-modulation.md)).
 - **Delay compensation** lines up every path to the master, the sends' and the sidechains' too. The Low Latency
   switch leaves it off for what is played live ([performance.md](performance.md)).
+  A sidechain that comes later than the device's own sound (a kick through a linear-phase EQ keying a compressor on a
+  bass) can't be heard earlier: the device's own sound waits for it instead, held back by a delay before the device
+  (`Plan::Device::inputDelay`), and its track comes out as much later, which the rest of the song is lined up with, so
+  that a duck stays on its kick whatever is on the kick's track. Live, a device with a sidechain keeps that ring
+  whether it waits or not, so that a wait that comes (the EQ switched to Linear while the song plays) plays on from
+  the past under the dip. What is held back is the strip's own sound, never a path that comes or goes: choosing a
+  sidechain or taking it away while the song plays leaves the device's sound as it was, with no fade of its own; where
+  it had waited (the sidechain taken away, its key's track or the device deleted), the sound comes that much earlier,
+  across the dip a plan that lines its paths up otherwise makes. A
+  sidechain chosen while the song plays whose key already comes late has no past to wait from: its device's sound
+  is silent for as long as the wait, once, and fades in. An instrument's sound isn't held back (it takes notes): its
+  sidechain is lined up where it can be; nor is a device's that is off, which doesn't play.
   A device that sound comes into late (through devices before it, or the strips a bus adds up) is given the song's
   place less that latency, for its automation and for what it counts from the place itself (an LFO in time with the
   song, its grid of control steps, a noise that starts with the song), so that each meets the sound that belongs

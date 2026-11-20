@@ -15,6 +15,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
@@ -654,6 +655,40 @@ TEST_CASE ("Delay compensation: how long the song's sound waits, and for which d
     phazite::test::dispatchPendingMessages(); // the song, as it is now, handed to the engine for its next block
     device.process (20);
     CHECK (phazite::getDelayCompensation (context).seconds == doctest::Approx (compensation.seconds));
+}
+
+TEST_CASE ("Delay compensation counts a device's wait for a sidechain that comes later than its own sound")
+{
+    // A device whose key comes later than the sound coming into it waits for it (engine::Plan::Device::inputDelay), and what
+    // its track plays after it comes out as much later: A is 1,000 samples late (Test Latency), and B's Test Sidechain listens
+    // to it, with Test Latency of 500 samples after it. The song waits 1,500 samples, not the 1,000 of A's alone.
+    phazite::test::HostedDevice device;
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& model = *tracks.song;
+    const auto rate = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getSampleRate();
+    const auto late = [&model] (phazite::TrackID track, float samples)
+    {
+        const phazite::UndoStep step (model, "Add Latency");
+        const auto latency = phazite::test::addTestDevice (model, track, phazite::test::TestLatency::typeID);
+        phazite::setValueSetByHand (model, phazite::ParameterRef { latency, "samples" }, samples);
+    };
+
+    late (tracks.a, 1000.0f);
+    const auto listener = phazite::test::addTestDevice (model, tracks.b, phazite::test::TestSidechain::typeID);
+    phazite::setSidechainSource (context, listener, tracks.a);
+    late (tracks.b, 500.0f);
+
+    phazite::test::dispatchPendingMessages(); // the song, as it is now, handed to the engine for its next block
+    device.process (20);
+    CHECK (phazite::getDelayCompensation (context).seconds == doctest::Approx (1500.0 / rate));
+    CHECK (phazite::getEngineDelaySeconds (context) == doctest::Approx (1500.0 / rate));
+
+    // Its sidechain off, nothing waits.
+    phazite::setSidechainSource (context, listener, phazite::TrackID());
+    phazite::test::dispatchPendingMessages();
+    device.process (20);
+    CHECK (phazite::getDelayCompensation (context).seconds == doctest::Approx (1000.0 / rate));
 }
 
 TEST_CASE ("A bus ducks under a track outside it as a track does; a plain folder, which has no effects, doesn't")

@@ -107,6 +107,8 @@ another track instead of the sound passing through it. You choose what it listen
   device's own track would make a loop, so it is greyed out, with why.
 - Choosing a source turns the sidechain on. A muted source still feeds the sidechain, so a kick you never hear can
   still duck a bass.
+- When the source comes later than the device's own track (a kick through a linear-phase EQ), the device's track
+  waits for it, so a duck stays on its kick whatever is on the kick's track.
 - In the mixer, a device that listens to a track has a stripe of that track's colour down its left.
 
 **Duck Under**, in a track's right-click menu, does "duck the bass under the kick" in one step: choose the track to

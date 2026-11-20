@@ -77,7 +77,9 @@ A row under the title bar, for what belongs to the song as a whole, in groups: t
 the groups a larger one, every button with an icon as wide.
 
 - Play, Record and Capture. Record has an arrow joined to its right, one control with it (lit together under the
-  pointer), which opens its options (the recording's commands), as a right-click on the button does.
+  pointer), which opens its options (the recording's commands), as a right-click on the button does. Stop goes back to
+  where playback started; what rings on after it rings on as it was where the song stopped, and automated controls
+  move to the playhead when the song plays or the playhead is moved ([engine.md](engine.md)).
 - Loop and the metronome, whose arrow opens its count-in in the same way.
 - The tempo and the time signature. The tempo field is dragged, scrolled or typed in; the time signature is a menu.
 - The playhead's place in bars, beats and sixteenths ("17.3.2", each counted from 1) and its time ("1:23.4"). Each is a

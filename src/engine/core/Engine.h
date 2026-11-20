@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -61,6 +62,12 @@ public:
     void locate (double beat);                          // the playhead there, playing on from there if it plays
     bool isPlaying() const noexcept { return playing; } // as last asked
     static constexpr double fadeSeconds = 0.003;
+
+    // The playhead there, as locate() puts it, but asked after a stop that sends it back (Stop going back to where playback
+    // started, the song's end): what plays stays where the song stopped (its automation, and the song's place its devices
+    // and modulators are given), so that what rings on rings on as it was, until the song starts or a locate() puts the
+    // playhead elsewhere. Asked while the song plays, with no stop before it, it is a locate().
+    void returnTo (double beat);
 
     // A count-in: a bar of clicks on the song's beats before the playhead, as long as a bar there, which the song waits
     // for; live notes and the inputs play meanwhile, and a take starts after it. Its clicks and the metronome's come out as
@@ -196,12 +203,15 @@ private:
     std::uint32_t stopsTaken = 0;                          // the audio thread's
     bool isStopAsked (std::uint32_t asked) const noexcept; // while it plays
 
-    // The last locate asked for, whose beat the playhead shows until it is taken. Written by one thread at a time as a
-    // sequence lock: its count goes up once before the beat is written and once after, odd meanwhile; a locate is asked
-    // for each two, and the audio thread takes the beat only when the count was the same, and even, on both sides of it.
+    // The last locate asked for, whose beat the playhead shows until it is taken, and whether it was a returnTo(). Written by
+    // one thread at a time as a sequence lock: its count goes up once before the two are written and once after, odd
+    // meanwhile; a locate is asked for each two, and the audio thread takes them only when the count was the same, and
+    // even, on both sides of them.
     std::atomic<double> requestedBeat { 0.0 };
+    std::atomic<bool> requestedKeepsPlace { false };
     std::atomic<std::uint32_t> locateCount { 0 }, locatesTaken { 0 };
     static_assert (std::atomic<double>::is_always_lock_free);
+    void askJump (double beat, bool keepsPlace); // locate() and returnTo()
 
     // The audio thread's transport: where the playhead is, in samples from the song's start, and in beats (to stay on its
     // beat when a plan with another tempo comes); and the plan it last played.
@@ -216,6 +226,8 @@ private:
         double samplesPerBeat = 1.0;
     };
 
+    // Stopped and sent back by a returnTo(), what plays holds the place where the song stopped, in beats (to stay on its
+    // beat when a plan with another tempo comes), until the song starts or a jump without it is taken (takeJump()).
     struct Transport
     {
         bool playing = false;
@@ -225,7 +237,12 @@ private:
         bool notesOff = false, chase = true;
         bool flush = false; // playback starts or jumps: what rings on from before stops (flushStrip())
         CountIn countIn;
+        bool holdsPlace = false;
+        double heldBeat = 0.0;
     } transport;
+
+    // Where the song is for what plays, in samples: where the playhead is, or while the transport holds a place, there.
+    std::int64_t getPlaceSample (const Plan&) const noexcept;
 
     bool rendering = false, playingAsRender = false; // a render's blocks, and a test's that wait as they do
     juce::AudioBuffer<float> renderBlock;            // the render's last block, of which the next part takes what is left
@@ -250,7 +267,8 @@ private:
         double beat = 0.0;
         std::uint32_t count = 0; // of locates asked, when it is taken
         int left = 0;
-        bool thenStop = false; // a stop asked meanwhile, taken where the jump lands
+        bool thenStop = false;   // a stop asked meanwhile, taken where the jump lands
+        bool keepsPlace = false; // a returnTo()'s
     } jump;
 
     int fadingIn = 0;
@@ -283,6 +301,19 @@ public:
     // For tests: whether a jump that lands among audio clips at another rate is held while they are made ready (Landing),
     // as it is; or played from there at once, each started from nothing. Only while no block plays.
     void setHoldsLandings (bool holds) noexcept { holdsLandings = holds; }
+
+    // For tests, on the thread that calls process() and between its blocks: the beat the transport is at, and while what plays
+    // holds the place where the song stopped (returnTo()), that place's beat.
+    struct HeldPlace
+    {
+        double playhead = 0.0;
+        std::optional<double> held;
+    };
+
+    HeldPlace getHeldPlace() const noexcept
+    {
+        return { transport.beat, transport.holdsPlace ? std::optional<double> (transport.heldBeat) : std::nullopt };
+    }
 
     // How long a jump's landing is held at most while audio clips at another rate there are made ready (Landing).
     static constexpr double maximumHoldSeconds = 0.02;
@@ -346,8 +377,8 @@ private:
     void takeTransport (const Plan&) noexcept;           // the state asked for, as each part with a plan starts
     void stopTransport (bool fadedOut) noexcept;         // a stop (one asked while a jump fades out waits for it to end)
     void startTransport (const Plan&, bool countIn) noexcept;
-    void takeJump (const Plan&, double beat, std::uint32_t count, std::int64_t at) noexcept; // at the engine's clock
-    void fadeMaster (float* const* sides, int offset, int numSamples) noexcept;              // around a jump and a plan realigned
+    void takeJump (const Plan&, double beat, std::uint32_t count, std::int64_t at, bool keepsPlace) noexcept; // at the engine's clock
+    void fadeMaster (float* const* sides, int offset, int numSamples) noexcept; // around a jump and a plan realigned
     bool isFading() const noexcept;
     void expectAudio (const Plan&) noexcept;       // tells the audio clips' files where they play next (AudioRegion::expect())
     std::array<std::int64_t, 3> expectedPlaces {}; // those places, as the part played started (a jump's landing first)

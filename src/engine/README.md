@@ -9,8 +9,8 @@ the model compiles the song into what it plays (`src/model/playback/internal/Son
 
 | File | What it holds |
 |---|---|
-| `Engine.h` | The engine: it plays a plan, handed to it whole, and its transport, which the message thread drives through the state it last asked for (atomic values) and reads back through its playhead, with fades at a stop, a jump, the loop's end and a plan whose delay compensation changed. Live, the model's playback host calls it from the audio device's callback; a render makes an engine of its own. |
-| `Plan.h` | What the engine plays, built on the message thread from the song and never changed once built. What sounds on from one plan to the next (a device's voices, a reverb's tail, a channel's fader) is pointed at, kept by the song's IDs. |
+| `Engine.h` | The engine: it plays a plan, handed to it whole, and its transport, which the message thread drives through the state it last asked for (atomic values) and reads back through its playhead, with fades at a stop, a jump, the loop's end and a plan whose delay compensation changed. A return after a stop (`returnTo()`: Stop going back, the song's end) puts the playhead back as a locate does but leaves what plays where the song stopped, until the song plays or a locate moves it. Live, the model's playback host calls it from the audio device's callback; a render makes an engine of its own. |
+| `Plan.h` | What the engine plays, built on the message thread from the song and never changed once built. What sounds on from one plan to the next (a device's voices, a reverb's tail, a channel's fader) is pointed at, kept by the song's IDs. A device whose sidechain comes later than its own sound waits for it, through a delay of what comes into it (`Device::inputDelay`). |
 | `Handover.h` | How the audio thread is handed what it plays, whole, and frees nothing: what it replaces is freed on the message thread, but for what the audio thread says it keeps playing a while longer. |
 | `Workers.h` | The threads that help the engine play a block, each strip a task. |
 | `Recording.h` | What the engine records of a take: the armed inputs, and where the take started, known to the sample; the take after a jump, started where the playhead lands. |
@@ -27,7 +27,7 @@ the model compiles the song into what it plays (`src/model/playback/internal/Son
 | `NoteSequence.h` | A track's notes and controllers' changes, in beats, with an index of the notes sounding at a place and each controller's changes, made with it, which a start, a jump and the loop's wrap find them and the controllers' values (the chase) by. |
 | `PartOutput.h` | A part of a device's sound on a mixer channel of its own (a drum sampler's pad on a track of its own): the buffer the device plays it into, which the pad's track adds up. |
 | `Channel.h`, `LevelMeter.h` | A channel's fader, pan, mute and meter. |
-| `Strip.h` | A track's, bus's, return's or the master's state, with what joins paths: the rings of what came out of a strip at a point (its taps, which the paths from there share), the delay that lines a path up and a send's level, which follows its automation and modulation as a fader's volume does. |
+| `Strip.h` | A track's, bus's, return's or the master's state, with what joins paths: the rings of what came out of a strip at a point (its taps, which the paths from there share), the delay that lines a path up (a sidechain's, a chain's, and what a device holds back for its sidechain too) and a send's level, which follows its automation and modulation as a fader's volume does. |
 | `Container.h` | A container's chains, each in a buffer of its own, its split of what comes in and its mix. |
 | `LoudnessMeter.h` | The loudness of what goes out, by EBU R128. |
 | `Comparison.h` | A version's bounce heard against the song (A/B) after the master, each measured as it is and the louder turned down to the other's level at each switch. |

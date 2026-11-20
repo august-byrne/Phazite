@@ -40,7 +40,7 @@ metronome, the tempo, where the playhead is, and at the right the master and the
 
 | Control | Does |
 |---|---|
-| Play | Plays, or stops (**Space**). Stop goes back to where playback started, so you can hear a part again while you change it. **Shift+Space** stops where the playhead is, and plays on from there next time |
+| Play | Plays, or stops (**Space**). Stop goes back to where playback started, so you can hear a part again while you change it; what rings on after Stop (a reverb's tail, a delay's echoes) rings on as it was where the song stopped, and automated controls move to the playhead when you play or move it. **Shift+Space** stops where the playhead is, and plays on from there next time |
 | Record, and its arrow | Records onto the armed tracks (**R**). The arrow, or a right-click, opens Record's options ([Recording](recording.md)) |
 | Capture | Turns what you played in the last 30 seconds into a clip (**Ctrl+Shift+C**) |
 | Loop | Turns looping on or off (**L**) ([The playlist](playlist.md#the-loop-and-the-playhead)) |

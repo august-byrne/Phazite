@@ -89,7 +89,9 @@ void playOrStop (Song&);
 // Plays from where the playhead is, or stops it where it is, as Shift+Space does in Ableton Live.
 void playOrPause (Song&);
 
-// Stops playback and puts the playhead back where playback starts.
+// Stops playback and puts the playhead back where playback starts. What rings on after the stop (a reverb's tail, a
+// delay's echoes) rings on as it was: every automated control stays where the song stopped, and moves to the playhead
+// when the song plays again or the playhead is put elsewhere (PlaybackSession::returnTo()).
 void stopAndReturn (Song&);
 
 // Stops playback where it is; a recording it stops is kept as one undo step, "Record" (Recording.h).

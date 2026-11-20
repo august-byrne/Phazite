@@ -13,6 +13,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/motion/Motion.h"
+#include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
 #include "engine/transport/Click.h"
@@ -516,7 +517,8 @@ TEST_CASE ("A modulation moves a frequency as many octaves wherever it is: an LF
     }
 }
 
-TEST_CASE ("Phazite's engine plays a fader's automation, which the fader shows, and stopped, the lane's value at the playhead")
+TEST_CASE ("Phazite's engine plays a fader's automation, which the fader shows; stopped and sent back, where the song stopped until "
+           "the playhead is moved, then the lane's value at the playhead")
 {
     TestSong song;
     song.setTempo (120.0);
@@ -533,8 +535,13 @@ TEST_CASE ("Phazite's engine plays a fader's automation, which the fader shows, 
     playback.play (1.0);
     CHECK (volume.getValue() == doctest::Approx ((top + bottom) / 2.0f).epsilon (0.01));
 
-    // Stopped, back at the start: the lane's value there.
+    // Stopped and sent back to the start: where the song stopped, so that what rings on rings on as it was.
     song.run ("transport.playStop");
+    playback.play (0.05);
+    CHECK (volume.getValue() == doctest::Approx ((top + bottom) / 2.0f).epsilon (0.01));
+
+    // The playhead put there by hand: the lane's value there.
+    phazite::movePlayhead (song.context, phazite::BeatPosition());
     playback.play (0.05);
     CHECK (volume.getValue() == doctest::Approx (top).epsilon (0.001));
 }
@@ -1511,6 +1518,187 @@ TEST_CASE ("A send's lane ramping from silence moves what its return plays, live
     checkSendRamp (phazite::test::renderOffline (song.context, 5.5), phazite::test::renderSampleRate, 120.0);
 }
 
+namespace
+{
+// The value a parameter plays now (its control shows it), as Phazite's engine plays the song.
+float getPlayedValue (TestSong& song, const phazite::ParameterRef& parameter)
+{
+    return phazite::getParameter (song.context, parameter).getValue();
+}
+
+// Plays a second of blocks, stopped, checking after each tenth of a second that a parameter plays a value, within a
+// fraction of it, and that the playhead is at a beat.
+void checkHeldWhileStopped (EnginePlayback& playback, TestSong& song, const phazite::ParameterRef& parameter, float value, double playhead)
+{
+    for (int tenth = 0; tenth < 10; ++tenth)
+    {
+        CAPTURE (tenth);
+        playback.play (0.1);
+        CHECK (getPlayedValue (song, parameter) == doctest::Approx (value).epsilon (0.01));
+        CHECK (phazite::getPlayheadBeat (song.context).inBeats() == doctest::Approx (playhead));
+    }
+}
+} // namespace
+
+TEST_CASE ("Stop going back to where playback started leaves what plays where the song stopped until it plays again or the playhead is "
+           "moved, at every condition")
+{
+    // The owner's report: a reverb's tail through a filter its automation had closed, stopped, blipped loud as the filter's
+    // lane opened it again at the start, where Stop sent the playhead. Now a Stop that sends the playhead back leaves every
+    // automated value where the song stopped (as FL Studio does, and as Ableton Live's song stays where it stopped); the
+    // values go to the playhead when the song plays, or when the playhead is put somewhere by hand. Test Frequency's
+    // frequency and its track's fader, automated from beat 0 to beat 8.
+    phazite::test::atEveryCondition (
+        [] (const phazite::test::PlaybackCondition& condition)
+        {
+            using phazite::BeatPosition;
+            TestSong song;
+            song.setTempo (condition.getTempo());
+            const auto track = song.firstTrack;
+            const auto device =
+                phazite::test::addTestDevice (*phazite::findSong (song.context), track, phazite::test::TestFrequency::typeID);
+            const phazite::ParameterRef frequency { device, "frequency" };
+            const auto volume = song.getVolumeParameter (track);
+            const auto top = phazite::decibelsToFaderPosition (0.0f), bottom = phazite::decibelsToFaderPosition (-24.0f);
+            song.addAutomation (frequency, { { BeatPosition(), 20.0f }, { BeatPosition::fromBeats (8.0), 20000.0f } });
+            song.addAutomation (volume, { { BeatPosition(), top }, { BeatPosition::fromBeats (8.0), bottom } });
+            EnginePlayback playback (condition);
+            const auto secondsFor = [&condition] (double beats) { return beats * 60.0 / condition.getTempo(); };
+
+            // Played to near beat 7.5 and stopped there, or by Stop, which sends the playhead back.
+            const auto playToBeat = [&] (bool sendBack)
+            {
+                song.run ("transport.playStop");
+                playback.play (secondsFor (7.5));
+
+                if (sendBack)
+                    song.run ("transport.playStop");
+                else
+                    song.run ("transport.playPause");
+            };
+
+            // Sent back to the start: the values stay where the song stopped.
+            song.run ("transport.playStop");
+            playback.play (secondsFor (7.5));
+            const auto stoppedFrequency = getPlayedValue (song, frequency), stoppedVolume = getPlayedValue (song, volume);
+            REQUIRE (stoppedFrequency > 5000.0f); // 12.9 kHz at beat 7.5
+            song.run ("transport.playStop");
+            checkHeldWhileStopped (playback, song, frequency, stoppedFrequency, 0.0);
+            CHECK (getPlayedValue (song, volume) == doctest::Approx (stoppedVolume).epsilon (0.01));
+
+            // Played again: the start's values from its first block.
+            song.run ("transport.playStop");
+            playback.playSamples (playback.getBlockSize());
+            CHECK (getPlayedValue (song, frequency) < 25.0f);
+            CHECK (getPlayedValue (song, volume) == doctest::Approx (top).epsilon (0.01));
+            song.run ("transport.playStop");
+
+            // Stopped where it is, and the playhead put back at the start by hand (a locate, not a return): the start's values,
+            // as before.
+            playToBeat (false);
+            phazite::movePlayhead (song.context, BeatPosition());
+            checkHeldWhileStopped (playback, song, frequency, 20.0f, 0.0);
+            CHECK (getPlayedValue (song, volume) == doctest::Approx (top).epsilon (0.01));
+
+            // Stopped and sent back, then the playhead put at beat 4: beat 4's values (632 Hz, halfway along its travel).
+            playToBeat (true);
+            playback.play (0.1);
+            phazite::movePlayhead (song.context, BeatPosition::fromBeats (4.0));
+            checkHeldWhileStopped (playback, song, frequency, 632.456f, 4.0);
+            CHECK (getPlayedValue (song, volume) == doctest::Approx ((top + bottom) / 2.0f).epsilon (0.01));
+        });
+}
+
+TEST_CASE ("Stop going back to where playback started leaves a send's lane and a chain's fader where the song stopped")
+{
+    // As a device's values and a track's fader (above): a send's level and a container's chain's volume, each automated from
+    // the top of its fader at beat 0 to its bottom at beat 8, stay where the song stopped near beat 7.5, and go to the
+    // start's as the playhead is put there.
+    using phazite::BeatPosition;
+    TestSong song;
+    const auto sent = addSendToReturn (song, 120.0);
+    const auto container = phazite::addContainer (song.context, sent.track);
+    REQUIRE (container.isValid());
+    const phazite::ParameterRef chainVolume { phazite::getChains (song.context, container).front().id,
+                                              phazite::schema::chainVolumeParameter };
+    const auto top = phazite::decibelsToFaderPosition (0.0f), bottom = phazite::decibelsToFaderPosition (-24.0f);
+
+    for (const auto& lane : { sent.level, chainVolume })
+        song.addAutomation (lane, { { BeatPosition(), top }, { BeatPosition::fromBeats (8.0), bottom } });
+
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+    playback.play (3.75); // to beat 7.5
+    const auto stoppedLevel = getPlayedValue (song, sent.level), stoppedChain = getPlayedValue (song, chainVolume);
+    REQUIRE (stoppedLevel < top - 0.5f * (top - bottom));
+    song.run ("transport.playStop");
+    checkHeldWhileStopped (playback, song, sent.level, stoppedLevel, 0.0);
+    CHECK (getPlayedValue (song, chainVolume) == doctest::Approx (stoppedChain).epsilon (0.01));
+
+    phazite::movePlayhead (song.context, BeatPosition());
+    checkHeldWhileStopped (playback, song, sent.level, top, 0.0);
+    CHECK (getPlayedValue (song, chainVolume) == doctest::Approx (top).epsilon (0.01));
+}
+
+TEST_CASE ("Playing past the song's end goes back to where playback started, leaving what plays where the song stopped")
+{
+    // The song's end stops it and sends it back as Stop does: the same.
+    TestSong song;
+    song.setTempo (120.0);
+    song.addMidiClip (song.firstTrack, 0.0, 4.0); // a bar: the song ends at beat 4
+    const auto device =
+        phazite::test::addTestDevice (*phazite::findSong (song.context), song.firstTrack, phazite::test::TestFrequency::typeID);
+    const phazite::ParameterRef frequency { device, "frequency" };
+    song.addAutomation (frequency, { { phazite::BeatPosition(), 20.0f }, { phazite::BeatPosition::fromBeats (8.0), 20000.0f } });
+    song.setSwitch ("transport.loop", false);
+    EnginePlayback playback;
+
+    song.run ("transport.playStop");
+    playback.play (1.9);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 100); // the session's timer sees where the song is
+    REQUIRE (phazite::isPlaying (song.context));
+    playback.play (0.2);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! phazite::isPlaying (song.context); }));
+    playback.play (0.05);
+    const auto stopped = getPlayedValue (song, frequency);
+    CHECK (stopped > 632.0f); // past beat 4, halfway along its line
+    checkHeldWhileStopped (playback, song, frequency, stopped, 0.0);
+}
+
+TEST_CASE ("A reverb's tail through a filter that closed before Stop rings on as it was after the playhead goes back")
+{
+    // The owner's report itself: a tone into Phazite's reverb and on into its filter, whose cutoff's lane closes from 20 kHz
+    // at the start to 200 Hz at beat 4. Played to beat 4 and stopped where it is, and played to beat 4 again and stopped by
+    // Stop, which sends the playhead back to the start, where the lane is open: the two tails are the same, sample for sample
+    // (the filter opened again, a loud blip).
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    song.addEffect (track, phazite::devices::Reverb::typeID);
+    const auto filter = song.addEffect (track, phazite::devices::FilterEffect::typeID);
+    song.addAutomation ({ filter, "cutoff" },
+                        { { phazite::BeatPosition(), 20000.0f }, { phazite::BeatPosition::fromBeats (4.0), 200.0f } });
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    EnginePlayback::waitForFiles();
+
+    const auto tailAfter = [&] (void (*stop) (phazite::ProjectContext&))
+    {
+        phazite::movePlayhead (song.context, phazite::BeatPosition());
+        playback.play (0.1); // stopped a while: each stop's blocks fall on the same control points
+        song.run ("transport.playStop");
+        playback.play (2.0); // to beat 4
+        stop (song.context);
+        return playback.play (1.0);
+    };
+
+    const auto paused = tailAfter ([] (phazite::ProjectContext& context) { phazite::stopPlaying (*phazite::findSong (context)); });
+    const auto sentBack = tailAfter ([] (phazite::ProjectContext& context) { phazite::stopAndReturn (*phazite::findSong (context)); });
+    REQUIRE (phazite::getPlayheadBeat (song.context).inBeats() == doctest::Approx (0.0));
+    CHECK (paused.getMagnitude (0, 0, 4800) > 1.0e-4f);                                   // the tail rings
+    CHECK (phazite::test::getDifference (sentBack, paused, 48000.0).peakDb <= -100.0f);   // none
+    CHECK (sentBack.getMagnitude (0, 24000, 24000) <= paused.getMagnitude (0, 0, 24000)); // no rise
+}
+
 TEST_CASE ("A send that follows its lane and an LFO plays the same in blocks of 441 samples as in blocks of 512")
 {
     // The ramp from one control point to the next goes on where a block's end cuts it, from where it reached, so that the send
@@ -1584,8 +1772,8 @@ TEST_CASE ("A send leaving its lane for the level set by hand eases there over 1
     CHECK (largest < way / 600.0f);
 }
 
-TEST_CASE ("Phazite's engine plays a send's automation, which its knob shows, the lane's value at the playhead while stopped, and "
-           "Touch writes it")
+TEST_CASE ("Phazite's engine plays a send's automation, which its knob shows, the lane's value at the playhead put there while stopped, "
+           "and Touch writes it")
 {
     TestSong song;
     const auto sent = addSendToReturn (song, 120.0);
@@ -1601,8 +1789,11 @@ TEST_CASE ("Phazite's engine plays a send's automation, which its knob shows, th
     CHECK (knob.getValue() == doctest::Approx ((top + bottom) / 2.0f).epsilon (0.01));
     CHECK (lastSample (halfway) == doctest::Approx (heldTone() * sendGainAt ((top + bottom) / 2.0f)).epsilon (0.01));
 
-    // Stopped, back at the start: the lane's value there.
+    // Stopped and sent back to the start: where the song stopped; the playhead put there by hand: the lane's value there.
     song.run ("transport.playStop");
+    playback.play (0.05);
+    CHECK (knob.getValue() == doctest::Approx ((top + bottom) / 2.0f).epsilon (0.01));
+    phazite::movePlayhead (song.context, phazite::BeatPosition());
     playback.play (0.05);
     CHECK (knob.getValue() == doctest::Approx (top).epsilon (0.001));
 

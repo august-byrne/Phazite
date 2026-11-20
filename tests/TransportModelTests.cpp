@@ -106,6 +106,28 @@ TEST_CASE ("A drag of the playhead pauses playback where it is and plays on from
     setSong (context, nullptr);
 }
 
+TEST_CASE ("Stop puts the playhead back where playback started, by stopAndReturn() and by Play / Stop alike")
+{
+    // What plays after Stop stays where the song stopped (engine::Engine::returnTo()), but the playhead is where playback
+    // starts, as it always was.
+    auto song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    phazite::movePlayhead (*song, phazite::BeatPosition::fromBeats (2.0));
+
+    phazite::playOrStop (*song);
+    REQUIRE (phazite::isPlaying (context));
+    phazite::stopAndReturn (*song);
+    CHECK_FALSE (phazite::isPlaying (context));
+    CHECK (phazite::getPlayheadBeat (*song).inBeats() == doctest::Approx (2.0));
+
+    phazite::playOrStop (*song);
+    REQUIRE (phazite::isPlaying (context));
+    phazite::playOrStop (*song);
+    CHECK (phazite::getPlayheadBeat (*song).inBeats() == doctest::Approx (2.0));
+    setSong (context, nullptr);
+}
+
 TEST_CASE ("The engine as the UI reaches it: its audio devices, how busy it is, and the MIDI keyboards connected")
 {
     auto& engineContext = phazite::test::getEngineContext();

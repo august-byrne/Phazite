@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Sidechains (model/mixer/internal/Sidechain.h): which tracks a device can listen to, and why not the others, picking one as an
 // undo step (a compressor as it was made starting to duck in it, a vocoder playing it as its carrier), Duck Under,
-// forgetting a deleted source, the source's sound reaching the device as the song plays, and a multiband's band ducking
-// under it.
+// forgetting a deleted source, the source's sound reaching the device as the song plays, a multiband's band ducking under
+// it, and a device's sound waiting for a key that comes later than it.
 #include "EnginePlayback.h"
+#include "RenderHarness.h"
 #include "TestClips.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
@@ -12,7 +13,9 @@
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Multiband.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/vocoder/Vocoder.h"
+#include "engine/core/Engine.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
@@ -22,12 +25,17 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Buses.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+
+#include <algorithm>
+#include <cmath>
+#include <string>
 
 using phazite::DeviceID;
 using phazite::TrackID;
@@ -965,4 +973,430 @@ TEST_CASE ("A soloed return hears what is sent to it, from tracks its solo silen
     // Another track soloed: the kick is heard nowhere, as before.
     phazite::setTrackSoloed (model, song.bass, true);
     CHECK (renderPeak (model) < 1.0e-4f);
+}
+
+namespace
+{
+// A key that comes later than the sound it ducks, the owner's report: a kick (Test Tone, a sixteenth on every beat from beat
+// 1, or none) through Phazite's EQ with every band off, at Minimum or Linear phase, keying Phazite's compressor set to duck
+// on a bass (Test Frequency's steady level of 0.5, which shows the duck's gain sample by sample). The kick is muted, so that
+// the bass alone is heard, its sidechain still hearing the kick. A linear-phase EQ with every band off is a delay alone: its
+// latency (4,096 samples at 48 kHz) and nothing else.
+struct LateKey
+{
+    explicit LateKey (bool linear, double tempo = 120.0, bool kicks = true)
+    {
+        using phazite::devices::Equalizer;
+        song.setTempo (tempo);
+        auto& model = *phazite::findSong (song.context);
+        kick = song.firstTrack;
+        phazite::test::addTestDevice (model, kick, TestTone::typeID);
+
+        if (kicks)
+        {
+            const auto clip = song.addMidiClip (kick, 0.0, 32.0);
+
+            for (int beat = 1; beat < 32; ++beat)
+                song.addNote (clip, 36, beat, 0.25);
+        }
+
+        eq = song.addEffect (kick, Equalizer::typeID);
+
+        for (int band = 0; band < Equalizer::numBands; ++band)
+        {
+            const auto on = Equalizer::info.parameters[(size_t) Equalizer::getParameterIndex (band, Equalizer::on)].id;
+            song.setParameter (eq, juce::String (std::string (on)), 0.0f);
+        }
+
+        setLinear (linear);
+        phazite::setTrackMuted (model, kick, true);
+        bass = song.addTrack ("Bass");
+        const auto level = phazite::test::addTestDevice (model, bass, phazite::test::TestFrequency::typeID);
+        song.setParameter (level, "frequency", 10000.0f);
+        compressor = phazite::duckUnder (song.context, bass, kick);
+        REQUIRE (compressor.isValid());
+        phazite::test::dispatchPendingMessages();
+    }
+
+    void setLinear (bool linear) { song.setParameter (eq, "phase", linear ? 1.0f : 0.0f); }
+
+    // Rendered from its start, as an export renders it (ahead by its delay compensation, so that it starts on time).
+    juce::AudioBuffer<float> render (double seconds)
+    {
+        phazite::test::dispatchPendingMessages();
+        return phazite::renderWithOwnEngine (*phazite::findSong (song.context), (int) (seconds * 48000.0), 48000.0, 256);
+    }
+
+    phazite::test::TestSong song;
+    TrackID kick, bass;
+    DeviceID eq, compressor;
+};
+
+// Where the first duck of a render or a play starts: the first sample from a sample on where the bass falls under nine
+// tenths of its level there; or -1.
+int findDuck (const juce::AudioBuffer<float>& audio, int from)
+{
+    const auto steady = std::abs (audio.getSample (0, from));
+
+    for (int i = from; i < audio.getNumSamples(); ++i)
+        if (std::abs (audio.getSample (0, i)) < 0.9f * steady)
+            return i;
+
+    return -1;
+}
+} // namespace
+
+TEST_CASE ("A sidechain's key that comes later than the device's own sound is waited for: a duck stays on its kick through a "
+           "linear-phase EQ")
+{
+    // The owner's report: Linear phase on a kick's EQ made what it keyed pump in a weird, clicky way. Its 4,096 samples of
+    // latency made the key reach the compressor that late, the bass's own sound being on time: the duck came 85 ms after its
+    // kick. Now the bass's sound waits for its key (engine::Plan::Device::inputDelay), and the whole song comes out as much
+    // later, which a render plays ahead of: rendered with the kick's EQ at Minimum and at Linear, the bass is the same.
+    LateKey minimum (false), linear (true);
+    const auto atMinimum = minimum.render (3.0), atLinear = linear.render (3.0);
+    const auto difference = phazite::test::getDifference (atLinear, atMinimum, 48000.0);
+    CAPTURE (difference.seconds);
+    CHECK (difference.peakDb <= -100.0f); // none
+
+    // The duck on the first kick, at beat 1 (sample 24,000), in both: the compressor's look-ahead ducks just ahead of it.
+    const auto duck = findDuck (atMinimum, 12000), lateDuck = findDuck (atLinear, 12000);
+    REQUIRE (duck > 12000);
+    CHECK (duck < 24000 + 480);
+    CHECK (lateDuck - duck == 0);
+}
+
+TEST_CASE ("A sidechain's key that comes later is waited for live too, played a block at a time at every condition")
+{
+    // Played live, the song comes out as late as its delay compensation: what the bass played with the kick's EQ at Linear is
+    // what it played at Minimum, that much later.
+    phazite::test::atEveryCondition (
+        [] (const phazite::test::PlaybackCondition& condition)
+        {
+            using phazite::test::EnginePlayback;
+            const auto play = [&condition] (bool linear, int& latency)
+            {
+                LateKey late (linear, condition.getTempo());
+                EnginePlayback playback (condition, EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+                phazite::test::dispatchPendingMessages();
+                const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
+                REQUIRE (plan != nullptr);
+                latency = phazite::engine::Engine::getOutputLatency (*plan);
+                late.song.run ("transport.playStop");
+                auto audio = playback.play (6.0 * 60.0 / condition.getTempo());
+                late.song.run ("transport.playStop");
+                return audio;
+            };
+
+            auto atMinimum = 0, atLinear = 0;
+            const auto minimum = play (false, atMinimum), linear = play (true, atLinear);
+            const auto later = atLinear - atMinimum;
+            CAPTURE (later);
+            REQUIRE (later > 1000);
+
+            // From half a beat on (after the start, where what plays fades in), to the end of what both played.
+            const auto from = (int) (0.5 * condition.getBeatSamples()) + atLinear;
+            auto largest = 0.0f;
+
+            for (int i = from; i < linear.getNumSamples(); ++i)
+                largest = std::max (largest, std::abs (linear.getSample (0, i) - minimum.getSample (0, i - later)));
+
+            CHECK (largest < 1.0e-5f);
+            const auto duck = findDuck (minimum, from - later);
+            REQUIRE (duck > 0);
+            CHECK (findDuck (linear, from) - duck == later);
+        });
+}
+
+TEST_CASE ("A key's EQ switched to Linear while the song plays realigns it with one dip and no click, the bass waiting from its past")
+{
+    // As a device with latency that joins a playing song (EnginePlaybackTests.cpp): what goes out fades out and in across the
+    // new plan, and the bass's sound, which now waits 4,096 samples for its key, is read from what came in before (a device
+    // with a sidechain keeps a ring of its own live, waiting or not), not from silence: no gap and no step. The kick plays
+    // nothing here, so that the bass's level stays as it is but for the dip.
+    phazite::test::atEveryCondition (
+        [] (const phazite::test::PlaybackCondition& condition)
+        {
+            using phazite::test::EnginePlayback;
+            LateKey late (false, condition.getTempo(), false);
+            EnginePlayback playback (condition, EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+            late.song.run ("transport.playStop");
+            const auto before = playback.play (0.5);
+            const auto level = std::abs (before.getSample (0, before.getNumSamples() - 1));
+            REQUIRE (level > 0.1f);
+            late.setLinear (true);
+            const auto after = playback.play (1.0);
+            late.song.run ("transport.playStop");
+            const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
+            REQUIRE (plan != nullptr);
+            REQUIRE (phazite::engine::Engine::getOutputLatency (*plan) > 1000);
+
+            // No step larger than the dip's own (a 3 ms fade), no longer under half its level than the dip's two fades (a
+            // wait read from silence would be a hole as long as the wait), and the bass heard at its level again.
+            auto largest = std::abs (after.getSample (0, 0) - before.getSample (0, before.getNumSamples() - 1));
+            auto lowest = level;
+            auto under = 0, longestUnder = 0;
+
+            for (int i = 1; i < after.getNumSamples(); ++i)
+            {
+                largest = std::max (largest, std::abs (after.getSample (0, i) - after.getSample (0, i - 1)));
+                lowest = std::min (lowest, std::abs (after.getSample (0, i)));
+                under = std::abs (after.getSample (0, i)) < 0.5f * level ? under + 1 : 0;
+                longestUnder = std::max (longestUnder, under);
+            }
+
+            const auto fadeSamples = phazite::engine::Engine::fadeSeconds * condition.getSampleRate();
+            const auto fadeStep = level / (float) fadeSamples;
+            CAPTURE (largest);
+            CAPTURE (longestUnder);
+            CHECK (largest <= 1.5f * fadeStep);
+            CHECK (lowest < 0.1f * level); // it dipped
+            CHECK (longestUnder < (int) (3.0 * fadeSamples));
+            CHECK (std::abs (after.getSample (0, after.getNumSamples() - 1)) == doctest::Approx (level).epsilon (0.01));
+        });
+}
+
+TEST_CASE ("A device in a container's chain that waits for its key keeps the container's chains lined up")
+{
+    // The model offers no sidechain to a device in a container yet (docs/guide/mixer.md); the plan takes one all the same, set
+    // here in the song's state. Keys plays a note at beat 1 (Test Tone) into a container of two chains: the first Test
+    // Sidechain, which plays its key in place of what comes in, the kick, whose note at beat 1 comes 1,000 samples late (Test
+    // Latency) and is muted; the second empty, passing what comes in. The first waits 1,000 samples for its key, and the
+    // second is lined up with it: rendered, both sound from beat 1's sample together, and not the keys first.
+    phazite::test::TestSong song;
+    auto& model = *phazite::findSong (song.context);
+    const auto kick = song.firstTrack;
+    phazite::test::addTestDevice (model, kick, TestTone::typeID);
+    const auto latency = phazite::test::addTestDevice (model, kick, phazite::test::TestLatency::typeID);
+    song.setParameter (latency, "samples", 1000.0f);
+    song.addNote (song.addMidiClip (kick, 0.0, 4.0), 60, 1.0, 0.25);
+    phazite::setTrackMuted (model, kick, true);
+
+    const auto keys = song.addTrack ("Keys");
+    phazite::test::addTestDevice (model, keys, TestTone::typeID);
+    song.addNote (song.addMidiClip (keys, 0.0, 4.0), 60, 1.0, 0.25);
+    const auto container = phazite::addContainer (model, keys);
+    REQUIRE (container.isValid());
+    REQUIRE (phazite::addChain (model, container).isValid());
+    const auto chains = phazite::getChains (model, container);
+    REQUIRE (chains.size() == 2);
+    phazite::test::registerTestDevices();
+    const auto listener = phazite::insertIntoChain (model, chains[0], phazite::makeOwnDeviceState (model, TestSidechain::typeID));
+    REQUIRE (listener.isValid());
+    phazite::findDeviceState (model, listener).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+
+    phazite::test::dispatchPendingMessages();
+    const auto audio = phazite::renderWithOwnEngine (model, 48000, 48000.0, 256);
+    const auto beat1 = 24000;
+    const auto both = audio.getSample (0, beat1 + 2000);
+    CHECK (std::abs (audio.getSample (0, beat1 - 1)) < 1.0e-6f);
+    CHECK (both > 0.5f);
+    CHECK (audio.getSample (0, beat1) == doctest::Approx (both).epsilon (1.0e-4));
+    CHECK (audio.getSample (0, beat1 + 500) == doctest::Approx (both).epsilon (1.0e-4));
+}
+
+TEST_CASE ("An instrument whose sidechain comes later than its strip plays as before, its key lined up where it can be")
+{
+    // An instrument takes notes, which aren't held back: its sound isn't made to wait for its key, which comes as late as it
+    // comes. Test Tone on Keys with a sidechain (set in the song's state: a test instrument has none to offer) on a kick
+    // 1,000 samples late; Keys' note at beat 1 sounds at beat 1, rendered, and its strip doesn't wait.
+    phazite::test::TestSong song;
+    auto& model = *phazite::findSong (song.context);
+    const auto kick = song.firstTrack;
+    phazite::test::addTestDevice (model, kick, TestTone::typeID);
+    const auto latency = phazite::test::addTestDevice (model, kick, phazite::test::TestLatency::typeID);
+    song.setParameter (latency, "samples", 1000.0f);
+    phazite::setTrackMuted (model, kick, true);
+
+    const auto keys = song.addTrack ("Keys");
+    const auto instrument = phazite::test::addTestDevice (model, keys, TestTone::typeID);
+    song.addNote (song.addMidiClip (keys, 0.0, 4.0), 60, 1.0, 0.25);
+    phazite::findDeviceState (model, instrument).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+    phazite::test::dispatchPendingMessages();
+
+    const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
+    REQUIRE (plan != nullptr);
+    const auto strip = std::find_if (plan->strips.begin(), plan->strips.end(),
+                                     [&keys] (const auto& each) { return each.id == (std::int64_t) keys.getRaw(); });
+    REQUIRE (strip != plan->strips.end());
+    REQUIRE_FALSE (strip->devices.empty());
+    CHECK (strip->devices.front().sidechain >= 0);
+    CHECK (strip->devices.front().inputDelay == nullptr);
+    CHECK (strip->latency == 0);
+
+    const auto audio = phazite::renderWithOwnEngine (model, 48000, 48000.0, 256);
+    CHECK (std::abs (audio.getSample (0, 24000 - 1)) < 1.0e-6f);
+    CHECK (audio.getSample (0, 24000) > 0.1f);
+}
+
+namespace
+{
+// The largest step from one sample to the next of a steady level, how many samples fall under half of it, and the longest
+// run of those.
+struct Steadiness
+{
+    float largestStep = 0.0f;
+    int under = 0, longestUnder = 0;
+};
+
+Steadiness measureSteadiness (const juce::AudioBuffer<float>& before, const juce::AudioBuffer<float>& after, float level)
+{
+    Steadiness found;
+    auto last = before.getSample (0, before.getNumSamples() - 1);
+    auto run = 0;
+
+    for (int i = 0; i < after.getNumSamples(); ++i)
+    {
+        const auto sample = after.getSample (0, i);
+        found.largestStep = std::max (found.largestStep, std::abs (sample - last));
+        last = sample;
+
+        if (std::abs (sample) < 0.5f * level)
+        {
+            ++found.under;
+            found.longestUnder = std::max (found.longestUnder, ++run);
+        }
+        else
+        {
+            run = 0;
+        }
+    }
+
+    return found;
+}
+} // namespace
+
+// A sidechain given to a device while the song plays, and taken away, with its key on time (nothing to wait for): the
+// device's own sound goes on as it was. What holds it back for a later key (Plan::Device::inputDelay) is the strip's own
+// sound, never a path that comes, which would fade in from silence, or leaves, which would fade out alone and come back in
+// a step.
+TEST_CASE ("A sidechain set and taken away while the song plays leaves the device's own sound as it was")
+{
+    using phazite::test::EnginePlayback;
+    phazite::test::TestSong song;
+    auto& model = *phazite::findSong (song.context);
+    const auto kick = song.firstTrack;
+    phazite::test::addTestDevice (model, kick, TestTone::typeID);
+    phazite::setTrackMuted (model, kick, true);
+    const auto bass = song.addTrack ("Bass");
+    const auto source = phazite::test::addTestDevice (model, bass, phazite::test::TestFrequency::typeID);
+    song.setParameter (source, "frequency", 10000.0f);
+    const auto gain = phazite::test::addTestDevice (model, bass, TestGain::typeID);
+    phazite::test::dispatchPendingMessages();
+
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    const auto before = playback.play (0.5);
+    const auto level = std::abs (before.getSample (0, before.getNumSamples() - 1));
+    REQUIRE (level > 0.1f);
+
+    phazite::findDeviceState (model, gain).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+    const auto keyed = playback.play (0.5);
+    const auto setting = measureSteadiness (before, keyed, level);
+    CAPTURE (setting.largestStep);
+    CAPTURE (setting.longestUnder);
+    CHECK (setting.under == 0);
+    CHECK (setting.largestStep < 0.01f * level);
+
+    phazite::findDeviceState (model, gain).removeProperty (phazite::schema::deviceSidechain, nullptr);
+    const auto unkeyed = playback.play (0.5);
+    const auto taking = measureSteadiness (keyed, unkeyed, level);
+    CAPTURE (taking.largestStep);
+    CAPTURE (taking.longestUnder);
+    CHECK (taking.under == 0);
+    CHECK (taking.largestStep < 0.01f * level);
+    song.run ("transport.playStop");
+}
+
+// The same with a key that comes 1,000 samples late (Test Latency on the kick): the song realigns (one dip of what goes
+// out, 3 ms out and 3 ms in), and the device's own sound, which has no past to wait from yet (only a device that has a
+// sidechain keeps one), is silent for as long as its new wait and fades in then, as a path made longer than its past is: no
+// step, and no longer than the wait and the fades.
+TEST_CASE ("A late sidechain set while the song plays realigns without a step, its device's sound back after the wait")
+{
+    using phazite::test::EnginePlayback;
+    phazite::test::TestSong song;
+    auto& model = *phazite::findSong (song.context);
+    const auto kick = song.firstTrack;
+    phazite::test::addTestDevice (model, kick, TestTone::typeID);
+    const auto latency = phazite::test::addTestDevice (model, kick, phazite::test::TestLatency::typeID);
+    song.setParameter (latency, "samples", 1000.0f);
+    phazite::setTrackMuted (model, kick, true);
+    const auto bass = song.addTrack ("Bass");
+    const auto source = phazite::test::addTestDevice (model, bass, phazite::test::TestFrequency::typeID);
+    song.setParameter (source, "frequency", 10000.0f);
+    const auto gain = phazite::test::addTestDevice (model, bass, TestGain::typeID);
+    phazite::test::dispatchPendingMessages();
+
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    const auto before = playback.play (0.5);
+    const auto level = std::abs (before.getSample (0, before.getNumSamples() - 1));
+    REQUIRE (level > 0.1f);
+
+    phazite::findDeviceState (model, gain).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+    const auto keyed = playback.play (0.5);
+    const auto setting = measureSteadiness (before, keyed, level);
+    CAPTURE (setting.largestStep);
+    CAPTURE (setting.longestUnder);
+    const auto fadeSamples = (int) (phazite::engine::Engine::fadeSeconds * 48000.0);
+    CHECK (setting.largestStep < 1.5f * level / (float) fadeSamples); // the fades' own steps: no click
+    CHECK (setting.longestUnder > 0);
+    CHECK (setting.longestUnder < 1000 + 3 * fadeSamples);
+    CHECK (std::abs (keyed.getSample (0, keyed.getNumSamples() - 1)) == doctest::Approx (level).epsilon (0.01));
+    song.run ("transport.playStop");
+}
+
+// A wait that goes while the song plays (its key's track deleted, in a song of the two tracks alone: the master's latency
+// falls as much as the listening strip's, so no path's delay changes): the listening device's sound comes 1,000 samples
+// earlier from the next plan on, which the song realigns for with its dip, rather than jump there in a step (nothing
+// else says the compensation moved). With the sidechain taken away the same.
+TEST_CASE ("A wait that goes with its key's track or its sidechain realigns the song with a dip, not a jump")
+{
+    using phazite::test::EnginePlayback;
+
+    for (const auto deletesKey : { true, false })
+    {
+        CAPTURE (deletesKey);
+        phazite::test::TestSong song;
+        auto& model = *phazite::findSong (song.context);
+        const auto kick = song.firstTrack;
+        phazite::test::addTestDevice (model, kick, TestTone::typeID);
+        const auto latency = phazite::test::addTestDevice (model, kick, phazite::test::TestLatency::typeID);
+        song.setParameter (latency, "samples", 1000.0f);
+        phazite::setTrackMuted (model, kick, true);
+        const auto bass = song.addTrack ("Bass");
+        const auto source = phazite::test::addTestDevice (model, bass, phazite::test::TestFrequency::typeID);
+        song.setParameter (source, "frequency", 10000.0f);
+        const auto gain = phazite::test::addTestDevice (model, bass, TestGain::typeID);
+        phazite::findDeviceState (model, gain).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+        phazite::test::dispatchPendingMessages();
+
+        EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+        song.run ("transport.playStop");
+        const auto before = playback.play (0.5);
+        const auto level = std::abs (before.getSample (0, before.getNumSamples() - 1));
+        REQUIRE (level > 0.1f);
+        const auto alignment = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan()->alignment;
+
+        if (deletesKey)
+            phazite::deleteTracks (model, { kick }, nullptr);
+        else
+            phazite::findDeviceState (model, gain).removeProperty (phazite::schema::deviceSidechain, nullptr);
+
+        const auto after = playback.play (0.5);
+        const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
+        REQUIRE (plan != nullptr);
+        CHECK (plan->alignment != alignment);
+
+        const auto going = measureSteadiness (before, after, level);
+        const auto fadeSamples = (int) (phazite::engine::Engine::fadeSeconds * 48000.0);
+        CAPTURE (going.largestStep);
+        CAPTURE (going.longestUnder);
+        CHECK (going.largestStep < 1.5f * level / (float) fadeSamples);
+        CHECK (going.under > 0); // the dip
+        CHECK (going.longestUnder < 3 * fadeSamples);
+        CHECK (std::abs (after.getSample (0, after.getNumSamples() - 1)) == doctest::Approx (level).epsilon (0.01));
+        song.run ("transport.playStop");
+    }
 }

@@ -167,9 +167,20 @@ bool Engine::isStopAsked (std::uint32_t asked) const noexcept
 
 void Engine::locate (double beat)
 {
-    // Sequentially consistent, all three: a beat read between two equal even counts was written before the first.
+    askJump (beat, false);
+}
+
+void Engine::returnTo (double beat)
+{
+    askJump (beat, true);
+}
+
+void Engine::askJump (double beat, bool keepsPlace)
+{
+    // Sequentially consistent, all four: a beat and a flag read between two equal even counts were written before the first.
     locateCount.fetch_add (1);
     requestedBeat.store (beat);
+    requestedKeepsPlace.store (keepsPlace);
     locateCount.fetch_add (1);
 
     // The audio files where it lands, read there first, ahead of everything else, at once (known bug 36: the reading thread
@@ -237,8 +248,16 @@ void Engine::takeTransport (const Plan& plan) noexcept
 {
     // The last locate asked for, if it isn't taken yet: read between two equal even counts; and what the transport was
     // asked, with no locate asked meanwhile (a locate() and a play() between the two would start from where the song was).
-    // A few tries, else the next part's.
-    std::optional<std::pair<double, std::uint32_t>> locate;
+    // A few tries, else the next part's. Whether it is a returnTo()'s is read with its beat, so that one is never taken with
+    // another's.
+    struct Asked
+    {
+        double beat = 0.0;
+        std::uint32_t count = 0;
+        bool keepsPlace = false;
+    };
+
+    std::optional<Asked> locate;
     auto asked = askedTransport.load();
 
     for (int attempt = 0; attempt < 4; ++attempt)
@@ -246,13 +265,14 @@ void Engine::takeTransport (const Plan& plan) noexcept
         locate.reset();
         const auto before = locateCount.load();
         const auto beat = requestedBeat.load();
+        const auto keepsPlace = requestedKeepsPlace.load();
         asked = askedTransport.load();
 
         if (before % 2 != 0 || locateCount.load() != before)
             continue;
 
         if (before / 2 != locatesTaken.load (std::memory_order_relaxed))
-            locate = std::pair (beat, before / 2);
+            locate = Asked { beat, before / 2, keepsPlace };
 
         break;
     }
@@ -270,7 +290,7 @@ void Engine::takeTransport (const Plan& plan) noexcept
 
     stopsTaken = asked >> stopsShift;
 
-    if (locate.has_value() && locate->second != locatesTaken.load (std::memory_order_relaxed)) // not taken by the stop
+    if (locate.has_value() && locate->count != locatesTaken.load (std::memory_order_relaxed)) // not taken by the stop
     {
         // While the song plays (not counting in), what sounds fades out first; the latest beat asked for is taken then. Held
         // at a landing, silent, it is taken at once (and not held there in turn: Landing).
@@ -284,12 +304,13 @@ void Engine::takeTransport (const Plan& plan) noexcept
                 fadingIn = 0;
             }
 
-            jump.beat = locate->first;
-            jump.count = locate->second;
+            jump.beat = locate->beat;
+            jump.count = locate->count;
+            jump.keepsPlace = locate->keepsPlace;
         }
         else
         {
-            takeJump (plan, locate->first, locate->second, clock + partStart);
+            takeJump (plan, locate->beat, locate->count, clock + partStart, locate->keepsPlace);
         }
     }
 
@@ -321,6 +342,7 @@ void Engine::startTransport (const Plan& plan, bool countIn) noexcept
     transport.chase = true;
     transport.flush = true;
     transport.playing = true;
+    transport.holdsPlace = false; // what plays goes where the song plays from
     stopFade = {};
 }
 
@@ -340,8 +362,23 @@ void Engine::stopTransport (bool fadedOut) noexcept
     endHold();
 }
 
-void Engine::takeJump (const Plan& plan, double beat, std::uint32_t count, std::int64_t at) noexcept
+void Engine::takeJump (const Plan& plan, double beat, std::uint32_t count, std::int64_t at, bool keepsPlace) noexcept
 {
+    // A return asked after a stop (returnTo()), taken while stopped or where a stop that waited for its fade takes it: what
+    // plays holds the place where the song stopped (the first such return's, if it holds one already). Any other jump, one
+    // asked while the song plays on among them, takes what plays with the playhead.
+    if (keepsPlace && (! transport.playing || jump.thenStop))
+    {
+        if (! transport.holdsPlace)
+            transport.heldBeat = plan.tempo.toBeats ((double) transport.sample);
+
+        transport.holdsPlace = true;
+    }
+    else
+    {
+        transport.holdsPlace = false;
+    }
+
     // A jump while playing: the notes sounding stop, and those where it lands start, from silence, fading in if what
     // sounded faded out. The clicks to come were for where the song was, but the one sounding rings on.
     if (transport.playing)
@@ -511,7 +548,10 @@ void Engine::holdAcrossLeave (const Plan& given) noexcept
             take (input.delay);
 
         for (const auto& device : strip.devices)
+        {
             take (device.sidechainDelay);
+            take (device.inputDelay);
+        }
 
         for (const auto& container : strip.containers)
             for (const auto& chain : container.chains)
@@ -1037,7 +1077,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                     if (jump.pending && (jump.left -= span) <= 0)
                     {
                         const auto stops = jump.thenStop;
-                        takeJump (*plan, jump.beat, jump.count, clock + done + offset);
+                        takeJump (*plan, jump.beat, jump.count, clock + done + offset, jump.keepsPlace);
 
                         if (recording != nullptr)
                             recording->end();
@@ -1214,14 +1254,21 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
         findClicks (plan, offset, numSamples);
 }
 
+std::int64_t Engine::getPlaceSample (const Plan& plan) const noexcept
+{
+    return ! transport.playing && transport.holdsPlace ? std::llround (plan.tempo.toSamples (transport.heldBeat)) : transport.sample;
+}
+
 void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
 {
     // Where the song is for the stretch of the block. Where automation is: moving with the song while it plays; at the
-    // playhead while the song is stopped. The control points it and modulation move on are the song's while it plays,
-    // time's while it is stopped.
+    // playhead while the song is stopped, or where it stopped while it holds that place (returnTo()), so that what rings on
+    // after Stop rings on as it was. The control points it and modulation move on are the song's while it plays, time's
+    // while it is stopped. (What the transport itself does, the audio clips' reading ahead and their fade after a stop,
+    // follow the playhead.)
     Span span { this, &plan, offset, numSamples };
-    span.songSample = transport.sample;
-    span.beat = plan.tempo.toBeats ((double) transport.sample);
+    span.songSample = getPlaceSample (plan);
+    span.beat = plan.tempo.toBeats ((double) span.songSample);
     span.tempo = plan.tempo.getTempoAt (span.beat);
     span.timeSignature = plan.tempo.getTimeSignatureAt (span.beat);
     span.bars = plan.tempo.getBarsAt (span.beat);
@@ -1353,13 +1400,17 @@ void Engine::resetContainers (const Plan::Strip& strip) noexcept
 void Engine::flushStrip (const Plan::Strip& strip) noexcept
 {
     // Nothing it heard before rings on: its devices start from silence (a plug-in as its helper is handed its next block),
-    // and so do the delays that line up what it adds and listens to, and its containers' dry sound.
+    // and so do the delays that line up what it adds and listens to (and what a device holds back for its sidechain), and
+    // its containers' dry sound.
     for (const auto& device : strip.devices)
     {
         device.node->getRunner().reset();
 
         if (device.sidechainDelay != nullptr)
             device.sidechainDelay->reset();
+
+        if (device.inputDelay != nullptr)
+            device.inputDelay->reset();
     }
 
     for (const auto& input : strip.inputs)
@@ -1445,6 +1496,25 @@ void Engine::playDevice (const Span& span, const Plan::Strip& strip, size_t inde
 
     block.partOutputs = device.parts;
     block.outputOffset = offset;
+
+    // What comes into it, held back to meet a sidechain that comes later (Plan::Device::inputDelay): through the buffer's
+    // third and fourth channels, which every buffer a device plays in has for its sidechain, and which the sidechain fills
+    // after.
+    if (device.inputDelay != nullptr)
+    {
+        float* sides[] = { buffer.getWritePointer (0, offset), buffer.getWritePointer (1, offset) };
+        float* held[] = { buffer.getWritePointer (2, offset), buffer.getWritePointer (3, offset) };
+        const float* came[] = { held[0], held[1] };
+
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            juce::FloatVectorOperations::copy (held[channel], sides[channel], numSamples);
+            juce::FloatVectorOperations::clear (sides[channel], numSamples);
+        }
+
+        const auto [startGain, endGain] = span.getPathGains (device.inputDelay.get(), { 1.0f, 1.0f });
+        device.inputDelay->addDelayed (came, sides, numSamples, startGain, endGain);
+    }
 
     // What its sidechain listens to: another strip after its fader and before its mute, lined up with its sound.
     if (device.sidechain >= 0)
@@ -1686,7 +1756,7 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
             // on to there (known bug 85: the loop's wrap started every one's resampler from nothing, in one block); while
             // a jump fades out, for where it lands first, and where it lands, held there until they are (Landing).
             for (const auto& region : strip.audio)
-                region.prepare (span.songSample + numSamples, transport.playing && ! jump.pending,
+                region.prepare (transport.sample + numSamples, transport.playing && ! jump.pending,
                                 std::span (expectedPlaces.data(), numExpectedPlaces), sampleRate, numSamples);
         }
 
@@ -1746,9 +1816,10 @@ void Engine::addInput (const Plan::Strip& strip, float* const* channels, int off
 void Engine::findControlPoints (const Plan& plan, std::int64_t gridSample, int numSamples) noexcept
 {
     // From the one at or before the block's start to the one at or after its end, each where the song is: while it plays,
-    // on the song's samples; stopped, on time's, all at the playhead (numbered apart from the song's, so that none is taken
-    // for one given before).
+    // on the song's samples; stopped, on time's, all at the playhead, or where the song stopped while that place is held
+    // (numbered apart from the song's, so that none is taken for one given before).
     constexpr std::int64_t stoppedPoints = std::int64_t (1) << 52;
+    const auto stoppedAt = (double) getPlaceSample (plan);
     const auto since = (int) (((gridSample % controlPointSpacing) + controlPointSpacing) % controlPointSpacing);
     const auto first = (gridSample - since) / controlPointSpacing;
     numControlPoints = std::min ((int) controlPoints.size(), (since + numSamples + controlPointSpacing - 1) / controlPointSpacing + 1);
@@ -1758,7 +1829,7 @@ void Engine::findControlPoints (const Plan& plan, std::int64_t gridSample, int n
         auto& point = controlPoints[(size_t) k];
         point.index = first + k + (transport.playing ? 0 : stoppedPoints);
         point.sample = std::max (0, k * controlPointSpacing - since);
-        const auto songSample = transport.playing ? (double) (gridSample - since + k * controlPointSpacing) : (double) transport.sample;
+        const auto songSample = transport.playing ? (double) (gridSample - since + k * controlPointSpacing) : stoppedAt;
         const auto beat = plan.tempo.toBeats (songSample);
         point.place = { songSample / sampleRate, beat, plan.tempo.getTempoAt (beat), plan.tempo.getBarLength (beat),
                         plan.tempo.getBarsAt (beat) };

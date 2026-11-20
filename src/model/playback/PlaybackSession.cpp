@@ -312,8 +312,23 @@ void PlaybackSession::stop()
 
 void PlaybackSession::locate (BeatPosition beat)
 {
+    jump (beat, false);
+}
+
+void PlaybackSession::returnTo (BeatPosition beat)
+{
+    jump (beat, true);
+}
+
+void PlaybackSession::jump (BeatPosition beat, bool keepsPlace)
+{
     writer.playheadJumped (beat); // while the playhead heard is still where the song was
-    host.getEngine().locate (beat.inBeats());
+
+    if (keepsPlace)
+        host.getEngine().returnTo (beat.inBeats());
+    else
+        host.getEngine().locate (beat.inBeats());
+
     lastPlayhead.reset();
 }
 
@@ -393,7 +408,7 @@ void PlaybackSession::timerCallback()
     if (lastPlayhead.has_value() && *lastPlayhead < songEnd && playhead >= songEnd)
     {
         stop();
-        locate (getPlayStartBeat (*song));
+        returnTo (getPlayStartBeat (*song));
         return;
     }
 

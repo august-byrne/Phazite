@@ -109,7 +109,8 @@ namespace
                     found.add (where, "the automation of parameter " + juce::String (a.automation[i].parameter));
         }
 
-        if (a.sidechain != b.sidechain || lengthOf (a.sidechainDelay) != lengthOf (b.sidechainDelay))
+        if (a.sidechain != b.sidechain || lengthOf (a.sidechainDelay) != lengthOf (b.sidechainDelay)
+            || lengthOf (a.inputDelay) != lengthOf (b.inputDelay))
             found.add (where, "its sidechain");
 
         if ((a.modulation == nullptr) != (b.modulation == nullptr)

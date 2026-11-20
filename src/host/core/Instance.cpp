@@ -54,7 +54,8 @@ namespace
 } // namespace
 
 // The song's place for the plug-in, set for each piece it plays (on the thread that plays it): so far on from the block's
-// start while the song plays, where the playhead is in every piece while it is stopped; and the bar it is in, the block's
+// start while the song plays, the place the engine gives in every piece while it is stopped (the playhead's, or where the song
+// stopped while Stop's way back holds it: engine/core/Engine.h, returnTo()); and the bar it is in, the block's
 // or one of the bars after it, each as long.
 class Instance::PlayHead final : public juce::AudioPlayHead
 {

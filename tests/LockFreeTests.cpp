@@ -627,9 +627,11 @@ TEST_CASE (
 }
 
 TEST_CASE (
-    "The transport raced: asked to play, stop and jump on one thread while the audio thread plays, it ends as last asked, and the playhead never shows a beat that wasn't asked for")
+    "The transport raced: asked to play, stop, jump and return on one thread while the audio thread plays, it ends as last asked, the playhead never shows a beat that wasn't asked for, and a return's place is never taken with another jump's")
 {
-    // Jumps to whole thousands of beats, from which the blocks played in the race can't take the playhead 60 beats on.
+    // Jumps to whole thousands of beats, from which the blocks played in the race can't take the playhead 60 beats on: locates
+    // to even thousands, returns (returnTo()) to odd ones. What plays holds the place where the song stopped only after a
+    // return taken while it was stopped, and so only while the playhead is exactly at a return's beat.
     static constexpr double rate = 48000.0, spacing = 1000.0, reach = 60.0;
     static constexpr int blockSize = 64, blocks = 20000, asks = 20000, reads = 20000;
     static_assert (blocks * blockSize / rate * 2.0 < reach); // 120 BPM: two beats a second
@@ -653,7 +655,7 @@ TEST_CASE (
             std::this_thread::yield();
     };
 
-    // The message thread's part: play, stop and jump, drawn from a seed, and last a jump and play.
+    // The message thread's part: play, stop, jump and return, drawn from a seed, and last a jump and play.
     std::thread asker (
         [&]
         {
@@ -662,13 +664,16 @@ TEST_CASE (
 
             for (int i = 0; i < asks; ++i)
             {
-                switch (random.nextInt (3))
+                switch (random.nextInt (4))
                 {
                     case 0:
-                        player.locate (spacing * (1 + random.nextInt (1000)));
+                        player.locate (spacing * 2.0 * (1 + random.nextInt (500)));
                         break;
                     case 1:
                         player.play();
+                        break;
+                    case 2:
+                        player.returnTo (spacing * (1.0 + 2.0 * random.nextInt (500)));
                         break;
                     default:
                         player.stop();
@@ -676,11 +681,15 @@ TEST_CASE (
                 }
             }
 
-            player.locate (1001.0 * spacing);
+            player.locate (1000.0 * spacing);
             player.play();
         });
 
-    // The audio thread's: its blocks.
+    // The audio thread's: its blocks, and after each whether what plays holds a place, and where the playhead is then.
+    const auto isReturnBeat = [] (double beat)
+    { return juce::exactlyEqual (beat - 2.0 * spacing * std::floor (beat / (2.0 * spacing)), spacing); };
+    int heldBlocks = 0, heldElsewhere = 0;
+
     std::thread audio (
         [&]
         {
@@ -688,7 +697,17 @@ TEST_CASE (
             juce::AudioBuffer<float> buffer (2, blockSize);
 
             for (int i = 0; i < blocks; ++i)
+            {
                 player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
+
+                if (const auto place = player.getHeldPlace(); place.held.has_value())
+                {
+                    ++heldBlocks;
+
+                    if (! isReturnBeat (place.playhead))
+                        ++heldElsewhere;
+                }
+            }
 
             audioDone = true;
         });
@@ -716,33 +735,44 @@ TEST_CASE (
     audio.join();
     CAPTURE (firstNotAsked);
     CHECK (notAsked == 0);
+    CHECK (heldBlocks > 0); // the race held places
+    CHECK (heldElsewhere == 0);
 
     // As last asked: a jump while it played fades out what sounds and is taken then (in the race, or in the blocks that
-    // follow), and it plays on from there.
+    // follow), and it plays on from there, holding nothing.
     REQUIRE (player.isPlaying());
     juce::AudioBuffer<float> buffer (2, blockSize);
 
     for (int i = 0; i < 8; ++i)
         player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
 
+    CHECK_FALSE (player.getHeldPlace().held.has_value());
+
     // Where the latest block started, a block and a half on (as far as the stamps reach after it).
     const auto latest = [&player] { return player.getPlayheadBeatAt (1.0e12); };
     const auto landed = latest();
-    CHECK (landed >= 1001.0 * spacing);
-    CHECK (landed <= 1001.0 * spacing + reach);
+    CHECK (landed >= 1000.0 * spacing);
+    CHECK (landed <= 1000.0 * spacing + reach);
 
     for (int i = 0; i < 8; ++i)
         player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
 
     CHECK (latest() - landed == doctest::Approx (8.0 * blockSize / rate * 2.0));
+    const auto stoppedAt = player.getHeldPlace().playhead;
 
-    // Stopped and put elsewhere, it stays there.
+    // Stopped and sent back, it holds where it stopped; then put elsewhere, it stays there, holding nothing.
     player.stop();
+    player.returnTo (9.0);
+    player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
+    CHECK (juce::exactlyEqual (player.getPlayheadBeat(), 9.0));
+    REQUIRE (player.getHeldPlace().held.has_value());
+    CHECK (juce::exactlyEqual (*player.getHeldPlace().held, stoppedAt));
     player.locate (7.0);
     player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
     player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
     CHECK_FALSE (player.isPlaying());
     CHECK (juce::exactlyEqual (player.getPlayheadBeat(), 7.0));
+    CHECK_FALSE (player.getHeldPlace().held.has_value());
 }
 
 TEST_CASE ("A device's sample tap raced: made as a display first listens while the audio thread pushes, each pair whole and in order")

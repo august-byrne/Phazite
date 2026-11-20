@@ -57,11 +57,15 @@ public:
     bool isPlayingProject() const;
 
     // The transport, through the host's engine. The playhead is in the song's beats. Playing on past the song's end with
-    // nothing looped, it stops and goes back to where it started (as Stop does), unless it started past the end.
+    // nothing looped, it stops and goes back to where it started (as Stop does), unless it started past the end. After a
+    // stop, returnTo() sends the playhead back as locate() does, but what plays stays where the song stopped, so that what
+    // rings on rings on as it was (Engine::returnTo()), until the song plays again or a locate() moves the playhead: Stop's
+    // way back to where playback started (stopAndReturn(), model/transport/internal/Playback.h) and the song's end's.
     bool isPlaying() const;
     void play (bool countIn = false); // a bar of clicks first, from a stop (Engine.h)
     void stop();
     void locate (BeatPosition);
+    void returnTo (BeatPosition);
     BeatPosition getPlayhead() const;
 
     // What is heard at a moment left the engine this many milliseconds before: the delay compensation that lines up its
@@ -176,6 +180,7 @@ private:
     BeatPosition songEnd;                     // where the song's loop ends, which playing on past stops at
     std::optional<BeatPosition> lastPlayhead; // while playing without a loop: where the playhead was last time
     void timerCallback() override;
+    void jump (BeatPosition, bool keepsPlace); // locate() and returnTo()
 
     // A change of the song, but of view state (how it shows), which no plan holds: a new plan.
     void changed (const juce::ValueTree& parent, const juce::ValueTree& child);

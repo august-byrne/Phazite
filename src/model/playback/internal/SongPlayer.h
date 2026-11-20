@@ -354,9 +354,11 @@ private:
 
     std::vector<ChannelInfo> getChannels() const; // in an order in which each comes after what it takes in
     void addInputs (engine::Plan&, engine::Plan::Strip&, std::vector<engine::Plan::Input>);
-    // One for every path (none for a render's that needs none): reading a strip's tap, or with a ring of its own.
+    // One for every path (none for a render's that needs none): reading a strip's tap, or with a ring of its own. One that
+    // doesn't come and go with what the song routes (a device's own sound held back) never fades in as a new path does.
     std::shared_ptr<engine::Delay> getDelay (std::pair<std::int64_t, std::int64_t> key, int length,
-                                             std::optional<TapKey> tap = std::nullopt, std::shared_ptr<engine::PartOutput> part = {});
+                                             std::optional<TapKey> tap = std::nullopt, std::shared_ptr<engine::PartOutput> part = {},
+                                             bool comesAndGoes = true);
     void leaveOutWhatIsNotHeard (engine::Plan&); // a render's
     void finishRings (engine::Plan&);            // the taps the plan's paths read, on their strips, and the rings made
     void markWhatReadsLeaving (engine::Plan&);   // the delays whose growth would play again what paths that left added (live)

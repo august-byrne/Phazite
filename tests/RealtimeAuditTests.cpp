@@ -763,6 +763,32 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE (
+        "Real-time audit: Phazite's own engine, a bass ducking under a kick through a linear-phase EQ, its sound waiting for its key")
+    {
+        // The kick's EQ in Linear phase comes 4,096 samples late at 48 kHz, so that the bass's compressor, keyed by it, holds
+        // what comes into it back as long (engine::Plan::Device::inputDelay): the wait played while allocations are counted.
+        TestSong song;
+        const auto kick = song.firstTrack;
+        song.setInstrument (kick, phazite::devices::DrumSampler::typeID);
+        const auto beats = song.addMidiClip (kick, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addNote (beats, 36, beat, 0.25);
+
+        const auto eq = song.addEffect (kick, phazite::devices::Equalizer::typeID);
+        song.setParameter (eq, "phase", 1.0f);
+        const auto bass = song.addTrack ("Bass");
+        song.setInstrument (bass, phazite::devices::Synth::typeID);
+        song.addNote (song.addMidiClip (bass, 0.0, 16.0), 36, 0.0, 16.0);
+        REQUIRE (phazite::duckUnder (song.context, bass, kick).isValid());
+
+        const auto m = playProjectAndMeasure (song.context);
+        report ("Phazite's engine: a bass waiting for its key through a linear-phase EQ", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: Phazite's own engine recording a take: an armed track's input, heard, and notes played live")
     {
         TestSong song;
@@ -2400,6 +2426,35 @@ TEST_SUITE ("realtime-audit")
         report ("Edited while it plays: effects and the instrument", m);
         CHECK (m.peakLevel > 0.01f);                                  // it plays
         CHECK (phazite::getEffects (song.context, keys).size() == 1); // the compressor
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: edited while it plays: the EQ of a kick that keys a bass's compressor switched to Linear phase and back")
+    {
+        // Each switch makes the EQ anew with its new latency, and the bass's compressor waits for its key as long, or no
+        // longer: a new plan that realigns the song, its wait read from what came in before.
+        TestSong song;
+        const auto kick = song.firstTrack;
+        song.setInstrument (kick, phazite::devices::DrumSampler::typeID);
+        const auto beats = song.addMidiClip (kick, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addNote (beats, 36, beat, 0.25);
+
+        const auto eq = song.addEffect (kick, phazite::devices::Equalizer::typeID);
+        const auto bass = song.addTrack ("Bass");
+        song.setInstrument (bass, phazite::devices::Synth::typeID);
+        song.addNote (song.addMidiClip (bass, 0.0, 16.0), 36, 0.0, 16.0);
+        REQUIRE (phazite::duckUnder (song.context, bass, kick).isValid());
+
+        const auto m = playProjectAndMeasure (
+            song.context, Playing { .edits = {
+                                        { 10, "the kick's EQ to Linear phase", [&] { song.setParameter (eq, "phase", 1.0f); } },
+                                        { 60, "back to Minimum phase", [&] { song.setParameter (eq, "phase", 0.0f); } },
+                                        { 110, "to Linear phase again", [&] { song.setParameter (eq, "phase", 1.0f); } },
+                                    } });
+        report ("Edited while it plays: a key's EQ switched to Linear phase and back", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

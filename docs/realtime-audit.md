@@ -60,6 +60,8 @@ Every scenario plays as the app plays: its song opened as a project, the tests' 
 | Phazite's compressor, ducked by another track at 70 % mix, with its meters and its trail read | 0 | 0 |
 | Phazite's compressor ducking under a kick track, held and let go along a curve, Listen on (2026-11-11) | 0 | 0 |
 | Phazite's compressor keyed by another track, its mode, look-ahead and hold moved by lanes (2026-11-18, step S6.3) | 0 | 0 |
+| A bass ducking under a kick through a linear-phase EQ, its sound waiting for its key (`Plan::Device::inputDelay`, 2026-11-19) | 0 | 0 |
+| Edited while it plays: the EQ of a kick that keys a bass's compressor switched to Linear phase, back to Minimum and to Linear again, the bass's wait following (2026-11-19) | 0 | 0 |
 | Phazite's multiband, its low band and master keyed by another track through the sidechain, its key cut, Listen on (2026-11-10) | 0 | 0 |
 | Phazite's vocoder at 40 bands, its carrier another track through the sidechain | 0 | 0 |
 | Phazite's limiter on the master, pushed 12 dB, with its meters read | 0 | 0 |

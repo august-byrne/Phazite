@@ -182,6 +182,11 @@ through it.
   listens to), deleting the source, or making a source folder plain turns that sidechain off in the same undo step.
 - In the mixer, a slot whose device listens to a track has a stripe of that track's colour down its left, and its
   tooltip names the track.
+- What the device listens to is lined up with its own sound. A source that comes later than the device's own sound (a
+  kick through a linear-phase EQ, 85 ms late) can't be heard earlier, so the device's track waits for it, and comes
+  out as much later, which the rest of the song is lined up with: a duck stays on its kick whatever is on the kick's
+  track. An instrument with a sidechain doesn't wait (it plays notes), nor does a device that is off
+  ([engine.md](engine.md)).
 
 **Duck Under,** in a track's right-click menu, does "kick ducks bass" in one step ("Duck Bass Under Kick"): it adds
 Phazite's compressor after the track's effects, in its Duck mode, listening to the other track.

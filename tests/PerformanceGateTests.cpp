@@ -427,7 +427,10 @@ std::int64_t countRingSamples (const phazite::engine::Plan& plan)
             add (input.delay);
 
         for (const auto& device : strip.devices)
+        {
             add (device.sidechainDelay);
+            add (device.inputDelay);
+        }
 
         for (const auto& container : strip.containers)
             for (const auto& chain : container.chains)
