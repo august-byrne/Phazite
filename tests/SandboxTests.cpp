@@ -4,10 +4,13 @@
 // plug-in opened from its description with its parameters by their own IDs, parameters' changes played at their
 // samples, values set by hand and the plug-in's own changes and gestures, its state, an instrument's notes, latency, a
 // sidechain, the text of a value, another sample rate, two instances side by side, a pipe kept up while quiet, a
-// plug-in that hangs and one that crashes, a helper ended, and one that never connects to its pipe as it starts.
+// plug-in that hangs and one that crashes, a helper ended, and one that never connects to its pipe as it starts, which a
+// plug-in scan cancelled meanwhile ends at once.
+#include "SandboxedPlugins.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "host/SandboxTestHelpers.h"
+#include "model/engine/internal/PluginScanner.h"
 #include "sandbox/core/BlockChannel.h"
 
 #include <atomic>
@@ -594,6 +597,45 @@ TEST_CASE ("A helper that doesn't connect to its pipe as it starts is ended once
     // The tests' helper starts as before.
     sandbox::Helper helper (phazite::test::getTestHost());
     CHECK (helper.start (phazite::test::hangTimeout));
+}
+
+TEST_CASE ("A plug-in scan cancelled while its helper starts ends that helper at once, not once its time to start is up")
+{
+    // The scan's thread held the scanner's lock for as long as a helper may take to start, and a cancel, which the message
+    // thread asks for as the plug-in list's window closes, waited there for it: 20 seconds with the window dead, where
+    // something kept the helper from starting. A helper that hangs before it connects, as that one did.
+    const EnvironmentVariable hangs ("PHAZITE_TEST_HOST_HANGS_AT_START", "1");
+    auto scanner = phazite::createPluginScanner (phazite::test::SandboxedPlugins::getHost());
+    const auto format = phazite::test::TestPlugins::createFormat();
+    juce::OwnedArray<juce::PluginDescription> found;
+    std::atomic<bool> stop { false }, blacklisted { false };
+    std::atomic<double> scanTook { 0.0 };
+
+    JoinedThread scan (stop,
+                       [&]
+                       {
+                           const auto from = juce::Time::getMillisecondCounterHiRes();
+                           blacklisted = ! scanner->findPluginTypesFor (*format, found, "PhaziteTestEffect");
+                           scanTook = juce::Time::getMillisecondCounterHiRes() - from;
+                       });
+
+    // Time for the scan to come to its helper's start (a lower bound only: a cancel that comes before it keeps the helper
+    // from starting at all, which ends the scan as soon).
+    juce::Thread::sleep (500);
+
+    // A cancel that waited for the start, and a scan that went on to its end, would each last the helper's time to start:
+    // half of that tells them apart however busy the machine is.
+    const auto limit = phazite::pluginScanStartMilliseconds / 2.0;
+    const auto from = juce::Time::getMillisecondCounterHiRes();
+    phazite::cancelPluginScan (*scanner);
+    CHECK (juce::Time::getMillisecondCounterHiRes() - from < limit);
+    scan.join();
+    CHECK (scanTook.load() < limit);
+
+    // Cancelled, it found nothing and blacklisted nothing: the next scan tries the file again.
+    CHECK (found.isEmpty());
+    CHECK_FALSE (blacklisted.load());
+    scanner->scanFinished();
 }
 
 namespace

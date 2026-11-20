@@ -4,6 +4,7 @@
 // map, the transport and its metronome, to the sample, and audio files and the clips that play them.
 #include "TestDevices.h"
 #include "TestHelpers.h"
+#include "devices/core/AudioThreads.h"
 #include "devices/delay/Delay.h"
 #include "devices/modulation/Modulators.h"
 #include "devices/motion/Phaser.h"
@@ -3767,6 +3768,70 @@ TEST_CASE ("The engine's workers take a long job's tasks beside the thread that 
     }
 
     CHECK (job.elsewhere.load() > 0);
+}
+
+TEST_CASE ("A render's workers are plain threads, where an audio device's play in its task")
+{
+    // An export plays flat out on every worker for as long as it takes: at the audio device's priority (MMCSS's Pro Audio
+    // task on Windows, real-time threads elsewhere) its workers kept the window and other programs' sound waiting. Jobs of
+    // tasks long enough for a worker asleep to wake, until a worker has taken one: whether it is one of Phazite's own audio
+    // threads says which it was started as.
+    struct Job
+    {
+        std::thread::id caller;
+        std::atomic<int> elsewhere { 0 }, onAudioThreads { 0 };
+    };
+
+    const auto runOnWorkers = [] (engine::Workers& workers, Job& job)
+    {
+        job.caller = std::this_thread::get_id();
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (phazite::test::hangTimeout);
+
+        while (job.elsewhere.load() == 0 && std::chrono::steady_clock::now() < until)
+        {
+            workers.run (
+                64,
+                [] (void* context, int) noexcept
+                {
+                    auto& running = *static_cast<Job*> (context);
+                    const auto taskEnd = std::chrono::steady_clock::now() + std::chrono::microseconds (20);
+
+                    while (std::chrono::steady_clock::now() < taskEnd)
+                    {
+                    }
+
+                    if (std::this_thread::get_id() != running.caller)
+                    {
+                        if (dev::isOwnAudioThread())
+                            running.onAudioThreads.fetch_add (1);
+
+                        running.elsewhere.fetch_add (1);
+                    }
+                },
+                &job);
+        }
+    };
+
+    engine::Workers workers;
+    Job rendering;
+    workers.setNumThreads (4, engine::Workers::Use::render);
+    runOnWorkers (workers, rendering);
+    REQUIRE (rendering.elsewhere.load() > 0);
+    CHECK (rendering.onAudioThreads.load() == 0);
+
+    // The same count for an audio device then: its workers are made anew, as its own.
+    Job live;
+    workers.setNumThreads (4);
+    runOnWorkers (workers, live);
+    REQUIRE (live.elsewhere.load() > 0);
+    CHECK (live.onAudioThreads.load() == live.elsewhere.load());
+
+    // And back.
+    Job again;
+    workers.setNumThreads (4, engine::Workers::Use::render);
+    runOnWorkers (workers, again);
+    REQUIRE (again.elsewhere.load() > 0);
+    CHECK (again.onAudioThreads.load() == 0);
 }
 
 #if JUCE_WINDOWS

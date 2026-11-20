@@ -544,7 +544,7 @@ juce::AudioBuffer<float> renderWithOwnEngine (Song& song, int numSamples, double
 
     {
         engine::Engine engine;
-        engine.setNumThreads (numThreads);
+        engine.setNumThreads (numThreads, engine::Workers::Use::render);
         engine.prepare (sampleRate, blockSize);
         SongPlayer player (song, session != nullptr ? &session->getPlugins() : nullptr);
         engine.setPlan (player.compile (sampleRate, blockSize, std::nullopt));

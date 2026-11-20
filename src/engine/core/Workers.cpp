@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <optional>
 #include <thread>
 
 namespace phazite::engine
@@ -21,11 +22,15 @@ namespace
 class Workers::Worker final : private juce::Thread
 {
 public:
-    explicit Worker (Workers& w)
-        : juce::Thread ("Phazite engine worker"),
-          workers (w)
+    Worker (Workers& w, Use u)
+        : juce::Thread (u == Use::live ? "Phazite engine worker" : "Phazite render worker"),
+          workers (w),
+          use (u)
     {
-        devices::startAudioThread (*this); // at the audio device's priority, the process's left as it is
+        if (use == Use::live)
+            devices::startAudioThread (*this); // at the audio device's priority, the process's left as it is
+        else
+            startThread (juce::Thread::Priority::normal); // a render's: as the thread that renders
     }
 
     ~Worker() override
@@ -37,6 +42,7 @@ public:
 
 private:
     Workers& workers;
+    const Use use;
 
     void run() override
     {
@@ -44,7 +50,13 @@ private:
         // container's crossover, a modulator's follower) doesn't slow down, and plays the same on any thread. A device's own
         // guard puts this back as it returns.
         const juce::ScopedNoDenormals noDenormals;
-        const devices::ProAudioTask proAudio;
+
+        // In the audio device's task while it plays its blocks; a render's is no audio thread (Workers.h).
+        std::optional<devices::ProAudioTask> proAudio;
+
+        if (use == Use::live)
+            proAudio.emplace();
+
         auto seen = workers.generation.load (std::memory_order_acquire);
 
         while (! threadShouldExit() && ! workers.quitting.load (std::memory_order_acquire))
@@ -78,12 +90,17 @@ Workers::~Workers()
     setNumThreads (1);
 }
 
-void Workers::setNumThreads (int count)
+void Workers::setNumThreads (int count, Use newUse)
 {
     const auto wanted = (size_t) std::max (0, count - 1);
 
-    if (wanted == threads.size())
+    if (wanted == threads.size() && (newUse == use || threads.empty()))
+    {
+        use = newUse;
         return;
+    }
+
+    use = newUse;
 
     // All go and come anew: a sleeping one is woken to go.
     quitting.store (true, std::memory_order_release);
@@ -93,7 +110,7 @@ void Workers::setNumThreads (int count)
     quitting.store (false, std::memory_order_release);
 
     for (size_t i = 0; i < wanted; ++i)
-        threads.push_back (std::make_unique<Worker> (*this));
+        threads.push_back (std::make_unique<Worker> (*this, use));
 }
 
 void Workers::run (int count, Task newTask, void* newContext) noexcept

@@ -151,8 +151,9 @@ public:
     const std::atomic<std::uint64_t>& getBlocksPlayed() const noexcept { return blocksPlayed; }
 
     // Message thread, while the engine is stopped or not yet given to the audio device: so many threads play each block,
-    // the audio thread one of them (Workers.h).
-    void setNumThreads (int count) { workers.setNumThreads (count); }
+    // the audio thread one of them (Workers.h): an audio device's, at its priority, or a render's, which plays as fast as
+    // it can and so at the normal priority.
+    void setNumThreads (int count, Workers::Use use = Workers::Use::live) { workers.setNumThreads (count, use); }
     int getNumThreads() const noexcept { return workers.getNumThreads(); }
 
     // How loud what goes out is (any thread reads it, and resets its integrated loudness and held peak).

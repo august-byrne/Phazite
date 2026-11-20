@@ -245,7 +245,7 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
     const auto firstBeat = compiled.plan->tempo.toBeats ((double) firstSample);
 
     engine::Engine engine;
-    engine.setNumThreads (setup.numThreads);
+    engine.setNumThreads (setup.numThreads, engine::Workers::Use::render);
     engine.prepare (setup.sampleRate, setup.blockSize);
     engine.setPlan (std::move (compiled.plan));
     engine.locate (firstBeat);

@@ -396,7 +396,7 @@ std::shared_ptr<Helper::Reply> Helper::send (MessageWriter& message, bool holdsO
         waiting.push_back (reply);
     }
 
-    if (! pipe->sendMessage (message.take()))
+    if (! write (message))
     {
         const juce::ScopedLock held (lock);
         finish (*reply, {});
@@ -427,7 +427,16 @@ bool Helper::isWaiting()
 
 bool Helper::post (MessageWriter& message)
 {
-    return running && pipe->sendMessage (message.take());
+    return running && write (message);
+}
+
+bool Helper::write (MessageWriter& message)
+{
+    // One message at a time: JUCE's connection lets several threads write at once, and on Linux and macOS its pipe writes a
+    // message longer than the pipe takes at once (4,096 bytes) in parts, so a heartbeat or a value set from another thread
+    // could land inside a plug-in's state, after which the helper reads no message right and quits.
+    const juce::ScopedLock sending (sendLock);
+    return pipe->sendMessage (message.take());
 }
 
 void Helper::kill()

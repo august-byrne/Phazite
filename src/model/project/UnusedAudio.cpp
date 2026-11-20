@@ -56,14 +56,18 @@ namespace
     }
 
     // What the saved files play, each read again only once it changed since the last look; what is kept of one gone since
-    // (a backup thinned away) forgotten.
-    void addSavedPaths (UnusedAudioLook& look, juce::StringArray& paths)
+    // (a backup thinned away) forgotten. False where it was told to stop first, between two files: a look under way as its
+    // project closes read every backup that had changed first, the window waiting for it.
+    bool addSavedPaths (UnusedAudioLook& look, juce::StringArray& paths, const std::function<bool()>& shouldStop = nullptr)
     {
         const auto files = findSavedSongFiles (look.projectFile);
         std::erase_if (look.saved, [&files] (const auto& entry) { return ! files.contains (entry.first); });
 
         for (const auto& file : files)
         {
+            if (shouldStop != nullptr && shouldStop())
+                return false;
+
             if (! file.existsAsFile())
                 continue;
 
@@ -79,6 +83,8 @@ namespace
 
             paths.addArray (saved.paths);
         }
+
+        return true;
     }
 
     std::set<juce::File> resolveAll (const juce::File& projectFile, const juce::StringArray& paths)
@@ -115,14 +121,28 @@ namespace
         if (! found.unreadable.isEmpty())
             return found;
 
-        addSavedPaths (look, paths);
+        if (! addSavedPaths (look, paths, shouldStop))
+            return std::nullopt;
+
         const auto used = resolveAll (look.projectFile, paths);
         const auto folder = look.projectFile.getParentDirectory();
+        juce::Array<juce::File> files;
 
+        // The folders' files one at a time, so that it stops between two of them.
         for (const auto* subfolder : { "Audio", "Generated" })
-            for (const auto& file : folder.getChildFile (subfolder).findChildFiles (juce::File::findFiles, true))
-                if (getFileKind (file) == FileKind::audio && used.count (file) == 0)
-                    found.files.push_back ({ file, file.getRelativePathFrom (folder).replaceCharacter ('\\', '/'), file.getSize() });
+        {
+            for (const auto& entry : juce::RangedDirectoryIterator (folder.getChildFile (subfolder), true, "*", juce::File::findFiles))
+            {
+                if (shouldStop != nullptr && shouldStop())
+                    return std::nullopt;
+
+                files.add (entry.getFile());
+            }
+        }
+
+        for (const auto& file : files)
+            if (getFileKind (file) == FileKind::audio && used.count (file) == 0)
+                found.files.push_back ({ file, file.getRelativePathFrom (folder).replaceCharacter ('\\', '/'), file.getSize() });
 
         std::sort (found.files.begin(), found.files.end(),
                    [] (const auto& a, const auto& b) { return a.name.compareNatural (b.name) < 0; });

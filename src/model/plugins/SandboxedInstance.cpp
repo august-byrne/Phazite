@@ -289,9 +289,16 @@ void SandboxedInstance::takeChanges (sandbox::BlockInfo& info, sandbox::Paramete
     if (! anyPending.exchange (false, std::memory_order_acquire))
         return;
 
-    for (size_t i = 0; i < parameters.size() && info.numChanges < maxChanges; ++i)
+    size_t i = 0;
+
+    for (; i < parameters.size() && info.numChanges < maxChanges; ++i)
         if (float value = 0.0f; parameters[i]->takePending (value))
             changes[info.numChanges++] = { (int) i, 0, value };
+
+    // More set than a block takes: those past here go with the next block, which looks again (they waited until another
+    // value was set, however long that was).
+    if (i < parameters.size())
+        anyPending.store (true, std::memory_order_release);
 }
 
 void SandboxedInstance::setMovedByEngine (std::span<const int> moved)

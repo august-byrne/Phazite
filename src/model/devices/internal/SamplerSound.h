@@ -68,8 +68,10 @@ void findRootKey (Song&, DeviceID);
 
 // A sound file as the sampler plays it (its first longestSampleSeconds), with where its hits begin and, for a loop that
 // says, how many beats it lasts; kept while anything holds it, so that a file is read once, however many samplers play it.
-// nullptr for one that isn't a sound Phazite can read.
+// nullptr for one that isn't a sound Phazite can read, or that says its rate is beyond highestSampleRate: a WAV's header
+// takes any number for it (4 GHz, in a file made to), and the sampler steps through a sound by its rate.
 inline constexpr double longestSampleSeconds = 120.0;
+inline constexpr double highestSampleRate = 768000.0;
 std::shared_ptr<const devices::Sampler::Sound> readSampleSound (const juce::File&);
 
 // The sound it plays, for drawing it (nullptr for a device that isn't a sampler), and its slices changed by hand.

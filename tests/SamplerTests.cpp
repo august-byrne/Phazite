@@ -477,6 +477,37 @@ TEST_CASE ("A loop that starts where the sound starts plays round without a dip:
     CHECK (lowest > 0.4f);
 }
 
+TEST_CASE ("A loop shorter than a voice's step plays round as many times as the step is long, and plays on")
+{
+    // A sound at sixteen times the engine's rate, four octaves up: each sample the voice steps 256 of the sound's, through a
+    // loop of 100, so every sample takes it round more than once (all its rounds at once: one at a time, a sample's work
+    // grew with the sound's rate). A steady level, which no reading so far up the keys filters away: it holds the note on,
+    // each sample a number, the same every time.
+    const auto makeFast = []
+    {
+        auto sound = makeSound (8000, [] (int) { return 0.5f; });
+        sound->sampleRate = 16.0 * testRate;
+        return sound;
+    };
+
+    auto values = getPlainValues();
+    values[Sampler::transpose] = 48.0f;
+    values[Sampler::loopOn] = 1.0f;
+    values[Sampler::loopStart] = 0.25f;
+    values[Sampler::loopEnd] = 0.2625f; // 100 samples on
+    values[Sampler::loopCrossfade] = 0.0f;
+
+    const auto held = playBoth (*makeSampler (makeFast()), values, (int) testRate, { noteOn (0, 60) });
+    const auto again = playBoth (*makeSampler (makeFast()), values, (int) testRate, { noteOn (0, 60) });
+    REQUIRE (held.first.size() == (size_t) testRate);
+
+    for (const auto sample : held.first)
+        REQUIRE (std::isfinite (sample));
+
+    CHECK (peakOf (held.first, (size_t) (0.9 * testRate), held.first.size()) > 0.3f); // still playing after a second
+    CHECK (largestDifference (held, again) == 0.0f);
+}
+
 TEST_CASE ("A note on a sampler voice that Stop was fading plays at its full level, though the voice's release ended first")
 {
     // Mono, released in a millisecond: Stop just after its note began fades the voice over 10 ms, and its release ends first,

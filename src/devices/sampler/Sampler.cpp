@@ -1066,9 +1066,16 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
                 {
                     // Round the loop, it plays on: the few samples' fade in at its start was for its first time only, as
                     // the start may be where the loop starts.
-                    while (voice.position >= voice.loopEndAt)
+                    // A step longer than the loop (a short loop far up the keys, a sound at a far higher rate than the
+                    // engine's) takes it round more than once: all its rounds at once, never one at a time, so that a
+                    // sample's work doesn't grow with what a sound file says its rate is.
+                    if (voice.position >= voice.loopEndAt)
                     {
                         voice.position -= loopLength;
+
+                        if (voice.position >= voice.loopEndAt)
+                            voice.position = voice.loopStartAt + std::fmod (voice.position - voice.loopStartAt, loopLength);
+
                         voice.fadeIn = 0;
                     }
                 }

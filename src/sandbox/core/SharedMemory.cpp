@@ -263,7 +263,10 @@ bool Bell::sleepWhile (std::uint32_t value, std::int64_t timeoutNanoseconds) noe
 
     for (;;)
     {
-        if (get() != value)
+        // Read as it says that it sleeps, and as ring() writes and looks: in one order for both threads, so that either
+        // ring() sees it sleeping, or it sees what ring() wrote (an acquire load here could miss both, by the language's
+        // rules, and sleep through a ring to its time limit).
+        if (state.value.load (std::memory_order_seq_cst) != value)
         {
             changed = true;
             break;

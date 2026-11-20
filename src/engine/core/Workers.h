@@ -4,7 +4,9 @@
 // (its strip's inputs, done in tasks before it). The workers spin a moment for the next job, then sleep until it comes;
 // the audio thread neither waits on a lock nor allocates, and wakes them without one (std::atomic's wait and notify).
 // The workers play at the audio thread's priority, never raising the whole process's: on Windows in MMCSS's Pro Audio
-// task, as JUCE's WASAPI thread does; elsewhere as real-time threads.
+// task, as JUCE's WASAPI thread does; elsewhere as real-time threads. A render's workers (Use::render) are plain threads
+// at the normal priority, as the thread that renders is: they play flat out for as long as an export takes, which at
+// the audio device's priority would keep the window, the audio device's own thread and other programs' sound waiting.
 #pragma once
 
 #include <juce_core/juce_core.h>
@@ -24,9 +26,16 @@ public:
     Workers();
     ~Workers();
 
+    // What the workers help play: an audio device's blocks, in real time, or a render's, as fast as they come.
+    enum class Use
+    {
+        live,
+        render
+    };
+
     // Message thread, while the audio thread runs no job (the engine is stopped, or prepared anew): so many threads in all,
-    // the audio thread one of them (1 for none to help it).
-    void setNumThreads (int);
+    // the audio thread one of them (1 for none to help it), at the priority of what they help play.
+    void setNumThreads (int, Use = Use::live);
     int getNumThreads() const noexcept { return (int) threads.size() + 1; }
 
     // Audio thread: runs a task for each index from 0 to numTasks - 1, on itself and the workers, and returns once all are
@@ -36,6 +45,7 @@ public:
 private:
     class Worker;
     std::vector<std::unique_ptr<Worker>> threads;
+    Use use = Use::live; // of the threads there are
 
     // The job, which the audio thread sets before it starts it; and which job it is, how many tasks it has and the next
     // not taken yet, in one value (the job's number in the top 32 bits, then the count, then the index, 16 bits each), so

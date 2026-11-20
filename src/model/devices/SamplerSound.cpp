@@ -201,7 +201,7 @@ std::optional<SampleSettings> readSampleSettings (const juce::File& file)
 {
     const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
 
-    if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+    if (reader == nullptr || ! (reader->sampleRate > 0.0 && reader->sampleRate <= highestSampleRate) || reader->lengthInSamples <= 0)
         return {};
 
     SampleSettings settings;
@@ -337,7 +337,7 @@ std::shared_ptr<const Sampler::Sound> readSampleSound (const juce::File& file)
 
     const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
 
-    if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+    if (reader == nullptr || ! (reader->sampleRate > 0.0 && reader->sampleRate <= highestSampleRate) || reader->lengthInSamples <= 0)
         return {};
 
     auto sound = std::make_shared<Sampler::Sound>();

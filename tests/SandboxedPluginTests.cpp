@@ -1040,6 +1040,44 @@ TEST_CASE ("A crashed plug-in's slot in the mixer says so, and reloads at a clic
     CHECK_FALSE (getSandboxed (song, crashing).hasCrashed());
 }
 
+TEST_CASE ("Values set on more of a plug-in's parameters than a block takes go with the blocks after it")
+{
+    // A block takes so many changes; the values set past them stayed where they were until another value was set, however
+    // long that was (the look for them was asked for once, and that one look ended at the block's limit).
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    auto& instance = getSandboxed (song, effect);
+    REQUIRE (instance.getParameters().size() == 2);
+
+    // Set from another thread than the message thread, as what plays a block sets them: kept for the next block.
+    std::thread (
+        [&instance]
+        {
+            instance.getParameters()[0]->setValue (0.25f);
+            instance.getParameters()[1]->setValue (0.75f);
+        })
+        .join();
+
+    // Blocks that take one change each: the first parameter's, the second's, then none.
+    phazite::sandbox::ParameterChange change;
+    phazite::sandbox::BlockInfo first;
+    instance.takeChanges (first, &change, 1);
+    REQUIRE (first.numChanges == 1);
+    CHECK (change.index == 0);
+    CHECK (change.value == 0.25f);
+
+    phazite::sandbox::BlockInfo second;
+    instance.takeChanges (second, &change, 1);
+    REQUIRE (second.numChanges == 1);
+    CHECK (change.index == 1);
+    CHECK (change.value == 0.75f);
+
+    phazite::sandbox::BlockInfo third;
+    instance.takeChanges (third, &change, 1);
+    CHECK (third.numChanges == 0);
+}
+
 TEST_CASE ("A shell file's hundreds of plug-ins are all found; what is past what Phazite takes from a file is said, not left out silently")
 {
     // The review of known bug 181: a file's plug-ins past 256 were left out without a word (Waves' WaveShell holds hundreds).

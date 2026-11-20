@@ -131,6 +131,7 @@ private:
     std::atomic<std::int64_t> heartbeat { 0 }; // the heartbeat's request not answered yet, or 0
     std::atomic<double> startDeadline { 0.0 }; // while it starts: when it must have answered (getMillisecondCounterHiRes())
     juce::CriticalSection lock, pipeLock;
+    juce::CriticalSection sendLock;            // held while a message is written to the pipe, by whichever thread sends it
     std::vector<std::weak_ptr<Reply>> waiting; // the requests whose answers are still wanted (those let go of are pruned)
 
     bool isWaiting();                               // for an answer still wanted (lock held)
@@ -140,6 +141,7 @@ private:
     // to share (finding it gone forgets it): every use of it holds this (linux-tsan found the race, 2026-11-11).
     juce::CriticalSection processLock;
 
+    bool write (MessageWriter&); // into the pipe, whole, one thread at a time
     void received (const juce::MemoryBlock&);
     void helperLost();
     void closePipe(); // as the helper is lost, and before the watching thread is stopped
