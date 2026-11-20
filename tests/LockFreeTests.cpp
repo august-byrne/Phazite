@@ -633,8 +633,9 @@ TEST_CASE (
     // to even thousands, returns (returnTo()) to odd ones. What plays holds the place where the song stopped only after a
     // return taken while it was stopped, and so only while the playhead is exactly at a return's beat.
     static constexpr double rate = 48000.0, spacing = 1000.0, reach = 60.0;
-    static constexpr int blockSize = 64, blocks = 20000, asks = 20000, reads = 20000;
+    static constexpr int blockSize = 64, blocks = 20000, asks = 20000, reads = 20000, asksPerBlock = 4;
     static_assert (blocks * blockSize / rate * 2.0 < reach); // 120 BPM: two beats a second
+    static_assert (asks / asksPerBlock < blocks);            // the asks are over before the blocks are
 
     engine::Engine player;
     player.prepare (rate, blockSize);
@@ -645,7 +646,7 @@ TEST_CASE (
     const auto isAsked = [] (double beat)
     { return beat >= 0.0 && beat <= 1002.0 * spacing && beat - spacing * std::floor (beat / spacing) <= reach; };
 
-    std::atomic<int> started { 0 };
+    std::atomic<int> started { 0 }, blocksPlayed { 0 };
     std::atomic<bool> audioDone { false };
     const auto startTogether = [&started]
     {
@@ -655,7 +656,10 @@ TEST_CASE (
             std::this_thread::yield();
     };
 
-    // The message thread's part: play, stop, jump and return, drawn from a seed, and last a jump and play.
+    // The message thread's part: play, stop, jump and return, drawn from a seed, and last a jump and play. A few asks to
+    // each of the audio thread's blocks, landing wherever in it they land, so that it takes the transport in every state
+    // the asks leave: asked all at once, as on a machine whose blocks are slow beside its asks, they were over before a
+    // handful of blocks had played, and no place was held among those (CI's Linux Debug jobs, 2026-11-20).
     std::thread asker (
         [&]
         {
@@ -664,6 +668,10 @@ TEST_CASE (
 
             for (int i = 0; i < asks; ++i)
             {
+                if (i % asksPerBlock == asksPerBlock - 1)
+                    for (const auto seen = blocksPlayed.load(); blocksPlayed.load() == seen && ! audioDone.load();)
+                        std::this_thread::yield();
+
                 switch (random.nextInt (4))
                 {
                     case 0:
@@ -699,6 +707,7 @@ TEST_CASE (
             for (int i = 0; i < blocks; ++i)
             {
                 player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
+                blocksPlayed.fetch_add (1);
 
                 if (const auto place = player.getHeldPlace(); place.held.has_value())
                 {
