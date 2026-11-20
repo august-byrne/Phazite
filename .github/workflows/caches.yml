@@ -1,0 +1,29 @@
+# When a branch is deleted, its compiler caches go with it. GitHub keeps 10 GB of caches for the repository and deletes
+# the least recently used beyond that, main's among them; a merged branch's caches would otherwise stay for seven days
+# and push out the caches of the branches still worked on (ci.yml says what each run saves). GitHub runs this workflow
+# from the default branch's copy of this file. Actions are pinned to full commit hashes; this one uses none.
+name: Caches
+
+on:
+  delete:
+
+permissions:
+  actions: write # deleting caches
+
+jobs:
+  forget:
+    name: Delete a deleted branch's caches
+    if: github.event.ref_type == 'branch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Delete the caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: refs/heads/${{ github.event.ref }}
+        run: |
+          ids=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/caches" -f ref="$REF" -F per_page=100 --paginate --jq '.actions_caches[].id')
+          for id in $ids; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id"
+          done
+          echo "Deleted $(printf '%s\n' $ids | grep -c .) caches of $REF."

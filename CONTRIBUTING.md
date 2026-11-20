@@ -111,7 +111,7 @@ Threads share data only through lock-free FIFOs and `std::atomic` values. Phazit
 3. Check what you're about to publish: read `git diff --cached` in full (see [No secrets](#no-secrets)).
 4. Open a pull request against `main`, saying what changed, why, and how you tested it. For a change to the UI or the sound, say what to click and listen for.
 
-Every push and pull request runs [CI](.github/workflows/ci.yml) on GitHub's machines: a secret scan of the whole history, formatting with clang-format 23, whitespace, the architecture budgets, and builds of both Windows presets (Visual Studio 2026) and all four Linux presets (Ubuntu 24.04, two with sanitizers), with warnings as errors and the tests run. The results are on the [Actions tab](https://github.com/august-byrne/Phazite/actions), with compiler messages as annotations.
+Every push and pull request runs [CI](.github/workflows/ci.yml) on GitHub's machines: a secret scan of the whole history, formatting with clang-format 23, whitespace, the architecture budgets, and builds of the three Windows presets (Visual Studio 2026) and all four Linux presets (Ubuntu 24.04, two with sanitizers), with warnings as errors and the tests run. A push to a branch other than `main` builds only the presets your own `windows-debug` build doesn't check (`windows-release`, `linux-release`, `linux-asan`, `linux-tsan` and the Clang build); pull requests build them all. The results are on the [Actions tab](https://github.com/august-byrne/Phazite/actions), with compiler messages as annotations.
 
 ### Licenses
 

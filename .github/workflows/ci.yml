@@ -1,11 +1,22 @@
 # Phazite's continuous integration: on every push and pull request, check the repository (secrets,
-# formatting, whitespace, architecture budgets), build every preset on Windows and Linux with warnings
+# formatting, whitespace, architecture budgets), build the presets on Windows and Linux with warnings
 # as errors, and run the tests (phazite_tests, through CTest, a test file in each, 4 at once); and build the Windows
 # installer from windows-release, install it, check it and uninstall it. The problem matchers in
 # .github/problem-matchers turn compiler messages, failed tests and sanitizer reports into annotations on the run,
 # which the public API serves without signing in, unlike the logs. Builds keep going after
-# a failure (ninja -k 0) to report every problem at once. Every compile goes through ccache, whose cache each preset
-# keeps from its last run on the branch (or on main), so that a build compiles only what changed since; without
+# a failure (ninja -k 0) to report every problem at once.
+#
+# Which presets: main, tags, pull requests and a run started by hand with full=true build every preset. A work branch
+# builds only what a contributor's own windows-debug build doesn't already check: windows-release (the optimizer, the
+# installer), linux-release (GCC's warnings with optimization), linux-asan (GCC at Debug, with AddressSanitizer),
+# linux-tsan and linux-clang; windows-debug, windows-profile and linux-debug wait for main. Before main moves to a
+# branch's head, a full run checks that commit on every preset: gh workflow run ci.yml --ref <branch> -f full=true.
+#
+# Every compile goes through ccache, whose cache each preset keeps from its last run on the branch (or on main), so that
+# a build compiles only what changed since. GitHub keeps 10 GB of caches for the repository and deletes the least
+# recently used beyond that, which made builds start from nothing: so a work branch saves the caches of its own presets
+# alone (about 1.9 GB, against main's 4.2), pull requests and tags save none (they start from main's), and a deleted
+# branch's caches go with it (caches.yml). Without
 # precompiled headers (PHAZITE_PRECOMPILED_HEADERS=OFF), which ccache documents no support for with MSVC and serves from
 # GCC only with its checks loosened, and so that every push shows each file compiles with what it includes itself. Actions
 # are pinned to full commit hashes, so a moved tag can't change what runs.
@@ -15,6 +26,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Every preset, as on main (a work branch otherwise builds the presets local builds don't check)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -93,7 +109,8 @@ jobs:
       fail-fast: false
       matrix:
         # windows-profile, the build to play and profile with, has compiler and linker flags of its own (CMakeLists.txt).
-        preset: [windows-debug, windows-release, windows-profile]
+        # On a work branch windows-release alone (see the top of this file).
+        preset: ${{ fromJSON((github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || inputs.full) && '["windows-debug", "windows-release", "windows-profile"]' || '["windows-release"]') }}
     env:
       CMAKE_C_COMPILER_LAUNCHER: ccache # every compile, JUCE's juceaide helper's in the configure step too
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
@@ -138,8 +155,9 @@ jobs:
           ccache --evict-older-than "$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long] $env:PHAZITE_CCACHE_START)s"
           ccache --show-stats
 
+      # Saved by pushes to branches, of a work branch's own presets only (see the top of this file).
       - name: Save the compiler cache # before the tests, so that the next run has it whatever they find
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/heads/') && (github.ref == 'refs/heads/main' || matrix.preset == 'windows-release') }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
@@ -169,7 +187,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [linux-debug, linux-release, linux-asan, linux-tsan]
+        # On a work branch linux-debug waits for main: linux-asan is a Debug build with GCC too (see the top of this file).
+        preset: ${{ fromJSON((github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || inputs.full) && '["linux-debug", "linux-release", "linux-asan", "linux-tsan"]' || '["linux-release", "linux-asan", "linux-tsan"]') }}
     env:
       CMAKE_C_COMPILER_LAUNCHER: ccache # every compile, JUCE's juceaide helper's in the configure step too
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
@@ -217,8 +236,9 @@ jobs:
           ccache --evict-older-than "$(( $(date +%s) - PHAZITE_CCACHE_START ))s"
           ccache --show-stats
 
+      # Saved by pushes to branches, of a work branch's own presets only (see the top of this file).
       - name: Save the compiler cache # before the tests, so that the next run has it whatever they find
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/heads/') && (github.ref == 'refs/heads/main' || matrix.preset != 'linux-debug') }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
@@ -305,8 +325,9 @@ jobs:
           ccache --evict-older-than "$(( $(date +%s) - PHAZITE_CCACHE_START ))s"
           ccache --show-stats
 
+      # Saved by pushes to branches only: pull requests and tags start from main's (see the top of this file).
       - name: Save the compiler cache
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/heads/') }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
