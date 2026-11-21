@@ -213,6 +213,16 @@
             "sources": [ "resources/licenses/Ooura-FFT.txt" ]
         },
         {
+            "name": "immer",
+            "version": "0.9.1",
+            "licence": "BSL-1.0",
+            "copyright": "Copyright (C) 2016, 2017, 2018 Juan Pedro Bolivar Puente",
+            "use": "Immutable data structures: the song's values",
+            "url": "https://github.com/arximboldi/immer",
+            "file": "immer.txt",
+            "sources": [ "external/immer/LICENSE" ]
+        },
+        {
             "name": "libebur128",
             "version": "",
             "licence": "MIT",

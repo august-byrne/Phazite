@@ -79,6 +79,9 @@
 #                             device..., folder..., ...State but songState), and getPropertyAsValue, CachedValue and
 #                             referTo, which listen to an element's property. By the names the model gives its
 #                             handles: a handle named otherwise isn't seen.
+#   immer-outside-model       includes of the immer library's headers (immer/...) in src/ outside src/model: the
+#                             song's values (src/model/base/internal/ValueArea.h) stay inside the model, and the layers
+#                             above get Phazite's own types of it. The tests may include it.
 # Comments and the text of string and character literals don't count. A C/C++ file in src/ outside the eight
 # layers fails the check whatever the budgets.
 # Exit codes: 0 = every count equals its budget (and every raise checked says why); 1 = a count differs from
@@ -154,7 +157,7 @@ function setup(    i, n, s, parts) {
 
     ruleNames = "upward-includes model-window-includes model-window-references model-undo-steps"
     ruleNames = ruleNames " model-include-loops ui-internal-includes ui-undo-steps flat-files unresolved-includes"
-    ruleNames = ruleNames " cmake-sources tracktion thread-kills ui-design-literals song-listeners"
+    ruleNames = ruleNames " cmake-sources tracktion thread-kills ui-design-literals song-listeners immer-outside-model"
     nrules = split(ruleNames, rules, " ")
     for (i = 1; i <= nrules; i++) known[rules[i]] = 1
 
@@ -173,6 +176,8 @@ function setup(    i, n, s, parts) {
     reWindowModule = "^(juce_gui_basics|juce_gui_extra|juce_opengl|juce_video)/"
     # A header of one of Tracktion's modules (tracktion_engine/..., tracktion_graph/...), by any path to it.
     reTracktionInclude = "(^|/)tracktion_[A-Za-z0-9_]+(/|[.])"
+    # A header of the immer library (immer/map.hpp...).
+    reImmerInclude = "^immer/"
     reModelInternal = "^src/model/[^/]+/internal/"
     reInclude = "^[[:blank:]]*#[[:blank:]]*(include|import)[[:blank:]]*[<" DQ "]"
     reModelUndo = W "beginNewTransaction" W
@@ -240,6 +245,8 @@ function setup(    i, n, s, parts) {
     instead["ui-design-literals"] = "take it from the design tokens (src/ui/theme/DesignTokens.h, read with ui::getPalette (component)), adding a token where none fits. This budget only falls: never raise it."
     what["song-listeners"] = "listeners on a song" q "s elements rather than its root in src/model, src/services, src/ui and src/app (but the song" q "s index, src/model/base/SongIndex.cpp): addListener on an element found in the song or named for one (track..., clip..., note..., ...State), and juce::Value or CachedValue of an element" q "s property"
     instead["song-listeners"] = "listen to the song" q "s root (what Song::getState() returns) and tell the element from the tree the callback names: the song" q "s index listens to its track list so that it hears of every change first (src/model/base/Song.h)."
+    what["immer-outside-model"] = "includes of the immer library" q "s headers (immer/...) in src/ outside src/model"
+    instead["immer-outside-model"] = "keep the song" q "s values inside the model (src/model/base/internal/ValueArea.h): add a model function that takes and returns Phazite" q "s own types (IDs, plain values, handles) for what the layer above needs."
 }
 
 { sub(CR "$", "") }
@@ -475,6 +482,7 @@ function takeInclude(path, lineno, text, s,    delim, rest, k, target, res) {
     target = substr(rest, 1, k - 1)
     res = resolve(path, target, delim)
     if (target ~ reTracktionInclude) hitLine("tracktion", path, lineno, text, 1)
+    if (target ~ reImmerInclude && index(path, "src/") == 1 && curLayer != "model") hitLine("immer-outside-model", path, lineno, text, 1)
     if (curLayer == "model" || curLayer == "services") {
         if (target ~ reWindowModule) hitLine("model-window-includes", path, lineno, text, 1)
         if (index(res, "src/ui/") == 1 || index(res, "src/app/") == 1 || index(res, "src/host/") == 1 || (curLayer == "model" && index(res, "src/services/") == 1))
@@ -987,7 +995,8 @@ AWK
 # 14: 12 in src/ui/Fixture.cpp (lines 14 to 20: two colours, one, three font sizes, two corners, one, two constants, one
 # corner) and 2 in src/app/Fixture.cpp, but none in src/ui/theme, in a transparent colour, a colour or size worked out
 # from variables or tokens, a line thickness, layout, a string, a comment, a call whose arguments go on to the next line,
-# or a variable that isn't const.
+# or a variable that isn't const. immer-outside-model counts 3: in src/ui, src/engine and src/Fixture.cpp (in no layer), but
+# none in src/model, a comment, a string, tests/ or tools/.
 fixture() {
     cat <<'FIXTURE'
 src/model/a/Fixture.h:1:#include "../../ui/Panels.h"
@@ -1008,6 +1017,7 @@ src/model/b/One.h:1:#include "Two.h"
 src/model/b/Two.h:1:#include "One.h"
 src/model/b/Two.cpp:1:#include "Two.h"
 src/model/b/Two.cpp:2:auto* t = te::findTrackForID (e, id);
+src/model/b/Two.cpp:3:#include <immer/map.hpp>
 src/model/b/Three.cpp:1:#include "One.h"
 src/model/b/Three.cpp:2:state.addListener (this); songState.addListener (this); findClipState (song, id).addListener (this);
 src/model/b/Three.cpp:3:trackState.addListener (this); clip.addListener (this); juce::CachedValue<int> v; auto value = note.getPropertyAsValue (id, nullptr);
@@ -1017,6 +1027,7 @@ src/services/Fixture.cpp:2:#include "app/MainWindow.h"
 src/services/Fixture.cpp:3:#include <tracktion_graph/tracktion_graph.h>
 src/services/Fixture.cpp:4:te::Engine* engine;
 src/services/Fixture.cpp:5:#include "model/a/internal/Side.h"
+src/services/Fixture.cpp:6:// #include <immer/set.hpp>
 src/ui/Fixture.cpp:1:#include <tracktion_engine/tracktion_engine.h> // te::Edit
 src/ui/Fixture.cpp:2:#include "app/MainWindow.h"
 src/ui/Fixture.cpp:3:#include "model/a/Fixture.h"
@@ -1038,11 +1049,13 @@ src/ui/Fixture.cpp:18:path.addRoundedRectangle (0.0f, 0.0f, 10.0f, 10.0f, 4.0f);
 src/ui/Fixture.cpp:19:constexpr float corner = 3.0f, gap = 2.0f; constexpr int fontHeight { 14 }; const auto cornerSize = std::min (2.0f, w); // juce::Colours::blue
 src/ui/Fixture.cpp:20:auto s = "juce::Colours::green"; g.fillRoundedRectangle (juce::Rectangle<float> (0.0f, 0.0f, 4.0f, 4.0f), 2.0f); g.fillRoundedRectangle (area,
 src/ui/Fixture.cpp:21:    2.0f); auto h = juce::FontOptions (TextSize::body * 0.8f); float cornerRadius = 4.0f;
+src/ui/Fixture.cpp:22:#include <immer/flex_vector.hpp>
 src/ui/views/Fixture3.cpp:1:#include "../../model/a/internal/Side.h"
 src/ui/views/Fixture3.cpp:2:#include "../../app/MainWindow.h"
 src/app/Fixture.cpp:1:e->getUndoManager().beginNewTransaction ("Rename"); te::Edit* e2;
 src/app/Fixture.cpp:2:#include "model/a/internal/Side.h"
 src/app/Fixture.cpp:3:g.setColour (juce::Colours::white.withAlpha (0.5f)); g.fillRoundedRectangle (area, 6.0f);
+src/app/Fixture.cpp:4:auto s = "#include <immer/set.hpp>";
 src/ui/theme/Look.cpp:1:g.setColour (juce::Colours::black); g.fillRoundedRectangle (area, 3.0f); g.setFont (juce::FontOptions (12.0f));
 src/app/MainWindow.h:1:// the main window
 src/devices/x/Dsp.h:1:#include <juce_dsp/juce_dsp.h>
@@ -1061,6 +1074,7 @@ src/engine/x/Eng.h:3:#include "model/b/One.h"
 src/engine/x/Eng.cpp:1:#include "Eng.h"
 src/engine/x/Eng.cpp:2:te::Edit* e; juce::KeyPress k; juce::AudioBuffer<float> b; // tracktion::Edit
 src/engine/x/Eng.cpp:3:void stop() { stopThread (2000); stopThread (-1); stopThread(); } // stopThread (5)
+src/engine/x/Eng.cpp:4:#  include <immer/vector.hpp> // immer
 src/engine/Flat.cpp:1:int y;
 src/sandbox/x/Shm.h:1:#include "engine/x/Eng.h"
 src/host/x/Host.cpp:1:#include "sandbox/x/Shm.h"
@@ -1068,6 +1082,7 @@ src/host/x/Host.cpp:2:#include "model/b/One.h"
 src/host/x/Host.cpp:3:te::Engine* e; juce::Component* c;
 src/host/x/Host.cpp:4:thread.killThread(); juce::ThreadPool pool; juce::ThreadPoolJob* job; auto s = "stopThread (1)";
 src/Fixture.cpp:1:int x; te::Edit* e;
+src/Fixture.cpp:2:#include <immer/box.hpp>
 src/ui/Fixture.txt:1:te::NotCxx
 tests/Fixture.cpp:1:#include "TestHelpers.h"
 tests/Fixture.cpp:2:#include "model/b/one.h"
@@ -1076,11 +1091,13 @@ tests/Fixture.cpp:4:std::unique_ptr<te::Edit> edit; // te::Track
 tests/Fixture.cpp:5:namespace tr = tracktion::engine; using namespace te; auto p = "#include <tracktion_engine/tracktion_engine.h>";
 tests/Fixture.cpp:6:stopThread (timeout); waitForThreadToExit (100);
 tests/Fixture.cpp:7:clip.addListener (this); juce::CachedValue<int> v;
+tests/Fixture.cpp:8:#include <immer/map.hpp>
 tests/TestHelpers.h:1:// test helpers
 tools/x/Tool.cpp:1:#include "Missing.h"
 tools/x/Tool.cpp:2:#include <tracktion_core/tracktion_core.h>
 tools/x/Tool.cpp:3:tracktion::engine::Engine* e; auto s = "tracktion::x"; /* te::y */ char c = 't';
 tools/x/Tool.cpp:4:using namespace tracktion::literals;
+tools/x/Tool.cpp:5:#include <immer/map.hpp>
 FIXTURE
 }
 
@@ -1117,6 +1134,7 @@ fixture_expectations() {
 @expect thread-kills 5
 @expect ui-design-literals 14
 @expect song-listeners 6
+@expect immer-outside-model 3
 @expect no-layer 1
 EXPECT
 }

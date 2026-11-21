@@ -102,6 +102,9 @@ Exports, freezes and bounces compile the song the same way and play it offline, 
   that a part of the engine could be replaced without rewriting the rest. The devices use JUCE's `juce_core`,
   `juce_audio_basics` and `juce_dsp` only; the engine those and r8brain-free-src; the sandbox `juce_core`,
   `juce_events` and `juce_audio_basics`.
+- **The song's values stay in the model.** The immer library, which holds the song's areas as immutable values
+  (`src/model/base/internal/ValueArea.h`), is included in `src/model/` alone (and the tests): what the layers above get of
+  the song is Phazite's own types, so that how the model holds it can change without them.
 - **The UI decides nothing about the project.** It runs a command or calls a model function, and a control changes a
   parameter through a `ParameterHandle`. Then the rules of editing are in one place, and a redesigned UI keeps them.
 - **The model's insides stay in the model.** The UI includes no `internal/` header and passes Phazite's own types
@@ -125,7 +128,8 @@ Exports, freezes and bounces compile the song the same way and play it offline, 
 `tools/check-architecture.sh` counts what breaks these rules, and more: includes that point up a layer, window modules
 and classes below the UI, undo steps begun outside the undo code or in the UI, include loops in the model and the
 services, `internal/` headers included in the UI, source files outside an area's folder, includes and CMake source paths
-that name no file exactly, Tracktion Engine, threads ended by force, listeners on a song's elements rather than its root, and colours, font sizes and corner radii written
+that name no file exactly, Tracktion Engine, threads ended by force, listeners on a song's elements rather than its root, immer's headers included
+outside the model, and colours, font sizes and corner radii written
 as literals in the UI rather than taken from the design tokens. It compares each count with its budget in
 `tools/architecture-budget.txt`, where every budget is 0 but the literals', the count there was when that rule came,
 which only falls; every count must equal its budget. CI and the pre-commit hook run it; run

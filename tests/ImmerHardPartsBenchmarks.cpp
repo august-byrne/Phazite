@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A spike, not a part of Phazite: the hard parts of a song kept as immutable values (the immer library, Boost Software
-// License 1.0), written for one area, the notes, and measured beside the song's own, for the question whether the song
-// should become an immutable value (docs/design/decisions.md, "Engineering"). Built only where CMake is told where immer
-// is (-DPHAZITE_IMMER_SPIKE_DIR=<its folder>), which no preset does: immer is no dependency of Phazite's.
+// A spike: the hard parts of a song kept as immutable values (the immer library, Boost Software License 1.0), written for
+// one area, the notes, and measured beside the song's own, for the question whether the song should become an immutable
+// value (docs/design/decisions.md, "Engineering"; the answer: roadmap step S5.20). A benchmark, which ctest skips:
 //   phazite_tests.exe --test-suite=benchmark --no-skip --test-case="*hard parts*"
 // ImmerSpikeBenchmarks.cpp measured the notes' storage alone. This one writes what stood between that and a model:
 // - the song as a value: its tracks, their MIDI clips and the clips' notes, with its index (each clip's place by its ID)
@@ -47,10 +46,12 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #if JUCE_WINDOWS
@@ -611,11 +612,12 @@ ValueSong addNote (const ValueSong& song, ID clipID, ID id, int pitch, double st
     const auto roomEnd = findRoomEnd (track, clip);
     start = std::max (start, clip.start);
     length = std::max (length, phazite::getMinimumNoteLength().inBeats());
-    ValueNote note { .id = id,
-                     .pitch = juce::jlimit (0, 127, pitch),
-                     .start = start - clip.getContentStart(),
-                     .length = length,
-                     .velocity = juce::jlimit (1, 127, velocity) };
+    ValueNote note;
+    note.id = id;
+    note.pitch = juce::jlimit (0, 127, pitch);
+    note.start = start - clip.getContentStart();
+    note.length = length;
+    note.velocity = juce::jlimit (1, 127, velocity);
     const ValueNotes notes { clip.notes.inOrder.push_back (note), clip.notes.places.set (id, (std::uint32_t) clip.notes.inOrder.size()) };
     return withNotes (song, clipID, notes, getLengthToHold (clip, roomEnd, start + length));
 }
@@ -1078,7 +1080,7 @@ ValueTrack mergeTracks (const ValueTrack& base, const ValueTrack& ours, const Va
 // The three hold the same tracks in the same order: the spike merges no track added, moved or taken away.
 ValueMerge mergeSongs (const ValueSong& base, const ValueSong& ours, const ValueSong& theirs, const std::function<ID()>& makeID)
 {
-    ValueMerge merge { ours };
+    ValueMerge merge { ours, 0, 0 };
 
     if (theirs.tracks == base.tracks)
         return merge;
@@ -1112,8 +1114,13 @@ ValueMerge mergeSongs (const ValueSong& base, const ValueSong& ours, const Value
 //==============================================================================
 struct Compared
 {
+    explicit Compared (juce::String rowName)
+        : what (std::move (rowName))
+    {
+    }
+
     juce::String what;
-    std::vector<double> song {}, value {};
+    std::vector<double> song, value;
 };
 
 juce::String describeTimes (std::vector<double> times)
@@ -1182,7 +1189,14 @@ TEST_CASE ("Benchmark: the hard parts of a song of immutable values beside the s
         std::vector<phazite::NoteData> made;
 
         for (size_t i = 0; i < notes; ++i)
-            made.push_back ({ .clip = clip, .pitch = pitchOf (i), .start = at (clipStart + startOf (i)), .length = lasting (0.2) });
+        {
+            phazite::NoteData note;
+            note.clip = clip;
+            note.pitch = pitchOf (i);
+            note.start = at (clipStart + startOf (i));
+            note.length = lasting (0.2);
+            made.push_back (note);
+        }
 
         phazite::setClipNotes (song, clip, made);
     };

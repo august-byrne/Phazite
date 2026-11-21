@@ -33,3 +33,7 @@ ui-design-literals            32
 # Whatever listens to a song listens to its root, but the song's index, which listens to the track list so that it hears
 # of every change there first (src/model/base/Song.h), and this stays 0.
 song-listeners                 0
+
+# The immer library, which holds the song's values (src/model/base/internal/ValueArea.h), is included in src/model alone
+# (and the tests): the layers above get Phazite's own types of the song. This stays 0.
+immer-outside-model            0

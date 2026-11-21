@@ -35,8 +35,9 @@ TEST_CASE ("The notices name everything from others that Phazite is built with, 
     REQUIRE (notices.size() > 20);
 
     for (const auto* name :
-         { "JUCE", "zlib", "HarfBuzz", "SheenBidi", "LunaSVG", "libpng", "libjpeg", "libwebp", "FLAC", "libvorbis", "Opus", "VST 3 SDK",
-           "Rubber Band Library", "r8brain-free-src", "Ooura FFT", "libebur128", "Inter", "Lucide", "Code - OSS" })
+         { "JUCE",      "zlib",      "HarfBuzz",  "SheenBidi",           "LunaSVG",          "libpng",    "libjpeg", "libwebp",    "FLAC",
+           "libvorbis", "Opus",      "VST 3 SDK", "Rubber Band Library", "r8brain-free-src", "Ooura FFT", "immer",   "libebur128", "Inter",
+           "Lucide",    "Code - OSS" })
     {
         INFO (name);
         CHECK (findNotice (notices, name) != nullptr);
@@ -96,6 +97,7 @@ TEST_CASE ("The licenses' texts are what their licenses ask to go with every cop
     CHECK (read ("libjpeg.txt").contains ("Independent JPEG Group"));
     CHECK (read ("r8brain-free-src.txt").contains ("Aleksey Vaneev"));
     CHECK (read ("Ooura-FFT.txt").contains ("Takuya OOURA"));
+    CHECK (read ("immer.txt").contains ("Boost Software License - Version 1.0"));
 
 #if JUCE_WINDOWS
     CHECK (read ("ASIO-SDK.txt").contains ("Steinberg ASIO License"));

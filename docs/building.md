@@ -79,7 +79,7 @@ The last line states the result, such as `Result: exit code 0 (done)`:
 
 ### 3. Fetch the submodules
 
-The submodules are the other git repositories Phazite builds with, pinned at exact commits: JUCE, Rubber Band Library, doctest and WindowsToolchain, about 0.1 GB. `--depth 1` skips their history:
+The submodules are the other git repositories Phazite builds with, pinned at exact commits: JUCE, Rubber Band Library, r8brain-free-src, immer, doctest and WindowsToolchain, about 0.1 GB (immer brings two of its own, for its Python bindings and its documentation, which Phazite doesn't build). `--depth 1` skips their history:
 
 ```powershell
 git submodule update --init --recursive --depth 1

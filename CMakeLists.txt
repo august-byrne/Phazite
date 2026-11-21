@@ -354,6 +354,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/Selection.h
     src/model/base/internal/SongIndex.h
     src/model/base/internal/SongText.h
+    src/model/base/internal/ValueArea.h
     src/model/chords/ChordModel.cpp
     src/model/chords/ChordModel.h
     src/model/chords/ChordValues.cpp
@@ -700,6 +701,20 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/r8brain-free-src/CDSPResampler.h")
 endif()
 
 target_include_directories(phazite_core SYSTEM PRIVATE external/r8brain-free-src)
+
+# immer 0.9.1 (BSL-1.0), header-only: the song's values, held in src/model/ (model/base/internal/ValueArea.h; roadmap step
+# S5.20), which tools/check-architecture.sh keeps there (immer-outside-model). The model's headers include it, so its folder
+# reaches every target that includes them: PUBLIC, through phazite_core, as the folder of a system's headers (SYSTEM), so
+# that it raises no warning in Phazite's build; phazite_use_core() passes phazite_core's folders on as they are, and CMake
+# gives a folder that a linked library names SYSTEM the system's flag in each target. Its own CMakeLists.txt, with its
+# tests, examples and extras, isn't read.
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/immer/immer/flex_vector.hpp")
+    message(FATAL_ERROR
+        "external/immer is empty because the git submodules are not checked out. Run:\n"
+        "  git submodule update --init --recursive --depth 1")
+endif()
+
+target_include_directories(phazite_core SYSTEM PUBLIC "${CMAKE_SOURCE_DIR}/external/immer")
 
 # GCC 13 and later read `const auto& button = opt.getButtons().front();` in JUCE 9.0.5's juce_LookAndFeel_V2.cpp as a
 # reference to a temporary (-Wdangling-reference, in -Wall): getButtons() returns a Span by value, but the button is in the
@@ -1352,6 +1367,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/GuideTests.cpp
         tests/HostedDevice.h
         tests/IconTests.cpp
+        tests/ImmerHardPartsBenchmarks.cpp
+        tests/ImmerSpikeBenchmarks.cpp
         tests/ImportTests.cpp
         tests/InconsistentProjectTests.cpp
         tests/InspectorTests.cpp
@@ -1498,6 +1515,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/UndoCheck.h
         tests/UndoTests.cpp
         tests/UpdatesTests.cpp
+        tests/ValueAreaTests.cpp
         tests/ValueTextTests.cpp
         tests/VersionStoreTests.cpp
         tests/VersionsBranchTests.cpp
@@ -1533,18 +1551,6 @@ if(PHAZITE_BUILD_TESTS)
     phazite_add_sanitizer_runtime(phazite_tests)
     target_include_directories(phazite_tests SYSTEM PRIVATE external/doctest) # its warnings off: it is third-party
     phazite_precompile_juce(phazite_tests ${PHAZITE_UI_MODULES} juce_cryptography)
-
-    # A spike, for the question whether the song should become an immutable value: a clip's notes kept with the immer library
-    # (Boost Software License 1.0), measured beside the song's own (tests/ImmerSpikeBenchmarks.cpp), and the hard parts of a
-    # song of such values written for the notes (tests/ImmerHardPartsBenchmarks.cpp), and one undo history for a tree and
-    # a value (tests/ImmerOneHistoryTests.cpp). immer is no dependency of Phazite's:
-    # the files are built only where this names a folder that holds immer, which no preset does.
-    set(PHAZITE_IMMER_SPIKE_DIR "" CACHE PATH "A folder that holds the immer library, for the tests' Immer*Benchmarks.cpp")
-    if(PHAZITE_IMMER_SPIKE_DIR)
-        target_sources(phazite_tests PRIVATE tests/ImmerSpikeBenchmarks.cpp tests/ImmerHardPartsBenchmarks.cpp
-                                             tests/ImmerOneHistoryTests.cpp)
-        target_include_directories(phazite_tests SYSTEM PRIVATE "${PHAZITE_IMMER_SPIKE_DIR}")
-    endif()
 
     # On Linux the test program exports its symbols (-rdynamic): its own malloc and free, which the real-time audit counts
     # allocations with in place of glibc's, and its functions' names, which name where they came from

@@ -17,3 +17,7 @@
 	path = external/r8brain-free-src
 	url = https://github.com/avaneev/r8brain-free-src.git
 	shallow = true
+[submodule "external/immer"]
+	path = external/immer
+	url = https://github.com/arximboldi/immer
+	shallow = true

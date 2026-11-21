@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A spike, not a part of Phazite: whether one undo history can span a song held partly as a tree and partly as immutable
-// values (the immer library), which moving the song to values one area at a time needs (docs/design/decisions.md,
-// "Engineering"). Built only where CMake is told where immer is (-DPHAZITE_IMMER_SPIKE_DIR=<its folder>).
-//   phazite_tests.exe --test-suite=immer-spike
-//   phazite_tests.exe --test-suite=benchmark --no-skip --test-case="*one history*"
-// The way tried: an area of the song held as a value (ValueArea) changes through the song's own history, as one action that
-// puts a root in the place of another. So a step, a gesture and a trial (model/commands/internal/Undo.h) hold a tree's
-// changes and a value's alike, and Undo and Redo take both back and forth, with nothing of theirs changed. However many
-// times an area changes within a step, the step holds one action for it (the root before, the root after), wherever the
-// tree's changes fall between them: a drag keeps two roots, not one for each of the mouse's moves.
+// An area of the song held as an immutable value, in the song's one undo history (model/base/internal/ValueArea.h): a step,
+// a gesture and a trial (model/commands/internal/Undo.h) hold a tree's changes and a value's alike, and Undo and Redo take
+// both back and forth, with nothing of theirs changed. However many times an area changes within a step, the step holds one
+// action for it (the value before, the value after), wherever the tree's changes fall between them.
 // Here the song is a real one (its tracks, clips, names and volumes in its tree, changed by the model's functions), and the
 // clips' notes are a value beside it, by their clips' IDs: as the song would be once the notes had moved and the clips not.
+//   phazite_tests.exe --test-case="Value area*"
+//   phazite_tests.exe --test-suite=benchmark --no-skip --test-case="*one history*"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UndoCheck.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/ValueArea.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/NoteElements.h"
@@ -25,6 +22,7 @@
 #include <immer/flex_vector.hpp>
 #include <immer/flex_vector_transient.hpp>
 #include <immer/map.hpp>
+#include <immer/vector.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -42,146 +40,54 @@ namespace
 {
 using ID = std::uint64_t;
 
-//==============================================================================
-// An area of a song held as an immutable value, in the song's one undo history. Value has isSameAs (another): whether two
-// are one value, without a look inside.
+// A listener that counts what it is told, keeps the values of the last change, and does what a test asks as it is told.
 template <typename Value>
-class ValueArea
+struct Told final : phazite::ValueArea<Value>::Listener
 {
-public:
-    using Listener = std::function<void (const Value& before, const Value& after)>;
+    int count = 0;
+    Value before {}, after {};
+    std::function<void()> also;
 
-    ValueArea (juce::UndoManager& history, Value start)
-        : undoManager (history),
-          shared (std::make_shared<Shared>())
+    void valueAreaChanged (const Value& valueBefore, const Value& valueAfter) override
     {
-        shared->now = std::move (start);
+        ++count;
+        before = valueBefore;
+        after = valueAfter;
+
+        if (also != nullptr)
+            also();
     }
-
-    const Value& get() const noexcept { return shared->now; }
-
-    // The area's next value, as a part of the history's step in progress: what a tree's change with the undo manager is.
-    // The step's first change of the area performs an action that holds the value before and the value after; its later
-    // ones only give that action another value after.
-    void set (Value next)
-    {
-        if (next.isSameAs (shared->now))
-            return;
-
-        if (auto* open = findOpenAction())
-        {
-            open->after = next;
-            shared->moveTo (std::move (next));
-            return;
-        }
-
-        auto* action = new Swap (shared, shared->now, std::move (next));
-        shared->open = action;
-        undoManager.perform (action);
-    }
-
-    // Outside the history: a song as it is read from its file.
-    void setOutsideHistory (Value next) { shared->moveTo (std::move (next)); }
-
-    // Told of every change, a step's, an undo's and a redo's alike, with the value left and the value come to: what the
-    // song's index, what plays it and its views would compare to know what changed.
-    void addListener (Listener listener) { shared->listeners.push_back (std::move (listener)); }
-
-    // The actions the history holds for the area: one for each step that changed it and is still kept.
-    int countActions() const noexcept { return shared->actions; }
-
-private:
-    struct Swap;
-
-    struct Shared
-    {
-        Value now;
-        Swap* open = nullptr; // the action performed last, while its step may still be in progress
-        std::vector<Listener> listeners;
-        int actions = 0;
-
-        void moveTo (Value next)
-        {
-            const auto before = std::exchange (now, std::move (next));
-
-            for (const auto& listener : listeners)
-                listener (before, now);
-        }
-    };
-
-    // The actions hold what the area shares with them, so that a history that outlives the area still finds it.
-    struct Swap final : juce::UndoableAction
-    {
-        Swap (std::shared_ptr<Shared> area, Value valueBefore, Value valueAfter)
-            : shared (std::move (area)),
-              before (std::move (valueBefore)),
-              after (std::move (valueAfter))
-        {
-            ++shared->actions;
-        }
-
-        ~Swap() override
-        {
-            if (shared->open == this)
-                shared->open = nullptr;
-
-            --shared->actions;
-        }
-
-        bool perform() override
-        {
-            shared->moveTo (after);
-            return true;
-        }
-
-        bool undo() override
-        {
-            shared->moveTo (before);
-            return true;
-        }
-
-        std::shared_ptr<Shared> shared;
-        Value before, after;
-    };
-
-    // The area's action in the step in progress, if it has one: the action performed last, while the history still lists
-    // it among the actions of its current transaction (none once a step began, or after an undo or a redo). An action the
-    // history let go says so itself (~Swap()), so the pointer compared is never one of another action since.
-    Swap* findOpenAction() const
-    {
-        if (shared->open == nullptr)
-            return nullptr;
-
-        juce::Array<const juce::UndoableAction*> current;
-        undoManager.getActionsInCurrentTransaction (current);
-
-        if (! current.contains (shared->open))
-            shared->open = nullptr;
-
-        return shared->open;
-    }
-
-    juce::UndoManager& undoManager;
-    std::shared_ptr<Shared> shared;
 };
 
 //==============================================================================
 // The notes of the song's clips as a value, by their clips' IDs.
-struct SpikeNote
+struct TestNote
 {
     ID id = 0;
     int pitch = 60;
     double start = 0.0, length = 1.0;
 
-    bool operator== (const SpikeNote&) const = default;
+    bool operator== (const TestNote&) const = default;
 };
 
 struct NotesByClip
 {
-    immer::map<ID, immer::flex_vector<SpikeNote>> clips;
+    immer::map<ID, immer::flex_vector<TestNote>> clips;
 
     bool isSameAs (const NotesByClip& other) const { return clips.identity() == other.clips.identity(); }
 };
+
+// A value that says by a free function in its own namespace whether two are the same: here, by its version alone.
+struct Versioned
+{
+    int version = 0;
+    juce::String text;
+};
+
+bool isSameValue (const Versioned& a, const Versioned& b)
+{
+    return a.version == b.version;
+}
 
 // The song as it is now: its tree as text, as an undo step keeps it (UndoCheck.h), and its notes' value.
 struct Snapshot
@@ -221,8 +127,8 @@ struct MixedSong
         for (const auto clip : getClips())
             inTree.insert (clip.getRaw());
 
-        for (const auto& [clip, clipNotes] : notes.get().clips)
-            inValue.insert (clip);
+        for (const auto& entry : notes.get().clips)
+            inValue.insert (entry.first);
 
         return inTree == inValue;
     }
@@ -231,9 +137,9 @@ struct MixedSong
     void addNote (phazite::ClipID clip)
     {
         const auto id = ++made;
-        const SpikeNote note { id, 48 + (int) (id % 24), (double) (id % 16) * 0.25, 0.25 };
+        const TestNote note { id, 48 + (int) (id % 24), (double) (id % 16) * 0.25, 0.25 };
         const auto* held = notes.get().clips.find (clip.getRaw());
-        notes.set ({ notes.get().clips.set (clip.getRaw(), (held != nullptr ? *held : immer::flex_vector<SpikeNote>()).push_back (note)) });
+        notes.set ({ notes.get().clips.set (clip.getRaw(), (held != nullptr ? *held : immer::flex_vector<TestNote>()).push_back (note)) });
     }
 
     void changeNotes (phazite::ClipID clip, int how)
@@ -249,7 +155,7 @@ struct MixedSong
 
             for (size_t i = 0; i < moved.size(); ++i)
                 moved.update (i,
-                              [] (SpikeNote note)
+                              [] (TestNote note)
                               {
                                   note.start += 0.25;
                                   return note;
@@ -348,7 +254,7 @@ struct MixedSong
     }
 
     phazite::Song::Ptr song = phazite::createSong();
-    ValueArea<NotesByClip> notes { song->getUndoManager(), NotesByClip() };
+    phazite::ValueArea<NotesByClip> notes { song->getUndoManager(), NotesByClip() };
     std::vector<phazite::TrackID> tracks;
     ID made = 0; // counts what was made, for IDs, names and places of its own
 };
@@ -366,6 +272,16 @@ juce::String describeDifference (const MixedSong& mixed, const Snapshot& expecte
         differences.add ("the tree and the notes name other clips");
 
     return differences.joinIntoString ("; ");
+}
+
+phazite::NoteData makeNoteData (phazite::ClipID clip, int pitch, double start, double length)
+{
+    phazite::NoteData note;
+    note.clip = clip;
+    note.pitch = pitch;
+    note.start = phazite::test::at (start);
+    note.length = phazite::test::lasting (length);
+    return note;
 }
 
 double millisecondsOf (const std::function<void()>& f)
@@ -394,8 +310,7 @@ std::int64_t getHeapBytesInUse()
 } // namespace
 
 //==============================================================================
-TEST_CASE ("One history: a step that changes the tree and the notes' value is one step, undone and done again whole"
-           * doctest::test_suite ("immer-spike"))
+TEST_CASE ("Value area: a step that changes the tree and the notes' value is one step, undone and done again whole")
 {
     MixedSong mixed;
     const auto empty = mixed.take();
@@ -444,9 +359,8 @@ TEST_CASE ("One history: a step that changes the tree and the notes' value is on
     CHECK (describeDifference (mixed, grown) == juce::String());
 }
 
-TEST_CASE ("One history: a drag is one step with one action for the notes, however the tree's changes fall between theirs; "
-           "given up, it leaves the song and its redo steps as they were"
-           * doctest::test_suite ("immer-spike"))
+TEST_CASE ("Value area: a drag is one step with one action for the notes, however the tree's changes fall between theirs; "
+           "given up, it leaves the song and its redo steps as they were")
 {
     MixedSong mixed;
     phazite::ClipID clip;
@@ -464,27 +378,20 @@ TEST_CASE ("One history: a drag is one step with one action for the notes, howev
 
     const auto start = mixed.take();
     const auto actionsAtStart = mixed.notes.countActions();
-    int told = 0;
-    NotesByClip toldBefore, toldAfter;
-    mixed.notes.addListener (
-        [&] (const NotesByClip& before, const NotesByClip& after)
-        {
-            ++told;
-            toldBefore = before;
-            toldAfter = after;
-        });
+    Told<NotesByClip> told;
+    mixed.notes.addListener (&told);
 
     {
         phazite::Gesture gesture (*mixed.song, "Move Notes");
 
-        for (int step = 0; step < 20; ++step)
+        for (int move = 0; move < 20; ++move)
         {
             mixed.changeNotes (clip, 1);
 
-            if (step % 3 == 0)
+            if (move % 3 == 0)
                 mixed.changeTree (clip, 2); // the clip grown between the notes' changes
 
-            if (step % 5 == 0)
+            if (move % 5 == 0)
             {
                 const phazite::UndoStep joins (*mixed.song, "Joins");
                 mixed.changeNotes (clip, 1);
@@ -495,15 +402,15 @@ TEST_CASE ("One history: a drag is one step with one action for the notes, howev
     }
 
     const auto moved = mixed.take();
-    CHECK (told == 24);
+    CHECK (told.count == 24);
     CHECK (mixed.notes.countActions() == actionsAtStart + 1);
     CHECK (phazite::getHistorySteps (*mixed.song).done.size() == 5);
 
-    told = 0;
+    told.count = 0;
     phazite::undo (*mixed.song);
-    CHECK (told == 1); // the whole drag, told as one change
-    CHECK (toldBefore.isSameAs (moved.notes));
-    CHECK (toldAfter.isSameAs (start.notes));
+    CHECK (told.count == 1); // the whole drag, told as one change
+    CHECK (told.before.isSameAs (moved.notes));
+    CHECK (told.after.isSameAs (start.notes));
     CHECK (describeDifference (mixed, start) == juce::String());
     phazite::redo (*mixed.song);
     CHECK (describeDifference (mixed, moved) == juce::String());
@@ -518,10 +425,10 @@ TEST_CASE ("One history: a drag is one step with one action for the notes, howev
     {
         phazite::Gesture gesture (*mixed.song, "Move Notes");
 
-        for (int step = 0; step < 5; ++step)
+        for (int move = 0; move < 5; ++move)
         {
             mixed.changeNotes (clip, 1);
-            mixed.changeTree (clip, step % 3);
+            mixed.changeTree (clip, move % 3);
         }
 
         CHECK_FALSE (mixed.take().notes.isSameAs (before.notes));
@@ -533,10 +440,11 @@ TEST_CASE ("One history: a drag is one step with one action for the notes, howev
     phazite::redo (*mixed.song);
     phazite::redo (*mixed.song);
     CHECK (describeDifference (mixed, moved) == juce::String());
+    mixed.notes.removeListener (&told);
 }
 
-TEST_CASE ("One history: a trial tries changes of both kinds, from its start again, and is kept or put back; and gives way to an undo"
-           * doctest::test_suite ("immer-spike"))
+TEST_CASE ("Value area: a trial tries changes of both kinds, from its start again, and is kept or put back; and gives way to an "
+           "undo")
 {
     MixedSong mixed;
     phazite::ClipID clip;
@@ -598,7 +506,7 @@ TEST_CASE ("One history: a trial tries changes of both kinds, from its start aga
     }
 }
 
-TEST_CASE ("One history: the steps the history lets go take their values along" * doctest::test_suite ("immer-spike"))
+TEST_CASE ("Value area: the steps the history lets go take their values along")
 {
     const auto stepsBefore = phazite::Song::getUndoSteps();
     phazite::Song::setUndoSteps (phazite::Song::minimumUndoSteps);
@@ -629,9 +537,8 @@ TEST_CASE ("One history: the steps the history lets go take their values along" 
     phazite::Song::setUndoSteps (stepsBefore);
 }
 
-TEST_CASE ("One history: 1,500 changes, drags, trials, undos and redos drawn by lot, the song at each the one a history of whole "
-           "songs holds"
-           * doctest::test_suite ("immer-spike"))
+TEST_CASE ("Value area: 1,500 changes, drags, trials, undos and redos drawn by lot, the song at each the one a history of whole "
+           "songs holds")
 {
     struct Step
     {
@@ -800,8 +707,7 @@ TEST_CASE ("One history: 1,500 changes, drags, trials, undos and redos drawn by 
     phazite::Song::setUndoSteps (stepsBefore);
 }
 
-TEST_CASE ("One history: a clip's notes read into a value and written back are the clip's element as it was"
-           * doctest::test_suite ("immer-spike"))
+TEST_CASE ("Value area: a clip's notes read into a value and written back are the clip's element as it was")
 {
     // The project file can stay as it is while an area is a value: read into the value as the song opens, written from it
     // into the copy of the song a save writes.
@@ -811,15 +717,15 @@ TEST_CASE ("One history: a clip's notes read into a value and written back are t
     std::vector<phazite::NoteData> made;
 
     for (int i = 0; i < 200; ++i)
-        made.push_back ({ .clip = clip,
-                          .pitch = 40 + i % 40,
-                          .start = phazite::test::at (i * 0.25),
-                          .length = phazite::test::lasting (0.2),
-                          .velocity = 1 + i % 127,
-                          .muted = i % 7 == 0,
-                          .slide = i % 11 == 0,
-                          .portamento = i % 13 == 0,
-                          .channel = 1 + i % 16 });
+    {
+        auto note = makeNoteData (clip, 40 + i % 40, i * 0.25, 0.2);
+        note.velocity = 1 + i % 127;
+        note.muted = i % 7 == 0;
+        note.slide = i % 11 == 0;
+        note.portamento = i % 13 == 0;
+        note.channel = 1 + i % 16;
+        made.push_back (note);
+    }
 
     phazite::setClipNotes (*song, clip, made);
     const auto clipState = phazite::findClipState (*song, clip);
@@ -836,6 +742,194 @@ TEST_CASE ("One history: a clip's notes read into a value and written back are t
         phazite::appendNote (written, note, nullptr);
 
     CHECK (written.isEquivalentTo (clipState));
+}
+
+TEST_CASE ("Value area: a listener may remove itself, or another not told yet, while it is told")
+{
+    auto song = phazite::createSong();
+    phazite::ValueArea<int> area (song->getUndoManager(), 0);
+    Told<int> first, second, third;
+    area.addListener (&first);
+    area.addListener (&second);
+    area.addListener (&third);
+    first.also = [&] { area.removeListener (&first); };
+    second.also = [&]
+    {
+        if (second.count == 1)
+            area.removeListener (&third);
+    };
+
+    {
+        const phazite::UndoStep step (*song, "One");
+        area.set (1);
+    }
+
+    CHECK (first.count == 1);
+    CHECK (second.count == 1);
+    CHECK (third.count == 0); // removed before its turn came
+
+    phazite::undo (*song);
+    CHECK (area.get() == 0);
+    CHECK (first.count == 1);
+    CHECK (second.count == 2);
+    CHECK (second.before == 1);
+    CHECK (second.after == 0);
+    CHECK (third.count == 0);
+    area.removeListener (&second);
+}
+
+TEST_CASE ("Value area: two areas of one song changed in one step are an action each, and Undo and Redo take both back and "
+           "forth")
+{
+    MixedSong mixed;
+    phazite::ValueArea<immer::vector<int>> other (mixed.song->getUndoManager(), immer::vector<int>());
+    Told<NotesByClip> notesTold;
+    Told<immer::vector<int>> otherTold;
+    mixed.notes.addListener (&notesTold);
+    other.addListener (&otherTold);
+    phazite::ClipID clip;
+
+    {
+        const phazite::UndoStep step (*mixed.song, "Add Clip");
+        clip = mixed.insertClip();
+    }
+
+    const auto start = mixed.take();
+    const auto otherAtStart = other.get();
+
+    {
+        const phazite::UndoStep step (*mixed.song, "Both");
+
+        for (int i = 0; i < 5; ++i)
+        {
+            mixed.addNote (clip);
+            other.set (other.get().push_back (i));
+            mixed.changeTree (clip, i % 3);
+        }
+    }
+
+    const auto both = mixed.take();
+    const auto otherAfter = other.get();
+    CHECK (phazite::getHistorySteps (*mixed.song).done == juce::StringArray { "Add Clip", "Both" });
+    CHECK (mixed.notes.countActions() == 2);
+    CHECK (other.countActions() == 1);
+    CHECK (other.get().size() == 5);
+
+    notesTold.count = otherTold.count = 0;
+    phazite::undo (*mixed.song);
+    CHECK (describeDifference (mixed, start) == juce::String());
+    CHECK (other.get().identity() == otherAtStart.identity());
+    CHECK (notesTold.count == 1);
+    CHECK (otherTold.count == 1);
+
+    phazite::redo (*mixed.song);
+    CHECK (describeDifference (mixed, both) == juce::String());
+    CHECK (other.get().identity() == otherAfter.identity());
+    CHECK (notesTold.count == 2);
+    CHECK (otherTold.count == 2);
+
+    mixed.notes.removeListener (&notesTold);
+    other.removeListener (&otherTold);
+}
+
+TEST_CASE ("Value area: an area gone before the song's history leaves the history's Undo and Redo safe, telling no one")
+{
+    auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1).front();
+    song->getUndoManager().clearUndoHistory();
+    auto area = std::make_unique<phazite::ValueArea<immer::vector<int>>> (song->getUndoManager(), immer::vector<int>());
+    Told<immer::vector<int>> told;
+    area->addListener (&told);
+
+    {
+        const phazite::UndoStep step (*song, "Both");
+        area->set (area->get().push_back (1));
+        phazite::renameTrack (*song, track, "Renamed");
+    }
+
+    {
+        const phazite::UndoStep step (*song, "Again");
+        area->set (area->get().push_back (2));
+    }
+
+    phazite::undo (*song); // one step undone, waiting to be redone, as the area goes
+    CHECK (told.count == 3);
+    area.reset();
+
+    phazite::undo (*song);
+    CHECK (phazite::getTrackName (*song, track) != "Renamed"); // the step's tree half undone all the same
+    phazite::redo (*song);
+    phazite::redo (*song);
+    CHECK (phazite::getTrackName (*song, track) == "Renamed");
+    CHECK (told.count == 3);
+    CHECK_FALSE (phazite::canRedo (*song));
+
+    song->getUndoManager().clearUndoHistory();
+    CHECK_FALSE (phazite::canUndo (*song));
+}
+
+TEST_CASE ("Value area: a value set that is the same as the area's performs nothing, and a step with nothing else is no step")
+{
+    MixedSong mixed;
+    Told<NotesByClip> told;
+    mixed.notes.addListener (&told);
+
+    {
+        const phazite::UndoStep step (*mixed.song, "Nothing");
+        mixed.notes.set (mixed.notes.get());
+        mixed.notes.set (NotesByClip()); // an empty map is the one empty root
+    }
+
+    CHECK (told.count == 0);
+    CHECK (mixed.notes.countActions() == 0);
+    CHECK_FALSE (phazite::canUndo (*mixed.song));
+    CHECK (phazite::getHistorySteps (*mixed.song).done.isEmpty());
+
+    // And within a step that changes it, the same value again adds nothing to it.
+    phazite::ClipID clip;
+
+    {
+        const phazite::UndoStep step (*mixed.song, "Add Clip");
+        clip = mixed.insertClip();
+        const auto now = mixed.notes.get();
+        mixed.notes.set (now);
+    }
+
+    CHECK (told.count == 1);
+    CHECK (mixed.notes.countActions() == 1);
+    CHECK (phazite::getHistorySteps (*mixed.song).done == juce::StringArray { "Add Clip" });
+
+    // A plain value, compared by ==.
+    phazite::ValueArea<int> plain (mixed.song->getUndoManager(), 3);
+
+    {
+        const phazite::UndoStep step (*mixed.song, "Three");
+        plain.set (3);
+    }
+
+    CHECK (plain.countActions() == 0);
+    CHECK (phazite::getHistorySteps (*mixed.song).done == juce::StringArray { "Add Clip" });
+
+    // A value whose type says by its own isSameValue: the same version is the same value, whatever else it holds.
+    phazite::ValueArea<Versioned> versioned (mixed.song->getUndoManager(), Versioned { 1, "one" });
+
+    {
+        const phazite::UndoStep step (*mixed.song, "Same Version");
+        versioned.set (Versioned { 1, "other" });
+    }
+
+    CHECK (versioned.countActions() == 0);
+    CHECK (versioned.get().text == "one");
+
+    {
+        const phazite::UndoStep step (*mixed.song, "Next Version");
+        versioned.set (Versioned { 2, "two" });
+    }
+
+    CHECK (versioned.countActions() == 1);
+    phazite::undo (*mixed.song);
+    CHECK (versioned.get().text == "one");
+    mixed.notes.removeListener (&told);
 }
 
 //==============================================================================
@@ -857,7 +951,7 @@ TEST_CASE ("Benchmark: one history for a tree and a value: what the notes' chang
     }
 
     {
-        auto notes = immer::flex_vector<SpikeNote>().transient();
+        auto notes = immer::flex_vector<TestNote>().transient();
 
         for (size_t i = 0; i < count; ++i)
             notes.push_back ({ i + 1, 48 + (int) (i % 24), (double) i * 0.25, 0.2 });
@@ -871,7 +965,7 @@ TEST_CASE ("Benchmark: one history for a tree and a value: what the notes' chang
     std::vector<phazite::NoteData> made;
 
     for (size_t i = 0; i < moved; ++i)
-        made.push_back ({ .clip = treeClip, .pitch = 60, .start = phazite::test::at ((double) i), .length = phazite::test::lasting (0.2) });
+        made.push_back (makeNoteData (treeClip, 60, (double) i, 0.2));
 
     phazite::setClipNotes (*mixed.song, treeClip, made);
     const auto treeNotes = phazite::getClipNotes (*mixed.song, treeClip);
@@ -883,7 +977,7 @@ TEST_CASE ("Benchmark: one history for a tree and a value: what the notes' chang
 
         for (size_t i = 0; i < moved; ++i)
             notes.update (i * 10,
-                          [] (SpikeNote note)
+                          [] (TestNote note)
                           {
                               note.start += 0.25;
                               return note;
@@ -942,15 +1036,16 @@ TEST_CASE ("Benchmark: one history for a tree and a value: what the notes' chang
 
     // What a drag kept holds: 40 of them, there by turns (each a step), with immer's kept blocks taken first.
     constexpr int kept = 40;
-    std::vector<immer::flex_vector<SpikeNote>> held;
-    auto many = immer::flex_vector<SpikeNote>().transient();
+    std::vector<immer::flex_vector<TestNote>> held;
+    auto many = immer::flex_vector<TestNote>().transient();
 
     for (size_t i = 0; i < 20000; ++i)
-        many.push_back ({ i + 1 });
+        many.push_back ({ i + 1, 60, 0.0, 1.0 });
 
     held.push_back (many.persistent());
     // The history cleared first. JUCE keeps the redo steps it put aside last through that (the drag undone last, here):
-    // one action, and its two roots, that outlive the clear until redo steps are put aside again.
+    // one action, and its two values, that outlive the clear until redo steps are put aside again (JUCE workaround W56
+    // (docs/juce-workarounds.md) says where Phazite meets it).
     mixed.song->getUndoManager().clearUndoHistory();
     const auto actionsBefore = mixed.notes.countActions();
     CHECK (actionsBefore == 1);

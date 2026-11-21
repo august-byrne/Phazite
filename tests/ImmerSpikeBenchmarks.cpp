@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A spike, not a part of Phazite: a clip's notes kept as immutable values (the immer library, Boost Software License 1.0),
-// measured beside the song's own notes, for the question whether the song should become an immutable value
-// (docs/design/decisions.md, "Engineering"). Built only where CMake is told where immer is
-// (-DPHAZITE_IMMER_SPIKE_DIR=<its folder>), which no preset does: immer is no dependency of Phazite's.
+// A spike: a clip's notes kept as immutable values (the immer library, Boost Software License 1.0), measured beside the
+// song's own notes, for the question whether the song should become an immutable value (docs/design/decisions.md,
+// "Engineering"; the answer: roadmap step S5.20). A benchmark, which ctest skips:
 //   phazite_tests.exe --test-suite=benchmark --no-skip --test-case="*immutable values*"
 // What it leaves out, on purpose: what tells the views and the plan of a change (today the tree's listeners, which these
 // times include for the song's index; for immutable values, a comparison of the roots, not written), a clip's aliases, and
@@ -26,6 +25,8 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #if JUCE_WINDOWS
@@ -81,8 +82,13 @@ struct ValueClip
 
 struct Timed
 {
+    explicit Timed (juce::String rowName)
+        : name (std::move (rowName))
+    {
+    }
+
     juce::String name;
-    std::vector<double> times {};
+    std::vector<double> times;
 
     double getMedian()
     {
@@ -126,7 +132,14 @@ TEST_CASE (
     std::vector<phazite::NoteData> made;
 
     for (size_t i = 0; i < (size_t) count; ++i)
-        made.push_back ({ .clip = clip, .pitch = pitchAt (i), .start = at (startAt (i)), .length = lasting (0.2) });
+    {
+        phazite::NoteData note;
+        note.clip = clip;
+        note.pitch = pitchAt (i);
+        note.start = at (startAt (i));
+        note.length = lasting (0.2);
+        made.push_back (note);
+    }
 
     phazite::setClipNotes (*song, clip, made);
     auto& undo = song->getUndoManager();
@@ -142,7 +155,12 @@ TEST_CASE (
 
         for (size_t i = 0; i < refs.size(); ++i)
         {
-            notes.push_back ({ .id = refs[i].note.getRaw(), .pitch = pitchAt (i), .start = startAt (i), .length = 0.2 });
+            ValueNote note;
+            note.id = refs[i].note.getRaw();
+            note.pitch = pitchAt (i);
+            note.start = startAt (i);
+            note.length = 0.2;
+            notes.push_back (note);
             places.set (refs[i].note.getRaw(), (std::uint32_t) i);
         }
 
@@ -228,8 +246,8 @@ TEST_CASE (
                 changeValue (notes);
 
             const auto after = getHeapBytesInUse();
-            const auto kilobytes = [steps = steps] (std::int64_t bytes)
-            { return juce::String ((double) bytes / steps / 1024.0, 2) + " KB"; };
+            const auto kilobytes = [stepCount = steps] (std::int64_t bytes)
+            { return juce::String ((double) bytes / stepCount / 1024.0, 2) + " KB"; };
             report << "| " << what << " | " << kilobytes (between - before) << " | " << kilobytes (after - between) << " |\n";
         }
 
