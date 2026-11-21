@@ -10,6 +10,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
 
@@ -445,6 +446,9 @@ void forgetWhatNamesTheGone (Song& song)
     for (auto& modulates : modulations)
         if (! ids.contains (readID (modulates[schema::modulatesDevice])))
             modulates.getParent().removeChild (modulates, undo);
+
+    // A MIDI link of a parameter of what is gone.
+    forgetMidiLinksOfTheGone (song, ids);
 
     // A pad's track whose drum sampler is gone: deleted, or, holding clips, a plain track.
     std::vector<TrackID> padTracks;

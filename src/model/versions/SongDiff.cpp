@@ -571,6 +571,9 @@ SongChange findSongChange (const juce::ValueTree& songBefore, const juce::ValueT
     if (! holdTheSameOrNothing (songBefore.getChildWithName (schema::CHORDLANE), songAfter.getChildWithName (schema::CHORDLANE)))
         what.add ("chords");
 
+    if (! holdTheSameOrNothing (songBefore.getChildWithName (schema::MIDILINKS), songAfter.getChildWithName (schema::MIDILINKS)))
+        what.add ("MIDI links");
+
     // The order of the tracks both have.
     std::set<std::uint64_t> inBefore, both;
 

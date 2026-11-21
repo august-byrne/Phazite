@@ -734,6 +734,9 @@ TEST_SUITE ("golden")
                  });
         s.run ({ "automation.automateLastTouched" });
 
+        // MIDI learn for it, then cancelled: neither changes the song (the link is made as a controller comes).
+        s.run ({ "midi.learnLastTouched", "midi.learnLastTouched" });
+
         // A lane removed between two undo steps: lanes come and go outside the undo history, which must still find what
         // each step changed on the track (the walk at the script's end undoes the clip).
         const auto addClipWithNote = [&s, one] (double beat)

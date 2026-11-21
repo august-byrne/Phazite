@@ -6,7 +6,7 @@
 // button for what to do next where there is one ("Show in Folder"), and one that closes it. Everything goes on working while
 // they show: news goes by itself once it has shown for NoticeTint::shownSeconds while Phazite is in front and the pointer
 // isn't over it, as VS Code's go, and a problem stays until it is closed. At most NoticeTint::mostShown show, the latest at
-// the bottom, the oldest news going first. Until 2026-11-13 each was a dialog that stopped everything until it was answered,
+// the bottom, the oldest news going first, never one that lasts while a state holds. Until 2026-11-13 each was a dialog that stopped everything until it was answered,
 // which NN/g keeps for decisions that can't wait, as Phazite still asks "Save changes?" in one.
 #pragma once
 
@@ -28,12 +28,20 @@ public:
         bool isProblem = false;          // what went wrong: it stays until it is closed
         juce::String actionName {};      // a button for what to do next, if any
         std::function<void()> action {}; // which closes the notice too
+
+        // A state that lasts until the user acts (MIDI learn waiting for a knob): it stays while lasts says so, going as it
+        // turns false (looked at with the timer's ticks), and its close button runs closed first.
+        std::function<bool()> lasts {};
+        std::function<void()> closed {};
     };
 
     Notices();
     ~Notices() override;
 
     void show (Notice);
+
+    // Those that last (Notice::lasts) whose state has ended go now, rather than at the timer's next tick.
+    void closeThoseEnded() { countShown (0.0); }
 
     // How tall the column is at a width, the notices one over another (none while none shows); told when one comes or goes,
     // so that the parent places the column again.

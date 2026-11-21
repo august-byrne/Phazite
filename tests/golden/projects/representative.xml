@@ -107,6 +107,16 @@
             parameter="master pan"/>
     </LANES>
   </MASTER>
+  <MIDILINKS>
+    <MIDILINK channel="3"
+              device="15"
+              number="74"
+              parameter="cutoff"/>
+    <MIDILINK channel="1"
+              device="95"
+              number="1"
+              parameter="value"/>
+  </MIDILINKS>
   <PIANOROLL gridAdaptive="0"
              gridOffset="0"
              gridSnap="1"

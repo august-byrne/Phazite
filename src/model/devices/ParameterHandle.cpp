@@ -221,11 +221,7 @@ struct ParameterHandle::Impl
 
     juce::String getUndoName (const ParameterRef& found) const
     {
-        if (undoName.isNotEmpty())
-            return undoName;
-
-        const auto description = describeParameter (*song.get(), found);
-        return "Change " + (description.has_value() ? description->name : juce::String());
+        return undoName.isNotEmpty() ? undoName : getChangeName (*song.get(), found);
     }
 
     // A gesture begun: for Phazite's automation writer.
@@ -271,6 +267,11 @@ ParameterHandle makeCreatingHandle (Song& song, std::function<DeviceID (const So
 Song* findSong (const ParameterHandle& handle)
 {
     return handle.getImpl() != nullptr ? handle.getImpl()->song.get() : nullptr;
+}
+
+ParameterRef findParameterRef (const ParameterHandle& handle)
+{
+    return handle.getImpl() != nullptr ? handle.getImpl()->findRef() : ParameterRef();
 }
 
 ParameterHandle::ParameterHandle() = default;

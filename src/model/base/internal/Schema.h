@@ -453,6 +453,28 @@ inline const juce::Identifier pointBeat { "beat" };
 inline const juce::Identifier pointValue { "value" };
 inline const juce::Identifier pointCurve { "curve" };
 
+//==============================================================================
+// The song's MIDI links (model/midi/internal/MidiLinks.h): a hardware controller linked to the parameter it turns (MIDI
+// learn). song
+
+// Child of PHAZITE, added with the first link: the links (MIDILINK), in no particular order. A link of a device, a chain, a
+// send, a fader, a modulator or a macro that goes leaves with it, in its step (model/mixer/internal/Mixer.h:
+// forgetWhatNamesTheGone()).
+inline const juce::Identifier MIDILINKS { "MIDILINKS" };
+
+// Child of MIDILINKS: a link. On MIDILINK: the controller, by its channel (int 1..16) and its number (int 0..119: 120 to
+// 127 are channel mode messages, which no link takes; a link with another goes as the song loads); and the parameter it
+// turns, by its device's ID as a curve names it (curveDevice: "1042", a macro's or a modulator's own ID for theirs) and its
+// own ID in it (curveParameter: a modulator's parameter by its name, "rate"; a macro's value by the word "value",
+// midiLinkMacroValue, so that a macro given a new ID by a merge or a copy keeps its link). One link of a controller, and
+// one of a parameter.
+inline const juce::Identifier MIDILINK { "MIDILINK" };
+inline const juce::Identifier midiLinkChannel { "channel" };
+inline const juce::Identifier midiLinkNumber { "number" };
+inline const juce::Identifier midiLinkDevice { "device" };
+inline const juce::Identifier midiLinkParameter { "parameter" };
+inline constexpr const char* midiLinkMacroValue = "value";
+
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; isUncountedProperty() and
 // isUncountedElement(), below): on tracks and the master (whose row Collapse All collapses), their heights, collapsed and
 // pinned, drum mode and rows, and their automation lanes; on PHAZITE, the playlist's grid; on devices (DEVICE), where their

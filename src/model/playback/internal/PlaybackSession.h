@@ -142,6 +142,14 @@ public:
     bool recordsLiveTrack() const noexcept { return liveTrackRecords; }
     void setRecordsLiveTrack (bool records) noexcept { liveTrackRecords = records; }
 
+    // MIDI learn (model/midi/internal/MidiLinks.h): while the engine plays this project, what the MIDI inputs send on the
+    // controllers of the song's links, and while one of its parameters learns, on any controller that can be linked, comes
+    // to onMidiController rather than playing live (model/engine/internal/MidiTap.h), within a turn of the message loop: by
+    // its channel (1 to 16), number (0 to 119) and value (0 to 127), of the values of one controller that came together the
+    // last alone. The project context that makes the session sets it, and says while a parameter learns.
+    void setMidiLearning (bool);
+    std::function<void (int channel, int number, int value)> onMidiController;
+
     // The piano roll's guide notes into a track, on a MIDI channel (1 to 16), and a preset's tried in the browser; and their
     // ends, each on its channel. Neither Capture nor a take records them (Engine::playLive()'s recordable).
     void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity, int channel = 1);
@@ -170,6 +178,10 @@ private:
 
     TrackID liveTrack;
     bool liveTrackRecords = true;
+    bool midiLearning = false, midiLinksChanged = true;
+    void followMidiLinks(); // what the MIDI tap takes, told while the engine plays this project
+    void takeMidiControllers();
+    void letGoOfMidiTap();
     struct GuideNote
     {
         std::int64_t track = 0;

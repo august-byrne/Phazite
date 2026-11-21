@@ -37,10 +37,12 @@ namespace
         return path;
     }
 
-    // What merges whole: a curve with its points, the chord lane, the key set last.
+    // What merges whole: a curve with its points, the chord lane, the key set last, and a MIDI link (a controller's, which
+    // both sides linked to different parameters, is this side's: never one side's device with the other's parameter).
     bool mergesWhole (const juce::ValueTree& element)
     {
-        return element.hasType (schema::CURVE) || element.hasType (schema::CHORDLANE) || element.hasType (schema::LASTKEY);
+        return element.hasType (schema::CURVE) || element.hasType (schema::CHORDLANE) || element.hasType (schema::LASTKEY)
+               || element.hasType (schema::MIDILINK);
     }
 
     juce::ValueTree findTrack (const juce::ValueTree& song, std::uint64_t id)
@@ -422,6 +424,9 @@ namespace
 
         if (element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO) || element.hasType (schema::MODULATES))
             return "modulation";
+
+        if (element.hasType (schema::MIDILINK))
+            return "MIDI link of CC " + element[schema::midiLinkNumber].toString();
 
         return property.isValid() ? property.toString() : element.getType().toString().toLowerCase();
     }
@@ -1193,8 +1198,10 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
         Merger merger { result, "Song", 0, baseItems, theirItems, ourItems };
         merger.mergeProperties (base, result.song, other);
 
-        // Its tempo map's tempos and time signatures, its sections, its chord lane and the key set last.
-        for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
+        // Its tempo map's tempos and time signatures, its sections, its chord lane, the key set last and its MIDI links, by
+        // their controllers, each whole (a second link of a parameter, one from each side, goes as the merge is applied:
+        // forgetWhatNamesTheGone()).
+        for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY, &schema::MIDILINKS })
         {
             const auto b = base.getChildWithName (*type), t = other.getChildWithName (*type);
             auto o = result.song.getChildWithName (*type);

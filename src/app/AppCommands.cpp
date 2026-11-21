@@ -8,6 +8,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/UndoCommands.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/midi/MidiLinkModel.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -40,6 +41,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context, TrackR
     addFreezeCommands (registry, context, renders);
     addContainerCommands (registry, selection);
     addAutomationCommands (registry, context);
+    addMidiLinkCommands (registry, context);
     addLoopCommands (registry, selection, range);
     addMetronomeCommands (registry, selection, getAudioIO (engine));
     addTempoCommands (registry, selection);

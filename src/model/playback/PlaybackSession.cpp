@@ -52,6 +52,12 @@ namespace
     {
         return (child.isValid() && schema::isUncountedElement (parent, child)) || isInViewElement (parent);
     }
+
+    // The song's MIDI links, or one of them.
+    bool isInMidiLinks (const juce::ValueTree& tree)
+    {
+        return tree.hasType (schema::MIDILINKS) || (tree.hasType (schema::MIDILINK) && tree.getParent().hasType (schema::MIDILINKS));
+    }
 } // namespace
 
 PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
@@ -90,9 +96,12 @@ PlaybackSession::~PlaybackSession()
     plugins.setListener (nullptr);
     recorder = nullptr; // what it opened for the tracks closes
 
-    // Live MIDI goes nowhere until the session the engine plays next (if any) sends it there again (host.remove()).
+    // Live MIDI goes nowhere until the session the engine plays next (if any) sends it there again (host.remove()), and no
+    // controller is taken for this song's links any more.
     if (host.getPlayingSession() == this)
         getAudioIO().stopLiveMidi (host.getEngine());
+
+    letGoOfMidiTap();
 
     player.letGoOfPlugins();
     host.remove (*this);
@@ -106,6 +115,14 @@ AudioIO& PlaybackSession::getAudioIO() const noexcept
 
 void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
+    // The MIDI links, which no plan holds: what the MIDI tap takes.
+    if (isInMidiLinks (parent) || child.hasType (schema::MIDILINKS))
+    {
+        midiLinksChanged = true;
+        followMidiLinks();
+        return;
+    }
+
     // An element of view state added, removed or moved (a piano roll's, a track's lanes), or one in it: no new plan.
     if (! isViewElement (parent, child))
         triggerAsyncUpdate();
@@ -113,6 +130,13 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    if (isInMidiLinks (tree))
+    {
+        midiLinksChanged = true;
+        followMidiLinks();
+        return;
+    }
+
     // Where playback starts is the transport's (movePlayhead() locates the engine itself), view state is how the song shows,
     // and where the song stands in its versions is the versions': nothing a plan holds.
     if ((tree == songState && property == schema::playStart) || isViewState (tree, property) || schema::isVersionsProperty (tree, property))
@@ -445,6 +469,82 @@ void PlaybackSession::followLiveMidi()
     // While the engine plays this project, into its track.
     if (isPlayingProject())
         getAudioIO().setLiveMidi (&host.getEngine(), (std::int64_t) liveTrack.getRaw());
+
+    followMidiLinks();
+}
+
+void PlaybackSession::setMidiLearning (bool learning)
+{
+    midiLearning = learning;
+
+    if (isPlayingProject())
+        getAudioIO().getMidiTap().setLearning (learning);
+}
+
+void PlaybackSession::followMidiLinks()
+{
+    if (! isPlayingProject())
+        return;
+
+    auto& tap = getAudioIO().getMidiTap();
+
+    // What another session left waiting is none of this song's.
+    if (tap.takenBy != this)
+    {
+        tap.clear();
+        tap.takenBy = this;
+        tap.onArrived = [this] { takeMidiControllers(); };
+        midiLinksChanged = true;
+    }
+
+    tap.setLearning (midiLearning);
+
+    if (! std::exchange (midiLinksChanged, false))
+        return;
+
+    std::vector<std::pair<int, int>> controllers;
+
+    for (const auto& link : song->getState().getChildWithName (schema::MIDILINKS))
+        if (link.hasType (schema::MIDILINK))
+            controllers.emplace_back ((int) link[schema::midiLinkChannel], (int) link[schema::midiLinkNumber]);
+
+    tap.setDiverted (controllers);
+}
+
+void PlaybackSession::letGoOfMidiTap()
+{
+    auto& tap = getAudioIO().getMidiTap();
+
+    if (tap.takenBy != this)
+        return;
+
+    tap.setDiverted ({});
+    tap.setLearning (false);
+    tap.onArrived = nullptr;
+    tap.takenBy = nullptr;
+    tap.clear();
+}
+
+void PlaybackSession::takeMidiControllers()
+{
+    auto& tap = getAudioIO().getMidiTap();
+    std::vector<MidiTap::Value> values;
+
+    // The last of each controller's values that came together, in the order the controllers came.
+    for (MidiTap::Value value; tap.pop (value);)
+    {
+        const auto same = std::find_if (values.begin(), values.end(), [&value] (const MidiTap::Value& each)
+                                        { return each.channel == value.channel && each.number == value.number; });
+
+        if (same != values.end())
+            same->value = value.value;
+        else
+            values.push_back (value);
+    }
+
+    for (const auto& value : values)
+        if (onMidiController != nullptr && tap.takenBy == this)
+            onMidiController (value.channel, value.number, value.value);
 }
 
 void PlaybackSession::playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity, int channel)

@@ -22,6 +22,12 @@ The full text of every step, as it was written when it was built, is in the
   that nothing plays unseen. A drag draws values on the grid (off it with Alt), a right drag a straight ramp, the
   Delete tool removes what it passes and Delete All the lane's values, each one undo step that Escape takes back; a
   clip opens on the lane it was left on. A sustain pedal recorded with a part shows there, plays and can be deleted.
+- **S5.4 MIDI learn.** MIDI Learn in any control's menu (a device's knob, a fader, a pan, a send, a macro) links the
+  next knob or fader moved on a MIDI controller to it, and MIDI Learn Last Touched Parameter does the same for a knob
+  turned in a plug-in's own window. The link is the project's, saved with it, one controller for one parameter, made
+  and removed as undo steps and listed in the Project view's MIDI Links. A linked controller turns its parameter as
+  the control does, a sweep of it one undo step, written as automation while its track writes, and no longer reaches
+  the instrument or a take.
 
 ## The owner's round of 2026-11-20
 

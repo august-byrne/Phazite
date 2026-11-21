@@ -6,6 +6,7 @@
 #include "ValueText.h"
 #include "devices/core/Clock.h"
 #include "model/automation/AutomationModel.h"
+#include "model/midi/MidiLinkModel.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/theme/DesignTokens.h"
 #include "ui/theme/LookAndFeel.h"
@@ -957,6 +958,19 @@ juce::PopupMenu makeParameterMenu (ParameterHandle& handle, juce::Component& con
 
     menu.addItem ("Automate", isDevices, false, act ([] (ParameterHandle& h) { showAutomationLane (h); }));
     menu.addItem ("Delete Automation", isAutomated (handle), false, act ([] (ParameterHandle& h) { deleteAutomation (h); }));
+
+    // MIDI learn (model/midi/MidiLinkModel.h): the next knob or fader moved on a MIDI controller turns it; and its link removed.
+    if (canLearnMidi (handle))
+    {
+        if (isLearningMidi (handle))
+            menu.addItem ("Cancel MIDI Learn", act ([] (ParameterHandle& h) { cancelMidiLearn (h); }));
+        else
+            menu.addItem ("MIDI Learn", act ([] (ParameterHandle& h) { startMidiLearn (h); }));
+
+        if (const auto link = getMidiLink (handle))
+            menu.addItem ("Remove MIDI Link (" + describeMidiController (*link) + ")",
+                          act ([] (ParameterHandle& h) { removeMidiLink (h); }));
+    }
 
     // Modulation (docs/design.md, section 10): the modulators of its track, ticked while they modulate it (choosing one
     // adds or takes away its modulation), and a new one of each kind.

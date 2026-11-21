@@ -47,6 +47,11 @@ public:
     void gestureBegan (const ParameterRef&);
     void gestureEnded (const ParameterRef&);
 
+    // A grab let go of that changed nothing, outside any step (a MIDI controller's burst that set every value as it was:
+    // model/midi/internal/MidiLinks.h), which no step begins for: nothing is written. A pass in touch goes, as if never
+    // grabbed; one in latch or write writes on, as one not grabbed does.
+    void gestureLetGo (const ParameterRef&);
+
     // A control's drag taken back (Escape: ParameterHandle::cancelGesture()), just before its undo step is rolled back (what
     // waits for the drag to end is written after that, in a step of its own): what its pass
     // recorded since the grab goes, and the pass is as it was before the grab: in touch, as if never grabbed; in latch, back to

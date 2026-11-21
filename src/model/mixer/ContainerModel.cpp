@@ -369,7 +369,7 @@ ParameterHandle getChainVolume (ProjectContext& context, DeviceID chain)
         return {};
 
     const ParameterRef ref { chain, schema::chainVolumeParameter };
-    return makeParameterHandle (*song, ref, "Change " + getParameterName (*song, ref));
+    return makeParameterHandle (*song, ref);
 }
 
 ParameterHandle getChainPan (ProjectContext& context, DeviceID chain)
@@ -380,7 +380,7 @@ ParameterHandle getChainPan (ProjectContext& context, DeviceID chain)
         return {};
 
     const ParameterRef ref { chain, schema::chainPanParameter };
-    return makeParameterHandle (*song, ref, "Change " + getParameterName (*song, ref));
+    return makeParameterHandle (*song, ref);
 }
 
 ParameterHandle getChainCrossover (ProjectContext& context, DeviceID chain)
@@ -391,7 +391,7 @@ ParameterHandle getChainCrossover (ProjectContext& context, DeviceID chain)
     if (song == nullptr || ! locateParameter (*song, ref).has_value())
         return {};
 
-    return makeParameterHandle (*song, ref, "Change " + getParameterName (*song, ref));
+    return makeParameterHandle (*song, ref);
 }
 
 ContainerSplit getContainerSplit (const ProjectContext& context, DeviceID container)

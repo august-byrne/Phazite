@@ -59,6 +59,11 @@ its tags). An element it does know, where `Schema.h` doesn't put it, it leaves o
   scale: for a frequency, logarithmic, minimum × (maximum / minimum)^position, so 0.5 on a 20 Hz to 20 kHz cutoff is
   632 Hz; for another skewed parameter, skewed so that its midpoint is at 0.5), so that a straight line between two
   points is an even turn of the knob; a plug-in's parameters are from 0 to 1 already, and a pan's centre is 0.5;
+- `MIDILINKS`: the MIDI links (MIDI learn), each a `MIDILINK` with a hardware controller, by its `channel` (1 to 16)
+  and `number` (0 to 119; a link with another goes as the song opens), and the parameter it turns, by its `device`'s ID
+  and its `parameter`'s ID as a curve names them (a modulator's parameter by its name; a macro by its ID as `device` and
+  the word `value` as `parameter`, so that the link names the macro's ID once); one link of a controller and one of a
+  parameter, the first kept as the song opens;
 - `SECTIONS`, `CHORDLANE`: the song's parts and its chords;
 - `MERGING`, while a merge taken into the song waits for its version: what it merged, where, and the song before it
   (a piece in the project's Versions folder), as [versions-format.md](versions-format.md) says (section 8). It goes in

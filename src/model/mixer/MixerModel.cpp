@@ -240,7 +240,7 @@ ParameterHandle getVolume (ProjectContext& context, TrackID id)
     if (song == nullptr || ! isTrack (*song, id))
         return {};
 
-    return makeParameterHandle (*song, { getFader (*song, id), getVolumeParameterID (*song, id) }, "Change Volume");
+    return makeParameterHandle (*song, { getFader (*song, id), getVolumeParameterID (*song, id) });
 }
 
 ParameterHandle getPan (ProjectContext& context, TrackID id)
@@ -250,7 +250,7 @@ ParameterHandle getPan (ProjectContext& context, TrackID id)
     if (song == nullptr || ! isTrack (*song, id) || getPanParameterID (*song, id).isEmpty())
         return {};
 
-    return makeParameterHandle (*song, { getFader (*song, id), getPanParameterID (*song, id) }, "Change Pan");
+    return makeParameterHandle (*song, { getFader (*song, id), getPanParameterID (*song, id) });
 }
 
 namespace
@@ -283,8 +283,7 @@ LevelSource getLevel (ProjectContext& context, TrackID id)
 ParameterHandle getMasterVolume (ProjectContext& context)
 {
     auto* song = findSong (context);
-    return song != nullptr ? makeParameterHandle (*song, { getFader (*song, {}), getVolumeParameterID (*song, {}) }, "Change Master Volume")
-                           : ParameterHandle();
+    return song != nullptr ? makeParameterHandle (*song, { getFader (*song, {}), getVolumeParameterID (*song, {}) }) : ParameterHandle();
 }
 
 LevelSource getMasterLevel (ProjectContext& context)
@@ -555,7 +554,7 @@ std::vector<Send> getSends (const ProjectContext& context, TrackID id)
 ParameterHandle getSendLevel (ProjectContext& context, DeviceID id)
 {
     auto* song = findSong (context);
-    return song != nullptr ? makeParameterHandle (*song, { id, schema::sendLevelParameter }, "Change Send Level") : ParameterHandle();
+    return song != nullptr ? makeParameterHandle (*song, { id, schema::sendLevelParameter }) : ParameterHandle();
 }
 
 void setPreFader (ProjectContext& context, DeviceID id, bool preFader)
@@ -629,7 +628,7 @@ ParameterHandle getSendLevelTo (ProjectContext& context, TrackID from, TrackID r
     const auto create = [from, returnTrack] (Song& in) { return addSend (in, from, returnTrack, false); };
     const auto identity = "send " + juce::String (from.getRaw()) + " " + juce::String (returnTrack.getRaw());
     return makeCreatingHandle (*song, locate, create, identity, schema::sendLevelParameter, { 0.0f, 1.0f },
-                               "Send to " + getTrackName (*song, returnTrack), "Change Send Level");
+                               "Send to " + getTrackName (*song, returnTrack), {});
 }
 
 //==============================================================================

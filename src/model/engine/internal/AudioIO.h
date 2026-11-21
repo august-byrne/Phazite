@@ -6,6 +6,7 @@
 // recordings' options and their correction, which are Phazite's settings too. Message thread, but where it says.
 #pragma once
 
+#include "MidiTap.h"
 #include "engine/core/Engine.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -74,6 +75,12 @@ public:
     // their threads, with their pitch bends and controllers.
     void playLive (const juce::MidiMessage&) noexcept;
 
+    // What a MIDI input plays (any thread: each input calls it from its own, and tests from theirs): what MIDI learn takes
+    // (getMidiTap()), its controllers linked and, while a parameter learns, any it can link, goes to it alone; the rest is
+    // played live, as playLive() plays it, with its bend, pressure and controllers.
+    void takeMidi (const juce::MidiMessage&) noexcept;
+    MidiTap& getMidiTap() noexcept { return midiTap; }
+
 private:
     juce::AudioDeviceManager devices;
     std::vector<std::unique_ptr<juce::MidiInput>> openMidiInputs; // those on, open
@@ -86,11 +93,12 @@ private:
     std::atomic<engine::Engine*> liveEngine { nullptr };
     std::atomic<std::int64_t> liveTrack { 0 };
     std::atomic<int> playingLive { 0 }; // the calls of playLive() under way, which stopLiveMidi() waits for
+    MidiTap midiTap;
 
     void openMidiInputsOn(); // closes those switched off or gone, and opens those on
     void changeListenerCallback (juce::ChangeBroadcaster*) override { sendChangeMessage(); }
     void playLiveEvent (const juce::MidiMessage&) noexcept; // any message the engine plays
-    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message) override { playLiveEvent (message); }
+    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message) override { takeMidi (message); }
 
     JUCE_DECLARE_NON_COPYABLE (AudioIO)
 };

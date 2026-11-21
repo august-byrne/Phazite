@@ -113,9 +113,11 @@ what feeds the channel.
   not to be heard, as a MIDI cable carries a message a millisecond at most for all of them together, and a bound on a long
   take of a keyboard that sends its keys' pressure all the time (ten keys held for five minutes keep 3 million values at
   most). Capture thins them the same way. A controller recorded into a clip that was there takes the place of
-  its earlier values there from its first move in the take to its last. Capture keeps them too. The computer keyboard
-  plays notes alone. A take after a jump keeps no notes from before its start: the take before kept them, whose clips,
-  as Stop's, wait for a drag under way to end, a Record step of their own that the drag's Escape doesn't take back.
+  its earlier values there from its first move in the take to its last. Capture keeps them too. A controller linked to a
+  parameter (MIDI learn, [automation-and-modulation.md](automation-and-modulation.md)) turns that parameter alone: no
+  take or Capture keeps it. The computer keyboard plays notes alone. A take after a jump keeps no notes from before its
+  start: the take before kept them, whose clips, as Stop's, wait for a drag under way to end, a Record step of their own
+  that the drag's Escape doesn't take back.
 - **MIDI channels:** a note and a controller are recorded on the MIDI channel they were played on (the computer
   keyboard plays on channel 1), and everything above holds for each channel on its own: a note's end is its start's on
   its channel and pitch; the pedal, the bend and the channel's pressure held as the take starts or let go of at its

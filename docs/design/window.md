@@ -145,7 +145,7 @@ The activity bar down the window's left edge picks the left panel's view; a clic
 hides the panel.
 
 - **Browser:** instruments, effects, plug-ins, presets, sounds and projects ([browser.md](browser.md)).
-- **Project:** what the song holds, in three panes that fold.
+- **Project:** what the song holds, in four panes that fold.
   - *Notes*, kept in the song and saved with it. They are typed in place; each burst of typing is one undo step,
     "Change Notes". Showing the view does not give the notes the keys, so shortcuts go on working until the notes are
     clicked.
@@ -156,6 +156,10 @@ hides the panel.
     plays, their count with **Clean Up...**, which runs Clean Up Unused Audio.
   - *Plug-ins:* each plug-in the song holds, on its track or the master; the header says how many crashed, are not
     installed or are off. A crashed one has Reload. A click selects the plug-in and shows it in the Devices view.
+  - *MIDI Links:* each knob or fader of a MIDI controller linked to a parameter (MIDI learn,
+    [automation-and-modulation.md](automation-and-modulation.md)), "CC 21, Channel 1", and what it turns ("Lead: Synth:
+    Filter Cutoff"); a click selects its device and shows it (or else its track), and its cross, under the pointer or on
+    the row selected, removes the link, as one undo step, "Remove MIDI Link". With none, it says how to make one.
 - **Versions:** the project's versions and branches ([versions.md](versions.md)).
 
 ## Centre: the song above, the selection below

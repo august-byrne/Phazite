@@ -69,6 +69,7 @@ after start:
   automation.touch: off "Touch Automation"
   automation.latch: off "Latch Automation"
   automation.write: off "Write Automation"
+  midi.learnLastTouched: off "MIDI Learn Last Touched Parameter"
   transport.loop: on "Loop"
   transport.loopSelection: on "Loop Selection"
   section.loop: off "Loop Section"
@@ -1028,7 +1029,12 @@ after turn One's pan:
   edit.undo: on "Undo Change Pan"
   edit.undoOrRedo: on "Undo Change Pan"
   automation.automateLastTouched: on "Automate Pan"
+  midi.learnLastTouched: on "MIDI Learn Pan"
 after automation.automateLastTouched:
+after midi.learnLastTouched:
+  midi.learnLastTouched: on "Cancel MIDI Learn"
+after midi.learnLastTouched:
+  midi.learnLastTouched: on "MIDI Learn Pan"
 after add a clip to One at beat 32:
   edit.undo: on "Undo Script: add a clip to One at beat 32"
   edit.undoOrRedo: on "Undo Script: add a clip to One at beat 32"

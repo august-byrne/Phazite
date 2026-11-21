@@ -15,8 +15,10 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/DrumKit.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
@@ -1517,4 +1519,53 @@ TEST_CASE ("A DAWproject's project.xml with a byte order mark and no XML declara
 
     const auto read = phazite::readDawProject (file);
     CHECK (read.project != nullptr);
+}
+
+TEST_CASE ("A MIDI link to what the song hasn't, a controller's or a parameter's second link, and a controller out of range go as the "
+           "song opens")
+{
+    Edited edited;
+
+    // Two links, a device's parameter's and a fader's, saved.
+    {
+        auto& song = *phazite::findSong (edited.s.context);
+        const phazite::UndoStep step (song, "Link MIDI Controllers");
+        phazite::linkMidiController (song, { 1, 21 }, { edited.synth, "cutoff" });
+        phazite::linkMidiController (song, { 2, 7 }, edited.s.getVolumeParameter (edited.lead));
+    }
+
+    REQUIRE (edited.s.getProject().save().wasOk());
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* links = song.getChildByName ("MIDILINKS");
+            REQUIRE (links != nullptr);
+            REQUIRE (links->getNumChildElements() == 2);
+            const auto* first = links->getChildElement (0);
+            auto* second = links->getChildElement (1);
+
+            auto* gone = new juce::XmlElement (*first); // a link of a device the song hasn't
+            gone->setAttribute ("device", "777777");
+            gone->setAttribute ("number", "50");
+
+            auto* sameController = new juce::XmlElement (*second); // the first's controller, another parameter
+            sameController->setAttribute ("channel", first->getStringAttribute ("channel"));
+            sameController->setAttribute ("number", first->getStringAttribute ("number"));
+
+            auto* sameParameter = new juce::XmlElement (*first); // the first's parameter, another controller
+            sameParameter->setAttribute ("number", "60");
+
+            for (auto* added : { gone, sameController, sameParameter })
+                links->addChildElement (added);
+
+            // No controller a link takes: brought within range, it would be another controller (16 and 119).
+            second->setAttribute ("channel", "40");
+            second->setAttribute ("number", "125");
+        });
+    REQUIRE (project != nullptr);
+    const auto links = findAll (project->getSong().getState(), schema::MIDILINK);
+    REQUIRE (links.size() == 1);
+    CHECK ((int) links[0][schema::midiLinkChannel] == 1);
+    CHECK ((int) links[0][schema::midiLinkNumber] == 21);
+    CHECK (links[0][schema::midiLinkParameter].toString() == "cutoff");
 }

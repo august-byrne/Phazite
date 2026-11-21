@@ -4,15 +4,24 @@
 #include "AppScreen.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/DeviceHandle.h"
+#include "model/engine/internal/AudioIO.h"
+#include "model/engine/internal/EngineContext.h"
+#include "model/midi/MidiLinkModel.h"
+#include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/modulation/ModulationModel.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/UnusedAudio.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
 #include "model/versions/internal/VersionStore.h"
+#include "ui/components/Controls.h"
 #include "ui/project/ProjectView.h"
 #include "ui/shell/ActivityBar.h"
 
@@ -278,4 +287,95 @@ TEST_CASE ("The Project view lists the song's plug-ins on their tracks, and a cl
         REQUIRE (selected.size() == 1);
         CHECK (selected.front() == device);
     }
+}
+
+TEST_CASE ("MIDI learn the whole way: a control's MIDI Learn, a knob moved, the notice, the control turned, and the MIDI Links pane")
+{
+    Screen screen;
+    auto& context = screen.session.getContext();
+    auto& song = screen.getSong();
+    const auto track = screen.addTrack();
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    const auto send = [&audio] (int value)
+    {
+        audio.takeMidi (juce::MidiMessage::controllerEvent (1, 7, value));
+        phazite::test::dispatchPendingMessages();
+    };
+
+    // The fader as a slider shows it, with its menu.
+    juce::Slider fader;
+    phazite::ui::ParameterAttachment attachment (fader);
+    attachment.setParameter (phazite::getVolume (context, track));
+    auto& view = screen.showView();
+    CHECK (view.getNumLinks() == 0);
+    CHECK (view.getEmptyLinksText() == "No MIDI links. Right-click a control and choose MIDI Learn.");
+
+    // MIDI Learn: the notice says so, with Cancel, until a knob moves.
+    REQUIRE (phazite::test::runMenuItem (attachment.getMenu(), { "MIDI Learn" }));
+    auto& notices = screen.shell.getNotices();
+    REQUIRE (notices.getNumNotices() == 1);
+    CHECK (notices.getText (0) == "Move a knob or fader on your MIDI controller to link it to Volume.");
+    REQUIRE (notices.getActionButton (0) != nullptr);
+    CHECK (notices.getActionButton (0)->getButtonText() == "Cancel");
+    CHECK (phazite::test::findMenuItem (attachment.getMenu(), { "Cancel MIDI Learn" }) != nullptr);
+
+    send (100);
+    REQUIRE (notices.getNumNotices() == 1);
+    CHECK (notices.getText (0) == "CC 7 on channel 1 now turns Volume.");
+    CHECK (phazite::test::findMenuItem (attachment.getMenu(), { "Remove MIDI Link (CC 7, Channel 1)" }) != nullptr);
+    CHECK (phazite::test::findMenuItem (attachment.getMenu(), { "MIDI Learn" }) != nullptr);
+
+    // The knob turns the fader, which the slider shows.
+    send (0);
+    CHECK (phazite::getVolume (context, track).getValue() == doctest::Approx (0.0f));
+    attachment.update(); // as the display ticker has the control's owner update it
+    CHECK (fader.getValue() == doctest::Approx (0.0));
+
+    // The pane lists it; a click on its row selects its track, and its cross removes it.
+    view.refreshNow();
+    REQUIRE (view.getNumLinks() == 1);
+    CHECK (view.describeLink (0) == "CC 7, Channel 1: " + phazite::getTrackName (song, track) + ": Mixer: Volume");
+    auto& list = view.getLinkList();
+    phazite::test::Mouse mouse (list);
+    mouse.click (list.getRowPosition (0, true).withTrimmedRight (list.getRowPosition (0, true).getWidth() / 2).getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (context.getSongSelection().getTracks() == std::vector { track });
+    list.selectRow (0);
+    const auto remove = view.getRemovePosition (0);
+    REQUIRE_FALSE (remove.isEmpty());
+    mouse.click (remove.getCentre());
+    phazite::test::dispatchPendingMessages();
+    view.tickNow(); // read again after the click
+    CHECK (view.getNumLinks() == 0);
+    CHECK (phazite::describeUndo (&song) == "Undo Remove MIDI Link");
+
+    // The notice's Cancel ends learning, and the notice with it.
+    REQUIRE (phazite::test::runMenuItem (attachment.getMenu(), { "MIDI Learn" }));
+    auto* cancel = notices.getActionButton (notices.getNumNotices() - 1);
+    REQUIRE (cancel != nullptr);
+    screen.click (*cancel);
+    CHECK_FALSE (phazite::isLearningMidi (context));
+    CHECK (phazite::test::runTimersUntil (
+        [&notices] { return notices.getNumNotices() == 0 || notices.getText (notices.getNumNotices() - 1).startsWith ("CC"); }));
+
+    // A macro's knob and a device's have it too.
+    const auto macro = phazite::addModulator (context, track, phazite::ModulatorType::macro);
+    REQUIRE (macro.isValid());
+    juce::Slider macroKnob;
+    phazite::ui::ParameterAttachment macroAttachment (macroKnob);
+    macroAttachment.setParameter (
+        phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro).front().id));
+    CHECK (phazite::test::findMenuItem (macroAttachment.getMenu(), { "MIDI Learn" }) != nullptr);
+
+    phazite::DeviceID synth;
+
+    {
+        const phazite::UndoStep step (song, "Add Device");
+        synth = phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, phazite::devices::Synth::typeID));
+    }
+
+    juce::Slider cutoffKnob;
+    phazite::ui::ParameterAttachment cutoffAttachment (cutoffKnob);
+    cutoffAttachment.setParameter (phazite::getDeviceHandle (context, synth).getParameter ("cutoff"));
+    CHECK (phazite::test::findMenuItem (cutoffAttachment.getMenu(), { "MIDI Learn" }) != nullptr);
 }

@@ -174,6 +174,7 @@ namespace schema
                 { &CURVE, { &curveDevice, &curveParameter } },
                 { &LANE, { &laneDevice, &laneParameter } },
                 { &MODULATES, { &modulatesDevice, &modulatesParameter } },
+                { &MIDILINK, { &midiLinkChannel, &midiLinkNumber } },
                 { &VALUE, { &valueParameter } },
                 { &TEMPO, { &mapBeat }, true },
                 { &TIMESIGNATURE, { &mapBeat }, true },
@@ -231,13 +232,18 @@ namespace schema
             return holders;
         }
 
-        // What names an ID of the song's: a send's return, a sidechain's track, the device of a lane, a curve or what a
-        // modulator moves, and the drum sampler whose pad a track plays.
+        // What names an ID of the song's: a send's return, a sidechain's track, the device of a lane, a curve, what a
+        // modulator moves or what a MIDI link turns, and the drum sampler whose pad a track plays.
         const std::vector<Property>& getIDNamers()
         {
             static const std::vector<Property> namers {
-                { &SEND, &sendTo },       { &DEVICE, &deviceSidechain },    { &LANE, &laneDevice },
-                { &CURVE, &curveDevice }, { &MODULATES, &modulatesDevice }, { &TRACK, &trackPadDevice },
+                { &SEND, &sendTo },
+                { &DEVICE, &deviceSidechain },
+                { &LANE, &laneDevice },
+                { &CURVE, &curveDevice },
+                { &MODULATES, &modulatesDevice },
+                { &TRACK, &trackPadDevice },
+                { &MIDILINK, &midiLinkDevice },
             };
             return namers;
         }
@@ -341,7 +347,8 @@ namespace schema
     const std::map<juce::String, juce::StringArray>& getPlaces()
     {
         static const std::map<juce::String, juce::StringArray> places {
-            { "PHAZITE", { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "SECTIONS", "CHORDLANE", "MERGING" } },
+            { "PHAZITE",
+              { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "MIDILINKS", "SECTIONS", "CHORDLANE", "MERGING" } },
             { "TEMPOMAP", { "TEMPO", "TIMESIGNATURE" } },
             { "TRACKS", { "TRACK" } },
             { "TRACK", { "TRACK", "LANES", "DEVICE", "CONTAINER", "SEND", "MODULATOR", "MACRO", "CLIP" } },
@@ -354,6 +361,7 @@ namespace schema
             { "MACRO", { "MODULATES" } },
             { "AUTOMATION", { "CURVE" } },
             { "CURVE", { "POINT" } },
+            { "MIDILINKS", { "MIDILINK" } },
             { "SECTIONS", { "SECTION" } },
             { "CHORDLANE", { "CHORD", "CHORDKEY" } },
             { "CLIP", { "NOTE", "CONTROL", "WARP" } },

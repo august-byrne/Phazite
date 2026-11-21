@@ -7,12 +7,15 @@
 //   that nothing plays, how many, with Clean Up..., which runs Clean Up Unused Audio;
 // - Plug-ins: each plug-in the song holds, on its track (or the master), and what is wrong with it, if anything: crashed
 //   (with its Reload under the pointer), not installed here, or off; a click selects it and shows it in the Devices view.
+// - MIDI Links: each MIDI controller linked to a parameter (MIDI learn), "CC 21, Channel 1", and what it turns; a click selects
+//   its device, or else its track, and shows it; its Remove under the pointer, or selected, removes the link.
 // By the model's functions (model/project/ProjectContents.h) and the commands. It reads them again once a turn after the song
 // changes, and every few seconds while it shows, for files that came or went on the disk; how many audio files are unused it
 // finds in the background (model/project/UnusedAudio.h: UnusedAudioFinder), showing the last count meanwhile.
 #pragma once
 
 #include "model/commands/SongGesture.h"
+#include "model/midi/MidiLinkModel.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/UnusedAudio.h"
@@ -57,14 +60,20 @@ public:
     juce::Button& getNotesSection() noexcept { return notesSection; }
     juce::Button& getAudioSection() noexcept { return audioSection; }
     juce::Button& getPluginSection() noexcept { return pluginSection; }
+    juce::Button& getLinkSection() noexcept { return linkSection; }
     juce::ListBox& getAudioList() noexcept { return audioList; }
     juce::ListBox& getPluginList() noexcept { return pluginList; }
+    juce::ListBox& getLinkList() noexcept { return linkList; }
     int getNumAudioFiles() const noexcept { return (int) audioFiles.size(); }
     int getNumPlugins() const noexcept { return (int) plugins.size(); }
+    int getNumLinks() const noexcept { return (int) links.size(); }
     juce::String describeAudioFile (int row) const;
     juce::String describePlugin (int row) const;
+    juce::String describeLink (int row) const;
     juce::Rectangle<int> getLocatePosition (int row) const;
     juce::Rectangle<int> getReloadPosition (int row) const;
+    juce::Rectangle<int> getRemovePosition (int row) const;
+    juce::String getEmptyLinksText() const { return emptyLinks.isVisible() ? emptyLinks.getText() : juce::String(); }
     juce::Button& getCleanUpButton() noexcept { return cleanUpButton; }
     juce::String getUnusedText() const { return unusedText.getText(); }
 
@@ -75,6 +84,7 @@ public:
 private:
     class AudioModel;
     class PluginModel;
+    class LinkModel;
     class NotesField;
 
     CommandBridge& commands;
@@ -82,20 +92,22 @@ private:
 
     ViewTitle title { "Project" };
     SectionHeader notesSection { "Notes", SectionHeader::Style::pane }, audioSection { "Audio Files", SectionHeader::Style::pane },
-        pluginSection { "Plug-ins", SectionHeader::Style::pane };
+        pluginSection { "Plug-ins", SectionHeader::Style::pane }, linkSection { "MIDI Links", SectionHeader::Style::pane };
     std::unique_ptr<NotesField> notesField;
     std::unique_ptr<SongGesture> notesTyping; // a burst of typing's one undo step, until a pause or the keys go elsewhere
     juce::uint32 lastTyped = 0;               // when the last key of the burst changed the notes
     std::unique_ptr<AudioModel> audioModel;
     std::unique_ptr<PluginModel> pluginModel;
-    juce::ListBox audioList, pluginList;
-    std::unique_ptr<ListRowHover> audioHover, pluginHover;
-    juce::Label emptyAudio, emptyPlugins, unusedText;
+    std::unique_ptr<LinkModel> linkModel;
+    juce::ListBox audioList, pluginList, linkList;
+    std::unique_ptr<ListRowHover> audioHover, pluginHover, linkHover;
+    juce::Label emptyAudio, emptyPlugins, emptyLinks, unusedText;
     juce::TextButton cleanUpButton;
     std::unique_ptr<juce::FileChooser> chooser;
 
     std::vector<ProjectAudioFile> audioFiles;
     std::vector<ProjectPlugin> plugins;
+    std::vector<MidiLinkInfo> links;
     int unusedFiles = -1;       // none read yet
     juce::String unusedProblem; // why it can't tell which are unused (a version that can't be read whole), none while it can
     UnusedAudioFinder unusedFinder;
@@ -109,7 +121,7 @@ private:
 
     // The rows' icons and actions, drawn in each row's colours.
     TintedIcon soundIcon { Icon::sound }, instrumentIcon { Icon::instrument }, effectIcon { Icon::effect };
-    TintedIcon locateIcon { Icon::search }, reloadIcon { Icon::reload };
+    TintedIcon midiIcon { Icon::midi }, locateIcon { Icon::search }, reloadIcon { Icon::reload }, removeIcon { Icon::close };
 
     void read();         // the lists, the notes and the unused files, from the model
     void readNotes();    // the notes, unless a burst of typing is going on
@@ -119,6 +131,8 @@ private:
     void locate (int row);
     void reload (int row);
     void showPlugin (int row);
+    void removeLink (int row);
+    void showLink (int row);
     bool showsAction (const juce::ListBox&, const ListRowHover&, int row) const; // under the pointer, or selected
     juce::Rectangle<int> getActionPosition (const juce::ListBox&, int row) const;
 

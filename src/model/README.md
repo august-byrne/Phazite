@@ -78,6 +78,7 @@ The engine as the app and the UI reach it, and what Phazite reads and opens arou
 | `AudioDevices.h` | The audio devices as Phazite chooses and describes them: a Bluetooth output, the first run's low-latency setup. |
 | `AudioDeviceWatch.h` | The audio devices plugged in while Phazite runs, watched, with the switch to one. |
 | `internal/AudioIO.h` | Opens the audio devices and the MIDI inputs through JUCE's device manager, as Phazite's settings keep them, with the recordings' options. |
+| `internal/MidiTap.h` | What the MIDI inputs send that MIDI learn takes before it is played live: a linked controller, or any while a parameter learns, handed to the message thread through a lock-free queue. |
 | `internal/PluginScanner.h` | The plug-in scan, in the helper program, with a time limit for each file, and what a helper says a file holds read with limits (`readScannedPlugins()`). |
 | `EngineContext.h` | The engine context as the UI reaches it: the audio devices, how busy the engine is, the MIDI inputs. It owns the audio device, the plug-in host and Phazite's engine on the device. |
 | `internal/EngineContext.h` | The engine context as the app and the tests make it: `phazite::createEngineContext()`. |
@@ -199,6 +200,14 @@ The chord lane, a guide the playlist shows while the song has chords.
 | `ModulationModel.h` | Each track's modulators and macros and what they modulate, by IDs. |
 | `ModulationValues.h` | Their plain values. |
 | `internal/Modulation.h` | Modulators and macros kept on the tracks' and containers' elements in the song, which Phazite's engine plays. |
+
+## midi/
+
+| File | What it holds |
+|---|---|
+| `MidiLinkModel.h` | MIDI learn: a MIDI controller's knob or fader linked to a parameter, which it turns as its control does; the links, learning them and removing them, by handles and plain values, and MIDI Learn Last Touched Parameter. |
+| `MidiLinkValues.h` | A MIDI controller as a plain value, and how menus and sentences name it. |
+| `internal/MidiLinks.h` | The song's links, and what learns and turns them for the open song (`MidiLinker`, which the project context holds): a burst of a knob's moves one undo step. |
 
 ## versions/
 

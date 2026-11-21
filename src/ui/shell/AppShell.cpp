@@ -2,6 +2,7 @@
 #include "AppShell.h"
 #include "CommandPalette.h"
 #include "model/base/Numbers.h"
+#include "model/midi/MidiLinkModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/presets/PresetModel.h"
 #include "model/versions/VersionsModel.h"
@@ -368,6 +369,27 @@ void AppShell::versionsChanged()
 
         notices.show ({ .title = notice->title, .text = notice->text, .actionName = notice->actionName, .action = std::move (back) });
     }
+}
+
+void AppShell::midiLearnChanged()
+{
+    // While a parameter learns, a notice says so until it ends (with Cancel; closing it cancels too); then what was linked,
+    // as news.
+    notices.closeThoseEnded();
+
+    if (const auto name = getMidiLearnName (projectContext))
+    {
+        const auto cancel = [this] { cancelMidiLearn (projectContext); };
+        notices.show ({ .title = "MIDI Learn",
+                        .text = "Move a knob or fader on your MIDI controller to link it to " + *name + ".",
+                        .actionName = "Cancel",
+                        .action = cancel,
+                        .lasts = [this, learning = *name] { return getMidiLearnName (projectContext) == learning; },
+                        .closed = cancel });
+    }
+
+    if (const auto made = takeMidiLinkMade (projectContext))
+        notices.show ({ .title = "MIDI Link", .text = *made });
 }
 
 void AppShell::setLayout (Layout layout)

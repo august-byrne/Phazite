@@ -57,9 +57,12 @@
 #include "model/engine/AudioFiles.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/Preview.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/Preview.h"
+#include "model/midi/MidiLinkModel.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
@@ -2417,6 +2420,42 @@ TEST_SUITE ("realtime-audit")
         report ("Edited while it plays: values, notes, a clip, undo and redo", m);
         CHECK (m.peakLevel > 0.01f);                                                   // it plays
         CHECK (phazite::getNotes (song.context, std::vector { chords }).size() == 48); // the note undone
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: edited while it plays: a parameter turned by the MIDI controller linked to it")
+    {
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto filter = song.addEffect (keys, phazite::devices::FilterEffect::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        // Linked as a user links it: MIDI Learn, then the knob moved, as an input's thread hands it over.
+        auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+        const auto cutoff = phazite::getParameter (song.context, { filter, "cutoff" });
+        phazite::startMidiLearn (cutoff);
+        audio.takeMidi (juce::MidiMessage::controllerEvent (1, 74, 0));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&cutoff] { return phazite::getMidiLink (cutoff).has_value(); }));
+
+        const auto turn = [&audio] (int value) { audio.takeMidi (juce::MidiMessage::controllerEvent (1, 74, value)); };
+        auto& played = getSong (song);
+
+        const auto m = playProjectAndMeasure (
+            song.context, Playing { .edits = {
+                                        { 10, "the knob turned", [&] { turn (20); } },
+                                        { 20, "turned on", [&] { turn (70); } },
+                                        { 30, "and on", [&] { turn (110); } },
+                                        { 40, "the knob rested: its burst kept", [&] { phazite::findMidiLinker (played)->endBurst(); } },
+                                        { 60, "undone", [&] { phazite::undo (played); } },
+                                        { 70, "turned again", [&] { turn (40); } },
+                                    } });
+        report ("Edited while it plays: a parameter turned by a MIDI controller", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        CHECK (cutoff.getValue() == doctest::Approx (*phazite::getValueAtControllerPosition (played, { filter, "cutoff" }, 40)));
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

@@ -60,6 +60,7 @@ struct SongChanges
     bool tempo = false;      // the tempo or the time signature
     bool view = false;       // how tracks show: their heights, collapsed and pinned ones, drum rows, automation lanes (view state)
     bool notes = false;      // the project's notes (model/project/ProjectContents.h)
+    bool midiLinks = false;  // MIDI links made or removed (model/midi/MidiLinkModel.h)
 
     // With clips: the clips added, changed (their notes included) or removed, and the tracks they were on or went to (both of
     // a clip moved to another track).
@@ -87,6 +88,9 @@ public:
         // The project's versions, its branches or the changes since its last version may have changed
         // (model/versions/VersionsModel.h): at most a few times a second.
         virtual void versionsChanged() {}
+
+        // MIDI learn started or ended for a parameter, or a link learned (model/midi/MidiLinkModel.h): at once.
+        virtual void midiLearnChanged() {}
     };
 
     // Plays the song it holds on an engine context, which outlives it (model/engine/internal/EngineContext.h).

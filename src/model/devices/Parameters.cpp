@@ -573,6 +573,39 @@ void setValueSetByHand (Song& song, const ParameterRef& ref, float value)
         setValueSetByHand (song, *parameter, value);
 }
 
+juce::String getChangeName (const Song& song, const ParameterRef& ref)
+{
+    const auto parameter = locateParameter (song, ref);
+
+    if (! parameter.has_value())
+        return {};
+
+    switch (parameter->source)
+    {
+        case ParameterSource::volume:
+            return parameter->state.hasType (schema::MASTER) ? "Change Master Volume" : "Change Volume";
+
+        case ParameterSource::pan:
+            return "Change Pan";
+
+        case ParameterSource::send:
+            return "Change Send Level";
+
+        case ParameterSource::macro:
+            return "Change " + getModulatorName (song, ModulatorID::fromRaw (ref.device.getRaw()));
+
+        case ParameterSource::chainVolume:
+        case ParameterSource::chainPan:
+        case ParameterSource::crossover:
+        case ParameterSource::device:
+        case ParameterSource::plugin:
+        case ParameterSource::modulator:
+            break;
+    }
+
+    return "Change " + getParameterName (song, ref);
+}
+
 ManyValuesSetByHand::ManyValuesSetByHand (const Song& song)
 {
     if (auto* session = findSession (song))

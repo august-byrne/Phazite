@@ -300,14 +300,74 @@ private:
 };
 
 //==============================================================================
+// The MIDI links: each with the MIDI icon, its controller and what it turns; its Remove under the pointer or selected. A click
+// selects what it turns and shows it.
+class ProjectView::LinkModel : public juce::ListBoxModel
+{
+public:
+    explicit LinkModel (ProjectView& v)
+        : view (v)
+    {
+    }
+
+    int getNumRows() override { return view.getNumLinks(); }
+
+    void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
+    {
+        if (! juce::isPositiveAndBelow (row, getNumRows()))
+            return;
+
+        const auto& p = getPalette (view);
+        const auto& link = view.links[(size_t) row];
+        const auto textColour = drawListRow (g, view, juce::Rectangle<int> (width, height).toFloat(), selected, row == view.linkHover->row);
+        auto area = juce::Rectangle<int> (width, height);
+        view.midiIcon.draw (g, takeIcon (area).toFloat().withSizeKeepingCentre (History::rowIconSize, History::rowIconSize), p.textMuted);
+        const auto action = takeActionColumn (area);
+
+        if (view.showsAction (view.linkList, *view.linkHover, row))
+            view.removeIcon.draw (g, action.toFloat().withSizeKeepingCentre (History::rowIconSize, History::rowIconSize), p.text);
+
+        drawText (g, area, textColour, p.textMuted, describeMidiController (link.controller), link.turns);
+    }
+
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+            return;
+
+        if (view.getRemovePosition (row).contains (e.getEventRelativeTo (&view.linkList).getPosition()))
+            view.removeLink (row);
+        else
+            view.showLink (row);
+    }
+
+    void returnKeyPressed (int row) override { view.showLink (row); }
+    void selectedRowsChanged (int) override { view.linkList.repaint(); }
+
+    juce::String getNameForRow (int row) override { return view.describeLink (row); }
+
+    juce::String getTooltipForRow (int row) override
+    {
+        return juce::isPositiveAndBelow (row, getNumRows())
+                   ? view.describeLink (row) + ". Click to show it; its cross removes the link (Remove MIDI Link)"
+                   : juce::String();
+    }
+
+private:
+    ProjectView& view;
+};
+
+//==============================================================================
 ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
     : commands (bridge),
       context (projectContext),
       notesField (std::make_unique<NotesField> (*this)),
       audioModel (std::make_unique<AudioModel> (*this)),
       pluginModel (std::make_unique<PluginModel> (*this)),
+      linkModel (std::make_unique<LinkModel> (*this)),
       audioList ("Audio Files", audioModel.get()),
       pluginList ("Plug-ins", pluginModel.get()),
+      linkList ("MIDI Links", linkModel.get()),
       unusedFinder (projectContext),
       pressElsewhere (std::make_unique<PressElsewhere> (*this))
 {
@@ -318,7 +378,7 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
     // The first pane has no line above it, as in VS Code; each folds under its header.
     notesSection.setLineAbove (false);
 
-    for (auto* section : { &notesSection, &audioSection, &pluginSection })
+    for (auto* section : { &notesSection, &audioSection, &pluginSection, &linkSection })
     {
         section->onClick = [this] { resized(); };
         addAndMakeVisible (section);
@@ -327,6 +387,7 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
     notesSection.set ("Notes", {}, 0);
     audioSection.set ("Audio Files", {}, 0);
     pluginSection.set ("Plug-ins", {}, 0);
+    linkSection.set ("MIDI Links", {}, 0);
     notesField->setTitle ("Notes");
     notesField->setMultiLine (true, true);
     notesField->setReturnKeyStartsNewLine (true);
@@ -336,7 +397,7 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
     notesField->onTextChange = [this] { notesChanged(); };
     addAndMakeVisible (*notesField);
 
-    for (auto* list : { &audioList, &pluginList })
+    for (auto* list : { &audioList, &pluginList, &linkList })
     {
         list->setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
         list->setTitle (list->getName());
@@ -355,8 +416,9 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
 
     audioHover = std::make_unique<ListRowHover> (audioList, repaintRows (audioList));
     pluginHover = std::make_unique<ListRowHover> (pluginList, repaintRows (pluginList));
+    linkHover = std::make_unique<ListRowHover> (linkList, repaintRows (linkList));
 
-    for (auto* label : { &emptyAudio, &emptyPlugins, &unusedText })
+    for (auto* label : { &emptyAudio, &emptyPlugins, &emptyLinks, &unusedText })
     {
         label->setFont (juce::FontOptions (TextSize::small));
         label->setJustificationType (juce::Justification::topLeft);
@@ -368,6 +430,7 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
                         juce::dontSendNotification);
     emptyPlugins.setText ("No plug-ins: those the song's tracks hold show here, with any that crashed or aren't installed.",
                           juce::dontSendNotification);
+    emptyLinks.setText ("No MIDI links. Right-click a control and choose MIDI Learn.", juce::dontSendNotification);
     unusedText.setJustificationType (juce::Justification::centredLeft);
     unusedText.setTitle ("Unused audio files");
 
@@ -388,6 +451,7 @@ ProjectView::~ProjectView()
     endTyping();
     audioHover = nullptr;
     pluginHover = nullptr;
+    linkHover = nullptr;
 }
 
 juce::TextEditor& ProjectView::getNotesField() noexcept
@@ -400,9 +464,11 @@ void ProjectView::refreshTooltips()
     notesSection.setTooltip ("Folds the notes written about the song, or shows them again");
     audioSection.setTooltip ("Folds the song's audio files, or shows them again");
     pluginSection.setTooltip ("Folds the song's plug-ins, or shows them again");
+    linkSection.setTooltip ("Folds the song's MIDI links, or shows them again");
     notesField->setTooltip ("Notes about the song, kept in it: what it is, ideas, lyrics, what is left to do");
     audioList.setTooltip ("The audio files the song plays, with the tracks that play them; a missing one says so");
     pluginList.setTooltip ("The plug-ins the song holds, on their tracks, and any that crashed, aren't installed or are off");
+    linkList.setTooltip ("The knobs and faders of MIDI controllers linked to the song's parameters, and what each turns");
     cleanUpButton.setTooltip (withShortcut (commands,
                                             "Clean Up Unused Audio: lists the audio files in the project's folder that nothing "
                                             "plays, any version included, to move those you tick to the recycle bin",
@@ -423,7 +489,8 @@ void ProjectView::read()
     // What shows changes only when what the model holds did: at rest, nothing repaints.
     auto newFiles = getProjectAudioFiles (context);
     auto newPlugins = getProjectPlugins (context);
-    const auto changed = newFiles != audioFiles || newPlugins != plugins;
+    auto newLinks = getMidiLinks (context);
+    const auto changed = newFiles != audioFiles || newPlugins != plugins || newLinks != links;
     readNotes();
 
     // The unused files, while it shows: looked for in the background, the count shown once it is found (showUnused()).
@@ -437,14 +504,18 @@ void ProjectView::read()
 
     audioFiles = std::move (newFiles);
     plugins = std::move (newPlugins);
+    links = std::move (newLinks);
 
     const auto missing = (int) std::count_if (audioFiles.begin(), audioFiles.end(), [] (const auto& file) { return file.missing; });
     audioSection.set ("Audio Files", missing > 0 ? juce::String (missing) + " missing" : juce::String(), (int) audioFiles.size());
     pluginSection.set ("Plug-ins", describeProblems (plugins), (int) plugins.size());
+    linkSection.set ("MIDI Links", {}, (int) links.size());
 
     audioList.updateContent();
     pluginList.updateContent();
+    linkList.updateContent();
     audioList.repaint();
+    linkList.repaint();
     pluginList.repaint();
     resized();
 }
@@ -564,6 +635,33 @@ void ProjectView::showPlugin (int row)
     commands.invoke ("device.show");
 }
 
+void ProjectView::removeLink (int row)
+{
+    if (juce::isPositiveAndBelow (row, (int) links.size()))
+    {
+        // Read again after the click, not inside it: the list's row that was clicked goes with the link.
+        removeMidiLink (context, links[(size_t) row].controller);
+        needsReading = true;
+    }
+}
+
+void ProjectView::showLink (int row)
+{
+    if (! juce::isPositiveAndBelow (row, (int) links.size()))
+        return;
+
+    // Its device in the Devices view, as a plug-in's row shows it; or else its track (a fader's, a send's, a macro's).
+    if (const auto& link = links[(size_t) row]; link.device.isValid())
+    {
+        context.getSongSelection().selectOnly (link.device);
+        commands.invoke ("device.show");
+    }
+    else if (link.track.isValid())
+    {
+        context.getSongSelection().selectOnly (link.track);
+    }
+}
+
 //==============================================================================
 juce::String ProjectView::describeAudioFile (int row) const
 {
@@ -582,6 +680,23 @@ juce::String ProjectView::describePlugin (int row) const
     const auto& plugin = plugins[(size_t) row];
     const auto state = describeState (plugin.state);
     return plugin.name + (state.isNotEmpty() ? ", " + state : juce::String()) + ": " + plugin.channelName;
+}
+
+juce::String ProjectView::describeLink (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, (int) links.size()))
+        return {};
+
+    const auto& link = links[(size_t) row];
+    return describeMidiController (link.controller) + ": " + link.turns;
+}
+
+juce::Rectangle<int> ProjectView::getRemovePosition (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, (int) links.size()) || ! showsAction (linkList, *linkHover, row))
+        return {};
+
+    return getActionPosition (linkList, row);
 }
 
 bool ProjectView::showsAction (const juce::ListBox& list, const ListRowHover& hover, int row) const
@@ -621,6 +736,7 @@ void ProjectView::projectChanged()
     notesField->setText ({}, false);
     audioFiles.clear();
     plugins.clear();
+    links.clear();
     unusedFiles = 0; // none shown until the new project's are found
     unusedProblem.clear();
     read();
@@ -631,7 +747,8 @@ void ProjectView::songChanged (const SongChanges& changes)
     if (changes.notes)
         readNotes();
 
-    if (changes.clips || changes.devices || changes.tracks)
+    // What a link turns is named by its track, its device and its parameter (a macro's or a modulator's by theirs).
+    if (changes.clips || changes.devices || changes.tracks || changes.modulation || changes.midiLinks)
         needsReading = true;
 }
 
@@ -694,24 +811,30 @@ void ProjectView::resized()
                                    .withSizeKeepingCentre (width, height));
     }
 
-    // The two lists share what is left, each as tall as its rows if there is room, with the clean-up row and the notes of
+    // The three lists share what is left, each as tall as its rows if there is room, with the clean-up row and the notes of
     // empty lists under their headers.
-    const auto audioOpen = audioSection.getToggleState(), pluginsOpen = pluginSection.getToggleState();
+    const auto audioOpen = audioSection.getToggleState(), pluginsOpen = pluginSection.getToggleState(),
+               linksOpen = linkSection.getToggleState();
     const auto showsUnused = audioOpen && (unusedFiles > 0 || unusedProblem.isNotEmpty());
     const auto emptyHeight = 2 * ListRow::height;
-    auto fixed = audioSection.getPreferredHeight() + pluginSection.getPreferredHeight() + (showsUnused ? SideBar::buttonRowHeight : 0)
-                 + (audioOpen && audioFiles.empty() ? emptyHeight : 0) + (pluginsOpen && plugins.empty() ? emptyHeight : 0);
+    auto fixed = audioSection.getPreferredHeight() + pluginSection.getPreferredHeight() + linkSection.getPreferredHeight()
+                 + (showsUnused ? SideBar::buttonRowHeight : 0) + (audioOpen && audioFiles.empty() ? emptyHeight : 0)
+                 + (pluginsOpen && plugins.empty() ? emptyHeight : 0) + (linksOpen && links.empty() ? emptyHeight : 0);
     const auto room = juce::jmax (0, area.getHeight() - fixed);
     auto audioHeight = audioOpen ? (int) audioFiles.size() * ListRow::height : 0;
     auto pluginHeight = pluginsOpen ? (int) plugins.size() * ListRow::height : 0;
+    auto linkHeight = linksOpen ? (int) links.size() * ListRow::height : 0;
 
-    if (audioHeight + pluginHeight > room)
+    if (audioHeight + pluginHeight + linkHeight > room)
     {
         // Each gets its part of the room, at least a row while it has any.
-        const auto total = (double) (audioHeight + pluginHeight);
-        const auto audioShare = juce::roundToInt (room * (audioHeight / total));
-        audioHeight = audioHeight > 0 ? juce::jmax (ListRow::height, audioShare) : 0;
-        pluginHeight = pluginHeight > 0 ? juce::jmax (ListRow::height, room - audioHeight) : 0;
+        const auto total = (double) (audioHeight + pluginHeight + linkHeight);
+        const auto share = [room, total] (int height)
+        { return height > 0 ? juce::jmax (ListRow::height, juce::roundToInt (room * (height / total))) : 0; };
+        const auto audioShare = share (audioHeight), pluginShare = share (pluginHeight);
+        linkHeight = linkHeight > 0 ? juce::jmax (ListRow::height, room - audioShare - pluginShare) : 0;
+        audioHeight = audioShare;
+        pluginHeight = pluginShare;
     }
 
     audioSection.setBounds (area.removeFromTop (audioSection.getPreferredHeight()));
@@ -743,5 +866,13 @@ void ProjectView::resized()
 
     if (emptyPlugins.isVisible())
         emptyPlugins.setBounds (fromSides (area.removeFromTop (emptyHeight)).withTrimmedLeft (-emptyPlugins.getBorderSize().getLeft()));
+
+    linkSection.setBounds (area.removeFromTop (linkSection.getPreferredHeight()));
+    linkList.setBounds (area.removeFromTop (linkHeight));
+    linkList.setVisible (linksOpen && ! links.empty());
+    emptyLinks.setVisible (linksOpen && links.empty());
+
+    if (emptyLinks.isVisible())
+        emptyLinks.setBounds (fromSides (area.removeFromTop (emptyHeight)).withTrimmedLeft (-emptyLinks.getBorderSize().getLeft()));
 }
 } // namespace phazite::ui

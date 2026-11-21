@@ -110,6 +110,8 @@ automation.lowerPoints: Lower Automation Points
 automation.raisePointsMore: Raise Automation Points More
 automation.lowerPointsMore: Lower Automation Points More
 automation.automateLastTouched: Change Pan
+midi.learnLastTouched: Change Pan
+midi.learnLastTouched: Change Pan
 clip.consolidate: Consolidate
 transport.metronome: Consolidate
 transport.metronome: Consolidate

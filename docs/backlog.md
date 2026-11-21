@@ -263,7 +263,7 @@ Stage 2 put the docs in order: pages that say what is, with the history in `arch
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
 | The checks by hand: recording through an ASIO® interface, a MIDI keyboard, a DAWproject opened in another DAW | `docs/hand-checks.md` | — | 3 | product-gaps 7, docs 2 |
-| MIDI learn | `src/model/engine/AudioIO.cpp` | M | 5 | product-gaps 1 |
+| MIDI learn, what is left: a link that picks the control up where it is rather than jumping, a range for a link, relative encoders, 14-bit controllers and NRPN, pads and notes as switches, links kept for every project, Escape to cancel learning, and Delete on a row of the Project view's MIDI Links | `src/model/midi/MidiLinks.cpp` | M | 7 | roadmap step S5.4 |
 | Export of a range or the loop, and templates to start a project from | `src/model/project/Export.h` | M | 5 | product-gaps 11 |
 | MP3 export, beside WAV and FLAC (roadmap step S5.16): an encoder under a compatible licence chosen (LAME is LGPL), added to the notices and [third-party.md](third-party.md), a bit rate to choose, and the song's start kept where it is | `src/model/project/Export.h` | M | 5 | the owner, 2026-11-17; product-gaps 11 |
 | Presets heard in the browser before they go into the song: an instrument's preset plays a short phrase that fits its kind, an effect's plays on a loop, both rendered beside the song and never through it (roadmap step S5.18) | `src/ui/browser/Browser.cpp` | M | 5 | comparison with another DAW, 2026-11-17 |

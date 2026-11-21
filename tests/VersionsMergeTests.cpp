@@ -3,6 +3,7 @@
 // same base, changed through the model, and the other side's lines taken into this side's.
 #include "EnginePlayback.h"
 #include "RandomEdits.h"
+#include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
@@ -13,14 +14,18 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/versions/internal/ApplySong.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/SongMerge.h"
 #include "model/versions/internal/VersionHistory.h"
@@ -55,6 +60,16 @@ struct Sides
     phazite::MergeResult merge()
     {
         return phazite::mergeSongs (base->getState(), ours->getState(), theirs->getState(), [this] { return ours->makeID(); });
+    }
+
+    // The merge applied to this side's song, as Merge applies it (VersionsModel.cpp): one step, what names the gone taken away.
+    phazite::MergeResult mergeIntoOurs()
+    {
+        auto merged = merge();
+        const phazite::UndoStep step (*ours, "Merge");
+        phazite::makeSongLike (*ours, merged.song);
+        phazite::removeBrokenReferences (*ours);
+        return merged;
     }
 };
 
@@ -219,6 +234,64 @@ TEST_CASE ("What both sides added gets IDs of its own: tracks, devices, clips an
         notes += child.hasType (schema::NOTE) ? 1 : 0;
 
     CHECK (notes == 3);
+}
+
+TEST_CASE ("A macro the other side added and linked to a MIDI controller keeps its link as the merge gives it a new ID")
+{
+    Sides sides;
+
+    // Both count on from the same place, so each side's first macro has the same ID, and theirs is given another.
+    const auto ourMacro = phazite::addModulator (*sides.ours, sides.tracks[0], phazite::ModulatorType::macro);
+    const auto theirMacro = phazite::addModulator (*sides.theirs, sides.tracks[1], phazite::ModulatorType::macro);
+    REQUIRE (ourMacro == theirMacro);
+    const phazite::ParameterRef macro { phazite::DeviceID::fromRaw (theirMacro.getRaw()), juce::String (theirMacro.getRaw()) };
+    REQUIRE (phazite::describeParameter (*sides.theirs, macro).has_value());
+    phazite::linkMidiController (*sides.theirs, { 1, 1 }, macro);
+
+    CHECK_FALSE (sides.mergeIntoOurs().renumbered.empty());
+    const auto linked = phazite::findLinkedParameter (*sides.ours, { 1, 1 });
+    REQUIRE (linked.has_value());
+    CHECK (linked->device != macro.device);
+    CHECK (phazite::describeParameter (*sides.ours, *linked).has_value());
+    const auto state = phazite::findModulatorState (*sides.ours, phazite::ModulatorID::fromRaw (linked->device.getRaw()));
+    CHECK (state.hasType (schema::MACRO));
+    CHECK (state.getParent()[schema::trackName].toString() == "Drums");
+    checkSong (*sides.ours);
+}
+
+TEST_CASE ("A merge keeps one link of each MIDI controller and one of each parameter, each link whole")
+{
+    Sides sides;
+    const auto synthA = phazite::insertDeviceState (*sides.base, sides.tracks[0],
+                                                    phazite::makeOwnDeviceState (*sides.base, phazite::devices::Synth::typeID));
+    const auto synthB = phazite::insertDeviceState (*sides.base, sides.tracks[1],
+                                                    phazite::makeOwnDeviceState (*sides.base, phazite::devices::Synth::typeID));
+    const phazite::ParameterRef cutoffA { synthA, "cutoff" }, resonanceA { synthA, "resonance" }, cutoffB { synthB, "cutoff" };
+    phazite::linkMidiController (*sides.base, { 1, 1 }, cutoffA);
+    sides.ours = phazite::makeSong (sides.base->getState().createCopy());
+    sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+
+    SUBCASE ("Both sides link another controller to the same parameter: this side's link stays")
+    {
+        phazite::linkMidiController (*sides.ours, { 1, 2 }, resonanceA);
+        phazite::linkMidiController (*sides.theirs, { 1, 3 }, resonanceA);
+        sides.mergeIntoOurs();
+        CHECK (phazite::findMidiLink (*sides.ours, resonanceA) == phazite::MidiController { 1, 2 });
+        CHECK_FALSE (phazite::findLinkedParameter (*sides.ours, { 1, 3 }).has_value());
+    }
+
+    // This side moved the link to another device's knob, the other to another knob of the same device: never another
+    // device's knob of the one, the other's knob of the other.
+    SUBCASE ("Both sides link the same controller to different parameters: one side's link, whole")
+    {
+        phazite::linkMidiController (*sides.ours, { 1, 1 }, cutoffB);
+        phazite::linkMidiController (*sides.theirs, { 1, 1 }, resonanceA);
+        const auto merged = sides.mergeIntoOurs();
+        CHECK (phazite::findLinkedParameter (*sides.ours, { 1, 1 }) == cutoffB);
+        CHECK (merged.clashes.size() == 1);
+    }
+
+    checkSong (*sides.ours);
 }
 
 TEST_CASE ("Taken away on one side: it goes if the other left it as it was, and stays, with a note, if the other changed it")

@@ -65,6 +65,11 @@ std::optional<devices::Travel> getControlTravel (const Song&, const ParameterRef
 float getValueSetByHand (const Song&, const ParameterRef&);
 void setValueSetByHand (Song&, const ParameterRef&, float value);
 
+// The name of the undo step of a change of it by hand, by a control (ParameterHandle.h) or a MIDI controller's knob
+// (model/midi/internal/MidiLinks.h): "Change Volume", "Change Master Volume", "Change Pan", "Change Send Level", "Change
+// Chain 2 Volume", a macro's or another parameter's by its name ("Change Filter Cutoff"). None for one the song hasn't.
+juce::String getChangeName (const Song&, const ParameterRef&);
+
 // While one lives, the values set by hand are a change of many at once (a preset loaded or tried, a sampler's sound with
 // its settings), which writes no automation: a track in Latch or Write punches in for a control moved by itself
 // (model/playback/internal/AutomationWriter.h), not for each of these. Message thread only.

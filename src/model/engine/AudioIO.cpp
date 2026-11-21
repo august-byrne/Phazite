@@ -189,6 +189,12 @@ void AudioIO::playLive (const juce::MidiMessage& message) noexcept
         playLiveEvent (message);
 }
 
+void AudioIO::takeMidi (const juce::MidiMessage& message) noexcept
+{
+    if (! midiTap.take (message))
+        playLiveEvent (message);
+}
+
 void AudioIO::playLiveEvent (const juce::MidiMessage& message) noexcept
 {
     playingLive.fetch_add (1);

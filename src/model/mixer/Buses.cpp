@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 
@@ -43,6 +44,10 @@ namespace
                 }
             }
         }
+
+        // Its MIDI link, which turns it by its new name.
+        if (const auto controller = findMidiLink (song, was); controller.has_value() && was != now)
+            linkMidiController (song, *controller, now);
 
         // A lane for the new name after the old one's, as it was (its height, collapsed or not): the old one stays, ignored
         // while its fader is gone, for an undo that brings that fader back (lanes are view state, outside the history).

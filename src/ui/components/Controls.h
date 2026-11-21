@@ -261,7 +261,8 @@ void setPrimary (juce::TextButton&, bool primary);
 //==============================================================================
 // A parameter's menu, as a right-click on any of its controls shows it (docs/design.md, section 10): its name as a header;
 // Type a Value..., where typeValue is given (a knob's or a fader's field); then Automate, Delete Automation (enabled while it
-// is automated) and Modulate: the modulators of its track, ticked while they modulate it, and a new one of each kind. A
+// is automated), MIDI Learn (Cancel MIDI Learn while it learns) and, while it has a link, Remove MIDI Link (CC 21, Channel 1),
+// and Modulate: the modulators of its track, ticked while they modulate it, and a new one of each kind. A
 // parameter that the first change makes (a send to a return) has Type a Value... alone; with none, it is empty. What is
 // chosen acts on the handle while the control lives, so the handle must live as long as the control (its attachment's, or
 // its owner's).

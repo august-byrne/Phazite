@@ -12,6 +12,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
@@ -141,6 +142,9 @@ namespace
                 if (element.hasType (schema::AUTOMATION))
                     return add (pending.automation);
 
+                if (element.hasType (schema::MIDILINKS))
+                    return add (pending.midiLinks);
+
                 // A track's modulators and macros, and what they modulate.
                 if (element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO) || element.hasType (schema::MODULATES))
                     return add (pending.modulation);
@@ -201,6 +205,8 @@ namespace
         {
             if (child.hasType (schema::AUTOMATION) || child.hasType (schema::CURVE))
                 add (pending.automation);
+            else if (child.hasType (schema::MIDILINKS) || child.hasType (schema::MIDILINK))
+                add (pending.midiLinks);
             else if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO) || child.hasType (schema::MODULATES))
                 add (pending.modulation);
             else if (schema::isTrackViewElement (child))
@@ -356,6 +362,7 @@ struct ProjectContext::Impl
     std::unique_ptr<FreezeKeeper> freezes;         // unfreezes a frozen track whose clips or frozen devices change
     std::unique_ptr<ClipRenders> clipRenders;      // renders what the clips play stretched, pitched or reversed
     std::unique_ptr<AutomationWatcher> automation; // the parameter touched last
+    std::unique_ptr<MidiLinker> midiLinks;         // what learns and turns its MIDI links
     std::unique_ptr<PlaybackSession> playback;     // the song as Phazite's engine plays it
     std::unique_ptr<VersionHistory> versions;      // the project's versions, beside its file
     DeviceWindowHost* windows = nullptr;           // what shows the devices' windows, the app's
@@ -368,7 +375,8 @@ struct ProjectContext::Impl
 
     void dropSong()
     {
-        versions = nullptr; // a version being written is finished first
+        versions = nullptr;  // a version being written is finished first
+        midiLinks = nullptr; // its burst kept, its learning ended, before its session goes
         playback = nullptr;
         automation = nullptr;
         clipRenders = nullptr; // its renders stopped
@@ -612,6 +620,16 @@ void setSong (ProjectContext& context, Song* song)
         {
             if (impl.problems != nullptr)
                 impl.problems (title, message);
+        };
+        impl.midiLinks = std::make_unique<MidiLinker> (*song);
+        impl.midiLinks->onChange = [&impl] { impl.listeners.call ([] (ProjectContext::Listener& l) { l.midiLearnChanged(); }); };
+        // Not while the window is held for work, when no command that changes the project runs either (holdForWork()): the
+        // value goes, and learning waits for the next one. Under a card or a dialog, a knob turns its parameter, as a
+        // hardware control does.
+        impl.playback->onMidiController = [&impl, &context] (int channel, int number, int value)
+        {
+            if (impl.midiLinks != nullptr && ! context.isHoldingForWork())
+                impl.midiLinks->take ({ channel, number }, value);
         };
         impl.versions = std::make_unique<VersionHistory> (
             *song, [&impl] { impl.listeners.call ([] (ProjectContext::Listener& l) { l.versionsChanged(); }); });

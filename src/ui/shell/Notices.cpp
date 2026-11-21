@@ -67,7 +67,13 @@ public:
         }
 
         closeButton.setTooltip ("Closes the notice");
-        closeButton.onClick = [this] { owner.close (*this); };
+        closeButton.onClick = [this]
+        {
+            if (notice.closed != nullptr)
+                notice.closed();
+
+            owner.close (*this);
+        };
         addAndMakeVisible (closeButton);
 
         for (auto* button : std::initializer_list<juce::Button*> { &actionButton, &closeButton })
@@ -164,12 +170,25 @@ void Notices::show (Notice notice)
     auto& card = *cards.emplace_back (std::make_unique<Card> (*this, std::move (notice)));
     addAndMakeVisible (card);
 
-    // At most so many: the oldest news goes first, then the oldest problem.
+    // At most so many: the oldest news goes first, then the oldest problem. One that lasts while a state holds (MIDI learn
+    // waiting for a knob) stays, as the state does.
     for (auto shown = getShown(); (int) shown.size() > NoticeTint::mostShown; shown = getShown())
     {
-        const auto news = std::find_if (shown.begin(), shown.end(), [] (const Card* c) { return ! c->notice.isProblem; });
-        const auto* gone = news != shown.end() ? *news : shown.front();
-        std::erase_if (cards, [gone] (const std::unique_ptr<Card>& c) { return c.get() == gone; });
+        const auto first = [&shown] (bool problem)
+        {
+            return std::find_if (shown.begin(), shown.end(),
+                                 [problem] (const Card* c) { return c->notice.lasts == nullptr && c->notice.isProblem == problem; });
+        };
+
+        auto gone = first (false);
+
+        if (gone == shown.end())
+            gone = first (true);
+
+        if (gone == shown.end())
+            break;
+
+        std::erase_if (cards, [card = *gone] (const std::unique_ptr<Card>& c) { return c.get() == card; });
     }
 
     cardsChanged();
@@ -294,8 +313,16 @@ void Notices::countShown (double seconds)
     {
         auto& card = **it;
 
-        if (card.isVisible() && ! card.notice.isProblem && ! NoticeCard::isUnderPointer (card))
+        if (card.isVisible() && ! card.notice.isProblem && card.notice.lasts == nullptr && ! NoticeCard::isUnderPointer (card))
             card.shown += seconds;
+
+        // One whose state ended goes as a closed one does, hidden now and deleted after: its own button's click may have ended it.
+        if (card.isVisible() && card.notice.lasts != nullptr && ! card.notice.lasts())
+        {
+            close (card);
+            ++it;
+            continue;
+        }
 
         if (card.shown >= NoticeTint::shownSeconds)
         {
@@ -319,7 +346,6 @@ void Notices::timerCallback()
     const auto seconds = (now - lastTick) / 1000.0;
     lastTick = now;
 
-    if (juce::Process::isForegroundProcess())
-        countShown (seconds);
+    countShown (juce::Process::isForegroundProcess() ? seconds : 0.0); // a lasting one goes as its state ends, in front or not
 }
 } // namespace phazite::ui

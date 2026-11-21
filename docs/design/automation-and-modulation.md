@@ -30,7 +30,7 @@ macro knob. Any knob or fader of Phazite's, and any parameter a plug-in lets be 
 | A modulator's On switch | Built | |
 | Automating or modulating a modulator's own parameters | Planned | No roadmap step |
 | Modulation for each note (per voice) | Planned | No roadmap step |
-| MIDI learn | Planned | No roadmap step |
+| MIDI learn: a controller's knob or fader linked to a parameter, saved in the project | Built | Roadmap S5.4 |
 
 ## Automating a control
 
@@ -283,6 +283,46 @@ the rings of knobs that only switched-off modulators modulate (showing where the
 Switching is one undo step ("Turn Modulator Off"), saved with the project. Presets load modulators on. A macro has
 no switch: it is a knob, turned down to do nothing.
 
+## MIDI learn
+
+A knob or fader of a MIDI controller can turn any control that turns a parameter the song saves: a device's parameter
+(Phazite's or a plug-in's), a track's volume and pan, a send's level, a container's chain's, a modulator's and a macro.
+
+- **Learning.** A control's right-click menu has MIDI Learn (after Delete Automation). While it learns, a notice says
+  "Move a knob or fader on your MIDI controller to link it to Cutoff.", with Cancel; the next controller moved on any
+  MIDI input (a control change, 0 to 119, on any channel) is linked, as one undo step, "Link MIDI Controller", and the
+  notice says what was linked ("CC 21 on channel 1 now turns Cutoff."). The move that links the controller doesn't turn
+  the parameter; its next one does. Notes, the bend and pressure play on meanwhile. Learning ends then, when cancelled
+  (the menu's Cancel MIDI Learn, the notice's Cancel or its close; Escape doesn't cancel it), when its parameter goes, or
+  when another project opens. The notice stays while it learns, however many others come. MIDI Learn Last Touched
+  Parameter (a command, with no key by default) learns the parameter changed last, in a plug-in's own window too, and
+  cancels while one learns.
+- **One controller, one parameter.** A controller is linked by its channel and number to one parameter, and a parameter
+  has one link: learning a controller that is linked moves its link ("..., instead of Volume."), and learning for a
+  parameter that has one replaces it, in the one step. A knob for several parameters is a macro's job.
+- **The link is the project's,** saved in the song, as Ableton Live, FL Studio, Bitwig and Reaper keep theirs; making
+  and removing one are undo steps and unsaved changes. The menu's Remove MIDI Link (CC 21, Channel 1) and the Project
+  view's MIDI Links pane remove one. What leaves the song takes its links along in its step; a copied device or track
+  gets none, and a preset holds none. A merge takes a link whole: a controller both lines linked to different parameters
+  keeps this line's link, and of two links of one parameter, one from each line, this line's stays.
+- **The value is the control's position:** 0 to 127 along the control's travel, as an automation point's position is,
+  a switch on from 64 and a choice's steps sharing the travel evenly. The parameter jumps to the knob's position at its
+  first move, as Live does by default (no pick-up).
+- **Turning the knob is turning the control by hand:** the parameter touched last, heard by a plug-in, and, while the
+  song plays and its track writes automation, written as a control's drag is. A burst of a knob's moves is one undo step
+  named as the control's change is ("Change Cutoff", "Change Master Volume") from its first value until the knob has
+  rested for half a second, or until another step, a gesture, an undo or a redo begins, which keeps it first; two knobs
+  turned at once are one step. A burst that set every value as it was (a switch that is on, turned within its top half)
+  is no step. A knob turned during a control's drag is part of the drag's step, so the drag's Escape takes it back too, a
+  link learned meanwhile included: one step for what happens inside a gesture.
+- **Where it turns:** under a card or a dialog (the settings, a file chooser) a knob turns its parameter, as a hardware
+  control does. While the window is held for work (a branch being switched to, a file being read), when no command that
+  changes the project runs, a knob changes nothing and learning waits for a controller moved after the hold.
+- **A linked controller is the link's alone:** from any input, it turns its parameter and goes nowhere else (not to the
+  instrument, not into a take or Capture); every other message plays as before. The inputs' threads hand what MIDI learn
+  takes to the message thread through a lock-free queue (`MidiTap`), which wakes it, so that a knob is heard within a
+  turn of the message loop; nothing of it runs on the audio thread.
+
 ## How automation and modulation combine
 
 - The lane sets the base value, and modulators move the parameter around it.
@@ -325,7 +365,9 @@ no switch: it is a knob, turned down to do nothing.
 
 ## Not built
 
-- MIDI learn, a hardware control assigned to a parameter: Planned.
+- MIDI learn's pick-up (a knob that takes over only once it passes the value), a range for a link, relative encoders,
+  14-bit controllers and NRPN, notes and pads as switches, the bend or pressure as sources, links kept for every
+  project (in the app's settings), control-surface scripts, MIDI clock and feedback to the controller: not built.
 - Automating or modulating a modulator's own parameters: Planned.
 - Modulation for each note, an instrument moving a parameter for each voice (the note follower's each note's pitch
   and velocity, envelopes started by each note): Planned.
@@ -349,5 +391,8 @@ no switch: it is a knob, turned down to do nothing.
 - `src/engine/modulation/ModulatorNode.h`, `src/devices/modulation/Modulators.h`, `Modulation.h`: modulators as the
   engine plays them, and how modulation moves a parameter.
 - `src/ui/mixer/ModulatorSlots.h`, `src/ui/devices/ModulatorEditor.h`: the chips and the editors.
+- `src/model/midi/MidiLinkModel.h`: MIDI learn and the links, by handles; `internal/MidiLinks.h`: the song's links and
+  what learns and turns them (`MidiLinker`, which the project context holds); `src/model/engine/internal/MidiTap.h`:
+  what the MIDI inputs send that MIDI learn takes, before it is played live.
 - Tests: `tests/AutomationModelTests.cpp`, `AutomationLaneTests.cpp`, `AutomationFollowsClipsTests.cpp`,
-  `ModulationModelTests.cpp`, `ModulationUiTests.cpp`, `GoldenModulationTests.cpp`.
+  `ModulationModelTests.cpp`, `ModulationUiTests.cpp`, `GoldenModulationTests.cpp`, `MidiLinkTests.cpp`.

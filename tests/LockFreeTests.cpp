@@ -19,6 +19,7 @@
 #include "engine/core/PlayheadClock.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
+#include "model/engine/internal/MidiTap.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -1260,4 +1261,85 @@ TEST_CASE ("The clock a test held runs on from where it stood as it is let go, n
     // To a hundredth of a millisecond: the clock counts whole ticks, so a minute moved on can come out a part of a tick
     // short in milliseconds (it did once, on CI's Clang build, 2026-11-17, the two numbers alike to six digits).
     CHECK (Clock::getMilliseconds() >= heldAt + 60000.0 - 0.01);
+}
+
+TEST_CASE ("The MIDI tap raced by four inputs while the message thread changes what it takes and takes it: nothing torn, nothing lost "
+           "that isn't counted")
+{
+    // Each input sends every controller of its own channel round and round, its value a sum of its channel and number, so that
+    // a value torn between two sends shows. The message thread meanwhile diverts every controller, then none, then the even
+    // ones, learning between, and takes what comes.
+    static constexpr int inputs = 4, sendsEach = 40000;
+    phazite::MidiTap tap;
+    std::atomic<int> started { 0 }, taken { 0 }, finished { 0 };
+    const auto valueOf = [] (int channel, int number) { return (channel * 7 + number) % 128; };
+    std::vector<std::thread> threads;
+
+    for (int input = 0; input < inputs; ++input)
+    {
+        threads.emplace_back (
+            [&tap, &started, &taken, &finished, &valueOf, channel = input + 1]
+            {
+                ++started;
+
+                while (started.load() < inputs + 1)
+                    std::this_thread::yield();
+
+                for (int i = 0; i < sendsEach; ++i)
+                {
+                    const auto number = i % phazite::MidiTap::numLinkable;
+
+                    if (tap.take (juce::MidiMessage::controllerEvent (channel, number, valueOf (channel, number))))
+                        ++taken;
+                }
+
+                ++finished;
+            });
+    }
+
+    std::vector<std::pair<int, int>> all, even;
+
+    for (int channel = 1; channel <= inputs; ++channel)
+    {
+        for (int number = 0; number < phazite::MidiTap::numLinkable; ++number)
+        {
+            all.emplace_back (channel, number);
+
+            if (number % 2 == 0)
+                even.emplace_back (channel, number);
+        }
+    }
+
+    const auto dropped = tap.getDropped();
+    int popped = 0, torn = 0, round = 0;
+    ++started;
+
+    const auto takeWaiting = [&]
+    {
+        for (phazite::MidiTap::Value value; tap.pop (value);)
+        {
+            ++popped;
+
+            if (value.channel < 1 || value.channel > inputs || value.number >= phazite::MidiTap::numLinkable
+                || value.value != valueOf (value.channel, value.number))
+                ++torn;
+        }
+    };
+
+    // Until every input has sent all it sends.
+    while (finished.load() < inputs)
+    {
+        ++round;
+        tap.setDiverted (round % 3 == 0 ? all : round % 3 == 1 ? std::vector<std::pair<int, int>> {} : even);
+        tap.setLearning (round % 7 == 0);
+        takeWaiting();
+    }
+
+    for (auto& thread : threads)
+        thread.join();
+
+    takeWaiting();
+    CHECK (torn == 0);
+    CHECK (popped + (int) (tap.getDropped() - dropped) == taken.load());
+    CHECK (popped > 0);
 }

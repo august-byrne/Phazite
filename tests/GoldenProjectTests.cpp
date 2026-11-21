@@ -41,6 +41,7 @@
 #include "model/devices/internal/Wavetables.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/midi/MidiLinkModel.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/DeviceType.h"
 #include "model/mixer/FreezeModel.h"
@@ -247,8 +248,17 @@ phazite::TrackID addDrumSampler (phazite::Song& song, phazite::ProjectContext& c
     return snare;
 }
 
+// A MIDI controller linked to a parameter as a user links one: MIDI Learn, then the knob moved on an input.
+void linkMidi (const phazite::ParameterHandle& parameter, int channel, int number)
+{
+    phazite::startMidiLearn (parameter);
+    phazite::getAudioIO (phazite::test::getEngineContext()).takeMidi (juce::MidiMessage::controllerEvent (channel, number, 0));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&parameter] { return phazite::getMidiLink (parameter).has_value(); }));
+}
+
 // Modulators on Keys, each kind's values and what it modulates: an LFO on the synth's cutoff, a step sequencer on the
-// track's pan, switched off, and a macro of the track's on its volume.
+// track's pan, switched off, and a macro of the track's on its volume. And MIDI links: a knob on the synth's cutoff, and
+// one on the macro.
 void addModulators (phazite::ProjectContext& context, const Tracks& tracks)
 {
     const auto synth = phazite::getInstrument (context, tracks.keys);
@@ -271,6 +281,9 @@ void addModulators (phazite::ProjectContext& context, const Tracks& tracks)
     phazite::renameMacro (context, macro, "Swell");
     phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro).front().id).setValue (0.25f);
     phazite::modulate (context, macro, phazite::getVolume (context, tracks.keys).getRef(), -0.5f);
+
+    linkMidi (phazite::getParameter (context, { synth->id, "cutoff" }), 3, 74);
+    linkMidi (phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro).front().id), 1, 1);
 }
 
 // A MIDI file with a note and one of each kind of controller event a recording takes in, and a note and a controller on
@@ -824,6 +837,7 @@ juce::StringArray getHolders (const juce::String& declared)
         { "modulator", { "MODULATOR" } },
         { "macro", { "MACRO" } },
         { "modulates", { "MODULATES" } },
+        { "midi", { "MIDILINK" } },
         { "curve", { "CURVE" } },
         { "point", { "POINT" } },
         { "section", { "SECTION" } },

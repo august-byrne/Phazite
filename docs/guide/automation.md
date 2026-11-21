@@ -152,9 +152,31 @@ hear the sound with and without it.
 
 Automation sets a control's value along the song, and modulators move it around that value.
 
+## MIDI learn
+
+A knob or fader on a MIDI controller can turn any control: a device's knob, a plug-in's parameter, a track's volume, pan
+and sends, or a macro.
+
+1. Right-click the control and choose **MIDI Learn**. A notice says that Phazite is waiting, with **Cancel** (Escape
+   doesn't cancel it; the control's menu has **Cancel MIDI Learn** too).
+2. Move the knob or fader on your controller. The notice says what it now turns ("CC 21 on channel 1 now turns Filter
+   Cutoff."). That first move only links it; the next one turns the control.
+
+From then on the knob turns the control, from wherever it is, and goes nowhere else: it plays no notes and isn't
+recorded. Turning it is like turning the control by hand: **Undo** takes back a turn of it, and while the song plays on a
+track in Touch, Latch or Write, it writes automation. It turns the control while the settings or another dialog is open,
+but not while Phazite holds the window for work (switching to a branch, reading a file). Turned while you drag another
+control, it is part of that drag: Escape takes both back. A knob turns one control, and a control has one knob: learning
+a knob that turns something else moves it here. For a parameter in a plug-in's own window, turn it there, then run
+**MIDI Learn Last Touched Parameter** from the command search.
+
+The links are saved with the project. The control's menu has **Remove MIDI Link**, and the Project view lists every link
+under **MIDI Links**, where a click shows what it turns and its cross removes it.
+
 ## Not yet
 
-- MIDI learn, a hardware knob assigned to a control: planned.
+- MIDI learn's pick-up (a knob that takes over only as it passes the value), ranges, relative encoders and 14-bit
+  controllers: not built.
 - Automating or modulating a modulator's own settings: planned.
 - Modulation for each note an instrument plays: planned.
 - Copying automation points with Cut, Copy and Paste: planned (Duplicate copies them).

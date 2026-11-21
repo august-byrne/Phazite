@@ -41,6 +41,14 @@
       "join": "/"
     },
     {
+      "type": "MIDILINK",
+      "properties": [
+        "channel",
+        "number"
+      ],
+      "join": "/"
+    },
+    {
       "type": "VALUE",
       "properties": [
         "parameter"
@@ -146,6 +154,10 @@
     {
       "type": "TRACK",
       "property": "padDevice"
+    },
+    {
+      "type": "MIDILINK",
+      "property": "device"
     }
   ],
   "uncountedProperties": {

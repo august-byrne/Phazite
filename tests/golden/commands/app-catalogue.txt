@@ -68,6 +68,7 @@ automation.read
 automation.touch
 automation.latch
 automation.write
+midi.learnLastTouched
 transport.loop | L
 transport.loopSelection | ctrl + L
 section.loop

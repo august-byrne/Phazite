@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The song's MIDI links (MidiLinkModel.h; Schema.h: MIDILINKS), for the model, the app and tests: reading and changing them in
+// the caller's undo step, and what learns and turns them for the open song (MidiLinker), which the project context holds.
+// Message thread only.
+#pragma once
+
+#include "model/base/Song.h"
+#include "model/devices/ParameterRef.h"
+#include "model/midi/MidiLinkValues.h"
+
+#include <juce_events/juce_events.h>
+
+#include <functional>
+#include <memory>
+#include <optional>
+#include <set>
+#include <utility>
+#include <vector>
+
+namespace phazite
+{
+class Trial;
+
+struct MidiLink
+{
+    MidiController controller;
+    ParameterRef parameter;
+};
+
+// The parameter a link's element names, as the song names it elsewhere (ParameterRef.h): a macro's link holds the word
+// schema::midiLinkMacroValue as its parameter, which stays as a merge or a copy gives the macro a new ID.
+ParameterRef readMidiLinkParameter (const Song&, const juce::ValueTree& link);
+
+// The song's links, by channel, then number; a parameter's controller; a controller's parameter.
+std::vector<MidiLink> getMidiLinks (const Song&);
+std::optional<MidiController> findMidiLink (const Song&, const ParameterRef&);
+std::optional<ParameterRef> findLinkedParameter (const Song&, MidiController);
+
+// Links a controller to a parameter in the caller's step: the controller's link, if it had one, moves here, and the
+// parameter's own, if it had one, goes. The parameter the controller turned before, if it was another.
+std::optional<ParameterRef> linkMidiController (Song&, MidiController, const ParameterRef&);
+void unlinkMidiController (Song&, MidiController);
+
+// The links of what is gone: those whose device, chain, send, fader, modulator or macro isn't among the song's items (by
+// their IDs, as forgetWhatNamesTheGone() finds them, model/mixer/internal/Mixer.h), in the caller's step.
+void forgetMidiLinksOfTheGone (Song&, const std::set<std::uint64_t>& items);
+
+// One link of each controller and one of each parameter: of two, the first in the song's order stays, the other goes, through
+// undo (the caller's step), or none (the loader: makeConsistent()). forgetMidiLinksOfTheGone() does it too, after a merge or
+// an applied song, which can take one side's link of a parameter beside the other's.
+void keepOneMidiLinkEach (Song&, juce::UndoManager* undo);
+
+// The value a controller's position (0 to 127) sets a parameter to: along its control's travel (getControlTravel()), as an
+// automation point's position is, 127 all the way; a parameter that steps (a switch, a choice) in steps that share the travel
+// evenly, a switch on from 64. None for a parameter the song hasn't.
+std::optional<float> getValueAtControllerPosition (const Song&, const ParameterRef&, int position);
+
+// What learns and turns the open song's links (the project context holds one for the song it holds, and it goes with it).
+// A controller's values come from the MIDI inputs (model/engine/internal/MidiTap.h) through the song's session, which
+// diverts the song's links' controllers and, while learning, any controller (PlaybackSession::setMidiLearning()).
+//
+// A burst of a knob's moves is one undo step, named as a control's change is ("Change Cutoff"), from its first value until
+// the controllers have rested for restMilliseconds (devices::Clock), or until a step, a gesture, an undo or a redo begins
+// meanwhile, which keeps it first (Trial); two knobs turned at once are one burst, named after the first. A burst that set
+// every value as it was begins and keeps no step. A value that comes while a control is dragged joins the drag's step, and
+// begins no burst. While the song plays and a parameter's track writes automation, its burst writes as a control's drag
+// writes, punched in at its first value and out at the burst's end (one that changed nothing writes nothing: its hold is let
+// go of, AutomationWriter::gestureLetGo()).
+class MidiLinker final : private juce::Timer,
+                         private juce::ValueTree::Listener
+{
+public:
+    explicit MidiLinker (Song&);
+    ~MidiLinker() override; // keeps what a burst changed
+
+    Song& getSong() const noexcept { return *song; }
+
+    void startLearning (const ParameterRef&);
+    void cancelLearning();
+    std::optional<ParameterRef> getLearning() const { return learning; }
+
+    // A controller's value, 0 to 127: the controller learned, if a parameter learns, else its link's parameter set.
+    void take (MidiController, int value);
+
+    // Called as learning starts or ends, and as a link is learned (not as the linker goes).
+    std::function<void()> onChange;
+
+    // What the last link learned made, once (MidiLinkModel.h: takeMidiLinkMade()).
+    std::optional<juce::String> takeLinkMade() { return std::exchange (linkMade, std::nullopt); }
+
+    bool isInBurst() const;   // a burst open that changed something
+    bool isBurstOpen() const; // one open, whether or not it changed anything (its timer runs)
+    void endBurst();          // keeps it, as the controllers' rest does
+
+    static constexpr double restMilliseconds = 500.0;
+
+private:
+    Song::Ptr song;
+    juce::ValueTree state;
+    std::optional<ParameterRef> learning;
+    std::optional<juce::String> linkMade;
+
+    std::unique_ptr<Trial> burst;
+    juce::String burstName;
+    std::vector<ParameterRef> inBurst; // the parameters it turned, which a pass may write
+    double lastMove = 0.0;             // when it moved last, in devices::Clock's milliseconds
+    static constexpr int restCheckMilliseconds = 50;
+
+    void setLearning (std::optional<ParameterRef>);
+    void learn (MidiController);
+    void turn (const ParameterRef&, float value);
+    void finishWriting(); // the burst's passes told it ended, in its step
+
+    void timerCallback() override;
+    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
+
+    JUCE_DECLARE_NON_COPYABLE (MidiLinker)
+};
+
+// The linker of a song a project context holds, or nullptr.
+MidiLinker* findMidiLinker (const Song&);
+} // namespace phazite

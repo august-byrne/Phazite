@@ -26,7 +26,8 @@ namespace
     const std::map<juce::String, juce::StringArray>& getPlaces()
     {
         static const std::map<juce::String, juce::StringArray> places {
-            { "PHAZITE", { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "SECTIONS", "CHORDLANE", "MERGING" } },
+            { "PHAZITE",
+              { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "MIDILINKS", "SECTIONS", "CHORDLANE", "MERGING" } },
             { "TEMPOMAP", { "TEMPO", "TIMESIGNATURE" } },
             { "TRACKS", { "TRACK" } },
             { "TRACK", { "TRACK", "LANES", "DEVICE", "CONTAINER", "SEND", "MODULATOR", "MACRO", "CLIP" } },
@@ -39,6 +40,7 @@ namespace
             { "MACRO", { "MODULATES" } },
             { "AUTOMATION", { "CURVE" } },
             { "CURVE", { "POINT" } },
+            { "MIDILINKS", { "MIDILINK" } },
             { "SECTIONS", { "SECTION" } },
             { "CHORDLANE", { "CHORD", "CHORDKEY" } },
             { "CLIP", { "NOTE", "CONTROL", "WARP" } },
@@ -95,6 +97,8 @@ namespace
             { "MODULATES", "amount", -1.0, 1.0 },
             { "POINT", "beat", 0.0, beat },
             { "POINT", "curve", -1.0, 1.0 },
+            { "MIDILINK", "channel", 1.0, 16.0, true },
+            { "MIDILINK", "number", 0.0, 119.0, true },
             { "SECTION", "start", 0.0, beat },
             { "SECTION", "length", some, beat },
             { "SECTION", "energy", 0.0, 1.0 },
@@ -455,6 +459,34 @@ namespace
                         && findDevice (song.getState(), parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin
                         && ! (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter))
                         add ("names", tree, "a curve of a parameter the song hasn't: " + parameter.parameter);
+                }
+
+                if (child.hasType (schema::MIDILINK))
+                {
+                    // A controller and a parameter the song has (a plug-in's while its element says it is one; a macro's
+                    // value by the word "value", its ID being the macro's), one link of each parameter (one of each
+                    // controller is its key's).
+                    const auto device = DeviceID::fromRaw (readID (child[schema::midiLinkDevice]));
+                    const auto isMacro = findModulatorState (song, ModulatorID::fromRaw (device.getRaw())).hasType (schema::MACRO);
+                    const ParameterRef parameter { device,
+                                                   isMacro ? juce::String (device.getRaw()) : child[schema::midiLinkParameter].toString() };
+
+                    if (isMacro && child[schema::midiLinkParameter].toString() != schema::midiLinkMacroValue)
+                        add ("names", child,
+                             "a MIDI link of a macro that doesn't name its value: " + child[schema::midiLinkParameter].toString());
+
+                    if (! child.hasProperty (schema::midiLinkChannel) || ! child.hasProperty (schema::midiLinkNumber))
+                        add ("names", child, "a MIDI link without its controller");
+
+                    if (! describeParameter (song, parameter).has_value()
+                        && findDevice (song.getState(), parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin)
+                        add ("names", child, "a MIDI link of a parameter the song hasn't: " + parameter.parameter);
+
+                    for (const auto& other : tree)
+                        if (other != child && other.hasType (schema::MIDILINK)
+                            && other[schema::midiLinkDevice] == child[schema::midiLinkDevice]
+                            && other[schema::midiLinkParameter] == child[schema::midiLinkParameter])
+                            add ("key", child, "a second MIDI link of a parameter: " + parameter.parameter);
                 }
 
                 if (child.hasType (schema::CLIP))

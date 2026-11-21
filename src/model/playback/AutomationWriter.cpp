@@ -235,6 +235,23 @@ void AutomationWriter::gestureEnded (const ParameterRef& parameter, bool ownDrag
         setAutomationMode (song, track, AutomationMode::latch);
 }
 
+void AutomationWriter::gestureLetGo (const ParameterRef& parameter)
+{
+    std::erase_if (grabs, [&parameter] (const Grab& grab) { return grab.parameter == parameter; });
+    auto* pass = findPass (parameter);
+
+    if (pass == nullptr || ! pass->held)
+        return;
+
+    pass->held = false;
+
+    if (pass->mode != AutomationMode::touch)
+        return;
+
+    session.getPlayer().setWriting (parameter, false);
+    std::erase_if (passes, [&parameter] (const Pass& each) { return each.parameter == parameter; });
+}
+
 bool AutomationWriter::isWriting (const ParameterRef& parameter) const
 {
     return std::any_of (passes.begin(), passes.end(), [&parameter] (const Pass& pass) { return pass.parameter == parameter; });

@@ -404,6 +404,7 @@ target_sources(phazite_core PRIVATE
     src/model/engine/EngineContext.cpp
     src/model/engine/EngineContext.h
     src/model/engine/LiveInput.cpp
+    src/model/engine/MidiTap.cpp
     src/model/engine/PluginScanner.cpp
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
@@ -413,6 +414,7 @@ target_sources(phazite_core PRIVATE
     src/model/engine/internal/AudioIO.h
     src/model/engine/internal/EngineContext.h
     src/model/engine/internal/LiveInput.h
+    src/model/engine/internal/MidiTap.h
     src/model/engine/internal/PluginScanner.h
     src/model/engine/internal/Preview.h
     src/model/engine/internal/PreviewLoop.h
@@ -440,6 +442,11 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/internal/MixHandle.h
     src/model/mixer/internal/Mixer.h
     src/model/mixer/internal/Sidechain.h
+    src/model/midi/MidiLinkModel.cpp
+    src/model/midi/MidiLinkModel.h
+    src/model/midi/MidiLinkValues.h
+    src/model/midi/MidiLinks.cpp
+    src/model/midi/internal/MidiLinks.h
     src/model/modulation/Modulation.cpp
     src/model/modulation/ModulationModel.cpp
     src/model/modulation/ModulationModel.h
@@ -1349,6 +1356,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/LessonsTests.cpp
         tests/LiveInputTests.cpp
         tests/LockFreeTests.cpp
+        tests/MidiLinkTests.cpp
         tests/MainWindowTests.cpp
         tests/LongRun.cpp
         tests/MessageQueueTests.cpp

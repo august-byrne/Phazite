@@ -15,6 +15,7 @@
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/engine/AppInfo.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
@@ -621,7 +622,9 @@ namespace
         constexpr auto maxID = schema::maxID;
         constexpr auto maxCountedID = schema::maxCountedID;
 
-        // A number Schema.h gives a range, and what it becomes when it is no number at all: none (its default), or a value.
+        // A number Schema.h gives a range, and what it becomes when it is no number at all: none (its default), or a value;
+        // and whether one outside the range goes rather than being brought in (a MIDI link's controller, which brought in
+        // would be another controller).
         struct Range
         {
             const juce::Identifier* type;
@@ -629,6 +632,7 @@ namespace
             double low, high;
             bool whole = false;
             std::optional<double> fallback {};
+            bool goesOutside = false;
         };
 
         const std::vector<Range>& getRanges()
@@ -670,6 +674,8 @@ namespace
                 { &MODULATES, &modulatesAmount, -1.0, 1.0, false, 0.0 },
                 { &POINT, &pointBeat, 0.0, maxBeat, false, 0.0 },
                 { &POINT, &pointCurve, -1.0, 1.0 },
+                { &MIDILINK, &midiLinkChannel, 1.0, 16.0, true, {}, true },
+                { &MIDILINK, &midiLinkNumber, 0.0, 119.0, true, {}, true },
                 { &SECTION, &sectionStart, 0.0, maxBeat, false, 0.0 },
                 { &SECTION, &sectionLength, some, maxBeat, false, 4.0 },
                 { &SECTION, &sectionEnergy, 0.0, 1.0 },
@@ -872,6 +878,18 @@ namespace
                 element.setProperty (property, value, nullptr);
         }
 
+        // Whether a number lies outside its range, made whole first where it is a whole one (a number that is none isn't).
+        bool isOutside (const juce::var& value, const Range& range)
+        {
+            const auto number = readNumber (value);
+
+            if (! number.has_value() || ! std::isfinite (*number))
+                return false;
+
+            const auto kept = range.whole ? std::round (*number) : *number;
+            return kept < range.low || kept > range.high;
+        }
+
         // Whether a property holds a number Schema.h writes down, which a reader takes as a double: one the loader's table
         // gives a range (getRanges()), a device's or a modulator's value set by hand (VALUES), a point's position; or numbers
         // separated by spaces (inList): a step sequencer's steps, the sampler's slices.
@@ -893,9 +911,9 @@ namespace
         // elements' types then tell apart.
         bool mayHoldID (const juce::Identifier& property)
         {
-            for (const auto* name :
-                 { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink, &schema::sendTo,
-                   &schema::deviceSidechain, &schema::laneDevice, &schema::curveDevice, &schema::modulatesDevice, &schema::trackPadDevice })
+            for (const auto* name : { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink, &schema::sendTo,
+                                      &schema::deviceSidechain, &schema::laneDevice, &schema::curveDevice, &schema::modulatesDevice,
+                                      &schema::trackPadDevice, &schema::midiLinkDevice })
                 if (property == *name)
                     return true;
 
@@ -1230,8 +1248,15 @@ namespace
                 if (const auto rows = byType.find (keyOf (element.getType())); rows != byType.end())
                 {
                     for (const auto* range : rows->second.first)
-                        if (element.hasProperty (*range->property))
+                    {
+                        if (! element.hasProperty (*range->property))
+                            continue;
+
+                        if (range->goesOutside && isOutside (element[*range->property], *range))
+                            element.removeProperty (*range->property, nullptr); // and what needs it with it (keepMidiLinks())
+                        else
                             keepInRange (element, *range->property, range->low, range->high, range->whole, range->fallback);
+                    }
 
                     for (const auto* words : rows->second.second)
                         if (element.hasProperty (*words->property) && ! words->words.contains (element[*words->property].toString()))
@@ -1511,7 +1536,8 @@ namespace
                             if (items.count (readID (child[property])) > 0 || readInPart)
                                 continue;
 
-                            if (child.hasType (schema::LANE) || child.hasType (schema::CURVE) || child.hasType (schema::MODULATES))
+                            if (child.hasType (schema::LANE) || child.hasType (schema::CURVE) || child.hasType (schema::MODULATES)
+                                || child.hasType (schema::MIDILINK))
                                 gone = true;
                             else if (property == schema::trackPadDevice)
                                 child.removeProperty (schema::trackPad, nullptr);
@@ -1618,6 +1644,42 @@ namespace
             }
 
             //==============================================================================
+            // Each MIDI link with its controller (one outside what a link takes went: keepNumbers()) and its parameter, a
+            // parameter the song has (a plug-in's as its curves are, kept while its element says it is one); and one link of a
+            // controller and one of a parameter, the first staying, as after a merge (keepOneMidiLinkEach()).
+            void keepMidiLinks()
+            {
+                auto links = song.getState().getChildWithName (schema::MIDILINKS);
+
+                for (int i = 0; i < links.getNumChildren();)
+                {
+                    const auto link = links.getChild (i);
+
+                    if (! link.hasType (schema::MIDILINK))
+                    {
+                        ++i; // one of a type Phazite doesn't know, which stays
+                        continue;
+                    }
+
+                    const auto parameter = readMidiLinkParameter (song, link);
+                    const auto isThere =
+                        readInPart || describeParameter (song, parameter).has_value()
+                        || findDeviceState (song, parameter.device)[schema::deviceType].toString() == schema::deviceIsPlugin;
+
+                    if (! link.hasProperty (schema::midiLinkChannel) || ! link.hasProperty (schema::midiLinkNumber) || ! parameter.isValid()
+                        || ! isThere)
+                    {
+                        links.removeChild (i, nullptr);
+                        continue;
+                    }
+
+                    ++i;
+                }
+
+                keepOneMidiLinkEach (song, nullptr);
+            }
+
+            //==============================================================================
             // Every sound file where this computer can look for it without going elsewhere: a path within the project's
             // folder, or a full path of this computer's or another's, as Phazite writes one where a file couldn't be copied
             // in (Import.h: copyIntoProject()), stays as it is. One that no Phazite writes is looked for in the project's
@@ -1711,6 +1773,7 @@ namespace
                 forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
                 keepKeys (state);
                 keepCurves();
+                keepMidiLinks();
                 keepPaths (state);
             }
         };

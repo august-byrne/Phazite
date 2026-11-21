@@ -183,7 +183,7 @@ The mixer, the Devices view and the inspector.
 
 | File | What it holds |
 |---|---|
-| `ProjectView.*` | What the project holds, in the left panel, through the model's `src/model/project/ProjectContents.h`: the song's notes, the audio files it plays (a missing one to locate, those nothing plays to clean up), and its plug-ins (a crashed one to reload). |
+| `ProjectView.*` | What the project holds, in the left panel, through the model's `src/model/project/ProjectContents.h`: the song's notes, the audio files it plays (a missing one to locate, those nothing plays to clean up), its plug-ins (a crashed one to reload) and its MIDI links (each to remove). |
 
 ## versions/
 

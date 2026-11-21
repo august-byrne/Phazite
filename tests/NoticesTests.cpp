@@ -67,6 +67,25 @@ TEST_CASE ("A notice tells news or a problem with a button for what to do next; 
         phazite::test::checkChildrenApart (*card);
 }
 
+TEST_CASE ("A notice that lasts while a state holds is never pushed out by others: the oldest news and problems go first")
+{
+    // MIDI learn's notice, waiting for a knob, then more news and problems than show at once: it stays, the others take turns.
+    phazite::ui::Notices notices;
+    phazite::test::TestWindow window (notices, 500, 600);
+    notices.show ({ .title = "MIDI Learn", .text = "Move a knob.", .lasts = [] { return true; } });
+
+    for (const auto* title : { "One", "Two", "Three" })
+        notices.show ({ .title = title, .text = "News." });
+
+    notices.show ({ .title = "Save failed", .text = "The disk is full.", .isProblem = true });
+    notices.show ({ .title = "Autosave failed", .text = "The disk is full.", .isProblem = true });
+    notices.show ({ .title = "Export failed", .text = "The disk is full.", .isProblem = true });
+
+    REQUIRE (notices.getNumNotices() == phazite::ui::NoticeTint::mostShown);
+    CHECK (notices.getTitle (0) == "MIDI Learn");
+    CHECK (notices.getTitle (notices.getNumNotices() - 1) == "Export failed");
+}
+
 TEST_CASE ("The window's notices show over its bottom right corner, above the status bar")
 {
     phazite::test::AppScreen screen;
