@@ -1265,6 +1265,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AboutPanelTests.cpp
         tests/ActivityBarTests.cpp
         tests/AgeTests.cpp
+        tests/AliasAudioTests.cpp
         tests/AliasNotesTests.cpp
         tests/AntialiasingTests.cpp
         tests/AppInfoTests.cpp

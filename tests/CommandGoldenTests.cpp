@@ -2,8 +2,11 @@
 // Golden files of the model's commands (tests/golden/commands): their catalogue (each command's id, texts and switches,
 // in the order the app registers them, which decides which of two commands on one key runs and the order of the
 // shortcuts list), and a script that runs every model command where it does something: the test fails for a command the
-// registry has that the script doesn't run (getCommandsNotRun() lists those that can't run in it, with why: none now), and
-// for one it runs where it changes nothing. The script's golden files hold the project it leaves (script.xml), the undo
+// registry has that the script doesn't run (getCommandsNotRun() lists those it doesn't, with why: versions' commands that
+// change the song outside the undo history, need what one project can't make, or change no song), and for one it runs where
+// it changes nothing. And the whole window's commands beyond the model's: each that changes the song or the project run once
+// through an UndoCheck, every other listed with why it changes no song (getWindowCommandsNotRun()). The script's golden
+// files hold the project it leaves (script.xml), the undo
 // step the Edit menu offers after each command (script-undo.txt), and, after each step, every command whose state changed
 // (enabled or greyed out, ticked, and the name menus show), and what is selected (notes with their pitches, starts and
 // lengths), where the playhead is, the loop's range and whether the song plays or records, each if it changed
@@ -12,8 +15,10 @@
 // Every command the script runs, and every change it makes itself, goes through an UndoCheck (UndoCheck.h): Undo gives
 // the song as it was before, and Redo as it was after; and at its end, the script's every step is undone and redone, the
 // song at each as it was there.
+#include "AppScreen.h"
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
+#include "SongCheck.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -45,6 +50,10 @@
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
+#include "model/versions/VersionsModel.h"
+#include "model/versions/internal/VersionHistory.h"
+#include "ui/pianoroll/PianoRoll.h"
+#include "ui/playlist/Playlist.h"
 
 #include <algorithm>
 #include <functional>
@@ -88,21 +97,82 @@ phazite::test::RenderHost& getRenders()
     return renders;
 }
 
-// The model's commands, registered as the app registers them: addSongCommands(), which Main.cpp calls, then the note
-// commands as AppShell adds them, with a grid of a quarter beat.
-void addModelCommands (phazite::CommandRegistry& registry, phazite::ProjectContext& context)
+// The model's commands, registered as the app registers them: addSongCommands(), which Main.cpp calls, the versions'
+// commands as the project's session adds them (ProjectSession::addCommands(), the project saved as the app's save saves it),
+// then the note commands as AppShell adds them, with a grid of a quarter beat.
+void addModelCommands (phazite::CommandRegistry& registry, phazite::ProjectContext& context, phazite::SaveProjectThen saveProject)
 {
     phazite::addSongCommands (registry, context, getRenders());
+    phazite::addVersionCommands (registry, context, std::move (saveProject), getRenders());
     phazite::addNoteCommands (registry, getSelection (context), [] { return 0.25; });
 }
 
-// The model's commands that the script can't run, each with why, so that a new command is either run by the script or
-// listed here on purpose: none. (The commands that need the song to play, a device's input or notes played live run
-// while the engine is driven a block at a time: EnginePlayback.h.)
+// The model's commands that the script doesn't run, each with why, so that a new command is either run by the script or
+// listed here on purpose. (The commands that need the song to play, a device's input or notes played live run while the
+// engine is driven a block at a time: EnginePlayback.h.) Among the versions' commands, those that change the song in an
+// undo step are run; these change it outside the undo history by design, need what one project's script can't make, name
+// their step by the time of day, or change no song at all, each with the test that runs it.
 const std::vector<std::pair<juce::String, juce::String>>& getCommandsNotRun()
 {
-    static const std::vector<std::pair<juce::String, juce::String>> commands {};
+    static const std::vector<std::pair<juce::String, juce::String>> commands {
+        { "version.takeNewer",
+          "needs versions of the current branch that the song didn't grow from, saved on another computer or after the project "
+          "file was saved, which one project's script can't make; VersionsTiedTests.cpp runs it through an UndoCheck (\"A "
+          "version another computer saved on the branch under a closed project is offered to be taken, as one undo step\"), "
+          "and the merge it starts where the song has changes of its own (\"The newer versions merged with the song's own "
+          "changes: its version follows both lines, and nothing is lost\")" },
+        { "version.switchBranch",
+          "a switch starts the song's undo history again (VersionsModel.h: Branches), which no UndoCheck can walk back through, "
+          "so it has no step to check; VersionsBranchTests.cpp checks what it leaves (\"Switching keeps each branch's song as it "
+          "was left there, unsaved changes included, and starts the undo history again\")" },
+        { "version.merge",
+          "changes no song itself: it lists what a version of another line changed (its step is version.finishMerge's), and "
+          "that version is on another branch, which needs a switch (above); VersionsBranchTests.cpp checks its list (\"A branch "
+          "that changed other tracks merges with no clashes, and the version after follows both lines\")" },
+        { "version.finishMerge",
+          "takes the list version.merge shows, which the script can't make (above); VersionsGoingBackTests.cpp runs it through "
+          "an UndoCheck (\"A merge of note edits made through an alias on both branches is one exact undo step, the group whole "
+          "after it, its Undo and its Redo\"), and VersionsTiedTests.cpp too (\"The newer versions merged with the song's own "
+          "changes: its version follows both lines, and nothing is lost\")" },
+        { "version.cancelMerge",
+          "cancels a merge version.finishMerge took, which the script can't make (above); no UndoCheck runs it: "
+          "VersionsBranchTests.cpp checks the song it leaves and its step's name (\"Merge Branch merges another branch's last "
+          "commit, and Cancel Merge makes the song what it was before it\") and its Undo (\"Undo after a merge takes the merge "
+          "back with the song, Redo brings it back, and a merge waits still as the project opens again\")" },
+        { "version.open",
+          "a version open in the song's place is a trial held open until Back to Now (VersionsModel.cpp: showVersion()), no "
+          "undo step, which an UndoCheck around the command sees as a change without a step (VersionsOpenTests.cpp)" },
+        { "version.backToNow", "as version.open, which it ends (VersionsOpenTests.cpp)" },
+        { "version.compare", "opens the last version in the song's place, as version.open (VersionsOpenTests.cpp)" },
+        { "version.restoreSnapshot",
+          "changes the song in one undo step whose name holds the local time of the automatic save it restores (\"Restore the "
+          "Automatic Save of ...\"), which the script's golden file of undo steps can't hold the same on every machine; "
+          "VersionsGoingBackTests.cpp runs it through an UndoCheck (\"Every way of going back is one exact undo step on a song "
+          "of notes and aliases, which holds together after it, its Undo and its Redo\")" },
+        { "version.verify",
+          "changes neither the song nor a command's state once it is done: what it found shows in the Versions view alone "
+          "(VersionsKeptWholeTests.cpp)" },
+        { "version.resetToReadable",
+          "needs a branch whose last version can't be read from the Versions folder (VersionsKeptWholeTests.cpp)" },
+        { "version.bounce", "changes no song: it renders a version into the history (VersionsHearingTests.cpp)" },
+        { "version.hear", "changes no song: it plays a version's bounce in the song's place (VersionsHearingTests.cpp)" },
+        { "version.deleteBounce", "changes no song: it deletes a version's bounce (VersionsHearingTests.cpp)" },
+        { "version.exportDawProject", "changes no song: it writes a file into the Renders folder (DawProjectTests.cpp)" },
+    };
     return commands;
+}
+
+// What a command of the versions began on the history's thread done, and what came of it (TestSong.h: finished()).
+void waitForVersions (phazite::ProjectContext& context)
+{
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&context]
+        {
+            const auto* history = phazite::getVersionHistory (context);
+            return history == nullptr || ! history->isReadingForCommand();
+        },
+        phazite::test::versionHistoryTimeout));
+    REQUIRE (phazite::test::waitForVersionHistory (context));
 }
 
 // The recordings' options and the transport's switches that the app keeps for every project, as they are at first: the
@@ -284,8 +354,12 @@ struct Script
         song.getUndoManager().clearUndoHistory();
 
         setSong (context, &song);
-        addModelCommands (registry, context);
+        addModelCommands (registry, context, [this] (std::function<void (bool)> then) { then (project->save().wasOk()); });
         resetAppSwitches();
+
+        // Its history read, and its initial version made, as a project's are as it starts: the versions' commands' states
+        // follow from there, the same in every run.
+        REQUIRE (phazite::test::waitForVersionHistory (context));
         undoCheck.emplace (song);
         snapshot ("start");
     }
@@ -351,6 +425,44 @@ struct Script
     void runReading (const juce::String& id)
     {
         record (id, [this] { REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! phazite::isReadingAudio (context); })); });
+    }
+
+    // Runs a command of the versions, and waits for what it began on the history's thread (a version saved, a song read
+    // for a restore) and what came of it.
+    void runVersions (const juce::String& id)
+    {
+        record (id, [this] { waitForVersions (context); });
+    }
+
+    // Selects in the Versions view, as a click there does (none of it an undo step): a version, or Now with none; a line of
+    // the changes the view lists; a line of what a version changed.
+    void selectVersion (const juce::String& what, const juce::String& versionID)
+    {
+        phazite::selectVersion (context, versionID);
+        snapshot ("select " + what);
+    }
+
+    void selectChange (const juce::String& what, const phazite::VersionChange& change)
+    {
+        phazite::selectChange (context, change);
+        snapshot ("select " + what);
+    }
+
+    void selectVersionChange (const juce::String& what, const juce::String& versionID, const phazite::VersionChange& change)
+    {
+        phazite::selectVersionChange (context, versionID, change);
+        snapshot ("select " + what);
+    }
+
+    // The line of the changes listed now (since the last version, or against the version compared) that names a track.
+    phazite::VersionChange findListedChange (phazite::TrackID track)
+    {
+        phazite::test::withChangesIn (context);
+        const auto changes = phazite::getListedChanges (context);
+        const auto found =
+            std::find_if (changes.begin(), changes.end(), [track] (const phazite::VersionChange& change) { return change.track == track; });
+        REQUIRE (found != changes.end());
+        return *found;
     }
 
     // A change the script makes itself, as an undo step of its own (or several, which undo and redo exactly together).
@@ -503,7 +615,7 @@ TEST_SUITE ("golden")
     {
         phazite::ProjectContext context { phazite::test::getEngineContext() };
         phazite::CommandRegistry registry;
-        addModelCommands (registry, context);
+        addModelCommands (registry, context, [] (std::function<void (bool)> then) { then (true); });
 
         juce::StringArray lines;
 
@@ -845,6 +957,51 @@ TEST_SUITE ("golden")
             s.engine = nullptr;
         }
 
+        // The versions: the song so far saved as a version; Two renamed and its change discarded, all of it and as a line;
+        // renamed again and saved as a second version; renamed a third time, and its line restored from the second version;
+        // compared with the first, and the comparison closed; the whole song restored from the first; the second version
+        // undone (the song stays as it is); and a branch made from Now, where the song goes on.
+        const auto renameTwo = [&s, two] (const juce::String& name)
+        { s.setup ("name Two " + name, [&s, two, name] { phazite::setTrackName (s.song, two, name); }); };
+
+        s.runVersions ("version.save");
+        const auto firstVersion = phazite::getLastVersion (s.context)->id;
+        renameTwo ("Second");
+        s.runVersions ("version.discardAll");
+        renameTwo ("Second");
+        s.selectChange ("the change of Two", s.findListedChange (two));
+        s.runVersions ("version.putBack");
+        renameTwo ("Second");
+        s.runVersions ("version.save");
+        const auto secondVersion = phazite::getLastVersion (s.context)->id;
+        const auto secondsLine = [&s, &secondVersion, two]
+        {
+            // Read in the background the first time they are asked for.
+            REQUIRE (phazite::test::dispatchMessagesUntil (
+                [&]
+                {
+                    return ! phazite::getVersionChanges (s.context, secondVersion).empty()
+                           && ! phazite::isReadingVersionChanges (s.context, secondVersion);
+                },
+                phazite::test::versionHistoryTimeout));
+            const auto changes = phazite::getVersionChanges (s.context, secondVersion);
+            const auto found =
+                std::find_if (changes.begin(), changes.end(), [two] (const phazite::VersionChange& change) { return change.track == two; });
+            REQUIRE (found != changes.end());
+            return *found;
+        };
+
+        renameTwo ("Third");
+        s.selectVersionChange ("the second version's change of Two", secondVersion, secondsLine());
+        s.runVersions ("version.restoreChange");
+        s.selectVersion ("the first version", firstVersion);
+        s.runVersions ("version.takeFrom");
+        s.runVersions ("version.showChanges");
+        s.runVersions ("version.bringBack");
+        s.runVersions ("version.undoLast");
+        s.selectVersion ("Now", {});
+        s.runVersions ("version.newBranch");
+
         // Selecting everything: clips, or tracks while tracks are selected.
         s.selectNothing();
         s.run ({ "edit.selectAll" });
@@ -870,4 +1027,289 @@ TEST_SUITE ("golden")
         phazite::test::checkGoldenText ("commands/script-undo.txt", makeGoldenText (aboutTheUndoSteps, s.undoLines), compareLines);
         phazite::test::checkGoldenText ("commands/script-states.txt", makeGoldenText (aboutTheStates, s.stateLines), compareLines);
     }
+}
+
+//==============================================================================
+namespace
+{
+// Why the window's commands below change no song: what each does instead.
+constexpr const char* showsView = "shows, hides, zooms or arranges a part of the window: view state outside the song";
+constexpr const char* opensField = "opens a field or a menu, and changes nothing until what is typed or chosen there is "
+                                   "applied, by a model function that has tests of its own";
+constexpr const char* selects = "selects or deselects: no undo step";
+constexpr const char* projectFile = "opens, saves or writes a project or a file, or opens a dialog for one: no edit of the song";
+constexpr const char* history = "changes the versions' history or how the Versions view shows it, not the song (VersionsTests.cpp)";
+constexpr const char* setting = "switches a setting of the app or of a view, outside the song";
+constexpr const char* help = "shows help or a lesson over the window, or opens an example song as another project "
+                             "(LessonsTests.cpp, ExampleSongTests.cpp)";
+
+// The commands the whole window registers beyond the model's (the project session's, the shell's and the editors':
+// AppScreen.h) that the case below doesn't run, each with why: none of them changes the song in an undo step (one, Import
+// DAWproject, switches it to a branch it makes, as a switch does). A new command of the window is either run there or listed
+// here on purpose.
+const std::vector<std::pair<juce::String, juce::String>>& getWindowCommandsNotRun()
+{
+    static const std::vector<std::pair<juce::String, juce::String>> commands {
+        { "help.example.exodus", help },
+        { "help.example.loFiBeat", help },
+        { "help.example.houseGroove", help },
+        { "project.new", projectFile },
+        { "project.open", projectFile },
+        { "project.openRecent", projectFile },
+        { "project.saveAs", projectFile },
+        { "project.save", projectFile },
+        { "project.autoSave", setting },
+        { "project.export", projectFile },
+        { "project.cleanUpAudio", "opens the Project view's list of the audio files no version plays, to delete: files, not the song "
+                                  "(CleanUpTests.cpp)" },
+        { "project.importDawProject",
+          "opens a DAWproject file chosen in a dialog: as a new project in the open one's place, or, one exported from a version "
+          "of this project, as a new branch of its versions from that version, which the song then switches to as "
+          "version.switchBranch does (its undo history started again, so no UndoCheck can walk back through it); "
+          "DawProjectTests.cpp runs the branch (\"Changed in another DAW and imported back: a branch from its version with just "
+          "those changes, which merges\", and \"A DAWproject imported back unpacks its audio off the message thread, and one "
+          "cancelled leaves none of it\")" },
+        { "view.commandPalette", showsView },
+        { "view.menus", showsView },
+        { "view.searchBrowser", showsView },
+        { "view.browser", showsView },
+        { "view.project", showsView },
+        { "view.versions", showsView },
+        { "version.pickBranch", opensField },
+        { "version.renameBranch", history },
+        { "version.mergeBranch", opensField },
+        { "version.deleteBranch", history },
+        { "version.recover", history },
+        { "version.editMessage", history },
+        { "version.bounceEach", history },
+        { "version.showAutomatic", history },
+        { "device.add", opensField },
+        { "device.savePreset", projectFile },
+        { "track.savePreset", projectFile },
+        { "view.toggleLeftPanel", showsView },
+        { "view.maximizeLeftPanel", showsView },
+        { "view.toggleSong", showsView },
+        { "view.maximizeSong", showsView },
+        { "view.toggleEditor", showsView },
+        { "view.maximizeEditor", showsView },
+        { "view.toggleInspector", showsView },
+        { "view.maximizeInspector", showsView },
+        { "view.maximizePanel", showsView },
+        { "view.pianoRoll", showsView },
+        { "view.instrument", showsView },
+        { "view.effects", showsView },
+        { "device.show", showsView },
+        { "view.playlist", showsView },
+        { "view.mixer", showsView },
+        { "view.layoutBeat", showsView },
+        { "view.layoutMix", showsView },
+        { "view.layoutFull", showsView },
+        { "view.scrollContinuously", setting },
+        { "view.resetViewPlaces", showsView },
+        { "view.detachLeftPanel", showsView },
+        { "view.detachInspector", showsView },
+        { "view.detachEditor", showsView },
+        { "view.zoomIn", showsView },
+        { "view.zoomOut", showsView },
+        { "view.zoomToFit", showsView },
+        { "view.zoomToSelection", showsView },
+        { "view.zoomBack", showsView },
+        { "view.centreOnPlayhead", showsView },
+        { "view.followPlayback", setting },
+        { "tool.smart", setting },
+        { "tool.draw", setting },
+        { "tool.paint", setting },
+        { "tool.slice", setting },
+        { "tool.slip", setting },
+        { "tool.mute", setting },
+        { "tool.delete", setting },
+        { "tool.select", setting },
+        { "tool.zoom", setting },
+        { "automation.typeValue", opensField },
+        { "edit.rename", opensField },
+        { "track.color", opensField },
+        { "view.focusMode", showsView },
+        { "note.selectAll", selects },
+        { "note.deselectAll", selects },
+        { "pianoRoll.ghostNotes", setting },
+        { "pianoRoll.snapToKey", setting },
+        { "help.guide", help },
+        { "help.lesson.beat", help },
+        { "help.lesson.recording", help },
+        { "help.lesson.arranging", help },
+        { "help.lesson.effects", help },
+        { "help.lesson.chords", help },
+        { "help.stopLesson", help },
+    };
+    return commands;
+}
+} // namespace
+
+TEST_CASE ("Every command of the whole window that changes the song, run once there, undoes and redoes exactly")
+{
+    // The window's commands beyond the model's, which the script above runs: on a song of a synth's track with a MIDI clip
+    // of a chord and a note off the grid, and a track with an audio clip, each run once through an UndoCheck where it does
+    // something (the playlist's nudges and quantize on the MIDI clip, the grid's switches, Quantize Audio on the audio clip;
+    // the piano roll's transforms, each applied, and one cancelled, its drum mode and its key on every track), and every
+    // step walked back and forth at the end. Every other command of the window is listed with why it changes no song.
+    using phazite::test::dispatchPendingMessages;
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    dispatchPendingMessages();
+    auto& context = screen.session.getContext();
+    auto& song = *phazite::findSong (context);
+    auto& selection = getSelection (context);
+
+    const auto tracks = phazite::ensureTracks (song, 2);
+    REQUIRE (phazite::setInstrument (song, tracks[0], phazite::test::makeBuiltInDevice (song, phazite::devices::Synth::typeID)).isValid());
+    const auto clip = phazite::insertMidiClip (song, tracks[0], { beats (4.3), beats (8.3) }, nullptr);
+    REQUIRE (clip.isValid());
+
+    for (const auto& [pitch, start] : { std::pair { 60, 0.0 }, std::pair { 64, 0.0 }, std::pair { 67, 0.0 }, std::pair { 72, 2.1 } })
+        REQUIRE (phazite::addNote (song, clip, pitch, beats (4.3 + start), phazite::BeatDuration::fromBeats (1.0), 100).isValid());
+
+    phazite::setTrackKey (song, tracks[0], phazite::Key { 2, phazite::Scale::minor });
+    const auto tone = phazite::test::writeSound (screen.temp.folder.getChildFile ("Tone.wav"), 2.0);
+    const auto audio = phazite::importFile (song, tracks[1], tone, beats (0.0));
+    REQUIRE (phazite::hasAudioClips (song, { audio }));
+    song.getUndoManager().clearUndoHistory();
+    dispatchPendingMessages();
+
+    phazite::test::UndoCheck check (context);
+    juce::StringArray run;
+
+    // What a command changes: the song, in an undo step; the project's view state alone; or nothing the project keeps (a
+    // view's own setting, a change previewed and taken back).
+    enum class Changes
+    {
+        song,
+        view,
+        nothing
+    };
+
+    const auto runChecked = [&] (const juce::String& what, Changes changes, const std::function<void()>& change)
+    {
+        CAPTURE (what.toStdString());
+        const auto undoable = phazite::test::writeSong (song, phazite::test::SongPart::undoable);
+        const auto whole = phazite::test::writeSong (song, phazite::test::SongPart::whole);
+        check.check (what,
+                     [&]
+                     {
+                         change();
+                         dispatchPendingMessages();
+                     });
+        const auto undoableAfter = phazite::test::writeSong (song, phazite::test::SongPart::undoable);
+        const auto wholeAfter = phazite::test::writeSong (song, phazite::test::SongPart::whole);
+        CHECK ((undoableAfter != undoable) == (changes == Changes::song));
+
+        if (changes == Changes::view)
+            CHECK (wholeAfter != whole);
+        else if (changes == Changes::nothing)
+            CHECK (wholeAfter == whole);
+    };
+
+    const auto command = [&] (const juce::String& id, Changes changes)
+    {
+        runChecked (id, changes, [&] { REQUIRE (screen.registry.invoke (id)); });
+        run.add (id);
+    };
+
+    // The playlist's, on the MIDI clip, which starts off the grid: a step of the grid later and earlier, and its start to the
+    // grid; and the grid's switches, each to and fro, which the project keeps for the editor (its view state).
+    screen.showView<phazite::ui::Playlist> ("view.playlist");
+    selection.selectOnly (clip);
+    dispatchPendingMessages();
+
+    for (const auto* id : { "edit.nudgeRight", "edit.nudgeLeft", "edit.quantize" })
+        command (id, Changes::song);
+
+    for (const auto* id :
+         { "grid.snap", "grid.snap", "grid.adaptive", "grid.adaptive", "grid.finer", "grid.coarser", "grid.triplets", "grid.triplets" })
+        command (id, Changes::view);
+
+    // Quantize Audio, whose step comes once the hits are found in the background.
+    selection.selectOnly (audio);
+    dispatchPendingMessages();
+    runChecked ("clip.quantizeAudio", Changes::song,
+                [&]
+                {
+                    REQUIRE (screen.registry.invoke ("clip.quantizeAudio"));
+                    REQUIRE (phazite::test::runTimersUntil ([&context] { return ! phazite::isReadingAudio (context); }));
+                });
+    run.add ("clip.quantizeAudio");
+
+    // The piano roll's, on the MIDI clip's notes: each transform opened and applied as one step; one opened and cancelled; its
+    // drum mode (the track's view state) on and off; the track's key given to every track.
+    selection.selectOnly (clip);
+    dispatchPendingMessages();
+    auto& roll = screen.showView<phazite::ui::PianoRoll> ("view.pianoRoll");
+    roll.setActive (true);
+    dispatchPendingMessages();
+
+    const auto transform =
+        [&] (const juce::String& open, const juce::String& close, Changes changes, const std::function<void()>& adjust = nullptr)
+    {
+        REQUIRE (screen.registry.invoke ("note.selectAll"));
+        dispatchPendingMessages();
+        runChecked (open + ", then " + close, changes,
+                    [&]
+                    {
+                        REQUIRE (screen.registry.invoke (open));
+                        dispatchPendingMessages();
+
+                        if (adjust != nullptr)
+                            adjust();
+
+                        REQUIRE (screen.registry.invoke (close));
+                    });
+        run.addIfNotAlreadyThere (open);
+        run.addIfNotAlreadyThere (close);
+    };
+
+    for (const auto* id : { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.strumSettings",
+                            "note.humanizeSettings", "note.arpeggiateSettings" })
+        transform (id, "note.applyTransform", Changes::song);
+
+    // Transpose, which moves nothing until its amount is set: two steps of the track's key up.
+    transform ("note.transposeSettings", "note.applyTransform", Changes::song,
+               [&roll]
+               {
+                   auto* steps = dynamic_cast<juce::Slider*> (phazite::test::findComponentWithTitle (roll, "Steps"));
+
+                   if (steps == nullptr)
+                       steps = dynamic_cast<juce::Slider*> (phazite::test::findComponentWithTitle (roll, "Semitones"));
+
+                   REQUIRE (steps != nullptr);
+                   steps->setValue (2.0, juce::sendNotificationSync);
+               });
+
+    transform ("note.quantizeSettings", "note.cancelTransform", Changes::nothing);
+    command ("pianoRoll.drumMode", Changes::view);
+    command ("pianoRoll.drumMode", Changes::view);
+    command ("pianoRoll.keyForAllTracks", Changes::song);
+
+    check.walkBackAndForth();
+    phazite::test::checkSong (song);
+
+    // Every command of the window that the model's script doesn't run, run here or listed with why.
+    phazite::ProjectContext modelContext { phazite::test::getEngineContext() };
+    phazite::CommandRegistry model;
+    addModelCommands (model, modelContext, [] (std::function<void (bool)> then) { then (true); });
+    juce::StringArray notRun;
+
+    for (const auto& [id, why] : getWindowCommandsNotRun())
+    {
+        notRun.add (id);
+        CHECK_MESSAGE (screen.registry.find (id) != nullptr,
+                       (id + " is listed as a window command not run, but is no command").toStdString());
+        CHECK_MESSAGE (! run.contains (id), (id + " is listed as a window command not run, but the case runs it").toStdString());
+    }
+
+    for (const auto* each : screen.registry.getAll())
+        if (model.find (each->id) == nullptr)
+            CHECK_MESSAGE ((run.contains (each->id) || notRun.contains (each->id)),
+                           ("The whole window's case doesn't run " + each->id
+                            + ": run it there through its UndoCheck (tests/CommandGoldenTests.cpp), or say in "
+                              "getWindowCommandsNotRun() why it changes no song")
+                               .toStdString());
 }

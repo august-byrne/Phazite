@@ -1624,8 +1624,9 @@ namespace
 
             //==============================================================================
             // Every alias group holding together (Schema.h: clipLink): a clip whose kind, or whose notes and controllers' values
-            // (each with every property, in the same order), differ from the group's first clip's in the song's order is made a
-            // clip of its own, its link removed and its notes kept; then a group left with one clip loses its link. Last, once
+            // (each with every property, in the same order), or, of audio clips, whose file, tempo, pitch, direction or warp
+            // markers (AudioClips.h: shareTheSound()), differ from the group's first clip's in the song's order is made a clip of its
+            // own, its link removed and what it holds kept; then a group left with one clip loses its link. Last, once
             // every clip that goes has gone (keepPaths()). Not in a song read in part, whose groups' other clips may be in
             // what wasn't read. Clips are compared as values (juce::ValueTree::isEquivalentTo(): numbers that are the same within
             // JUCE's own tolerance are the same), the group's first against each other, as the check compares them (SongCheck.cpp).
@@ -1687,7 +1688,8 @@ namespace
                     {
                         auto clip = clips[i]; // the same element, which loses its link
 
-                        if (clip[schema::clipKind].toString() == first[schema::clipKind].toString() && holdTheSameEvents (first, clip))
+                        if (clip[schema::clipKind].toString() == first[schema::clipKind].toString() && holdTheSameEvents (first, clip)
+                            && (! isAudioState (first) || shareTheSound (first, clip)))
                             ++kept;
                         else
                             clip.removeProperty (schema::clipLink, nullptr);

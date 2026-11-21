@@ -198,10 +198,16 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   would hear its own track's sound round a loop (on a drum sampler's track, listening to one of its own pads' tracks, say).
   Of two elements of one parent with one key (two curves of one
   parameter, two tempos on one beat), the first stays.
-- **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values. A clip of another kind than
-  the group's first clip in the song's order, or whose `NOTE` and `CONTROL` elements differ from that clip's (in a
-  property, in number or in order), is made a clip of its own: its `link` is left out and its notes stay. A group left
-  with one clip, its only clip loses its `link`.
+- **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values, and its audio clips play
+  one file alike: they share their `file` (the path as written, compared as text, whether the file is there or not),
+  `tempo`, `pitch`, `reversed` and `WARP` markers. Each keeps its own place, the part of the file it plays (`fileStart`,
+  `fileEnd`), `gain`, fades, `mute` and `take`. Renaming a clip writes the same `name` into every clip of its group,
+  but a clip on a track of that name holds none, as a clip without a `name` is named after its track; the loader
+  doesn't compare names. A clip of another kind than the group's first clip in the song's order, or whose `NOTE` and
+  `CONTROL` elements differ from that clip's (in a property, in number or in order), or an audio clip whose `file`,
+  `tempo`, `pitch` or `reversed` (each as read, its default where it has none: no tempo, 0, forwards) or `WARP` elements
+  (in a property, in number or in order) differ from that clip's, is made a clip of its own: its `link` is left out and
+  what it holds stays. A group left with one clip, its only clip loses its `link`.
 - **Sound files:** a sound file named on a network path, or by a path that climbs out of the project's folder with
   `..`, is named `Audio/<its name>` instead, its name unchanged, so it is never looked for there; the Project view lists
   it as missing until it is located. A full path on this computer stays as it is. An audio clip that names no file is

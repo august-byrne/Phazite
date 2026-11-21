@@ -223,8 +223,10 @@ removals of the song's, nor taken out by the next version.
   thing: those of the first clip of the group that the newest version both lines have and both lines hold in that group,
   merged three ways, each line's edits in, whichever clip they were made through. Every other clip of the group takes
   them (an alias one line added gets what the other line changed), a conflict in them is listed once, and the value chosen
-  reaches every clip of the group. A group the merge leaves with one clip (its other clips deleted on one line) loses its
-  link, as deleting a clip unlinks the last one of its group.
+  reaches every clip of the group. The same holds for what the audio clips of a group share, which plays one file alike:
+  the file itself (an alias one line added plays the file the other line located anew), its tempo, pitch, direction and
+  warp markers. A group the merge leaves with one clip (its other clips deleted on one line)
+  loses its link, as deleting a clip unlinks the last one of its group.
 - **What names the gone goes.** A merge, as every restore and discard, leaves out what names something the song
   hasn't (a send to a return this branch deleted, a modulation of a device gone), and lets go of a sidechain that
   the two lines' changes made into a loop (one side's sidechain, the other's send), as the edit that makes one does.

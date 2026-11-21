@@ -294,7 +294,11 @@ Then each alias group of the merged song (the clips with one `link`) holds toget
 song's order, that the parting and both sides hold with that `link`; failing that, the first both sides hold with it; the
 first both sides hold at all; or its first. Every other clip of the group takes the keeper's `NOTE` and `CONTROL` elements,
 copies in their order, and the conflicts found in those clips' notes are dropped, so that a note's conflict is listed (and
-counted in `chosen`) once, in the keeper; a value chosen for it is set in every clip of the group. A group left with one
+counted in `chosen`) once, in the keeper; a value chosen for it is set in every clip of the group. Of audio clips, every
+other clip of the group takes the keeper's `file`, `tempo`, `pitch` and `reversed` (or their absence) and copies of its
+`WARP` elements in their order (so an alias one line added, which kept the path the group played there, plays the file the
+other line located anew), and the conflicts found in those four properties of the other clips are dropped, so that such a
+conflict is listed once, in the keeper; a value chosen for it is set in every clip of the group. A group left with one
 clip loses its `link`.
 
 **IDs given anew.** What the other line added gets a new ID where this side has something else with that ID, and what

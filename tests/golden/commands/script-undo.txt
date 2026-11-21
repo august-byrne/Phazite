@@ -140,10 +140,20 @@ transport.playPause: Next Take
 transport.playPause: Next Take
 transport.capture: Capture
 edit.delete: Delete Clip
-edit.selectAll: Delete Clip
-edit.selectAll: Delete Clip
-edit.deselectAll: Delete Clip
-edit.undo: Capture
-edit.redo: Delete Clip
-edit.undoOrRedo: Capture
-edit.undoOrRedo: Delete Clip
+version.save: Delete Clip
+version.discardAll: Discard All Changes
+version.putBack: Discard Changes in Second
+version.save: Script: name Two Second
+version.restoreChange: Restore Second from "Update Second"
+version.takeFrom: Restore Second from "Update Second"
+version.showChanges: Restore Second from "Update Second"
+version.bringBack: Restore "Add Group, Two, Two (Bounce) and 3 more; update One, song outline, tempo and 2 more"
+version.undoLast: Restore "Add Group, Two, Two (Bounce) and 3 more; update One, song outline, tempo and 2 more"
+version.newBranch: Restore "Add Group, Two, Two (Bounce) and 3 more; update One, song outline, tempo and 2 more"
+edit.selectAll: Restore "Add Group, Two, Two (Bounce) and 3 more; update One, song outline, tempo and 2 more"
+edit.selectAll: Restore "Add Group, Two, Two (Bounce) and 3 more; update One, song outline, tempo and 2 more"
+edit.deselectAll: Restore "Add Group, Two, Two (Bounce) and 3 more; update One, song outline, tempo and 2 more"
+edit.undo: Restore Second from "Update Second"
+edit.redo: Restore "Add Group, Two, Two (Bounce) and 3 more; update One, song outline, tempo and 2 more"
+edit.undoOrRedo: Restore Second from "Update Second"
+edit.undoOrRedo: Restore "Add Group, Two, Two (Bounce) and 3 more; update One, song outline, tempo and 2 more"

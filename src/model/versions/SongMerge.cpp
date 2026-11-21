@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongMerge.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
@@ -1098,8 +1099,25 @@ namespace
         }
     }
 
+    // An audio clip of an alias group given what its group's keeper shares with it (AudioClips.h: shareTheSound(): its file,
+    // tempo, pitch, direction and warp markers), as it is given the keeper's notes: an alias one side added, which kept the
+    // file the group played there, plays the one the other side located anew; and a clash in one of those properties of its
+    // own is the keeper's, which has it too (on each side the group held the same), and is listed once, for the keeper.
+    void keepSharedSound (MergeResult& result, const juce::ValueTree& keeper, juce::ValueTree clip)
+    {
+        if (! isAudioState (keeper) || ! isAudioState (clip))
+            return;
+
+        const auto path = getPath (clip);
+        std::erase_if (result.clashes,
+                       [&path] (const MergeClash& clash) { return clash.path == path && isSharedInAliasGroup (clash.property); });
+
+        giveSharedSound (keeper, clip, nullptr);
+    }
+
     // Each alias group of the merged song holding together: its clips' notes and controllers' values are one thing, which
-    // the merge treats as one. They are its keeper's: the first clip of the group, in the song's order, that the parting and
+    // the merge treats as one, and so is what audio clips of a group share (keepSharedSound()). They are its keeper's:
+    // the first clip of the group, in the song's order, that the parting and
     // both sides all hold in that group, whose own were merged three ways, each side's edits in (on each side the group held
     // the same, so an edit made there through any of its clips reached the keeper too); failing that, the first both sides
     // hold in it, the first both sides hold at all (a clip one side linked to a new alias), or the first. Every other clip of
@@ -1181,6 +1199,7 @@ namespace
                                });
 
                 giveClipEvents (keeper, clip, nullptr);
+                keepSharedSound (result, keeper, clip);
             }
         }
     }

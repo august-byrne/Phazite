@@ -161,7 +161,8 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   beside clips of the group that hold newer ones: an edit through one of them then reaches it only in part, and a
   later merge gives it the group's notes over its own. Found by reading, while the merge's alias rule was reviewed
   (2026-11-21), then shown: Put Back of one track's line, Take from This Version and a line restored each change
-  that track's clips of a group and leave the group's clips on other tracks as they were (two cases of
+  that track's clips of a group (their notes, and for audio clips what a group shares: the file, the tempo, the pitch,
+  the direction and the warp markers) and leave the group's clips on other tracks as they were (two cases of
   `tests/VersionsGoingBackTests.cpp` fail until it is fixed), and the next opening of the project then makes the
   clip a clip of its own. To fix (decided 2026-11-21, as a merge does): the group's other clips take the restored
   notes, in the same undo step, since putting a line back is an edit of its clips' notes and an edit of a group's

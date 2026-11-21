@@ -508,6 +508,85 @@ namespace
                 }
             }
         }
+
+        //==============================================================================
+        // The audio clips of an alias group (Schema.h: clipLink) play one file alike: they share the file (its path as the
+        // song holds it), its tempo, pitch and direction, each as read (its default where a clip has none: no tempo, no
+        // pitch, forwards), and its warp markers (WARP), the same in the same order. Compared as the loader compares
+        // them (Project.cpp: keepAliasGroups()): the
+        // group's first clip's against each other's, as values (juce::var's, and juce::ValueTree::isEquivalentTo() for the
+        // markers).
+        static juce::String describeMarker (const juce::ValueTree& marker)
+        {
+            return marker[schema::warpTime].toString() + " plays at " + marker[schema::warpPlaysAt].toString();
+        }
+
+        void checkAudioAliases()
+        {
+            struct Shared
+            {
+                juce::Identifier name;
+                juce::var none;
+            };
+
+            const std::vector<Shared> shared { { schema::clipFile, juce::String() },
+                                               { schema::clipTempo, 0.0 },
+                                               { schema::clipPitch, 0.0 },
+                                               { schema::clipReversed, false } };
+            const auto markersOf = [] (const juce::ValueTree& clip)
+            {
+                std::vector<juce::ValueTree> markers;
+
+                for (const auto& child : clip)
+                    if (child.hasType (schema::WARP))
+                        markers.push_back (child);
+
+                return markers;
+            };
+
+            std::map<juce::String, std::vector<juce::ValueTree>> groups;
+            collectGroups (state, groups);
+
+            for (const auto& [link, clips] : groups)
+            {
+                const auto& first = clips.front();
+
+                if (first[schema::clipKind].toString() != schema::clipIsAudio)
+                    continue;
+
+                const auto firstMarkers = markersOf (first);
+
+                for (size_t i = 1; i < clips.size(); ++i)
+                {
+                    const auto& clip = clips[i];
+
+                    if (clip[schema::clipKind].toString() != schema::clipIsAudio) // the kind's rule says so (checkAliases())
+                        continue;
+
+                    const auto clipText = "clip " + clip[schema::clipID].toString() + " of alias group " + link + ": ";
+
+                    for (const auto& [name, none] : shared)
+                        if (const auto a = first.getProperty (name, none), b = clip.getProperty (name, none); a != b)
+                            add ("alias", clip,
+                                 clipText + "its " + name.toString() + " " + b.toString() + " against clip "
+                                     + first[schema::clipID].toString() + "'s " + a.toString());
+
+                    const auto markers = markersOf (clip);
+                    size_t at = 0;
+
+                    while (at < markers.size() && at < firstMarkers.size() && firstMarkers[at].isEquivalentTo (markers[at]))
+                        ++at;
+
+                    if (at < markers.size() || at < firstMarkers.size())
+                        add ("alias", clip,
+                             clipText + "its warp markers differ from clip " + first[schema::clipID].toString() + "'s at marker "
+                                 + juce::String ((int) at + 1) + ": \""
+                                 + (at < markers.size() ? describeMarker (markers[at]) : juce::String ("none")) + "\" against \""
+                                 + (at < firstMarkers.size() ? describeMarker (firstMarkers[at]) : juce::String ("none")) + "\" ("
+                                 + juce::String ((int) markers.size()) + " against " + juce::String ((int) firstMarkers.size()) + ")");
+                }
+            }
+        }
     };
 } // namespace
 
@@ -546,6 +625,7 @@ std::vector<std::string> findSongProblems (const Song& song, const schema::Table
     checker.checkRanges (state);
     checker.checkValues (state);
     checker.checkAliases();
+    checker.checkAudioAliases();
     return checker.problems;
 }
 

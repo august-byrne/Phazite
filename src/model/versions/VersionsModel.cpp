@@ -3,6 +3,7 @@
 #include "internal/ApplySong.h"
 #include "internal/SongMerge.h"
 #include "internal/VersionHistory.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -34,6 +35,7 @@
 #include <optional>
 #include <set>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -2141,10 +2143,20 @@ bool chooseClash (ProjectContext& context, int index, int value)
             if (! element.isValid())
                 return false;
 
-            if (values[value]->isVoid())
-                element.removeProperty (clash.property, undo);
-            else
-                element.setProperty (clash.property, *values[value], undo);
+            // What the audio clips of an alias group share (AudioClips.h: shareTheSound()), which the merge reported once, for
+            // the group's keeper: set in every clip of the group, as an edit through one of them sets it.
+            std::vector<juce::ValueTree> elements { element };
+
+            if (element.hasType (schema::CLIP) && isAudioState (element) && isSharedInAliasGroup (clash.property))
+                elements = getAliasStates (*song, element);
+
+            for (auto each : elements)
+            {
+                if (values[value]->isVoid())
+                    each.removeProperty (clash.property, undo);
+                else
+                    each.setProperty (clash.property, *values[value], undo);
+            }
         }
     }
     else

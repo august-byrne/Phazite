@@ -12,6 +12,9 @@
 #include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/WholeFile.h"
@@ -22,6 +25,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/ProjectContents.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
@@ -1930,4 +1934,136 @@ TEST_CASE ("A note's conflict in an alias group is listed once, and each choice 
 
     phazite::undo (*phazite::findSong (s.context)); // back to this branch's
     checkHoldsTogether (38);
+}
+
+TEST_CASE ("A conflict in what the audio clips of an alias group share is listed once, and each choice of it reaches every clip of "
+           "the group")
+{
+    // An audio clip on the Loop track and its alias; idea-2 pitches the group 5 semitones up through the alias, main 2 through
+    // the clip: one conflict, the group's keeper's (SongMerge.h), whose choice every clip of the group takes, none (the base's)
+    // among them, as Undo puts it back in every one.
+    TestSong s;
+    const auto loop = s.addTrack ("Loop");
+    const auto clip = s.addAudioClip (loop, writeSound (s.getSoundsFolder().getChildFile ("Loop.wav"), 2.0), 0.0);
+    const auto alias = s.copyClip (clip, 8.0, true);
+    keepVersion (s.context, "First");
+
+    const auto pitch = [&s] (phazite::ClipID through, float semitones)
+    {
+        auto& song = *phazite::findSong (s.context);
+        const phazite::UndoStep step (song, "Change Clip Pitch");
+        phazite::setClipPitch (song, through, semitones);
+    };
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+    pitch (alias, 5.0f);
+    const auto theirs = keepVersion (s.context, "A fourth up");
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    pitch (clip, 2.0f);
+    keepVersion (s.context, "A tone up");
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+    phazite::finishMerge (s.context);
+    REQUIRE (phazite::isMerging (s.context));
+    REQUIRE (phazite::getClashes (s.context).size() == 1);
+
+    const auto checkHoldsTogether = [&] (float semitones)
+    {
+        auto& song = *phazite::findSong (s.context);
+        CHECK (phazite::getClipPitch (song, clip) == doctest::Approx (semitones));
+        CHECK (phazite::getClipPitch (song, alias) == doctest::Approx (semitones));
+        checkSong (song);
+    };
+
+    checkHoldsTogether (2.0f);
+
+    for (const auto& [value, semitones] : { std::pair { 2, 5.0f }, std::pair { 0, 0.0f }, std::pair { 1, 2.0f }, std::pair { 2, 5.0f } })
+    {
+        INFO ("chosen " << value);
+        REQUIRE (phazite::chooseClash (s.context, 0, value));
+        CHECK (phazite::getClashes (s.context)[0].chosen == value);
+        checkHoldsTogether (semitones);
+    }
+
+    phazite::undo (*phazite::findSong (s.context)); // back to this branch's
+    checkHoldsTogether (2.0f);
+}
+
+TEST_CASE ("An audio alias group whose file one branch located anew while the other added an alias merges with every clip of the "
+           "group playing the file located")
+{
+    // A clip on the Loop track and its alias; one branch locates the group's file anew (Locate Audio File writes the path found
+    // into every clip that plays the old one), the other adds an alias, which keeps the path the group played there. Merged,
+    // each way round: one group of three, each clip playing the file located, through the merge's step, its Undo and its Redo.
+    for (const auto locatedHere : { false, true })
+    {
+        INFO ((locatedHere ? "located here, the alias added there" : "located there, the alias added here"));
+        TestSong s;
+        const auto loop = s.addTrack ("Loop");
+        const auto clip = s.addAudioClip (loop, writeSound (s.getSoundsFolder().getChildFile ("Loop.wav"), 2.0), 0.0);
+        s.copyClip (clip, 8.0, true);
+        const auto pathOf = [&s] (phazite::ClipID id)
+        { return phazite::findClipState (*phazite::findSong (s.context), id)[schema::clipFile].toString(); };
+        const auto played = pathOf (clip);
+        REQUIRE (played.isNotEmpty());
+        keepVersion (s.context, "First");
+
+        juce::String located;
+        const auto locate = [&]
+        {
+            const auto found = writeSound (s.getSoundsFolder().getChildFile ("Found").getChildFile ("Loop again.wav"), 2.0);
+            REQUIRE (phazite::locateAudioFile (s.context, played, found));
+            waitForAudioWork (s.context);
+            located = pathOf (clip);
+            REQUIRE (located != played);
+        };
+
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+
+        if (locatedHere)
+            s.copyClip (clip, 16.0, true);
+        else
+            locate();
+
+        const auto theirs = keepVersion (s.context, "There");
+        REQUIRE (
+            phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+
+        if (locatedHere)
+            locate();
+        else
+            s.copyClip (clip, 16.0, true);
+
+        keepVersion (s.context, "Here");
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+
+        const auto checkGroup = [&]
+        {
+            auto& song = *phazite::findSong (s.context);
+            const auto group = phazite::getLinkedClips (s.context, clip);
+            REQUIRE (group.size() == 3);
+
+            for (const auto id : group)
+            {
+                INFO ("clip " << id.getRaw());
+                CHECK (pathOf (id) == located);
+                CHECK (phazite::getClipFile (song, phazite::findClipState (song, id)).existsAsFile());
+            }
+
+            checkSong (song);
+        };
+
+        UndoCheck undo (s.context);
+        undo.check ("Merge", [&s] { REQUIRE (phazite::finishMerge (s.context)); });
+        REQUIRE (phazite::isMerging (s.context));
+        CHECK (phazite::getClashes (s.context).empty());
+        checkGroup();
+
+        auto& song = *phazite::findSong (s.context);
+        undo.stepBackOrForth ("Undo Merge", [&song] { phazite::undo (song); });
+        checkSong (song);
+        undo.stepBackOrForth ("Redo Merge", [&song] { phazite::redo (song); });
+        checkGroup();
+    }
 }

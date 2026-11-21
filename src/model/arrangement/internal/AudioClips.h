@@ -181,6 +181,20 @@ void setClipReversed (Song&, ClipID, bool);
 void setClipFollowsTempo (Song&, ClipID, bool);
 void setClipTempo (Song&, ClipID, double bpm);
 
+// What the audio clips of an alias group share (Schema.h: clipLink): their file (clipFile, its path as the song holds it),
+// which no edit changes in one clip alone (a clip is made with it, and Locate Audio File, model/project/ProjectContents.h,
+// writes the path found into every clip that plays the old one); their tempo (clipTempo), pitch (clipPitch) and direction
+// (clipReversed), which setClipPitch(), setClipReversed(), setClipFollowsTempo() and setClipTempo() write into each clip of
+// the group; and their warp markers (WARP, times in that one file), which the markers' edits write into each; the rest of a
+// clip is its own. Whether a property is one of those; whether two audio clips' elements share them, compared as values,
+// each property as read (its default where it has none: no tempo, no pitch, forwards) and the markers in their order, each as
+// juce::ValueTree::isEquivalentTo() compares elements, the first's against the other's: as the loader (makeConsistent())
+// and a merge (model/versions/internal/SongMerge.h) compare them; and the first's given to the other, in place of its own
+// (a merge's keeper's, to every other clip of its group).
+bool isSharedInAliasGroup (const juce::Identifier& property);
+bool shareTheSound (const juce::ValueTree& first, const juce::ValueTree& other);
+void giveSharedSound (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager*);
+
 // A clip recorded round a looped range (Schema.h: clipTakes): how many takes its file holds, 0 for a clip without any, and
 // the one it plays (from 1); and playing another, the same part of it (in the caller's undo step).
 int getClipTakeCount (const Song&, ClipID);

@@ -11,9 +11,10 @@
 // the other side added keeps its IDs where this side has nothing with them, and gets new ones where this side has
 // something else with them (giveNewIDs()'s lists: holdsID(), namesID()), its notes in clips both have too: no ID collides.
 // Curves, the chord lane and a plug-in's state merge whole; view state and how the song plays are always this side's. An
-// alias group's notes are one thing (Schema.h: clipLink): every clip of a merged group takes those of its keeper, the first
-// clip that the parting and both sides hold in that group (merged three ways, each side's edits in), a clash in them is
-// reported once, for the keeper, and a group left with one clip loses its link. Plain functions of trees, for any thread, but
+// alias group's notes are one thing (Schema.h: clipLink), and so are the file, tempo, pitch, direction and warp markers its
+// audio clips share: every clip of a merged group takes those of its keeper, the first clip that the parting and both sides hold
+// in that group (merged three ways, each side's edits in), a clash in them is reported once, for the keeper, and a group left
+// with one clip loses its link. Plain functions of trees, for any thread, but
 // for the IDs.
 #pragma once
 

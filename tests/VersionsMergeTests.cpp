@@ -1628,3 +1628,156 @@ TEST_CASE ("A clip both sides copied as the same alias: the copy is the group's 
     CHECK (describeClipNotes (*sides.ours, sides.clip) == describeClipNotes (*sides.ours, copies[0]));
     checkSong (*sides.ours);
 }
+
+namespace
+{
+// Sides whose base holds an alias group of audio clips on the Drums: X, from beat 0, two seconds of a file following the
+// song's tempo with a warp marker at half a second of it, and its alias Y from beat 8 (where that half second plays at beat
+// 9). Edits are made through either, as the audio clip editor makes them.
+struct AudioSides : Sides
+{
+    AudioSides()
+    {
+        const auto file = phazite::test::writeSound (temporary.folder.getChildFile ("Loop.wav"), 2.0);
+        x = phazite::test::addAudioClip (*base, tracks[1], "Loop", file, 0.0, 2.0);
+        REQUIRE (x.isValid());
+        phazite::setClipFollowsTempo (*base, x, true);
+        REQUIRE (phazite::addWarpMarker (*base, x, 0.5));
+        const auto aliases = phazite::copyClips (*base, { x }, true);
+        REQUIRE (aliases.size() == 1);
+        y = aliases.front();
+        phazite::moveClip (*base, y, at (8.0), tracks[1]);
+        REQUIRE (phazite::getWarpMarkers (*base, y).size() == 1);
+        ours = phazite::makeSong (phazite::test::copyWholeSong (*base));
+        theirs = phazite::makeSong (phazite::test::copyWholeSong (*base));
+    }
+
+    // What an audio clip of a song shares with the others of its group, as the model reads it: its tempo, pitch and
+    // direction, and its warp markers in their order, each a time of the file with where it plays straight.
+    static juce::String describeShared (const phazite::Song& song, phazite::ClipID clip)
+    {
+        juce::StringArray markers;
+
+        for (const auto& child : phazite::findClipState (song, clip))
+            if (child.hasType (schema::WARP))
+                markers.add (juce::String ((double) child[schema::warpTime], 4) + ":"
+                             + juce::String ((double) child[schema::warpPlaysAt], 4));
+
+        return "tempo " + juce::String (phazite::getClipTempo (song, clip), 2) + ", pitch "
+               + juce::String ((double) phazite::getClipPitch (song, clip), 2)
+               + (phazite::isClipReversed (song, clip) ? ", backwards" : ", forwards") + ", markers " + markers.joinIntoString (" ");
+    }
+
+    // This side's audio clips on the Drums, by their alias groups (none for a clip of its own).
+    std::map<juce::String, std::vector<phazite::ClipID>> getAudioGroups() const
+    {
+        std::map<juce::String, std::vector<phazite::ClipID>> groups;
+
+        for (const auto id : phazite::getClips (*ours, tracks[1]))
+            groups[phazite::findClipState (*ours, id)[schema::clipLink].toString()].push_back (id);
+
+        return groups;
+    }
+
+    TemporaryFolder temporary;
+    phazite::ClipID x, y;
+};
+} // namespace
+
+TEST_CASE ("A value the audio clips of a group share, changed through one of them on one side while the other adds an alias: "
+           "every clip of the group plays it")
+{
+    // One side pitches X's group 3 semitones up, through X or through Y; the other adds Z, an alias of X on the Drums from beat
+    // 16, which it copied as the group was before.
+    for (const auto addedHere : { false, true })
+    {
+        for (const auto throughAlias : { false, true })
+        {
+            INFO ((addedHere ? "added here" : "added there") << (throughAlias ? ", pitched through Y" : ", pitched through X"));
+            AudioSides sides;
+            auto& adding = addedHere ? *sides.ours : *sides.theirs;
+            auto& pitching = addedHere ? *sides.theirs : *sides.ours;
+            const auto copies = phazite::copyClips (adding, { sides.x }, true);
+            REQUIRE (copies.size() == 1);
+            phazite::moveClip (adding, copies.front(), at (16.0), sides.tracks[1]);
+            phazite::setClipPitch (pitching, throughAlias ? sides.y : sides.x, 3.0f);
+
+            const auto merged = sides.mergeIntoOurs();
+            INFO (describeMerge (merged));
+            CHECK (merged.clashes.empty());
+            const auto groups = sides.getAudioGroups();
+            REQUIRE (groups.size() == 1); // X, Y and Z in one group
+            REQUIRE (groups.begin()->second.size() == 3);
+
+            for (const auto id : groups.begin()->second)
+            {
+                INFO ("clip " << id.getRaw());
+                CHECK (phazite::getClipPitch (*sides.ours, id) == doctest::Approx (3.0f));
+                CHECK (AudioSides::describeShared (*sides.ours, id) == AudioSides::describeShared (*sides.ours, sides.x));
+            }
+
+            checkSong (*sides.ours);
+        }
+    }
+}
+
+TEST_CASE ("A value the audio clips of a group share, changed differently on both sides: one clash, the keeper's, this side's value "
+           "in every clip")
+{
+    // This side pitches the group 2 semitones up through X, the other 5 through Y: the clash is reported once, for X, the
+    // group's keeper (SongMerge.h); this side's pitch is every clip's.
+    AudioSides sides;
+    phazite::setClipPitch (*sides.ours, sides.x, 2.0f);
+    phazite::setClipPitch (*sides.theirs, sides.y, 5.0f);
+
+    const auto merged = sides.mergeIntoOurs();
+    INFO (describeMerge (merged));
+    REQUIRE (merged.clashes.size() == 1);
+    CHECK (merged.clashes[0].property == schema::clipPitch);
+    CHECK (merged.clashes[0].path[merged.clashes[0].path.size() - 1] == "CLIP:" + juce::String ((juce::int64) sides.x.getRaw()));
+    CHECK (merged.clashes[0].base.isVoid());
+    CHECK ((double) merged.clashes[0].ours == doctest::Approx (2.0));
+    CHECK ((double) merged.clashes[0].theirs == doctest::Approx (5.0));
+
+    for (const auto id : { sides.x, sides.y })
+    {
+        INFO ("clip " << id.getRaw());
+        CHECK (phazite::getClipPitch (*sides.ours, id) == doctest::Approx (2.0f));
+    }
+
+    CHECK (AudioSides::describeShared (*sides.ours, sides.x) == AudioSides::describeShared (*sides.ours, sides.y));
+    checkSong (*sides.ours);
+}
+
+TEST_CASE ("A warp marker of an audio group moved on one side and the group's pitch changed on the other: every clip of the group "
+           "has both")
+{
+    // One side moves the marker at half a second through Y, from beat 9 to beat 9.25 (the audio where Y starts held by a marker
+    // of its own); the other pitches the group 4 semitones up through X.
+    for (const auto movedHere : { true, false })
+    {
+        INFO ((movedHere ? "moved here, pitched there" : "moved there, pitched here"));
+        AudioSides sides;
+        auto& moving = movedHere ? *sides.ours : *sides.theirs;
+        auto& pitching = movedHere ? *sides.theirs : *sides.ours;
+        phazite::moveWarpMarker (moving, sides.y, 0.5, at (9.25));
+        REQUIRE (phazite::getWarpMarkers (moving, sides.x).size() == 2);
+        const auto moved = AudioSides::describeShared (moving, sides.x);
+        phazite::setClipPitch (pitching, sides.x, 4.0f);
+
+        const auto merged = sides.mergeIntoOurs();
+        INFO (describeMerge (merged));
+        CHECK (merged.clashes.empty());
+
+        for (const auto id : { sides.x, sides.y })
+        {
+            INFO ("clip " << id.getRaw());
+            CHECK (phazite::getClipPitch (*sides.ours, id) == doctest::Approx (4.0f));
+            CHECK (phazite::getWarpMarkers (*sides.ours, id).size() == 2);
+            CHECK (AudioSides::describeShared (*sides.ours, id).fromFirstOccurrenceOf ("markers", true, false)
+                   == moved.fromFirstOccurrenceOf ("markers", true, false));
+        }
+
+        checkSong (*sides.ours);
+    }
+}

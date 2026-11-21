@@ -1882,3 +1882,229 @@ TEST_CASE ("An alias group whose notes' IDs are given anew as it opens stays a g
         }
     }
 }
+
+namespace
+{
+// An alias group of three audio clips on the Audio track, written into a project's file: the track's clip (800101, from beat
+// 4) following the tempo, played at 120 BPM, pitched 2 semitones up and with two warp markers, and two copies of it (800102
+// at beat 8 and 800103 at beat 16), all three in the group 800110. Returns the three, in the song's order.
+std::vector<juce::XmlElement*> writeAudioGroupOfThree (juce::XmlElement& song)
+{
+    auto* audio = Edited::findTrack (song, "Audio");
+    auto* clip = audio->getChildByName ("CLIP");
+    REQUIRE (clip != nullptr);
+    clip->setAttribute ("id", "800101");
+    clip->setAttribute ("link", "800110");
+    clip->setAttribute ("tempo", "120");
+    clip->setAttribute ("pitch", "2");
+
+    for (const auto& [time, playsAt] : { std::pair { "0", "0" }, std::pair { "0.125", "0.15" } })
+    {
+        auto* marker = clip->createNewChildElement ("WARP");
+        marker->setAttribute ("time", time);
+        marker->setAttribute ("playsAt", playsAt);
+    }
+
+    std::vector<juce::XmlElement*> clips { clip };
+
+    for (const auto& [id, start] : { std::pair { "800102", "8" }, std::pair { "800103", "16" } })
+    {
+        auto* copy = new juce::XmlElement (*clip);
+        copy->setAttribute ("id", id);
+        copy->setAttribute ("start", start);
+        audio->addChildElement (copy);
+        clips.push_back (copy);
+    }
+
+    return clips;
+}
+
+// A clip's WARP elements, in order.
+std::vector<juce::XmlElement*> getMarkers (juce::XmlElement& clip)
+{
+    std::vector<juce::XmlElement*> markers;
+
+    for (auto* child : clip.getChildIterator())
+        if (child->hasTagName ("WARP"))
+            markers.push_back (child);
+
+    return markers;
+}
+
+// What an opened song's audio clip shares with the others of its group, as the model reads it: its tempo, pitch and
+// direction, and its warp markers in their order, each a time of the file with where it plays straight.
+juce::String describeSoundOf (const phazite::Song& song, std::uint64_t id)
+{
+    const auto clip = phazite::ClipID::fromRaw (id);
+    juce::StringArray markers;
+
+    for (const auto& child : findClipByID (song, id))
+        if (child.hasType (schema::WARP))
+            markers.add (juce::String ((double) child[schema::warpTime], 3) + ":" + juce::String ((double) child[schema::warpPlaysAt], 3));
+
+    return "tempo " + juce::String (phazite::getClipTempo (song, clip), 1) + ", pitch "
+           + juce::String ((double) phazite::getClipPitch (song, clip), 1)
+           + (phazite::isClipReversed (song, clip) ? ", backwards" : ", forwards") + ", markers " + markers.joinIntoString (" ");
+}
+} // namespace
+
+TEST_CASE ("An audio clip of an alias group whose tempo, pitch, direction or warp markers differ from the group's first clip's "
+           "opens as a clip of its own, playing as it was written")
+{
+    // Three audio clips of a group; the one that differs, by each value the group's audio clips share in turn and by its
+    // warp markers, made a clip of its own, playing as it was written; the other two still a group, under its link. With the
+    // first clip the one that differs, the other two each differ from it: all three of their own.
+    struct Difference
+    {
+        const char* what;
+        std::function<void (juce::XmlElement& clip)> make;
+        const char* sound; // what the clip that differs plays
+    };
+
+    const std::vector<Difference> differences {
+        { "its tempo", [] (juce::XmlElement& clip) { clip.setAttribute ("tempo", "100"); },
+          "tempo 100.0, pitch 2.0, forwards, markers 0.000:0.000 0.125:0.150" },
+        { "its pitch", [] (juce::XmlElement& clip) { clip.setAttribute ("pitch", "3"); },
+          "tempo 120.0, pitch 3.0, forwards, markers 0.000:0.000 0.125:0.150" },
+        { "its pitch, none of its own", [] (juce::XmlElement& clip) { clip.removeAttribute ("pitch"); },
+          "tempo 120.0, pitch 0.0, forwards, markers 0.000:0.000 0.125:0.150" },
+        { "its direction", [] (juce::XmlElement& clip) { clip.setAttribute ("reversed", "1"); },
+          "tempo 120.0, pitch 2.0, backwards, markers 0.000:0.000 0.125:0.150" },
+        { "a warp marker's place", [] (juce::XmlElement& clip) { getMarkers (clip)[1]->setAttribute ("playsAt", "0.2"); },
+          "tempo 120.0, pitch 2.0, forwards, markers 0.000:0.000 0.125:0.200" },
+        { "a warp marker more",
+          [] (juce::XmlElement& clip)
+          {
+              auto* marker = clip.createNewChildElement ("WARP");
+              marker->setAttribute ("time", "0.2");
+              marker->setAttribute ("playsAt", "0.22");
+          },
+          "tempo 120.0, pitch 2.0, forwards, markers 0.000:0.000 0.125:0.150 0.200:0.220" },
+        { "the warp markers' order",
+          [] (juce::XmlElement& clip)
+          {
+              auto* first = getMarkers (clip)[0];
+              clip.removeChildElement (first, false);
+              clip.addChildElement (first);
+          },
+          "tempo 120.0, pitch 2.0, forwards, markers 0.125:0.150 0.000:0.000" },
+    };
+
+    for (const auto& difference : differences)
+    {
+        for (const auto differing : { 1, 0 })
+        {
+            INFO (difference.what << ", in the group's " << (differing == 0 ? "first" : "second") << " clip");
+            Edited edited;
+            const auto project = edited.open (
+                [&] (juce::XmlElement& song)
+                {
+                    auto clips = writeAudioGroupOfThree (song);
+                    REQUIRE (getMarkers (*clips[0]).size() == 2);
+                    difference.make (*clips[(size_t) differing]);
+                });
+            REQUIRE (project != nullptr);
+            const auto& song = project->getSong();
+            const std::uint64_t odd = differing == 0 ? 800101 : 800102;
+            CHECK (getLink (song, odd).isEmpty());
+
+            if (differing == 0)
+            {
+                CHECK (getLink (song, 800102).isEmpty());
+                CHECK (getLink (song, 800103).isEmpty());
+            }
+            else
+            {
+                CHECK (getLink (song, 800101) == "800110");
+                CHECK (getLink (song, 800103) == "800110");
+                CHECK (describeSoundOf (song, 800101) == describeSoundOf (song, 800103));
+            }
+
+            CHECK (describeSoundOf (song, odd) == difference.sound); // as it was written
+            checkSong (song);
+        }
+    }
+}
+
+TEST_CASE ("An audio alias group that holds together opens as it was written, each clip's own values its own, and an edit through "
+           "one clip reaches all")
+{
+    // The second clip's gain, fade and the part of the file it plays its own; the third's direction written as forwards, as
+    // a clip without one plays: none differs from the first's in what they share.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            const auto clips = writeAudioGroupOfThree (song);
+            clips[1]->setAttribute ("gain", "-6");
+            clips[1]->setAttribute ("fadeIn", "0.05");
+            clips[1]->setAttribute ("fileStart", "0.05");
+            clips[2]->setAttribute ("reversed", "0");
+        });
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+
+    for (const auto id : { std::uint64_t { 800101 }, std::uint64_t { 800102 }, std::uint64_t { 800103 } })
+    {
+        INFO ("clip " << id);
+        CHECK (getLink (song, id) == "800110");
+        CHECK (describeSoundOf (song, id) == "tempo 120.0, pitch 2.0, forwards, markers 0.000:0.000 0.125:0.150");
+    }
+
+    CHECK (phazite::getClipGain (song, phazite::ClipID::fromRaw (800102)) == doctest::Approx (-6.0f));
+    CHECK (phazite::getClipGain (song, phazite::ClipID::fromRaw (800101)) == doctest::Approx (0.0f));
+
+    {
+        const phazite::UndoStep step (song, "Change Clip Pitch");
+        phazite::setClipPitch (song, phazite::ClipID::fromRaw (800103), -5.0f);
+    }
+
+    for (const auto id : { std::uint64_t { 800101 }, std::uint64_t { 800102 } })
+        CHECK (describeSoundOf (song, id) == describeSoundOf (song, 800103));
+
+    CHECK (phazite::getClipPitch (song, phazite::ClipID::fromRaw (800101)) == doctest::Approx (-5.0f));
+    checkSong (song);
+}
+
+TEST_CASE ("An audio clip of an alias group that plays another file than the group's first clip opens as a clip of its own, "
+           "playing its file")
+{
+    // Three audio clips of a group, alike but for the file one of them names: another file of the project's Audio folder,
+    // there to play. Warp markers are times in one file, so a clip of another file can't share them: it is made a clip of its
+    // own, its file kept; the other two stay a group. With the first clip the one that names another, each other differs
+    // from it: all three of their own.
+    for (const auto differing : { 2, 0 })
+    {
+        INFO ("the group's " << (differing == 0 ? "first" : "third") << " clip names another file");
+        Edited edited;
+        const auto project = edited.open (
+            [&] (juce::XmlElement& song)
+            {
+                auto clips = writeAudioGroupOfThree (song);
+                writeSound (edited.s.getProject().getAudioFolder().getChildFile ("Other.wav"), 0.25);
+                REQUIRE (clips[0]->getStringAttribute ("file") == "Audio/Loop.wav");
+                clips[(size_t) differing]->setAttribute ("file", "Audio/Other.wav");
+            });
+        REQUIRE (project != nullptr);
+        const auto& song = project->getSong();
+        const std::uint64_t odd = differing == 0 ? 800101 : 800103;
+        CHECK (getLink (song, odd).isEmpty());
+        CHECK (findClipByID (song, odd)[schema::clipFile].toString() == "Audio/Other.wav");
+        CHECK (phazite::getClipFile (song, findClipByID (song, odd)).existsAsFile());
+        CHECK (describeSoundOf (song, odd) == "tempo 120.0, pitch 2.0, forwards, markers 0.000:0.000 0.125:0.150");
+
+        if (differing == 0)
+        {
+            CHECK (getLink (song, 800102).isEmpty());
+            CHECK (getLink (song, 800103).isEmpty());
+        }
+        else
+        {
+            CHECK (getLink (song, 800101) == "800110");
+            CHECK (getLink (song, 800102) == "800110");
+            CHECK (findClipByID (song, 800102)[schema::clipFile].toString() == "Audio/Loop.wav");
+        }
+
+        checkSong (song);
+    }
+}

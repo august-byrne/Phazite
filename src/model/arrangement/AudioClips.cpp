@@ -14,6 +14,7 @@
 #include <limits>
 #include <memory>
 #include <tuple>
+#include <vector>
 
 namespace phazite
 {
@@ -625,6 +626,77 @@ void setClipTempo (Song& song, ClipID clip, double bpm)
 
     const auto tempo = juce::jlimit (minClipTempo, maxClipTempo, bpm);
     changeSound (song, clip, [tempo] (Sound& sound) { sound.tempo = tempo; });
+}
+
+//==============================================================================
+namespace
+{
+    // The properties an alias group's audio clips share, each with its value where a clip has none (writeSound() writes
+    // none for it; every audio clip names its file, as the loader keeps it). The file's path is compared as the song holds it
+    // (Schema.h: clipFile), whether the file is there or not.
+    struct SharedProperty
+    {
+        juce::Identifier name;
+        juce::var none;
+    };
+
+    const std::vector<SharedProperty>& getSharedProperties()
+    {
+        static const std::vector<SharedProperty> properties { { schema::clipFile, juce::String() },
+                                                              { schema::clipTempo, 0.0 },
+                                                              { schema::clipPitch, 0.0 },
+                                                              { schema::clipReversed, false } };
+        return properties;
+    }
+
+    std::vector<juce::ValueTree> getWarpElements (const juce::ValueTree& clipState)
+    {
+        std::vector<juce::ValueTree> markers;
+
+        for (const auto& child : clipState)
+            if (child.hasType (schema::WARP))
+                markers.push_back (child);
+
+        return markers;
+    }
+} // namespace
+
+bool isSharedInAliasGroup (const juce::Identifier& property)
+{
+    const auto& shared = getSharedProperties();
+    return std::any_of (shared.begin(), shared.end(), [&property] (const SharedProperty& each) { return each.name == property; });
+}
+
+bool shareTheSound (const juce::ValueTree& first, const juce::ValueTree& other)
+{
+    for (const auto& [name, none] : getSharedProperties())
+        if (first.getProperty (name, none) != other.getProperty (name, none))
+            return false;
+
+    const auto a = getWarpElements (first), b = getWarpElements (other);
+    return a.size() == b.size()
+           && std::equal (a.begin(), a.end(), b.begin(),
+                          [] (const juce::ValueTree& x, const juce::ValueTree& y) { return x.isEquivalentTo (y); });
+}
+
+void giveSharedSound (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager* undo)
+{
+    if (shareTheSound (from, to))
+        return;
+
+    for (const auto& [name, none] : getSharedProperties())
+    {
+        if (from.hasProperty (name))
+            to.setProperty (name, from[name], undo);
+        else
+            to.removeProperty (name, undo);
+    }
+
+    for (const auto& marker : getWarpElements (to))
+        to.removeChild (marker, undo);
+
+    for (const auto& marker : getWarpElements (from))
+        to.appendChild (marker.createCopy(), undo);
 }
 
 //==============================================================================
