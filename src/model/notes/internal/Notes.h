@@ -66,22 +66,8 @@ void selectNotes (Selection&, const std::vector<NoteRef>&);
 // another, or read from a file). Returns it, or none for a clip that isn't a MIDI clip of the song's.
 NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity, int channel = 1);
 
-// The kinds of controller events a recording takes in with the notes (schema::CONTROL), as MIDI has them: a MIDI controller
-// (by its number: the sustain pedal 64, the mod wheel 1; its value 0 to 127), the pitch bend (0 to 16383, its middle
-// 8192), the channel's pressure (0 to 127), a note's pressure, polyphonic aftertouch (by the note's number; 0 to 127),
-// and a program change (its value the program, 0 to 127). Each on a MIDI channel, from 1 to 16.
-enum class ControlKind
-{
-    controller,
-    pitchWheel,
-    channelPressure,
-    aftertouch,
-    programChange
-};
-
+// The kinds of controller events a recording takes in with the notes (schema::CONTROL; NoteValues.h: ControlKind).
 const char* getSchemaKind (ControlKind) noexcept;                            // its controlKind in the song
-bool hasNumber (ControlKind) noexcept;                                       // a controller's and a note's pressure have one
-int getHighestValue (ControlKind) noexcept;                                  // 16383 for the pitch bend, 127 for the others
 std::optional<ControlKind> findControlKind (const juce::ValueTree& control); // none for a kind Phazite doesn't know
 
 // Adds a controller's value at a song beat, on a MIDI channel (1 to 16), as a recording takes it in with the notes. The
@@ -107,6 +93,31 @@ void addControls (Song&, ClipID, const std::vector<ControlValue>&);
 // a beat: what a take after a jump that carries on what the take before let go of at its end takes away (Take.h).
 void removeControls (Song&, ClipID, ControlKind, int number, int channel, BeatPosition from, BeatPosition to);
 void removeControl (Song&, ClipID, const ControlValue&);
+
+// The piano roll's controller lanes (NoteValues.h: ControlLane), with the song's undo history. As notes are, only the
+// values that play are shown and changed: those in the part of the song their clip covers (from its start, up to its end),
+// as model/playback/internal/SongPlayer.h plays them; a split or a trim leaves the others in the clip as they are. Every
+// change is made in each of the clip's aliases too.
+
+// The lanes these clips hold values of that play, in the order the lane menu lists them (NoteValues.h), each once. And a
+// lane's values that play, clip by clip, each clip's in time order (two at one beat in the order the clip holds them).
+std::vector<ControlLane> getControlLanes (const Song&, const std::vector<ClipID>&);
+std::vector<ControlPoint> getControlValues (const Song&, const std::vector<ClipID>&, const ControlLane&);
+
+// Replaces a lane's values in a clip that play from one song beat to another, both included, with these (their clips
+// aside: they go into this one). Of them, those outside the range or where the clip doesn't play them are left out, one
+// closer than getShortestControlGap() after the one before takes its place, and one that repeats the value before it (the
+// clip's, before the range) is left out, as a recording leaves it out. A clip doesn't grow for a value. Nothing for a note's
+// pressure, which is not drawn. A value already there as it would be put stays as it is, the others are removed and added:
+// values set as they are change nothing. One walk through the clip's elements for each alias, which reads no note: a step
+// of a drag.
+void setControlValues (Song&, ClipID, const ControlLane&, BeatRange, const std::vector<ControlPoint>&);
+
+// Removes a lane's values that play from these clips from one song beat to another, both included; or all of them. Many
+// values removed (more than a step of a drag removes) are one change of each clip: it is filled as a copy without them and
+// put in its place, the same clip by its ID, as addControls() fills one; a few are removed in place.
+void deleteControlValues (Song&, const std::vector<ClipID>&, const ControlLane&, BeatRange);
+void deleteAllControlValues (Song&, const std::vector<ClipID>&, const ControlLane&);
 
 // Moves a note to a song beat and a pitch. It can't go to before its clip's start (one that starts before it already,
 // which a split or a trim cut, goes no earlier than it is); the clip grows to hold it, as addNote() says, and where the

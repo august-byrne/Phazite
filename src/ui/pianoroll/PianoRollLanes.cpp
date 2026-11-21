@@ -452,6 +452,7 @@ void PianoRoll::VelocityLane::mouseUp (const juce::MouseEvent&)
     drag = Drag::none;
     step = nullptr; // the drag's undo step is done
     before.clear();
+    roll.updateLaneButton(); // which waited for the drag's end
     repaint();
 }
 
@@ -466,6 +467,7 @@ void PianoRoll::VelocityLane::cancelDrag()
     step = nullptr;
     drag = Drag::none;
     before.clear();
+    roll.updateLaneButton(); // which waited for the drag's end
     repaint();
 }
 

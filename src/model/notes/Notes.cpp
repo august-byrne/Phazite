@@ -13,6 +13,8 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <juce_audio_basics/juce_audio_basics.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -20,6 +22,7 @@
 #include <map>
 #include <numeric>
 #include <set>
+#include <tuple>
 #include <unordered_map>
 
 namespace phazite
@@ -659,6 +662,163 @@ int getHighestValue (ControlKind kind) noexcept
     return kind == ControlKind::pitchWheel ? 16383 : 127;
 }
 
+juce::String getControllerName (int number)
+{
+    // The names players know, where JUCE's are old or long ("Modulation Wheel (coarse)", "Hold Pedal (on/off)").
+    switch (number)
+    {
+        case 1:
+            return "Mod Wheel";
+        case 7:
+            return "Volume";
+        case 10:
+            return "Pan";
+        case 11:
+            return "Expression";
+        case 64:
+            return "Sustain Pedal";
+        case 66:
+            return "Sostenuto Pedal";
+        default:
+            break;
+    }
+
+    // JUCE's otherwise: a coarse value and a switch named for what they control alone, a fine one so ("Breath controller
+    // Fine"), and the sound controllers without the word every one of them has ("Brightness", not "Sound Brightness").
+    const auto* text = juce::MidiMessage::getControllerName (number);
+
+    if (text == nullptr)
+        return {};
+
+    auto name = juce::String (text).replace (" (coarse)", {}).replace (" (on/off)", {}).replace (" (fine)", " Fine");
+
+    if (name.startsWith ("Sound ") && ! name.startsWith ("Sound Control"))
+        name = name.fromFirstOccurrenceOf ("Sound ", false, false);
+
+    return name;
+}
+
+juce::String ControlLane::getShortName() const
+{
+    switch (kind)
+    {
+        case ControlKind::controller:
+        {
+            const auto name = getControllerName (number);
+            return name.isNotEmpty() ? name : "CC " + juce::String (number);
+        }
+        case ControlKind::pitchWheel:
+            return "Pitch Bend";
+        case ControlKind::channelPressure:
+            return "Channel Pressure";
+        case ControlKind::aftertouch:
+            return "Note Pressure";
+        case ControlKind::programChange:
+            return "Program Change";
+    }
+
+    return {};
+}
+
+juce::String ControlLane::getName() const
+{
+    auto name = getShortName();
+
+    if (kind == ControlKind::controller && getControllerName (number).isNotEmpty())
+        name << " (CC " << number << ")";
+
+    if (channel != 1)
+        name << ", Channel " << channel;
+
+    return name;
+}
+
+int ControlLane::getHighestValue() const noexcept
+{
+    return phazite::getHighestValue (kind);
+}
+
+int ControlLane::getRest() const noexcept
+{
+    return kind == ControlKind::pitchWheel ? 8192 : 0;
+}
+
+bool ControlLane::canDraw() const noexcept
+{
+    return kind != ControlKind::aftertouch;
+}
+
+juce::String ControlLane::describeValue (int value) const
+{
+    value = juce::jlimit (0, getHighestValue(), value);
+
+    switch (kind)
+    {
+        case ControlKind::pitchWheel:
+            return getShortName() + " " + juce::String (juce::jlimit (-100, 100, juce::roundToInt ((value - 8192) * 100.0 / 8192.0))) + "%";
+        case ControlKind::programChange:
+            return "Program " + juce::String (value + 1);
+        case ControlKind::controller:
+        case ControlKind::channelPressure:
+        case ControlKind::aftertouch:
+            break;
+    }
+
+    return getShortName() + " " + juce::String (value);
+}
+
+bool operator< (const ControlLane& a, const ControlLane& b) noexcept
+{
+    return std::tuple (a.channel, static_cast<int> (a.kind), a.number) < std::tuple (b.channel, static_cast<int> (b.kind), b.number);
+}
+
+ControlLane makeControlLane (ControlKind kind, int number, int channel)
+{
+    return { kind, kind == ControlKind::controller ? juce::jlimit (0, 127, number) : 0, juce::jlimit (1, 16, channel) };
+}
+
+std::vector<ControlLane> getUsualControlLanes()
+{
+    return { { ControlKind::pitchWheel, 0, 1 },      { ControlKind::controller, 1, 1 },   { ControlKind::controller, 64, 1 },
+             { ControlKind::controller, 11, 1 },     { ControlKind::controller, 7, 1 },   { ControlKind::controller, 10, 1 },
+             { ControlKind::channelPressure, 0, 1 }, { ControlKind::programChange, 0, 1 } };
+}
+
+BeatDuration getShortestControlGap()
+{
+    return BeatDuration::fromBeats (1.0 / 64.0);
+}
+
+std::vector<ControlPoint> makeControlRamp (const ControlLane& lane, BeatPosition from, int fromValue, BeatPosition to, int toValue)
+{
+    if (to < from)
+    {
+        std::swap (from, to);
+        std::swap (fromValue, toValue);
+    }
+
+    fromValue = juce::jlimit (0, lane.getHighestValue(), fromValue);
+    toValue = juce::jlimit (0, lane.getHighestValue(), toValue);
+    std::vector<ControlPoint> points;
+
+    const auto add = [&points] (BeatPosition beat, int value)
+    {
+        if (points.empty() || points.back().value != value)
+            points.push_back ({ {}, beat, value, 0 });
+    };
+
+    // A value at each gap from its start, the last a gap or more before its end, then the end's: none closer than a gap.
+    const auto length = (to - from).inBeats();
+    const auto gap = getShortestControlGap().inBeats();
+    const auto steps = length > 0.0 ? (int) std::floor (length / gap + 1.0e-9) : 0;
+
+    for (int i = 0; i < steps; ++i)
+        add (from + BeatDuration::fromBeats (i * gap), juce::roundToInt (fromValue + (toValue - fromValue) * (i * gap / length)));
+
+    add (to, toValue);
+    return points;
+}
+
 std::optional<ControlKind> findControlKind (const juce::ValueTree& control)
 {
     const auto kind = control[schema::controlKind].toString();
@@ -783,6 +943,292 @@ void removeControl (Song& song, ClipID clip, const ControlValue& control)
             }
         }
     }
+}
+
+//==============================================================================
+namespace
+{
+    // Whether a clip's element is a value of a lane: of its kind and on its channel, and a controller's of its number.
+    bool isOfLane (const juce::ValueTree& child, const ControlLane& lane)
+    {
+        return child.hasType (schema::CONTROL) && findControlKind (child) == lane.kind
+               && (lane.kind != ControlKind::controller || (int) child[schema::controlNumber] == lane.number)
+               && readChannel (child, schema::controlChannel) == lane.channel;
+    }
+
+    // What of a clip's values plays, in song beats, as model/playback/internal/SongPlayer.h reads them: a value's beat is
+    // its clip's content start and its own, and it plays from the clip's start up to its end.
+    struct PlayedPart
+    {
+        double contentStart = 0.0, start = 0.0, end = 0.0;
+
+        double getBeat (const juce::ValueTree& control) const { return contentStart + (double) control[schema::controlBeat]; }
+        bool plays (double beat) const { return beat >= start && beat < end; }
+    };
+
+    PlayedPart getPlayedPart (const juce::ValueTree& clipState)
+    {
+        const auto range = getClipRange (clipState);
+        return { getContentStart (clipState).inBeats(), range.getStart().inBeats(), range.getEnd().inBeats() };
+    }
+
+    constexpr double nearBeats = 1.0e-9; // a range's ends take what is this close to them
+
+    // A lane's values that play from one song beat to another, both included, in the clip's element or an alias's (whose
+    // values are where the clip's are among its notes), found in one walk through its elements: their places among them, in
+    // order; and the value of the lane's that holds at the range's start, the latest that plays before it (the later of two
+    // at a beat).
+    struct LaneValuesIn
+    {
+        std::vector<int> places;
+        std::optional<int> before;
+    };
+
+    LaneValuesIn findLaneValues (const juce::ValueTree& element, const ControlLane& lane, const PlayedPart& part, double from, double to)
+    {
+        LaneValuesIn found;
+        auto beforeBeat = 0.0;
+        SongIndex::countVisited ((std::uint64_t) element.getNumChildren()); // a walk of the clip's, for the speed gates
+
+        for (int i = 0; i < element.getNumChildren(); ++i)
+        {
+            const auto child = element.getChild (i);
+
+            if (! isOfLane (child, lane))
+                continue;
+
+            const auto beat = part.getBeat (child);
+
+            if (! part.plays (beat))
+                continue;
+
+            if (beat >= from - nearBeats && beat <= to + nearBeats)
+            {
+                found.places.push_back (i);
+            }
+            else if (beat < from && (! found.before.has_value() || beat >= beforeBeat))
+            {
+                found.before = (int) child[schema::controlValue];
+                beforeBeat = beat;
+            }
+        }
+
+        return found;
+    }
+
+    // Past this many values removed and added at once, a clip is filled as a copy without them and put in its place, as
+    // addControls() fills one: each removal in place shifts the clip's elements after it and is an undo action and a change
+    // its listeners hear, so that Delete All of a long take's bend removed a hundred thousand one by one. A draw's step
+    // removes and adds a few, in place, the clip's element staying the one it was.
+    constexpr size_t mostChangesInPlace = 256;
+
+    // Removes the clip's elements at these places (in order) and adds these, as one change of the clip where they are many.
+    void changeLaneValues (Song& song, juce::ValueTree element, const std::vector<int>& removed, const std::vector<juce::ValueTree>& added)
+    {
+        if (removed.empty() && added.empty())
+            return;
+
+        auto* undo = &song.getUndoManager();
+        auto parent = element.getParent();
+
+        if (removed.size() + added.size() <= mostChangesInPlace || ! parent.isValid())
+        {
+            for (auto place = removed.rbegin(); place != removed.rend(); ++place)
+                element.removeChild (*place, undo);
+
+            for (const auto& each : added)
+                element.appendChild (each, undo);
+
+            return;
+        }
+
+        // The copy, without the history, the same clip by its ID; the original stays as it was, for the removal's undo.
+        juce::ValueTree filled (element.getType());
+        filled.copyPropertiesFrom (element, nullptr);
+        auto next = removed.begin();
+        SongIndex::countVisited ((std::uint64_t) element.getNumChildren());
+
+        for (int i = 0; i < element.getNumChildren(); ++i)
+        {
+            if (next != removed.end() && *next == i)
+                ++next;
+            else
+                filled.appendChild (element.getChild (i).createCopy(), nullptr);
+        }
+
+        for (const auto& each : added)
+            filled.appendChild (each, nullptr);
+
+        const auto index = parent.indexOf (element);
+        parent.removeChild (index, undo);
+        parent.addChild (filled, index, undo);
+    }
+
+    // Makes the lane's values at these places in a clip's element the values wanted (in time order, in song beats): those
+    // already there as wanted stay where they are, and only the others go or come.
+    void putLaneValues (Song& song, juce::ValueTree element, const std::vector<int>& places, const std::vector<ControlPoint>& wanted,
+                        const ControlLane& lane, double contentStart)
+    {
+        // What is there, by its beat as the clip holds it.
+        std::vector<std::pair<double, size_t>> there;
+
+        for (size_t i = 0; i < places.size(); ++i)
+            there.emplace_back ((double) element.getChild (places[i])[schema::controlBeat], i);
+
+        std::sort (there.begin(), there.end());
+        std::vector<bool> stays (places.size(), false);
+        std::vector<juce::ValueTree> added;
+
+        for (const auto& each : wanted)
+        {
+            const auto state =
+                makeControlState ({ each.beat, lane.kind, lane.number, each.value, lane.channel }, BeatPosition::fromBeats (contentStart));
+            const auto beat = (double) state[schema::controlBeat];
+            const auto value = (int) state[schema::controlValue];
+            auto found = std::lower_bound (there.begin(), there.end(), std::pair { beat - nearBeats, size_t {} });
+
+            for (; found != there.end() && found->first <= beat + nearBeats; ++found)
+                if (! stays[found->second] && (int) element.getChild (places[found->second])[schema::controlValue] == value)
+                    break;
+
+            if (found != there.end() && found->first <= beat + nearBeats)
+                stays[found->second] = true;
+            else
+                added.push_back (state);
+        }
+
+        std::vector<int> removed;
+
+        for (size_t i = 0; i < places.size(); ++i)
+            if (! stays[i])
+                removed.push_back (places[i]);
+
+        changeLaneValues (song, element, removed, added);
+    }
+} // namespace
+
+std::vector<ControlLane> getControlLanes (const Song& song, const std::vector<ClipID>& clips)
+{
+    std::set<ControlLane> lanes;
+
+    for (const auto clip : clips)
+    {
+        const auto clipState = findMidiClipState (song, clip);
+        const auto part = getPlayedPart (clipState);
+        SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren());
+
+        for (const auto& child : clipState)
+            if (child.hasType (schema::CONTROL) && part.plays (part.getBeat (child)))
+                if (const auto kind = findControlKind (child))
+                    lanes.insert (makeControlLane (*kind, (int) child[schema::controlNumber], readChannel (child, schema::controlChannel)));
+    }
+
+    return { lanes.begin(), lanes.end() };
+}
+
+std::vector<ControlPoint> getControlValues (const Song& song, const std::vector<ClipID>& clips, const ControlLane& lane)
+{
+    std::vector<ControlPoint> points;
+
+    for (const auto clip : clips)
+    {
+        const auto clipState = findMidiClipState (song, clip);
+        const auto part = getPlayedPart (clipState);
+        const auto first = points.size();
+        SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren());
+
+        for (const auto& child : clipState)
+            if (isOfLane (child, lane))
+                if (const auto beat = part.getBeat (child); part.plays (beat))
+                    points.push_back ({ clip, BeatPosition::fromBeats (beat),
+                                        juce::jlimit (0, lane.getHighestValue(), (int) child[schema::controlValue]),
+                                        juce::jlimit (0, 127, (int) child[schema::controlNumber]) });
+
+        std::stable_sort (points.begin() + (std::ptrdiff_t) first, points.end(),
+                          [] (const ControlPoint& a, const ControlPoint& b) { return a.beat < b.beat; });
+    }
+
+    return points;
+}
+
+void setControlValues (Song& song, ClipID clip, const ControlLane& lane, BeatRange range, const std::vector<ControlPoint>& values)
+{
+    const auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid() || ! lane.canDraw())
+        return;
+
+    const auto part = getPlayedPart (clipState);
+    const auto from = std::max (range.getStart().inBeats(), part.start), to = range.getEnd().inBeats();
+
+    if (from >= part.end || to < from - nearBeats)
+        return;
+
+    // The values to put there, in time order: none outside the range or where the clip doesn't play them, and none closer
+    // than the shortest gap after the one before, which takes its value instead.
+    auto sorted = values;
+    std::stable_sort (sorted.begin(), sorted.end(), [] (const ControlPoint& a, const ControlPoint& b) { return a.beat < b.beat; });
+    std::vector<ControlPoint> kept;
+    const auto gap = getShortestControlGap().inBeats();
+
+    for (const auto& each : sorted)
+    {
+        const auto beat = each.beat.inBeats();
+
+        if (beat < from - nearBeats || beat > to + nearBeats || ! part.plays (beat))
+            continue;
+
+        const auto value = juce::jlimit (0, lane.getHighestValue(), each.value);
+
+        if (! kept.empty() && beat - kept.back().beat.inBeats() < gap - nearBeats)
+            kept.back().value = value;
+        else
+            kept.push_back ({ clip, each.beat, value, 0 });
+    }
+
+    // A value that repeats the one that holds before it is left out. What is there already as it would be put stays as it
+    // is, so that a click on the value there changes nothing, and a step of a drag changes only what it draws differently.
+    const auto found = findLaneValues (clipState, lane, part, from, to);
+    auto previous = found.before;
+    std::vector<ControlPoint> wanted;
+
+    for (const auto& each : kept)
+    {
+        if (previous == each.value)
+            continue;
+
+        previous = each.value;
+        wanted.push_back (each);
+    }
+
+    for (const auto& alias : getAliasStates (song, clipState))
+        putLaneValues (song, alias, alias == clipState ? found.places : findLaneValues (alias, lane, part, from, to).places, wanted, lane,
+                       part.contentStart);
+}
+
+void deleteControlValues (Song& song, const std::vector<ClipID>& clips, const ControlLane& lane, BeatRange range)
+{
+    for (const auto clip : clips)
+    {
+        const auto clipState = findMidiClipState (song, clip);
+
+        if (! clipState.isValid())
+            continue;
+
+        const auto part = getPlayedPart (clipState);
+
+        for (const auto& alias : getAliasStates (song, clipState))
+            changeLaneValues (
+                song, alias,
+                findLaneValues (alias, lane, part, std::max (range.getStart().inBeats(), part.start), range.getEnd().inBeats()).places, {});
+    }
+}
+
+void deleteAllControlValues (Song& song, const std::vector<ClipID>& clips, const ControlLane& lane)
+{
+    for (const auto clip : clips)
+        if (const auto clipState = findMidiClipState (song, clip); clipState.isValid())
+            deleteControlValues (song, { clip }, lane, getClipRange (clipState));
 }
 
 namespace

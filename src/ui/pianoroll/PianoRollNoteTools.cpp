@@ -712,6 +712,7 @@ void PianoRoll::NoteGrid::mouseUp (const juce::MouseEvent& e)
     }
 
     gesture = nullptr;
+    roll.updateLaneButton(); // which waited for the drag's end
 
     if (! rubberBand.isEmpty())
     {
@@ -770,6 +771,7 @@ void PianoRoll::NoteGrid::cancelGesture()
     roll.stopAudition();
     roll.setDragReadout ({});
     gesture = nullptr;
+    roll.updateLaneButton(); // which waited for the drag's end
     rubberBand = {};
     updateHint (getMouseXYRelative().toFloat());
     repaint();
@@ -794,6 +796,7 @@ void PianoRoll::NoteGrid::cancelDrag()
     }
 
     gesture = nullptr;
+    roll.updateLaneButton(); // which waited for the drag's end
     rubberBand = {};
     updateHint (getMouseXYRelative().toFloat());
     repaint();

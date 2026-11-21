@@ -998,6 +998,127 @@ TEST_CASE ("Performance gate: a step of a drag of notes looks at as many element
     CHECK (moreTracks < small * 2); // ten times the song: the same work
 }
 
+TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no note, and changes as much whatever the notes in its clip")
+{
+    // As the piano roll's lane draws a step (PianoRollControlLane.cpp: putCells()): the lane's values in a beat replaced by
+    // two. It removes and adds the lane's elements there alone, walking the clip's elements once to find them, rather than
+    // rebuilding the clip as a take's thousands of values do (Notes.h: addControls()) or reading its notes.
+    struct Counts
+    {
+        std::uint64_t notesRead = 0, visited = 0;
+        int changes = 0;
+    };
+
+    struct Heard : juce::ValueTree::Listener
+    {
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++changes; }
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++changes; }
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++changes; }
+        int changes = 0;
+    };
+
+    const auto countFor = [] (int numNotes)
+    {
+        auto song = phazite::createSong();
+        phazite::ProjectContext context (phazite::test::getEngineContext());
+        const auto track = phazite::ensureTracks (*song, 1).front();
+        const auto clip = phazite::insertMidiClip (*song, track, { at (0.0), at (std::max (64.0, numNotes * 0.25)) }, nullptr);
+        std::vector<phazite::NoteData> notes;
+
+        for (int i = 0; i < numNotes; ++i)
+            notes.push_back ({ .clip = clip, .pitch = 48 + i % 24, .start = at (i * 0.25), .length = lasting (0.2) });
+
+        phazite::setClipNotes (*song, clip, notes);
+
+        for (int i = 0; i < 256; ++i)
+            phazite::addControl (*song, clip, at (i * 0.25), phazite::ControlKind::controller, 64, i % 2 == 0 ? 127 : 0);
+
+        phazite::setSong (context, song.get());
+        const phazite::ControlLane pedal { phazite::ControlKind::controller, 64, 1 };
+        const auto step = [&] (double from)
+        {
+            phazite::setControlValues (context, clip, pedal, { at (from), at (from + 1.0) },
+                                       { { clip, at (from), 64, 0 }, { clip, at (from + 0.5), 100, 0 } });
+        };
+
+        step (4.0);
+        Heard heard;
+        auto root = song->getState();
+        root.addListener (&heard);
+        const auto element = phazite::findClipState (*song, clip);
+        const auto inTheBeat = [&]
+        {
+            const auto values = phazite::getControlValues (*song, { clip }, pedal);
+            return std::count_if (values.begin(), values.end(),
+                                  [] (const phazite::ControlPoint& point) { return point.beat >= at (8.0) && point.beat <= at (9.0); });
+        };
+
+        const auto removed = inTheBeat();
+        const auto notesBefore = phazite::countNotesRead();
+        const auto visitedBefore = phazite::SongIndex::countElementsVisited();
+        step (8.0);
+        const Counts counts { phazite::countNotesRead() - notesBefore, phazite::SongIndex::countElementsVisited() - visitedBefore,
+                              heard.changes };
+        root.removeListener (&heard);
+
+        // The clip's own element changed in place, not a copy of it put in its place; and what was heard, each value of the
+        // lane's in the beat taken out and each drawn put in (none of them the same), nothing else.
+        CHECK (phazite::findClipState (*song, clip) == element);
+        CHECK (counts.changes == (int) (removed + inTheBeat()));
+        phazite::setSong (context, nullptr);
+        return counts;
+    };
+
+    const auto few = countFor (200), many = countFor (20000);
+    INFO ("A step in a clip of 200 notes: " << few.changes << " changes, " << few.visited << " elements looked at; of 20,000 notes: "
+                                            << many.changes << " changes, " << many.visited << " looked at");
+    CHECK (few.notesRead == 0);
+    CHECK (many.notesRead == 0);
+    CHECK (few.changes == 7);                    // five values of the pedal's in the beat, both its ends in it, and two drawn
+    CHECK (many.changes == few.changes);         // whatever else the clip holds
+    CHECK (many.visited - few.visited <= 19800); // one walk through the clip's elements, not one for each value or note
+}
+
+TEST_CASE ("Performance gate: a step of a note's drag in the piano roll doesn't walk the controller values its clip holds")
+{
+    // The lane's chooser marks the lanes the clips hold that it doesn't show, which a walk through the clips' elements finds:
+    // read at each change of the song, a note dragged in a clip of a long take paid that walk at each step. It waits for the
+    // drag's end.
+    const auto visitedFor = [] (int numValues)
+    {
+        phazite::test::PianoRollScreen screen;
+        std::vector<phazite::ControlValue> values;
+
+        for (int i = 0; i < numValues; ++i)
+            values.push_back ({ at (i * 8.0 / numValues), phazite::ControlKind::controller, 1, i % 128, 1 });
+
+        phazite::addControls (screen.getSong(), screen.clip, values);
+        screen.addNote (1.0);
+        phazite::test::Mouse mouse (*screen.notes);
+        mouse.press (screen.at (1.5));
+        mouse.dragTo (screen.at (2.5));
+        phazite::test::dispatchPendingMessages();
+        const auto before = phazite::SongIndex::countElementsVisited();
+        mouse.dragTo (screen.at (3.5));
+        phazite::test::dispatchPendingMessages();
+        const auto visited = phazite::SongIndex::countElementsVisited() - before;
+        mouse.release();
+        phazite::test::dispatchPendingMessages();
+
+        // Once the drag is over, the chooser says what the clip holds.
+        auto* chooser = dynamic_cast<juce::TextButton*> (phazite::test::findComponentWithTitle (screen.pianoRoll, "Lane: Velocity"));
+        REQUIRE (chooser != nullptr);
+        CHECK (chooser->getTooltip().contains ("Mod Wheel (CC 1)") == (numValues > 0));
+        return visited;
+    };
+
+    // One walk through the clip's elements, which reads its notes, as before the lanes came (191 elements looked at and
+    // about 20,200 measured, 2026-11-20); the chooser's read at each step made it two (40,193).
+    const auto none = visitedFor (0), many = visitedFor (20000);
+    INFO ("Elements looked at by a step of a note's drag in a clip of no controller values: " << none << "; of 20,000: " << many);
+    CHECK (many - none < 30000);
+}
+
 TEST_CASE ("Performance gate: a drag or a paste of many notes looks through its clip's track once, not once for each note")
 {
     // Where a clip can grow to (the next clip on its track) was found by a walk through the track's clips for each note a

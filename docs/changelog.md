@@ -16,6 +16,12 @@ The full text of every step, as it was written when it was built, is in the
   The inspector shows and sets the selected notes' channel. A program change, played on a keyboard or from a clip,
   selects a plug-in's program, and is chased where playback starts or jumps only where the program differs from the
   one set last, in a render from the block it lies in; a song that plays one stays without unsaved changes.
+- **S5.3 Controller lanes in the piano roll.** The lane under the notes shows the velocities or, picked by the chooser
+  beside its chevron, one controller, the pitch bend, the channel's pressure, a note's pressure or the program changes
+  of one channel, as steps in the clip's colour; the chooser marks what the clips hold that the lane doesn't show, so
+  that nothing plays unseen. A drag draws values on the grid (off it with Alt), a right drag a straight ramp, the
+  Delete tool removes what it passes and Delete All the lane's values, each one undo step that Escape takes back; a
+  clip opens on the lane it was left on. A sustain pedal recorded with a part shows there, plays and can be deleted.
 
 ## The owner's round of 2026-11-20
 

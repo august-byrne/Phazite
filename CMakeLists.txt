@@ -943,6 +943,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/pianoroll/PianoRoll.cpp
     src/ui/pianoroll/PianoRoll.h
     src/ui/pianoroll/PianoRollCommands.cpp
+    src/ui/pianoroll/PianoRollControlLane.cpp
     src/ui/pianoroll/PianoRollLanes.cpp
     src/ui/pianoroll/PianoRollNoteTools.cpp
     src/ui/pianoroll/PianoRollNotes.cpp
@@ -1280,6 +1281,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ContainerTests.cpp
         tests/ContainerUiTests.cpp
         tests/ControlGridTests.cpp
+        tests/ControlLaneTests.cpp
         tests/ControlsTests.cpp
         tests/ConvolutionTests.cpp
         tests/DawProjectTests.cpp
@@ -1377,6 +1379,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/PerformanceCounts.cpp
         tests/PerformanceCounts.h
         tests/PerformanceGateTests.cpp
+        tests/PianoRollControlLaneTests.cpp
         tests/PianoRollTests.cpp
         tests/PlanCheck.cpp
         tests/PlanCheck.h

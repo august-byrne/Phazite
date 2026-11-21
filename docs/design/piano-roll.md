@@ -16,7 +16,8 @@ warp markers. The tab is named for what it shows and follows the selection ([win
 | Several clips edited at once | Built | |
 | Clips that grow with their notes | Built | |
 | Velocity lane, velocity shown on the notes | Built | |
-| Controller, pitch-bend and per-note expression lanes | Planned | No roadmap step; imported controllers play but cannot be seen or edited |
+| Controller lane: controllers, pitch bend, pressure and program changes shown, drawn and deleted | Built | One lane at a time, in the velocity lane's place; a note's pressure shown and deleted, not drawn |
+| Per-note expression lanes (MPE) | Planned | After version 1 |
 | Slide and portamento notes | Built | Phazite's own instruments play them |
 | Pitch glides sent to plug-ins as MPE | Planned | After version 1 |
 | Ghost notes | Built | All other tracks at once; no choice per track |
@@ -124,6 +125,53 @@ Delete and Zoom.
 | Click the chevron at its top left | Folds the lane to a thin row, or opens it |
 
 The settings keep the lane's height and whether it is folded.
+
+## Controller lanes
+
+The lane under the notes shows one thing at a time, as FL Studio's event lane and Ableton Live's envelope do: the
+velocities, or one controller's values on one MIDI channel. A lane is a kind of value on a channel: a controller by its
+number ("Sustain Pedal (CC 64)", "Mod Wheel (CC 1)", "Brightness (CC 74)", or "CC 21" for one without a name), the
+pitch bend, the channel's pressure, a note's pressure (every note's) or program changes, with ", Channel 2" after its
+name on another channel than the first. Its height, its fold and the line that sizes it are the velocity lane's.
+
+- **The chooser**, a button beside the lane's chevron (the folded row shows it too), shows the lane's name, cut where
+  the room is short and whole in its tooltip. Its menu: Velocity; "In these clips", each lane the clips shown hold values
+  of, by channel, then kind, then number; the usual ones they don't hold, on the first channel (Pitch Bend, Mod Wheel,
+  Sustain Pedal, Expression, Volume, Pan, Channel Pressure, Program Change); Other Controller, the controllers 0 to 119;
+  Channel, 1 to 16, which shows the same kind on that channel; and Delete All of the lane's values that play in the
+  clips shown (what a trim hides stays), one undo step. The lane shown is ticked.
+- **Nothing plays unseen:** while the clips shown hold values the lane doesn't show, the chooser has a mark, and its
+  tooltip names them ("These clips also hold Sustain Pedal (CC 64) and Pitch Bend").
+- **Values are steps**, as MIDI has them: each holds until the next. The lane draws a stepped line with what is under it
+  filled in the clip's colour (the pitch bend from its middle line, up and down), and a dot at each value's start where
+  they are far enough apart to see. A program change is a line at its place with its number, counted from 1 as Ableton
+  Live shows them (the song holds 0 to 127). A note's pressure is a stem for each value, as the velocities show, since
+  the notes' values overlap. Nothing is interpolated on playback, and there are no curves or handles: a ramp is many
+  values.
+- **Where a value goes:** into the clip shown that plays at that beat (the first shown, where two do), and its aliases,
+  as every note edit does. A clip doesn't grow for a value: nothing is drawn where no clip shown plays, and the lane shows
+  that part as the note grid does. Only the values that play are shown and changed, as notes are.
+- **No repeats, no crowding:** a value that repeats the one before it is left out as it is drawn, as a recording leaves it
+  out, and values are no closer together than 1/64 of a beat.
+- Which lane a clip shows is remembered with its view, for as long as the project is open, and shared by its aliases: a
+  clip shown again opens on the lane it was left on, and one not seen before on Velocity. Several clips shown at once open
+  on Velocity. Nothing of it is saved.
+
+| In a controller lane | Does |
+| --- | --- |
+| Drag (any tool but Delete) | Draws: the values across what the pointer passed are replaced by those under it as it passed, one at the start of each step of the grid the pointer is in with Snap on, one at each pixel (no closer than 1/64 of a beat) with Snap off or Alt held, the steps as long as they were as the drag began. The last value drawn holds until the next value that was there. The pitch bend's middle row draws no bend |
+| Click | Sets one value, in place of those in its step of the grid; a click on the value already there changes nothing and leaves no undo step |
+| Right drag | A straight ramp from where the button went down to the pointer, shown as it is dragged and put in place of what is between its ends as the button comes up; its ends snap to the nearest line of the grid |
+| Drag with the Delete tool | Deletes the values in the time it passes over, the stretch shown as it goes |
+| Escape during any of them | Takes the drag back, leaving nothing to undo or redo |
+| Wheel | Scrolls, as over the notes |
+
+Each drag is one undo step: "Draw Sustain Pedal", "Draw Pitch Bend", "Delete Sustain Pedal"; one that leaves the values
+as they were (drawn out and back) is none. The lane's values span it from its top row under the line that sizes it (the
+highest) to its foot (none). The hint bar says what a drag would draw and where ("Sustain Pedal 127 at 3.2.1", the bend
+from -100% to 100%, "Program 12"). The Select, Slice, Mute and Zoom tools draw, as they set velocities in the velocity
+lane. A note's pressure can't be drawn yet: a draw or a ramp in its lane does nothing, and its hint says so; the Delete
+tool and Delete All remove it.
 
 ## Slide and portamento notes
 
@@ -279,12 +327,21 @@ plays the earlier render at once.
   handles and no tools.
 - Normalize sets the clip's gain to -1 dB and writes no file, with no level to choose.
 - One stretch algorithm, rendered in the background before it plays, rather than several played live.
+- One lane under the notes, which shows one thing at a time (the velocities or one controller on one channel), as FL
+  Studio's event lane and Ableton Live's envelope do; no stack of lanes. Its chooser marks values the clips hold that it
+  doesn't show, so that nothing plays unseen.
+- A controller's values are steps, as MIDI has them, with no curves or handles: a ramp is many values, no closer than
+  1/64 of a beat, and a value that repeats the one before it is left out.
 
 ## Not built
 
-- Controller, pitch-bend, program-change and per-note expression lanes: Planned. Controllers and program changes that a
-  MIDI file brought in play, but the piano roll does not show them. A note's MIDI channel (1 to 16; a new note's is 1)
-  shows and changes in the inspector; the piano roll shows no channel (no colour by channel, no channel filter).
+- Several controller lanes at once; curves and ramps as single shapes that stay editable; selecting, copying and moving
+  a controller's values; values that move with their notes: Planned.
+- Drawing a note's pressure (its lane shows and deletes it), per-note expression and MPE: Planned, after version 1.
+- 14-bit controllers and NRPN as one lane (each of their controllers shows in a lane of its own): Planned. A lane for a
+  plug-in's parameters is automation, in the playlist.
+- A note's MIDI channel (1 to 16; a new note's is 1) shows and changes in the inspector; the piano roll shows no channel
+  for notes (no colour by channel, no channel filter).
 - Pitch glides between notes sent to plug-ins as MPE note expression: Planned, after version 1.
 - A choice of ghost notes per track, and a single click on a ghost note to go to its track: Planned; today one switch
   shows every other track's notes, and a double-right-click on one shows its clip.
@@ -303,10 +360,11 @@ plays the earlier render at once.
 
 - `src/ui/pianoroll/PianoRoll.h`, with its parts in `PianoRollParts.h`: rows (`PianoRollRows.cpp`), the note grid
   (`PianoRollNotes.cpp`) and its tools (`PianoRollNoteTools.cpp`), the keys, the velocity lane and the transform bar
-  (`PianoRollLanes.cpp`), and the transforms, menus and commands (`PianoRollCommands.cpp`).
+  (`PianoRollLanes.cpp`), the controller lane and its chooser (`PianoRollControlLane.cpp`), and the transforms, menus
+  and commands (`PianoRollCommands.cpp`).
 - `src/ui/pianoroll/DrumRows.h`: which rows a drum track shows, and in what order.
-- `src/model/notes/NotesModel.h` (the notes by IDs), `NoteValues.h` (notes as plain values, the transforms, keys and
-  scales, chord stamps).
+- `src/model/notes/NotesModel.h` (the notes and the controllers' values by IDs), `NoteValues.h` (notes as plain values,
+  the transforms, keys and scales, chord stamps, and the controller lanes, `ControlLane`).
 - `src/ui/audioclip/AudioClipEditor.h`.
 - `src/model/arrangement/AudioClipModel.h` (gain, pitch, reverse, tempo, warp markers, Quantize Audio),
   `PlaylistValues.h` (`FadeCurve`), `internal/Transients.h` (the hits), `internal/ClipRenders.h` (the renders).

@@ -678,7 +678,7 @@ TEST_CASE ("The piano roll's settings show down its left, and its velocity lane 
     std::vector<std::pair<int, bool>> heard;
     roll.onVelocityLaneChanged = [&heard] (int height, bool folded) { heard.emplace_back (height, folded); };
     const auto notesHeight = screen.notesArea().getHeight();
-    auto* chevron = phazite::test::findComponentWithTitle (roll, "Fold the velocity lane");
+    auto* chevron = phazite::test::findComponentWithTitle (roll, "Fold the lane");
     REQUIRE (chevron != nullptr);
     const auto chevronCentre = roll.getLocalArea (chevron, chevron->getLocalBounds()).getCentre();
     phazite::test::Mouse mouse (roll);

@@ -24,6 +24,7 @@
 #include "ui/theme/LookAndFeel.h"
 
 #include <array>
+#include <cmath>
 #include <optional>
 
 namespace
@@ -132,6 +133,16 @@ struct PlayingSong
         for (auto beat = 33.0; beat < 47.0; beat += 1.25)
             phazite::addNote (s, clip, 52 + (int) (beat * 4.0) % 24, beats (beat), phazite::BeatDuration::fromBeats (0.5),
                               40 + (int) (beat * 3.0) % 80);
+
+        // The pedal down and up, and the bend sweeping, in its controller lane (as a stepped line, filled, with a dot at each
+        // value's start), and a program change (a line with its number).
+        for (auto beat = 33.0; beat < 47.0; beat += 1.75)
+            phazite::addControl (s, clip, beats (beat), phazite::ControlKind::controller, 64, (int) (beat * 2.0) % 2 == 0 ? 127 : 0);
+
+        for (auto beat = 33.0; beat < 47.0; beat += 0.125)
+            phazite::addControl (s, clip, beats (beat), phazite::ControlKind::pitchWheel, 0, 8192 + (int) (std::sin (beat) * 6000.0));
+
+        phazite::addControl (s, clip, beats (38.5), phazite::ControlKind::programChange, 0, 11);
 
         const auto other = phazite::insertMidiClip (s, tracks[1], { beats (41.25), beats (43.5) }, nullptr);
         REQUIRE (other.isValid());
@@ -365,6 +376,27 @@ TEST_CASE ("Scrolling continuously, everything on the piano roll's time line mov
     song.fill();
     PianoRollOn shown (song);
     checkTimelineMovesWithTheSong (song, shown.pianoRoll, shown.window, *shown.notes, renderer);
+}
+
+TEST_CASE ("Scrolling continuously, the piano roll's controller lane moves with the song, as far as it played")
+{
+    // Its steps, their fills and dots, a bend's line about its middle and a program change's number, as the note grid's notes.
+    const auto& renderer = eachRenderer();
+    PlayingSong song;
+    song.fill();
+    PianoRollOn shown (song);
+
+    for (const auto& lane : { phazite::ControlLane { phazite::ControlKind::controller, 64, 1 },
+                              phazite::ControlLane { phazite::ControlKind::pitchWheel, 0, 1 },
+                              phazite::ControlLane { phazite::ControlKind::programChange, 0, 1 } })
+    {
+        CAPTURE (lane.getName().toStdString());
+        shown.pianoRoll.showLane (lane);
+        checkTimelineMovesWithTheSong (song, shown.pianoRoll, shown.window, *shown.notes, renderer);
+
+        if (phazite::isSongPlaying (*song.song))
+            phazite::playOrStop (*song.song);
+    }
 }
 
 TEST_CASE ("Scrolling continuously, the tags of clips the view's edges cut stay put on the screen while the clips glide under them")

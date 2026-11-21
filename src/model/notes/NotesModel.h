@@ -145,6 +145,24 @@ void changeNotes (ProjectContext&, const std::vector<NoteRef>&, NoteProperty, do
 void setNotesTo (ProjectContext&, const std::vector<NoteRef>&, NoteProperty, double value);
 
 //==============================================================================
+// The piano roll's controller lane (NoteValues.h: ControlLane; docs/design/piano-roll.md, "Controller lanes"): what the
+// clips hold beside their notes, as Notes.h's functions of the same names say. Only the values that play are shown and
+// changed, as notes are.
+
+// The lanes these clips hold values of, in the lane menu's order; and a lane's values, clip by clip, in time order.
+std::vector<ControlLane> getControlLanes (const ProjectContext&, const std::vector<ClipID>&);
+std::vector<ControlPoint> getControlValues (const ProjectContext&, const std::vector<ClipID>&, const ControlLane&);
+
+// Edits, which join the caller's undo step (a drag's): a lane's values in a clip, and in its aliases, replaced from one
+// song beat to another, both included, by these (a drawn line, a ramp: Notes.h says which are left out); and a lane's
+// values removed from these clips from one beat to another.
+void setControlValues (ProjectContext&, ClipID, const ControlLane&, BeatRange, const std::vector<ControlPoint>&);
+void deleteControlValues (ProjectContext&, const std::vector<ClipID>&, const ControlLane&, BeatRange);
+
+// A step of its own, named for the lane ("Delete Sustain Pedal"): every value of a lane that these clips play removed.
+void deleteAllControlValues (ProjectContext&, const std::vector<ClipID>&, const ControlLane&);
+
+//==============================================================================
 // A track's key (Notes.h), which the piano roll shades its rows by and can snap notes to.
 std::optional<Key> getTrackKey (const ProjectContext&, TrackID);
 

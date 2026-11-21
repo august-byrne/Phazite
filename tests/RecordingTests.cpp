@@ -34,6 +34,7 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
+#include "ui/pianoroll/PianoRoll.h"
 
 #include <algorithm>
 #include <tuple>
@@ -928,6 +929,77 @@ TEST_CASE ("A pedal still down as a take stops is let go of at its clip's end: t
     { return played.getMagnitude (0, (int) (from * 48000.0), (int) ((to - from) * 48000.0)); };
     CHECK (levelBetween (0.6, 0.95) > 0.01f);                          // held by the pedal in the take's clip
     CHECK (levelBetween (2.6, 3.0) < levelBetween (2.0, 2.1) * 0.01f); // the note after it let go of
+}
+
+TEST_CASE ("A sustain pedal recorded with a part shows in the piano roll's Sustain Pedal lane, plays, and once deleted plays no more")
+{
+    // A pedal recorded, seen in its lane, heard holding the note, and deleted there. The pedal goes down at half a beat, a
+    // note sounds from beat 1 to 1.5, and the pedal comes up at beat 3; the synth lets go of a note within 0.2 s of its key
+    // coming up.
+    EngineTake take;
+    take.song.run ("transport.record");
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+    take.playNote (60, 0.25, 0.25);
+    take.playback.play (0.75);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.5);
+    take.song.run ("transport.record");
+
+    auto& song = *phazite::findSong (take.song.context);
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const phazite::ControlLane pedal { phazite::ControlKind::controller, 64, 1 };
+
+    // The piano roll shows the clip, on its velocities: the chooser says the clip holds the pedal, and lists it first.
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::PianoRoll pianoRoll { commands, take.song.context };
+    phazite::test::TestWindow window { pianoRoll, 1176, 564 };
+    pianoRoll.showClip (clips[0].id);
+    pianoRoll.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
+    auto* chooser = dynamic_cast<juce::TextButton*> (phazite::test::findComponentWithTitle (pianoRoll, "Lane: Velocity"));
+    REQUIRE (chooser != nullptr);
+    CHECK (chooser->getTooltip().contains ("These clips also hold Sustain Pedal (CC 64)"));
+
+    // Chosen, its lane shows the pedal held down from half a beat to beat 3: filled under its line there, and not after.
+    REQUIRE (phazite::test::runMenuItem (pianoRoll.getLaneMenu(), { "Sustain Pedal (CC 64)" }));
+    auto* lane = phazite::test::findComponentWithTitle (pianoRoll, "Controller lane");
+    REQUIRE (lane != nullptr);
+    REQUIRE (lane->isShowing());
+    const auto values = phazite::getControlValues (take.song.context, { clips[0].id }, pedal);
+    REQUIRE (values.size() == 2);
+    CHECK (values[0].value == 127);
+    CHECK (values[1].value == 0);
+
+    const auto pixelAt = [&pianoRoll, lane] (double beat)
+    {
+        const auto image = lane->createComponentSnapshot (lane->getLocalBounds());
+        // Between the grid's lines and the lane's own.
+        return image.getPixelAt (juce::roundToInt (pianoRoll.getView().beatToX (phazite::BeatPosition::fromBeats (beat))),
+                                 lane->getHeight() * 3 / 5);
+    };
+
+    const auto down = pixelAt (2.1), up = pixelAt (3.6);
+    CHECK (down != up);
+
+    // It plays: the pedal holds the note on after its key came up, until it does.
+    const auto levelBetween = [&song] (double from, double to)
+    {
+        const auto played = phazite::renderWithOwnEngine (song, 96000, EnginePlayback::sampleRate, EnginePlayback::blockSize);
+        return played.getMagnitude (0, (int) (from * 48000.0), (int) ((to - from) * 48000.0));
+    };
+
+    const auto held = levelBetween (1.1, 1.45);
+    CHECK (held > 0.01f);
+
+    // Delete All, from the chooser: the lane shows nothing held, and the note stops as its key comes up.
+    REQUIRE (phazite::test::runMenuItem (pianoRoll.getLaneMenu(), { "Delete All Sustain Pedal Values" }));
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getControlValues (take.song.context, { clips[0].id }, pedal).empty());
+    CHECK (pixelAt (2.1) == up);
+    CHECK (levelBetween (1.1, 1.45) < held * 0.01f);
+    CHECK (take.song.context.getUndoManager()->getUndoDescription() == juce::String ("Delete Sustain Pedal"));
 }
 
 TEST_CASE ("With Overdub, a controller recorded into a clip takes the place of its earlier values there, from its first to its last")

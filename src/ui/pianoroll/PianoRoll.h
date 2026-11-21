@@ -16,7 +16,9 @@
 
 #include <map>
 #include <optional>
+#include <span>
 #include <unordered_set>
+#include <vector>
 
 namespace phazite::ui
 {
@@ -60,6 +62,30 @@ public:
     std::function<void (int height, bool folded)> onVelocityLaneChanged; // by a drag or the chevron
     static constexpr int defaultVelocityHeight = 72, minimumVelocityHeight = 32, foldedVelocityHeight = 20;
 
+    // What that lane shows, as the chooser beside its chevron picks it: the notes' velocities (none), or one controller's
+    // values on one channel (NoteValues.h: ControlLane), as FL Studio's event lane and Ableton Live's envelope show one at a
+    // time. A clip shown alone opens on the lane it was left on, as its view (ClipView), and one not seen before on the
+    // velocities. And the chooser's menu (for the tests too): Velocity, the lanes the clips shown hold, the usual ones, the
+    // other controllers, the channel, and Delete All of the lane's values.
+    std::optional<ControlLane> getLaneShown() const noexcept { return laneShown; }
+    void showLane (const std::optional<ControlLane>&);
+    juce::PopupMenu getLaneMenu();
+
+    // What a controller lane draws of a clip's values (in time order), within columns of the view, from the column of the
+    // value that holds at their start: a step for each pixel column that values start in, at most one, however many start
+    // there (a long take's bend zoomed out has hundreds a column). The step holds the column's last value from its column
+    // to the next step's, or to the clip's end; a line up and down its column spans its lowest and highest values, with the
+    // value that held before it; and it has a dot where it stands alone, its values further apart than a few pixels.
+    struct ControlStep
+    {
+        int left = 0, right = 0;                // its columns, from its first to the next step's
+        int value = 0, lowest = 0, highest = 0; // the value that holds, and the span of its column
+        bool dot = false;
+    };
+
+    static std::vector<ControlStep> getControlSteps (std::span<const ControlPoint> clipValues, const TimelineView&,
+                                                     juce::Range<int> columns, int clipEndColumn);
+
     // How far down the rows are scrolled, in pixels from the top row; set, they scroll there, within their range, as the wheel
     // and the rows' scroll bar scroll them.
     int getScrollY() const noexcept { return scrollY; }
@@ -84,13 +110,15 @@ private:
     static constexpr double scrollPerNotch = 48.0;
     double rowsWheelRest = 0.0, scrollWheelRest = 0.0; // the parts of a step the wheel has turned the rows' height and scroll by
 
-    bool cancelDrag() override; // Escape: in the notes or the velocity lane
+    bool cancelDrag() override; // Escape: in the notes or the lane under them, whichever it shows
 
     // Its parts (PianoRollParts.h).
-    struct Keys;         // the piano keys, or the drums' names, down the left
-    struct NoteGrid;     // the rows of notes
-    struct VelocityLane; // the velocity of each note, under them
-    struct TransformBar; // a transform's settings, while its preview shows
+    struct Keys;            // the piano keys, or the drums' names, down the left
+    struct NoteGrid;        // the rows of notes
+    struct VelocityLane;    // the velocity of each note, under them
+    struct ControlLaneView; // or a controller's values, in its place
+    struct LaneButton;      // which of them shows
+    struct TransformBar;    // a transform's settings, while its preview shows
 
     // A transform with its settings, as the transform bar edits them.
     struct Transform
@@ -146,6 +174,7 @@ private:
         double pixelsPerBeat = 0.0;
         double offsetBeats = 0.0; // the view's start, from bar 1
         int scrollY = 0;
+        std::optional<ControlLane> lane; // what the lane under the notes showed: none for the velocities
     };
 
     std::map<ClipID, ClipView> clipViews;
@@ -165,7 +194,7 @@ private:
     int velocityHeight = defaultVelocityHeight;
     bool velocityFolded = false;
     juce::Rectangle<int> velocityRow;
-    IconButton velocityFoldButton { "Fold the velocity lane", Icon::expanded };
+    IconButton velocityFoldButton { "Fold the lane", Icon::expanded };
     struct VelocityEdge; // the line between the notes and the velocities, dragged to size the lane
     std::unique_ptr<VelocityEdge> velocityEdge;
     void setVelocityFolded (bool);
@@ -175,7 +204,27 @@ private:
     std::unique_ptr<Keys> keys;
     std::unique_ptr<NoteGrid> grid;
     std::unique_ptr<VelocityLane> velocityLane;
+    std::unique_ptr<ControlLaneView> controlLane;
+    std::unique_ptr<LaneButton> laneButton;
     std::unique_ptr<TransformBar> transformBar;
+
+    // The lane shown (getLaneShown()), and the lanes the clips shown hold values of, which the chooser marks while the lane
+    // shown isn't one of them (nothing plays unseen). Those are read through the clips' elements, so they are kept with the
+    // song's version and the clips shown, as what the lanes draw is, and read again only when one of those changed and the
+    // chooser or its menu asks; and the chooser asks again only once a drag in the notes or the lane is over, not at each of
+    // its steps (a note dragged in a clip of a long take's values).
+    std::optional<ControlLane> laneShown;
+    struct LanesHeld
+    {
+        std::vector<ControlLane> lanes;
+        int songVersion = 0;
+        std::vector<ClipID> shown;
+    };
+    std::optional<LanesHeld> lanesHeld;
+    const std::vector<ControlLane>& getLanesHeld();
+    bool isDraggingInNotesOrLane() const;
+    void updateLaneButton(); // its name, its title, its mark and its tooltip; after the drag, during one
+    void showLaneMenu();
     TrackID auditionTrack; // the track a note is being auditioned on
 
     // What the note grid and the velocity lane draw: the clips' notes, their colours and which are selected, read again

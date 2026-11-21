@@ -65,6 +65,8 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
       keys (std::make_unique<Keys> (*this)),
       grid (std::make_unique<NoteGrid> (*this)),
       velocityLane (std::make_unique<VelocityLane> (*this)),
+      controlLane (std::make_unique<ControlLaneView> (*this)),
+      laneButton (std::make_unique<LaneButton>()),
       transformBar (std::make_unique<TransformBar> (*this))
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
@@ -114,16 +116,21 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     addAndMakeVisible (settingsView);
     addAndMakeVisible (keys.get());
 
-    // The velocity lane folds by its chevron to a thin row, and sizes by its edge.
+    // The lane under the notes folds by its chevron to a thin row, and sizes by its edge; its chooser, beside the chevron,
+    // picks what it shows.
     velocityFoldButton.setQuiet (true);
     velocityFoldButton.setMouseClickGrabsKeyboardFocus (false);
     velocityFoldButton.onClick = [this] { setVelocityFolded (! velocityFolded); };
     addAndMakeVisible (velocityFoldButton);
+    laneButton->onClick = [this] { showLaneMenu(); };
+    addAndMakeVisible (*laneButton);
     addAndMakeVisible (*velocityEdge);
 
-    // The notes and the velocities draw the time line, each through a window of its own (TimelineEditor::addTimelinePart()).
+    // The notes and the lane under them draw the time line, each through a window of its own
+    // (TimelineEditor::addTimelinePart()).
     addTimelinePart (*grid);
     addTimelinePart (*velocityLane);
+    addTimelinePart (*controlLane);
     addAndMakeVisible (getOverview());
 
     // The overview of the clips' notes along the time bar's top scrolls and zooms the time line, as the playlist's does, as FL
@@ -156,6 +163,7 @@ void PianoRoll::projectChanged()
     // project's notes can have too.
     grid->cancelGesture();
     velocityLane->endDrag();
+    controlLane->endDrag();
 
     stopAudition();
     closeTransform();
@@ -276,7 +284,7 @@ void PianoRoll::rememberView()
     // fit).
     if (clips.size() == 1 && hasProject())
     {
-        const ClipView left { getView().pixelsPerBeat, (getView().start - getTimeOrigin()).inBeats(), scrollY };
+        const ClipView left { getView().pixelsPerBeat, (getView().start - getTimeOrigin()).inBeats(), scrollY, laneShown };
 
         for (const auto clip : getLinkedClips (context, clips.front()))
             clipViews[clip] = left;
@@ -296,11 +304,13 @@ void PianoRoll::showNewClips()
                 const auto start = getTimeOrigin() + BeatDuration::fromBeats (left.offsetBeats);
                 zoomTo ({ start, start + BeatDuration::fromBeats (std::max (1, getTimelineArea().getWidth()) / left.pixelsPerBeat) });
                 setScrollY (left.scrollY);
+                showLane (left.lane);
                 return;
             }
         }
     }
 
+    showLane (std::nullopt);
     zoomToClips();
     scrollToNotes();
 }
@@ -375,9 +385,13 @@ void PianoRoll::clipsChanged()
     updateVerticalScrollBar();
     updateScrollBar();
     updateSettings();
+    updateLaneButton();
     keys->repaint();
     grid->repaint();
     velocityLane->repaint();
+
+    if (controlLane->needsRepaintFor (context.getSongVersion())) // a draw's step repaints the columns it changed alone
+        controlLane->repaint();
 }
 
 std::vector<NoteData> PianoRoll::getAllNotes() const
@@ -624,6 +638,7 @@ void PianoRoll::timelineChanged()
 {
     grid->repaint();
     velocityLane->repaint();
+    controlLane->repaint();
 }
 
 void PianoRoll::toolChanged()
@@ -662,16 +677,9 @@ void PianoRoll::paint (juce::Graphics& g)
     g.setColour (p.border);
     g.fillRect (settingsWidth - 1, 0, 1, getHeight());
 
-    // The velocity lane's corner under the keys, its name after its chevron; folded, the lane is that row alone, all of it.
+    // The lane's corner under the keys, where its chevron and its chooser are; folded, the lane is that row alone, all of it.
     g.setColour (p.surfaceRaised);
     g.fillRect (velocityFolded ? velocityRow : velocityRow.withWidth (keysWidth));
-    g.setColour (p.textMuted);
-    g.setFont (juce::FontOptions (TextSize::small));
-    g.drawText ("Velocity",
-                velocityRow.withWidth (keysWidth)
-                    .withHeight (foldedVelocityHeight)
-                    .withTrimmedLeft (velocityFoldButton.getRight() - velocityRow.getX()),
-                juce::Justification::centredLeft);
     g.setColour (p.border);
     g.fillRect (velocityRow.getX(), velocityRow.getY() - 1, velocityRow.getWidth(), 1);
 }
@@ -699,15 +707,20 @@ void PianoRoll::resized()
     keys->setBounds (area.removeFromLeft (keysWidth));
     placeTimelinePart (*grid, area);
     placeTimelinePart (ruler, rulerArea.withTrimmedLeft (keysWidth));
-    velocityLane->setVisible (! velocityFolded);
+    velocityLane->setVisible (! velocityFolded && ! laneShown.has_value());
+    controlLane->setVisible (! velocityFolded && laneShown.has_value());
     placeTimelinePart (*velocityLane, velocityRow.withTrimmedLeft (keysWidth));
+    placeTimelinePart (*controlLane, velocityRow.withTrimmedLeft (keysWidth));
 
-    // The lane's chevron at its top left, and its edge over the line above it, which a folded lane hasn't.
+    // The lane's chevron at its top left, its chooser after it, and its edge over the line above it, which a folded lane hasn't.
     const auto chevron = chevronSize;
     velocityFoldButton.setIcon (velocityFolded ? Icon::folded : Icon::expanded);
-    velocityFoldButton.setTooltip (velocityFolded ? "Show the velocity lane" : "Fold the velocity lane to a thin row");
+    velocityFoldButton.setTooltip (velocityFolded ? "Show the lane" : "Fold the lane to a thin row");
     velocityFoldButton.setBounds (velocityRow.getX() + Space::xs / 2, velocityRow.getY() + (foldedVelocityHeight - chevron) / 2, chevron,
                                   chevron);
+    const auto chooserLeft = velocityFoldButton.getRight() + Space::xs / 2;
+    laneButton->setBounds (chooserLeft, velocityRow.getY() + 1, velocityRow.getX() + keysWidth - Space::xs / 2 - chooserLeft,
+                           foldedVelocityHeight - 2);
     velocityEdge->setVisible (! velocityFolded);
     velocityEdge->setBounds (velocityRow.getX(), velocityRow.getY() - velocityEdgeHeight / 2, velocityRow.getWidth(), velocityEdgeHeight);
     velocityEdge->toFront (false);
@@ -816,11 +829,12 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
 bool PianoRoll::cancelDrag()
 {
     // Escape during a drag takes back what it did, as a part of the drag, as Alt and Shift are.
-    if (! grid->isDragging() && ! velocityLane->isDragging())
+    if (! grid->isDragging() && ! velocityLane->isDragging() && ! controlLane->isDragging())
         return false;
 
     grid->cancelDrag();
     velocityLane->cancelDrag();
+    controlLane->cancelDrag();
     return true;
 }
 

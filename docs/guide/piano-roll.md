@@ -1,6 +1,6 @@
 ---
 title: The piano roll
-description: Drawing and editing notes, velocity, the grid, ghost notes, drum mode, the transforms, chord stamps and keys.
+description: Drawing and editing notes, velocity, controllers, the grid, ghost notes, drum mode, the transforms, chord stamps and keys.
 sidebar:
   order: 4
 ---
@@ -85,6 +85,35 @@ shows a stem for each note.
 | Drag the line over the lane | Makes the lane taller or shorter |
 | The chevron at its top left | Folds the lane to a thin row, or opens it |
 
+## Controllers
+
+The lane under the notes shows the velocities, or a controller's values: the sustain pedal, the mod wheel, any other
+controller, the pitch bend, the keys' pressure or program changes, on one MIDI channel. Click the button beside the
+lane's chevron (it reads **Velocity**) and pick one:
+
+- **In these clips** lists what the clips you are editing hold. While they hold values the lane doesn't show, the button
+  has a dot, and its tooltip names them: they play, whichever lane shows.
+- Then the usual ones (**Pitch Bend**, **Mod Wheel**, **Sustain Pedal**, **Expression**, **Volume**, **Pan**,
+  **Channel Pressure**, **Program Change**), **Other Controller** for any controller by its number, and **Channel** for
+  the same kind on another channel.
+- **Delete All** removes every value of the lane that plays in the clips, as one undo step (what a trim hides in a clip
+  stays).
+
+A value holds until the next, as MIDI plays it: the lane draws steps, filled under them in the clip's colour (the pitch
+bend from its middle, up and down). A program change shows as a line with its number. Each clip opens on the lane you
+left it on.
+
+| In a controller lane | Does |
+|---|---|
+| Drag | Draws the values under the pointer: one at each step of the grid with Snap on, finer with Snap off or **Alt** |
+| Click | Sets one value |
+| Right-drag | Draws a straight ramp, put in place when you let go |
+| Drag with the Delete tool | Deletes the values you pass over |
+| **Escape** during a drag | Takes it back |
+
+Values go into the clip that plays where you draw, never past it; a value that repeats the one before is left out. A
+note's pressure (polyphonic aftertouch) is shown and can be deleted, not drawn yet.
+
 ## Slide and portamento notes
 
 The notes' menu makes the selected notes **Slide Note** or **Portamento** notes, and plain notes again.
@@ -161,9 +190,8 @@ The menu also has **Cut**, **Copy**, **Paste**, **Duplicate**, **Delete** and **
 
 ## Not yet
 
-- Lanes for controllers, pitch bend, program changes and per-note expression: planned. Controllers, pitch bend, the
-  keys' pressure and program changes a MIDI file brought in, or a recording took in, play, but the piano roll doesn't
-  show them. A note's MIDI channel shows and changes in the inspector.
+- Several controller lanes at once, curves, selecting and moving a controller's values, drawing a note's pressure and
+  per-note expression: planned. A note's MIDI channel shows and changes in the inspector.
 - Ghost notes chosen track by track: planned; the switch shows every other track's notes.
 - Flam, velocity scaling, reverse and flip transforms: planned.
 - Editing a whole track in song time rather than clip by clip: planned.

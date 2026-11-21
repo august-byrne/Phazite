@@ -145,6 +145,7 @@ The piano roll, which reaches the notes by their IDs through the model's `src/mo
 | `PianoRollNotes.cpp` | The note grid. |
 | `PianoRollNoteTools.cpp` | The note grid's tools. |
 | `PianoRollLanes.cpp` | The keys, the velocity lane and the transform bar. |
+| `PianoRollControlLane.cpp` | The controller lane, in the velocity lane's place while a controller is chosen, and the chooser of what that lane shows. |
 | `DrumRows.*` | Which rows a drum track shows, in what order. |
 
 ## audioclip/

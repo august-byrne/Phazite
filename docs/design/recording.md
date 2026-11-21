@@ -97,9 +97,9 @@ what feeds the channel.
 - **Controllers:** the sustain pedal, the mod wheel, every other controller, the pitch bend and the keys' pressure (the
   channel's, and each note's: polyphonic aftertouch) played from a MIDI keyboard go into the take's clips beside its
   notes, where they were heard, as a MIDI file's import keeps them, and play back to the track's instrument, Phazite's
-  own (which take them without using them yet) or a plug-in. Only
-  what is played during the take (notes, or controllers moved) makes a clip, as Ableton Live records controllers
-  alone; a pedal held from before, with nothing played, leaves the track's clips as they were. Only notes take the
+  own (which take them without using them yet) or a plug-in. The piano roll's controller lane shows them, draws and
+  deletes them ([piano-roll.md](piano-roll.md#controller-lanes)). Only what is played during the take (notes, or
+  controllers moved) makes a clip, as Ableton Live records controllers alone; a pedal held from before, with nothing played, leaves the track's clips as they were. Only notes take the
   place of the clips there without Overdub: controllers moved without notes go into the clips there, and make a clip of
   their own only where the track has none across the take. The pedal held down, the bend away from its middle and the
   channel's pressure held as the take starts are written at its start (as they were when it started, however long the

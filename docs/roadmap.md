@@ -96,15 +96,14 @@ what they found is fixed or in known-bugs.md.
 
 ### Stage 5. Wide: what a beat maker meets in the first week
 
-Built, each in the [changelog](changelog.md): S5.7 (the plan rebuilt only for what changed, with the known bugs) and
-S5.2 (MIDI channels and program changes, 2026-11-20). What S5.2 left is in the [backlog](backlog.md): a track's own
-channel, which waits for S7.3. Its rows of the [hand checks](hand-checks.md) (W1 to W5) need a MIDI keyboard and a
-plug-in with several parts.
+Built, each in the [changelog](changelog.md): S5.7 (the plan rebuilt only for what changed, with the known bugs), S5.2
+(MIDI channels and program changes) and S5.3 (controller lanes in the piano roll), the last two on 2026-11-20. What
+they left is in the [backlog](backlog.md): a track's own channel, which waits for S7.3, and several lanes at once.
+Their rows of the [hand checks](hand-checks.md) (W1 to W9) need a MIDI keyboard and a plug-in with several parts.
 
 | Step | Size | What | Done when |
 |---|---|---|---|
 | S5.1 | L | Stretched, pitched and reversed clips heard at once; then stretch modes and a formant switch | A warp marker dragged is heard on the next play, before any render finishes |
-| S5.3 | L | Controllers recorded, played and edited in lanes beside the velocity lane | A sustain pedal recorded with a part shows in a lane, plays and can be deleted |
 | S5.4 | M | MIDI learn | A hardware knob moved after Learn turns the control clicked, and the link is kept |
 | S5.5 | M | Recording keeps a note played just before the take starts; an input meter; pre-roll; a key that drops the take being recorded and records it again from where it began; takes that survive a full disk and a crash | A take cut off by ending Phazite is offered when the project reopens |
 | S5.6 | M | Arming never reopens the audio device; automation written where it is heard (held live notes end when the track changes: built in S1.1) | Arming a track during playback makes no gap in the sound |

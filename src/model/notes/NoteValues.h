@@ -59,6 +59,81 @@ BeatDuration getMinimumNoteLength();
 juce::String describeNoteLength (BeatDuration);
 
 //==============================================================================
+// Controllers: what a MIDI clip holds beside its notes (Notes.h: addControl()), as MIDI has them: a MIDI controller (by
+// its number: the sustain pedal 64, the mod wheel 1; its value 0 to 127), the pitch bend (0 to 16383, its middle 8192), the
+// channel's pressure (0 to 127), a note's pressure, polyphonic aftertouch (by the note's number; 0 to 127), and a program
+// change (its value the program, 0 to 127). Each on a MIDI channel, from 1 to 16.
+enum class ControlKind
+{
+    controller,
+    pitchWheel,
+    channelPressure,
+    aftertouch,
+    programChange
+};
+
+bool hasNumber (ControlKind) noexcept;      // a controller's and a note's pressure have one
+int getHighestValue (ControlKind) noexcept; // 16383 for the pitch bend, 127 for the others
+
+// A controller's name, as the piano roll's lanes name it: "Sustain Pedal", "Mod Wheel", "Brightness" (JUCE's names, tidied),
+// or nothing for a number that has none.
+juce::String getControllerName (int number);
+
+// What the piano roll's controller lane shows (docs/design/piano-roll.md, "Controller lanes"): one kind of value on one MIDI
+// channel, and for a controller, which one. A note's pressure is every note's: its lane has no number. Values are steps, as
+// MIDI has them: each holds until the next.
+struct ControlLane
+{
+    ControlKind kind = ControlKind::controller;
+    int number = 0;  // a controller's, 0 to 127; 0 for the other kinds
+    int channel = 1; // 1 to 16
+
+    // "Sustain Pedal (CC 64)", "Brightness (CC 74)", "CC 21", "Pitch Bend", "Channel Pressure", "Note Pressure", "Program
+    // Change", with ", Channel 2" after it on another channel than the first. And without its number and channel, for the
+    // undo steps that change it ("Draw Sustain Pedal"): "Sustain Pedal", "CC 21", "Pitch Bend".
+    juce::String getName() const;
+    juce::String getShortName() const;
+
+    int getHighestValue() const noexcept; // 16383 for the pitch bend, 127 for the others
+    int getRest() const noexcept;         // where it rests: the bend's middle, 8192, and 0 for the others
+    bool canDraw() const noexcept;        // all but a note's pressure, which is shown and deleted
+
+    // A value as the hint bar says it: "Sustain Pedal 127", "Pitch Bend -50%" (from -100% to 100%), "Program 12" (programs
+    // counted from 1, as Ableton Live shows them).
+    juce::String describeValue (int value) const;
+
+    bool operator== (const ControlLane&) const = default;
+};
+
+// In the order the piano roll's lane menu lists them: by channel, then kind, then number.
+bool operator< (const ControlLane&, const ControlLane&) noexcept;
+
+// The lane of a kind of value, its number kept only where the kind has one and both kept in their ranges.
+ControlLane makeControlLane (ControlKind, int number, int channel);
+
+// The lanes the menu offers whatever the clips hold, on the first channel: Pitch Bend, Mod Wheel (CC 1), Sustain Pedal
+// (CC 64), Expression (CC 11), Volume (CC 7), Pan (CC 10), Channel Pressure, Program Change.
+std::vector<ControlLane> getUsualControlLanes();
+
+// A value of a lane where it is in the song: in a clip (the clip it is to go in, for one still to be drawn), at a song beat;
+// and for a note's pressure, the note's number.
+struct ControlPoint
+{
+    ClipID clip {};
+    BeatPosition beat {};
+    int value = 0;
+    int number = 0;
+};
+
+// Values are no closer together than this (1/64 of a beat): a drawn line or a ramp makes one at each step of it at most.
+BeatDuration getShortestControlGap();
+
+// The values a straight ramp from one value to another is made of, from the earlier beat to the later, both included: one
+// at each getShortestControlGap() at most, each kept within the lane's range, one that repeats the value before it left
+// out, as a recording leaves it out. A ramp of no length is the value at its end alone.
+std::vector<ControlPoint> makeControlRamp (const ControlLane&, BeatPosition from, int fromValue, BeatPosition to, int toValue);
+
+//==============================================================================
 // Transforms: what a change would make of some notes. The notes of a chord are those of one clip that start together
 // (within a 128th of a beat).
 

@@ -79,6 +79,19 @@ TEST_CASE ("Every view of the window paints, in each theme, over a song with som
         paint (screen.showView<phazite::ui::MixerView> ("view.mixer"), "the mixer");
         context.getSongSelection().selectOnly (*notes);
         paint (screen.showView<phazite::ui::PianoRoll> ("view.pianoRoll"), "the piano roll");
+
+        // Its controller lane, on each kind it draws apart: steps, the bend about its middle, program changes' marks.
+        for (const auto& lane : { phazite::ControlLane { phazite::ControlKind::controller, 64, 1 },
+                                  phazite::ControlLane { phazite::ControlKind::pitchWheel, 0, 1 },
+                                  phazite::ControlLane { phazite::ControlKind::programChange, 0, 1 },
+                                  phazite::ControlLane { phazite::ControlKind::aftertouch, 0, 1 } })
+        {
+            auto& pianoRoll = screen.showView<phazite::ui::PianoRoll> ("view.pianoRoll");
+            pianoRoll.showLane (lane);
+            paint (pianoRoll, "the piano roll's " + lane.getName() + " lane");
+            pianoRoll.showLane (std::nullopt);
+        }
+
         paint (screen.showView<phazite::ui::Inspector> ("view.toggleInspector"), "the inspector, a MIDI clip");
         context.getSongSelection().selectOnly (*audio);
         paint (screen.showView<phazite::ui::AudioClipEditor> ("view.pianoRoll"), "the audio clip editor");

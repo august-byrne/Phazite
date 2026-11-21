@@ -843,6 +843,23 @@ namespace VelocityTint
     inline constexpr float ball = 6.0f;
 } // namespace VelocityTint
 
+// The piano roll's controller lane (ui/pianoroll/PianoRollParts.h: ControlLaneView): what is under its stepped line, in the
+// clip's colour, the clips' wash behind it and their edges (alphas, as the note grid shows them); its line's thickness, the
+// dot at each value's start and how far apart values must be to have one, and a program change's line (pixels); the wash
+// over what the Delete tool passed (alpha); and the mark on its chooser while the clips hold values it doesn't show (pixels).
+namespace ControlLaneTint
+{
+    inline constexpr float fill = 0.3f;
+    inline constexpr float clipWash = 0.06f;
+    inline constexpr float clipEdge = 0.6f;
+    inline constexpr float line = 1.5f;
+    inline constexpr float dot = 5.0f;
+    inline constexpr int dotSpacing = 8;
+    inline constexpr float programLine = 2.0f;
+    inline constexpr float eraseWash = 0.25f;
+    inline constexpr float mark = 6.0f;
+} // namespace ControlLaneTint
+
 // The piano roll's marks on slide and portamento notes (model/notes/NoteValues.h), in the note's ink at its start: a slide
 // note's triangle, pointing on as FL Studio's slide icon does, and a portamento note's rising stroke, each at most this big,
 // this far inside the note, the stroke this thick (pixels).

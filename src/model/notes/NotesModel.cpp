@@ -488,6 +488,43 @@ bool VelocityWheel::isInBurst() const
 }
 
 //==============================================================================
+std::vector<ControlLane> getControlLanes (const ProjectContext& context, const std::vector<ClipID>& ids)
+{
+    auto* song = findSong (context);
+    return song != nullptr ? getControlLanes (*song, ids) : std::vector<ControlLane>();
+}
+
+std::vector<ControlPoint> getControlValues (const ProjectContext& context, const std::vector<ClipID>& ids, const ControlLane& lane)
+{
+    auto* song = findSong (context);
+    return song != nullptr ? getControlValues (*song, ids, lane) : std::vector<ControlPoint>();
+}
+
+void setControlValues (ProjectContext& context, ClipID id, const ControlLane& lane, BeatRange range,
+                       const std::vector<ControlPoint>& values)
+{
+    if (auto* song = findSong (context))
+        setControlValues (*song, id, lane, range, values);
+}
+
+void deleteControlValues (ProjectContext& context, const std::vector<ClipID>& ids, const ControlLane& lane, BeatRange range)
+{
+    if (auto* song = findSong (context))
+        deleteControlValues (*song, ids, lane, range);
+}
+
+void deleteAllControlValues (ProjectContext& context, const std::vector<ClipID>& ids, const ControlLane& lane)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return;
+
+    const UndoStep step (*song, "Delete " + lane.getShortName());
+    deleteAllControlValues (*song, ids, lane);
+}
+
+//==============================================================================
 std::optional<Key> getTrackKey (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
