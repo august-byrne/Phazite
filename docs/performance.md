@@ -907,9 +907,52 @@ in a song of ten times the tracks (counting the model's own walks of a track's c
 find how far its clip can grow: 24 elements); no notes read by the hover.
 
 What the index costs: about 100 bytes a track and a clip, made in one walk as the song is first asked for one (as a
-single lookup walked before), and about 60 bytes a note of each clip whose notes were asked for, made as the first is;
+single lookup walked before), and about 60 bytes a note of each clip whose notes were asked for, made as the first is
+(until the notes became a value, 2026-11-21: the index holds none since, and a note is found in its clip's value);
 each change to the song costs it a lookup in a hash table at most, and each answer a check that the element is still where the index holds it (above), and a change it doesn't follow (an ID changed in
 place, a track made a folder) makes it again at the next lookup.
+
+**The notes as a value (roadmap step S5.20, 2026-11-21).** A clip's notes and controllers' values are an immutable
+value beside the song's tree, in the song's one undo history (`src/model/base/internal/SongValues.h`), and the edits
+of notes are functions from one value to the next. Measured on `main` (f70b396f) and on the branch in turns, the
+median of five runs of each, the `windows-profile` build on a quiet machine, the same benchmark as the tables above
+(the piano roll in a window, each through the mouse or the command, the views and the engine's new plan included):
+
+| What | `main` | The notes as a value |
+|---|---|---|
+| A step of a rectangle selecting across the clip | 2.65 ms | 2.15 ms |
+| A step of a drag of 500 notes / its Undo | 3.69 / 8.28 ms | 2.82 / 1.00 ms |
+| Select All | 3.33 ms | 2.56 ms |
+| Transpose Up, every note / its Undo | 24.4 / 10.7 ms | 18.1 / 3.4 ms |
+| Quantize, every note / its Undo | 42.3 / 20.1 ms | 26.9 / 3.0 ms |
+| Duplicate, every note / its Undo | 42.3 / 9.9 ms | 35.4 / 2.5 ms |
+| Delete, every note / its Undo | 25.2 / 13.4 ms | 14.6 / 3.1 ms |
+| Every track's clips (`getClips()`, 200 calls) | 5.94 ms | 4.83 ms |
+| A clip's note shapes (`getNoteShapes()`) | 0.0026 ms | 0.0013 ms |
+| The check for unsaved changes after a track moved and moved back (every track compared; "the UI's work on a big song") | 8.14 ms | 0.18 ms |
+| Autosave, on the UI thread (the same benchmark) | 4.9 ms | 5.3 ms |
+
+An Undo of notes is their value put back: what is left of each Undo's time above is the piano roll's and the plan's
+work after it. A clip's notes are compared with their saved copy by whether the two are one value, which is what the
+unsaved check gained. What grew: a copy of the whole song has each clip's notes written back into it (the autosave's
+row; and the benchmark song of 100 tracks compared whole, which nothing does on the message thread since S4.5, went
+from 47 to 62 ms), until what saves and compares reads values.
+
+The model alone (`--test-case="*notes as values*"`, a song of 100 tracks with a clip of 5,000 notes, no window; the
+median of three runs):
+
+| What | Time |
+|---|---|
+| A step of a drag of 500 notes (`placeNotes()` in a gesture) / the drag undone | 1.10 ms / 0.001 ms |
+| 5,000 notes transposed / undone | 10.8 ms / 0.001 ms |
+| 500 notes deleted / undone | 1.40 ms / under 0.001 ms |
+| A note added to the clip of 5,000 / through a clip with seven aliases | 0.025 ms / 0.013 ms |
+| The song copied whole (`copyWholeSong()`) | 4.0 ms |
+
+The spike that measured the idea first (written for the notes alone, with the model's rules, checked equal to the
+song's; in the history at d0d651b1) took 0.08 ms for the drag's step and 0.62 ms for the transpose: about 2
+microseconds a note are still spent in the model's functions around the value (each note's own look at its clip's
+place in the tree and at where the clip can grow to), which the clips' move takes next.
 
 ### Benchmark: a sandboxed plug-in's round trip at 128 samples
 
