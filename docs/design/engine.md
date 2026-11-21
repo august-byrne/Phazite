@@ -25,6 +25,8 @@ between them, which compiles the song into what plays. The layers and where the 
 | Phazite's own devices, engine-neutral | Built | [devices.md](devices.md) |
 | Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
 | Browser previews on an engine of their own | Built | |
+| Every element of the song described once in code: its type, range, default and kind | Planned | Roadmap step S5.19 |
+| The song as an immutable value, one area at a time | Planned | Roadmap step S5.20 |
 | Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
 | Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
 
@@ -319,6 +321,15 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
   its renders, so that each can be fixed and measured where it is. Nothing else is built on for playback.
 - **The song is the model's; the engine plays plans.** The engine and the devices know nothing of the song, so
   that either side can change, or be replaced, without the other.
+- **The song becomes an immutable value** (the owner, 2026-11-21): plain values that share what a change leaves
+  alone, kept with the immer library, where it is a JUCE `ValueTree` today. Undo is then a root put back, a save, a
+  render and a merge read a song that no edit can change under them, and what changed is found by comparing two
+  roots. Written for the notes and measured beside the song's own, it was faster in every edit but one (notes
+  deleted, only twice as fast, and its undo step larger), most of all in Undo, a merge and the copy a save takes
+  ([decisions.md](decisions.md), "Engineering"). Every element is described once in code first (roadmap step S5.19),
+  which the values, the loader and the merge are made from; then the song moves one area at a time behind the
+  model's functions (S5.20), the notes first, with one undo history for the tree's changes and the values' while
+  both are there, and the project file as it is.
 - **Beats are quarter notes everywhere,** and a time signature only sets the bar's length and the counted beat.
   Everything that keeps time then agrees, in every meter.
 - **Control points every 32 samples from the song's start,** so that what a song sounds like does not depend on
@@ -337,6 +348,10 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
 
 ## Not built
 
+- The song's schema as data, and the song as an immutable value: Planned, before the beta (roadmap steps S5.19 and
+  S5.20). Today `Schema.h` defines the names, their types, ranges and defaults are in its comments and in tables
+  written from them, and the song is a `ValueTree`; the notes alone are reached through typed views
+  (`src/model/notes/internal/NoteElements.h`), under which their storage can change.
 - Other stretch modes, such as slicing drums at their hits or re-pitching: Planned.
 - Tracks that aren't being edited pre-rendered in the background: Planned, after v1.
 - Audio Units and CLAP in the helper: Planned, after v1 ([plugin-hosting.md](plugin-hosting.md)).

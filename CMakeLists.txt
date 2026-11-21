@@ -454,10 +454,12 @@ target_sources(phazite_core PRIVATE
     src/model/modulation/ModulationValues.cpp
     src/model/modulation/ModulationValues.h
     src/model/modulation/internal/Modulation.h
+    src/model/notes/NoteElements.cpp
     src/model/notes/Notes.cpp
     src/model/notes/NoteValues.h
     src/model/notes/NotesModel.cpp
     src/model/notes/NotesModel.h
+    src/model/notes/internal/NoteElements.h
     src/model/notes/internal/Notes.h
     src/model/playback/AutomationWriter.cpp
     src/model/playback/OfflineRender.cpp
@@ -1529,6 +1531,18 @@ if(PHAZITE_BUILD_TESTS)
     phazite_add_sanitizer_runtime(phazite_tests)
     target_include_directories(phazite_tests SYSTEM PRIVATE external/doctest) # its warnings off: it is third-party
     phazite_precompile_juce(phazite_tests ${PHAZITE_UI_MODULES} juce_cryptography)
+
+    # A spike, for the question whether the song should become an immutable value: a clip's notes kept with the immer library
+    # (Boost Software License 1.0), measured beside the song's own (tests/ImmerSpikeBenchmarks.cpp), and the hard parts of a
+    # song of such values written for the notes (tests/ImmerHardPartsBenchmarks.cpp), and one undo history for a tree and
+    # a value (tests/ImmerOneHistoryTests.cpp). immer is no dependency of Phazite's:
+    # the files are built only where this names a folder that holds immer, which no preset does.
+    set(PHAZITE_IMMER_SPIKE_DIR "" CACHE PATH "A folder that holds the immer library, for the tests' Immer*Benchmarks.cpp")
+    if(PHAZITE_IMMER_SPIKE_DIR)
+        target_sources(phazite_tests PRIVATE tests/ImmerSpikeBenchmarks.cpp tests/ImmerHardPartsBenchmarks.cpp
+                                             tests/ImmerOneHistoryTests.cpp)
+        target_include_directories(phazite_tests SYSTEM PRIVATE "${PHAZITE_IMMER_SPIKE_DIR}")
+    endif()
 
     # On Linux the test program exports its symbols (-rdynamic): its own malloc and free, which the real-time audit counts
     # allocations with in place of glibc's, and its functions' names, which name where they came from

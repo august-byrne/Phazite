@@ -56,6 +56,11 @@ what S5.5 and S7.6 gained. The release process (4.5) moved from stage 8 to stage
 anyone can download. What the comparison left for later is under [After 1.0](#after-10) and in the
 [backlog](backlog.md).
 
+Added on 2026-11-20 and 2026-11-21 (the owner's decisions, so that the model under Phazite is robust before the
+beta): the song's schema as data (S5.19) and the song as an immutable value (S5.20), which was weighed and left at
+first and taken once it was measured ([decisions.md](design/decisions.md), "Engineering"). S5.19 comes before S5.20,
+and both before the stage's other steps that add to the model, which then write through them.
+
 ### Stage 1. Safe: the bugs that lose work or sound
 
 Built on Windows (2026-11-14): every step, S1.1 to S1.17, each in the [changelog](changelog.md), each bug with a test
@@ -118,6 +123,8 @@ lanes at once, and pick-up, ranges and relative encoders for a link. Their rows 
 | S5.16 | M | MP3 export, beside WAV and FLAC (the owner, 2026-11-17), with an encoder under a compatible licence in the notices | An exported MP3 plays in another player, and imported again its first note is where the song's is |
 | S5.17 | M | Resampling: an audio track records what another track, a bus or the master plays | A track armed with the master as its input records what is heard, placed to the sample |
 | S5.18 | M | Presets heard in the browser before they go into the song: an instrument's plays a phrase, an effect's a loop | A preset selected in the browser is heard, and the song is unchanged |
+| S5.19 | L | The song's schema as data: every element and property described once in code, with its type, its range or its words, its default and its kind (song, view or state), where `Schema.h` holds the names alone and their comments the rest. Made from that description, where each is written out by hand today: the loader's tables (`getRanges()`, `getWords()`), the check's (`tests/SongCheck.cpp`) and the lists of view state and of what doesn't count as a change | A range changed in the description changes what the loader keeps to and what `checkSong()` allows, with no other line touched; a saved name without a description does not build; the golden files are as they were |
+| S5.20 | XL | The song as an immutable value: each area's elements as plain values in Phazite's own types (a clip's start in beats, a choice as its enum), made from S5.19's description and kept with the immer library, which share what a change leaves alone. One area at a time behind the model's functions, the notes first (their code reaches them through typed views alone already: `src/model/notes/internal/NoteElements.h`). While both are there, an area's value changes through the song's one undo history, as an action that puts a root in another's place, so that steps, gestures and trials hold the tree's changes and the values' alike; the song's index, what plays it and its views learn what changed by comparing roots; and the project file stays as it is, an area read into its value as the song opens and written from it as it saves. The code that walks any element (the song's text, the versions' pieces, differences and merge, the loader) goes by the description. immer joins `external/` with its notice (Boost Software License 1.0, which joins the licences Phazite takes). A `check-architecture.sh` rule counts `juce::ValueTree` and raw property access in the model outside the song's own files (about 1,340 and 1,080 today), whose budget only falls | That budget is 0 and the song holds no tree; a value read as another type does not build; the golden files are as they were; Undo, the copy a save takes and a merge no longer grow with the song ([performance.md](performance.md)); and the speed gates pass |
 | 4.5 | S | The release process: the version from the tag, release builds and the installer from CI, the changelog by version | A tag produces a release with the installer, its SHA-256 and `phazite-update.json` |
 
 **Beta.** The steps above are done, stage 3's rows are checked, and the beta is a release made by 4.5 that anyone can

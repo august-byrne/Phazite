@@ -12,6 +12,7 @@
 #include "model/chords/internal/Chords.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/NoteElements.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -469,14 +470,12 @@ std::vector<NoteShape> getNoteShapes (const ProjectContext& context, ClipID id)
     const auto contentOffset = -getClipOffset (clipState).inBeats();
     SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren()); // a walk of the clip's, for the speed gates
 
-    for (const auto& note : clipState)
-    {
-        if (! note.hasType (schema::NOTE))
-            continue;
-
-        const auto start = contentOffset + (double) note[schema::noteStart];
-        shapes.push_back ({ (int) note[schema::notePitch], start, start + (double) note[schema::noteLength] });
-    }
+    forEachNote (clipState,
+                 [&] (const NoteElement& note)
+                 {
+                     const auto start = contentOffset + note.getStart().inBeats();
+                     shapes.push_back ({ note.getPitch(), start, start + note.getLength().inBeats() });
+                 });
 
     return shapes;
 }

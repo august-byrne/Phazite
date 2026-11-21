@@ -10,6 +10,7 @@
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
 #include "model/notes/NoteValues.h"
+#include "model/notes/internal/NoteElements.h"
 
 #include <functional>
 #include <optional>
@@ -26,11 +27,6 @@ juce::ValueTree findNoteState (const Song&, const NoteRef&);
 std::optional<NoteData> getNoteData (const Song&, const NoteRef&);
 std::vector<NoteData> getNoteData (const Song&, const std::vector<NoteRef>&); // those there
 std::vector<NoteData> getClipNotes (const Song&, ClipID);                     // in the order the clip holds them
-
-// A note's or a controller's MIDI channel in the song (schema::noteChannel, controlChannel), from 1 to 16: 1 where none is
-// written, and one beyond them kept within them. And written so, as nothing for the first.
-int readChannel (const juce::ValueTree& element, const juce::Identifier& property);
-void writeChannel (juce::ValueTree& element, const juce::Identifier& property, int channel, juce::UndoManager*);
 
 // How many notes were read from the song as NoteData since the program started: for the speed gates
 // (tests/PerformanceGateTests.cpp), which count what a view's mouse event reads.
@@ -66,8 +62,8 @@ void selectNotes (Selection&, const std::vector<NoteRef>&);
 // another, or read from a file). Returns it, or none for a clip that isn't a MIDI clip of the song's.
 NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity, int channel = 1);
 
-// The kinds of controller events a recording takes in with the notes (schema::CONTROL; NoteValues.h: ControlKind).
-const char* getSchemaKind (ControlKind) noexcept;                            // its controlKind in the song
+// The kind of a controller's value a recording took in with the notes (schema::CONTROL; NoteValues.h: ControlKind), for
+// the code that still reads a clip's elements itself (NoteElements.h: ControlElement::getKind()).
 std::optional<ControlKind> findControlKind (const juce::ValueTree& control); // none for a kind Phazite doesn't know
 
 // Adds a controller's value at a song beat, on a MIDI channel (1 to 16), as a recording takes it in with the notes. The

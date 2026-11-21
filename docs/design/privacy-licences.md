@@ -47,7 +47,9 @@ Phazite is installed and updated, because that is the one place it goes online b
 
 - **Phazite is AGPL-3.0-or-later.** Every C and C++ file starts with its SPDX line.
 - **Compatibility:** only code under licences compatible with it is added: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later,
-  LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC and Zlib. The 4-clause BSD licence is not.
+  LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, Zlib and BSL-1.0 (the Boost Software License, a lax
+  licence the FSF lists as compatible with the GPL; the owner, 2026-11-21, for the immer library). The 4-clause BSD
+  licence is not.
 - **No proprietary code:** nothing under a proprietary licence alone is compiled in, and no dependency's proprietary
   option is turned on. The ASIO SDK headers bundled with JUCE are used under Steinberg's GPLv3 option, and the
   VST 3 SDK under the MIT licence.

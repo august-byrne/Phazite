@@ -149,6 +149,7 @@ Tracks, clips, sections, the grid, the selection and the time line.
 | `NoteValues.h` | Notes as plain values, with the transforms, keys and scales, chord stamps and drums' names; the kinds of controller values (`ControlKind`) and the piano roll's controller lanes (`ControlLane`, `ControlPoint`, a ramp's values). |
 | `NotesModel.h` | The notes and the controllers' values as the piano roll reaches them, by IDs. |
 | `internal/Notes.h` | Notes in MIDI clips, as the song holds them, by their IDs (`NoteID`, in `src/model/base/IDs.h`), and their controllers' values, each on a MIDI channel, with what the controller lane reads and changes of them. |
+| `internal/NoteElements.h` | Typed access to what a MIDI clip holds, its notes and its controllers' values: the one place that reads and writes their properties by name, through views made for the length of a call. What the notes' code, what plays them and the playlist's read of their shapes go through, and what their storage changes under (roadmap step S5.20). |
 
 ## chords/
 

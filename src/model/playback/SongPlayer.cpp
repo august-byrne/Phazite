@@ -21,6 +21,7 @@
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/notes/internal/NoteElements.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/plugins/internal/SandboxedProcessor.h"
 #include "model/transport/internal/AudioRecorder.h"
@@ -45,11 +46,10 @@ namespace
         return (juce::int64) state[property];
     }
 
-    // A note's or a controller's MIDI channel, as the engine takes it: the song's 1 to 16 (1 where none is written) as 0 to
-    // 15, kept within them.
-    std::uint8_t toEngineChannel (const juce::ValueTree& element, const juce::Identifier& property)
+    // A note's or a controller's MIDI channel, as the engine takes it: the song's 1 to 16 as 0 to 15.
+    std::uint8_t toEngineChannel (int channel)
     {
-        return (std::uint8_t) (juce::jlimit (1, 16, (int) element.getProperty (property, 1)) - 1);
+        return (std::uint8_t) (juce::jlimit (1, 16, channel) - 1);
     }
 
     // A number mixed into what tells a strip's instrument from another (engine::Plan::Strip::instrument), FNV-1a's way.
@@ -76,43 +76,57 @@ namespace
             const auto end = start + (double) clip[schema::clipLength];
             const auto contentStart = start - (double) clip.getProperty (schema::clipOffset, 0.0);
 
-            for (const auto& child : clip)
-            {
-                if (child.hasType (schema::NOTE) && ! (bool) child[schema::noteMute])
+            forEachEvent (
+                clip,
+                [&] (const NoteElement& note)
                 {
-                    const auto from = contentStart + (double) child[schema::noteStart];
-                    const auto to = from + (double) child[schema::noteLength];
+                    if (note.has (NoteFlag::muted))
+                        return;
+
+                    const auto from = contentStart + note.getStart().inBeats();
+                    const auto to = from + note.getLength().inBeats();
 
                     if (const auto playedFrom = std::max (from, start), playedTo = std::min (to, end); playedTo > playedFrom)
-                        notes.push_back ({ playedFrom, playedTo, (int) child[schema::notePitch],
-                                           (float) (int) child[schema::noteVelocity] / 127.0f, (bool) child[schema::noteSlide],
-                                           (bool) child[schema::notePortamento], toEngineChannel (child, schema::noteChannel) });
-                }
-                else if (child.hasType (schema::CONTROL))
+                        notes.push_back ({ playedFrom, playedTo, note.getPitch(), (float) note.getVelocity() / 127.0f,
+                                           note.has (NoteFlag::slide), note.has (NoteFlag::portamento),
+                                           toEngineChannel (note.getChannel()) });
+                },
+                [&] (const ControlElement& control)
                 {
-                    const auto beat = contentStart + (double) child[schema::controlBeat];
-                    const auto kind = child[schema::controlKind].toString();
-                    const auto value = (int) child[schema::controlValue];
-                    const auto channel = toEngineChannel (child, schema::controlChannel);
+                    const auto beat = contentStart + control.getBeat();
 
                     if (beat < start || beat >= end)
-                        continue;
+                        return;
 
-                    if (kind == schema::controlIsController)
-                        controls.push_back (
-                            { beat, EventType::controller, (int) child[schema::controlNumber], (float) value / 127.0f, channel });
-                    else if (kind == schema::controlIsPitchWheel)
-                        controls.push_back ({ beat, EventType::pitchBend, 0, (float) (value - 8192) / 8192.0f, channel });
-                    else if (kind == schema::controlIsChannelPressure)
-                        controls.push_back (
-                            { beat, EventType::channelPressure, 0, (float) juce::jlimit (0, 127, value) / 127.0f, channel });
-                    else if (kind == schema::controlIsAftertouch)
-                        controls.push_back ({ beat, EventType::aftertouch, (int) child[schema::controlNumber],
-                                              (float) juce::jlimit (0, 127, value) / 127.0f, channel });
-                    else if (kind == schema::controlIsProgramChange)
-                        controls.push_back ({ beat, EventType::programChange, juce::jlimit (0, 127, value), 0.0f, channel });
-                }
-            }
+                    const auto kind = control.getKind();
+
+                    if (! kind.has_value())
+                        return;
+
+                    const auto value = control.getValue();
+                    const auto channel = toEngineChannel (control.getChannel());
+
+                    switch (*kind)
+                    {
+                        case ControlKind::controller:
+                            controls.push_back ({ beat, EventType::controller, control.getNumber(), (float) value / 127.0f, channel });
+                            break;
+                        case ControlKind::pitchWheel:
+                            controls.push_back ({ beat, EventType::pitchBend, 0, (float) (value - 8192) / 8192.0f, channel });
+                            break;
+                        case ControlKind::channelPressure:
+                            controls.push_back (
+                                { beat, EventType::channelPressure, 0, (float) juce::jlimit (0, 127, value) / 127.0f, channel });
+                            break;
+                        case ControlKind::aftertouch:
+                            controls.push_back ({ beat, EventType::aftertouch, control.getNumber(),
+                                                  (float) juce::jlimit (0, 127, value) / 127.0f, channel });
+                            break;
+                        case ControlKind::programChange:
+                            controls.push_back ({ beat, EventType::programChange, juce::jlimit (0, 127, value), 0.0f, channel });
+                            break;
+                    }
+                });
         }
 
         if (notes.empty() && controls.empty())
