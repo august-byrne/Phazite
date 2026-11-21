@@ -1182,8 +1182,8 @@ TEST_CASE ("Every command of the whole window that changes the song, run once th
     // view's own setting, a change previewed and taken back).
     enum class Changes
     {
-        song,
-        view,
+        theSong,
+        theView,
         nothing
     };
 
@@ -1200,9 +1200,9 @@ TEST_CASE ("Every command of the whole window that changes the song, run once th
                      });
         const auto undoableAfter = phazite::test::writeSong (song, phazite::test::SongPart::undoable);
         const auto wholeAfter = phazite::test::writeSong (song, phazite::test::SongPart::whole);
-        CHECK ((undoableAfter != undoable) == (changes == Changes::song));
+        CHECK ((undoableAfter != undoable) == (changes == Changes::theSong));
 
-        if (changes == Changes::view)
+        if (changes == Changes::theView)
             CHECK (wholeAfter != whole);
         else if (changes == Changes::nothing)
             CHECK (wholeAfter == whole);
@@ -1221,16 +1221,16 @@ TEST_CASE ("Every command of the whole window that changes the song, run once th
     dispatchPendingMessages();
 
     for (const auto* id : { "edit.nudgeRight", "edit.nudgeLeft", "edit.quantize" })
-        command (id, Changes::song);
+        command (id, Changes::theSong);
 
     for (const auto* id :
          { "grid.snap", "grid.snap", "grid.adaptive", "grid.adaptive", "grid.finer", "grid.coarser", "grid.triplets", "grid.triplets" })
-        command (id, Changes::view);
+        command (id, Changes::theView);
 
     // Quantize Audio, whose step comes once the hits are found in the background.
     selection.selectOnly (audio);
     dispatchPendingMessages();
-    runChecked ("clip.quantizeAudio", Changes::song,
+    runChecked ("clip.quantizeAudio", Changes::theSong,
                 [&]
                 {
                     REQUIRE (screen.registry.invoke ("clip.quantizeAudio"));
@@ -1268,10 +1268,10 @@ TEST_CASE ("Every command of the whole window that changes the song, run once th
 
     for (const auto* id : { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.strumSettings",
                             "note.humanizeSettings", "note.arpeggiateSettings" })
-        transform (id, "note.applyTransform", Changes::song);
+        transform (id, "note.applyTransform", Changes::theSong);
 
     // Transpose, which moves nothing until its amount is set: two steps of the track's key up.
-    transform ("note.transposeSettings", "note.applyTransform", Changes::song,
+    transform ("note.transposeSettings", "note.applyTransform", Changes::theSong,
                [&roll]
                {
                    auto* steps = dynamic_cast<juce::Slider*> (phazite::test::findComponentWithTitle (roll, "Steps"));
@@ -1284,9 +1284,9 @@ TEST_CASE ("Every command of the whole window that changes the song, run once th
                });
 
     transform ("note.quantizeSettings", "note.cancelTransform", Changes::nothing);
-    command ("pianoRoll.drumMode", Changes::view);
-    command ("pianoRoll.drumMode", Changes::view);
-    command ("pianoRoll.keyForAllTracks", Changes::song);
+    command ("pianoRoll.drumMode", Changes::theView);
+    command ("pianoRoll.drumMode", Changes::theView);
+    command ("pianoRoll.keyForAllTracks", Changes::theSong);
 
     check.walkBackAndForth();
     phazite::test::checkSong (song);
