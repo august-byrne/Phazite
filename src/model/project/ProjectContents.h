@@ -10,6 +10,10 @@
 
 #include <juce_core/juce_core.h>
 
+#include <functional>
+#include <memory>
+#include <optional>
+#include <set>
 #include <vector>
 
 namespace phazite
@@ -36,8 +40,56 @@ struct ProjectAudioFile
     bool operator== (const ProjectAudioFile&) const = default;
 };
 
-// Each once, in the order of the channels that play it first, top to bottom, the master last.
-std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext&);
+// Each once, in the order of the channels that play it first, top to bottom, the master last. Without the disk: missing as
+// the files given say (what a MissingAudioCheck found, below), none where none are given.
+std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext&, const std::set<juce::File>& missing = {});
+
+// What these functions ask of the disk on the message thread, counted (as the library counts its own): every such question
+// here is noted first (noteProjectDiskQuery()), and getProjectAudioFiles(), which the Project view reads at each of its
+// ticks, asks none (the tests hold it to that). Any thread.
+void noteProjectDiskQuery() noexcept;
+int getProjectDiskQueriesOnMessageThread() noexcept;
+
+// Which of the files given are missing, asked of the disk on a thread of its own, so that the window never waits for a drive
+// (a network share or a synced folder that is slow to answer, a disk spinning up: seconds for each file). One check at a
+// time: check() while one is under way asks that one to stop at its next file and keeps the files given, the newest, for the
+// check that starts once it has ended (a check stuck inside the system's call on one file holds back the next, never two of
+// them). Nothing waits for a check: as this goes, one under way is left to end by itself, telling nothing. onChecked is told
+// on the message thread once the newest check is done; getMissing() keeps what the last check that was done found until the
+// next is. Message thread.
+class MissingAudioCheck
+{
+public:
+    MissingAudioCheck();
+    ~MissingAudioCheck();
+
+    void check (const juce::Array<juce::File>&);
+    bool isChecking() const noexcept { return checking; }
+    const std::set<juce::File>& getMissing() const noexcept { return missing; }
+    std::function<void()> onChecked;
+
+    // Tests: what the next checks' threads do before they ask about each file (held until let go, as a drive slow to answer);
+    // how many checks this started; and how many checks' threads, of every MissingAudioCheck, are under way (what the test
+    // program waits for before it ends). Any thread, the last.
+    void setBeforeChecking (std::function<void (const juce::File&)> before) { beforeChecking = std::move (before); }
+    int getChecksStarted() const noexcept { return started; }
+    static int getChecksUnderWay() noexcept;
+
+private:
+    struct Running; // the check under way's: whether a newer one waits, or this went
+    std::shared_ptr<Running> running;
+    std::optional<juce::Array<juce::File>> next; // the newest asked for while one was under way
+    std::function<void (const juce::File&)> beforeChecking;
+    std::set<juce::File> missing;
+    bool checking = false;
+    int started = 0;
+
+    void start (const juce::Array<juce::File>&);
+    void ended (bool stopped, std::set<juce::File>);
+
+    JUCE_DECLARE_WEAK_REFERENCEABLE (MissingAudioCheck)
+    JUCE_DECLARE_NON_COPYABLE (MissingAudioCheck)
+};
 
 // A missing file found again, or another put in its place: the project's copy of the file found (copied into its Audio
 // folder, as an import copies it) takes the path's place everywhere the song plays it, as one undo step, "Locate Audio File".

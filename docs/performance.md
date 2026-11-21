@@ -516,6 +516,16 @@ less for the rest: which would make about 4 % for the song's 600 devices; measur
 with what each runner resets of its own, they took 1.7 ms of one thread (64 % of a block; 2.3 to 2.7 ms of the tasks'
 time on four, shared by them), and the chase of every track 0.3 ms.
 
+A reset that writes nothing of a delay line was tried and taken back (2026-11-20, the audit of the threads): a line
+counted what came in since its reset and read what was older as silence, which took the Delay's reset from 0.35 % of
+a block to none and the Reverb's from 0.6 % to none (run with other builds going on the PC, each build twice in turn),
+but put a compare on every read of a line: the Reverb went from 0.91 to 1.29 % of a core (its plate from 0.42 to
+0.59, its hall from 1.51 to 1.98), the Delay from 0.23 to 0.27, the Compressor from 0.45 to 0.51, the Multiband from
+1.44 to 1.67, Motion's chorus of three voices from 0.37 to 0.44. A cost on every sample for as long as a device plays,
+against a tenth of one block at Play for ten Delays and ten Reverbs: the lines are cleared whole, as they were. The
+EQ's linear phase keeps its own count, which costs nothing for each sample (its history read in two runs, its
+partitions summed up to those filled).
+
 The message thread's wait as a new plan keeps each clip's start in its file (`AudioFile::keep()`), while a reading
 thread reads a file whose reads take 20 ms each, as a cold read of a slow or busy drive can
 (`Benchmark: what the message thread waits for`): before, a median of 25 ms and as long as 1.2 s, as the reading thread

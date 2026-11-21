@@ -32,10 +32,14 @@ juce::String Transients::getKey (const juce::File& file)
 
 std::optional<std::vector<double>> Transients::find (const juce::File& file)
 {
+    // The key asks the disk (the file's size and time): before the lock, which the thread takes too, so that neither waits for
+    // the other's question to the disk.
+    const auto key = getKey (file);
+
     {
         const std::scoped_lock scoped (lock);
 
-        if (const auto hit = found.find (getKey (file)); hit != found.end())
+        if (const auto hit = found.find (key); hit != found.end())
             return hit->second;
 
         // Once: not again while it waits, nor while it is being analysed.
@@ -52,9 +56,10 @@ std::optional<std::vector<double>> Transients::find (const juce::File& file)
 
 std::optional<std::vector<double>> Transients::lookUp (const juce::File& file)
 {
+    const auto key = getKey (file); // before the lock (find())
     const std::scoped_lock scoped (lock);
 
-    if (const auto hit = found.find (getKey (file)); hit != found.end())
+    if (const auto hit = found.find (key); hit != found.end())
         return hit->second;
 
     return std::nullopt;
@@ -62,9 +67,10 @@ std::optional<std::vector<double>> Transients::lookUp (const juce::File& file)
 
 void Transients::keep (const juce::File& file, const std::vector<double>& hits)
 {
+    const auto key = getKey (file); // before the lock (find())
     const std::scoped_lock scoped (lock);
     std::erase (waiting, file);
-    found[getKey (file)] = hits;
+    found[key] = hits;
 }
 
 std::optional<std::vector<double>> Transients::analyse (const juce::File& file, const std::function<bool()>& shouldStop,
@@ -181,18 +187,21 @@ void Transients::run()
             analysing = next;
         }
 
+        // Nothing to do: it sleeps until a file comes (find()) or it is stopped (the destructor), each of which wakes it; a
+        // wake that comes before it waits is kept for the wait.
         if (next == juce::File())
         {
-            wake.wait (1000);
+            wake.wait (-1.0);
             continue;
         }
 
+        const auto key = getKey (next); // as it was analysed, and before the lock (find())
         auto hits = analyse (next, [this] { return threadShouldExit(); });
         ++analysed;
         const std::scoped_lock scoped (lock);
 
         if (hits.has_value())
-            found[getKey (next)] = std::move (*hits);
+            found[key] = std::move (*hits);
 
         analysing = juce::File();
     }

@@ -85,13 +85,14 @@ public:
     static constexpr TextSetting knownPlugins { "phaziteKnownPlugins", "", SaveTiming::soon };              // the scan's list, JUCE's XML
     // The audio device and MIDI inputs (model/engine/internal/AudioIO.h): JUCE's device manager's state, empty until a
     // first run chose one; the MIDI inputs switched off, by their IDs; the recordings' options (MIDI overdub and quantize, a
-    // bar counted in before recording); and the correction of the inputs' delay for recordings, in milliseconds.
+    // bar counted in before recording); and the correction of the inputs' delay for recordings, in milliseconds, saved soon:
+    // its field changes it at each step of a drag, and nothing reads the file for it before Phazite opens again.
     static constexpr TextSetting audioSetup { "phaziteAudioSetup", "", SaveTiming::now };
     static constexpr ListSetting midiInputsOff { "phaziteMidiInputsOff", SaveTiming::now };
     static constexpr BoolSetting recordOverdub { "phaziteRecordOverdub", true, SaveTiming::now };
     static constexpr BoolSetting recordQuantize { "phaziteRecordQuantize", false, SaveTiming::now };
     static constexpr BoolSetting recordCountIn { "phaziteRecordCountIn", false, SaveTiming::now };
-    static constexpr NumberSetting recordingCorrection { "phaziteRecordingCorrection", 0.0, SaveTiming::now };
+    static constexpr NumberSetting recordingCorrection { "phaziteRecordingCorrection", 0.0, SaveTiming::soon };
     static constexpr BoolSetting guide { "phaziteGuide", true, SaveTiming::now };
     static constexpr ListSetting guideStepsDone { "phaziteGuideStepsDone", SaveTiming::now }; // the guide's steps, by name
     static constexpr ListSetting lessonsDone { "phaziteLessonsDone", SaveTiming::now };       // the lessons finished, by id
@@ -119,8 +120,9 @@ public:
     // How many steps each project's undo history keeps (model/base/Song.h: setUndoSteps(), which keeps it from 10 to
     // 100000), for the projects opened from then on (app/AppServices.h sets it as it changes; the Settings window's Editing
     // group shows it). The steps are kept whatever their size, as in the DAWs that count steps: a thousand large edits hold
-    // their memory until they go.
-    static constexpr NumberSetting undoSteps { "phaziteUndoSteps", 1000.0, SaveTiming::now };
+    // their memory until they go. Saved soon: its field changes it at each step of a drag, and it takes effect at once
+    // without the file.
+    static constexpr NumberSetting undoSteps { "phaziteUndoSteps", 1000.0, SaveTiming::soon };
 
     // This computer, as projects' histories know it (model/versions/VersionsModel.h: setThisComputer()): an ID made the first
     // time Phazite runs, never a name.
@@ -176,7 +178,7 @@ private:
     juce::PropertiesFile* file = nullptr;
     juce::ListenerList<Listener> listeners;
 
-    void changed (const juce::String& key, SaveTiming);
+    void store (const juce::String& key, const juce::var& value, SaveTiming); // kept, saved as its timing says, listeners told
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Settings)
 };

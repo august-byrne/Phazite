@@ -4884,11 +4884,11 @@ TEST_CASE ("A plug-in whose state takes longer to set than a hang is silent mean
     // unplayed, and silent; the helper not taken for hung. The note ends in the first.
     const auto from = juce::Time::getMillisecondCounterHiRes();
     const auto lasting = 2.0 * std::max (SandboxedPlugins::messageHangMilliseconds, SandboxedPlugins::audioHangMilliseconds);
-    auto silent = synth.play ({ { Type::noteOff, 10, 69, 0.0f } }, false) == 0.0f;
+    auto silent = juce::exactlyEqual (synth.play ({ { Type::noteOff, 10, 69, 0.0f } }, false), 0.0f);
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {
-            silent = synth.play ({}, false) == 0.0f && silent;
+            silent = juce::exactlyEqual (synth.play ({}, false), 0.0f) && silent;
             return synth.instance->hasCrashed() || juce::Time::getMillisecondCounterHiRes() - from >= lasting;
         }));
     CHECK (silent);

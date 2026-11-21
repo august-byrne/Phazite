@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The window of Clean Up Unused Audio... (model/project/UnusedAudio.h): the audio files in the project's folder that no song
 // of it plays, each ticked, with its size, and what the ticked ones take, looked for in the background (UnusedAudioFinder),
-// the window saying so meanwhile, or why it can't tell. Delete moves them to the recycle bin and says how many went;
-// Cancel (then Close) closes the window.
+// the window saying so meanwhile, or why it can't tell. Delete moves them to the recycle bin, in the background with the
+// window held (UnusedAudioFinder::deleteUnused()), and says how many went; Cancel (then Close) closes the window.
 #pragma once
 
 #include "model/project/ProjectContext.h"
@@ -23,6 +23,7 @@ public:
 
     // For tests: the files listed, a row at a time as screen readers say it, and their ticks; what the panel says of them.
     bool isLooking() const noexcept { return finder.isLooking(); }
+    bool isDeleting() const noexcept { return finder.isDeleting(); }
     int getNumFiles() const noexcept { return (int) files.size(); }
     juce::String describeFile (int row) const;
     bool isTicked (int row) const;
@@ -48,6 +49,7 @@ private:
 
     void showFound();
     void deleteTicked();
+    void showDeleted (const UnusedAudioFinder::Deleted&);
     void refreshSummary();
     void close();
 

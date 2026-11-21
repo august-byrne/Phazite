@@ -599,11 +599,11 @@ TEST_CASE ("A delay line returns what was pushed, also between samples")
     CHECK (line.read (100) == doctest::Approx (0.0f));
 }
 
-TEST_CASE ("A delay line's reset writes nothing, and every read after it gives what a cleared line gives, to the bit")
+TEST_CASE ("After a delay line's reset, every read gives what a line made anew gives, to the bit")
 {
-    // Every Play and every jump resets every device: a Delay's two lines of five seconds were written over whole, 2 MiB at
-    // 48 kHz, in the block that starts. Now a reset forgets what the line held by a count of what came in since. Against a
-    // line made anew (silence in all of it, as a reset left it before), sample for sample: after the reset, partly refilled,
+    // Every Play and every jump resets every device, and a reset must leave nothing of what a line held, however it is
+    // made (cleared whole, as it is; a count of what came in since was tried, and cost a compare at every read). Against a
+    // line made anew (silence in all of it), sample for sample: after the reset, partly refilled,
     // filled past its length, and reset again; every whole delay, those past its room and below 0 too, and between samples,
     // where a read reaches past what came in by a fraction.
     dsp::Random random (0x1d3a5u);
@@ -661,8 +661,8 @@ TEST_CASE ("A delay line's reset writes nothing, and every read after it gives w
 
 TEST_CASE ("A comb's reset plays as a comb made anew, whatever it held, to the bit")
 {
-    // A comb's reset forgets what it held by a count of what came in since, as a delay line's does: against a comb made anew
-    // and given the same, the one reset after ringing plays the same, sample for sample, as it fills up and past its length.
+    // A comb's reset leaves nothing of what it held: against a comb made anew and given the same, the one reset after
+    // ringing plays the same, sample for sample, as it fills up and past its length.
     dsp::Random random (0x7c0bu);
     const auto coefficients = dsp::makeComb (false, 200.0, testRate, 0.9f);
     auto comb = makeCombFilter (coefficients);
@@ -684,12 +684,12 @@ TEST_CASE ("A comb's reset plays as a comb made anew, whatever it held, to the b
     CHECK (differences == 0);
 }
 
-TEST_CASE ("A device reset after sound plays as one reset after silence, to the bit, though its reset writes none of what it held")
+TEST_CASE ("A device reset after sound plays as one reset after silence, to the bit")
 {
-    // The devices whose resets wrote most (a Delay's lines, a Reverb's three modes' lines, the EQ's linear phase: its history
-    // and its convolution's partitions) forget what they held by counts of what came in since. One device plays two seconds
-    // of loud noise, another as much silence; both are reset and given the same: what each plays, sample for sample, is the
-    // same. And the reset is counted as writing only what ClearedSamples counts: none of their lines.
+    // The devices whose resets hold most (a Delay's lines, a Reverb's three modes' lines, the EQ's linear phase, which
+    // forgets its history and its convolution's partitions by counts of what came in since, writing none of them). One
+    // device plays two seconds of loud noise, another as much silence; both are reset and given the same: what each plays,
+    // sample for sample, is the same. And what the resets clear through ClearedSamples' count (the linear phase's) is small.
     namespace devices = phazite::devices;
     static constexpr int block = 256;
 

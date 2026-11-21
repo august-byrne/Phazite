@@ -7,9 +7,13 @@
 //   that nothing plays, how many, with Clean Up..., which runs Clean Up Unused Audio;
 // - Plug-ins: each plug-in the song holds, on its track (or the master), and what is wrong with it, if anything: crashed
 //   (with its Reload under the pointer), not installed here, or off; a click selects it and shows it in the Devices view.
-// By the model's functions (model/project/ProjectContents.h) and the commands. It reads them again once a turn after the song
-// changes, and every few seconds while it shows, for files that came or went on the disk; how many audio files are unused it
-// finds in the background (model/project/UnusedAudio.h: UnusedAudioFinder), showing the last count meanwhile.
+// By the model's functions (model/project/ProjectContents.h) and the commands. It reads them again at its next tick after the
+// song changes, and every few seconds while it shows (the plug-ins' states). It asks nothing of the disk itself: which audio
+// files are missing (MissingAudioCheck) and how many in the project's folder are unused (model/project/UnusedAudio.h:
+// UnusedAudioFinder) are found in the background, showing what it knew meanwhile, and looked for again only once something
+// could have changed them: it was shown, the song or its versions changed, Phazite came to the front again (files gone or
+// come from outside), Clean Up deleted files, or a look Clean Up refused (the versions being read or written, an import under
+// way) can run now.
 #pragma once
 
 #include "model/commands/SongGesture.h"
@@ -40,8 +44,17 @@ public:
 
     void refreshTooltips(); // with the commands' keys, after the keymap changed
 
-    // What the model holds now, read at once (it is read again by itself after changes, and every few seconds while shown).
+    // What the model holds now, read at once, and the disk looked at again in the background (it is read again by itself after
+    // changes, and every few seconds while shown).
     void refreshNow();
+
+    // For tests: whether the disk is being looked at (which files are missing, or unused); and the check of which are missing.
+    bool isLooking() const noexcept { return missingCheck.isChecking() || unusedFinder.isLooking(); }
+    MissingAudioCheck& getMissingCheck() noexcept { return missingCheck; }
+
+    // Whether Phazite is the program in front (its coming to the front again looks at the disk again): the system's answer,
+    // unless this is set (the tests answer it).
+    std::function<bool()> isInFront;
 
     // What its timer does at each tick, done now: for tests, which hold the clock a burst of typing ends by
     // (devices/core/Clock.h) and tick it as they move the clock on.
@@ -99,8 +112,11 @@ private:
     int unusedFiles = -1;       // none read yet
     juce::String unusedProblem; // why it can't tell which are unused (a version that can't be read whole), none while it can
     UnusedAudioFinder unusedFinder;
+    MissingAudioCheck missingCheck;
     bool needsReading = true; // the song changed since the lists were read
     int ticksSinceRead = 0;
+    bool wasInFront = false; // Phazite was the program in front at the last tick
+    int deletionsSeen = 0;   // Clean Up's deletions, as many as there were at the last tick
 
     // While a burst of typing goes on: a press anywhere but in the notes ends it, so that what it starts is a step of its own.
     struct PressElsewhere;
@@ -111,11 +127,12 @@ private:
     TintedIcon soundIcon { Icon::sound }, instrumentIcon { Icon::instrument }, effectIcon { Icon::effect };
     TintedIcon locateIcon { Icon::search }, reloadIcon { Icon::reload };
 
-    void read();         // the lists, the notes and the unused files, from the model
-    void readNotes();    // the notes, unless a burst of typing is going on
-    void showUnused();   // how many files are unused, as the background look found it
-    void notesChanged(); // typed: into the song, joining the burst's step
-    void endTyping();    // the burst's step kept
+    void read (bool look);   // the lists and the notes from the model; and, if look, the disk looked at again in the background
+    bool askInFront() const; // isInFront, or the system's answer
+    void readNotes();        // the notes, unless a burst of typing is going on
+    void showUnused();       // how many files are unused, as the background look found it
+    void notesChanged();     // typed: into the song, joining the burst's step
+    void endTyping();        // the burst's step kept
     void locate (int row);
     void reload (int row);
     void showPlugin (int row);

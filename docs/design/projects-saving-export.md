@@ -330,7 +330,11 @@ Consolidate, which joins clips into one, is in [playlist.md](playlist.md).
 
 **Clean Up Unused Audio...** (File menu, `project.cleanUpAudio`) lists the files in the project's `Audio` and
 `Generated` folders that neither the song, nor its file as saved, its autosave or a backup, nor any version or branch
-of its history plays, and deletes the ticked ones.
+of its history plays, and deletes the ticked ones. It looks in the background; its Delete works in the background too,
+the window held meanwhile as for any work it waits for (a progress window after a second, whose Cancel and Escape stop
+it between two files), and keeps any file that the song, a saved file or a version plays as it deletes. Neither its
+look nor its Delete runs while an audio file's work is under way (an import's copy is in the `Audio` folder before a
+clip plays it), as while it records, while a version is open, or while the versions are read or written; it says why.
 
 ## DAWproject
 

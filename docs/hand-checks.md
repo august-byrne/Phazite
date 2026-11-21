@@ -341,6 +341,25 @@ the [changelog](changelog.md).
 | Z4 | The view's ... menu: untick Show Automatic Saves; look in Settings under Versions; tick it again there | The grey rows go and come back, and the menu and the setting follow each other | |
 | Z5 | Switch to another branch, change something, discard it, and switch back | That automatic save's ring is in the other branch's column, and its row says "on" that branch | |
 
+## What the audit of the threads fixed (2026-11-20)
+
+| # | Check | Proves | Checked on |
+|---|---|---|---|
+| T1 | A song with several Delays and Reverbs, the buffer at 64 samples: press Play; drag the playhead along the ruler while it plays | No dropout as it starts, nor at each place the playhead lands | |
+| T2 | A drum sampler with a long sound file on one pad, ringing as the song plays: drop another file on a different pad, then add a note | The ringing pad isn't cut off | |
+| T3 | A drum pad, or a one-shot in the Sampler, whose sound has a gap of silence in it, tuned or transposed two octaves down: play it | The part after the gap is heard, as in an export | |
+| T4 | A large sampler plug-in (one that reads a library as a preset loads): switch its preset while the song plays, several times, quick presets and slow ones | Its sound drops out while a slow preset loads and comes back after; a quick one makes no gap; no note hangs; its slot never reads "Crashed" | |
+| T5 | A compressor plug-in that tells its gain reduction as a parameter, in a saved song: play through it | The title bar shows no unsaved change, and the Versions view lists none | |
+| T6 | Set a long audio clip to +12 semitones and choose Export Song at once; then again, and click Cancel while the bar is in its first half | The window answers all along and the bar moves; Cancel stops it at once, and no file is left in the project's Cache folder | |
+| T7 | Export a large project as a DAWproject and click Cancel in its last stretch; export it again whole, open the file in 7-Zip and in Explorer, and in another DAW that reads DAWproject | The window closes within a moment and no `.dawproject` or temporary file is left in Renders; the whole one opens in all three, its audio beside `project.xml` | |
+| T8 | Export a long song while music plays in another program | The other program's sound doesn't crackle, and Phazite's window answers while it exports | |
+| T9 | Add a browser folder on a network share, disconnect the share, then remove that folder | The window answers at once, and the other folders' sounds are found as before | |
+| T10 | Clean Up with many unused files: Delete; again with other files, and Cancel | A window with its progress after a second; Cancel stops between two files; the note says how many went | |
+| T11 | With the Project view open, delete one of the song's audio files in Explorer and come back to Phazite | The file shows as missing within a moment | |
+| T12 | Open a project whose audio is on a network share or in a synced folder; duplicate an audio clip | The window paints at once and the waveforms come a moment later; the copy's waveform is there at once | |
+| T13 | With the inspector closed, drag a rubber band over notes, then open the inspector; with the Devices view's tab behind another, hold Down in the playlist, then click its tab | It shows "N notes" for the last selection; the last track's instrument, scrolled to it | |
+| T14 | Edit with the browser in the left panel, then open Versions | The changes are listed, and the bar's badge counted all along | |
+
 ## Performance on other machines
 
 Numbers and how to run the benchmarks are in [performance.md](performance.md).

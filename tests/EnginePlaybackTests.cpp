@@ -1701,15 +1701,14 @@ TEST_CASE ("A reverb's tail through a filter that closed before Stop rings on as
     CHECK (sentBack.getMagnitude (0, 24000, 24000) <= paused.getMagnitude (0, 0, 24000)); // no rise
 }
 
-TEST_CASE ("Play, and a jump while the song plays, reset every device without writing over its delay lines")
+TEST_CASE ("Play, and a jump while the song plays, reset every device with little that is counted as cleared")
 {
     // The audit of 2026-11-20: a start and a jump reset every device of every strip in the block that starts or lands
-    // (Engine::flushStrip()), and a delay line's reset wrote silence over the whole of it: a Delay's two lines of five seconds
-    // (2 MiB at 48 kHz), a Reverb's lines of all three modes (1.3 MiB) and the EQ's linear phase (0.3 MiB, and its runner's
-    // copy for the mix as late). Ten such devices wrote some 33 MiB in one block. Now a reset forgets what a line held by a
-    // count of what came in since: what the devices' resets clear through the count (devices/dsp/ClearedSamples.h: the linear
-    // phase's convolution, and whatever large comes to be cleared so) stays small in that block, whatever the lines hold.
-    // The count doesn't see a plain loop: that a delay line's and a comb's reset write nothing is DspTests' to keep.
+    // (Engine::flushStrip()), so a reset must cost little. The EQ's linear phase forgets its history and its convolution's
+    // partitions by a count of what came in since and writes none of them (0.3 MiB before): what the devices' resets clear
+    // through the count (devices/dsp/ClearedSamples.h: the linear phase's convolution, and whatever large comes to be
+    // cleared so) stays small in that block. The count doesn't see a plain loop: a delay line and a comb are cleared
+    // whole, as measured cheap (docs/realtime-audit.md, finding 25).
     // A synth's chord rather than an audio clip, so that a jump lands at once rather than when the clip's file is read there.
     TestSong song;
     song.setTempo (120.0);

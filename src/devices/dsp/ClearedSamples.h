@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the devices' resets write as silence, counted for the tests. Every Play and every jump while the song plays resets
 // every device of every track at once, on the audio thread and its workers (engine::Engine::flushStrip()), so what a reset
-// writes must not grow with what a device holds: a delay line (DelayLine.h), a comb (CombFilter.h) and the EQ's linear
-// phase (eq/LinearPhase.h, PartitionedConvolution.h) forget what they held by a count of what came in since, and write
-// nothing of it. What the linear phase's convolution still clears at a reset goes through clear(), which counts it, and
-// so should anything large a reset comes to clear, so that a test holds a block's resets to a small bound
-// (tests/EnginePlaybackTests.cpp), as the engine's rings are held to none (engine/nodes/Strip.h). It counts only what goes
-// through it: that a delay line's or a comb's reset writes nothing is kept by their own tests (tests/DspTests.cpp), which
-// compare them with lines cleared whole, and by whoever changes them.
+// writes must cost little. The EQ's linear phase (eq/LinearPhase.h, PartitionedConvolution.h) forgets what it held by a
+// count of what came in since, and writes none of it; what its convolution still clears at a reset goes through clear(),
+// which counts it, so that a test holds a block's resets to a small bound of what is counted (tests/EnginePlaybackTests.cpp),
+// as the engine's rings are held to none (engine/nodes/Strip.h). It counts only what goes through it: a delay line and a
+// comb are cleared whole by plain loops (a count of what came in there costs a compare at every read, which made the
+// reverb 40 % dearer to save a tenth of one block at Play: docs/realtime-audit.md, finding 25).
 #pragma once
 
 #include <algorithm>

@@ -748,11 +748,17 @@ void LinearPhase::playStretch (float* const* channels, int numChannels, int from
         auto& held = historyHeld[(size_t) channel];
         const auto firstHeld = std::clamp (latency - held, 0, length);
 
-        for (int i = 0; i < length; ++i)
+        // In two runs, so that no sample asks which it is in.
+        for (int i = 0; i < firstHeld; ++i)
         {
             kept[(size_t) ((historyAt + i) & historyMask)] = channels[channel][from + i];
-            delayed[(size_t) channel][(size_t) (from + i)] =
-                i >= firstHeld ? kept[(size_t) ((historyAt + i - latency) & historyMask)] : 0.0f;
+            delayed[(size_t) channel][(size_t) (from + i)] = 0.0f;
+        }
+
+        for (int i = firstHeld; i < length; ++i)
+        {
+            kept[(size_t) ((historyAt + i) & historyMask)] = channels[channel][from + i];
+            delayed[(size_t) channel][(size_t) (from + i)] = kept[(size_t) ((historyAt + i - latency) & historyMask)];
         }
 
         held = std::min (held + length, historyMask + 1);
