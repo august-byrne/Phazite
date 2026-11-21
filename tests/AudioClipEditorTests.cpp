@@ -504,3 +504,16 @@ TEST_CASE ("The clip editor's tab shows the piano roll or the audio clip editor,
     CHECK_FALSE (clipEditor.showsAudioClip());
     CHECK (pianoRoll.getClips() == std::vector<phazite::ClipID> { screen.midi });
 }
+
+TEST_CASE ("The audio clip editor asks for its content again as its clip stops showing, for its scroll bar")
+{
+    // The review of the threading audit's fix, 2026-11-20: the time line asks for its content's end only as the song changes;
+    // a clip no longer shown (another selected, another project) left the scroll bar at its end until the song next changed.
+    EditorScreen screen;
+    screen.editor.showClip (screen.vocal);
+    phazite::test::dispatchPendingMessages();
+    const auto asks = screen.editor.getContentAsks();
+    screen.editor.showClip ({});
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.editor.getContentAsks() > asks);
+}

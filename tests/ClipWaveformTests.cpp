@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The waveforms of audio clips (src/app/ClipWaveforms.h), from Phazite's own cache of their files' levels: one loads in
-// the background and draws where the clip's file has audio, nothing past it; a second clip of the same file draws at once.
+// The waveforms of audio clips (src/app/ClipWaveforms.h), from Phazite's own cache of their files' levels: one opens its
+// file and loads in the background and draws where the clip's file has audio, nothing past it; a second clip of the same
+// file draws as soon as its file is open, its levels from the cache.
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "app/ClipWaveforms.h"
@@ -13,6 +14,8 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
+
+#include <atomic>
 
 namespace
 {
@@ -86,7 +89,8 @@ juce::Image paint (phazite::ui::ClipWaveform& waveform, phazite::BeatRange span)
 }
 } // namespace
 
-TEST_CASE ("A clip's waveform loads in the background and draws where its file has audio; another clip of the file draws at once")
+TEST_CASE ("A clip's waveform loads in the background and draws where its file has audio; another clip of the file draws from the "
+           "cache")
 {
     phazite::test::TemporaryFolder temp;
     juce::String error;
@@ -114,8 +118,12 @@ TEST_CASE ("A clip's waveform loads in the background and draws where its file h
     const auto image = paint (*waveform, span);
     CHECK (countLit (image, 210, 400) == 0);
 
-    // Another waveform of the same file has its levels at once, from the cache.
-    auto again = make (context, clips[0], {});
+    // Another waveform of the same file has its levels from the cache as soon as its file is open: at once, without a
+    // message of more levels read.
+    auto loadsAgain = 0;
+    auto again = make (context, clips[0], [&loadsAgain] { ++loadsAgain; });
+    paint (*again, span);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&loadsAgain] { return loadsAgain > 0; }));
     CHECK (countLit (paint (*again, span), 0, 190) > 190 * 10);
 
     setSong (context, nullptr);
@@ -158,9 +166,14 @@ TEST_CASE ("A clip's waveform shows its file anew once an ask of the disk finds 
     writeToneInPlace (file, 1.0, 0.05f);
     const auto loadsBefore = loads;
     phazite::askFileIdentity (file);
+    // Nothing shows while it is opened again, then its new levels: the cache doesn't give the old ones.
     CHECK (loads > loadsBefore);
-    CHECK (phazite::test::dispatchMessagesUntil ([&] { return lit() < 400 * 10; }));
-    CHECK (lit() > 0);
+    CHECK (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            const auto now = lit();
+            return now > 0 && now < 400 * 10;
+        }));
 
     // A clip of a file that isn't there, painted again and again: the disk never asked.
     const auto goneClips =
@@ -184,6 +197,165 @@ TEST_CASE ("A clip's waveform shows its file anew once an ask of the disk finds 
     setSong (context, nullptr);
 }
 
+TEST_CASE ("A clip's waveform opens its file in the background, never in a paint, and shows once it is open")
+{
+    // The threading audit, 2026-11-20: the waveform gave JUCE's thumbnail the clip's file as a source inside a paint, which
+    // opened it and read its header there (and asked the disk whether it was there and when it was written), so that the
+    // first paint of a project, on a share or a synced folder, waited for every audio clip's file in view.
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (temp.folder, "Waves", error);
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, &song);
+
+    const auto track = phazite::getTrackIDs (song).front();
+    const auto clips =
+        phazite::importFiles (context,
+                              { phazite::test::writeSound (temp.folder.getChildFile ("Slow.wav"), 1.0, 220.0, 0.9f).getFullPathName(),
+                                phazite::test::writeSound (temp.folder.getChildFile ("Other.wav"), 1.0, 220.0, 0.9f).getFullPathName() },
+                              track, phazite::BeatPosition());
+    REQUIRE (clips.size() == 2);
+
+    // Their files asked about as a plan asks, so that what is known of them doesn't change while they show (a file found
+    // otherwise than it was known is opened again).
+    for (const auto clip : clips)
+        phazite::askFileIdentity (phazite::getClipFile (song, phazite::findClipState (song, clip)));
+
+    // Each open waits until the test lets it go, as a drive that is slow to wake. Where a reader is made, the thread is
+    // counted (countWaveformFiles()).
+    const auto before = phazite::countWaveformFiles();
+    const auto opensOnMessageThread = [&before]
+    { return phazite::countWaveformFiles().opensOnMessageThread - before.opensOnMessageThread; };
+    std::atomic<int> held { 0 };
+    juce::WaitableEvent letGo { true };
+    phazite::setBeforeWaveformFileOpens (
+        [&] (const juce::File&)
+        {
+            ++held;
+            letGo.wait (phazite::test::hangTimeout);
+        });
+    const juce::ScopeGuard noLongerHeld { [&letGo]
+                                          {
+                                              phazite::setBeforeWaveformFileOpens ({});
+                                              letGo.signal();
+                                          } };
+
+    auto loads = 0;
+    auto waveform = phazite::getClipWaveformMaker() (context, clips[0], [&loads] { ++loads; });
+    REQUIRE (waveform != nullptr);
+    const phazite::BeatRange span { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (2.0) };
+    const auto lit = [&] { return countLit (paint (*waveform, span), 0, 400); };
+
+    // A paint opens nothing on the message thread, and draws no waveform while the file is being opened, however often.
+    CHECK (lit() == 0);
+    REQUIRE (opensOnMessageThread() == 0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&held] { return held == 1; }));
+
+    for (int i = 0; i < 10; ++i)
+        CHECK (lit() == 0);
+
+    CHECK (held == 1);
+
+    // Once it is open, the waveform is told to paint again, and shows the file.
+    letGo.signal();
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return lit() > 400 * 40; }));
+    CHECK (loads > 0);
+    CHECK (opensOnMessageThread() == 0);
+
+    // A waveform that goes while its file is being opened takes nothing: the file opened is let go where it was opened.
+    letGo.reset();
+    auto gone = phazite::getClipWaveformMaker() (context, clips[1], {});
+    REQUIRE (gone != nullptr);
+    paint (*gone, span);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&held] { return held == 2; }));
+    gone.reset();
+    letGo.signal();
+
+    // Another waveform of that file opens it again and shows it.
+    auto again = phazite::getClipWaveformMaker() (context, clips[1], {});
+    REQUIRE (again != nullptr);
+    paint (*again, span);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return countLit (paint (*again, span), 0, 400) > 400 * 40; }));
+    CHECK (opensOnMessageThread() == 0);
+
+    setSong (context, nullptr);
+}
+
+TEST_CASE ("A clip's waveform lets its file go once its levels are read, and one of a file whose levels are kept opens nothing")
+{
+    // The review of the threading audit's fix, 2026-11-20: a thumbnail given a reader keeps it, so each waveform kept its file
+    // open for as long as it lived, one open file for each audio clip that had come into view, past the files a process may
+    // have open. Once its levels are read, the waveform keeps them without the file; and a clip of a file whose levels are
+    // kept draws them without opening it: in its first paint where the file is known on the disk (a copy, a split, Undo),
+    // else once its hash is worked out.
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (temp.folder, "Waves", error);
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, &song);
+
+    const auto track = phazite::getTrackIDs (song).front();
+    juce::StringArray paths;
+
+    for (int i = 0; i < 14; ++i)
+        paths.add (phazite::test::writeSound (temp.folder.getChildFile ("Sound " + juce::String (i) + ".wav"), 1.0, 220.0, 0.9f)
+                       .getFullPathName());
+
+    const auto clips = phazite::importFiles (context, paths, track, phazite::BeatPosition());
+    REQUIRE (clips.size() == 14);
+
+    // The first file known on the disk, as a plan asks; the second not.
+    phazite::askFileIdentity (phazite::getClipFile (song, phazite::findClipState (song, clips[0])));
+    const auto before = phazite::countWaveformFiles();
+    const auto opened = [&before] { return phazite::countWaveformFiles().opens - before.opens; };
+    const auto readersAlive = [] { return phazite::countWaveformFiles().readersAlive; };
+    const phazite::BeatRange span { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (2.0) };
+    const auto litIn = [&span] (phazite::ui::ClipWaveform& waveform) { return countLit (paint (waveform, span), 0, 400); };
+
+    // Read, its file opened once, and let go once every level is in.
+    auto first = phazite::getClipWaveformMaker() (context, clips[0], {});
+    REQUIRE (first != nullptr);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return litIn (*first) > 400 * 40; }));
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return readersAlive() == before.readersAlive; }));
+    CHECK (opened() == 1);
+    CHECK (litIn (*first) > 400 * 40); // its levels kept
+
+    // Another clip of the file, known on the disk: its levels in its first paint, nothing opened.
+    auto copy = phazite::getClipWaveformMaker() (context, clips[0], {});
+    REQUIRE (copy != nullptr);
+    CHECK (litIn (*copy) > 400 * 40);
+    phazite::test::dispatchPendingMessages();
+    CHECK (opened() == 1);
+    CHECK (readersAlive() == before.readersAlive);
+
+    // A file not known on the disk: read once; another of its clips takes its levels from the cache once its hash is worked
+    // out, nothing opened.
+    auto second = phazite::getClipWaveformMaker() (context, clips[1], {});
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return litIn (*second) > 400 * 40; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return readersAlive() == before.readersAlive; }));
+    CHECK (opened() == 2);
+    auto secondCopy = phazite::getClipWaveformMaker() (context, clips[1], {});
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return litIn (*secondCopy) > 400 * 40; }));
+    CHECK (opened() == 2);
+    CHECK (readersAlive() == before.readersAlive);
+
+    // Many waveforms of many files: none keeps a reader once its levels are in.
+    std::vector<std::unique_ptr<phazite::ui::ClipWaveform>> many;
+
+    for (size_t i = 2; i < clips.size(); ++i)
+        many.push_back (phazite::getClipWaveformMaker() (context, clips[i], {}));
+
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return std::all_of (many.begin(), many.end(), [&] (const auto& waveform) { return litIn (*waveform) > 400 * 40; }); }));
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return readersAlive() == before.readersAlive; }));
+    CHECK (opened() == 14);
+
+    setSong (context, nullptr);
+}
 TEST_CASE ("A clip that doesn't follow the tempo draws its sound where it plays it, across the song's tempo changes")
 {
     // Known bug 16 until 2026-11-11: such a clip plays the song's seconds, which a change of tempo puts at other beats, but its

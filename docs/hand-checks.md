@@ -374,7 +374,7 @@ the [changelog](changelog.md).
 | T9 | Add a browser folder on a network share, disconnect the share, then remove that folder | The window answers at once, and the other folders' sounds are found as before | |
 | T10 | Clean Up with many unused files: Delete; again with other files, and Cancel | A window with its progress after a second; Cancel stops between two files; the note says how many went | |
 | T11 | With the Project view open, delete one of the song's audio files in Explorer and come back to Phazite | The file shows as missing within a moment | |
-| T12 | Open a project whose audio is on a network share or in a synced folder; duplicate an audio clip | The window paints at once and the waveforms come a moment later; the copy's waveform is there at once | |
+| T12 | Open a project whose audio is on a network share or in a synced folder; duplicate an audio clip; open a short one-shot in the audio clip editor | The window paints at once and the waveforms come a moment later; the copy's waveform is there at once; the one-shot's waveform is drawn in steps a level wide (known bug 224: say whether that will do) | |
 | T13 | With the inspector closed, drag a rubber band over notes, then open the inspector; with the Devices view's tab behind another, hold Down in the playlist, then click its tab | It shows "N notes" for the last selection; the last track's instrument, scrolled to it | |
 | T14 | Edit with the browser in the left panel, then open Versions | The changes are listed, and the bar's badge counted all along | |
 

@@ -3612,3 +3612,42 @@ TEST_CASE ("Scrolls by hand stop waiting for the display's frames once they stop
     mouse.wheel (screen.lanesArea().getCentre(), -0.1f, juce::ModifierKeys::shiftModifier);
     CHECK (playlist.getView().start > target);
 }
+
+TEST_CASE ("The playlist asks for the song's whole extent only once the song has changed, at the next tick of its timer")
+{
+    // The threading audit, 2026-11-20: each editor that showed asked for where its content ends five times a second, which
+    // walks the whole song (its clips, sections and chords), while nothing changed.
+    PlaylistScreen screen;
+    auto& playlist = screen.playlist;
+    REQUIRE (playlist.isShowing());
+    playlist.tickNow(); // what changed as it was made
+    const auto asks = playlist.getContentAsks();
+
+    for (int i = 0; i < 20; ++i)
+        playlist.tickNow();
+
+    CHECK (playlist.getContentAsks() == asks);
+
+    // A clip far past the song's end: the next tick asks once, and the scroll bar reaches past it.
+    const auto scrollsTo = [&playlist]
+    {
+        auto most = 0.0;
+
+        for (auto* bar : phazite::test::findAll<juce::ScrollBar> (playlist))
+            if (! bar->isVertical())
+                most = std::max (most, bar->getMaximumRangeLimit());
+
+        return most;
+    };
+
+    REQUIRE (scrollsTo() < 1000.0);
+    screen.addClip (0, 1000.0, 4.0);
+    playlist.tickNow();
+    CHECK (playlist.getContentAsks() == asks + 1);
+    CHECK (scrollsTo() > 1004.0);
+
+    for (int i = 0; i < 20; ++i)
+        playlist.tickNow();
+
+    CHECK (playlist.getContentAsks() == asks + 1);
+}

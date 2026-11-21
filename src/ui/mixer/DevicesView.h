@@ -22,6 +22,7 @@
 #include "StripParts.h"
 #include "model/project/ProjectContext.h"
 #include "ui/components/SectionHeader.h"
+#include "ui/components/SightWatcher.h"
 
 #include <map>
 #include <memory>
@@ -36,7 +37,8 @@ class DevicesView : public juce::Component,
                     public juce::DragAndDropContainer,
                     private ProjectContext::Listener,
                     private juce::ChangeListener,
-                    private juce::Timer
+                    private juce::Timer,
+                    private juce::AsyncUpdater
 {
 public:
     DevicesView (CommandBridge&, ProjectContext&);
@@ -116,12 +118,23 @@ private:
     bool bodyFrozen = false;   // that it is frozen
     juce::Label hint;          // with nothing to show: why, or what to do
 
+    // While it can't be seen (its tab not chosen, the editor dock hidden), it makes nothing: the selected track's devices
+    // and its instrument's whole editor were made at the keys' repeat rate while Up or Down was held in the playlist. It
+    // notes that it is out of date, and catches up as it shows (isInSight(), SightWatcher.h), once the message that it shows
+    // comes: the tab that shows it picks its page just after.
+    bool stale = false;
+    bool columnToTop = false; // then the column scrolled to its top, for another channel,
+    DeviceID slotToReveal;    // or to a device's slot (showDevice())
+    SightWatcher sight { *this, [this] { showWhereStale(); } };
+
     DeviceID getShownDevice() const; // the instrument (or a device of its instrument container), or the effect that shows
     std::optional<DeviceSlot> findDeviceSlot (DeviceID) const; // a device in the column, or in a container there
     void rememberShown (DeviceID, Page);                       // the device that shows on a page, for the channel shown
     void followSelection();                                    // shows the channel the selection points to
     void setChannel (std::optional<TrackID>);
-    void refresh();  // the column's slots, and what shows beside it, as the song is now
+    void refresh();        // the column's slots, and what shows beside it, as the song is now
+    void showWhereStale(); // what changed while it couldn't be seen, once it can
+    void revealSlot (DeviceID);
     void showBody(); // what shows the shown device, made again if that changed
     void showChannelName();
     void layOutBody();
@@ -135,5 +148,6 @@ private:
     void songChanged (const SongChanges&) override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection changed
     void timerCallback() override;                                   // the knobs' values and the windows
+    void handleAsyncUpdate() override;                               // showWhereStale()'s
 };
 } // namespace phazite::ui

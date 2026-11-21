@@ -7,7 +7,24 @@
 
 #include "ui/playlist/ClipWaveform.h"
 
+#include <juce_core/juce_core.h>
+
+#include <functional>
+
 namespace phazite
 {
 ui::ClipWaveformMaker getClipWaveformMaker();
+
+// Tests: what the thread that opens a clip's file for its waveform does before it opens it, given the file (held there
+// until let go, as a drive that is slow to wake), or nothing. Any thread.
+void setBeforeWaveformFileOpens (std::function<void (const juce::File&)>);
+
+// Tests: how many times the waveforms opened a file to read it (each a reader made), how many of those were on the message
+// thread, and how many of the readers are alive now. Any thread.
+struct WaveformFiles
+{
+    int opens = 0, opensOnMessageThread = 0, readersAlive = 0;
+};
+
+WaveformFiles countWaveformFiles();
 } // namespace phazite

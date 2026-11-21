@@ -982,7 +982,15 @@ void AudioClipEditor::updateControls()
 
 void AudioClipEditor::fitView()
 {
-    if (! info.has_value() || waveform->getWidth() <= 0 || viewHeld)
+    // No clip shown (another selected, another project): the scroll bar for none, rather than the last one's end until the
+    // song next changes (TimelineEditor asks again only then).
+    if (! info.has_value())
+    {
+        updateScrollBar();
+        return;
+    }
+
+    if (waveform->getWidth() <= 0 || viewHeld)
         return;
 
     const auto shown = getContentRange();

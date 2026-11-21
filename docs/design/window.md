@@ -238,6 +238,8 @@ where their actions are.
 - No key combinations change how a value applies to several items.
 - Each page shows only what the selection has.
 - A sound in the browser is not in the song, so the inspector does not show it; the browser does.
+- While its panel is hidden it makes nothing, and shows what is selected as the panel shows again. While it shows, a
+  page takes more of its kind (a rubber band's notes, clips or points) rather than being made anew.
 
 ## Status bar
 

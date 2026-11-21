@@ -41,6 +41,7 @@ The base controls and what the left panel's views share.
 | `ViewTitle.*` | The title along a side panel view's top, with its actions (as VS Code's side bar): the left panel's views', and the inspector's, which names what it shows. |
 | `SectionHeader.*` | A section's header that folds it: a group's row or a pane's, with its count's badge. |
 | `ListRowHover.h` | Which row of a list is under the pointer. |
+| `SightWatcher.h` | Whether a view can be seen (`isInSight()`), and what tells it as its panel, its tab or what holds them shows or hides: the inspector, the Devices view and the versions build nothing while they can't be seen, and catch up as they show. |
 | `ModalCard.*` | A card over the whole window, as VS Code's modal editor: the window dimmed behind it, its header (icon, title, Maximize, Close), its size following the window's; modal while it shows, its keys kept in it (the settings show in one: `AppShell::showModal()`). Two siblings in the window: a see-through backdrop and the card's opaque part in front of it, so that a repaint in the card paints nothing behind it. |
 
 ## input/

@@ -892,7 +892,8 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
 
     refreshTooltips();
     context.addListener (this);
-    refresh();
+    followBounceSetting();
+    refreshInSight();
 }
 
 VersionsView::~VersionsView()
@@ -1543,8 +1544,42 @@ void VersionsView::showClashMenu (int index)
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 
+void VersionsView::refreshInSight()
+{
+    if (isInSight (*this))
+        refresh();
+    else
+        stale = true;
+}
+
+void VersionsView::refreshWhereStale()
+{
+    if (stale && isInSight (*this))
+        refresh();
+}
+
+void VersionsView::showAutomaticSavesChanged()
+{
+    // Switched off, no automatic save stays selected, nor a group of them, whether the view shows or not: Restore This
+    // Automatic Save is never there for a row nobody sees (selectHistoryRow() does it as the view reads the model).
+    if (! settings.get (Settings::versionShowAutomatic))
+    {
+        selectSnapshot (context, 0);
+        selectedGroup.reset();
+    }
+
+    refreshInSight();
+}
+
+void VersionsView::followBounceSetting()
+{
+    if (const auto bounces = settings.get (Settings::versionBounce); getBounceWithVersion (context) != bounces)
+        setBounceWithVersion (context, bounces);
+}
+
 void VersionsView::refresh()
 {
+    stale = false;
     const auto keeps = keepsVersions (context);
     const auto reading = isReadingVersions (context);
     changes = getListedChanges (context);
@@ -1566,11 +1601,6 @@ void VersionsView::refresh()
             bounceProgress = *progress;
         }
     }
-
-    // Bounce Each Version, as the settings keep it, for the song open now; and the room the history takes, or why an old
-    // version's bounce failed, until the next one.
-    if (const auto bounces = settings.get (Settings::versionBounce); getBounceWithVersion (context) != bounces)
-        setBounceWithVersion (context, bounces);
 
     // What needs saying first: a first save copying the versions (why saving a version, merging and switching are greyed), a
     // branch whose last version can't be read, a bounce or a restore that failed in part, a merge that waits otherwise than

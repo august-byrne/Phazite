@@ -181,12 +181,13 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Milliseconds on a local drive; in a OneDrive folder whose files aren't on the disk, or on a share, each step waits
   for the file. To fix: the length and the format from what the library's listing knows; the readers made on a job, as
   the clips' waveforms' are; the preview and the details started once the selection has rested a moment.
-- **224. A waveform zoomed in far reads its file's samples inside a paint.** At 256 samples a pixel or closer (the audio
-  clip editor, a playlist zoomed in), JUCE's thumbnail reads the samples themselves for what it draws, on the thread
-  that paints (`juce::AudioThumbnail`'s `CachedWindow::refillCache()`), where further out it draws from the levels it
-  keeps. No file is opened there any more, but on a share that is slow the paint waits for the read. To fix: draw from
-  the kept levels at every zoom (blockier close in), or read the close levels on a job and keep them: a choice of how
-  it looks, for the owner.
+- **224. A waveform zoomed in far is drawn in steps, from its levels of 256 samples.** Where a pixel is fewer than 256
+  samples (a short hit fitted in the audio clip editor, a playlist zoomed in far), a waveform shows as steps a level
+  wide once its levels are read, where it showed the samples themselves. Why: a waveform lets its file go once its
+  levels are read (JUCE workaround W59: it kept every clip's file open otherwise), and JUCE's thumbnail, with no reader,
+  draws from the levels alone; before, it read the file's samples for what it drew, on the thread that paints
+  (`CachedWindow::refillCache()`), which waited for a slow drive inside the paint. To fix: the fine levels of the
+  stretch in view read on a job and kept while it shows. How fine a waveform must look close in is the owner's to say.
 - **215. While the settings show, the system's own Close of the window does nothing** (the taskbar's Close and the
   window's menu on Windows, the window manager's close button on Linux), a click on its taskbar button or Win+Down
   doesn't minimize it, and its sides and bottom don't resize it: each only brings the window forward; Alt+F4 quits,
