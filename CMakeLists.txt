@@ -335,6 +335,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/BackgroundJobs.cpp
     src/model/base/BackgroundJobs.h
     src/model/base/Beats.h
+    src/model/base/ControlKinds.h
     src/model/base/IDs.h
     src/model/base/Json.cpp
     src/model/base/Json.h
@@ -346,6 +347,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/Song.h
     src/model/base/SongIndex.cpp
     src/model/base/SongText.cpp
+    src/model/base/SongValues.cpp
     src/model/base/Toggles.h
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
@@ -354,6 +356,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/SchemaDescription.h
     src/model/base/internal/Selection.h
     src/model/base/internal/SongIndex.h
+    src/model/base/internal/SongValues.h
     src/model/base/internal/SongText.h
     src/model/base/internal/ValueArea.h
     src/model/base/internal/WholeState.h
@@ -458,7 +461,6 @@ target_sources(phazite_core PRIVATE
     src/model/modulation/ModulationValues.cpp
     src/model/modulation/ModulationValues.h
     src/model/modulation/internal/Modulation.h
-    src/model/notes/NoteElements.cpp
     src/model/notes/Notes.cpp
     src/model/notes/NoteValues.h
     src/model/notes/NotesModel.cpp
@@ -1476,6 +1478,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongIndexTests.cpp
         tests/SongPlaceTextTests.cpp
         tests/SongTextTests.cpp
+        tests/SongValuesTests.cpp
         tests/SoundKeyTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp

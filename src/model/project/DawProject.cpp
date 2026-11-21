@@ -1845,10 +1845,12 @@ namespace
                     gone.push_back (note.id);
 
                 removeClipNotesAlone (song, clipID, gone);
+                std::vector<NoteData> notesAdded;
 
                 for (const auto* note : added)
-                    addNoteFrom (clipID, contentStart, *note);
+                    notesAdded.push_back (readNote (clipID, contentStart, *note));
 
+                addNotes (song, notesAdded);
                 keepWithinSong (clip);
             }
         }
@@ -1867,12 +1869,17 @@ namespace
             return juce::roundToInt (readNumber (note, "channel", 0.0, 0.0, 15.0)) + 1;
         }
 
-        void addNoteFrom (ClipID clip, BeatPosition contentStart, const juce::XmlElement& note)
+        // A DAWproject's note as a note to add to a clip (Notes.h: addNotes()).
+        static NoteData readNote (ClipID clip, BeatPosition contentStart, const juce::XmlElement& note)
         {
-            addNote (song, clip, juce::jlimit (0, 127, note.getIntAttribute ("key")),
-                     contentStart + BeatDuration::fromBeats (readNumber (note, "time", 0.0, -maxSongBeats, maxSongBeats)),
-                     BeatDuration::fromBeats (readNumber (note, "duration", 1.0, 1.0 / 64.0, maxSongBeats)),
-                     juce::jlimit (1, 127, juce::roundToInt (readNumber (note, "vel", 0.8, 0.0, 1.0) * 127.0)), readNoteChannel (note));
+            NoteData data;
+            data.clip = clip;
+            data.pitch = juce::jlimit (0, 127, note.getIntAttribute ("key"));
+            data.start = contentStart + BeatDuration::fromBeats (readNumber (note, "time", 0.0, -maxSongBeats, maxSongBeats));
+            data.length = BeatDuration::fromBeats (readNumber (note, "duration", 1.0, 1.0 / 64.0, maxSongBeats));
+            data.velocity = juce::jlimit (1, 127, juce::roundToInt (readNumber (note, "vel", 0.8, 0.0, 1.0) * 127.0));
+            data.channel = readNoteChannel (note);
+            return data;
         }
 
         void addTrack (const juce::XmlElement& track, const ReadTracks& theirs)
@@ -1914,9 +1921,12 @@ namespace
                 auto clipState = findClipState (song, clipID);
                 clipState.setProperty (schema::clipOffset, readNumber (*clip, "playStart", 0.0, 0.0, maxSongBeats), nullptr);
 
-                for (const auto* note : clip->getChildByName ("Notes")->getChildWithTagNameIterator ("Note"))
-                    addNoteFrom (clipID, getContentStart (clipState), *note);
+                std::vector<NoteData> notes;
 
+                for (const auto* note : clip->getChildByName ("Notes")->getChildWithTagNameIterator ("Note"))
+                    notes.push_back (readNote (clipID, getContentStart (clipState), *note));
+
+                addNotes (song, notes);
                 keepWithinSong (clipState);
             }
 

@@ -47,7 +47,7 @@ struct Store
     phazite::SongPieces makeSong (float volume)
     {
         phazite::setChannelVolume (*song, track, volume);
-        return phazite::splitSong (song->getState());
+        return phazite::splitSong (phazite::test::copyWholeSong (*song));
     }
 
     juce::String saveVersion (float volume, juce::StringArray parents = {}, const juce::String& branch = "main",
@@ -838,7 +838,7 @@ TEST_CASE ("Verify History walks Local History's songs and the songs left on bra
     // a branch.
     const auto lead = s.addTrack ("Lead");
     phazite::setChannelVolume (song, lead, -5.0f);
-    auto pieces = phazite::splitSong (song.getState());
+    auto pieces = phazite::splitSong (phazite::test::copyWholeSong (song));
     juce::String lost;
 
     for (const auto& [name, bytes] : pieces.pieces)
@@ -850,7 +850,7 @@ TEST_CASE ("Verify History walks Local History's songs and the songs left on bra
 
     // Another song for the snapshot, the same track lost from it.
     song.getState().setProperty ("forTheSnapshot", true, nullptr);
-    auto snapshotPieces = phazite::splitSong (song.getState());
+    auto snapshotPieces = phazite::splitSong (phazite::test::copyWholeSong (song));
     snapshotPieces.pieces.erase (lost);
 
     {

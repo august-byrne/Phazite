@@ -2648,7 +2648,7 @@ TEST_SUITE ("realtime-audit")
         report ("A version opened and closed while it plays", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         CHECK (phazite::getOpenVersion (song.context).isEmpty());
-        CHECK (phazite::findSong (song.context)->getState().isEquivalentTo (now));
+        CHECK (phazite::test::copyWholeSong (*phazite::findSong (song.context)).isEquivalentTo (now));
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

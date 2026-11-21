@@ -259,7 +259,7 @@ TEST_CASE ("Another computer's deletion is listed here too, by its log")
         record.parents.add (first);
         record.branch = "their-branch";
         record.saved = clock.get();
-        theirs = elsewhere.writeVersion (record, phazite::splitSong (song.getState()));
+        theirs = elsewhere.writeVersion (record, phazite::splitSong (phazite::test::copyWholeSong (song)));
         REQUIRE (theirs.isNotEmpty());
 
         phazite::BranchRecord branch;

@@ -1221,7 +1221,7 @@ TEST_CASE ("A double-click on a version opens it live, with no bounce, the bar a
     // Back to Now, by its button: the song as it was, the bar gone.
     screen.click (view.getBackToNowButton());
     CHECK (phazite::getOpenVersion (context).isEmpty());
-    CHECK (phazite::findSong (context)->getState().isEquivalentTo (nowState));
+    CHECK (phazite::test::copyWholeSong (*phazite::findSong (context)).isEquivalentTo (nowState));
     CHECK (view.getOpenBarText().isEmpty());
     CHECK (readout().isEmpty());
 
@@ -1231,7 +1231,7 @@ TEST_CASE ("A double-click on a version opens it live, with no bounce, the bar a
     view.grabKeyboardFocus();
     CHECK (view.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
     CHECK (phazite::getOpenVersion (context).isEmpty());
-    CHECK (phazite::findSong (context)->getState().isEquivalentTo (nowState));
+    CHECK (phazite::test::copyWholeSong (*phazite::findSong (context)).isEquivalentTo (nowState));
 
     // Hear It is greyed without a bounce, and says why.
     phazite::selectVersion (context, first);

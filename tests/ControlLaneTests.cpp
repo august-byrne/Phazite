@@ -8,6 +8,7 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
@@ -69,11 +70,10 @@ struct LaneSong
     {
         std::vector<std::pair<double, int>> values;
 
-        for (const auto& child : phazite::findClipState (getSong(), of.isValid() ? of : clip))
-            if (child.hasType (phazite::schema::CONTROL) && phazite::findControlKind (child) == lane.kind
-                && (lane.kind != ControlKind::controller || (int) child[phazite::schema::controlNumber] == lane.number)
-                && phazite::readChannel (child, phazite::schema::controlChannel) == lane.channel)
-                values.emplace_back ((double) child[phazite::schema::controlBeat], (int) child[phazite::schema::controlValue]);
+        for (const auto& control : phazite::getClipNotesValue (getSong(), of.isValid() ? of : clip).controls)
+            if (control.kind == lane.kind && (lane.kind != ControlKind::controller || control.number == lane.number)
+                && control.channel == lane.channel)
+                values.emplace_back (control.beat, control.value);
 
         std::stable_sort (values.begin(), values.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
         return values;
@@ -346,7 +346,8 @@ TEST_CASE ("Values set as they are change nothing: no undo action, no unsaved ch
     auto& history = song.getSong().getUndoManager();
     history.clearUndoHistory();
     REQUIRE_FALSE (song.song.getProject().hasUnsavedChanges());
-    const auto before = phazite::findClipState (song.getSong(), song.clip).createCopy();
+    const auto wholeClip = [&song] { return phazite::copyWhole (song.getSong(), phazite::findClipState (song.getSong(), song.clip)); };
+    const auto before = wholeClip();
 
     // A click on the value there, and a draw over a range with the values it holds (a repeat among them, left out as ever).
     {
@@ -358,7 +359,7 @@ TEST_CASE ("Values set as they are change nothing: no undo action, no unsaved ch
     }
 
     CHECK_FALSE (history.canUndo());
-    CHECK (phazite::findClipState (song.getSong(), song.clip).isEquivalentTo (before)); // its elements in their order
+    CHECK (wholeClip().isEquivalentTo (before)); // its elements in their order
     CHECK_FALSE (song.song.getProject().hasUnsavedChanges());
 
     // One value changed among them: that one alone goes and comes, the others staying where they are.
@@ -370,7 +371,7 @@ TEST_CASE ("Values set as they are change nothing: no undo action, no unsaved ch
     }
 
     CHECK (song.valuesOf (pedal) == Values { { 1.0, 127 }, { 2.0, 10 } });
-    CHECK (phazite::findClipState (song.getSong(), song.clip).getChild (0).isEquivalentTo (before.getChild (0)));
+    CHECK (wholeClip().getChild (0).isEquivalentTo (before.getChild (0)));
 }
 
 TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one change of the clip, and Undo brings every value back")
@@ -391,13 +392,14 @@ TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one chan
     phazite::addControls (song.getSong(), take, many);
     song.getSong().getUndoManager().clearUndoHistory();
 
-    // What the clip holds but the bend's values, in its order.
+    // What the clip holds but the bend's values, in its order: its whole state's children (WholeState.h), each as text.
     const auto allButTheBend = [&]
     {
         std::vector<juce::String> held;
 
-        for (const auto& child : phazite::findClipState (song.getSong(), take))
-            if (! (child.hasType (phazite::schema::CONTROL) && phazite::findControlKind (child) == ControlKind::pitchWheel))
+        for (const auto& child : phazite::copyWhole (song.getSong(), phazite::findClipState (song.getSong(), take)))
+            if (! (child.hasType (phazite::schema::CONTROL)
+                   && child[phazite::schema::controlKind].toString() == phazite::schema::controlIsPitchWheel))
                 held.push_back (child.toXmlString());
 
         return held;

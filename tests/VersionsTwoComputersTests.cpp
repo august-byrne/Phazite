@@ -258,7 +258,7 @@ TEST_CASE ("Verify History names a version whose earlier version can't be read")
         record.parents.add (juce::String::repeatedString ("e", 64)); // a version not in the folder
         record.branch = currentBranch (s.context);
         record.saved = juce::Time::currentTimeMillis();
-        const auto id = store.writeVersion (record, phazite::splitSong (song.getState()));
+        const auto id = store.writeVersion (record, phazite::splitSong (phazite::test::copyWholeSong (song)));
         REQUIRE (id.isNotEmpty());
         auto main = *phazite::getVersionHistory (s.context)->findCurrentBranch();
         main.head = id;
@@ -482,7 +482,7 @@ TEST_CASE ("A song another computer left on a branch it deleted, recovered here,
         record.parents.add (t.first);
         record.branch = "theirs";
         record.saved = juce::Time::currentTimeMillis();
-        const auto head = b.writeVersion (record, phazite::splitSong (phazite::findSong (t.s.context)->getState()));
+        const auto head = b.writeVersion (record, phazite::splitSong (phazite::test::copyWholeSong (*phazite::findSong (t.s.context))));
         REQUIRE (head.isNotEmpty());
 
         auto left = phazite::test::copyWholeSong (*phazite::findSong (t.s.context));

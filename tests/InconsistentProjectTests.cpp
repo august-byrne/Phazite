@@ -15,6 +15,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/DrumKit.h"
@@ -183,12 +184,12 @@ TEST_CASE ("A note's and a controller's MIDI channel open within 1 to 16, one in
             }
         });
     REQUIRE (project != nullptr);
-    const auto notes = findAll (project->getSong().getState(), schema::NOTE);
+    const auto notes = findAll (phazite::test::copyWholeSong (project->getSong()), schema::NOTE);
     REQUIRE (notes.size() == 1);
     CHECK ((int) notes[0][schema::noteChannel] == 16);
 
     std::map<int, juce::var> channels; // by value
-    for (const auto& control : findAll (project->getSong().getState(), schema::CONTROL))
+    for (const auto& control : findAll (phazite::test::copyWholeSong (project->getSong()), schema::CONTROL))
         channels[(int) control[schema::controlValue]] = control[schema::controlChannel];
 
     REQUIRE (channels.size() == 3);
@@ -211,7 +212,7 @@ TEST_CASE ("A clip where no track holds clips, and a note outside a MIDI clip, a
         });
     REQUIRE (project != nullptr);
     CHECK (findAll (project->getSong().getState(), schema::CLIP).size() == 2); // the MIDI clip and the audio clip, each once
-    CHECK (findAll (project->getSong().getState(), schema::NOTE).size() == 1);
+    CHECK (findAll (phazite::test::copyWholeSong (project->getSong()), schema::NOTE).size() == 1);
 }
 
 TEST_CASE ("A clip on a return or a folder is left out, as only a track holds clips")
@@ -1435,12 +1436,13 @@ TEST_CASE ("Notes a tempo change made shorter than the shortest a note is drawn 
     phazite::togglePatternsFollowTempo (song);
     REQUIRE_FALSE (phazite::doPatternsFollowTempo (song));
     s.setTempo (60.0);
-    const auto note = phazite::findClipState (song, clip).getChildWithName (schema::NOTE);
+    const auto note = phazite::copyWhole (song, phazite::findClipState (song, clip)).getChildWithName (schema::NOTE);
     const auto length = (double) note[schema::noteLength];
     REQUIRE (length < 1.0 / 64.0);
 
     s.reopen();
-    const auto reopened = phazite::findClipState (*phazite::findSong (s.context), clip).getChildWithName (schema::NOTE);
+    const auto& reopenedSong = *phazite::findSong (s.context);
+    const auto reopened = phazite::copyWhole (reopenedSong, phazite::findClipState (reopenedSong, clip)).getChildWithName (schema::NOTE);
     CHECK ((double) reopened[schema::noteLength] == doctest::Approx (length));
 }
 
@@ -1629,9 +1631,11 @@ std::vector<juce::XmlElement*> getEvents (juce::XmlElement& clip)
 }
 
 // An opened song's clip by its ID, its alias group (empty for none), and its notes as the model reads them.
+// A clip of the song, whole (model/base/internal/WholeState.h): its notes as a save writes them.
 juce::ValueTree findClipByID (const phazite::Song& song, std::uint64_t id)
 {
-    return phazite::findClipState (song, phazite::ClipID::fromRaw (id));
+    const auto clip = phazite::findClipState (song, phazite::ClipID::fromRaw (id));
+    return clip.isValid() ? phazite::copyWhole (song, clip) : juce::ValueTree();
 }
 
 juce::String getLink (const phazite::Song& song, std::uint64_t id)

@@ -62,7 +62,8 @@ struct Sides
     // makes of this side's song holds together, as every song must (SongCheck.h, the alias rule with it), each case's.
     phazite::MergeResult merge()
     {
-        auto merged = phazite::mergeSongs (base->getState(), ours->getState(), theirs->getState(), [this] { return ours->makeID(); });
+        auto merged = phazite::mergeSongs (phazite::test::copyWholeSong (*base), phazite::test::copyWholeSong (*ours),
+                                           phazite::test::copyWholeSong (*theirs), [this] { return ours->makeID(); });
         checkMerged (merged);
         return merged;
     }
@@ -384,7 +385,7 @@ TEST_CASE ("Merging what this side has already changes nothing")
 
     const auto merged = sides.merge();
     CHECK (merged.clashes.empty());
-    CHECK (phazite::findChanges (sides.ours->getState(), merged.song).empty());
+    CHECK (phazite::findChanges (phazite::test::copyWholeSong (*sides.ours), merged.song).empty());
 }
 
 TEST_CASE ("Random edits on two sides always merge into a song whose IDs are each once, and whose references name what is there")
@@ -436,8 +437,9 @@ TEST_CASE ("Random edits on two sides always merge into a song whose IDs are eac
         checkIDs (merged.song);
 
         // What all three have, neither side took away, and what this side added, it has still: a track ungrouped, a clip moved.
-        const auto inBase = itemsOf (sides.base->getState()), inOurs = itemsOf (sides.ours->getState()),
-                   inTheirs = itemsOf (sides.theirs->getState()), inMerged = itemsOf (merged.song);
+        const auto inBase = itemsOf (phazite::test::copyWholeSong (*sides.base)),
+                   inOurs = itemsOf (phazite::test::copyWholeSong (*sides.ours)),
+                   inTheirs = itemsOf (phazite::test::copyWholeSong (*sides.theirs)), inMerged = itemsOf (merged.song);
 
         for (const auto& item : inOurs)
         {
@@ -463,7 +465,7 @@ TEST_CASE ("Random edits on two sides always merge into a song whose IDs are eac
         }
 
         s.reopen();
-        checkIDs (phazite::findSong (s.context)->getState());
+        checkIDs (phazite::test::copyWholeSong (*phazite::findSong (s.context)));
         CHECK (phazite::getTrackIDs (*phazite::findSong (s.context)).size() == phazite::getTrackElements (merged.song).size());
     }
 }
@@ -497,7 +499,7 @@ TEST_CASE ("A line merged again after a merge gave its additions new IDs merges 
     CHECK (findTrack (theirs, "Pad 2")[schema::trackID] == padID);
 
     auto ours = phazite::makeSong (first.song.createCopy());
-    const auto second = phazite::mergeSongs (base, ours->getState(), theirs, [&ours] { return ours->makeID(); });
+    const auto second = phazite::mergeSongs (base, phazite::test::copyWholeSong (*ours), theirs, [&ours] { return ours->makeID(); });
 
     CHECK (second.clashes.empty());
     CHECK (findTrack (second.song, "Lead")[schema::trackID] == ourTrack[schema::trackID]);
@@ -778,7 +780,7 @@ TEST_CASE ("A song holds each ID once where each item's is once, and each note's
     addMidiNote (*song, first, 36, at (0.0), lasting (1.0));
     addMidiNote (*song, first, 38, at (1.0), lasting (1.0));
     addMidiNote (*song, second, 40, at (0.0), lasting (1.0));
-    CHECK (phazite::holdsEachIDOnce (song->getState()));
+    CHECK (phazite::holdsEachIDOnce (phazite::test::copyWholeSong (*song)));
 
     const auto notesOf = [] (const juce::ValueTree& tree, phazite::ClipID clip)
     {
@@ -907,7 +909,7 @@ TEST_CASE (
         REQUIRE (findTrack (merged.song, "Drums").isValid());
         CHECK (findTrack (merged.song, "Bass").getParent().hasType (schema::TRACKS));
         CHECK (findTrack (merged.song, "Bass").getChildWithName (schema::CLIP).isValid());
-        CHECK (phazite::findChanges (sides.theirs->getState(), merged.song).empty());
+        CHECK (phazite::findChanges (phazite::test::copyWholeSong (*sides.theirs), merged.song).empty());
     }
 
     // Ungrouped there, with its tracks the other way round, while this side changed one of them.
@@ -976,7 +978,7 @@ TEST_CASE ("A track added there in a folder added there is in the folder here, w
     REQUIRE (findTrack (merged.song, "Keys").isValid());
     CHECK (findTrack (merged.song, "Keys").getParent() == findTrack (merged.song, "Group"));
     CHECK (findTrack (merged.song, "Drums").getParent() == findTrack (merged.song, "Group"));
-    CHECK (phazite::findChanges (sides.theirs->getState(), merged.song).empty());
+    CHECK (phazite::findChanges (phazite::test::copyWholeSong (*sides.theirs), merged.song).empty());
 }
 
 TEST_CASE ("A clip moved onto another track on one side and changed on the other is once in the song, where it was moved to, as it changed")

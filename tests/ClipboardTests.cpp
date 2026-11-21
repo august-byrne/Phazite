@@ -485,7 +485,7 @@ TEST_CASE ("Paste twice in one place leaves one copy there, and in two places tw
     const auto both = song.clipsOf (1);
     REQUIRE (both.size() == 2);
     CHECK (song.rangeOf (both[1]).getStart().inBeats() == doctest::Approx (12.0));
-    CHECK (phazite::test::findIDProblems (song.getSong().getState()).empty());
+    CHECK (phazite::test::findIDProblems (phazite::test::copyWholeSong (song.getSong())).empty());
     check.walkBackAndForth();
 }
 
@@ -604,7 +604,7 @@ TEST_CASE ("Notes pasted where they run past the clip's end are pasted whole, an
     REQUIRE (notes.size() == 4);
     CHECK (notes[3].start.inBeats() == doctest::Approx (4.25));
     CHECK (songSelection.getNotes().size() == 2);
-    CHECK (phazite::test::findIDProblems (song.getSong().getState()).empty());
+    CHECK (phazite::test::findIDProblems (phazite::test::copyWholeSong (song.getSong())).empty());
 }
 
 TEST_CASE ("Paste and Duplicate name their step for the notes made where some wouldn't fit before the next clip, and say so")

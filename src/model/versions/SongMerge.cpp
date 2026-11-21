@@ -2,8 +2,8 @@
 #include "internal/SongMerge.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/notes/internal/NoteElements.h"
 
 #include <algorithm>
 #include <cmath>

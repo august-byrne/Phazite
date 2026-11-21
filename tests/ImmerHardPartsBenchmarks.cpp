@@ -25,8 +25,8 @@
 #include "engine/nodes/NoteSequence.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
-#include "model/notes/internal/NoteElements.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -251,14 +251,9 @@ void readTracks (const juce::ValueTree& element, std::vector<ValueTrack>& tracks
                 else
                 {
                     std::vector<ValueNote> read;
-                    phazite::forEachNote (
-                        clip,
-                        [&read] (const phazite::NoteElement& note)
-                        {
-                            read.push_back ({ note.getID().getRaw(), note.getPitch(), note.getStart().inBeats(), note.getLength().inBeats(),
-                                              note.getVelocity(), note.has (phazite::NoteFlag::muted), note.has (phazite::NoteFlag::slide),
-                                              note.has (phazite::NoteFlag::portamento), (std::uint8_t) note.getChannel() });
-                        });
+                    for (const auto& note : phazite::readClipNotes (clip).notes)
+                        read.push_back ({ note.id.getRaw(), note.pitch, note.start.inBeats(), note.length.inBeats(), note.velocity,
+                                          note.muted, note.slide, note.portamento, (std::uint8_t) note.channel });
                     notes = makeNotes (read);
 
                     if (link != 0)
@@ -867,20 +862,18 @@ std::vector<Sequence::Note> gatherNotes (const juce::ValueTree& trackState)
         const auto end = start + (double) clip[schema::clipLength];
         const auto contentStart = start - (double) clip.getProperty (schema::clipOffset, 0.0);
 
-        phazite::forEachNote (clip,
-                              [&] (const phazite::NoteElement& note)
-                              {
-                                  if (note.has (phazite::NoteFlag::muted))
-                                      return;
+        for (const auto& note : phazite::readClipNotes (clip).notes)
+        {
+            if (note.muted)
+                continue;
 
-                                  const auto from = contentStart + note.getStart().inBeats();
-                                  const auto to = from + note.getLength().inBeats();
+            const auto from = contentStart + note.start.inBeats();
+            const auto to = from + note.length.inBeats();
 
-                                  if (const auto playedFrom = std::max (from, start), playedTo = std::min (to, end); playedTo > playedFrom)
-                                      notes.push_back ({ playedFrom, playedTo, note.getPitch(), (float) note.getVelocity() / 127.0f,
-                                                         note.has (phazite::NoteFlag::slide), note.has (phazite::NoteFlag::portamento),
-                                                         (std::uint8_t) (juce::jlimit (1, 16, note.getChannel()) - 1) });
-                              });
+            if (const auto playedFrom = std::max (from, start), playedTo = std::min (to, end); playedTo > playedFrom)
+                notes.push_back ({ playedFrom, playedTo, note.pitch, (float) note.velocity / 127.0f, note.slide, note.portamento,
+                                   (std::uint8_t) (juce::jlimit (1, 16, note.channel) - 1) });
+        }
     }
 
     return notes;
@@ -1250,13 +1243,13 @@ TEST_CASE ("Benchmark: the hard parts of a song of immutable values beside the s
 
     const auto selected = someOf (0, dragged);
 
-    ValueHistory value (toValue (song.getState()));
+    ValueHistory value (toValue (phazite::test::copyWholeSong (song)));
     REQUIRE (value.get().tracks.size() == tracks.size());
     REQUIRE (value.get().findClip (bigClip.getRaw())->notes.inOrder.size() == (size_t) count);
 
     const auto check = [&] (const char* after)
     {
-        const auto difference = describeDifference (toValue (song.getState()), value.get(), false);
+        const auto difference = describeDifference (toValue (phazite::test::copyWholeSong (song)), value.get(), false);
         CHECK_MESSAGE (difference.isEmpty(), after << ": " << difference);
     };
 
@@ -1526,7 +1519,7 @@ TEST_CASE ("Benchmark: the hard parts of a song of immutable values beside the s
 
         for (int pass = 0; pass < 9; ++pass)
         {
-            copied.song.push_back (millisecondsOf ([&] { treeCopy = song.getState().createCopy(); }));
+            copied.song.push_back (millisecondsOf ([&] { treeCopy = phazite::test::copyWholeSong (song); }));
             copied.value.push_back (each ([&] { valueCopy = value.get(); }));
         }
 
@@ -1631,13 +1624,13 @@ TEST_CASE ("Benchmark: the hard parts of a song of immutable values beside the s
     // 500, 5 among those this side deleted), nudges 25 that this side nudged too (the clashes), deletes 25 (10 that this side
     // deleted too, 5 that it nudged), adds 10, nudges the same small clip's notes and another's.
     {
-        const auto base = song.getState().createCopy();
+        const auto base = phazite::test::copyWholeSong (song);
         const auto baseValue = value.get();
         auto ours = phazite::makeSong (base.createCopy());
         auto theirs = phazite::makeSong (base.createCopy());
         REQUIRE (ours != nullptr);
         REQUIRE (theirs != nullptr);
-        REQUIRE (describeDifference (toValue (ours->getState()), baseValue, false).isEmpty());
+        REQUIRE (describeDifference (toValue (phazite::test::copyWholeSong (*ours)), baseValue, false).isEmpty());
 
         for (int i = 0; i < 1000; ++i)
             ours->makeID(); // so that the notes the two sides add have IDs of their own
@@ -1687,13 +1680,14 @@ TEST_CASE ("Benchmark: the hard parts of a song of immutable values beside the s
         phazite::nudgeNotes (*theirs, smallRefs (40), lasting (0.25));
         theirsValue = nudgeNotes (theirsValue, smallRefs (40), 0.25);
 
-        CHECK_MESSAGE (describeDifference (toValue (ours->getState()), oursValue, false).isEmpty(),
-                       describeDifference (toValue (ours->getState()), oursValue, false));
-        CHECK_MESSAGE (describeDifference (toValue (theirs->getState()), theirsValue, false).isEmpty(),
-                       describeDifference (toValue (theirs->getState()), theirsValue, false));
+        CHECK_MESSAGE (describeDifference (toValue (phazite::test::copyWholeSong (*ours)), oursValue, false).isEmpty(),
+                       describeDifference (toValue (phazite::test::copyWholeSong (*ours)), oursValue, false));
+        CHECK_MESSAGE (describeDifference (toValue (phazite::test::copyWholeSong (*theirs)), theirsValue, false).isEmpty(),
+                       describeDifference (toValue (phazite::test::copyWholeSong (*theirs)), theirsValue, false));
 
         // The same three as a file would give them: nothing shared between them.
-        const auto baseRead = toValue (base), oursRead = toValue (ours->getState()), theirsRead = toValue (theirs->getState());
+        const auto baseRead = toValue (base), oursRead = toValue (phazite::test::copyWholeSong (*ours)),
+                   theirsRead = toValue (phazite::test::copyWholeSong (*theirs));
         const std::function<ID()> makeID = [&song] { return song.makeID(); };
 
         Compared lines { "The other side's changes found (the song: SongDiff's findChanges(); values: no step of their own)" };
@@ -1705,9 +1699,13 @@ TEST_CASE ("Benchmark: the hard parts of a song of immutable values beside the s
         for (int pass = 0; pass < 5; ++pass)
         {
             std::vector<phazite::SongChange> changes;
-            lines.song.push_back (millisecondsOf ([&] { changes = phazite::findChanges (base, theirs->getState()); }));
-            const auto ofSong =
-                millisecondsOf ([&] { merged = phazite::mergeSongs (base, ours->getState(), theirs->getState(), changes, makeID); });
+            lines.song.push_back (millisecondsOf ([&] { changes = phazite::findChanges (base, phazite::test::copyWholeSong (*theirs)); }));
+            const auto ofSong = millisecondsOf (
+                [&]
+                {
+                    merged = phazite::mergeSongs (base, phazite::test::copyWholeSong (*ours), phazite::test::copyWholeSong (*theirs),
+                                                  changes, makeID);
+                });
             merging.song.push_back (ofSong);
             mergingRead.song.push_back (ofSong);
             merging.value.push_back (millisecondsOf ([&] { mergedValue = mergeSongs (baseValue, oursValue, theirsValue, makeID); }));

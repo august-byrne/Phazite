@@ -1258,6 +1258,21 @@ TEST_CASE ("Every value of a note is kept within its limits, at both ends, by ev
               });
         CHECK (n.get (first).channel == 1);
 
+        // Added many at once, as a recording adds them: within 1 and 16, as one at a time.
+        std::vector<phazite::NoteRef> added;
+        edit ("Add Notes",
+              [&]
+              {
+                  auto low = noteData (64, 6.0, 0.5, 100), high = noteData (65, 6.5, 0.5, 100);
+                  low.clip = high.clip = n.clip;
+                  low.channel = 0;
+                  high.channel = 17;
+                  added = phazite::addNotes (n.song, { low, high });
+              });
+        REQUIRE (added.size() == 2);
+        CHECK (n.get (added[0]).channel == 1);
+        CHECK (n.get (added[1]).channel == 16);
+
         edit ("Set Clip Notes",
               [&]
               {
@@ -1671,4 +1686,136 @@ TEST_CASE ("Notes taken out of one clip alone stay in its aliases, and outside t
     CHECK (phazite::hasNote (n.song, stays));
     CHECK (phazite::hasNote (n.song, { aliases.front(), note.note }));
     CHECK_FALSE (n.song.getUndoManager().canUndo());
+}
+
+TEST_CASE ("A note given twice to placeNotes() goes where it was given last, as placing each in turn left it")
+{
+    Notes n;
+    const auto note = n.add (60, 5.0, 1.0);
+    n.song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck check (n.song);
+
+    step (check, n.song, "Place Notes",
+          [&]
+          {
+              auto first = n.get (note), last = first;
+              first.start = beats (6.0);
+              first.pitch = 62;
+              last.start = beats (7.0);
+              last.pitch = 64;
+              last.length = length (0.5);
+              phazite::placeNotes (n.song, { first, last });
+          });
+
+    CHECK (n.startOf (note) == doctest::Approx (7.0));
+    CHECK (n.get (note).pitch == 64);
+    CHECK (n.get (note).length.inBeats() == doctest::Approx (0.5));
+    CHECK (n.numNotesIn (n.clip) == 1);
+    check.walkBackAndForth();
+}
+
+namespace
+{
+// The Notes song, with more clips: on its track, the next clip from beat 12 to 16, which the clip (from 4 to 8) can grow up to;
+// on a second track, a clip from 0 to 4, and an alias of the clip from 20 to 24.
+struct MoreClips
+{
+    MoreClips()
+    {
+        other = phazite::ensureTracks (n.song, 2).back();
+        next = phazite::insertMidiClip (n.song, n.track, { beats (12), beats (16) }, nullptr);
+        loose = phazite::insertMidiClip (n.song, other, { beats (0), beats (4) }, nullptr);
+        const auto aliases = phazite::copyClips (n.song, { n.clip }, true);
+        REQUIRE (aliases.size() == 1);
+        alias = aliases.front();
+        phazite::moveClip (n.song, alias, beats (20), other);
+        REQUIRE (n.rangeOf (alias) == phazite::BeatRange (beats (20), beats (24)));
+        REQUIRE (n.rangeOf (n.clip) == phazite::BeatRange (beats (4), beats (8)));
+        n.song.getUndoManager().clearUndoHistory();
+    }
+
+    Notes n;
+    phazite::TrackID other;
+    phazite::ClipID next, loose, alias;
+};
+
+phazite::NoteData noteIn (phazite::ClipID clip, int pitch, double start, double noteLength, int velocity = 100, int channel = 1)
+{
+    auto note = noteData (pitch, start, noteLength, velocity);
+    note.clip = clip;
+    note.channel = channel;
+    return note;
+}
+} // namespace
+
+TEST_CASE ("addNotes() adds the notes as addNote() adds each, one after another: the same notes, values, order, IDs and clip lengths")
+{
+    // Two songs made alike: the notes added one at a time with addNote() to one, all at once with addNotes() to the other
+    // (one undo step, exact). The songs then hold the same, whole: every note with the same ID in the same place of its clip,
+    // each clip as long, every alias the same.
+    const auto compare = [] (const std::function<std::vector<phazite::NoteData> (const MoreClips&)>& notesFor)
+    {
+        MoreClips oneByOne, together;
+        std::vector<phazite::NoteRef> each, all;
+
+        for (const auto& note : notesFor (oneByOne))
+            each.push_back (
+                phazite::addNote (oneByOne.n.song, note.clip, note.pitch, note.start, note.length, note.velocity, note.channel));
+
+        phazite::test::UndoCheck check (together.n.song);
+        step (check, together.n.song, "Add Notes", [&] { all = phazite::addNotes (together.n.song, notesFor (together)); });
+
+        CHECK (all == each);
+
+        for (const auto clip : { together.n.clip, together.next, together.loose, together.alias })
+        {
+            INFO ("clip " << clip.getRaw());
+            CHECK (together.n.rangeOf (clip) == oneByOne.n.rangeOf (clip));
+            CHECK (describeNotes (together.n.song, clip) == describeNotes (oneByOne.n.song, clip));
+        }
+
+        CHECK (phazite::test::copyWholeSong (together.n.song).isEquivalentTo (phazite::test::copyWholeSong (oneByOne.n.song)));
+        check.walkBackAndForth();
+    };
+
+    SUBCASE ("Into one clip, each kept within its limits: before the clip's start, too short, too quiet or loud, off the channels")
+    {
+        compare (
+            [] (const MoreClips& m)
+            {
+                return std::vector { noteIn (m.n.clip, 60, 5.0, 1.0), noteIn (m.n.clip, 62, 4.5, 0.25, 90, 3),
+                                     noteIn (m.n.clip, 130, 2.0, 0.0, 0, 0), noteIn (m.n.clip, -4, 6.0, 0.5, 300, 40),
+                                     noteIn (m.n.clip, 64, 4.5, 0.25) };
+            });
+    }
+
+    SUBCASE ("Into two clips, by turns")
+    {
+        compare (
+            [] (const MoreClips& m)
+            {
+                return std::vector { noteIn (m.n.clip, 60, 5.0, 1.0), noteIn (m.loose, 48, 1.0, 0.5), noteIn (m.n.clip, 62, 6.0, 1.0),
+                                     noteIn (m.loose, 50, 0.0, 2.0), noteIn (m.loose, 52, 3.5, 0.5) };
+            });
+    }
+
+    SUBCASE ("Into a clip with an alias, through the clip and through the alias: each note in both")
+    {
+        compare (
+            [] (const MoreClips& m)
+            {
+                return std::vector { noteIn (m.n.clip, 60, 5.0, 1.0), noteIn (m.alias, 67, 22.0, 1.0), noteIn (m.n.clip, 64, 7.0, 0.5),
+                                     noteIn (m.alias, 72, 20.5, 0.25) };
+            });
+    }
+
+    SUBCASE ("Past the clip's end: the clip grown to the end of the bar, then up to the next clip and no further")
+    {
+        compare (
+            [] (const MoreClips& m)
+            {
+                return std::vector { noteIn (m.n.clip, 60, 7.5, 1.0), noteIn (m.n.clip, 62, 9.0, 0.5), noteIn (m.n.clip, 64, 10.0, 6.0),
+                                     noteIn (m.n.clip, 65, 30.0, 1.0), noteIn (m.alias, 67, 25.0, 1.0) };
+            });
+    }
 }

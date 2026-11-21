@@ -228,7 +228,7 @@ TEST_CASE ("Outlines by id")
     // An id no outline has changes nothing.
     const auto before = phazite::test::copyWholeSong (s);
     CHECK_FALSE (phazite::applyOutline (s, "unknown"));
-    CHECK (s.getState().isEquivalentTo (before));
+    CHECK (phazite::test::copyWholeSong (s).isEquivalentTo (before));
     CHECK (phazite::getAppliedOutline (s) == juce::String ("electronic"));
 
     // Pop's id lays out pop's sections, one after the other, in bars of 4 beats.

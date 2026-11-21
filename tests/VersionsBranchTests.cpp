@@ -584,7 +584,7 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     // One undo step: the song as it was before the merge; and redone, as merged.
     phazite::undo (song);
     checkIDs (song);
-    CHECK (phazite::findChanges (before, song.getState()).empty());
+    CHECK (phazite::findChanges (before, phazite::test::copyWholeSong (song)).empty());
     phazite::redo (song);
     checkIDs (song);
     CHECK (phazite::getClips (song, b.drums) == std::vector { clip });
@@ -592,7 +592,7 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     // Aborted: as before it too; then merged again.
     phazite::cancelMerge (b.s.context);
     checkIDs (song);
-    CHECK (phazite::findChanges (before, song.getState()).empty());
+    CHECK (phazite::findChanges (before, phazite::test::copyWholeSong (song)).empty());
     CHECK (phazite::getTracksInFolder (song, folder) == std::vector { b.bass, b.drums });
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishMerge (b.s.context);
@@ -639,7 +639,7 @@ TEST_CASE ("A merge leaves out a send the other side added to a return this side
     auto& merged = *phazite::findSong (b.s.context);
     CHECK_FALSE (phazite::findTrackState (merged, reverb).isValid());
     CHECK (phazite::getSends (merged, b.drums).empty());
-    checkIDs (merged.getState());
+    checkIDs (phazite::test::copyWholeSong (merged));
 }
 
 TEST_CASE ("A merge lets go of a sidechain that the two lines' changes made into a loop, as the edit that makes one does")

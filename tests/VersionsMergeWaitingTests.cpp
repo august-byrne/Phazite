@@ -478,7 +478,7 @@ TEST_CASE ("A merge's element that isn't one (a song from anyone) waits for noth
     // branch's last commit, not a track.
     juce::String trackPiece;
 
-    for (const auto& [name, piece] : phazite::splitSong (m.song().getState()).pieces)
+    for (const auto& [name, piece] : phazite::splitSong (phazite::test::copyWholeSong (m.song())).pieces)
         if (piece.toString().startsWith ("<" + schema::TRACK.toString()))
             trackPiece = name;
 
@@ -995,14 +995,14 @@ TEST_CASE (
     // Undo brings back exactly what was; Redo the restore again.
     const auto restored = phazite::test::copyWholeSong (n.song());
     phazite::undo (n.song());
-    CHECK (phazite::findChanges (before, n.song().getState()).empty());
+    CHECK (phazite::findChanges (before, phazite::test::copyWholeSong (n.song())).empty());
     phazite::redo (n.song());
-    CHECK (phazite::findChanges (restored, n.song().getState()).empty());
+    CHECK (phazite::findChanges (restored, phazite::test::copyWholeSong (n.song())).empty());
 
     // As its file opens.
     n.s.reopen (false);
     REQUIRE (waitForVersionHistory (n.s.context));
-    CHECK (phazite::findChanges (restored, n.song().getState()).empty());
+    CHECK (phazite::findChanges (restored, phazite::test::copyWholeSong (n.song())).empty());
     CHECK_FALSE (n.hasCurve());
 }
 
@@ -1266,7 +1266,7 @@ struct Lines
             }
         };
 
-        visit (song.getState());
+        visit (phazite::test::copyWholeSong (song));
         return found;
     }
 
@@ -1352,7 +1352,7 @@ TEST_CASE ("A line merged back into the line that merged it, whose merge gave it
     REQUIRE (phazite::canCancelMerge (l.s.context));
     phazite::cancelMerge (l.s.context);
     CHECK_FALSE (phazite::isMerging (l.s.context));
-    CHECK (phazite::findChanges (before, l.song.getState()).empty());
+    CHECK (phazite::findChanges (before, phazite::test::copyWholeSong (l.song)).empty());
     CHECK (l.named ("Pad 2") == std::vector { pad });
     CHECK (l.named ("Lead").empty());
 }
@@ -1869,7 +1869,7 @@ TEST_CASE ("A merge whose songs, matched by the IDs earlier merges gave anew, wo
     CHECK (phazite::getMergeLines (l.s.context).empty());
     CHECK (phazite::getReadingProblem (l.s.context).contains ("Nothing was merged"));
     CHECK (phazite::getReadingProblem (l.s.context).contains ("one ID for two"));
-    CHECK (phazite::findChanges (before, song.getState()).empty());
+    CHECK (phazite::findChanges (before, phazite::test::copyWholeSong (song)).empty());
     CHECK (song.getState()[schema::nextID] == before[schema::nextID]);
     checkSong (song);
 }

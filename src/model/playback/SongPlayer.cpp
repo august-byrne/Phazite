@@ -22,6 +22,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/NoteElements.h"
+#include "model/notes/internal/Notes.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/plugins/internal/SandboxedProcessor.h"
 #include "model/transport/internal/AudioRecorder.h"
@@ -62,7 +63,7 @@ namespace
     // What a track's MIDI clips play: each clip's notes and controller events where the clip is, cut to it (a note that
     // started before the clip's start plays from it, one that goes past its end stops there), each on its channel; none of a
     // muted clip or note.
-    std::shared_ptr<const engine::NoteSequence> compileNotes (const juce::ValueTree& trackState)
+    std::shared_ptr<const engine::NoteSequence> compileNotes (const Song& song, const juce::ValueTree& trackState)
     {
         std::vector<engine::NoteSequence::Note> notes;
         std::vector<engine::NoteSequence::Control> controls;
@@ -77,39 +78,33 @@ namespace
             const auto contentStart = start - (double) clip.getProperty (schema::clipOffset, 0.0);
 
             forEachEvent (
-                clip,
-                [&] (const NoteElement& note)
+                getClipNotesValue (song, getClipID (clip)),
+                [&] (const NoteValues& note)
                 {
-                    if (note.has (NoteFlag::muted))
+                    if (note.muted)
                         return;
 
-                    const auto from = contentStart + note.getStart().inBeats();
-                    const auto to = from + note.getLength().inBeats();
+                    const auto from = contentStart + note.start.inBeats();
+                    const auto to = from + note.length.inBeats();
 
                     if (const auto playedFrom = std::max (from, start), playedTo = std::min (to, end); playedTo > playedFrom)
-                        notes.push_back ({ playedFrom, playedTo, note.getPitch(), (float) note.getVelocity() / 127.0f,
-                                           note.has (NoteFlag::slide), note.has (NoteFlag::portamento),
-                                           toEngineChannel (note.getChannel()) });
+                        notes.push_back ({ playedFrom, playedTo, note.pitch, (float) note.velocity / 127.0f, note.slide, note.portamento,
+                                           toEngineChannel (note.channel) });
                 },
-                [&] (const ControlElement& control)
+                [&] (const ControlValues& control)
                 {
-                    const auto beat = contentStart + control.getBeat();
+                    const auto beat = contentStart + control.beat;
 
                     if (beat < start || beat >= end)
                         return;
 
-                    const auto kind = control.getKind();
+                    const auto value = control.value;
+                    const auto channel = toEngineChannel (control.channel);
 
-                    if (! kind.has_value())
-                        return;
-
-                    const auto value = control.getValue();
-                    const auto channel = toEngineChannel (control.getChannel());
-
-                    switch (*kind)
+                    switch (control.kind)
                     {
                         case ControlKind::controller:
-                            controls.push_back ({ beat, EventType::controller, control.getNumber(), (float) value / 127.0f, channel });
+                            controls.push_back ({ beat, EventType::controller, control.number, (float) value / 127.0f, channel });
                             break;
                         case ControlKind::pitchWheel:
                             controls.push_back ({ beat, EventType::pitchBend, 0, (float) (value - 8192) / 8192.0f, channel });
@@ -119,8 +114,8 @@ namespace
                                 { beat, EventType::channelPressure, 0, (float) juce::jlimit (0, 127, value) / 127.0f, channel });
                             break;
                         case ControlKind::aftertouch:
-                            controls.push_back ({ beat, EventType::aftertouch, control.getNumber(),
-                                                  (float) juce::jlimit (0, 127, value) / 127.0f, channel });
+                            controls.push_back (
+                                { beat, EventType::aftertouch, control.number, (float) juce::jlimit (0, 127, value) / 127.0f, channel });
                             break;
                         case ControlKind::programChange:
                             controls.push_back ({ beat, EventType::programChange, juce::jlimit (0, 127, value), 0.0f, channel });
@@ -286,14 +281,14 @@ std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const juce::Va
     {
         if (shouldCheck())
         {
-            [[maybe_unused]] const auto same = isSameSequence (found->second.get(), compileNotes (trackState).get());
+            [[maybe_unused]] const auto same = isSameSequence (found->second.get(), compileNotes (song, trackState).get());
             jassert (same); // the track's notes changed without the song saying so (markChange())
         }
 
         return found->second;
     }
 
-    auto compiled = compileNotes (trackState);
+    auto compiled = compileNotes (song, trackState);
     notes[id] = compiled;
     return compiled;
 }

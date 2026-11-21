@@ -18,9 +18,8 @@ and 212 are new; and 214 is a fault of the compiler on CI, which waits for the o
 message thread (2026-11-20) and the reviews of its fixes left: the audit's other findings were fixed at once
 ([changelog](changelog.md)); these were found by reading the code and none was measured, and what the audit only
 suspects, or would make faster, is in the [backlog](backlog.md). 230 was found by reading JUCE while
-roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 231 to 233 are what
-the tests written before the notes' storage changes found in edits of a note named through two clips of its alias
-group (2026-11-21), and 234 what the review of the merge's rule for alias groups found by reading.
+roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 234 is what
+the review of the merge's rule for alias groups found by reading (2026-11-21).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -187,28 +186,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `src/model/arrangement/ClipRenders.cpp`), and JUCE's `moveFileTo()` deletes the target before it moves. A compile in
   that instant finds no file. To fix: replace the file in one step (`writeWholeFile()`'s way, or a move that replaces),
   and an export that leaves to the background threads the renders they are already making.
-
-## Notes and clips
-
-Found by the tests written before the notes' storage changes (2026-11-21, `tests/AliasNotesTests.cpp`, each with a case
-that fails until it is fixed). All three show only where one edit names the same note through two clips of an alias
-group, as a selection across two of them does. To be fixed as the notes move (roadmap step S5.20), where a group's
-clips hold one value and an edit names a note of it once.
-
-- **231. A note placed through two clips of its alias group can end where one of them doesn't play it.**
-  `placeNotes()` (`src/model/notes/Notes.cpp`) places the note as named through each clip in turn, each kept where
-  that clip plays it, and the last one named wins for all of them: in a clip of the group that starts later (a
-  trimmed alias), the note is then before its start, held and unseen. To fix: one place for the note, kept where
-  every clip it was named through plays it, as `nudgeNotes()` does since 2026-11-21.
-- **232. A note made longer through two clips of its alias group grows only the clip named first.**
-  `changeNoteLengths()` drops the note's other names (`withoutAliasCopies()`) before it grows the clip to hold the
-  note, so which clip grows depends on the order of the selection. To fix: every clip the note was named through
-  grows to hold it (and none of the others, as for a note added).
-- **233. Quantize in the piano roll doubles a note selected in two clips of its alias group.**
-  `PianoRoll::quantizeSelection()` (`src/ui/pianoroll/`) hands `replaceNotes()` the note once for each clip, and
-  `replaceNotes()` adds one for each: every clip of the group then holds the note twice. The transform panel's Apply
-  (`PianoRollCommands.cpp`) reads the same and has no test. `replaceSelectedNotes()` drops the copies first, which
-  is why Legato and Chop are right. To fix: `replaceNotes()` itself takes each note of a group once.
 
 ## The window
 

@@ -992,6 +992,35 @@ TEST_CASE ("A nudge of a note named through two clips of its group stops where e
     check.walkBackAndForth();
 }
 
+TEST_CASE ("A nudge forward of a note named through two clips of its group grows both to hold it, and no other clip of the group")
+{
+    // Notes.h, nudgeNotes(): the notes moved "as moveNote() says: through each clip it was named through", and moveNote(): "the
+    // clip grows to hold it, as addNote() says". Forward by two beats, g (at their beat 2, half a beat long) ends at their beat
+    // 4.5, past the end of the first clip (from 0 to 4) and of its alias on the second track (from 8 to 12): each grows to the
+    // end of that bar, to 8 and to 16, the first having room up to the snippet at 17. The snippet, not named, stays as it is.
+    Aliased a;
+    auto& song = a.getSong();
+    phazite::test::UndoCheck check (a.song.context);
+    const NoteRef inClip { a.clip, a.g }, inOther = a.through (a.g);
+    const auto rangeOf = [&song] (ClipID clip) { return phazite::getClipRange (song, clip); };
+
+    const auto result = a.editBothWays (
+        check, "Nudge Notes", [&] (const std::vector<NoteRef>& named) { phazite::nudgeNotes (song, named, lasting (2.0)); }, inClip,
+        inOther,
+        [&]
+        {
+            a.inEach (a.g, [] (const NoteData&, double start) { CHECK (start == doctest::Approx (4.0)); });
+            CHECK (rangeOf (a.clip) == phazite::BeatRange (at (0.0), at (8.0)));
+            CHECK (rangeOf (a.onOther) == phazite::BeatRange (at (8.0), at (16.0)));
+            CHECK (rangeOf (a.snippet) == phazite::BeatRange (at (17.0), at (20.0)));
+        },
+        [&] { return phazite::isNotePlayed (song, inClip) && phazite::isNotePlayed (song, inOther); });
+
+    CHECK (result.firstWay == result.otherWay);
+    CHECK (result.played);
+    check.walkBackAndForth();
+}
+
 TEST_CASE ("A transpose of a note named through two clips of its group moves it once, whichever is named first")
 {
     // Notes.h, transposeNotes(): "all by the same amount and none beyond the MIDI range"; the range is the note's, the same in
@@ -1011,9 +1040,9 @@ TEST_CASE ("A transpose of a note named through two clips of its group moves it 
     check.walkBackAndForth();
 }
 
-// FINDING (known bug 231): placeNotes() places each note as named, the same note through each clip of its group in turn, and the last named
-// takes it to where the snippet, trimmed to start later, no longer plays it.
-TEST_CASE ("A drag of a note named through two clips of its group stops where either clip would stop playing it" * doctest::should_fail())
+// Known bug 231, fixed: placeNotes() placed the note as named through each clip of its group in turn, and the last named took it
+// to where the snippet, trimmed to start later, no longer played it.
+TEST_CASE ("A drag of a note named through two clips of its group stops where either clip would stop playing it")
 {
     // Notes.h, placeNotes(): each "placed as placeNote() says", which moves it "as moveNote() and setNoteLength() say": "a move
     // never takes a note that plays to where its clip doesn't play it". A drag back by a beat and a half, as the piano roll gives
@@ -1042,10 +1071,9 @@ TEST_CASE ("A drag of a note named through two clips of its group stops where ei
     check.walkBackAndForth();
 }
 
-// FINDING (known bug 232): changeNoteLengths() lengthens a note named through two clips of its group once, through the clip named first, and
-// only that clip grows to hold it: which clip grows depends on the order the clips are named in.
-TEST_CASE ("A note named through two clips of its group lengthened past their ends gives the same song whichever is named first"
-           * doctest::should_fail())
+// Known bug 232, fixed: changeNoteLengths() lengthened a note named through two clips of its group once, through the clip named
+// first, and only that clip grew to hold it: which clip grew depended on the order the clips were named in.
+TEST_CASE ("A note named through two clips of its group lengthened past their ends gives the same song whichever is named first")
 {
     // Notes.h, changeNoteLengths(): the notes longer "by the same amount", and setNoteLength(): "the clip grows to hold it, as
     // addNote() says". Lengthened by two beats, g ends at its beat 4.5, past the end of both clips named: the first clip has room
@@ -1066,11 +1094,11 @@ TEST_CASE ("A note named through two clips of its group lengthened past their en
     check.walkBackAndForth();
 }
 
-TEST_CASE ("replaceNotes() given a note through two clips of its group adds it twice: naming each note once is its caller's job")
+TEST_CASE ("replaceNotes() given a note through two clips of its group replaces it once, through the clip named first")
 {
     // Notes.h, replaceNotes(): the old ones go and the replacements are added, one with an old one's ID keeping it, "the others
-    // that come of an old one" (a chopped note's later pieces) added beside it. It doesn't take a note named twice as one: its
-    // callers name each note once, as replaceSelectedNotes() does (Notes.cpp: withoutAliasCopies()). Pinned as it is today.
+    // that come of an old one" (a chopped note's later pieces) added beside it; a note named through several clips of its group
+    // taken once, through the first, what comes of it through the others left out (known bug 233: it was added once for each).
     Aliased a;
     auto& song = a.getSong();
     phazite::test::UndoCheck check (a.song.context);
@@ -1091,13 +1119,10 @@ TEST_CASE ("replaceNotes() given a note through two clips of its group adds it t
         },
         [&]
         {
-            REQUIRE (made.size() == 2);
+            REQUIRE (made.size() == 1);
             CHECK (made[0] == named[0]); // its ID kept
-            CHECK (made[1].clip == a.onOther);
-            CHECK (made[1].note != a.e); // a note of its own: the group holds it twice
-            CHECK (a.eachHolds (4));
-            a.inEach (a.e, [] (const NoteData&, double start) { CHECK (start == doctest::Approx (1.25)); });
-            a.inEach (made[1].note,
+            CHECK (a.eachHolds (3));
+            a.inEach (a.e,
                       [] (const NoteData& note, double start)
                       {
                           CHECK (note.pitch == 64);
@@ -1108,9 +1133,44 @@ TEST_CASE ("replaceNotes() given a note through two clips of its group adds it t
     check.walkBackAndForth();
 }
 
-// FINDING (known bug 233): the piano roll's Quantize (PianoRoll::quantizeSelection()) hands replaceNotes() a note selected in two clips of its
-// group once for each clip, and the group then holds the note twice.
-TEST_CASE ("Quantize of a note selected in two clips of its group the piano roll shows moves it once" * doctest::should_fail())
+TEST_CASE ("replaceNotes() given a note through two clips of its group replaces it once, through whichever name its replacement has")
+{
+    // Notes.h, replaceNotes(): an old note named through several clips of its group goes once, and what comes of it is taken
+    // through "the first named that a replacement names". Named through the first clip and the second, its replacement given
+    // through the second alone: the note is replaced, keeping its ID, not deleted with nothing in its place.
+    Aliased a;
+    auto& song = a.getSong();
+    phazite::test::UndoCheck check (a.song.context);
+    const std::vector named { NoteRef { a.clip, a.e }, a.through (a.e) };
+    std::vector<NoteRef> made;
+
+    a.checkEdit (
+        check, "Quantize Note",
+        [&]
+        {
+            auto moved = a.noteIn (a.onOther, a.e);
+            moved.start = moved.start + lasting (0.25);
+            made = phazite::replaceNotes (song, named, { moved });
+        },
+        [&]
+        {
+            REQUIRE (made.size() == 1);
+            CHECK (made[0] == a.through (a.e)); // its ID kept
+            CHECK (a.eachHolds (3));
+            a.inEach (a.e,
+                      [] (const NoteData& note, double start)
+                      {
+                          CHECK (note.pitch == 64);
+                          CHECK (start == doctest::Approx (1.25));
+                      });
+        });
+
+    check.walkBackAndForth();
+}
+
+// Known bug 233, fixed: the piano roll's Quantize (PianoRoll::quantizeSelection()) hands replaceNotes() a note selected in two
+// clips of its group once for each clip, and the group then held the note twice.
+TEST_CASE ("Quantize of a note selected in two clips of its group the piano roll shows moves it once")
 {
     // Notes.h: each edit "is made to the note in each of its clip's aliases too"; the selection's own replace
     // (replaceSelectedNotes(), Legato and Chop) names each note once. A clip from beat 0 to 8 with a note at 1.25, its alias on
@@ -1136,6 +1196,37 @@ TEST_CASE ("Quantize of a note selected in two clips of its group the piano roll
     REQUIRE (phazite::getNoteData (song, note).has_value());
     REQUIRE (phazite::getNoteData (song, note)->start.inBeats() == doctest::Approx (1.0));
     CHECK (phazite::getClipNotes (song, screen.clip).size() == 1);
+    check.walkBackAndForth();
+}
+
+TEST_CASE ("The transform bar's Apply of a note selected in two clips of its group the piano roll shows moves it once")
+{
+    // The transform bar's Apply (PianoRoll::applyTransform()) hands replaceNotes() the selected notes as the piano roll shows
+    // them, a note selected in two clips of its group once for each clip, as Quantize does (known bug 233). Quantize... at its
+    // full strength, the grid a beat: the note at 1.25 to 1.
+    phazite::test::PianoRollScreen screen;
+    auto& song = screen.getSong();
+    const auto note = phazite::addNote (song, screen.clip, 60, at (1.25), lasting (0.5), 100);
+    REQUIRE (note.isValid());
+    const auto aliases = phazite::copyClips (song, { screen.clip }, true);
+    REQUIRE (aliases.size() == 1);
+    const auto alias = aliases.front();
+    phazite::moveClip (song, alias, at (8.0), screen.tracks[1]);
+    song.getUndoManager().clearUndoHistory();
+    screen.pianoRoll.showClips ({ screen.clip, alias });
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.pianoRoll.getClips().size() == 2);
+    getSelection (screen.context).selectNotes ({ note, NoteRef { alias, note.note } });
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.registry.invoke ("note.quantizeSettings"));
+
+    phazite::test::UndoCheck check (screen.context);
+    check.command (screen.registry, "note.applyTransform");
+    REQUIRE (haveTheSameNotes (song, { screen.clip, alias }));
+    REQUIRE (phazite::getNoteData (song, note).has_value());
+    CHECK (phazite::getNoteData (song, note)->start.inBeats() == doctest::Approx (1.0));
+    CHECK (phazite::getClipNotes (song, screen.clip).size() == 1);
+    CHECK (phazite::getClipNotes (song, alias).size() == 1);
     check.walkBackAndForth();
 }
 

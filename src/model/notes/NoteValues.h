@@ -7,6 +7,7 @@
 #pragma once
 
 #include "model/base/Beats.h"
+#include "model/base/ControlKinds.h"
 #include "model/base/IDs.h"
 
 #include <juce_core/juce_core.h>
@@ -59,21 +60,8 @@ BeatDuration getMinimumNoteLength();
 juce::String describeNoteLength (BeatDuration);
 
 //==============================================================================
-// Controllers: what a MIDI clip holds beside its notes (Notes.h: addControl()), as MIDI has them: a MIDI controller (by
-// its number: the sustain pedal 64, the mod wheel 1; its value 0 to 127), the pitch bend (0 to 16383, its middle 8192), the
-// channel's pressure (0 to 127), a note's pressure, polyphonic aftertouch (by the note's number; 0 to 127), and a program
-// change (its value the program, 0 to 127). Each on a MIDI channel, from 1 to 16.
-enum class ControlKind
-{
-    controller,
-    pitchWheel,
-    channelPressure,
-    aftertouch,
-    programChange
-};
-
-bool hasNumber (ControlKind) noexcept;      // a controller's and a note's pressure have one
-int getHighestValue (ControlKind) noexcept; // 16383 for the pitch bend, 127 for the others
+// Controllers: what a MIDI clip holds beside its notes (Notes.h: addControl()), as MIDI has them, their kinds
+// (ControlKind, hasNumber(), getHighestValue()) in model/base/ControlKinds.h.
 
 // A controller's name, as the piano roll's lanes name it: "Sustain Pedal", "Mod Wheel", "Brightness" (JUCE's names, tidied),
 // or nothing for a number that has none.

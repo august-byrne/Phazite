@@ -1050,7 +1050,7 @@ TEST_CASE ("Benchmark: the versions' changes on a song of 100 tracks, the messag
     const auto& versionSong = phazite::getVersionHistory (s.context)->getLastVersionSong();
 
     for (int i = 0; i < 5; ++i)
-        whole.push_back (millisecondsOf ([&] { phazite::findChanges (versionSong, song.getState()); }));
+        whole.push_back (millisecondsOf ([&] { phazite::findChanges (versionSong, phazite::test::copyWholeSong (song)); }));
 
     juce::String report ("\n| 100 tracks, the versions' changes | Median | Most |\n|---|---|---|\n");
     report << "| The message thread's work for an edit: its track copied and handed over | "
@@ -3459,15 +3459,14 @@ TEST_CASE ("Benchmark: a clip of 5,000 notes edited in the piano roll, and what 
 }
 
 //==============================================================================
-TEST_CASE (
-    "Benchmark: a clip's 5,000 notes read and changed, by what the code holds of a note: its element, a typed view, or the song and an ID"
-    * doctest::test_suite ("benchmark") * doctest::skip())
+TEST_CASE ("Benchmark: a clip's 5,000 notes read and changed through the model: its value whole or a note by its ID, one edit or many"
+           * doctest::test_suite ("benchmark") * doctest::skip())
 {
-    // Roadmap step S5.20's question: what typed access to the song costs, by how a note is reached. Each way does the same
-    // work on the same clip, in turns, so that what the machine does meanwhile falls on all of them alike.
+    // Roadmap step S5.20: what reading a clip's notes and changing them costs, by how a note is reached, while the clip's
+    // element still stores them and an edit reads the clip's value whole (model/notes/internal/Notes.h). Each way does the
+    // same work on the same clip, in turns, so that what the machine does meanwhile falls on all of them alike.
     using phazite::test::at;
     using phazite::test::lasting;
-    namespace schema = phazite::schema;
 
     auto song = phazite::createSong();
     const auto track = phazite::ensureTracks (*song, 1).front();
@@ -3496,124 +3495,85 @@ TEST_CASE (
         std::function<double (int)> pass; // what it read, or 0
         std::vector<double> times {};
         double read = 0.0;
+        int notes = count; // the notes it reads or changes
     };
-
-    const auto clipOf = [&] (phazite::ClipID id) { return phazite::findClipState (*song, id); };
-    const auto& index = song->getIndex();
 
     //==========================================================================
     // Reading three values of every note of the clip (start, length, pitch), as the playlist's note shapes do.
     std::vector<Way> reads {
-        { "1. The clip's elements walked, raw properties (today)",
+        { "1. The clip's value, read whole (getClipNotesValue())",
           [&] (int)
           {
               auto sum = 0.0;
 
-              for (const auto& child : clipOf (clip))
-                  if (child.hasType (schema::NOTE))
-                      sum += (double) child[schema::noteStart] + (double) child[schema::noteLength] + (int) child[schema::notePitch];
+              for (const auto& note : phazite::getClipNotesValue (*song, clip).notes)
+                  sum += note.start.inBeats() + note.length.inBeats() + note.pitch;
 
               return sum;
           } },
-        { "2 and 4. One lookup of the clip, then a typed view of each note",
+        { "2. The clip's notes as the piano roll reads them (getClipNotes())",
           [&] (int)
           {
               auto sum = 0.0;
-              phazite::forEachNote (clipOf (clip), [&sum] (const phazite::NoteElement& note)
-                                    { sum += note.getStart().inBeats() + note.getLength().inBeats() + note.getPitch(); });
+
+              for (const auto& note : phazite::getClipNotes (*song, clip))
+                  sum += note.start.inBeats() + note.length.inBeats() + note.pitch;
+
               return sum;
           } },
-        { "3. By the song and IDs, a lookup for each value",
+        { "3. By the song and IDs, a lookup for each note (getNoteData())",
           [&] (int)
           {
               auto sum = 0.0;
 
               for (const auto& ref : refs)
-                  sum += phazite::findNote (*song, clipOf (ref.clip), ref.note).getStart().inBeats()
-                         + phazite::findNote (*song, clipOf (ref.clip), ref.note).getLength().inBeats()
-                         + phazite::findNote (*song, clipOf (ref.clip), ref.note).getPitch();
-
-              return sum;
-          } },
-        { "3b. By the song and IDs, a lookup for each note, its values read together",
-          [&] (int)
-          {
-              auto sum = 0.0;
-
-              for (const auto& ref : refs)
-              {
-                  const auto note = phazite::findNote (*song, clipOf (ref.clip), ref.note);
-                  sum += note.getStart().inBeats() + note.getLength().inBeats() + note.getPitch();
-              }
+                  if (const auto note = phazite::getNoteData (*song, ref))
+                      sum += note->start.inBeats() + note->length.inBeats() + note->pitch;
 
               return sum;
           } },
     };
 
     //==========================================================================
-    // Changing two values of every note (start and pitch), each found by its ID, in the undo history, as a step of a drag
+    // Changing two values of every note (start and pitch), each named by its ID, in the undo history, as a step of a drag
     // changes them. Each pass moves every note on from where the pass before left it, so that every write is a change.
     auto& undo = song->getUndoManager();
     const auto startOf = [] (int pass, size_t i) { return (double) i * 0.25 + 0.03 + (pass + 1) * 0.001; };
     const auto pitchOf = [] (int pass, size_t i) { return 54 + (int) ((i * 7 + (size_t) pass) % 12); };
     auto writePass = 0; // one count for every way, so that none writes what is there already
 
-    const auto written = [&] (auto&& each)
-    {
-        undo.beginNewTransaction();
-        const auto pass = ++writePass;
-
-        for (size_t i = 0; i < shuffled.size(); ++i)
-            each (shuffled[i], startOf (pass, i), pitchOf (pass, i));
-
-        return 0.0;
-    };
-
     std::vector<Way> writes {
-        { "1. Found by its ID, raw properties (today)",
+        { "1. One edit of them all, as a drag's step (placeNotes())",
           [&] (int)
           {
-              return written (
-                  [&] (const phazite::NoteRef& ref, double start, int pitch)
-                  {
-                      auto note = index.findNote (clipOf (ref.clip), ref.note.getRaw());
-                      note.setProperty (schema::noteStart, start, &undo);
-                      note.setProperty (schema::notePitch, pitch, &undo);
-                  });
+              undo.beginNewTransaction();
+              const auto pass = ++writePass;
+              std::vector<phazite::NoteData> placed;
+
+              for (size_t i = 0; i < shuffled.size(); ++i)
+                  placed.push_back ({ .clip = clip,
+                                      .id = shuffled[i].note,
+                                      .pitch = pitchOf (pass, i),
+                                      .start = at (startOf (pass, i)),
+                                      .length = lasting (0.2) });
+
+              phazite::placeNotes (*song, placed);
+              return 0.0;
           } },
-        { "2. Found by its ID, a typed view of the note",
+        { "2. An edit for each of 100 of them (placeNote())",
           [&] (int)
           {
-              return written (
-                  [&] (const phazite::NoteRef& ref, double start, int pitch)
-                  {
-                      auto note = phazite::editNote (*song, clipOf (ref.clip), ref.note);
-                      note.setStart (phazite::BeatPosition::fromBeats (start));
-                      note.setPitch (pitch);
-                  });
-          } },
-        { "3. By the song and IDs, a lookup for each value",
-          [&] (int)
-          {
-              return written (
-                  [&] (const phazite::NoteRef& ref, double start, int pitch)
-                  {
-                      phazite::editNote (*song, clipOf (ref.clip), ref.note).setStart (phazite::BeatPosition::fromBeats (start));
-                      phazite::editNote (*song, clipOf (ref.clip), ref.note).setPitch (pitch);
-                  });
-          } },
-        { "4. One lookup of the clip, then a typed view of each note by its ID",
-          [&] (int)
-          {
-              const auto clipState = clipOf (clip);
-              return written (
-                  [&] (const phazite::NoteRef& ref, double start, int pitch)
-                  {
-                      auto note = phazite::editNote (*song, clipState, ref.note);
-                      note.setStart (phazite::BeatPosition::fromBeats (start));
-                      note.setPitch (pitch);
-                  });
-          } },
+              undo.beginNewTransaction();
+              const auto pass = ++writePass;
+
+              for (size_t i = 0; i < shuffled.size() / 50; ++i)
+                  phazite::placeNote (*song, shuffled[i], at (startOf (pass, i)), pitchOf (pass, i), lasting (0.2));
+
+              return 0.0;
+          },
+          {},
+          0.0,
+          count / 50 },
     };
 
     constexpr int passes = 41;
@@ -3648,7 +3608,7 @@ TEST_CASE (
             std::sort (way.times.begin(), way.times.end());
             const auto median = way.times[way.times.size() / 2];
             text << "| " << way.name << " | " << juce::String (median, 3) << " ms | " << juce::String (way.times.front(), 3) << " ms | "
-                 << juce::String (median * 1.0e6 / count, 0) << " ns |\n";
+                 << juce::String (median * 1.0e6 / way.notes, 0) << " ns |\n";
         }
 
         return text;

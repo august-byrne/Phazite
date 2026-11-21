@@ -101,7 +101,7 @@ TEST_CASE ("Random songs: written as text, a song reads back and opens as the sa
 
         // What the song keeps only while an undo could bring it back, which opening it leaves out, left out first.
         leaveOutWhatNamesNothing (*song);
-        const auto written = toText (song->getState());
+        const auto written = toText (phazite::test::copyWholeSong (*song));
         const auto xml = juce::parseXML (written);
         REQUIRE (xml != nullptr);
         const auto read = juce::ValueTree::fromXml (*xml);
@@ -141,7 +141,7 @@ TEST_CASE ("Random songs: a song cut into a version's pieces and joined again is
         // What only an undo needs, which the loader's checks leave out of a song joined as they do of one opened (SongPieces.h:
         // joinSong()), left out first.
         leaveOutWhatNamesNothing (*song);
-        const auto pieces = phazite::splitSong (song->getState());
+        const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*song));
         const auto joined = phazite::joinSong (pieces.song,
                                                [&pieces] (const juce::String& name) -> std::optional<juce::MemoryBlock>
                                                {
@@ -151,7 +151,7 @@ TEST_CASE ("Random songs: a song cut into a version's pieces and joined again is
                                                    return std::nullopt;
                                                });
         REQUIRE (joined.isValid());
-        const auto written = toText (song->getState()), again = toText (joined);
+        const auto written = toText (phazite::test::copyWholeSong (*song)), again = toText (joined);
         INFO ("joined: " << findDifference (written, again));
         CHECK (written == again);
     }
@@ -171,16 +171,17 @@ TEST_CASE ("Random songs: a song made like another, which went on from it, has n
         RandomEdits (*b, seed + 1000000, sounds.folder).edit (editsPerSong / 2);
         const auto before = phazite::test::copyWholeSong (*a);
 
-        phazite::makeSongLike (*a, b->getState());
-        const auto changes = phazite::findChanges (b->getState(), a->getState());
+        phazite::makeSongLike (*a, phazite::test::copyWholeSong (*b));
+        const auto changes = phazite::findChanges (phazite::test::copyWholeSong (*b), phazite::test::copyWholeSong (*a));
         INFO ("A made like B: " << changes.size() << " differences left");
         CHECK (changes.empty());
         checkIDs (*a);
         checkSong (*phazite::makeSong (phazite::test::copyWholeSong (*a)));
 
         phazite::makeSongLike (*b, before);
-        INFO ("B made like A as it was: " << phazite::findChanges (before, b->getState()).size() << " differences left");
-        CHECK (phazite::findChanges (before, b->getState()).empty());
+        INFO ("B made like A as it was: " << phazite::findChanges (before, phazite::test::copyWholeSong (*b)).size()
+                                          << " differences left");
+        CHECK (phazite::findChanges (before, phazite::test::copyWholeSong (*b)).empty());
         checkIDs (*b);
     }
 }

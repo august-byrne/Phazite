@@ -203,7 +203,7 @@ TEST_CASE ("Fuzz: a version's pieces join into a song that holds together, or no
     juce::String error;
     const auto project = phazite::Project::open (file, false, error);
     REQUIRE (project != nullptr);
-    const auto pieces = phazite::splitSong (project->getSong().getState());
+    const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (project->getSong()));
     std::vector<juce::String> names;
 
     for (const auto& [name, bytes] : pieces.pieces)
@@ -248,7 +248,7 @@ TEST_CASE (
     REQUIRE (golden.copyFileTo (copy));
     const auto representative = phazite::Project::open (copy, false, error);
     REQUIRE (representative != nullptr);
-    const auto seed = phazite::writeElement (representative->getSong().getState());
+    const auto seed = phazite::writeElement (phazite::test::copyWholeSong (representative->getSong()));
     const auto versions = s.getProject().getFolder().getChildFile ("Versions");
     auto round = 0;
 
@@ -397,7 +397,7 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
         record.note = "A note";
         record.saved = 1793800000000;
         record.files.push_back ({ "Audio/Kick.wav", 1234, juce::String::repeatedString ("ab", 32) });
-        const auto pieces = phazite::splitSong (song->getState());
+        const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*song));
         versionID = store.writeVersion (record, pieces);
         record.song = pieces.song; // which the snapshot names below
         REQUIRE (versionID.isNotEmpty());
@@ -501,7 +501,7 @@ TEST_CASE ("Fuzz: a sweep of a folder whose records anyone may have damaged neve
             phazite::VersionRecord record;
             record.parents = std::move (parents);
             record.saved = 1793800000000;
-            const auto id = into.writeVersion (record, phazite::splitSong (song->getState()));
+            const auto id = into.writeVersion (record, phazite::splitSong (phazite::test::copyWholeSong (*song)));
             REQUIRE (id.isNotEmpty());
             return id;
         };
@@ -509,7 +509,7 @@ TEST_CASE ("Fuzz: a sweep of a folder whose records anyone may have damaged neve
         const auto keep = [&song, track, &store] (float volume)
         {
             phazite::setChannelVolume (*song, track, volume);
-            const auto pieces = phazite::splitSong (song->getState());
+            const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*song));
             REQUIRE (store.writeSong (pieces));
             return pieces.song;
         };

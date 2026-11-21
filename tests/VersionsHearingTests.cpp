@@ -494,13 +494,13 @@ TEST_CASE ("A/B opens the last version live, without a bounce, and brings the so
 
     phazite::toggleCompare (s.context);
     CHECK (phazite::getOpenVersion (s.context).isEmpty());
-    CHECK (phazite::findSong (s.context)->getState().isEquivalentTo (now));
+    CHECK (phazite::test::copyWholeSong (*phazite::findSong (s.context)).isEquivalentTo (now));
 
     // Again: at once this time, its song kept from the first read.
     phazite::toggleCompare (s.context);
     CHECK (phazite::getOpenVersion (s.context) == saved);
     phazite::toggleCompare (s.context);
-    CHECK (phazite::findSong (s.context)->getState().isEquivalentTo (now));
+    CHECK (phazite::test::copyWholeSong (*phazite::findSong (s.context)).isEquivalentTo (now));
     phazite::stopAndReturn (*phazite::findSong (s.context));
 }
 

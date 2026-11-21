@@ -15,7 +15,6 @@
 #include "model/base/internal/ValueArea.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/notes/internal/NoteElements.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 
@@ -705,43 +704,6 @@ TEST_CASE ("Value area: 1,500 changes, drags, trials, undos and redos drawn by l
     }
 
     phazite::Song::setUndoSteps (stepsBefore);
-}
-
-TEST_CASE ("Value area: a clip's notes read into a value and written back are the clip's element as it was")
-{
-    // The project file can stay as it is while an area is a value: read into the value as the song opens, written from it
-    // into the copy of the song a save writes.
-    auto song = phazite::createSong();
-    const auto track = phazite::ensureTracks (*song, 1).front();
-    const auto clip = phazite::insertMidiClip (*song, track, { phazite::test::at (0.0), phazite::test::at (64.0) }, nullptr);
-    std::vector<phazite::NoteData> made;
-
-    for (int i = 0; i < 200; ++i)
-    {
-        auto note = makeNoteData (clip, 40 + i % 40, i * 0.25, 0.2);
-        note.velocity = 1 + i % 127;
-        note.muted = i % 7 == 0;
-        note.slide = i % 11 == 0;
-        note.portamento = i % 13 == 0;
-        note.channel = 1 + i % 16;
-        made.push_back (note);
-    }
-
-    phazite::setClipNotes (*song, clip, made);
-    const auto clipState = phazite::findClipState (*song, clip);
-    auto read = immer::flex_vector<phazite::NoteValues>().transient();
-    phazite::forEachNote (clipState, [&read] (const phazite::NoteElement& note) { read.push_back (note.getValues()); });
-    const auto value = read.persistent();
-    REQUIRE (value.size() == 200);
-
-    auto written = clipState.createCopy();
-    phazite::removeAllNotes (written, nullptr);
-    REQUIRE_FALSE (written.isEquivalentTo (clipState));
-
-    for (const auto& note : value)
-        phazite::appendNote (written, note, nullptr);
-
-    CHECK (written.isEquivalentTo (clipState));
 }
 
 TEST_CASE ("Value area: a listener may remove itself, or another not told yet, while it is told")

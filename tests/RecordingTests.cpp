@@ -703,17 +703,33 @@ void playFromMidiInput (const juce::MidiMessage& message)
     host.getEngine().playLive ((std::int64_t) session->getLiveTrack().getRaw(), *event);
 }
 
+// A clip's controllers' values in its order, as the model reads them (Notes.h: getClipControls()), each kind by its name in
+// the song.
 std::vector<RecordedControl> getControls (const phazite::Song& song, phazite::ClipID clip)
 {
-    const auto clipState = phazite::findClipState (song, clip);
+    const auto nameOf = [] (phazite::ControlKind kind) -> const char*
+    {
+        switch (kind)
+        {
+            case phazite::ControlKind::controller:
+                return phazite::schema::controlIsController;
+            case phazite::ControlKind::pitchWheel:
+                return phazite::schema::controlIsPitchWheel;
+            case phazite::ControlKind::channelPressure:
+                return phazite::schema::controlIsChannelPressure;
+            case phazite::ControlKind::aftertouch:
+                return phazite::schema::controlIsAftertouch;
+            case phazite::ControlKind::programChange:
+                return phazite::schema::controlIsProgramChange;
+        }
+
+        return "";
+    };
+
     std::vector<RecordedControl> controls;
 
-    for (const auto& child : clipState)
-        if (child.hasType (phazite::schema::CONTROL))
-            controls.push_back ({ child[phazite::schema::controlKind].toString(), (int) child[phazite::schema::controlNumber],
-                                  (int) child[phazite::schema::controlValue],
-                                  phazite::getContentStart (clipState).inBeats() + (double) child[phazite::schema::controlBeat],
-                                  phazite::readChannel (child, phazite::schema::controlChannel) });
+    for (const auto& control : phazite::getClipControls (song, clip))
+        controls.push_back ({ nameOf (control.kind), control.number, control.value, control.beat.inBeats(), control.channel });
 
     return controls;
 }

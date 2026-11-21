@@ -11,7 +11,6 @@
 #include "TestSong.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
-#include "model/notes/internal/NoteElements.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 
@@ -180,7 +179,6 @@ TEST_CASE (
     for (size_t i = order.size(); i > 1; --i)
         std::swap (order[i - 1], order[(size_t) random.nextInt ((int) i)]);
 
-    const auto clipOf = [&] { return phazite::findClipState (*song, clip); };
     juce::String report;
 
     //==========================================================================
@@ -193,15 +191,19 @@ TEST_CASE (
         {
             undo.beginNewTransaction();
             ++change;
-            const auto clipState = clipOf();
+            std::vector<phazite::NoteData> placed;
 
             for (size_t n = 0; n < notes; ++n)
             {
                 const auto i = order[n];
-                auto note = phazite::editNote (*song, clipState, refs[i].note);
-                note.setStart (phazite::BeatPosition::fromBeats (startAt (i) + change * 0.001));
-                note.setPitch (pitchAt (i + (size_t) change));
+                placed.push_back ({ .clip = clip,
+                                    .id = refs[i].note,
+                                    .pitch = pitchAt (i + (size_t) change),
+                                    .start = at (startAt (i) + change * 0.001),
+                                    .length = lasting (0.2) });
             }
+
+            phazite::placeNotes (*song, placed);
         };
 
         std::vector<ValueClip> history;
@@ -265,7 +267,7 @@ TEST_CASE (
     // Times: each way in turns, 41 passes, so that what the machine does meanwhile falls on all of them alike.
     constexpr int passes = 41;
 
-    Timed songWalk { "The song: the clip walked, a typed view of each note" };
+    Timed songWalk { "The song: the clip's notes read (getClipNotes())" };
     Timed valueWalk { "Immutable values: the notes walked (immer::for_each)" };
     Timed valueLoop { "Immutable values: the notes walked (a range-for)" };
     Timed songByID { "The song: each note found by its ID" };
@@ -278,8 +280,9 @@ TEST_CASE (
             [&]
             {
                 auto sum = 0.0;
-                phazite::forEachNote (clipOf(), [&sum] (const phazite::NoteElement& note)
-                                      { sum += note.getStart().inBeats() + note.getLength().inBeats() + note.getPitch(); });
+                for (const auto& note : phazite::getClipNotes (*song, clip))
+                    sum += note.start.inBeats() + note.length.inBeats() + note.pitch;
+
                 wanted = sum;
             }));
 
@@ -311,8 +314,8 @@ TEST_CASE (
 
                 for (const auto i : order)
                 {
-                    const auto note = phazite::findNote (*song, clipOf(), refs[i].note);
-                    sum += note.getStart().inBeats() + note.getLength().inBeats() + note.getPitch();
+                    const auto note = phazite::getNoteData (*song, refs[i]);
+                    sum += note->start.inBeats() + note->length.inBeats() + note->pitch;
                 }
 
                 read = sum;
@@ -339,26 +342,27 @@ TEST_CASE (
 
     //==========================================================================
     // Two values of every note changed (start and pitch), each found by its ID, as one undo step; then that step undone.
-    Timed songEdit { "The song: each found by its ID, a typed view, in the undo history" };
-    Timed songEditOnce { "The song: the same, the clip looked up once" };
+    Timed songEdit { "The song: one edit of them all (placeNotes()), in the undo history" };
     Timed valueEditEach { "Immutable values: a new root for each note changed, the root before kept" };
     Timed valueEditBatch { "Immutable values: every note changed in one batch (a transient), the root before kept" };
     Timed songUndo { "The song: that step undone" };
     Timed valueUndo { "Immutable values: that step undone (the root before put back)" };
     auto change = 0;
 
-    const auto editSong = [&] (bool clipOnce)
+    const auto editSong = [&]
     {
         undo.beginNewTransaction();
         ++change;
-        const auto clipState = clipOf();
+        std::vector<phazite::NoteData> placed;
 
         for (const auto i : order)
-        {
-            auto note = phazite::editNote (*song, clipOnce ? clipState : clipOf(), refs[i].note);
-            note.setStart (phazite::BeatPosition::fromBeats (startAt (i) + change * 0.001));
-            note.setPitch (pitchAt (i + (size_t) change));
-        }
+            placed.push_back ({ .clip = clip,
+                                .id = refs[i].note,
+                                .pitch = pitchAt (i + (size_t) change),
+                                .start = at (startAt (i) + change * 0.001),
+                                .length = lasting (0.2) });
+
+        phazite::placeNotes (*song, placed);
     };
 
     const auto changed = [&] (size_t i)
@@ -373,16 +377,9 @@ TEST_CASE (
 
     for (int pass = 0; pass < passes; ++pass)
     {
-        for (const auto clipOnce : { false, true })
-        {
-            (clipOnce ? songEditOnce : songEdit).times.push_back (millisecondsOf ([&] { editSong (clipOnce); }));
-            const auto undone = millisecondsOf ([&] { REQUIRE (undo.undo()); });
-
-            if (! clipOnce)
-                songUndo.times.push_back (undone);
-
-            undo.clearUndoHistory(); // not timed: the step's memory let go
-        }
+        songEdit.times.push_back (millisecondsOf ([&] { editSong(); }));
+        songUndo.times.push_back (millisecondsOf ([&] { REQUIRE (undo.undo()); }));
+        undo.clearUndoHistory(); // not timed: the step's memory let go
 
         for (const auto batch : { false, true })
         {
@@ -425,12 +422,13 @@ TEST_CASE (
 
     // Both ended where they began.
     auto sumOfSong = 0.0, sumOfValue = 0.0;
-    phazite::forEachNote (clipOf(), [&] (const phazite::NoteElement& note) { sumOfSong += note.getStart().inBeats() + note.getPitch(); });
+    for (const auto& note : phazite::getClipNotes (*song, clip))
+        sumOfSong += note.start.inBeats() + note.pitch;
     immer::for_each (value.notes, [&] (const ValueNote& note) { sumOfValue += note.start + note.pitch; });
     CHECK (sumOfSong == doctest::Approx (sumOfValue));
 
-    report << makeTable ("Two values of each of 5,000 notes changed, as one undo step",
-                         { &songEdit, &songEditOnce, &valueEditEach, &valueEditBatch }, count);
+    report << makeTable ("Two values of each of 5,000 notes changed, as one undo step", { &songEdit, &valueEditEach, &valueEditBatch },
+                         count);
     report << makeTable ("That step undone", { &songUndo, &valueUndo }, count);
     MESSAGE (report);
 }

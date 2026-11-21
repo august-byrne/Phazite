@@ -12,6 +12,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/ApplySong.h"
@@ -68,7 +69,16 @@ struct PiecesSong
         REQUIRE (plugin.isValid());
     }
 
-    juce::ValueTree findNotesClip() const { return phazite::findClipState (*song, longClip); }
+    // The long clip in a copy of the song whole.
+    juce::ValueTree findNotesClip (const juce::ValueTree& whole) const
+    {
+        for (const auto& track : phazite::getTrackElements (whole))
+            for (const auto& clip : track)
+                if (clip.hasType (schema::CLIP) && phazite::readID (clip[schema::clipID]) == longClip.getRaw())
+                    return clip;
+
+        return {};
+    }
 };
 
 std::optional<juce::MemoryBlock> readFrom (const phazite::SongPieces& pieces, const juce::String& name)
@@ -109,7 +119,7 @@ phazite::BranchRecord makeBranch (const juce::String& name, juce::Colour colour,
 TEST_CASE ("A song in pieces joins again as it was, its children in their order")
 {
     PiecesSong made;
-    const auto state = made.song->getState();
+    const auto state = phazite::test::copyWholeSong (*made.song);
     const auto pieces = phazite::splitSong (state);
 
     const auto joined = phazite::joinSong (pieces.song, [&pieces] (const juce::String& name) { return readFrom (pieces, name); });
@@ -141,7 +151,7 @@ TEST_CASE ("A song in pieces joins again as it was, its children in their order"
 TEST_CASE ("The same song always makes the same pieces, whatever order its properties were set in")
 {
     PiecesSong made;
-    const auto state = made.song->getState();
+    const auto state = phazite::test::copyWholeSong (*made.song);
     const auto first = phazite::splitSong (state);
     CHECK (phazite::splitSong (state).song == first.song);
 
@@ -179,7 +189,7 @@ TEST_CASE ("A plug-in's state is a piece of its own, in its bytes")
     REQUIRE (read.has_value());
     const auto& state = *read;
 
-    const auto pieces = phazite::splitSong (made.song->getState());
+    const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*made.song));
     const auto found = pieces.pieces.find (phazite::getPieceName (state));
     REQUIRE (found != pieces.pieces.end());
     CHECK (found->second == state);
@@ -207,7 +217,7 @@ TEST_CASE ("A plug-in's parameters' values go in a piece beside its state, and c
 {
     PiecesSong made;
     const phazite::PluginParameterValues values { { made.plugin.getRaw(), { { "1", "Cutoff", 0.4f }, { "2", "Resonance", 0.25f } } } };
-    const auto pieces = phazite::splitSong (made.song->getState(), values);
+    const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*made.song), values);
 
     phazite::PluginParameterValues read;
     const auto joined = phazite::joinSong (pieces.song, [&pieces] (const juce::String& name) { return readFrom (pieces, name); }, &read);
@@ -220,7 +230,7 @@ TEST_CASE ("A plug-in's parameters' values go in a piece beside its state, and c
     CHECK (parameters[1].id == "2");
 
     // They aren't part of the song.
-    CHECK (asPiece (joined) == asPiece (made.song->getState()));
+    CHECK (asPiece (joined) == asPiece (phazite::test::copyWholeSong (*made.song)));
 }
 
 TEST_CASE ("A version stores only what changed, and a note changed in a long clip stores its run alone")
@@ -232,22 +242,21 @@ TEST_CASE ("A version stores only what changed, and a note changed in a long cli
     phazite::VersionRecord first;
     first.name = "First";
     first.saved = 1000;
-    const auto firstPieces = phazite::splitSong (made.song->getState());
+    const auto firstPieces = phazite::splitSong (phazite::test::copyWholeSong (*made.song));
     const auto firstID = store.writeVersion (first, firstPieces);
     REQUIRE (firstID.isNotEmpty());
     const auto piecesAfterFirst = store.getPieces().getNumPieces();
     const auto sizeAfterFirst = store.getPieces().getSize();
 
     // One note in the middle of the long clip changes: its run, the clip, its track, the song and the version's record.
-    auto notes = made.findNotesClip();
-    auto note = notes.getChild (notes.getNumChildren() / 2);
-    REQUIRE (note.hasType (schema::NOTE));
-    note.setProperty (schema::noteVelocity, 7, nullptr);
+    const auto longNotes = phazite::getClipNotes (*made.song, made.longClip);
+    REQUIRE (longNotes.size() > 2);
+    phazite::setNoteVelocities (*made.song, { longNotes[longNotes.size() / 2].getRef() }, 7);
 
     phazite::VersionRecord second;
     second.parents.add (firstID);
     second.saved = 2000;
-    const auto secondID = store.writeVersion (second, phazite::splitSong (made.song->getState()));
+    const auto secondID = store.writeVersion (second, phazite::splitSong (phazite::test::copyWholeSong (*made.song)));
     REQUIRE (secondID.isNotEmpty());
     const auto added = store.getPieces().getNumPieces() - piecesAfterFirst;
     CHECK (added >= 5); // its run (two, if the note now ends one), the clip, the track, the song and the record
@@ -257,11 +266,14 @@ TEST_CASE ("A version stores only what changed, and a note changed in a long cli
     // A note added among them changes one run (or two, where it ends one), not the runs after it.
     const auto piecesAfterSecond = store.getPieces().getNumPieces();
     addMidiNote (*made.song, made.longClip, 70, at (30.05), lasting (0.05));
-    auto clip = made.findNotesClip();
+    // And moved to the middle of the clip's notes, as a version from elsewhere can hold it: in the song whole.
+    auto whole = phazite::test::copyWholeSong (*made.song);
+    auto clip = made.findNotesClip (whole);
+    REQUIRE (clip.isValid());
     clip.moveChild (clip.getNumChildren() - 1, clip.getNumChildren() / 2, nullptr);
     phazite::VersionRecord third;
     third.saved = 3000;
-    REQUIRE (store.writeVersion (third, phazite::splitSong (made.song->getState())).isNotEmpty());
+    REQUIRE (store.writeVersion (third, phazite::splitSong (whole)).isNotEmpty());
     CHECK (store.getPieces().getNumPieces() - piecesAfterSecond <= 6);
 
     // Both read back as they were saved, from a store opened again.
@@ -288,7 +300,7 @@ TEST_CASE ("A pack cut off midway leaves the store readable, and a damaged piece
 
     {
         phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
-        firstID = store.writeVersion ({}, phazite::splitSong (made.song->getState()));
+        firstID = store.writeVersion ({}, phazite::splitSong (phazite::test::copyWholeSong (*made.song)));
         REQUIRE (firstID.isNotEmpty());
     }
 
@@ -307,7 +319,7 @@ TEST_CASE ("A pack cut off midway leaves the store readable, and a damaged piece
     {
         phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
         CHECK (store.readVersion (firstID).has_value());
-        secondID = store.writeVersion ({}, phazite::splitSong (made.song->getState()));
+        secondID = store.writeVersion ({}, phazite::splitSong (phazite::test::copyWholeSong (*made.song)));
         REQUIRE (secondID.isNotEmpty());
     }
 
@@ -340,7 +352,7 @@ TEST_CASE ("A version is written only if its pack reads back: a pack cut short u
     const VersionsTime clock (juce::Time::currentTimeMillis()); // the same pieces at the same time: the same pack
     PiecesSong made;
     const auto packs = getVersionsFolder (temporary).getChildFile ("pieces");
-    const auto pieces = phazite::splitSong (made.song->getState());
+    const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*made.song));
     juce::String id;
 
     {
@@ -674,7 +686,7 @@ TEST_CASE ("A pack whose index doesn't hash to its name is left out, and a size 
 {
     TemporaryFolder temporary;
     PiecesSong made;
-    const auto pieces = phazite::splitSong (made.song->getState());
+    const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*made.song));
     juce::String id;
 
     {
@@ -812,9 +824,9 @@ TEST_CASE ("A history whose current branch is gone opens on the branch made firs
 {
     TemporaryFolder temporary;
     auto song = phazite::createSong (temporary.folder.getChildFile ("Song.phazite"));
-    const auto firstPieces = phazite::splitSong (song->getState());
+    const auto firstPieces = phazite::splitSong (phazite::test::copyWholeSong (*song));
     song->getState().setProperty ("madeOnLater", true, nullptr);
-    const auto laterPieces = phazite::splitSong (song->getState());
+    const auto laterPieces = phazite::splitSong (phazite::test::copyWholeSong (*song));
     phazite::VersionStore store (temporary.folder.getChildFile ("Versions"), thisComputer);
 
     phazite::VersionRecord first, later;
@@ -846,7 +858,7 @@ TEST_CASE ("A history whose current branch is gone opens on the branch made firs
 TEST_CASE ("A piece names what it holds, so a song with one that can't be read joins as far as it can, around a stand-in")
 {
     PiecesSong made;
-    const auto pieces = phazite::splitSong (made.song->getState());
+    const auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*made.song));
     const auto shortClip = "CLIP:" + juce::String ((juce::int64) made.shortClip.getRaw());
 
     // The short clip's piece, found by what its reference says of it, as a tool would without reading it.
@@ -882,7 +894,8 @@ TEST_CASE ("A piece names what it holds, so a song with one that can't be read j
 
     CHECK (phazite::findClipState (*made.song, made.longClip)[schema::clipName].toString() == "Long");
     CHECK (phazite::findClipState (*made.song, made.shortClip)[schema::clipName].toString() == "Changed");
-    CHECK_FALSE (phazite::writeElement (made.song->getState()).toString().contains (schema::versions::missing.toString()));
+    CHECK_FALSE (
+        phazite::writeElement (phazite::test::copyWholeSong (*made.song)).toString().contains (schema::versions::missing.toString()));
 }
 
 TEST_CASE ("Many packs are joined into one, every piece still read")
@@ -897,7 +910,7 @@ TEST_CASE ("Many packs are joined into one, every piece still read")
         for (int i = 0; i < 5; ++i)
         {
             phazite::setChannelVolume (*made.song, made.tracks[1], -1.0f - (float) i);
-            ids.push_back (store.writeVersion ({}, phazite::splitSong (made.song->getState())));
+            ids.push_back (store.writeVersion ({}, phazite::splitSong (phazite::test::copyWholeSong (*made.song))));
         }
 
         CHECK (store.getPieces().getNumPacks() == 5);

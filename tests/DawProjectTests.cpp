@@ -17,6 +17,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
@@ -465,7 +466,7 @@ std::vector<int> getPitches (const phazite::Song& song, phazite::ClipID clip)
 {
     std::vector<int> pitches;
 
-    for (const auto& note : phazite::findClipState (song, clip))
+    for (const auto& note : phazite::copyWhole (song, phazite::findClipState (song, clip)))
         if (note.hasType (phazite::schema::NOTE))
             pitches.push_back ((int) note[phazite::schema::notePitch]);
 
@@ -952,7 +953,8 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     const auto first = keepVersion (s.context, "First");
     const auto keptNote = [&s, riff] (int pitch)
     {
-        for (const auto& note : phazite::findClipState (*phazite::findSong (s.context), riff))
+        for (const auto& note :
+             phazite::copyWhole (*phazite::findSong (s.context), phazite::findClipState (*phazite::findSong (s.context), riff)))
             if (note.hasType (phazite::schema::NOTE) && (int) note[phazite::schema::notePitch] == pitch)
                 return note.createCopy();
 

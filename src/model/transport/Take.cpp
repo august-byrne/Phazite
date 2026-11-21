@@ -25,6 +25,7 @@
 #include <set>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -1159,17 +1160,33 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
 
     std::vector<Reach> reach (parts.size());
 
+    // The notes, each in its clip, added all at once when every clip they go into is there (addNotes()). Each clip is grown
+    // for each note as adding it grows it, as the loop goes, so that a later note goes into the clip it went into when each
+    // was added in turn (one a note before it grew to cover its beat, not a new one for the gap).
+    std::vector<NoteData> notesTaken;
+    notesTaken.reserve (placed.size());
+
     for (const auto& note : placed)
     {
         const auto beat = BeatPosition::fromBeats (note.start);
 
         if (const auto clip = clipFor (note.part, beat, true); clip.isValid())
         {
-            addNote (song, clip, note.pitch, beat, BeatDuration::fromBeats (std::max (note.length, getMinimumNoteLength().inBeats())),
-                     note.velocity, note.channel);
+            const auto length = BeatDuration::fromBeats (std::max (note.length, getMinimumNoteLength().inBeats()));
+            growClipForNote (song, clip, beat, length);
+            NoteData taken;
+            taken.clip = clip;
+            taken.pitch = note.pitch;
+            taken.start = beat;
+            taken.length = length;
+            taken.velocity = note.velocity;
+            taken.channel = note.channel;
+            notesTaken.push_back (taken);
             reach[note.part].add (beat, clip);
         }
     }
+
+    addNotes (song, notesTaken);
 
     // A clip's own value of a controller (or the bend, or the pressure) at a beat, as it was before the take: its last one
     // there, or none.

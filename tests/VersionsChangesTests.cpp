@@ -117,7 +117,7 @@ void checkChangesAreWhole (phazite::ProjectContext& context, const juce::String&
     const auto version = history.readSong (phazite::getLastVersion (context)->id);
     REQUIRE (version.isValid());
 
-    for (const auto& change : phazite::findChanges (version, phazite::findSong (context)->getState()))
+    for (const auto& change : phazite::findChanges (version, phazite::test::copyWholeSong (*phazite::findSong (context))))
         whole.add (describe (change));
 
     CHECK_MESSAGE (worked == whole, "worked out from what changed:\n  " << worked.joinIntoString ("\n  ")

@@ -997,12 +997,15 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     trackState.setProperty (phazite::schema::keyRoot, 2, nullptr);
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // A note taken out and put back as it was.
-    const auto note = clipState.getChildWithName (phazite::schema::NOTE);
-    REQUIRE (note.isValid());
-    const auto noteIndex = clipState.indexOf (note);
-    clipState.removeChild (note, nullptr);
-    clipState.addChild (note.createCopy(), noteIndex, nullptr);
+    // A note taken out and put back as it was (by Undo).
+    const auto firstNote = phazite::getClipNotes (song, clipID).front().getRef();
+
+    {
+        const phazite::UndoStep step (song, "Delete Note");
+        phazite::deleteNotes (song, { firstNote });
+    }
+
+    phazite::undo (song);
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // Where the playhead is.
@@ -1025,82 +1028,81 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     trackState.moveChild (trackState.indexOf (lanes), 0, nullptr);
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());
-    auto firstNote = clipState.getChildWithName (phazite::schema::NOTE);
-    const auto velocity = firstNote[phazite::schema::noteVelocity];
-    firstNote.setProperty (phazite::schema::noteVelocity, 7, nullptr);
-    firstNote.setProperty (phazite::schema::noteVelocity, velocity, nullptr);
-    CHECK_FALSE (project->hasUnsavedChanges());
-    firstNote.setProperty (phazite::schema::noteVelocity, 9, nullptr);
-    CHECK (project->hasUnsavedChanges());
-    REQUIRE (project->save().wasOk());
 
-    // Many notifications at once, compared by their track whole: taken back, nothing; one left, a change.
-    for (int i = 0; i < 100; ++i)
-        REQUIRE (phazite::test::addMidiNote (song, clipID, 40 + i % 40, beats (i * 0.03), phazite::BeatDuration::fromBeats (0.02), 100)
-                     .isValid());
-
-    phazite::test::dispatchPendingMessages();
-    REQUIRE (project->save().wasOk());
-
-    std::vector<juce::var> velocities;
-
-    for (const auto& each : clipState)
-        velocities.push_back (each[phazite::schema::noteVelocity]);
-
-    REQUIRE (velocities.size() > phazite::Project::mostToCompare);
-
-    for (auto each : clipState)
-        each.setProperty (phazite::schema::noteVelocity, 1, nullptr);
-
-    for (int i = 0; i < clipState.getNumChildren(); ++i)
-        clipState.getChild (i).setProperty (phazite::schema::noteVelocity, velocities[(size_t) i], nullptr);
-
-    CHECK_FALSE (project->hasUnsavedChanges());
-
-    // All but one put back: that one is the only difference.
-    for (auto each : clipState)
-        each.setProperty (phazite::schema::noteVelocity, 1, nullptr);
-
-    for (int i = 1; i < clipState.getNumChildren(); ++i)
-        clipState.getChild (i).setProperty (phazite::schema::noteVelocity, velocities[(size_t) i], nullptr);
-
-    CHECK (project->hasUnsavedChanges());
-    clipState.getChild (0).setProperty (phazite::schema::noteVelocity, velocities[0], nullptr);
-    REQUIRE (project->save().wasOk());
-
-    // One that notified, then taken out of the song before many more did, the others put back: the note gone is the only
-    // difference, which the clip it was in, compared whole, finds.
-    const auto setAllAndBack = [&clipState]
     {
-        std::vector<juce::var> before;
+        // The notes changed as the model changes them, outside the undo history, as a value taken back is.
+        const phazite::Song::OutsideHistory outside (song);
+        const auto velocity = phazite::getNoteData (song, firstNote)->velocity;
+        phazite::setNoteVelocities (song, { firstNote }, 7);
+        phazite::setNoteVelocities (song, { firstNote }, velocity);
+        CHECK_FALSE (project->hasUnsavedChanges());
+        phazite::setNoteVelocities (song, { firstNote }, 9);
+        CHECK (project->hasUnsavedChanges());
+        REQUIRE (project->save().wasOk());
 
-        for (const auto& each : clipState)
-            before.push_back (each[phazite::schema::noteVelocity]);
+        // Many notifications at once, compared by their track whole: taken back, nothing; one left, a change.
+        for (int i = 0; i < 100; ++i)
+            REQUIRE (phazite::test::addMidiNote (song, clipID, 40 + i % 40, beats (i * 0.03), phazite::BeatDuration::fromBeats (0.02), 100)
+                         .isValid());
 
-        for (auto each : clipState)
-            each.setProperty (phazite::schema::noteVelocity, 4, nullptr);
+        phazite::test::dispatchPendingMessages();
+        REQUIRE (project->save().wasOk());
 
-        for (int i = 0; i < clipState.getNumChildren(); ++i)
-            clipState.getChild (i).setProperty (phazite::schema::noteVelocity, before[(size_t) i], nullptr);
-    };
+        // Each note given its velocity again, from one on.
+        const auto putBack = [&song] (const std::vector<phazite::NoteData>& notes, size_t from)
+        {
+            for (auto i = from; i < notes.size(); ++i)
+                phazite::setNoteVelocities (song, { notes[i].getRef() }, notes[i].velocity);
+        };
 
-    auto gone = clipState.getChild (0);
-    gone.setProperty (phazite::schema::noteVelocity, 2, nullptr);
-    clipState.removeChild (gone, nullptr);
-    setAllAndBack();
-    CHECK_FALSE (project->isWholeAsSaved());
-    CHECK (project->hasUnsavedChanges());
+        const auto notes = phazite::getClipNotes (song, clipID);
+        REQUIRE (notes.size() > phazite::Project::mostToCompare);
+        phazite::setNoteVelocities (song, getRefs (notes), 1);
+        putBack (notes, 0);
+        CHECK_FALSE (project->hasUnsavedChanges());
 
-    // The reverse: the note put back where it was, as it was, among as many notifications: nothing to save.
-    REQUIRE (project->save().wasOk());
-    gone = clipState.getChild (0);
-    const auto goneCopy = gone.createCopy();
-    gone.setProperty (phazite::schema::noteVelocity, 2, nullptr);
-    clipState.removeChild (gone, nullptr);
-    setAllAndBack();
-    clipState.addChild (goneCopy, 0, nullptr);
-    CHECK_FALSE (project->hasUnsavedChanges());
-    CHECK (project->isWholeAsSaved());
+        // All but one put back: that one is the only difference.
+        phazite::setNoteVelocities (song, getRefs (notes), 1);
+        putBack (notes, 1);
+        CHECK (project->hasUnsavedChanges());
+        putBack ({ notes[0] }, 0);
+        REQUIRE (project->save().wasOk());
+
+        // One that notified, then taken out of the song before many more did, the others put back: the note gone is the only
+        // difference, which the clip it was in, compared whole, finds.
+        const auto setAllAndBack = [&song, &putBack, clipID]
+        {
+            const auto before = phazite::getClipNotes (song, clipID);
+            phazite::setNoteVelocities (song, getRefs (before), 4);
+            putBack (before, 0);
+        };
+
+        auto gone = phazite::getClipNotes (song, clipID).front().getRef();
+        phazite::setNoteVelocities (song, { gone }, 2);
+        phazite::deleteNotes (song, { gone });
+        setAllAndBack();
+        CHECK_FALSE (project->isWholeAsSaved());
+        CHECK (project->hasUnsavedChanges());
+
+        // The reverse: the note put back where it was, as it was (each clip of its group made like itself as it was saved),
+        // among as many notifications: nothing to save.
+        REQUIRE (project->save().wasOk());
+        std::vector<std::pair<phazite::ClipID, juce::ValueTree>> saved;
+
+        for (const auto clip : phazite::getClips (song, trackID))
+            saved.emplace_back (clip, phazite::copyWhole (song, phazite::findClipState (song, clip)));
+
+        gone = phazite::getClipNotes (song, clipID).front().getRef();
+        phazite::setNoteVelocities (song, { gone }, 2);
+        phazite::deleteNotes (song, { gone });
+        setAllAndBack();
+
+        for (const auto& [clip, asSaved] : saved)
+            phazite::makeClipNotesLike (song, clip, asSaved);
+
+        CHECK_FALSE (project->hasUnsavedChanges());
+        CHECK (project->isWholeAsSaved());
+    }
 
     // Real changes count, made without an undo step or with one; saving clears them.
     song.getState().setProperty (phazite::schema::outline, "pop", nullptr);
@@ -1155,32 +1157,38 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
     for (int i = 0; i < 80; ++i)
         REQUIRE (phazite::addNote (song, other, 40 + i % 40, beats (i * 0.04), phazite::BeatDuration::fromBeats (0.02), 100).isValid());
 
-    auto clipState = phazite::findClipState (song, clip);
-    auto otherState = phazite::findClipState (song, other);
-    REQUIRE (otherState.getNumChildren() > (int) phazite::Project::mostToCompare);
-    namespace schema = phazite::schema;
+    const auto othersNotes = getRefs (phazite::getClipNotes (song, other));
+    REQUIRE (othersNotes.size() > phazite::Project::mostToCompare);
+
+    // The notes changed as the model changes them, outside the undo history (Song::OutsideHistory), so that the undos below
+    // take back what they did before: as a value taken back is.
+    const auto clipNotes = [&song, clip] { return getRefs (phazite::getClipNotes (song, clip)); };
 
     // From the song as saved, its clip's two notes 10 and 20 loud.
     const auto startSaved = [&]
     {
-        clipState.getChild (0).setProperty (schema::noteVelocity, 10, nullptr);
-        clipState.getChild (1).setProperty (schema::noteVelocity, 20, nullptr);
+        {
+            const phazite::Song::OutsideHistory outside (song);
+            const auto notes = clipNotes();
+            REQUIRE (notes.size() == 2);
+            phazite::setNoteVelocities (song, { notes[0] }, 10);
+            phazite::setNoteVelocities (song, { notes[1] }, 20);
+        }
+
         phazite::test::dispatchPendingMessages();
         REQUIRE (project->save().wasOk());
         REQUIRE_FALSE (project->hasUnsavedChanges());
     };
 
     // Notifications elsewhere that change nothing: none, or more than are compared one by one.
-    const auto notifyElsewhere = [&otherState] (bool many)
+    const auto notifyElsewhere = [&song, &othersNotes] (bool many)
     {
         if (! many)
             return;
 
-        for (auto each : otherState)
-            each.setProperty (schema::noteVelocity, 1, nullptr);
-
-        for (auto each : otherState)
-            each.setProperty (schema::noteVelocity, 100, nullptr);
+        const phazite::Song::OutsideHistory outside (song);
+        phazite::setNoteVelocities (song, othersNotes, 1);
+        phazite::setNoteVelocities (song, othersNotes, 100);
     };
 
     const auto answer = [&project]
@@ -1198,19 +1206,23 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
         // The two notes swapped, each then given the other's loudness: at each place the value is the saved one, so only
         // the clip, compared whole for what was taken out and put in, tells the change.
         startSaved();
-        auto first = clipState.getChild (0), second = clipState.getChild (1);
-        clipState.removeChild (first, nullptr);
-        notifyElsewhere (many);
-        clipState.addChild (first, 1, nullptr);
-        second.setProperty (schema::noteVelocity, 10, nullptr);
-        first.setProperty (schema::noteVelocity, 20, nullptr);
+
+        {
+            const phazite::Song::OutsideHistory outside (song);
+            const auto notes = phazite::getClipNotes (song, clip);
+            phazite::deleteNotes (song, { notes[0].getRef() });
+            notifyElsewhere (many);
+            REQUIRE (phazite::replaceNotes (song, {}, { notes[0] }) == std::vector { notes[0].getRef() }); // after the other
+            phazite::setNoteVelocities (song, { notes[1].getRef() }, 10);
+            phazite::setNoteVelocities (song, { notes[0].getRef() }, 20);
+        }
+
         CHECK (answer());
 
         // A note deleted, the other edited to look like it, the delete undone: the other is changed.
         startSaved();
         auto notes = phazite::getClipNotes (song, clip);
         REQUIRE (notes.size() == 2);
-        const auto firstState = clipState.getChild (0);
 
         {
             const phazite::UndoStep step (song, "Delete Note");
@@ -1218,11 +1230,12 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
         }
 
         notifyElsewhere (many);
-        auto remaining = clipState.getChild (0);
 
-        for (const auto* property :
-             { &schema::notePitch.getName(), &schema::noteStart.getName(), &schema::noteLength.getName(), &schema::noteVelocity.getName() })
-            remaining.setProperty (*property, firstState[*property], nullptr);
+        {
+            const phazite::Song::OutsideHistory outside (song);
+            phazite::placeNote (song, notes[1].getRef(), notes[0].start, notes[0].pitch, notes[0].length);
+            phazite::setNoteVelocities (song, { notes[1].getRef() }, notes[0].velocity);
+        }
 
         phazite::undo (song);
         CHECK (answer());
@@ -1248,13 +1261,17 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
         notifyElsewhere (many);
         phazite::moveClip (song, clip, beats (0.0), tracks[0]);
         answer();
-        clipState = phazite::findClipState (song, clip);
 
         // A track moved and moved back, a value in it changed meanwhile.
         startSaved();
         phazite::moveTracksAfter (song, { tracks[0] }, tracks[1]);
         notifyElsewhere (many);
-        clipState.getChild (0).setProperty (schema::noteVelocity, 77, nullptr);
+
+        {
+            const phazite::Song::OutsideHistory outside (song);
+            phazite::setNoteVelocities (song, { clipNotes().front() }, 77);
+        }
+
         phazite::moveTracksAfter (song, { tracks[1] }, tracks[0]);
         CHECK (answer());
     }

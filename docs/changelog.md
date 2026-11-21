@@ -346,6 +346,15 @@ The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed be
 bug has a test that failed before its fix, and a reviewer read each area's changes; what the reviews found is fixed
 too. A line names the bug's number in that list.
 
+- **231 A note placed through two clips of its alias group:** a drag of a note selected in two clips of its group
+  places it once, where it was first named to go, kept where every clip it was named through plays it, where the clip
+  named last won before (roadmap step S5.20: each edit names a note of a group once).
+- **232 A note made longer through two clips of its alias group:** every clip it was named through grows to hold it,
+  and no other, where only the clip named first grew; a nudge and a placed note grow each clip they were named through
+  alike.
+- **233 Quantize of a note selected in two clips of its alias group:** `replaceNotes()` takes each note of a group
+  once, through the first clip a replacement names it through, so that Quantize and the transform bar's Apply move
+  it once, where the group held it twice.
 - **186 Versions from before a song's IDs were given anew:** a song whose IDs the loader gave anew (a file from
   another program, with IDs too large to count on from) is stamped with its numbering, and its versions and Local
   History snapshots hold the stamp their song had. A line's Restore, a line's Discard Changes and Merge refuse a

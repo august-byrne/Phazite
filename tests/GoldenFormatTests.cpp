@@ -209,7 +209,7 @@ TEST_SUITE ("golden")
             record.name = "Test vectors";
             record.saved = 1793800000000;
             record.phazite = "test";
-            REQUIRE (store.writeVersion (record, phazite::splitSong (song->getState())).isNotEmpty());
+            REQUIRE (store.writeVersion (record, phazite::splitSong (phazite::test::copyWholeSong (*song))).isNotEmpty());
             checkGoldenText ("format/song.txt", listPieces (store.getPieces()), compareTexts);
         }
 

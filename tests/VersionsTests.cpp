@@ -635,7 +635,7 @@ TEST_CASE ("The differences between two songs match items by their IDs, wherever
     auto list = phazite::getTrackList (*before);
     const auto second = phazite::findTrackState (*before, tracks[1]);
     list.moveChild (list.indexOf (second), 0, nullptr);
-    const auto moved = findChanges (then, before->getState());
+    const auto moved = findChanges (then, phazite::test::copyWholeSong (*before));
     REQUIRE (moved.size() == 1);
     CHECK (moved[0].where == phazite::SongChange::Where::song);
     CHECK (moved[0].what == juce::StringArray ("track order"));
@@ -701,7 +701,7 @@ TEST_CASE ("Saving a version records the whole song as it is, and Discard Change
     REQUIRE (recorded.size() == 2);
     CHECK (recorded[0].name == "Bass");
     CHECK (recorded[1].name == "Drums");
-    CHECK (phazite::findChanges (saved, phazite::findSong (s.context)->getState()).empty());
+    CHECK (phazite::findChanges (saved, phazite::test::copyWholeSong (*phazite::findSong (s.context))).empty());
 
     // Discard All Changes: the song as the last version has it again, one undo step.
     s.setVolume (bass, 0.0f);
@@ -837,7 +837,7 @@ TEST_CASE ("Verify History finds the versions no branch holds and what is damage
         lost.parents.add (first);
         lost.branch = history->findCurrentBranch()->id;
         lost.saved = juce::Time::currentTimeMillis();
-        lostID = store.writeVersion (lost, phazite::splitSong (song.getState()));
+        lostID = store.writeVersion (lost, phazite::splitSong (phazite::test::copyWholeSong (song)));
         REQUIRE (lostID.isNotEmpty());
     }
 
@@ -949,7 +949,7 @@ TEST_CASE ("A branch another computer took its own way keeps this computer's lin
         record.parents.add (first);
         record.branch = main.id;
         record.saved = juce::Time::currentTimeMillis();
-        theirs = elsewhere.writeVersion (record, phazite::splitSong (song.getState()));
+        theirs = elsewhere.writeVersion (record, phazite::splitSong (phazite::test::copyWholeSong (song)));
         REQUIRE (theirs.isNotEmpty());
 
         auto branch = main;

@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
@@ -166,7 +167,7 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
 
     const auto bass = phazite::importFile (song, track, temp.folder.getChildFile ("Bass.mid"), beats (16.0));
     REQUIRE (bass.isValid());
-    const auto clipState = phazite::findClipState (song, bass);
+    const auto clipState = phazite::copyWhole (song, phazite::findClipState (song, bass)); // whole, as a save writes it
     CHECK (clipState[phazite::schema::clipName].toString() == juce::String ("Bassline"));
     CHECK ((double) clipState[phazite::schema::clipStart] == doctest::Approx (16.0));
     CHECK ((double) clipState[phazite::schema::clipLength] == doctest::Approx (8.0)); // the note ends in the second bar
@@ -217,8 +218,8 @@ TEST_CASE ("A MIDI file's notes and controllers on two channels keep their chann
     CHECK (notes[1].velocity == 80);
     CHECK (notes[1].length.inBeats() == doctest::Approx (1.0));
 
-    const auto clipState = phazite::findClipState (song, clip);
-    std::vector<std::pair<juce::String, int>> controls; // kind and channel
+    const auto clipState = phazite::copyWhole (song, phazite::findClipState (song, clip)); // whole, as a save writes it
+    std::vector<std::pair<juce::String, int>> controls;                                    // kind and channel
 
     for (const auto& child : clipState)
         if (child.hasType (phazite::schema::CONTROL))

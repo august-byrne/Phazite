@@ -984,7 +984,7 @@ phazite::TrackID findTrackNamed (const phazite::Song& song, const juce::String& 
 
 juce::String writeSongText (const phazite::ProjectContext& context)
 {
-    return phazite::writeElement (phazite::findSong (context)->getState()).toString();
+    return phazite::writeElement (phazite::test::copyWholeSong (*phazite::findSong (context))).toString();
 }
 
 juce::String readNumbering (const phazite::ProjectContext& context)
@@ -996,7 +996,7 @@ juce::String readNumbering (const phazite::ProjectContext& context)
 // anew.
 void passTheMark (TestSong& s, const juce::String& name)
 {
-    while (phazite::findNextID (phazite::findSong (s.context)->getState()) <= phazite::schema::renumberMark)
+    while (phazite::findNextID (phazite::test::copyWholeSong (*phazite::findSong (s.context))) <= phazite::schema::renumberMark)
         s.addTrack (name);
 }
 
@@ -1242,7 +1242,8 @@ TEST_CASE ("A song that crosses the mark again gets another stamp, and the versi
     REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, made.before); }));
     phazite::undo (*phazite::findSong (s.context));
     REQUIRE (readNumbering (s.context) == made.stamp);
-    CHECK (phazite::findNextID (phazite::findSong (s.context)->getState()) > phazite::schema::maxCountedID); // kept by the Undo
+    CHECK (phazite::findNextID (phazite::test::copyWholeSong (*phazite::findSong (s.context)))
+           > phazite::schema::maxCountedID); // kept by the Undo
 
     passTheMark (s, "Later");
     s.reopen();

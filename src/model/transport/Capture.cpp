@@ -19,6 +19,7 @@
 #include <cmath>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -354,6 +355,8 @@ ClipID capture (Song& song, Selection* selection)
         return {};
 
     const bool quantize = isRecordQuantizeOn (session->getAudioIO());
+    std::vector<NoteData> captured;
+    captured.reserve (notes.size());
 
     for (size_t i = 0; i < notes.size(); ++i)
     {
@@ -366,9 +369,17 @@ ClipID capture (Song& song, Selection* selection)
             end = start + noteLength;
         }
 
-        addNote (song, clip, notes[i].pitch, BeatPosition::fromBeats (start),
-                 BeatDuration::fromBeats (std::max (end - start, getMinimumNoteLength().inBeats())), notes[i].velocity, notes[i].channel);
+        NoteData note;
+        note.clip = clip;
+        note.pitch = notes[i].pitch;
+        note.start = BeatPosition::fromBeats (start);
+        note.length = BeatDuration::fromBeats (std::max (end - start, getMinimumNoteLength().inBeats()));
+        note.velocity = notes[i].velocity;
+        note.channel = notes[i].channel;
+        captured.push_back (note);
     }
+
+    addNotes (song, captured);
 
     // The controls where they were played, as a take keeps them (Take.h), not quantized; those held from before the first
     // note where the clip starts, before any note quantizing could move.

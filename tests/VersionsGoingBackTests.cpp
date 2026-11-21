@@ -257,14 +257,14 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
 
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, verse); }));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
-    CHECK (phazite::findChanges (then, song.getState()).empty());
+    CHECK (phazite::findChanges (then, phazite::test::copyWholeSong (song)).empty());
     CHECK ((int) phazite::findTrackState (song, bass)[schema::trackHeight] == 140); // view state stays
     CHECK (phazite::describeUndo (&song) == "Undo Restore \"Verse\"");
     CHECK (phazite::getVersions (s.context).size() == 2); // the history keeps every commit, the initial one too
 
     // Undo takes it all back, in one step.
     phazite::undo (song);
-    CHECK (phazite::findChanges (changed, song.getState()).empty());
+    CHECK (phazite::findChanges (changed, phazite::test::copyWholeSong (song)).empty());
     CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 }
 
@@ -763,7 +763,7 @@ TEST_CASE ("A track brought back from a commit whose clip can't be read comes ba
     const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
     addMidiNote (*song, clip, 36, at (0.0), lasting (1.0));
 
-    auto pieces = phazite::splitSong (song->getState());
+    auto pieces = phazite::splitSong (phazite::test::copyWholeSong (*song));
     juce::String lost;
 
     for (const auto& [name, block] : pieces.pieces)

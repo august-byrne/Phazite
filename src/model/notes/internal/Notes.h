@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Notes in MIDI clips, as the piano roll edits them (docs/design.md, section 7): the song's side of NoteValues.h, which
-// holds notes as plain values with the transforms, keys, chords and drums' names. The song holds each note in its clip's
-// element (schema::NOTE), and in each of the clip's aliases', by its ID. Positions are song beats (the clip's content start
-// plus the note's own beat), so the notes of several clips line up.
+// holds notes as plain values with the transforms, keys, chords and drums' names. A clip's notes and its controllers' values
+// are a value (model/base/internal/SongValues.h: ClipNotes), the same in each of the clip's aliases; each note in it by its
+// ID. Each edit below takes the value of each clip it names (getClipNotesValue()), computes the next as a batch, and sets it
+// once for each alias group (setClipNotesValue()). Positions are song beats (the clip's content start plus the note's own
+// beat), so the notes of several clips line up.
 #pragma once
 
 #include "model/base/Beats.h"
@@ -20,10 +22,19 @@ namespace phazite
 {
 class CommandRegistry;
 
-// A note's element, invalid for a note that is gone; and what it is, by where it is in the song. Notes' IDs
-// (schema::noteID) are each note's, which no other note of its clip has, and the same in its clip's aliases; a copy of a
-// clip keeps them.
-juce::ValueTree findNoteState (const Song&, const NoteRef&);
+// A clip's notes and controllers' values as the song holds them now: nothing for a clip that isn't a MIDI clip of the song's.
+// Message thread. While the clip's element still stores them (roadmap step S5.20's first piece), the element's NOTE and
+// CONTROL children read (SongValues.h: readClipNotes()), a walk through them.
+ClipNotes getClipNotesValue (const Song&, ClipID);
+
+// Gives a clip, and each clip of its alias group, these notes and values: in the song's undo history (the step in progress),
+// or outside it while the song is written outside its history (Song::isWritingOutsideHistory()). While the clips' elements
+// still store them, what differs written into each (SongValues.h: writeClipNotes()). Nothing for a clip that isn't a MIDI
+// clip of the song's.
+void setClipNotesValue (Song&, ClipID, const ClipNotes&);
+
+// What a note is, by where it is in the song; none for a note that is gone. Notes' IDs (schema::noteID) are each note's,
+// which no other note of its clip has, and the same in its clip's aliases; a copy of a clip keeps them.
 std::optional<NoteData> getNoteData (const Song&, const NoteRef&);
 std::vector<NoteData> getNoteData (const Song&, const std::vector<NoteRef>&); // those there
 std::vector<NoteData> getClipNotes (const Song&, ClipID);                     // in the order the clip holds them
@@ -57,7 +68,9 @@ void selectNotes (Selection&, const std::vector<NoteRef>&);
 
 //==============================================================================
 // Edits, with the song's undo history: a command's undo step holds them. Each is made to the note in each of its clip's
-// aliases too.
+// aliases too, and names each note of an alias group once: a note named through several clips of its group (a selection
+// across two of them) is one note, changed once, as each of those clips allows (a move kept where each plays it, each of
+// them grown to hold it).
 
 // Adds a note at a song beat. If it ends after the clip, the clip grows to the end of that bar, but only into the empty
 // space after it: never past the start of the next clip on its track. A note beyond that stays in the clip without
@@ -65,9 +78,18 @@ void selectNotes (Selection&, const std::vector<NoteRef>&);
 // another, or read from a file). Returns it, or none for a clip that isn't a MIDI clip of the song's.
 NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity, int channel = 1);
 
-// The kind of a controller's value a recording took in with the notes (schema::CONTROL; NoteValues.h: ControlKind), for
-// the code that still reads a clip's elements itself (NoteElements.h: ControlElement::getKind()).
-std::optional<ControlKind> findControlKind (const juce::ValueTree& control); // none for a kind Phazite doesn't know
+// The notes of one clip or several added as addNote() adds each, one after another, in their order (each clip's notes after
+// those it holds): where each may start, its clip grown to hold it, the shortest length, the limits of its values, a new ID
+// each, and the clip's aliases given the same. Of each, its pitch, start (a song beat), length, velocity, flags and channel;
+// its ID isn't the note's. Where the clips can grow to is found once, and each alias group's notes are read once and set
+// once: what a recording, an import or a DAWproject puts in, many notes at a time. Returns the notes in their order, each
+// an empty reference where its clip isn't a MIDI clip of the song's.
+std::vector<NoteRef> addNotes (Song&, const std::vector<NoteData>&);
+
+// Grows a clip as addNote() grows it to hold a note at this start and of this length (no earlier than the clip's start, at
+// least the shortest length), without adding the note: what chooses each note's clip among clips that the notes before it
+// grew (model/transport/internal/Take.h) does for each, before it adds them all with addNotes().
+void growClipForNote (Song&, ClipID, BeatPosition start, BeatDuration);
 
 // Adds a controller's value at a song beat, on a MIDI channel (1 to 16), as a recording takes it in with the notes. The
 // clip doesn't grow for it: one past the clip's end or before its start plays nothing. Nothing for a clip that isn't a
@@ -120,8 +142,8 @@ void scaleClipContent (Song&, const std::vector<ClipID>&, double factor);
 // song is written outside it (Song::OutsideHistory). The clip alone: ApplySong makes its aliases like theirs in turn.
 void makeClipNotesLike (Song&, ClipID, const juce::ValueTree& otherClip);
 
-// One value of a note of a clip set, or taken away (a void value), in the song's undo history, and the note in each of the
-// clip's aliases made like it (giveClipEvents()): a merge's clash on a note's value chosen (model/versions/VersionsModel.h,
+// One value of a note of a clip set, or taken away (a void value: as if its element hadn't it), in the song's undo history,
+// and the note in each of the clip's aliases made like it: a merge's clash on a note's value chosen (model/versions/VersionsModel.h,
 // chooseClash()), which the merge reported once for the group. Whether the note was there.
 bool setNoteValue (Song&, const NoteRef&, const juce::Identifier& property, const juce::var& value);
 
@@ -144,8 +166,8 @@ std::vector<ControlPoint> getControlValues (const Song&, const std::vector<ClipI
 // closer than getShortestControlGap() after the one before takes its place, and one that repeats the value before it (the
 // clip's, before the range) is left out, as a recording leaves it out. A clip doesn't grow for a value. Nothing for a note's
 // pressure, which is not drawn. A value already there as it would be put stays as it is, the others are removed and added:
-// values set as they are change nothing. One walk through the clip's elements for each alias, which reads no note: a step
-// of a drag.
+// values set as they are change nothing. One read of the clip's value, and one walk through each alias's elements as it is
+// written, which reads no note as the piano roll's does: a step of a drag.
 void setControlValues (Song&, ClipID, const ControlLane&, BeatRange, const std::vector<ControlPoint>&);
 
 // Removes a lane's values that play from these clips from one song beat to another, both included; or all of them. Many
@@ -168,7 +190,9 @@ void setNoteLength (Song&, const NoteRef&, BeatDuration);
 void placeNote (Song&, const NoteRef&, BeatPosition start, int pitch, BeatDuration);
 
 // Each note (by its clip and ID; those gone left out) placed as placeNote() says, at its start, pitch and length: a step of
-// the piano roll's drag. Where each clip can grow to is found once for all of them, not once for each note.
+// the piano roll's drag. Where each clip can grow to is found once for all of them, not once for each note. A note named
+// through several clips of its group goes where it was first named to go, kept where each of them plays it; one named
+// through one clip twice, where it was given last.
 void placeNotes (Song&, const std::vector<NoteData>&);
 
 void deleteNotes (Song&, const std::vector<NoteRef>&);
@@ -177,10 +201,11 @@ void deleteNotes (Song&, const std::vector<NoteRef>&);
 void transposeNotes (Song&, const std::vector<NoteRef>&, int semitones);
 
 // Moves the notes in time, all by the same amount and none to before its clip's start or to where its clip doesn't play
-// it, as moveNote() says.
+// it, as moveNote() says: through each clip it was named through.
 void nudgeNotes (Song&, const std::vector<NoteRef>&, BeatDuration);
 
-// Makes the notes longer or shorter by the same amount, each at least getMinimumNoteLength().
+// Makes the notes longer or shorter by the same amount, each at least getMinimumNoteLength(); each clip a note was named
+// through grows to hold it, as setNoteLength() says.
 void changeNoteLengths (Song&, const std::vector<NoteRef>&, BeatDuration);
 
 bool areAllNotesMuted (const Song&, const std::vector<NoteRef>&);
@@ -216,7 +241,9 @@ void setClipNotes (Song&, ClipID, const std::vector<NoteData>&);
 // they name. One that replaces an old one (it has its ID, which it keeps) stays where its clip plays it, as a moved note
 // does (moveNote()); the others that come of an old one (a chopped note's later pieces, which have its ID too) go where
 // they are given, past the clip's end too, where the old note reached; and one that comes of none (a copy, a pasted note)
-// is added only where it plays (getClipNotesPlayed()). Returns the new notes.
+// is added only where it plays (getClipNotesPlayed()). An old note named through several clips of its group goes once, and
+// what comes of it is taken through one of those clips, the first named that a replacement names (the first named, if
+// none does): what comes of it through the others is left out. Returns the new notes.
 std::vector<NoteRef> replaceNotes (Song&, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements);
 
 // The same, as one undo step with the name given (a transform's, such as "Quantize Notes").

@@ -9,6 +9,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -23,9 +24,11 @@
 #include <functional>
 #include <map>
 #include <numeric>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 
 namespace phazite
 {
@@ -180,93 +183,154 @@ namespace
         return isMidiState (clipState) ? clipState : juce::ValueTree();
     }
 
-    // A song beat as a position among the clip's notes, which count from its content's start.
+    // A song beat as a position among the clip's notes, which count from its content's start; and back.
     BeatPosition toClipBeat (const juce::ValueTree& clipState, BeatPosition songBeat)
     {
         return BeatPosition::fromBeats ((songBeat - getContentStart (clipState)).inBeats());
     }
 
+    BeatPosition toSongBeat (const juce::ValueTree& clipState, BeatPosition clipBeat)
+    {
+        return getContentStart (clipState) + BeatDuration::fromBeats (clipBeat.inBeats());
+    }
+
     //==============================================================================
-    // The song's notes: each a NOTE in its clip's element (Schema.h), and in each alias's, with the same ID, read and written
-    // through NoteElements.h.
+    // The song's notes: each clip's value (SongValues.h: ClipNotes), the same in each of its aliases. While the clips'
+    // elements still store them, a value is read from its clip's element and what differs written back (getClipNotesValue(),
+    // setClipNotesValue()); one note alone is found by the song's index, rather than by a walk through its clip.
 
     std::uint64_t notesRead = 0; // message thread
 
-    NoteData readNote (const juce::ValueTree& clipState, const NoteElement& note)
+    // A clip's note as the piano roll shows it, in song beats.
+    NoteData toNoteData (const juce::ValueTree& clipState, const NoteValues& note)
     {
         ++notesRead;
-        return { getClipID (clipState),
-                 note.getID(),
-                 note.getPitch(),
-                 getContentStart (clipState) + BeatDuration::fromBeats (note.getStart().inBeats()),
-                 note.getLength(),
-                 note.getVelocity(),
-                 note.has (NoteFlag::muted),
-                 note.has (NoteFlag::slide),
-                 note.has (NoteFlag::portamento),
-                 note.getChannel() };
+        return { getClipID (clipState), note.id,       note.pitch, toSongBeat (clipState, note.start),
+                 note.length,           note.velocity, note.muted, note.slide,
+                 note.portamento,       note.channel };
     }
 
-    // Changes the note with an ID in a clip, and in each of its aliases, which hold the same notes.
-    template <typename Change>
-    void changeNote (Song& song, const NoteRef& ref, Change&& change)
+    // One note of a clip as it holds it now: none for a note or a clip that is gone.
+    std::optional<NoteValues> findNoteValues (const Song& song, const juce::ValueTree& clipState, NoteID id)
     {
-        const auto clipState = findMidiClipState (song, ref.clip);
-
         if (! clipState.isValid())
-            return;
+            return std::nullopt;
 
-        const auto aliases = getAliasStates (song, clipState);
+        if (const auto note = song.getIndex().findNote (clipState, id.getRaw()); note.isValid())
+            return readNoteValues (note);
 
-        for (const auto& alias : aliases)
-            if (auto note = editNote (song, alias, ref.note); note.exists())
-                change (note);
+        return std::nullopt;
     }
 
-    // A note's values as its clip holds them, but its ID, its pitch, its start and its length, which the edits work out.
+    // What names a clip's alias group: its link, or the clip's own ID for a clip in none.
+    juce::String getGroupKey (const juce::ValueTree& clipState)
+    {
+        const auto group = clipState[schema::clipLink].toString();
+        return group.isNotEmpty() ? group : "clip " + juce::String ((juce::int64) getClipID (clipState).getRaw());
+    }
+
+    // The undo history a clip's notes are written in: the song's, or none while the song is written outside it.
+    juce::UndoManager* getHistory (Song& song)
+    {
+        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+    }
+
+    // A value written into each clip of a clip's group but one (the clip read, which its edit writes itself).
+    void writeAliases (Song& song, const juce::ValueTree& clipState, const ClipNotes& value, const juce::ValueTree& written)
+    {
+        auto* undo = getHistory (song);
+
+        for (auto alias : getAliasStates (song, clipState))
+        {
+            if (alias == written)
+                continue;
+
+            SongIndex::countVisited ((std::uint64_t) alias.getNumChildren()); // a walk of the clip's, for the speed gates
+            writeClipNotes (value, alias, undo);
+        }
+    }
+
+    // One edit's clips' notes: each alias group's value read once, from the first of its clips the edit names (with where its
+    // notes are among that clip's children, so that what changed is written back without a second walk), changed as a batch,
+    // and set once for the group as the edit ends (commit()). The clips' own elements (their places, their tracks' other
+    // clips) are read and changed in the song as the edit goes, as before; a clip grown to hold a note changes no child.
+    class NotesEdit
+    {
+    public:
+        explicit NotesEdit (Song& s)
+            : song (s)
+        {
+        }
+
+        struct Group
+        {
+            juce::ValueTree read; // the clip whose element the value was read from
+            ClipPlaces places;
+            ClipNotes before, after;
+        };
+
+        // The value of a clip's group, for this edit: nullptr for a clip that isn't a MIDI clip of the song's.
+        Group* find (const juce::ValueTree& clipState)
+        {
+            if (! isMidiState (clipState))
+                return nullptr;
+
+            const auto key = getGroupKey (clipState);
+
+            if (const auto found = groups.find (key); found != groups.end())
+                return &found->second;
+
+            Group group;
+            group.read = clipState;
+            SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren()); // a walk of the clip's, for the speed gates
+            group.before = readClipNotes (clipState, group.places);
+            group.after = group.before;
+            order.push_back (key);
+            return &groups.emplace (key, std::move (group)).first->second;
+        }
+
+        Group* find (ClipID clip) { return find (findMidiClipState (song, clip)); }
+
+        // Each group's value set, in the order the groups were first named: the clip read written from what was read, and
+        // each other clip of its group as setClipNotesValue() writes it. Once, as the edit ends.
+        void commit()
+        {
+            auto* undo = getHistory (song);
+
+            for (const auto& key : order)
+            {
+                auto& group = groups.at (key);
+
+                if (group.after.isSameAs (group.before))
+                    continue;
+
+                writeClipNotes (group.before, group.places, group.after, group.read, undo);
+                writeAliases (song, group.read, group.after, group.read);
+            }
+
+            groups.clear();
+            order.clear();
+        }
+
+    private:
+        Song& song;
+        std::map<juce::String, Group> groups;
+        std::vector<juce::String> order;
+    };
+
+    // A note's values as its clip holds them, but its ID, its pitch, its start and its length, which the edits work out. Its
+    // channel kept within 1 to 16, as a note's value holds it (its velocity is kept within its range as it is added).
     NoteValues getValuesKept (const NoteData& data)
     {
         return { .velocity = data.velocity,
                  .muted = data.muted,
                  .slide = data.slide,
                  .portamento = data.portamento,
-                 .channel = data.channel };
+                 .channel = keepChannel (data.channel) };
     }
 
-    // Adds a note to a clip and to each of its aliases, with the ID wanted (values.id) if no note of the clip has it, or else
-    // a new one of the song's. Returns its ID, or none if the clip isn't the song's.
-    NoteID addNoteState (Song& song, const juce::ValueTree& clipState, NoteValues values)
-    {
-        if (! clipState.isValid())
-            return {};
-
-        if (! values.id.isValid() || findNote (song, clipState, values.id).exists())
-            values.id = NoteID::fromRaw (song.makeID());
-
-        const auto aliases = getAliasStates (song, clipState);
-
-        for (auto alias : aliases)
-            appendNote (alias, values, &song.getUndoManager());
-
-        return values.id;
-    }
-
-    void removeNoteState (Song& song, const NoteRef& ref)
-    {
-        const auto clipState = findMidiClipState (song, ref.clip);
-
-        if (! clipState.isValid())
-            return;
-
-        const auto aliases = getAliasStates (song, clipState);
-
-        for (auto alias : aliases)
-            if (const auto note = findNote (song, alias, ref.note); note.exists())
-                removeNote (alias, note, &song.getUndoManager());
-    }
-
-    // The notes there, each once: of a note in a clip and its copies in the clip's aliases, the first one, since an edit to it
-    // is made to each of them.
+    // The notes there, each once: of a note in a clip and its copies in the clip's aliases, the first one named, since an
+    // edit to it is made to each of them.
     std::vector<NoteRef> withoutAliasCopies (const Song& song, const std::vector<NoteRef>& notes)
     {
         std::vector<NoteRef> unique;
@@ -276,17 +340,45 @@ namespace
         {
             const auto clipState = findMidiClipState (song, ref.clip);
 
-            if (! findNote (song, clipState, ref.note).exists())
+            if (! findNoteValues (song, clipState, ref.note).has_value())
                 continue;
 
-            const auto group = clipState[schema::clipLink].toString();
-            const auto key = group.isNotEmpty() ? group : "clip " + juce::String ((juce::int64) ref.clip.getRaw());
-
-            if (seen.insert ({ key, (juce::int64) ref.note.getRaw() }).second)
+            if (seen.insert ({ getGroupKey (clipState), (juce::int64) ref.note.getRaw() }).second)
                 unique.push_back (ref);
         }
 
         return unique;
+    }
+
+    // The notes there, each once as withoutAliasCopies() names it, with every clip of its group it was named through, the
+    // first named first.
+    struct NamedNote
+    {
+        NoteRef ref;
+        std::vector<ClipID> clips;
+    };
+
+    std::vector<NamedNote> nameEachOnce (const Song& song, const std::vector<NoteRef>& notes)
+    {
+        std::vector<NamedNote> named;
+        std::map<std::pair<juce::String, juce::int64>, size_t> places;
+
+        for (const auto& ref : notes)
+        {
+            const auto clipState = findMidiClipState (song, ref.clip);
+
+            if (! findNoteValues (song, clipState, ref.note).has_value())
+                continue;
+
+            const auto [found, isNew] = places.try_emplace ({ getGroupKey (clipState), (juce::int64) ref.note.getRaw() }, named.size());
+
+            if (isNew)
+                named.push_back ({ ref, { ref.clip } });
+            else if (auto& clips = named[found->second].clips; std::find (clips.begin(), clips.end(), ref.clip) == clips.end())
+                clips.push_back (ref.clip);
+        }
+
+        return named;
     }
 
     // Where a clip can grow to without covering another clip on its track: the start of the first clip that reaches past
@@ -402,17 +494,27 @@ std::uint64_t countNotesRead() noexcept
     return notesRead;
 }
 
-juce::ValueTree findNoteState (const Song& song, const NoteRef& ref)
+ClipNotes getClipNotesValue (const Song& song, ClipID clip)
 {
-    return song.getIndex().findNote (findMidiClipState (song, ref.clip), ref.note.getRaw());
+    const auto clipState = findMidiClipState (song, clip);
+
+    // Its readers count the walk where they counted it before the notes were a value (the speed gates compare them): the
+    // views' reads, not what plays the song, which compiles its notes off the edit's path.
+    return clipState.isValid() ? readClipNotes (clipState) : ClipNotes();
+}
+
+void setClipNotesValue (Song& song, ClipID clip, const ClipNotes& value)
+{
+    if (const auto clipState = findMidiClipState (song, clip); clipState.isValid())
+        writeAliases (song, clipState, value, {});
 }
 
 std::optional<NoteData> getNoteData (const Song& song, const NoteRef& ref)
 {
     const auto clipState = findMidiClipState (song, ref.clip);
 
-    if (const auto note = findNote (song, clipState, ref.note); note.exists())
-        return readNote (clipState, note);
+    if (const auto note = findNoteValues (song, clipState, ref.note))
+        return toNoteData (clipState, *note);
 
     return std::nullopt;
 }
@@ -433,7 +535,7 @@ std::vector<NoteData> getClipNotes (const Song& song, ClipID clip)
     std::vector<NoteData> data;
     const auto clipState = findMidiClipState (song, clip);
     SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren()); // a walk of the clip's, for the speed gates
-    forEachNote (clipState, [&] (const NoteElement& note) { data.push_back (readNote (clipState, note)); });
+    forEachNote (getClipNotesValue (song, clip), [&] (const NoteValues& note) { data.push_back (toNoteData (clipState, note)); });
     return data;
 }
 
@@ -501,10 +603,10 @@ std::vector<NoteData> getClipNotesPlayed (const Song& song, ClipID clip)
     const auto clipState = findMidiClipState (song, clip);
     SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren());
 
-    forEachNote (clipState,
-                 [&] (const NoteElement& element)
+    forEachNote (getClipNotesValue (song, clip),
+                 [&] (const NoteValues& values)
                  {
-                     if (const auto note = readNote (clipState, element); plays (clipState, note))
+                     if (const auto note = toNoteData (clipState, values); plays (clipState, note))
                          data.push_back (note);
                  });
 
@@ -564,41 +666,65 @@ namespace
     // starts no earlier than its clip, or than the earliest start given: where the note it replaces started, if that was
     // before the clip's start (moveNote()); and no later than the latest given, if any.
     // Of the values given, the velocity, the flags and the channel are the note's (getValuesKept()).
-    NoteRef addNoteTo (Song& song, Rooms& rooms, ClipID clip, NoteID wanted, int pitch, BeatPosition start, BeatDuration length,
-                       NoteValues values, std::optional<BeatPosition> earliest = {}, std::optional<BeatPosition> latest = {})
+    NoteRef addNoteTo (Song& song, NotesEdit& edit, Rooms& rooms, ClipID clip, NoteID wanted, int pitch, BeatPosition start,
+                       BeatDuration length, NoteValues values, std::optional<BeatPosition> earliest = {},
+                       std::optional<BeatPosition> latest = {})
     {
         const auto clipState = findMidiClipState (song, clip);
+        auto* group = edit.find (clipState);
 
-        if (! clipState.isValid())
+        if (group == nullptr)
             return {};
 
         start = std::max (std::min (start, latest.value_or (start)), earliest.value_or (getClipRange (clipState).getStart()));
         length = std::max (length, getMinimumNoteLength());
         growToHold (song, rooms, clipState, start + length);
-        values.id = wanted;
+        values.id = wanted.isValid() && group->after.find (wanted) == nullptr ? wanted : NoteID::fromRaw (song.makeID());
         values.pitch = clampPitch (pitch);
         values.start = toClipBeat (clipState, start);
         values.length = length;
         values.velocity = juce::jlimit (1, 127, values.velocity);
-        const auto id = addNoteState (song, clipState, values);
-        return id.isValid() ? NoteRef { clip, id } : NoteRef {};
+        values.channel = keepChannel (values.channel);
+        group->after = withNoteAdded (group->after, values);
+        return { clip, values.id };
     }
 } // namespace
 
 NoteRef addNote (Song& song, ClipID clip, int pitch, BeatPosition start, BeatDuration length, int velocity, int channel)
 {
+    NotesEdit edit (song);
     Rooms rooms (song);
-    return addNoteTo (song, rooms, clip, {}, pitch, start, length, { .velocity = velocity, .channel = channel });
+    const auto note = addNoteTo (song, edit, rooms, clip, {}, pitch, start, length, { .velocity = velocity, .channel = channel });
+    edit.commit();
+    return note;
 }
 
-bool hasNumber (ControlKind kind) noexcept
+std::vector<NoteRef> addNotes (Song& song, const std::vector<NoteData>& notes)
 {
-    return kind == ControlKind::controller || kind == ControlKind::aftertouch;
+    // As addNote() adds each, one after another: where each clip can grow to is the same for all of them (Rooms), and each
+    // alias group's value is read once and set once.
+    NotesEdit edit (song);
+    Rooms rooms (song);
+    std::vector<NoteRef> added;
+    added.reserve (notes.size());
+
+    for (const auto& note : notes)
+        added.push_back (addNoteTo (song, edit, rooms, note.clip, {}, note.pitch, note.start, note.length, getValuesKept (note)));
+
+    edit.commit();
+    return added;
 }
 
-int getHighestValue (ControlKind kind) noexcept
+void growClipForNote (Song& song, ClipID clip, BeatPosition start, BeatDuration length)
 {
-    return kind == ControlKind::pitchWheel ? 16383 : 127;
+    const auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid())
+        return;
+
+    // Where addNoteTo() puts the note, and what it grows the clip to hold.
+    Rooms rooms (song);
+    growToHold (song, rooms, clipState, std::max (start, getClipRange (clipState).getStart()) + std::max (length, getMinimumNoteLength()));
 }
 
 juce::String getControllerName (int number)
@@ -758,37 +884,50 @@ std::vector<ControlPoint> makeControlRamp (const ControlLane& lane, BeatPosition
     return points;
 }
 
-std::optional<ControlKind> findControlKind (const juce::ValueTree& control)
-{
-    return ControlElement (control).getKind();
-}
-
 namespace
 {
-    // A value as its clip would hold it, its beat among the clip's notes, in no clip yet.
-    ControlElement makeControlState (const ControlValue& each, BeatPosition contentStart)
+    // A value as its clip would hold it, its beat among the clip's notes.
+    ControlValues makeControlValues (const ControlValue& each, BeatPosition contentStart)
     {
-        return makeControl ({ each.kind, each.number, (each.beat - contentStart).inBeats(), each.value, each.channel });
+        return keepWithinKind ({ each.kind, each.number, (each.beat - contentStart).inBeats(), each.value, each.channel });
     }
 
-    // Whether a clip's element is a value of a controller on a channel (by its number, if its kind has one).
-    bool isControlOf (const ControlElement& child, ControlKind kind, int number, int channel)
+    // Whether a clip's value is one of a controller on a channel (by its number, if its kind has one).
+    bool isControlOf (const ControlValues& control, ControlKind kind, int number, int channel)
     {
-        return child.exists() && child.getKind() == kind && (! hasNumber (kind) || child.getNumber() == number)
-               && child.getChannel() == juce::jlimit (1, 16, channel);
+        return control.kind == kind && (! hasNumber (kind) || control.number == number) && control.channel == juce::jlimit (1, 16, channel);
+    }
+
+    // A clip's group given a value as copies of its clips' elements, each put in its place, the same clip by its ID, in one
+    // removal and one insertion: what listens to the song hears a recording's thousands of values (a bend's sweep) as one
+    // change, and Undo takes them back with it. The original is never filled: the removal's undo brings it back as it was.
+    void setAsCopies (Song& song, const juce::ValueTree& clipState, const ClipNotes& value)
+    {
+        auto* undo = getHistory (song);
+
+        for (const auto& alias : getAliasStates (song, clipState))
+        {
+            auto filled = alias.createCopy();
+            writeClipNotes (value, filled, nullptr);
+            auto parent = alias.getParent();
+            const auto index = parent.indexOf (alias);
+            parent.removeChild (index, undo);
+            parent.addChild (filled, index, undo);
+        }
     }
 } // namespace
 
 void addControl (Song& song, ClipID clip, BeatPosition beat, ControlKind kind, int number, int value, int channel)
 {
     const auto clipState = findMidiClipState (song, clip);
+    NotesEdit edit (song);
 
-    if (! clipState.isValid())
-        return;
-
-    for (auto alias : getAliasStates (song, clipState))
-        appendControl (alias, makeControlState ({ beat, kind, number, value, channel }, getContentStart (clipState)),
-                       &song.getUndoManager());
+    if (auto* group = edit.find (clipState))
+    {
+        group->after =
+            withControlsAdded (group->after, { makeControlValues ({ beat, kind, number, value, channel }, getContentStart (clipState)) });
+        edit.commit();
+    }
 }
 
 void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& values)
@@ -799,73 +938,58 @@ void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& valu
         return;
 
     const auto contentStart = getContentStart (clipState);
-    auto* undo = &song.getUndoManager();
+    std::vector<ControlValues> added;
+    added.reserve (values.size());
 
-    // Each alias filled as a copy, without the history, and put in its place, the same clip by its ID, in one removal and one
-    // insertion: what listens to the song hears a recording's thousands of values (a bend's sweep) as one change, and Undo
-    // takes them back with it. The original is never filled: the removal's undo brings it back as it was.
-    for (auto alias : getAliasStates (song, clipState))
-    {
-        auto filled = alias.createCopy();
+    for (const auto& each : values)
+        added.push_back (makeControlValues (each, contentStart));
 
-        for (const auto& each : values)
-            appendControl (filled, makeControlState (each, contentStart), nullptr);
-
-        auto parent = alias.getParent();
-        const auto index = parent.indexOf (alias);
-        parent.removeChild (index, undo);
-        parent.addChild (filled, index, undo);
-    }
+    setAsCopies (song, clipState, withControlsAdded (getClipNotesValue (song, clip), added));
 }
 
 void removeControls (Song& song, ClipID clip, ControlKind kind, int number, int channel, BeatPosition from, BeatPosition to)
 {
     const auto clipState = findMidiClipState (song, clip);
+    NotesEdit edit (song);
+    auto* group = edit.find (clipState);
 
-    if (! clipState.isValid())
+    if (group == nullptr)
         return;
 
     constexpr auto near = 1.0e-9; // in beats
     const auto first = toClipBeat (clipState, from).inBeats() - near, last = toClipBeat (clipState, to).inBeats() + near;
 
-    for (auto alias : getAliasStates (song, clipState))
-    {
-        for (auto i = alias.getNumChildren(); --i >= 0;)
-        {
-            const auto child = getControlAt (alias, i);
-
-            if (! isControlOf (child, kind, number, channel))
-                continue;
-
-            if (const auto beat = child.getBeat(); beat >= first && beat <= last)
-                alias.removeChild (i, &song.getUndoManager());
-        }
-    }
+    group->after =
+        withoutControls (group->after, [&] (size_t, const ControlValues& control)
+                         { return isControlOf (control, kind, number, channel) && control.beat >= first && control.beat <= last; });
+    edit.commit();
 }
 
 void removeControl (Song& song, ClipID clip, const ControlValue& control)
 {
     const auto clipState = findMidiClipState (song, clip);
+    NotesEdit edit (song);
+    auto* group = edit.find (clipState);
 
-    if (! clipState.isValid())
+    if (group == nullptr)
         return;
 
     constexpr auto near = 1.0e-9; // in beats
     const auto beat = toClipBeat (clipState, control.beat).inBeats();
+    std::optional<size_t> found; // the last that matches
 
-    for (auto alias : getAliasStates (song, clipState))
+    forEachControl (group->after,
+                    [&] (size_t place, const ControlValues& each)
+                    {
+                        if (isControlOf (each, control.kind, control.number, control.channel) && std::abs (each.beat - beat) <= near
+                            && each.value == control.value)
+                            found = place;
+                    });
+
+    if (found.has_value())
     {
-        for (auto i = alias.getNumChildren(); --i >= 0;)
-        {
-            const auto child = getControlAt (alias, i);
-
-            if (isControlOf (child, control.kind, control.number, control.channel) && std::abs (child.getBeat() - beat) <= near
-                && child.getValue() == control.value)
-            {
-                alias.removeChild (i, &song.getUndoManager());
-                break;
-            }
-        }
+        group->after = withoutControls (group->after, [&found] (size_t place, const ControlValues&) { return place == *found; });
+        edit.commit();
     }
 }
 
@@ -879,12 +1003,11 @@ std::vector<ControlValue> getClipControls (const Song& song, ClipID clip)
 
     const auto contentStart = getContentStart (clipState);
 
-    forEachControl (clipState,
-                    [&] (int, const ControlElement& control)
+    forEachControl (getClipNotesValue (song, clip),
+                    [&] (size_t, const ControlValues& control)
                     {
-                        if (const auto kind = control.getKind(); kind.has_value())
-                            values.push_back ({ BeatPosition::fromBeats (contentStart.inBeats() + control.getBeat()), *kind,
-                                                control.getNumber(), control.getValue(), control.getChannel() });
+                        values.push_back ({ BeatPosition::fromBeats (contentStart.inBeats() + control.beat), control.kind, control.number,
+                                            control.value, control.channel });
                     });
 
     return values;
@@ -896,17 +1019,16 @@ std::optional<int> findControlValueBefore (const Song& song, ClipID clip, Contro
     const auto contentStart = getContentStart (clipState).inBeats();
     std::optional<std::pair<double, int>> last;
 
-    forEachControl (clipState,
-                    [&] (int, const ControlElement& control)
+    forEachControl (getClipNotesValue (song, clip),
+                    [&] (size_t, const ControlValues& control)
                     {
-                        if (control.getKind() != kind || (hasNumber (kind) && control.getNumber() != number)
-                            || control.getChannel() != channel)
+                        if (control.kind != kind || (hasNumber (kind) && control.number != number) || control.channel != channel)
                             return;
 
-                        const auto at = contentStart + control.getBeat();
+                        const auto at = contentStart + control.beat;
 
                         if (at <= beat.inBeats() + 1.0e-9 && (! last.has_value() || at >= last->first))
-                            last = std::pair (at, control.getValue());
+                            last = std::pair (at, control.value);
                     });
 
     return last.has_value() ? std::optional (last->second) : std::nullopt;
@@ -914,95 +1036,30 @@ std::optional<int> findControlValueBefore (const Song& song, ClipID clip, Contro
 
 void scaleClipContent (Song& song, const std::vector<ClipID>& clips, double factor)
 {
-    auto* undo = &song.getUndoManager();
-    std::set<ClipID> scaled; // each clip's element once, an alias's too
+    NotesEdit edit (song);
+    std::set<NotesEdit::Group*> scaled; // each alias group's notes once
 
     for (const auto clip : clips)
     {
-        const auto clipState = findMidiClipState (song, clip);
+        auto* group = edit.find (clip);
 
-        if (! clipState.isValid())
+        if (group == nullptr || ! scaled.insert (group).second)
             continue;
 
-        for (const auto& alias : getAliasStates (song, clipState))
-        {
-            if (! scaled.insert (getClipID (alias)).second)
-                continue;
-
-            for (auto child : alias)
+        group->after = withEachChanged (
+            group->after,
+            [factor] (NoteValues& note)
             {
-                if (child.hasType (schema::NOTE))
-                {
-                    child.setProperty (schema::noteStart, (double) child[schema::noteStart] * factor, undo);
-                    child.setProperty (schema::noteLength, (double) child[schema::noteLength] * factor, undo);
-                }
-                else if (child.hasType (schema::CONTROL))
-                {
-                    child.setProperty (schema::controlBeat, (double) child[schema::controlBeat] * factor, undo);
-                }
-            }
-        }
+                note.start = BeatPosition::fromBeats (note.start.inBeats() * factor);
+                note.length = BeatDuration::fromBeats (note.length.inBeats() * factor);
+            },
+            [factor] (ControlValues& control) { control.beat *= factor; });
     }
+
+    edit.commit();
 }
 
 //==============================================================================
-namespace
-{
-    bool isClipEvent (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::NOTE) || element.hasType (schema::CONTROL);
-    }
-
-    // A clip's notes and controllers' values, each named as ApplySong names an element's children: a note by its type and
-    // ID, a controller's value (which has no key) by its type and its place among those of its type.
-    struct NamedEvent
-    {
-        juce::ValueTree tree;
-        juce::String name;
-    };
-
-    std::vector<NamedEvent> getNamedEvents (const juce::ValueTree& clipState)
-    {
-        std::vector<NamedEvent> events;
-        std::map<juce::String, int> numUnkeyed;
-        std::set<juce::String> names;
-
-        for (const auto& child : clipState)
-        {
-            if (! isClipEvent (child))
-                continue;
-
-            const auto type = child.getType().toString();
-            const auto key = schema::getElementKey (child);
-            auto name = type + ":" + key;
-
-            if (key.isEmpty() || names.count (name) > 0)
-                name = type + "#" + juce::String (numUnkeyed[type]++);
-
-            names.insert (name);
-            events.push_back ({ child, name });
-        }
-
-        return events;
-    }
-
-    // An event's values made the other's: those it has that the other hasn't go, the others take the other's.
-    void makeEventLike (juce::ValueTree event, const juce::ValueTree& other, juce::UndoManager* undo)
-    {
-        for (int i = event.getNumProperties(); --i >= 0;)
-            if (const auto name = event.getPropertyName (i); ! other.hasProperty (name))
-                event.removeProperty (name, undo);
-
-        for (int i = 0; i < other.getNumProperties(); ++i)
-        {
-            const auto name = other.getPropertyName (i);
-
-            if (const auto* value = event.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
-                event.setProperty (name, other[name], undo);
-        }
-    }
-} // namespace
-
 void makeClipNotesLike (Song& song, ClipID clip, const juce::ValueTree& otherClip)
 {
     auto clipState = findClipState (song, clip);
@@ -1010,68 +1067,32 @@ void makeClipNotesLike (Song& song, ClipID clip, const juce::ValueTree& otherCli
     if (! clipState.isValid())
         return;
 
-    auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-
-    // Those it has that the other hasn't go; then, in the other's order, each it has made like the other's and moved to its
-    // place, and each it hasn't added there.
-    const auto wanted = getNamedEvents (otherClip);
-    std::set<juce::String> wantedNames;
-
-    for (const auto& event : wanted)
-        wantedNames.insert (event.name);
-
-    std::map<juce::String, juce::ValueTree> kept;
-
-    for (const auto& event : getNamedEvents (clipState))
-    {
-        if (wantedNames.count (event.name) == 0)
-            clipState.removeChild (event.tree, undo);
-        else
-            kept.emplace (event.name, event.tree);
-    }
-
-    int place = 0;
-
-    for (const auto& event : wanted)
-    {
-        while (place < clipState.getNumChildren() && ! isClipEvent (clipState.getChild (place)))
-            ++place;
-
-        if (const auto found = kept.find (event.name); found != kept.end())
-        {
-            makeEventLike (found->second, event.tree, undo);
-
-            if (const auto index = clipState.indexOf (found->second); index != place)
-                clipState.moveChild (index, place, undo);
-        }
-        else
-        {
-            clipState.addChild (event.tree.createCopy(), place, undo);
-        }
-
-        ++place;
-    }
+    // Those it has that the other hasn't go, those both have (a note by its ID, a value by its place) take the other's values,
+    // and those it hasn't come; then each in the other's order of events, which the value doesn't hold.
+    auto* undo = getHistory (song);
+    ClipPlaces places;
+    const auto read = readClipNotes (clipState, places);
+    writeClipNotes (read, places, readClipNotes (otherClip), clipState, undo);
+    followOrderOf (clipState, otherClip, undo);
 }
 
 bool setNoteValue (Song& song, const NoteRef& ref, const juce::Identifier& property, const juce::var& value)
 {
-    const auto clipState = findClipState (song, ref.clip);
-    auto note = clipState.isValid() ? song.getIndex().findNote (clipState, ref.note.getRaw()) : juce::ValueTree();
+    NotesEdit edit (song);
+    auto* group = edit.find (findClipState (song, ref.clip));
+    const auto* note = group != nullptr ? group->after.find (ref.note) : nullptr;
 
-    if (! note.isValid())
+    if (note == nullptr)
         return false;
 
-    auto* undo = &song.getUndoManager();
+    // A value of a note's (never its ID, which names it): a property of another name has no place in the note's value.
+    auto changed = *note;
 
-    if (value.isVoid())
-        note.removeProperty (property, undo);
-    else
-        note.setProperty (property, value, undo);
+    if (property == schema::noteID || ! setNoteProperty (changed, property, value))
+        return false;
 
-    for (auto alias : getAliasStates (song, clipState))
-        if (alias != clipState)
-            giveClipEvents (clipState, alias, undo);
-
+    group->after = withNotesChanged (group->after, { ref.note }, [&changed] (NoteValues& each) { each = changed; });
+    edit.commit();
     return true;
 }
 
@@ -1082,19 +1103,21 @@ void removeClipNotesAlone (Song& song, ClipID clip, const std::vector<NoteID>& n
     if (! clipState.isValid())
         return;
 
-    for (const auto id : notes)
-        if (const auto note = song.getIndex().findNote (clipState, id.getRaw()); note.isValid())
-            clipState.removeChild (note, nullptr);
+    const std::set<NoteID> gone (notes.begin(), notes.end());
+    ClipPlaces places;
+    const auto read = readClipNotes (clipState, places);
+    writeClipNotes (read, places, withoutNotes (read, [&gone] (const NoteValues& note) { return gone.count (note.id) > 0; }), clipState,
+                    nullptr);
 }
 
 //==============================================================================
 namespace
 {
-    // Whether a clip's element is a value of a lane: of its kind and on its channel, and a controller's of its number.
-    bool isOfLane (const ControlElement& child, const ControlLane& lane)
+    // Whether a clip's value is a value of a lane: of its kind and on its channel, and a controller's of its number.
+    bool isOfLane (const ControlValues& control, const ControlLane& lane)
     {
-        return child.exists() && child.getKind() == lane.kind && (lane.kind != ControlKind::controller || child.getNumber() == lane.number)
-               && child.getChannel() == lane.channel;
+        return control.kind == lane.kind && (lane.kind != ControlKind::controller || control.number == lane.number)
+               && control.channel == lane.channel;
     }
 
     // What of a clip's values plays, in song beats, as model/playback/internal/SongPlayer.h reads them: a value's beat is
@@ -1103,7 +1126,7 @@ namespace
     {
         double contentStart = 0.0, start = 0.0, end = 0.0;
 
-        double getBeat (const ControlElement& control) const { return contentStart + control.getBeat(); }
+        double getBeat (const ControlValues& control) const { return contentStart + control.beat; }
         bool plays (double beat) const { return beat >= start && beat < end; }
     };
 
@@ -1115,29 +1138,27 @@ namespace
 
     constexpr double nearBeats = 1.0e-9; // a range's ends take what is this close to them
 
-    // A lane's values that play from one song beat to another, both included, in the clip's element or an alias's (whose
-    // values are where the clip's are among its notes), found in one walk through its elements: their places among them, in
-    // order; and the value of the lane's that holds at the range's start, the latest that plays before it (the later of two
-    // at a beat).
+    // A lane's values that play from one song beat to another, both included, in a clip's value: their places among its
+    // values, in order; and the value of the lane's that holds at the range's start, the latest that plays before it (the
+    // later of two at a beat).
     struct LaneValuesIn
     {
-        std::vector<int> places;
+        std::vector<size_t> places;
         std::optional<int> before;
     };
 
-    LaneValuesIn findLaneValues (const juce::ValueTree& element, const ControlLane& lane, const PlayedPart& part, double from, double to)
+    LaneValuesIn findLaneValues (const ClipNotes& clip, const ControlLane& lane, const PlayedPart& part, double from, double to)
     {
         LaneValuesIn found;
         auto beforeBeat = 0.0;
-        SongIndex::countVisited ((std::uint64_t) element.getNumChildren()); // a walk of the clip's, for the speed gates
 
-        forEachControl (element,
-                        [&] (int place, const ControlElement& child)
+        forEachControl (clip,
+                        [&] (size_t place, const ControlValues& control)
                         {
-                            if (! isOfLane (child, lane))
+                            if (! isOfLane (control, lane))
                                 return;
 
-                            const auto beat = part.getBeat (child);
+                            const auto beat = part.getBeat (control);
 
                             if (! part.plays (beat))
                                 return;
@@ -1148,7 +1169,7 @@ namespace
                             }
                             else if (beat < from && (! found.before.has_value() || beat >= beforeBeat))
                             {
-                                found.before = child.getValue();
+                                found.before = control.value;
                                 beforeBeat = beat;
                             }
                         });
@@ -1162,88 +1183,82 @@ namespace
     // removes and adds a few, in place, the clip's element staying the one it was.
     constexpr size_t mostChangesInPlace = 256;
 
-    // Removes the clip's elements at these places (in order) and adds these, as one change of the clip where they are many.
-    void changeLaneValues (Song& song, juce::ValueTree element, const std::vector<int>& removed, const std::vector<ControlElement>& added)
+    // Removes the clip's values at these places (in order) and adds these, as one change of each clip of its group where they
+    // are many (setAsCopies()), in place where they are few.
+    void changeLaneValues (Song& song, NotesEdit& edit, NotesEdit::Group& group, const std::vector<size_t>& removed,
+                           const std::vector<ControlValues>& added)
     {
         if (removed.empty() && added.empty())
             return;
 
-        auto* undo = &song.getUndoManager();
-        auto parent = element.getParent();
+        auto next = group.after;
 
-        if (removed.size() + added.size() <= mostChangesInPlace || ! parent.isValid())
+        if (! removed.empty())
         {
-            for (auto place = removed.rbegin(); place != removed.rend(); ++place)
-                element.removeChild (*place, undo);
+            auto gone = removed.begin();
 
-            for (const auto& each : added)
-                appendControl (element, each, undo);
+            next = withoutControls (next,
+                                    [&] (size_t place, const ControlValues&)
+                                    {
+                                        if (gone == removed.end() || *gone != place)
+                                            return false;
 
+                                        ++gone;
+                                        return true;
+                                    });
+        }
+
+        next = withControlsAdded (next, added);
+
+        if (removed.size() + added.size() <= mostChangesInPlace || ! group.read.getParent().isValid())
+        {
+            group.after = next;
+            edit.commit();
             return;
         }
 
-        // The copy, without the history, the same clip by its ID; the original stays as it was, for the removal's undo.
-        juce::ValueTree filled (element.getType());
-        filled.copyPropertiesFrom (element, nullptr);
-        auto next = removed.begin();
-        SongIndex::countVisited ((std::uint64_t) element.getNumChildren());
-
-        for (int i = 0; i < element.getNumChildren(); ++i)
-        {
-            if (next != removed.end() && *next == i)
-                ++next;
-            else
-                filled.appendChild (element.getChild (i).createCopy(), nullptr);
-        }
-
-        for (const auto& each : added)
-            appendControl (filled, each, nullptr);
-
-        const auto index = parent.indexOf (element);
-        parent.removeChild (index, undo);
-        parent.addChild (filled, index, undo);
+        SongIndex::countVisited ((std::uint64_t) group.read.getNumChildren());
+        setAsCopies (song, group.read, next);
     }
 
-    // Makes the lane's values at these places in a clip's element the values wanted (in time order, in song beats): those
+    // Makes the lane's values at these places in a clip's value the values wanted (in time order, in song beats): those
     // already there as wanted stay where they are, and only the others go or come.
-    void putLaneValues (Song& song, juce::ValueTree element, const std::vector<int>& places, const std::vector<ControlPoint>& wanted,
-                        const ControlLane& lane, double contentStart)
+    void putLaneValues (Song& song, NotesEdit& edit, NotesEdit::Group& group, const std::vector<size_t>& places,
+                        const std::vector<ControlPoint>& wanted, const ControlLane& lane, double contentStart)
     {
         // What is there, by its beat as the clip holds it.
         std::vector<std::pair<double, size_t>> there;
 
         for (size_t i = 0; i < places.size(); ++i)
-            there.emplace_back (getControlAt (element, places[i]).getBeat(), i);
+            there.emplace_back (group.after.controls[places[i]].beat, i);
 
         std::sort (there.begin(), there.end());
         std::vector<bool> stays (places.size(), false);
-        std::vector<ControlElement> added;
+        std::vector<ControlValues> added;
 
         for (const auto& each : wanted)
         {
-            const auto state =
-                makeControlState ({ each.beat, lane.kind, lane.number, each.value, lane.channel }, BeatPosition::fromBeats (contentStart));
-            const auto beat = state.getBeat();
-            const auto value = state.getValue();
-            auto found = std::lower_bound (there.begin(), there.end(), std::pair { beat - nearBeats, size_t {} });
+            const auto control =
+                makeControlValues ({ each.beat, lane.kind, lane.number, each.value, lane.channel }, BeatPosition::fromBeats (contentStart));
+            auto found = std::lower_bound (there.begin(), there.end(), std::pair { control.beat - nearBeats, size_t {} });
 
-            for (; found != there.end() && found->first <= beat + nearBeats; ++found)
-                if (! stays[found->second] && getControlAt (element, places[found->second]).getValue() == value)
+            for (; found != there.end() && found->first <= control.beat + nearBeats; ++found)
+                if (! stays[found->second] && group.after.controls[places[found->second]].value == control.value)
                     break;
 
-            if (found != there.end() && found->first <= beat + nearBeats)
+            if (found != there.end() && found->first <= control.beat + nearBeats)
                 stays[found->second] = true;
             else
-                added.push_back (state);
+                added.push_back (control);
         }
 
-        std::vector<int> removed;
+        std::vector<size_t> removed;
 
         for (size_t i = 0; i < places.size(); ++i)
             if (! stays[i])
                 removed.push_back (places[i]);
 
-        changeLaneValues (song, element, removed, added);
+        changeLaneValues (song, edit, group, removed, added);
     }
 } // namespace
 
@@ -1253,16 +1268,14 @@ std::vector<ControlLane> getControlLanes (const Song& song, const std::vector<Cl
 
     for (const auto clip : clips)
     {
-        const auto clipState = findMidiClipState (song, clip);
-        const auto part = getPlayedPart (clipState);
-        SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren());
+        const auto part = getPlayedPart (findMidiClipState (song, clip));
+        SongIndex::countVisited ((std::uint64_t) findMidiClipState (song, clip).getNumChildren());
 
-        forEachControl (clipState,
-                        [&] (int, const ControlElement& child)
+        forEachControl (getClipNotesValue (song, clip),
+                        [&] (size_t, const ControlValues& control)
                         {
-                            if (part.plays (part.getBeat (child)))
-                                if (const auto kind = child.getKind())
-                                    lanes.insert (makeControlLane (*kind, child.getNumber(), child.getChannel()));
+                            if (part.plays (part.getBeat (control)))
+                                lanes.insert (makeControlLane (control.kind, control.number, control.channel));
                         });
     }
 
@@ -1275,19 +1288,18 @@ std::vector<ControlPoint> getControlValues (const Song& song, const std::vector<
 
     for (const auto clip : clips)
     {
-        const auto clipState = findMidiClipState (song, clip);
-        const auto part = getPlayedPart (clipState);
+        const auto part = getPlayedPart (findMidiClipState (song, clip));
+        SongIndex::countVisited ((std::uint64_t) findMidiClipState (song, clip).getNumChildren());
         const auto first = points.size();
-        SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren());
 
-        forEachControl (clipState,
-                        [&] (int, const ControlElement& child)
+        forEachControl (getClipNotesValue (song, clip),
+                        [&] (size_t, const ControlValues& control)
                         {
-                            if (isOfLane (child, lane))
-                                if (const auto beat = part.getBeat (child); part.plays (beat))
+                            if (isOfLane (control, lane))
+                                if (const auto beat = part.getBeat (control); part.plays (beat))
                                     points.push_back ({ clip, BeatPosition::fromBeats (beat),
-                                                        juce::jlimit (0, lane.getHighestValue(), child.getValue()),
-                                                        juce::jlimit (0, 127, child.getNumber()) });
+                                                        juce::jlimit (0, lane.getHighestValue(), control.value),
+                                                        juce::jlimit (0, 127, control.number) });
                         });
 
         std::stable_sort (points.begin() + (std::ptrdiff_t) first, points.end(),
@@ -1334,7 +1346,9 @@ void setControlValues (Song& song, ClipID clip, const ControlLane& lane, BeatRan
 
     // A value that repeats the one that holds before it is left out. What is there already as it would be put stays as it
     // is, so that a click on the value there changes nothing, and a step of a drag changes only what it draws differently.
-    const auto found = findLaneValues (clipState, lane, part, from, to);
+    NotesEdit edit (song);
+    auto& group = *edit.find (clipState);
+    const auto found = findLaneValues (group.after, lane, part, from, to);
     auto previous = found.before;
     std::vector<ControlPoint> wanted;
 
@@ -1347,26 +1361,26 @@ void setControlValues (Song& song, ClipID clip, const ControlLane& lane, BeatRan
         wanted.push_back (each);
     }
 
-    for (const auto& alias : getAliasStates (song, clipState))
-        putLaneValues (song, alias, alias == clipState ? found.places : findLaneValues (alias, lane, part, from, to).places, wanted, lane,
-                       part.contentStart);
+    putLaneValues (song, edit, group, found.places, wanted, lane, part.contentStart);
 }
 
 void deleteControlValues (Song& song, const std::vector<ClipID>& clips, const ControlLane& lane, BeatRange range)
 {
+    // Clip by clip, each with what it plays: one of a group named after another takes away what it plays of what is left.
     for (const auto clip : clips)
     {
         const auto clipState = findMidiClipState (song, clip);
+        NotesEdit edit (song);
+        auto* group = edit.find (clipState);
 
-        if (! clipState.isValid())
+        if (group == nullptr)
             continue;
 
         const auto part = getPlayedPart (clipState);
-
-        for (const auto& alias : getAliasStates (song, clipState))
-            changeLaneValues (
-                song, alias,
-                findLaneValues (alias, lane, part, std::max (range.getStart().inBeats(), part.start), range.getEnd().inBeats()).places, {});
+        changeLaneValues (
+            song, edit, *group,
+            findLaneValues (group->after, lane, part, std::max (range.getStart().inBeats(), part.start), range.getEnd().inBeats()).places,
+            {});
     }
 }
 
@@ -1379,91 +1393,153 @@ void deleteAllControlValues (Song& song, const std::vector<ClipID>& clips, const
 
 namespace
 {
-    // moveNote(), setNoteLength() and placeNote(), with where the clips can grow to found once for the edit (Rooms).
-    void moveNoteIn (Song& song, Rooms& rooms, const NoteRef& ref, BeatPosition start, int pitch)
+    // A note of the edit's group placed: at a start wanted (a song beat through the first clip it was named through), a pitch
+    // and a length, the start kept where each clip it was named through plays it (keepPlayed()), each of those clips grown
+    // to hold it (growToHold()). Of a note named through one clip, the start found as that clip says, and no other changed.
+    void placeNoteIn (Song& song, NotesEdit& edit, Rooms& rooms, const std::vector<ClipID>& clips, NoteID id, BeatPosition wanted,
+                      int pitch, BeatDuration length)
     {
-        const auto clipState = findMidiClipState (song, ref.clip);
-        const auto note = getNoteData (song, ref);
+        std::vector<juce::ValueTree> named;
 
-        if (! note.has_value())
+        for (const auto clip : clips)
+            if (const auto clipState = findMidiClipState (song, clip); clipState.isValid())
+                named.push_back (clipState);
+
+        auto* group = named.empty() ? nullptr : edit.find (named.front());
+        const auto* note = group != nullptr ? group->after.find (id) : nullptr;
+
+        if (note == nullptr)
             return;
 
-        start = keepPlayed (rooms, clipState, note->start, start);
-        growToHold (song, rooms, clipState, start + note->length);
-        const auto clipBeat = toClipBeat (clipState, start);
-        changeNote (song, ref,
-                    [clipBeat, pitch] (NoteEdit& n)
-                    {
-                        n.setStart (clipBeat);
-                        n.setPitch (clampPitch (pitch));
-                    });
+        const auto startNow = note->start; // among the clip's notes
+        const auto first = keepPlayed (rooms, named.front(), toSongBeat (named.front(), startNow), wanted);
+        auto start = toClipBeat (named.front(), first);
+        auto movedByAnother = false;
+
+        for (size_t i = 1; i < named.size(); ++i)
+        {
+            const auto inThis = toSongBeat (named[i], start);
+
+            if (const auto kept = keepPlayed (rooms, named[i], toSongBeat (named[i], startNow), inThis); kept != inThis)
+            {
+                start = toClipBeat (named[i], kept);
+                movedByAnother = true;
+            }
+        }
+
+        for (size_t i = 0; i < named.size(); ++i)
+            growToHold (song, rooms, named[i], (i == 0 && ! movedByAnother ? first : toSongBeat (named[i], start)) + length);
+
+        group->after = withNotesChanged (group->after, { id },
+                                         [start, pitch, length] (NoteValues& each)
+                                         {
+                                             each.start = start;
+                                             each.pitch = clampPitch (pitch);
+                                             each.length = length;
+                                         });
     }
 
-    void setNoteLengthIn (Song& song, Rooms& rooms, const NoteRef& ref, BeatDuration length)
+    // A note of the edit's group made a length (at least getMinimumNoteLength()), each clip it was named through grown to hold
+    // it.
+    void setNoteLengthIn (Song& song, NotesEdit& edit, Rooms& rooms, const std::vector<ClipID>& clips, NoteID id, BeatDuration length)
     {
-        const auto note = getNoteData (song, ref);
+        auto* group = clips.empty() ? nullptr : edit.find (clips.front());
+        const auto* note = group != nullptr ? group->after.find (id) : nullptr;
 
-        if (! note.has_value())
+        if (note == nullptr)
             return;
 
         length = std::max (length, getMinimumNoteLength());
-        growToHold (song, rooms, findMidiClipState (song, ref.clip), note->start + length);
-        changeNote (song, ref, [length] (NoteEdit& n) { n.setLength (length); });
+
+        for (const auto clip : clips)
+            if (const auto clipState = findMidiClipState (song, clip); clipState.isValid())
+                growToHold (song, rooms, clipState, toSongBeat (clipState, note->start) + length);
+
+        group->after = withNotesChanged (group->after, { id }, [length] (NoteValues& each) { each.length = length; });
     }
 
-    void placeNoteIn (Song& song, Rooms& rooms, const NoteRef& ref, BeatPosition start, int pitch, BeatDuration length)
+    // A note's values as it is now in the edit: none for a note that is gone.
+    std::optional<NoteValues> findInEdit (NotesEdit& edit, const NoteRef& ref)
     {
-        const auto clipState = findMidiClipState (song, ref.clip);
-        const auto note = getNoteData (song, ref);
+        if (auto* group = edit.find (ref.clip))
+            if (const auto* note = group->after.find (ref.note))
+                return *note;
 
-        if (! note.has_value())
-            return;
+        return std::nullopt;
+    }
 
-        start = keepPlayed (rooms, clipState, note->start, start);
-        length = std::max (length, getMinimumNoteLength());
-        growToHold (song, rooms, clipState, start + length);
-        const auto clipBeat = toClipBeat (clipState, start);
-        changeNote (song, ref,
-                    [clipBeat, pitch, length] (NoteEdit& n)
-                    {
-                        n.setStart (clipBeat);
-                        n.setPitch (clampPitch (pitch));
-                        n.setLength (length);
-                    });
+    // Each note named, each once, changed by change (NoteValues&) in its group's value.
+    template <typename Change>
+    void changeEach (NotesEdit& edit, const std::vector<NoteRef>& notes, Change&& change)
+    {
+        for (const auto& ref : notes)
+            if (auto* group = edit.find (ref.clip))
+                group->after = withNotesChanged (group->after, { ref.note }, change);
     }
 } // namespace
 
 void moveNote (Song& song, const NoteRef& ref, BeatPosition start, int pitch)
 {
+    NotesEdit edit (song);
     Rooms rooms (song);
-    moveNoteIn (song, rooms, ref, start, pitch);
+
+    if (const auto note = findInEdit (edit, ref))
+        placeNoteIn (song, edit, rooms, { ref.clip }, ref.note, start, pitch, note->length);
+
+    edit.commit();
 }
 
 void setNoteLength (Song& song, const NoteRef& ref, BeatDuration length)
 {
+    NotesEdit edit (song);
     Rooms rooms (song);
-    setNoteLengthIn (song, rooms, ref, length);
+    setNoteLengthIn (song, edit, rooms, { ref.clip }, ref.note, length);
+    edit.commit();
 }
 
 void placeNote (Song& song, const NoteRef& ref, BeatPosition start, int pitch, BeatDuration length)
 {
+    NotesEdit edit (song);
     Rooms rooms (song);
-    placeNoteIn (song, rooms, ref, start, pitch, length);
+    placeNoteIn (song, edit, rooms, { ref.clip }, ref.note, start, pitch, std::max (length, getMinimumNoteLength()));
+    edit.commit();
 }
 
 void placeNotes (Song& song, const std::vector<NoteData>& notes)
 {
+    // Each note once, where it was first named to go, kept where every clip it was named through plays it. One name given
+    // twice goes where it was given last (kept where its clip plays it as counted from where it was before the call).
+    NotesEdit edit (song);
     Rooms rooms (song);
+    const auto named = nameEachOnce (song, getRefs (notes));
+    std::map<NoteRef, const NoteData*> wanted;
 
     for (const auto& note : notes)
-        placeNoteIn (song, rooms, note.getRef(), note.start, note.pitch, note.length);
+        wanted.insert_or_assign (note.getRef(), &note);
+
+    for (const auto& note : named)
+    {
+        const auto& to = *wanted.at (note.ref);
+        placeNoteIn (song, edit, rooms, note.clips, note.ref.note, to.start, to.pitch, std::max (to.length, getMinimumNoteLength()));
+    }
+
+    edit.commit();
 }
 
 void deleteNotes (Song& song, const std::vector<NoteRef>& notes)
 {
     // Each by its ID, all found before any goes; a note's copies in its clip's aliases go with it.
+    NotesEdit edit (song);
+    std::map<NotesEdit::Group*, std::set<NoteID>> gone;
+
     for (const auto& ref : withoutAliasCopies (song, notes))
-        removeNoteState (song, ref);
+        if (auto* group = edit.find (ref.clip))
+            gone[group].insert (ref.note);
+
+    for (auto& [group, ids] : gone)
+        group->after = withoutNotes (group->after, [&ids = ids] (const NoteValues& note) { return ids.count (note.id) > 0; });
+
+    edit.commit();
 }
 
 void transposeNotes (Song& song, const std::vector<NoteRef>& notes, int semitones)
@@ -1477,96 +1553,124 @@ void transposeNotes (Song& song, const std::vector<NoteRef>& notes, int semitone
     if (semitones == 0)
         return;
 
-    for (const auto& note : unique)
-    {
-        const auto pitch = note.pitch + semitones;
-        changeNote (song, { note.clip, note.id }, [pitch] (NoteEdit& n) { n.setPitch (pitch); });
-    }
+    NotesEdit edit (song);
+    changeEach (edit, getRefs (unique), [semitones] (NoteValues& note) { note.pitch += semitones; });
+    edit.commit();
 }
 
 void nudgeNotes (Song& song, const std::vector<NoteRef>& notes, BeatDuration amount)
 {
-    const auto unique = getNoteData (song, withoutAliasCopies (song, notes));
+    const auto named = nameEachOnce (song, notes);
     Rooms rooms (song);
 
     // The note nearest its clip's start decides how far back they can go: none at all with one that starts before it. And
-    // the one nearest where its clip stops playing it, how far on (keepPlayed()). Each note as it was named, its copies in
-    // its clip's aliases too: a note named through two clips of its group stays where both play it, whichever comes first.
+    // the one nearest where its clip stops playing it, how far on (keepPlayed()). Each note as it was named, through each clip
+    // of its group it was named through: a note named through two clips stays where both play it, whichever comes first.
     for (const auto& note : getNoteData (song, notes))
     {
         const auto clipState = findMidiClipState (song, note.clip);
         amount = keepPlayed (rooms, clipState, note.start, note.start + amount) - note.start;
     }
 
-    for (const auto& note : unique)
-        moveNoteIn (song, rooms, { note.clip, note.id }, note.start + amount, note.pitch);
+    NotesEdit edit (song);
+
+    for (const auto& note : named)
+        if (const auto now = getNoteData (song, note.ref))
+            placeNoteIn (song, edit, rooms, note.clips, note.ref.note, now->start + amount, now->pitch, now->length);
+
+    edit.commit();
 }
 
 void changeNoteLengths (Song& song, const std::vector<NoteRef>& notes, BeatDuration change)
 {
+    // Each note once, every clip of its group it was named through grown to hold it.
+    NotesEdit edit (song);
     Rooms rooms (song);
 
-    for (const auto& note : getNoteData (song, withoutAliasCopies (song, notes)))
-        setNoteLengthIn (song, rooms, { note.clip, note.id }, note.length + change);
+    for (const auto& note : nameEachOnce (song, notes))
+        if (const auto now = findInEdit (edit, note.ref))
+            setNoteLengthIn (song, edit, rooms, note.clips, note.ref.note, now->length + change);
+
+    edit.commit();
 }
 
 namespace
 {
-    bool hasFlag (const Song& song, const NoteRef& ref, NoteFlag flag)
+    bool isOn (const NoteValues& note, int flag)
     {
-        return findNote (song, findMidiClipState (song, ref.clip), ref.note).has (flag);
+        return flag == 0 ? note.muted : flag == 1 ? note.slide : note.portamento;
     }
 
-    void toggleNoteFlags (Song& song, const std::vector<NoteRef>& notes, NoteFlag flag)
+    bool hasFlag (const Song& song, const NoteRef& ref, int flag)
     {
+        const auto note = findNoteValues (song, findMidiClipState (song, ref.clip), ref.note);
+        return note.has_value() && isOn (*note, flag);
+    }
+
+    void toggleNoteFlags (Song& song, const std::vector<NoteRef>& notes, int flag)
+    {
+        NotesEdit edit (song);
+
         toggleAll (
             withoutAliasCopies (song, notes), [&song, flag] (const NoteRef& ref) { return hasFlag (song, ref, flag); },
-            [&song, flag] (const NoteRef& ref, bool on) { changeNote (song, ref, [on, flag] (NoteEdit& note) { note.set (flag, on); }); });
+            [&edit, flag] (const NoteRef& ref, bool on)
+            {
+                changeEach (edit, { ref },
+                            [flag, on] (NoteValues& note) { (flag == 0   ? note.muted
+                                                             : flag == 1 ? note.slide
+                                                                         : note.portamento) = on; });
+            });
+
+        edit.commit();
     }
+
+    constexpr int mutedFlag = 0, slideFlag = 1, portamentoFlag = 2;
 } // namespace
 
 bool areAllNotesMuted (const Song& song, const std::vector<NoteRef>& notes)
 {
-    return areAllOn (notes, [&song] (const NoteRef& ref) { return hasFlag (song, ref, NoteFlag::muted); });
+    return areAllOn (notes, [&song] (const NoteRef& ref) { return hasFlag (song, ref, mutedFlag); });
 }
 
 void toggleNotesMuted (Song& song, const std::vector<NoteRef>& notes)
 {
-    toggleNoteFlags (song, notes, NoteFlag::muted);
+    toggleNoteFlags (song, notes, mutedFlag);
 }
 
 bool areAllNotesSlides (const Song& song, const std::vector<NoteRef>& notes)
 {
-    return areAllOn (notes, [&song] (const NoteRef& ref) { return hasFlag (song, ref, NoteFlag::slide); });
+    return areAllOn (notes, [&song] (const NoteRef& ref) { return hasFlag (song, ref, slideFlag); });
 }
 
 void toggleNotesSlide (Song& song, const std::vector<NoteRef>& notes)
 {
-    toggleNoteFlags (song, notes, NoteFlag::slide);
+    toggleNoteFlags (song, notes, slideFlag);
 }
 
 bool areAllNotesPortamento (const Song& song, const std::vector<NoteRef>& notes)
 {
-    return areAllOn (notes, [&song] (const NoteRef& ref) { return hasFlag (song, ref, NoteFlag::portamento); });
+    return areAllOn (notes, [&song] (const NoteRef& ref) { return hasFlag (song, ref, portamentoFlag); });
 }
 
 void toggleNotesPortamento (Song& song, const std::vector<NoteRef>& notes)
 {
-    toggleNoteFlags (song, notes, NoteFlag::portamento);
+    toggleNoteFlags (song, notes, portamentoFlag);
 }
 
 void setNoteVelocities (Song& song, const std::vector<NoteRef>& notes, int velocity)
 {
     const auto clamped = juce::jlimit (1, 127, velocity);
-
-    for (const auto& ref : withoutAliasCopies (song, notes))
-        changeNote (song, ref, [clamped] (NoteEdit& note) { note.setVelocity (clamped); });
+    NotesEdit edit (song);
+    changeEach (edit, withoutAliasCopies (song, notes), [clamped] (NoteValues& note) { note.velocity = clamped; });
+    edit.commit();
 }
 
 void setNoteChannels (Song& song, const std::vector<NoteRef>& notes, int channel)
 {
-    for (const auto& ref : withoutAliasCopies (song, notes))
-        changeNote (song, ref, [channel] (NoteEdit& note) { note.setChannel (channel); });
+    const auto clamped = keepChannel (channel);
+    NotesEdit edit (song);
+    changeEach (edit, withoutAliasCopies (song, notes), [clamped] (NoteValues& note) { note.channel = clamped; });
+    edit.commit();
 }
 
 void changeNoteVelocities (Song& song, const std::vector<NoteRef>& notes, int change)
@@ -1575,9 +1679,10 @@ void changeNoteVelocities (Song& song, const std::vector<NoteRef>& notes, int ch
         return;
 
     const UndoStep step (song, "Change Velocity");
-
-    for (const auto& note : getNoteData (song, withoutAliasCopies (song, notes)))
-        setNoteVelocities (song, { { note.clip, note.id } }, note.velocity + change);
+    NotesEdit edit (song);
+    changeEach (edit, withoutAliasCopies (song, notes),
+                [change] (NoteValues& note) { note.velocity = juce::jlimit (1, 127, note.velocity + change); });
+    edit.commit();
 }
 
 std::vector<NoteRef> duplicateNotes (Song& song, const std::vector<NoteRef>& notes, const juce::String& stepName)
@@ -1624,46 +1729,84 @@ void tellNotesMade (Song& song, const juce::String& asked, const juce::String& v
 void setClipNotes (Song& song, ClipID clip, const std::vector<NoteData>& notes)
 {
     const auto clipState = findMidiClipState (song, clip);
+    NotesEdit edit (song);
+    auto* group = edit.find (clipState);
 
-    if (! clipState.isValid())
+    if (group == nullptr)
         return;
 
-    auto* undo = &song.getUndoManager();
     const auto contentStart = getContentStart (clipState);
-    const auto aliases = getAliasStates (song, clipState);
-    std::vector<NoteID> ids;
+    std::vector<NoteValues> values;
 
-    for (size_t i = 0; i < notes.size(); ++i)
-        ids.push_back (NoteID::fromRaw (song.makeID()));
-
-    for (auto alias : aliases)
+    for (const auto& data : notes)
     {
-        removeAllNotes (alias, undo);
-
-        for (size_t i = 0; i < notes.size(); ++i)
-        {
-            const auto& data = notes[i];
-            auto values = getValuesKept (data);
-            values.id = ids[i];
-            values.pitch = clampPitch (data.pitch);
-            values.start = BeatPosition::fromBeats ((data.start - contentStart).inBeats());
-            values.length = data.length;
-            values.velocity = juce::jlimit (1, 127, data.velocity);
-            appendNote (alias, values, undo);
-        }
+        auto note = getValuesKept (data);
+        note.id = NoteID::fromRaw (song.makeID());
+        note.pitch = clampPitch (data.pitch);
+        note.start = BeatPosition::fromBeats ((data.start - contentStart).inBeats());
+        note.length = data.length;
+        note.velocity = juce::jlimit (1, 127, data.velocity);
+        values.push_back (note);
     }
+
+    auto next = makeClipNotes (values);
+    next.controls = group->after.controls;
+    group->after = next;
+    edit.commit();
 }
 
 std::vector<NoteRef> replaceNotes (Song& song, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements)
 {
+    // Each old note once, however many clips of its alias group name it: what comes of it is taken through one of its names,
+    // the first named that any replacement carries (the first named, if none does), and what comes of it through its other
+    // names is left out. The note is replaced once.
+    const auto named = nameEachOnce (song, old);
+    std::vector<NoteRef> unique;  // each old note by the name its replacements are taken through
+    std::set<NoteRef> namedAgain; // an old note's other names
+    {
+        std::set<NoteRef> carried;
+
+        for (const auto& data : replacements)
+            carried.insert (data.getRef());
+
+        for (const auto& note : named)
+        {
+            auto taken = note.ref;
+
+            for (const auto clip : note.clips)
+            {
+                if (carried.count ({ clip, note.ref.note }) > 0)
+                {
+                    taken = { clip, note.ref.note };
+                    break;
+                }
+            }
+
+            unique.push_back (taken);
+
+            for (const auto clip : note.clips)
+                if (clip != taken.clip)
+                    namedAgain.insert ({ clip, note.ref.note });
+        }
+    }
+
     // Where the old ones started: what comes of one that started before its clip did (a note a split or a trim cut) goes no
     // earlier, rather than to its clip's start.
     std::unordered_map<NoteRef, BeatPosition> oldStarts;
 
-    for (const auto& note : getNoteData (song, old))
+    for (const auto& note : getNoteData (song, unique))
         oldStarts[note.getRef()] = note.start;
 
-    deleteNotes (song, old);
+    NotesEdit edit (song);
+    std::map<NotesEdit::Group*, std::set<NoteID>> gone;
+
+    for (const auto& ref : unique)
+        if (auto* group = edit.find (ref.clip))
+            gone[group].insert (ref.note);
+
+    for (auto& [group, ids] : gone)
+        group->after = withoutNotes (group->after, [&ids = ids] (const NoteValues& note) { return ids.count (note.id) > 0; });
+
     std::vector<NoteRef> added;
     Rooms rooms (song);
 
@@ -1675,10 +1818,14 @@ std::vector<NoteRef> replaceNotes (Song& song, const std::vector<NoteRef>& old, 
     // it plays: none before its clip, or after it where the clip can't grow to hold it, where no editor would show it.
     for (const auto& data : replacements)
     {
+        if (namedAgain.count (data.getRef()) > 0)
+            continue;
+
         const auto clipState = findMidiClipState (song, data.clip);
+        const auto* group = edit.find (clipState);
         const auto oldStart = oldStarts.find (data.getRef());
         const auto comesOfOne = oldStart != oldStarts.end();
-        const auto replacesOne = comesOfOne && ! findNote (song, clipState, data.id).exists();
+        const auto replacesOne = comesOfOne && group != nullptr && group->after.find (data.id) == nullptr;
 
         if (! comesOfOne
             && (data.getEnd() <= getClipRange (clipState).getStart() + tinyBeats || ! canPlayAt (rooms, clipState, data.start)))
@@ -1693,12 +1840,13 @@ std::vector<NoteRef> replaceNotes (Song& song, const std::vector<NoteRef>& old, 
             if (const auto latestPlayed = findLatestStart (rooms, clipState))
                 latest = std::max (oldStart->second, *latestPlayed);
 
-        if (const auto note =
-                addNoteTo (song, rooms, data.clip, data.id, data.pitch, data.start, data.length, getValuesKept (data), earliest, latest);
+        if (const auto note = addNoteTo (song, edit, rooms, data.clip, data.id, data.pitch, data.start, data.length, getValuesKept (data),
+                                         earliest, latest);
             note.clip.isValid())
             added.push_back (note);
     }
 
+    edit.commit();
     return added;
 }
 

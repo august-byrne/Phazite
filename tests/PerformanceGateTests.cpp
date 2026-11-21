@@ -39,6 +39,7 @@
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/AudioFiles.h"
@@ -1116,7 +1117,11 @@ TEST_CASE ("Performance gate: a step of a note's drag in the piano roll doesn't 
     // about 20,200 measured, 2026-11-20); the chooser's read at each step made it two (40,193).
     const auto none = visitedFor (0), many = visitedFor (20000);
     INFO ("Elements looked at by a step of a note's drag in a clip of no controller values: " << none << "; of 20,000: " << many);
-    CHECK (many - none < 30000);
+
+    // Since the notes' edits read a clip's value from the song's tree (roadmap step S5.20, first half), an edit walks the clip
+    // once more than the view; the limit goes back to 30,000 with the second half, where the value is the storage and a read
+    // walks nothing.
+    CHECK (many - none < 45000);
 }
 
 TEST_CASE ("Performance gate: a drag or a paste of many notes looks through its clip's track once, not once for each note")
@@ -1302,7 +1307,7 @@ TEST_CASE (
 
     // What the whole song's comparison looks at, against which the others are measured.
     before = phazite::countElementsCompared();
-    REQUIRE (phazite::findChanges (history->getLastVersionSong(), song.getState()).empty());
+    REQUIRE (phazite::findChanges (history->getLastVersionSong(), phazite::test::copyWholeSong (song)).empty());
     const auto wholeSong = phazite::countElementsCompared() - before;
 
     // The count is the whole program's: what this history and those that went still compare on their threads is in first (a
@@ -1438,11 +1443,12 @@ TEST_CASE ("Performance gate: a drag in a clip of 50,000 notes copies its track 
 
     {
         phazite::Gesture drag (song, "Move Notes");
-        auto note = song.getIndex().findClip (clip.getRaw()).getChild (0);
+        const auto note = phazite::NoteRef { clip, phazite::NoteID::fromRaw (1) };
+        REQUIRE (phazite::getNoteData (song, note).has_value());
 
         for (int i = 0; i < 60; ++i)
         {
-            note.setProperty (phazite::schema::noteStart, 0.01 * (i + 1), &song.getUndoManager());
+            phazite::moveNote (song, note, at (0.01 * (i + 1)), 36);
             phazite::test::dispatchPendingMessages();
             phazite::countChanges (s.context);
         }
@@ -1500,8 +1506,8 @@ TEST_CASE ("Performance gate: the check for unsaved changes compares no element 
     before = phazite::Project::countElementsCompared();
     CHECK_FALSE (project.hasUnsavedChanges());
     const auto noteAdded = phazite::Project::countElementsCompared() - before;
-    const auto clip = countElements (phazite::findClipState (song, built.clips[3]));
-    const auto wholeSong = countElements (song.getState());
+    const auto clip = countElements (phazite::copyWhole (song, phazite::findClipState (song, built.clips[3])));
+    const auto wholeSong = countElements (phazite::test::copyWholeSong (song));
 
     INFO ("Elements compared after a note added and taken back: " << noteAdded << ", of its clip's " << clip << " and the song's "
                                                                   << wholeSong);
@@ -1576,7 +1582,7 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
         return count;
     };
 
-    const auto many = countMany (song.getState());
+    const auto many = countMany (phazite::test::copyWholeSong (song));
     INFO ("Allocations: " << *allocations << " for " << many << " notes, controllers, points and warp markers (" << notes << " notes)");
     CHECK (*allocations * 10 < many);
 
