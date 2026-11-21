@@ -63,7 +63,7 @@ phazite::Song& getSong (phazite::test::TestSong& s)
 juce::String getSongText (const phazite::Song& song)
 {
     juce::MemoryOutputStream text;
-    phazite::writeProjectText (text, song.getState());
+    phazite::writeProjectText (text, phazite::test::copyWholeSong (song));
     return text.toString();
 }
 

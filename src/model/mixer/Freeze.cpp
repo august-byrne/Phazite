@@ -13,6 +13,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -172,7 +173,7 @@ namespace
         juce::ValueTree copy ("FROZEN");
 
         for (const auto& part : getWhatTheFreezeHolds (song, track))
-            copy.appendChild (part.createCopy(), nullptr);
+            copy.appendChild (copyWhole (song, part), nullptr); // a clip with its notes
 
         return copy;
     }
@@ -184,6 +185,9 @@ namespace
         if ((int) parts.size() != frozen.getNumChildren())
             return false;
 
+        // Each as it is in the song, against its copy as copyWhatTheFreezeHolds() made it: in place, since this runs at every
+        // change in a frozen track (a fader dragged). Once a clip's notes are kept beside the tree, the copy is kept as a tree
+        // and the values kept with it, and the notes compared as values (roadmap step S5.20).
         for (int i = 0; i < (int) parts.size(); ++i)
             if (! isSameSound (parts[(size_t) i], frozen.getChild (i)))
                 return false;

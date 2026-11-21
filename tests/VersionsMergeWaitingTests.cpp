@@ -768,7 +768,7 @@ TEST_CASE ("Restoring a line from a damaged commit takes what it can, and nothin
     // A commit whose folder's piece is lost (a name of its own, so that no commit before has its piece): Bass, inside it,
     // is in the commit nowhere that reads, so its line restores nothing, saying why, and Bass stays.
     {
-        auto then = song.getState().createCopy();
+        auto then = phazite::test::copyWholeSong (song);
 
         for (auto track : phazite::getTrackElements (then))
             if (phazite::readID (track[schema::trackID]) == folder.getRaw())
@@ -797,7 +797,7 @@ TEST_CASE ("Restoring a line from a damaged commit takes what it can, and nothin
     // line is still refused, naming the folder that holds it; a track added since, outside the folder, the commit hasn't,
     // and its line takes it away as added since.
     {
-        auto then = song.getState().createCopy();
+        auto then = phazite::test::copyWholeSong (song);
 
         for (auto track : phazite::getTrackElements (then))
             if (const auto id = phazite::readID (track[schema::trackID]); id == keys.getRaw() || id == folder.getRaw())
@@ -831,7 +831,7 @@ TEST_CASE ("Restoring a line from a damaged commit takes what it can, and nothin
     // A commit whose tempo map stands in for itself (only a piece that isn't Phazite's makes one): the song's own line
     // leaves the tempo map as it is, and no stand-in reaches the song.
     {
-        auto then = song.getState().createCopy();
+        auto then = phazite::test::copyWholeSong (song);
         auto tempoMap = then.getChildWithName (schema::TEMPOMAP);
         REQUIRE (tempoMap.isValid());
         tempoMap.removeAllChildren (nullptr);
@@ -899,7 +899,7 @@ struct Named
     // that no commit before holds the same piece.
     juce::String commitWithoutReturnAndEq()
     {
-        auto then = song().getState().createCopy();
+        auto then = phazite::test::copyWholeSong (song());
         const std::function<void (juce::ValueTree)> rename = [&] (juce::ValueTree element)
         {
             for (auto child : element)
@@ -986,14 +986,14 @@ TEST_CASE (
     n.s.reopen (false); // the EQ's curve, kept for an Undo, left out as it opens
     REQUIRE (waitForVersionHistory (n.s.context));
     REQUIRE_FALSE (n.hasCurve());
-    const auto before = n.song().getState().createCopy();
+    const auto before = phazite::test::copyWholeSong (n.song());
 
     REQUIRE (finished (n.s.context, [&] { return phazite::bringBackVersion (n.s.context, damaged); }));
     CHECK_FALSE (n.hasCurve()); // of a device the song hasn't: taken away again in the restore's step
     checkSong (n.song());
 
     // Undo brings back exactly what was; Redo the restore again.
-    const auto restored = n.song().getState().createCopy();
+    const auto restored = phazite::test::copyWholeSong (n.song());
     phazite::undo (n.song());
     CHECK (phazite::findChanges (before, n.song().getState()).empty());
     phazite::redo (n.song());
@@ -1019,7 +1019,7 @@ TEST_CASE ("The other computer's merge of the same commit, merged in after this 
     // B's merge: the same song, Pad under the ID B gave it, recorded as B's merge records it.
     const auto byB = [&m, &padHere]
     {
-        auto song = m.song().getState().createCopy();
+        auto song = phazite::test::copyWholeSong (m.song());
         song.removeChild (song.getChildWithName (schema::MERGING), nullptr);
         const auto theirID = padHere[0].getRaw() + 1000;
 
@@ -1326,7 +1326,7 @@ TEST_CASE ("A line merged back into the line that merged it, whose merge gave it
     l.toBranch (idea);
     l.s.rename (pad, "Pad 2");
     keepVersion (l.s.context, "Pad 2");
-    const auto before = l.song.getState().createCopy();
+    const auto before = phazite::test::copyWholeSong (l.song);
 
     REQUIRE (phazite::test::finished (l.s.context, [&] { return phazite::startMerge (l.s.context, merged); }));
     UndoCheck undo (l.s.context);
@@ -1863,7 +1863,7 @@ TEST_CASE ("A merge whose songs, matched by the IDs earlier merges gave anew, wo
     REQUIRE (phazite::getVersionHistory (l.s.context)->getBaseVersionID() == ourMerge);
 
     auto& song = *phazite::findSong (l.s.context);
-    const auto before = song.getState().createCopy();
+    const auto before = phazite::test::copyWholeSong (song);
     CHECK_FALSE (phazite::test::finished (l.s.context, [&l, &theirMerge] { return phazite::startMerge (l.s.context, theirMerge); }));
     CHECK_FALSE (phazite::isMerging (l.s.context));
     CHECK (phazite::getMergeLines (l.s.context).empty());

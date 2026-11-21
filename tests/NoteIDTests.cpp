@@ -93,10 +93,10 @@ TEST_CASE ("Each note added to the open project gets an ID of its own, which it 
     CHECK (firstID.isValid());
     CHECK (secondID.isValid());
     CHECK (firstID != secondID);
-    REQUIRE (phazite::findNoteState (song, second).isValid());
+    REQUIRE (phazite::hasNote (song, second));
     CHECK (noteOf (song, second).pitch == 64);
     CHECK (noteOf (song, second).getRef() == phazite::NoteRef { clip, secondID });
-    CHECK_FALSE (phazite::findNoteState (song, { clip, {} }).isValid());
+    CHECK_FALSE (phazite::hasNote (song, { clip, {} }));
 
     // Moved, it is the same note; deleted and put back by an undo, too.
     {
@@ -109,9 +109,9 @@ TEST_CASE ("Each note added to the open project gets an ID of its own, which it 
         phazite::deleteNotes (song, { second });
     }
 
-    CHECK_FALSE (phazite::findNoteState (song, second).isValid());
+    CHECK_FALSE (phazite::hasNote (song, second));
     phazite::undo (song);
-    REQUIRE (phazite::findNoteState (song, second).isValid());
+    REQUIRE (phazite::hasNote (song, second));
     CHECK (noteOf (song, second).pitch == 65);
 
     // Undoing the move and the adding takes them away; redoing them brings back the same notes.
@@ -166,7 +166,7 @@ TEST_CASE ("A copy of a clip keeps its notes' IDs, an alias, a duplicate and the
     const auto right = halves.front();
     REQUIRE (phazite::isMidiState (phazite::findClipState (song, right)));
     CHECK (allDifferent (idsOf (song, clip)));
-    CHECK (phazite::findNoteState (song, { right, phazite::NoteID::fromRaw (ids[3]) }).isValid());
+    CHECK (phazite::hasNote (song, { right, phazite::NoteID::fromRaw (ids[3]) }));
 }
 
 TEST_CASE ("Each note of the song has an ID from the start, in a song no project context holds too")

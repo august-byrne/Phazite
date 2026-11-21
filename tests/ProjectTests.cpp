@@ -526,7 +526,7 @@ TEST_CASE ("A restored autosave, or a backup opened in the project's place, is u
 
     REQUIRE (restored->save().wasOk());
     CHECK_FALSE (restored->checkUnsavedChanges());
-    const auto saved = restored->getSong().getState().createCopy();
+    const auto saved = phazite::test::copyWholeSong (restored->getSong());
     restored = nullptr;
 
     // A song from elsewhere opened as the project's, whose file doesn't read: the same.

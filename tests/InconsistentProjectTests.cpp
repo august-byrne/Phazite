@@ -271,7 +271,7 @@ TEST_CASE ("The loader's checks alone leave the song's count of IDs past every I
     addMidiNote (*made, clip, 60, at (0.0), lasting (1.0), 100);
 
     juce::MemoryOutputStream text;
-    phazite::writeProjectText (text, made->getState());
+    phazite::writeProjectText (text, phazite::test::copyWholeSong (*made));
     auto xml = juce::parseXML (text.toString());
     REQUIRE (xml != nullptr);
     xml->setAttribute ("nextID", "10");

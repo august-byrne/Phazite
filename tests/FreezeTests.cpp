@@ -263,7 +263,7 @@ TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unf
 
     {
         const auto copy =
-            phazite::makeSong (song.getSong().getState().createCopy(), song.project->getFile(), song.project->getCacheFolder());
+            phazite::makeSong (phazite::test::copyWholeSong (song.getSong()), song.project->getFile(), song.project->getCacheFolder());
         REQUIRE (copy != nullptr);
         CHECK (phazite::getFrozenTracks (*copy) == std::vector { song.bass });
         CHECK (phazite::isFrozenDevice (*copy, song.stereo));

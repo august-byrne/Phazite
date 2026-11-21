@@ -167,16 +167,16 @@ TEST_CASE ("Random songs: a song made like another, which went on from it, has n
         const auto seed = 20261314 + i;
         INFO ("seed " << seed);
         const auto a = makeRandomSong (seed, sounds.folder);
-        const auto b = phazite::makeSong (a->getState().createCopy());
+        const auto b = phazite::makeSong (phazite::test::copyWholeSong (*a));
         RandomEdits (*b, seed + 1000000, sounds.folder).edit (editsPerSong / 2);
-        const auto before = a->getState().createCopy();
+        const auto before = phazite::test::copyWholeSong (*a);
 
         phazite::makeSongLike (*a, b->getState());
         const auto changes = phazite::findChanges (b->getState(), a->getState());
         INFO ("A made like B: " << changes.size() << " differences left");
         CHECK (changes.empty());
         checkIDs (*a);
-        checkSong (*phazite::makeSong (a->getState().createCopy()));
+        checkSong (*phazite::makeSong (phazite::test::copyWholeSong (*a)));
 
         phazite::makeSongLike (*b, before);
         INFO ("B made like A as it was: " << phazite::findChanges (before, b->getState()).size() << " differences left");
@@ -203,7 +203,7 @@ TEST_CASE ("Random songs: each edit's plan, compiled from what the edit changed,
         RandomEdits edits (*song, seed, sounds.folder);
         edits.freezes = true;
         phazite::SongPlayer kept (*song);
-        auto earlier = song->getState().createCopy();
+        auto earlier = phazite::test::copyWholeSong (*song);
 
         for (int step = 0; step < editsPerSong; ++step)
         {
@@ -220,7 +220,7 @@ TEST_CASE ("Random songs: each edit's plan, compiled from what the edit changed,
             }
             else if (kind == 2)
             {
-                const auto now = song->getState().createCopy();
+                const auto now = phazite::test::copyWholeSong (*song);
                 phazite::makeSongLike (*song, earlier);
                 earlier = now;
             }

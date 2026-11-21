@@ -11,6 +11,7 @@
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/WholeState.h"
 #include "model/engine/AppInfo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/FreezeModel.h"
@@ -590,27 +591,28 @@ namespace
             auto* notes = element->createNewChildElement ("Notes");
             notes->setAttribute ("id", "n" + id);
 
-            for (const auto& note : clip)
+            // Its notes as the song holds them (Notes.h), each where it is among the clip's notes, as DAWproject counts them.
+            const auto clipID = getClipID (clip);
+            const auto contentStart = getContentStart (clip);
+
+            for (const auto& note : getClipNotes (song, clipID))
             {
-                if (note.hasType (schema::CONTROL))
-                    leftOut.addIfNotAlreadyThere ("clips' controller events");
-
-                if (! note.hasType (schema::NOTE))
-                    continue;
-
-                if ((bool) note[schema::noteMute] || (bool) note[schema::noteSlide] || (bool) note[schema::notePortamento])
+                if (note.muted || note.slide || note.portamento)
                     leftOut.addIfNotAlreadyThere ("notes' mute, slide and glide");
 
-                if ((bool) note[schema::noteMute] || (bool) note[schema::noteSlide])
+                if (note.muted || note.slide)
                     continue;
 
                 auto* written = notes->createNewChildElement ("Note");
-                written->setAttribute ("time", number ((double) note[schema::noteStart]));
-                written->setAttribute ("duration", number ((double) note[schema::noteLength]));
-                written->setAttribute ("channel", readChannel (note, schema::noteChannel) - 1); // counted from 0 there
-                written->setAttribute ("key", (int) note[schema::notePitch]);
-                written->setAttribute ("vel", number ((int) note.getProperty (schema::noteVelocity, 100) / 127.0));
+                written->setAttribute ("time", number ((note.start - contentStart).inBeats()));
+                written->setAttribute ("duration", number (note.length.inBeats()));
+                written->setAttribute ("channel", note.channel - 1); // counted from 0 there
+                written->setAttribute ("key", note.pitch);
+                written->setAttribute ("vel", number (note.velocity / 127.0));
             }
+
+            if (! getClipControls (song, clipID).empty())
+                leftOut.addIfNotAlreadyThere ("clips' controller events");
         }
 
         void writeAudioClip (juce::XmlElement& clips, const juce::ValueTree& clip)
@@ -1808,28 +1810,27 @@ namespace
             for (size_t i = 0; i < std::min (ourClips.size(), clips.size()); ++i)
             {
                 auto clip = ourClips[i];
-                std::vector<juce::ValueTree> unused;
+                const auto clipID = getClipID (clip);
+                const auto contentStart = getContentStart (clip);
+                std::vector<NoteData> unused; // the song's notes (Notes.h), each where it is among the clip's notes
 
-                for (const auto& note : clip)
-                    if (note.hasType (schema::NOTE) && ! (bool) note[schema::noteMute] && ! (bool) note[schema::noteSlide])
+                for (const auto& note : getClipNotes (song, clipID))
+                    if (! note.muted && ! note.slide)
                         unused.push_back (note);
 
                 std::vector<const juce::XmlElement*> added;
 
                 for (const auto* note : clips[i]->getChildByName ("Notes")->getChildWithTagNameIterator ("Note"))
                 {
-                    const auto same =
-                        std::find_if (unused.begin(), unused.end(),
-                                      [note] (const juce::ValueTree& ours)
-                                      {
-                                          return (int) ours[schema::notePitch] == note->getIntAttribute ("key")
-                                                 && readChannel (ours, schema::noteChannel) == readNoteChannel (*note)
-                                                 && isClose ((double) ours[schema::noteStart], note->getDoubleAttribute ("time"))
-                                                 && isClose ((double) ours[schema::noteLength], note->getDoubleAttribute ("duration"))
-                                                 && std::abs ((int) ours.getProperty (schema::noteVelocity, 100)
-                                                              - roundToNearestInt (note->getDoubleAttribute ("vel", 0.8) * 127.0))
-                                                        <= 1;
-                                      });
+                    const auto same = std::find_if (
+                        unused.begin(), unused.end(),
+                        [note, contentStart] (const NoteData& ours)
+                        {
+                            return ours.pitch == note->getIntAttribute ("key") && ours.channel == readNoteChannel (*note)
+                                   && isClose ((ours.start - contentStart).inBeats(), note->getDoubleAttribute ("time"))
+                                   && isClose (ours.length.inBeats(), note->getDoubleAttribute ("duration"))
+                                   && std::abs (ours.velocity - roundToNearestInt (note->getDoubleAttribute ("vel", 0.8) * 127.0)) <= 1;
+                        });
 
                     if (same != unused.end())
                         unused.erase (same);
@@ -1837,11 +1838,13 @@ namespace
                         added.push_back (note);
                 }
 
-                for (const auto& note : unused)
-                    clip.removeChild (note, nullptr);
+                // Those it has that the DAWproject hasn't go, from this clip alone, as each of its clips is taken in.
+                std::vector<NoteID> gone;
 
-                const auto clipID = getClipID (clip);
-                const auto contentStart = getContentStart (clip);
+                for (const auto& note : unused)
+                    gone.push_back (note.id);
+
+                removeClipNotesAlone (song, clipID, gone);
 
                 for (const auto* note : added)
                     addNoteFrom (clipID, contentStart, *note);
@@ -2266,8 +2269,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
         import->said = takeDawProject (*song, *in, import->audio); // unpacked already: nothing more on this thread
 
         return VersionHistory::Taken::readAgain (
-            [&context, import, fromVersion, nothing, copy = song->getState().createCopy(),
-             store = reading->getStore()]() -> VersionHistory::TakeIn
+            [&context, import, fromVersion, nothing, copy = copyWholeSong (*song), store = reading->getStore()]() -> VersionHistory::TakeIn
             {
                 const auto pieces = splitSong (copy);
                 const auto kept = store->writeSong (pieces);

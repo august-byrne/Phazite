@@ -54,8 +54,8 @@ struct Sides
         phazite::setTrackName (*base, tracks[1], "Drums");
         clip = addMidiClip (*base, tracks[0], { at (0.0), at (8.0) }, "Riff");
         addMidiNote (*base, clip, 36, at (0.0), lasting (1.0));
-        ours = phazite::makeSong (base->getState().createCopy());
-        theirs = phazite::makeSong (base->getState().createCopy());
+        ours = phazite::makeSong (phazite::test::copyWholeSong (*base));
+        theirs = phazite::makeSong (phazite::test::copyWholeSong (*base));
     }
 
     // The other side's changes, every line of them (a merge takes them all), merged into this side's; and what that merge
@@ -87,7 +87,7 @@ struct Sides
     void checkMerged (const phazite::MergeResult& merged) const
     {
         INFO ("the merged song");
-        const auto applied = phazite::makeSong (ours->getState().createCopy());
+        const auto applied = phazite::makeSong (phazite::test::copyWholeSong (*ours));
         REQUIRE (applied != nullptr);
         apply (*applied, merged);
         checkSong (*copyAsOpened (*applied));
@@ -137,8 +137,8 @@ phazite::TrackID groupBase (Sides& sides)
 {
     const auto folder = phazite::groupIntoFolder (*sides.base, sides.tracks, nullptr);
     phazite::setTrackName (*sides.base, folder, "Group");
-    sides.ours = phazite::makeSong (sides.base->getState().createCopy());
-    sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+    sides.ours = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
+    sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
     return folder;
 }
 } // namespace
@@ -212,8 +212,8 @@ TEST_CASE ("Values set back to their defaults, one on each side, leave a device 
 
     phazite::setValueSetByHand (*sides.base, { device, "cutoff" }, 800.0f);
     phazite::setValueSetByHand (*sides.base, { device, "resonance" }, 0.5f);
-    sides.ours = phazite::makeSong (sides.base->getState().createCopy());
-    sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+    sides.ours = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
+    sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
     phazite::setValueSetByHand (*sides.ours, { device, "cutoff" }, defaultOf ("cutoff"));
     phazite::setValueSetByHand (*sides.theirs, { device, "resonance" }, defaultOf ("resonance"));
     REQUIRE (phazite::findDeviceState (*sides.ours, device).getChildWithName (schema::VALUES).getNumProperties() == 1);
@@ -289,8 +289,8 @@ TEST_CASE ("A merge keeps one link of each MIDI controller and one of each param
                                                     phazite::makeOwnDeviceState (*sides.base, phazite::devices::Synth::typeID));
     const phazite::ParameterRef cutoffA { synthA, "cutoff" }, resonanceA { synthA, "resonance" }, cutoffB { synthB, "cutoff" };
     phazite::linkMidiController (*sides.base, { 1, 1 }, cutoffA);
-    sides.ours = phazite::makeSong (sides.base->getState().createCopy());
-    sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+    sides.ours = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
+    sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
 
     SUBCASE ("Both sides link another controller to the same parameter: this side's link stays")
     {
@@ -352,8 +352,8 @@ TEST_CASE ("The other side's device order is taken where this side kept the base
 
     const auto first = addEq (*sides.base, sides.tracks[0]);
     const auto second = addEq (*sides.base, sides.tracks[0]);
-    sides.ours = phazite::makeSong (sides.base->getState().createCopy());
-    sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+    sides.ours = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
+    sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
 
     // Theirs: the two the other way round, and a third after the first.
     auto chain = phazite::findChainState (*sides.theirs, sides.tracks[0]);
@@ -380,7 +380,7 @@ TEST_CASE ("Merging what this side has already changes nothing")
     Sides sides;
     phazite::setChannelVolume (*sides.ours, sides.tracks[0], -6.0f);
     addMidiNote (*sides.ours, sides.clip, 40, at (2.0), lasting (1.0));
-    sides.theirs = phazite::makeSong (sides.ours->getState().createCopy());
+    sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.ours));
 
     const auto merged = sides.merge();
     CHECK (merged.clashes.empty());
@@ -487,11 +487,11 @@ TEST_CASE ("A line merged again after a merge gave its additions new IDs merges 
     CHECK (padID != ourTrack[schema::trackID]);
 
     // The other line goes on from what was merged in: its Pad renamed.
-    const auto parted = sides.theirs->getState().createCopy();
+    const auto parted = phazite::test::copyWholeSong (*sides.theirs);
     findTrack (sides.theirs->getState(), "Pad").setProperty (schema::trackName, "Pad 2", nullptr);
 
     // Merged again, the parting's and the other side's songs numbered as this side's through what the first merge recorded.
-    auto base = parted.createCopy(), theirs = sides.theirs->getState().createCopy();
+    auto base = parted.createCopy(), theirs = phazite::test::copyWholeSong (*sides.theirs);
     phazite::translateIDs (base, first.renumbered);
     phazite::translateIDs (theirs, first.renumbered);
     CHECK (findTrack (theirs, "Pad 2")[schema::trackID] == padID);
@@ -516,7 +516,7 @@ TEST_CASE ("A note the other line made with the ID a merge gave one of its notes
     const auto tracks = phazite::ensureTracks (*song, 1);
     const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
     addMidiNote (*song, clip, 36, at (0.0), lasting (1.0));
-    const auto base = song->getState().createCopy();
+    const auto base = phazite::test::copyWholeSong (*song);
     auto theirs = base.createCopy();
     REQUIRE (findItems (theirs, schema::CLIP, clip.getRaw()).size() == 1);
     auto theirClip = findItems (theirs, schema::CLIP, clip.getRaw()).front();
@@ -572,7 +572,7 @@ TEST_CASE ("The other line's merges of a version both merged cross to this line'
     const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
     addMidiNote (*song, clip, 36, at (0.0), lasting (1.0));
     addMidiNote (*song, clip, 38, at (1.0), lasting (1.0));
-    const auto theirs = song->getState().createCopy();
+    const auto theirs = phazite::test::copyWholeSong (*song);
     std::vector<std::uint64_t> notes;
 
     const auto clips = findItems (theirs, schema::CLIP, clip.getRaw());
@@ -629,7 +629,7 @@ TEST_CASE ("Crossings that aren't one to one are left out, and the other line's 
     // other line's own item too, which then was taken for the parting's item under that ID.
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 3);
-    const auto theirs = song->getState().createCopy();
+    const auto theirs = phazite::test::copyWholeSong (*song);
     const auto t0 = tracks[0].getRaw(), t1 = tracks[1].getRaw(), t2 = tracks[2].getRaw();
     constexpr std::uint64_t far = 1000000; // no ID the song holds
 
@@ -650,7 +650,7 @@ TEST_CASE ("The other line's song crosses into the parting's numbering where thi
 
     const auto songOf = [&song] (const std::map<std::uint64_t, juce::String>& names)
     {
-        auto copy = song->getState().createCopy();
+        auto copy = phazite::test::copyWholeSong (*song);
 
         for (auto track : phazite::getTrackElements (copy))
         {
@@ -725,7 +725,7 @@ TEST_CASE ("The other line's own note under an ID its merge gave away is found b
     const auto tracks = phazite::ensureTracks (*song, 1);
     const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
     addMidiNote (*song, clip, 36, at (0.0), lasting (1.0));
-    const auto base = song->getState().createCopy();
+    const auto base = phazite::test::copyWholeSong (*song);
     constexpr std::uint64_t far = 1000000; // no ID either song holds
     const auto k = clip.getRaw(), k2 = far + 2, k3 = far + 3;
 
@@ -794,19 +794,19 @@ TEST_CASE ("A song holds each ID once where each item's is once, and each note's
     };
 
     // A note with the ID of a note in another clip: once in each.
-    auto acrossClips = song->getState().createCopy();
+    auto acrossClips = phazite::test::copyWholeSong (*song);
     juce::ValueTree (notesOf (acrossClips, second)[0])
         .setProperty (schema::noteID, notesOf (acrossClips, first)[0][schema::noteID], nullptr);
     CHECK (phazite::holdsEachIDOnce (acrossClips));
 
     // Two notes of one clip, or two tracks, under one ID: twice.
-    auto inOneClip = song->getState().createCopy();
+    auto inOneClip = phazite::test::copyWholeSong (*song);
     const auto notes = notesOf (inOneClip, first);
     REQUIRE (notes.size() == 2);
     juce::ValueTree (notes[1]).setProperty (schema::noteID, notes[0][schema::noteID], nullptr);
     CHECK_FALSE (phazite::holdsEachIDOnce (inOneClip));
 
-    auto twoTracks = song->getState().createCopy();
+    auto twoTracks = phazite::test::copyWholeSong (*song);
     auto trackElements = phazite::getTrackElements (twoTracks);
     REQUIRE (trackElements.size() == 2);
     trackElements[1].setProperty (schema::trackID, trackElements[0][schema::trackID], nullptr);
@@ -1139,8 +1139,8 @@ TEST_CASE ("A device grouped into a container on one side and changed on the oth
     {
         const auto eq = phazite::insertDeviceState (*sides.base, sides.tracks[0],
                                                     phazite::makeOwnDeviceState (*sides.base, phazite::devices::Equalizer::typeID));
-        sides.ours = phazite::makeSong (sides.base->getState().createCopy());
-        sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+        sides.ours = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
+        sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
         return eq;
     };
 
@@ -1188,8 +1188,8 @@ struct AliasSides : Sides
         alias = aliases.front();
         phazite::moveClip (*base, alias, at (8.0), tracks[1]);
         REQUIRE (phazite::findClipState (*base, alias)[schema::clipLink] == phazite::findClipState (*base, clip)[schema::clipLink]);
-        ours = phazite::makeSong (base->getState().createCopy());
-        theirs = phazite::makeSong (base->getState().createCopy());
+        ours = phazite::makeSong (phazite::test::copyWholeSong (*base));
+        theirs = phazite::makeSong (phazite::test::copyWholeSong (*base));
     }
 
     // A note as a clip of the merged song holds it, applied to this side's (as Merge applies it).
@@ -1240,8 +1240,8 @@ struct AliasSides : Sides
         const auto copies = phazite::copyClips (*base, { clip }, true);
         REQUIRE (copies.size() == 1);
         phazite::moveClip (*base, copies.front(), at (16.0), tracks[1]);
-        ours = phazite::makeSong (base->getState().createCopy());
-        theirs = phazite::makeSong (base->getState().createCopy());
+        ours = phazite::makeSong (phazite::test::copyWholeSong (*base));
+        theirs = phazite::makeSong (phazite::test::copyWholeSong (*base));
         return copies.front();
     }
 

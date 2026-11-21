@@ -872,7 +872,7 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
                           [&]
                           {
                               juce::MemoryOutputStream text;
-                              phazite::writeProjectText (text, song.getState());
+                              phazite::writeProjectText (text, phazite::test::copyWholeSong (song));
                           })
                           .value_or (0);
         CHECK (song.getIndex().isExact());
@@ -1404,7 +1404,7 @@ TEST_CASE ("Performance gate: a drag in a clip of 50,000 notes copies its track 
 
     {
         // Its notes written into the song as a file holds them, opened as a project is.
-        auto state = phazite::findSong (s.context)->getState().createCopy();
+        auto state = phazite::test::copyWholeSong (*phazite::findSong (s.context));
         juce::ValueTree clipState;
 
         for (const auto& track : phazite::getTrackElements (state))
@@ -1551,7 +1551,7 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
 
     // As a project file holds it: every value text.
     juce::MemoryOutputStream text;
-    phazite::writeProjectText (text, made->getState());
+    phazite::writeProjectText (text, phazite::test::copyWholeSong (*made));
     const auto xml = juce::parseXML (text.toString());
     REQUIRE (xml != nullptr);
     phazite::Song song (juce::ValueTree::fromXml (*xml));
@@ -1582,7 +1582,7 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
 
     // And Phazite's own song is left as it was written.
     juce::MemoryOutputStream after;
-    phazite::writeProjectText (after, song.getState());
+    phazite::writeProjectText (after, phazite::test::copyWholeSong (song));
     CHECK (after.toString() == text.toString());
 }
 

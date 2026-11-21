@@ -428,3 +428,38 @@ TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one chan
     CHECK (allButTheBend() == kept);
     CHECK (phazite::getClipRange (song.getSong(), take) == between (16.0, 816.0)); // the same clip, by its ID
 }
+
+TEST_CASE ("A clip's controllers' values are read at their song beats in its order, and the last of one before a beat is found")
+{
+    LaneSong s;
+    s.add (1.0, pedal, 127);
+    s.add (3.0, pedal, 0);
+    s.add (2.0, modWheel, 64);
+    s.add (3.0, pedal, 90); // a second at one beat, later in the clip's order
+    s.add (5.0, ControlLane { ControlKind::controller, 64, 2 }, 30);
+    const auto& song = s.getSong();
+
+    const auto values = phazite::getClipControls (song, s.clip);
+    REQUIRE (values.size() == 5);
+    CHECK (values[0].beat.inBeats() == doctest::Approx (1.0));
+    CHECK (values[0].kind == ControlKind::controller);
+    CHECK (values[0].number == 64);
+    CHECK (values[0].value == 127);
+    CHECK (values[2].number == 1);
+    CHECK (values[2].value == 64);
+    CHECK (values[3].value == 90);
+    CHECK (values[4].channel == 2);
+    CHECK (phazite::getClipControls (song, {}).empty());
+
+    const auto before = [&song, &s] (double beat, const ControlLane& lane)
+    { return phazite::findControlValueBefore (song, s.clip, lane.kind, lane.number, lane.channel, beats (beat)); };
+
+    CHECK_FALSE (before (0.5, pedal).has_value());
+    CHECK (before (1.0, pedal) == 127);
+    CHECK (before (2.5, pedal) == 127);
+    CHECK (before (3.0, pedal) == 90); // the later of the two at beat 3
+    CHECK (before (8.0, modWheel) == 64);
+    CHECK (before (8.0, ControlLane { ControlKind::controller, 64, 2 }) == 30); // on its own channel
+    CHECK (before (8.0, pedal) == 90);
+    CHECK_FALSE (before (8.0, bend).has_value());
+}

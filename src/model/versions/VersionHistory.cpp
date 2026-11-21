@@ -6,6 +6,7 @@
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AppInfo.h"
 #include "model/mixer/FreezeModel.h"
@@ -1120,7 +1121,7 @@ void VersionHistory::open()
         [shared = store, number = generation, weak = juce::WeakReference<VersionHistory> (this),
          mergingElement = song.getState().getChildWithName (schema::MERGING).createCopy(), closingNow = closing,
          earlier = FinishingHistories::get().getKept (folder), sweepStop = sweepStopped, names = readNames (song.getState()),
-         songNow = readNames (song.getState()).base.isNotEmpty() ? song.getState().createCopy() : juce::ValueTree()]
+         songNow = readNames (song.getState()).base.isNotEmpty() ? copyWholeSong (song) : juce::ValueTree()]
         {
             // Tests' seam: the read held here, begun, and counted while it is (holdFirstReadsForTests).
             if (holdFirstReadsForTests.load())
@@ -2261,7 +2262,7 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
 
     // The song as a save stores it, its plug-ins' own settings included, and their knobs' values.
     song.storeDeviceStates();
-    auto copy = song.getState().createCopy();
+    auto copy = copyWholeSong (song);
     auto parameters = readPluginParameters();
     auto committed = song.getDeviceChangesHeld(); // the changes the plug-ins said they made, as far as the version holds them
 
@@ -3708,7 +3709,7 @@ void VersionHistory::keepLeft (Switch& plan)
     // from its own version, not the branch's newer one. So its piece is never the version's, and whether it has changes is
     // found by reading both (hasChangesLeftOn()).
     song.storeDeviceStates();
-    plan.left = song.getState().createCopy();
+    plan.left = copyWholeSong (song);
     plan.leftParameters = readPluginParameters();
     plan.changesAtCopy = countSongChanges();
 }
@@ -3806,7 +3807,7 @@ bool VersionHistory::copyLeftAgain (Switch& plan)
         return false;
 
     song.storeDeviceStates();
-    plan.left = song.getState().createCopy();
+    plan.left = copyWholeSong (song);
     plan.leftParameters = readPluginParameters();
     plan.changesAtCopy = countSongChanges();
     return true;
@@ -3850,7 +3851,7 @@ VersionHistory::Taken VersionHistory::finishSwitch (const Switch& plan, SwitchRe
     if (! plan.left.isValid() || countSongChanges() != read.leftChanges)
     {
         song.storeDeviceStates();
-        const auto pieces = splitSong (song.getState().createCopy(), readPluginParameters());
+        const auto pieces = splitSong (copyWholeSong (song), readPluginParameters());
         read.leftKept = store->writeSong (pieces);
         read.leftPiece = pieces.song;
     }
@@ -4206,9 +4207,8 @@ void VersionHistory::takeSnapshot (const juce::String& reason)
     lastSnapshotTime = getVersionsTime();
 
     run (
-        [shared = store, number = generation, copy = song.getState().createCopy(), parameters = readPluginParameters(),
-         branch = currentBranch, time = stampNow(), reason, weak = juce::WeakReference<VersionHistory> (this),
-         reference = baseline]() mutable
+        [shared = store, number = generation, copy = copyWholeSong (song), parameters = readPluginParameters(), branch = currentBranch,
+         time = stampNow(), reason, weak = juce::WeakReference<VersionHistory> (this), reference = baseline]() mutable
         {
             // Only while the song differs from the version it grew from (its changes, worked out in the background, may not
             // have been in as it was asked for), and from the snapshot before it; thinned as it grows.
@@ -4578,7 +4578,7 @@ void VersionHistory::followNamesOfSong()
     run (
         [shared = store, piece = version->song, number = generation, read, base = names.base,
          weak = juce::WeakReference<VersionHistory> (this), lastID = last != nullptr ? last->id : juce::String(),
-         lastPiece = last != nullptr ? last->song : juce::String(), songNow = mayBeLast ? song.getState().createCopy() : juce::ValueTree()]
+         lastPiece = last != nullptr ? last->song : juce::String(), songNow = mayBeLast ? copyWholeSong (song) : juce::ValueTree()]
         {
             PluginParameterValues parameters, lastParameters;
             auto then = readCommitSong (*shared, piece, &parameters);
@@ -4656,8 +4656,8 @@ void VersionHistory::healToLast()
     song.storeDeviceStates();
 
     run (
-        [shared = store, piece = last->song, id = last->id, number = generation, copy = song.getState().createCopy(),
-         changes = countSongChanges(), weak = juce::WeakReference<VersionHistory> (this)]
+        [shared = store, piece = last->song, id = last->id, number = generation, copy = copyWholeSong (song), changes = countSongChanges(),
+         weak = juce::WeakReference<VersionHistory> (this)]
         {
             PluginParameterValues parameters;
             auto lastSong = readCommitSong (*shared, piece, &parameters);

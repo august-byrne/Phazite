@@ -7,6 +7,8 @@
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -110,7 +112,7 @@ TEST_CASE ("Notes are placed in song beats, and their clip grows to hold them")
     phazite::NoteRef note;
     step (check, n.song, "Add Note", [&] { note = n.add (60, 5.0, 1.0); });
     CHECK (n.startOf (note) == doctest::Approx (5.0));
-    const auto inClip = (double) phazite::findNoteState (n.song, note)[phazite::schema::noteStart];
+    const auto inClip = (n.get (note).start - phazite::getContentStart (phazite::findClipState (n.song, n.clip))).inBeats();
     CHECK (inClip == doctest::Approx (1.0)); // in the clip, from its content's start
 
     // A note can't start before its clip, and one past its end makes it grow to the end of that bar.
@@ -1464,4 +1466,209 @@ TEST_CASE ("A nudge through an alias whose notes start further into them stops a
     CHECK (n.startOf (inAlias) == doctest::Approx (20.0));
     CHECK_FALSE (phazite::isNotePlayed (n.song, inAlias));
     check.walkBackAndForth();
+}
+
+//==============================================================================
+// What changes a clip's notes from outside the notes' edits (Notes.h), each by the song and IDs.
+namespace
+{
+// A clip's notes as the song holds them, each as its ID, pitch, place among the clip's notes, length and velocity, and
+// whether it is muted, in the clip's order: what two clips holding the same notes have alike.
+std::vector<std::string> describeNotes (const phazite::Song& song, phazite::ClipID clip, bool withIDs = true)
+{
+    std::vector<std::string> notes;
+    const auto contentStart = phazite::getContentStart (phazite::findClipState (song, clip));
+
+    for (const auto& note : phazite::getClipNotes (song, clip))
+        notes.push_back ((withIDs ? juce::String ((juce::int64) note.id.getRaw()) + " " : juce::String()).toStdString()
+                         + std::to_string (note.pitch) + " " + phazite::writeValue ((note.start - contentStart).inBeats()).toStdString()
+                         + " " + phazite::writeValue (note.length.inBeats()).toStdString() + " " + std::to_string (note.velocity)
+                         + (note.muted ? " muted" : ""));
+
+    return notes;
+}
+
+// A clip's controllers' values, each as its number, its place among the clip's notes and its value, in the clip's order.
+std::vector<std::string> describeControls (const phazite::Song& song, phazite::ClipID clip)
+{
+    std::vector<std::string> controls;
+    const auto contentStart = phazite::getContentStart (phazite::findClipState (song, clip));
+
+    for (const auto& control : phazite::getClipControls (song, clip))
+        controls.push_back (std::to_string (control.number) + " "
+                            + phazite::writeValue ((control.beat - contentStart).inBeats()).toStdString() + " "
+                            + std::to_string (control.value));
+
+    return controls;
+}
+
+using Lines = std::vector<std::string>;
+} // namespace
+
+TEST_CASE ("Whether a note is there, by its clip and its ID")
+{
+    Notes n;
+    const auto note = n.add (60, 5.0, 1.0);
+    const auto other = phazite::insertMidiClip (n.song, n.track, { beats (12), beats (16) }, nullptr);
+    REQUIRE (other.isValid());
+
+    CHECK (phazite::hasNote (n.song, note));
+    CHECK_FALSE (phazite::hasNote (n.song, { other, note.note })); // the same ID in another clip
+    CHECK_FALSE (phazite::hasNote (n.song, { n.clip, {} }));
+    CHECK_FALSE (phazite::hasNote (n.song, { {}, note.note }));
+
+    {
+        const phazite::UndoStep step (n.song, "Delete Note");
+        phazite::deleteNotes (n.song, { note });
+    }
+
+    CHECK_FALSE (phazite::hasNote (n.song, note));
+    phazite::undo (n.song);
+    CHECK (phazite::hasNote (n.song, note));
+}
+
+TEST_CASE ("Scaling clips' notes and controllers' values scales each alias group's once, however many of its clips are named")
+{
+    Notes n;
+    n.add (60, 5.0, 1.0); // a beat into the clip, which starts at beat 4
+    phazite::addControl (n.song, n.clip, beats (6.0), phazite::ControlKind::controller, 64, 127);
+    const auto aliases = phazite::copyClips (n.song, { n.clip }, true);
+    REQUIRE (aliases.size() == 1);
+    const auto alias = aliases.front();
+    const auto loose = phazite::insertMidiClip (n.song, n.track, { beats (20), beats (24) }, nullptr);
+    phazite::addNote (n.song, loose, 62, beats (22.0), length (0.5), 90);
+    n.song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck check (n.song);
+
+    // The clip named twice and its alias once: each scaled once, its notes' starts and lengths and its values' beats.
+    step (check, n.song, "Change Tempo", [&] { phazite::scaleClipContent (n.song, { n.clip, alias, n.clip, loose }, 2.0); });
+
+    for (const auto clip : { n.clip, alias })
+    {
+        CHECK (describeNotes (n.song, clip, false) == Lines { "60 2 2 100" });
+        CHECK (describeControls (n.song, clip) == Lines { "64 4 127" });
+    }
+
+    CHECK (describeNotes (n.song, loose, false) == Lines { "62 4 1 90" });
+
+    // One clip of a group named: the group's notes, its alias's too, and no other clip's.
+    step (check, n.song, "Change Tempo", [&] { phazite::scaleClipContent (n.song, { alias }, 0.5); });
+    CHECK (describeNotes (n.song, n.clip, false) == Lines { "60 1 1 100" });
+    CHECK (describeNotes (n.song, alias) == describeNotes (n.song, n.clip));
+    CHECK (describeControls (n.song, n.clip) == Lines { "64 2 127" });
+    CHECK (describeNotes (n.song, loose, false) == Lines { "62 4 1 90" });
+    check.walkBackAndForth();
+}
+
+TEST_CASE ("A clip's notes made like another song's clip's: those it hasn't come, those both have take its values, the others go")
+{
+    Notes n;
+    const auto kept = n.add (60, 5.0, 1.0);
+    const auto gone = n.add (62, 6.0, 1.0);
+    phazite::addControl (n.song, n.clip, beats (6.5), phazite::ControlKind::controller, 64, 127);
+    const auto then = phazite::copyWhole (n.song, phazite::findClipState (n.song, n.clip)); // as another song holds it
+    const auto notesThen = describeNotes (n.song, n.clip);
+    const auto controlsThen = describeControls (n.song, n.clip);
+
+    const auto changeSince = [&]
+    {
+        const phazite::UndoStep step (n.song, "Edit Notes");
+        phazite::transposeNotes (n.song, { kept }, 5);
+        phazite::deleteNotes (n.song, { gone });
+        n.add (64, 4.5, 0.5);
+        phazite::addControl (n.song, n.clip, beats (4.0), phazite::ControlKind::controller, 64, 0);
+    };
+
+    changeSince();
+    REQUIRE (describeNotes (n.song, n.clip) != notesThen);
+    n.song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck check (n.song);
+
+    // The clip's notes and controllers' values as elements, whole: every property of each, in the element's order.
+    const auto holdsThenEvents = [&]
+    {
+        const auto eventsOf = [] (const juce::ValueTree& clipState)
+        {
+            juce::ValueTree events ("EVENTS");
+
+            for (const auto& child : clipState)
+                if (child.hasType (phazite::schema::NOTE) || child.hasType (phazite::schema::CONTROL))
+                    events.appendChild (child.createCopy(), nullptr);
+
+            return events;
+        };
+
+        return eventsOf (phazite::copyWhole (n.song, phazite::findClipState (n.song, n.clip))).isEquivalentTo (eventsOf (then));
+    };
+
+    // In the song's undo history: as they were, in the other's order.
+    step (check, n.song, "Restore", [&] { phazite::makeClipNotesLike (n.song, n.clip, then); });
+    CHECK (describeNotes (n.song, n.clip) == notesThen);
+    CHECK (describeControls (n.song, n.clip) == controlsThen);
+    CHECK (holdsThenEvents());
+    check.walkBackAndForth();
+
+    // Outside it, while the song is written outside it: the same, and nothing to undo.
+    changeSince();
+    n.song.getUndoManager().clearUndoHistory();
+
+    {
+        const phazite::Song::OutsideHistory outside (n.song);
+        CHECK (n.song.isWritingOutsideHistory());
+        phazite::makeClipNotesLike (n.song, n.clip, then);
+    }
+
+    CHECK_FALSE (n.song.isWritingOutsideHistory());
+    CHECK (describeNotes (n.song, n.clip) == notesThen);
+    CHECK (describeControls (n.song, n.clip) == controlsThen);
+    CHECK (holdsThenEvents());
+    CHECK_FALSE (n.song.getUndoManager().canUndo());
+}
+
+TEST_CASE ("One value of a note set through its clip reaches the note in each of the clip's aliases, in one undo step")
+{
+    Notes n;
+    const auto note = n.add (60, 5.0, 1.0);
+    const auto aliases = phazite::copyClips (n.song, { n.clip }, true);
+    REQUIRE (aliases.size() == 1);
+    const phazite::NoteRef inAlias { aliases.front(), note.note };
+    n.song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck check (n.song);
+
+    step (check, n.song, "Take the Other Branch's: a note's velocity",
+          [&] { CHECK (phazite::setNoteValue (n.song, note, phazite::schema::noteVelocity, 40)); });
+    CHECK (n.get (note).velocity == 40);
+    CHECK (n.get (inAlias).velocity == 40);
+
+    step (check, n.song, "Take the Other Branch's: a note's mute",
+          [&] { CHECK (phazite::setNoteValue (n.song, inAlias, phazite::schema::noteMute, true)); });
+    CHECK (n.get (note).muted);
+    CHECK (n.get (inAlias).muted);
+
+    // A void value takes it away.
+    step (check, n.song, "Take What Was Before: a note's mute",
+          [&] { CHECK (phazite::setNoteValue (n.song, note, phazite::schema::noteMute, juce::var())); });
+    CHECK_FALSE (n.get (note).muted);
+    CHECK_FALSE (n.get (inAlias).muted);
+    check.walkBackAndForth();
+
+    // A note that isn't there: nothing.
+    const auto other = phazite::insertMidiClip (n.song, n.track, { beats (12), beats (16) }, nullptr);
+    CHECK_FALSE (phazite::setNoteValue (n.song, { other, note.note }, phazite::schema::noteVelocity, 10));
+}
+
+TEST_CASE ("Notes taken out of one clip alone stay in its aliases, and outside the undo history")
+{
+    Notes n;
+    const auto note = n.add (60, 5.0, 1.0);
+    const auto stays = n.add (62, 6.0, 1.0);
+    const auto aliases = phazite::copyClips (n.song, { n.clip }, true);
+    REQUIRE (aliases.size() == 1);
+    n.song.getUndoManager().clearUndoHistory();
+
+    phazite::removeClipNotesAlone (n.song, n.clip, { note.note });
+    CHECK_FALSE (phazite::hasNote (n.song, note));
+    CHECK (phazite::hasNote (n.song, stays));
+    CHECK (phazite::hasNote (n.song, { aliases.front(), note.note }));
+    CHECK_FALSE (n.song.getUndoManager().canUndo());
 }

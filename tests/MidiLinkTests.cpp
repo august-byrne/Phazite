@@ -27,6 +27,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/playback/internal/AutomationWriter.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -506,9 +507,9 @@ TEST_CASE ("MIDI Learn Last Touched Parameter learns the parameter changed last,
 TEST_CASE ("A link made is a change of the song's own in its versions: \"Update MIDI links\"")
 {
     SynthSong s;
-    const auto before = getSong (s.song).getState().createCopy();
+    const auto before = phazite::test::copyWholeSong (getSong (s.song));
     s.link (s.parameter ("cutoff"), { 1, 21 });
-    const auto after = getSong (s.song).getState().createCopy();
+    const auto after = phazite::test::copyWholeSong (getSong (s.song));
 
     CHECK (phazite::findSongChange (before, after).what.contains ("MIDI links"));
     CHECK (phazite::summarise (phazite::findChanges (before, after)) == "Update MIDI links");
@@ -847,9 +848,8 @@ TEST_CASE ("A take recorded while a linked controller moves holds none of its va
     REQUIRE (clips.size() == 1);
     std::vector<int> numbers;
 
-    for (const auto& child : phazite::findClipState (getSong (s.song), clips[0].id))
-        if (child.hasType (phazite::schema::CONTROL))
-            numbers.push_back ((int) child[phazite::schema::controlNumber]);
+    for (const auto& control : phazite::getClipControls (getSong (s.song), clips[0].id))
+        numbers.push_back (control.number);
 
     CHECK (std::find (numbers.begin(), numbers.end(), 22) != numbers.end());
     CHECK (std::find (numbers.begin(), numbers.end(), 21) == numbers.end());

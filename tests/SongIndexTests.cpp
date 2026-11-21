@@ -131,7 +131,7 @@ TEST_CASE ("The song's index follows the whole song made like another, as a merg
     const auto tracks = phazite::ensureTracks (*song, 3);
     const auto first = addClipOfNotes (*song, tracks[0], 0.0, 64);
     addClipOfNotes (*song, tracks[1], 0.0, 64);
-    const auto then = song->getState().createCopy();
+    const auto then = phazite::test::copyWholeSong (*song);
 
     // Changed since: a track gone, a clip moved, notes added and gone, a track added with a clip.
     phazite::deleteTracks (*song, { tracks[2] }, nullptr);
@@ -370,7 +370,7 @@ TEST_CASE ("The song's index holds what the song does after each of a few hundre
     phazite::test::UndoCheck undo (*song);
     juce::Random random (122);
     auto* history = &song->getUndoManager();
-    const auto snapshot = [&song] { return song->getState().createCopy(); };
+    const auto snapshot = [&song] { return phazite::test::copyWholeSong (*song); };
     auto earlier = snapshot();
     phazite::ensureTracks (*song, 3);
 

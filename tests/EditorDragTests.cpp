@@ -472,7 +472,7 @@ TEST_CASE ("Another project opened in the middle of a drag ends it in the song i
     // The new project is a copy of the song open, every ID the same: what a drag holds by its IDs would find its items there.
     const auto openCopy = [] (phazite::ProjectContext& context, phazite::Song& song)
     {
-        auto copy = phazite::makeSong (song.getState().createCopy());
+        auto copy = phazite::makeSong (phazite::test::copyWholeSong (song));
         const auto before = writeSong (*copy, SongPart::undoable);
         setSong (context, copy.get());
         phazite::test::dispatchPendingMessages();

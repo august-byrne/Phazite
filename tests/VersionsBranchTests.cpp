@@ -566,7 +566,7 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     REQUIRE (phazite::getTracksInFolder (song, folder) == std::vector { b.bass, b.drums });
     b.s.addNote (clip, 40, 2.0, 1.0);
     keepVersion (b.s.context, "Note");
-    const auto before = song.getState().createCopy();
+    const auto before = phazite::test::copyWholeSong (song);
 
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishMerge (b.s.context);

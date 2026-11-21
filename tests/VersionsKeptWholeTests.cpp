@@ -372,7 +372,7 @@ TEST_CASE ("A song written into the project's file as it was committed opens wit
     s.setVolume (keys, -4.5f);
     keepVersion (s.context, "First");
     REQUIRE (s.getProject().save().wasOk());
-    const auto saved = phazite::findSong (s.context)->getState().createCopy();
+    const auto saved = phazite::test::copyWholeSong (*phazite::findSong (s.context));
 
     s.openSong (saved);
     REQUIRE (waitForVersionHistory (s.context));
@@ -394,7 +394,7 @@ TEST_CASE ("A device's values written as another tool writes numbers open as the
     s.setParameter (synth, "unisonDrift", 0.5f);
     keepVersion (s.context, "First");
     REQUIRE (s.getProject().save().wasOk());
-    auto written = phazite::findSong (s.context)->getState().createCopy();
+    auto written = phazite::test::copyWholeSong (*phazite::findSong (s.context));
 
     std::function<juce::ValueTree (const juce::ValueTree&)> findValues = [&] (const juce::ValueTree& element) -> juce::ValueTree
     {
@@ -857,7 +857,7 @@ TEST_CASE ("A song read from the versions' pieces holds together as a project fi
     s.setVolume (bass, -6.0f);
     keepVersion (s.context, "Mine");
 
-    auto hostile = phazite::findSong (s.context)->getState().createCopy();
+    auto hostile = phazite::test::copyWholeSong (*phazite::findSong (s.context));
     auto tracks = phazite::getTrackElements (hostile);
     REQUIRE (tracks.size() >= 2);
     tracks[0].setProperty (phazite::schema::channelVolume, "nan", nullptr);
@@ -924,7 +924,7 @@ TEST_CASE ("A commit whose song holds an ID past 2^61 inside an element Phazite 
     s.addTrack ("Bass");
     keepVersion (s.context, "Mine");
 
-    auto future = phazite::findSong (s.context)->getState().createCopy();
+    auto future = phazite::test::copyWholeSong (*phazite::findSong (s.context));
     juce::ValueTree element ("FUTURE");
     element.appendChild (
         juce::ValueTree (phazite::schema::TRACK, { { phazite::schema::trackID, (juce::int64) (phazite::schema::maxID - 1) } }), nullptr);
@@ -951,7 +951,7 @@ TEST_CASE (
     s.addTrack ("Bass");
     keepVersion (s.context, "Mine");
 
-    auto hostile = phazite::findSong (s.context)->getState().createCopy();
+    auto hostile = phazite::test::copyWholeSong (*phazite::findSong (s.context));
     auto tracks = phazite::getTrackElements (hostile);
     REQUIRE_FALSE (tracks.empty());
     tracks.back().setProperty (phazite::schema::trackID, (juce::int64) phazite::schema::renumberMark, nullptr);
@@ -1016,7 +1016,7 @@ GivenAnew openGivenAnew (TestSong& s)
     const auto mark = (juce::int64) phazite::schema::renumberMark;
 
     {
-        auto edited = phazite::findSong (s.context)->getState().createCopy();
+        auto edited = phazite::test::copyWholeSong (*phazite::findSong (s.context));
         auto tracks = phazite::getTrackElements (edited);
         REQUIRE (tracks.size() == 1);
         tracks.front().setProperty (phazite::schema::trackID, mark - 20, nullptr);
@@ -1028,7 +1028,7 @@ GivenAnew openGivenAnew (TestSong& s)
     keepVersion (s.context, "Before");
     made.before = phazite::getLastVersion (s.context)->id;
     s.addTrack ("Idea");
-    made.oldLine = writeOthersCommit (s, phazite::findSong (s.context)->getState().createCopy(), "old-line");
+    made.oldLine = writeOthersCommit (s, phazite::test::copyWholeSong (*phazite::findSong (s.context)), "old-line");
     passTheMark (s, "More");
 
     REQUIRE (readNumbering (s.context).isEmpty());
@@ -1086,7 +1086,7 @@ TEST_CASE ("After a song's IDs were given anew as it opened, a line's Restore an
     CHECK (writeSongText (s.context) == now);
 
     // One numbered as the song is now, whose parting with the song is the version before: refused.
-    const auto newLine = writeOthersCommit (s, song().getState().createCopy(), "new-line");
+    const auto newLine = writeOthersCommit (s, phazite::test::copyWholeSong (song()), "new-line");
     CHECK (song().getState()[phazite::schema::idNumbering].toString() == stamp); // saved and opened again: nothing given anew
     now = writeSongText (s.context);
     CHECK_FALSE (finished (s.context, [&] { return phazite::startMerge (s.context, newLine); }));
@@ -1135,7 +1135,7 @@ TEST_CASE ("After a song's IDs were given anew as it opened, a line's Restore an
     CHECK (phazite::getTrackName (song(), bass) == "Bass");
     CHECK (phazite::getRestoreProblem (s.context).isEmpty());
 
-    auto theirs = song().getState().createCopy();
+    auto theirs = phazite::test::copyWholeSong (song());
     for (auto track : phazite::getTrackElements (theirs))
         if (phazite::readID (track[phazite::schema::trackID]) == bass.getRaw())
             track.setProperty (phazite::schema::trackName, "Bass elsewhere", nullptr);
@@ -1188,7 +1188,7 @@ TEST_CASE ("A merge's list worked out against the song in one numbering takes no
         // A version saved after, and another computer's from it, each with the song's stamp: the list shows. Then the song
         // made the version from before again, without a stamp.
         keepVersion (s.context, "After");
-        auto theirs = song().getState().createCopy();
+        auto theirs = phazite::test::copyWholeSong (song());
 
         for (auto track : phazite::getTrackElements (theirs))
             if (phazite::readID (track[phazite::schema::trackID]) == made.bass.getRaw())

@@ -6,6 +6,7 @@
 #include "internal/Selection.h"
 #include "internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -68,7 +69,7 @@ namespace
             span = span.has_value() ? span->getUnionWith (beats) : beats;
 
             if (const auto index = indexOf (tracks, getTrackID (clipState.getParent())); index >= 0)
-                clipboard.clips.push_back ({ clipState.createCopy(), beats, index - first });
+                clipboard.clips.push_back ({ copyWhole (song, clipState), beats, index - first }); // with its notes
         }
 
         if (range.has_value())

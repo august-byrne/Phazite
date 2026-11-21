@@ -103,8 +103,4 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
 // The element a clash's path names in a song, invalid if it has none.
 juce::ValueTree findByPath (const juce::ValueTree& song, const juce::StringArray& path);
 
-// Gives a clip (to) another's notes and controllers' values (from's, its alias group's keeper), in the same order and with
-// the same IDs, where its own were: an alias group's clips hold the same (Schema.h: clipLink). Only what differs is written,
-// so that a clash chosen in one clip of a group reaches the others as one change each.
-void giveClipEvents (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager*);
 } // namespace phazite

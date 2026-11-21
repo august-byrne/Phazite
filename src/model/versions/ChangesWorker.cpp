@@ -2,6 +2,7 @@
 #include "internal/ChangesWorker.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/WholeState.h"
 
 #include <algorithm>
 #include <utility>
@@ -25,14 +26,14 @@ namespace
     }
 
     // A track's own parts, or the master's: without the tracks in it (a folder's), which are parts of their own.
-    juce::ValueTree copyTrack (const juce::ValueTree& track)
+    juce::ValueTree copyTrack (const Song& song, const juce::ValueTree& track)
     {
         juce::ValueTree copy (track.getType());
         copy.copyPropertiesFrom (track, nullptr);
 
         for (const auto& child : track)
             if (! child.hasType (schema::TRACK))
-                copy.appendChild (child.createCopy(), nullptr);
+                copy.appendChild (copyWhole (song, child), nullptr); // a clip with its notes
 
         return copy;
     }
@@ -240,7 +241,7 @@ std::shared_ptr<ChangesWorker::Request> ChangesWorker::take (const Song& song, c
     {
         // Everything: the whole song, once.
         request->all = true;
-        request->songNow = songState.createCopy();
+        request->songNow = copyWholeSong (song);
         tracksCopied += (juce::int64) getTrackElements (songState).size() + 1;
         findPluginDevices (request->songNow, devices);
     }
@@ -258,7 +259,7 @@ std::shared_ptr<ChangesWorker::Request> ChangesWorker::take (const Song& song, c
         for (const auto id : tracks)
         {
             const auto element = master.isValid() && readID (master[schema::trackID]) == id ? master : song.getIndex().findTrack (id);
-            const auto copy = element.isValid() ? copyTrack (element) : juce::ValueTree();
+            const auto copy = element.isValid() ? copyTrack (song, element) : juce::ValueTree();
             ++tracksCopied;
             findPluginDevices (copy, devices);
             request->tracks[id] = copy;

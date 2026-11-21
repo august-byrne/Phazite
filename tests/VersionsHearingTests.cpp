@@ -480,7 +480,7 @@ TEST_CASE ("A/B opens the last version live, without a bounce, and brings the so
     CHECK_FALSE (phazite::canCompare (s.context));
 
     s.setVolume (track, -6.0f);
-    const auto now = phazite::findSong (s.context)->getState().createCopy();
+    const auto now = phazite::test::copyWholeSong (*phazite::findSong (s.context));
     REQUIRE (phazite::canCompare (s.context));
     CHECK (phazite::describeCompare (s.context).contains ("live"));
 

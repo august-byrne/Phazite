@@ -107,7 +107,7 @@ std::vector<ClipID> consolidatePart (Song& song, const ConsolidatePart& part, co
     // What the MIDI clips play in the range, before they go: each note as it plays, cut at its clip's and the range's edges,
     // and the controller events (a sustain pedal, the pitch wheel) there, counted from the range's start.
     std::vector<NoteData> notes;
-    std::vector<juce::ValueTree> controls;
+    std::vector<ControlValue> controls; // at their song beats, where the joined clip plays them
 
     for (const auto& clipState : midiClips)
     {
@@ -130,22 +130,9 @@ std::vector<ClipID> consolidatePart (Song& song, const ConsolidatePart& part, co
             notes.push_back (note);
         }
 
-        const auto contentStart = getContentStart (clipState).inBeats();
-
-        for (const auto& child : clipState)
-        {
-            if (! child.hasType (schema::CONTROL))
-                continue;
-
-            const auto beat = BeatPosition::fromBeats (contentStart + (double) child[schema::controlBeat]);
-
-            if (beat >= played.getStart() && beat < played.getEnd())
-            {
-                auto control = child.createCopy();
-                control.setProperty (schema::controlBeat, (beat - part.range.getStart()).inBeats(), nullptr);
+        for (const auto& control : getClipControls (song, getClipID (clipState)))
+            if (control.beat >= played.getStart() && control.beat < played.getEnd())
                 controls.push_back (control);
-            }
-        }
     }
 
     const auto midiName = getSharedName (midiClips), audioName = getSharedName (audioClips);
@@ -163,11 +150,7 @@ std::vector<ClipID> consolidatePart (Song& song, const ConsolidatePart& part, co
                 note.clip = clip;
 
             setClipNotes (song, clip, notes);
-            auto clipState = findClipState (song, clip);
-
-            for (auto& control : controls)
-                clipState.appendChild (control, &song.getUndoManager());
-
+            addControls (song, clip, controls); // after its notes, counted from its start, which is the range's
             made.push_back (clip);
         }
     }

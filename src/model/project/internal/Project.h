@@ -5,6 +5,7 @@
 #include "model/base/BackgroundJobs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 
 #include <juce_data_structures/juce_data_structures.h>
 
@@ -228,7 +229,7 @@ public:
     // changed since it was copied; false if the write failed, which leaves its changes to save again. And how many changes
     // the project has had, to tell when they stop.
     void saveInBackground();
-    bool hasBackgroundSave() const noexcept { return backgroundSave.isValid(); }
+    bool hasBackgroundSave() const noexcept { return backgroundSave.tree.isValid(); }
     bool finishBackgroundSave();
     juce::int64 getChangeCount() const noexcept { return changeCount; }
     static constexpr int backupMinutes = 10;
@@ -317,9 +318,21 @@ private:
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
     juce::int64 autosavedAt = 0; // when autosave() last wrote it, in milliseconds since 1970; 0 for none
 
+    // The song as it was at a moment: a copy of its tree, and what it kept beside its tree then (model/base/internal/
+    // WholeState.h), which copyWhole() makes the song whole of. Never the whole song itself: a clip of the copy is then of
+    // the same shape as a clip of the song (holding no more than the song's own tree holds), which the comparisons below
+    // find by its place and compare with the song's, its notes compared as values (holdSameNotes()).
+    struct SongCopy
+    {
+        juce::ValueTree tree;
+        ValuesKept values;
+    };
+
+    SongCopy copySong() const; // the song as it is now
+
     // A save in the background: what it writes, and the counts of the changes as it was copied; when the project file was
     // last backed up (milliseconds since 1970); and the changes counted since the project opened.
-    juce::ValueTree backgroundSave;
+    SongCopy backgroundSave;
     juce::int64 changesAtBackgroundSave = 0, backedUpAt = 0, changeCount = 0;
     int outsideAtBackgroundSave = 0;
 
@@ -331,7 +344,7 @@ private:
     // place among the elements that count; after many notifications, the track (or the song's element) each was in, whole.
     // No song at all while the project file doesn't hold the song that was opened (a restored autosave, or a song from
     // elsewhere: forgetSavedState()): then the song is unsaved, whatever it is compared with, until it is saved.
-    juce::ValueTree savedState;
+    SongCopy savedState;
     bool mayHaveChanged = false;
 
     struct ToCompare
@@ -392,17 +405,19 @@ private:
     bool takeNamesWritten(); // a names write under way finished, before another write or copy of the file: pending if it failed
     void tellNamesFailed();  // once, until a write of them works
     void handleAsyncUpdate() override;
-    void timerCallback() override; // a names write under way, or one waiting for another write of the file, looked at
-    void rememberSavedState();
-    void forgetSavedState(); // the project file doesn't hold the song: unsaved until a save
+    void timerCallback() override;           // a names write under way, or one waiting for another write of the file, looked at
+    void rememberSavedState();               // the song as it is now
+    void rememberSavedState (SongCopy copy); // or a copy of it taken since its last change (what save() wrote)
+    void forgetSavedState();                 // the project file doesn't hold the song: unsaved until a save
     void compareWithSavedState();
     void markChanged (const juce::ValueTree&, const juce::Identifier& property = {});
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
 
     // What isn't a change (Schema.h: schema::isUncountedProperty() and isUncountedElement(): view state, how the song plays,
     // its next ID) is left out of notifications and of the comparison with savedState alike. A plug-in's own change (its
-    // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()).
-    static bool holdTheSameProject (const juce::ValueTree&, const juce::ValueTree&);
+    // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()). Each
+    // element with what its song kept beside its tree (a clip's notes: holdSameNotes()).
+    static bool holdTheSameProject (const juce::ValueTree&, const ValuesKept&, const juce::ValueTree&, const ValuesKept&);
 
 public:
     // How many elements the comparisons with the saved copies looked at since the program started (each element compared
@@ -415,7 +430,7 @@ public:
 
     // For tests: what the comparison of the whole song with the saved copy says, which hasUnsavedChanges() works out
     // comparing only what notified since. Message thread.
-    bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), savedState); }
+    bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), keepValues (*song), savedState.tree, savedState.values); }
 
 private:
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }

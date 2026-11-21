@@ -6,6 +6,7 @@
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
@@ -332,7 +333,8 @@ std::vector<juce::ValueTree> getAliasStates (const Song& song, const juce::Value
 
 juce::ValueTree copyClipState (Song& song, const juce::ValueTree& clipState)
 {
-    auto copy = clipState.createCopy();
+    // A clip of the song whole, with its notes; one outside it (what the clipboard kept, a copy) is whole already.
+    auto copy = clipState.isAChildOf (song.getState()) ? copyWhole (song, clipState) : clipState.createCopy();
     copy.setProperty (schema::clipID, (juce::int64) song.makeID(), nullptr);
     return copy;
 }

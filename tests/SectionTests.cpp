@@ -223,7 +223,7 @@ TEST_CASE ("Outlines by id")
     auto& s = song.getSong();
 
     // An id no outline has changes nothing.
-    const auto before = s.getState().createCopy();
+    const auto before = phazite::test::copyWholeSong (s);
     CHECK_FALSE (phazite::applyOutline (s, "unknown"));
     CHECK (s.getState().isEquivalentTo (before));
     CHECK (phazite::getAppliedOutline (s) == juce::String ("electronic"));

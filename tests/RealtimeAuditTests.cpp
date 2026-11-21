@@ -2545,7 +2545,7 @@ TEST_SUITE ("realtime-audit")
         const auto bass = song.addTrack ("Bass");
         song.setInstrument (bass, phazite::devices::Synth::typeID);
         song.addNote (song.addMidiClip (bass, 0.0, 16.0), 36, 0.0, 16.0);
-        const auto now = phazite::findSong (song.context)->getState().createCopy();
+        const auto now = phazite::test::copyWholeSong (*phazite::findSong (song.context));
 
         REQUIRE (phazite::test::finished (song.context, [&] { return phazite::openVersion (song.context, version); }));
         phazite::backToNow (song.context);

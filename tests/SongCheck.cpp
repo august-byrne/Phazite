@@ -64,6 +64,7 @@ namespace
     struct Checker
     {
         const Song& song;
+        juce::ValueTree state;        // the song whole (TestHelpers.h: copyWholeSong()), which the rules walk
         juce::File folder;            // the project's, or none
         const schema::Tables& tables; // what Schema.h describes, or a test's changed copy of it
         std::vector<std::string> problems;
@@ -338,7 +339,7 @@ namespace
                     checkNumber (child, schema::pointValue, 0.0, 1.0, false, "value");
 
                     if (! describeParameter (song, parameter).has_value()
-                        && findDevice (song.getState(), parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin
+                        && findDevice (state, parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin
                         && ! (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter))
                         add ("names", tree, "a curve of a parameter the song hasn't: " + parameter.parameter);
                 }
@@ -361,7 +362,7 @@ namespace
                         add ("names", child, "a MIDI link without its controller");
 
                     if (! describeParameter (song, parameter).has_value()
-                        && findDevice (song.getState(), parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin)
+                        && findDevice (state, parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin)
                         add ("names", child, "a MIDI link of a parameter the song hasn't: " + parameter.parameter);
 
                     for (const auto& other : tree)
@@ -461,7 +462,7 @@ namespace
         void checkAliases()
         {
             std::map<juce::String, std::vector<juce::ValueTree>> groups;
-            collectGroups (song.getState(), groups);
+            collectGroups (state, groups);
 
             for (const auto& [link, clips] : groups)
             {
@@ -517,8 +518,9 @@ std::vector<std::string> findSongProblems (const Song& song)
 
 std::vector<std::string> findSongProblems (const Song& song, const schema::Tables& tables)
 {
-    const auto& state = song.getState();
-    Checker checker { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), tables, {} };
+    // The song whole, with what it keeps beside its tree: what its file would hold.
+    const auto state = test::copyWholeSong (song);
+    Checker checker { song, state, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), tables, {} };
 
     if (! state.hasType (schema::PHAZITE))
         return { "place: the song isn't a PHAZITE element" };
@@ -561,7 +563,7 @@ void checkSong (const Song& song)
 
 Song::Ptr copyAsOpened (const Song& song)
 {
-    Song::Ptr copy (new Song (song.getState().createCopy()));
+    Song::Ptr copy (new Song (phazite::test::copyWholeSong (song)));
     forgetCurvesOfGoneDevices (*copy);
     copy->getState().removeProperty (schema::playStart, nullptr);
     std::set<std::uint64_t> items;

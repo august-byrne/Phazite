@@ -5,6 +5,7 @@
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -891,7 +892,7 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         // own (its tracks, devices, sends, modulators and clips, its clips' notes as they are, in their alias groups), with
         // its own automation, right after the original. A frozen track's copy plays live: the frozen file is the original's.
         song.storeDeviceStates (track.getRaw());
-        auto copy = original.createCopy();
+        auto copy = copyWhole (song, original); // its clips with their notes
         const auto copied = giveNewIDs (song, copy);
 
         std::vector<juce::ValueTree> inside { copy };

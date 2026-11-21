@@ -234,7 +234,7 @@ namespace
             auto* song = findSong (context);
             REQUIRE (song != nullptr);
             song->storeDeviceStates(); // as a save does
-            const auto copy = makeSong (song->getState().createCopy(), song->getFile(), song->getCacheFolder());
+            const auto copy = makeSong (phazite::test::copyWholeSong (*song), song->getFile(), song->getCacheFolder());
             REQUIRE (copy != nullptr);
 
             ProjectContext opened (getEngineContext());

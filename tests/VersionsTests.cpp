@@ -544,7 +544,7 @@ TEST_CASE ("A project's versions are read again as it opens, with the song each 
     TestSong s;
     const auto bass = s.addTrack ("Bass");
     keepVersion (s.context, "One");
-    const auto firstSong = phazite::findSong (s.context)->getState().createCopy();
+    const auto firstSong = phazite::test::copyWholeSong (*phazite::findSong (s.context));
 
     s.setVolume (bass, -10.0f);
     keepVersion (s.context, "Two");
@@ -629,7 +629,7 @@ TEST_CASE ("The differences between two songs match items by their IDs, wherever
     auto before = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*before, 2);
     phazite::setTrackName (*before, tracks[0], "Drums");
-    const auto then = before->getState().createCopy();
+    const auto then = phazite::test::copyWholeSong (*before);
 
     // The second track moved above the first: the song's order, no track's own change.
     auto list = phazite::getTrackList (*before);
@@ -1283,7 +1283,7 @@ TEST_CASE ("A song another tool wrote with switches as true and false and IDs as
     REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     // The same song, each switch and ID as another tool writes it.
-    auto written = song.getState().createCopy();
+    auto written = phazite::test::copyWholeSong (song);
     const std::function<void (juce::ValueTree)> rewrite = [&rewrite] (juce::ValueTree element)
     {
         for (auto i = element.getNumProperties(); --i >= 0;)

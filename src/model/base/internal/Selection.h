@@ -148,4 +148,9 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE (Selection)
 };
+
+// Whether the song holds a note: its clip is the song's, and holds a note of its ID. Here, below the notes' code
+// (model/notes/internal/Notes.h, which includes this), for the selection, which counts the notes it names that are still
+// there; and for the notes' code and the tests. Message thread.
+bool hasNote (const Song&, const NoteRef&);
 } // namespace phazite

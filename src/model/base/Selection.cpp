@@ -60,17 +60,21 @@ namespace
     // How many of these notes are still in their clips, of those shown: each by its ID in its own clip.
     int countNotesThere (const Song& song, const std::vector<ClipID>& clips, const std::vector<NoteRef>& notes)
     {
-        const auto& index = song.getIndex();
         auto count = 0;
 
         for (const auto& ref : notes)
-            if (std::find (clips.begin(), clips.end(), ref.clip) != clips.end()
-                && index.findNote (index.findClip (ref.clip.getRaw()), ref.note.getRaw()).isValid())
+            if (std::find (clips.begin(), clips.end(), ref.clip) != clips.end() && hasNote (song, ref))
                 ++count;
 
         return count;
     }
 } // namespace
+
+bool hasNote (const Song& song, const NoteRef& ref)
+{
+    const auto& index = song.getIndex();
+    return index.findNote (index.findClip (ref.clip.getRaw()), ref.note.getRaw()).isValid();
+}
 
 void Selection::countPointComparisons (std::uint64_t count) noexcept
 {

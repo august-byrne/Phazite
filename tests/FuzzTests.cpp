@@ -628,7 +628,7 @@ TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, an
     phazite::finishMerge (s.context);
     REQUIRE (phazite::isMerging (s.context));
 
-    const auto state = phazite::findSong (s.context)->getState().createCopy();
+    const auto state = phazite::test::copyWholeSong (*phazite::findSong (s.context));
     const auto element = state.getChildWithName (schema::MERGING);
     REQUIRE (element.isValid());
     auto pointingAtATrack = element.createCopy();

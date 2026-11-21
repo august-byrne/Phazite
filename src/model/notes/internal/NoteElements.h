@@ -235,6 +235,12 @@ void forEachControl (const juce::ValueTree& clipState, Visit&& visit)
             visit (place, control);
 }
 
+// Gives a clip (to) another's notes and controllers' values (from's, its alias group's keeper), in the same order and with
+// the same IDs, where its own were: an alias group's clips hold the same (Schema.h: clipLink). Only what differs is written,
+// so that a change made in one clip of a group (a merge's clash chosen: Notes.h, setNoteValue()) reaches the others as one
+// change each. In the undo history given, or outside any (a merge's copy of the song: model/versions/internal/SongMerge.h).
+void giveClipEvents (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager*);
+
 // Each note and each controller's value of a clip in one walk, in the order the clip holds them: what plays the song reads.
 template <typename VisitNote, typename VisitControl>
 void forEachEvent (const juce::ValueTree& clipState, VisitNote&& visitNote, VisitControl&& visitControl)

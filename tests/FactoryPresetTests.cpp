@@ -569,9 +569,9 @@ TEST_CASE ("A drum kit's sounds that come whole with a song made like another pl
         return sampler->getPadSound (36);
     };
 
-    const auto plain = s.getState().createCopy();
+    const auto plain = phazite::test::copyWholeSong (s);
     REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("808 Kit.phazitepreset")));
-    const auto with808 = s.getState().createCopy();
+    const auto with808 = phazite::test::copyWholeSong (s);
     const auto kick808 = devices::getFactoryDrum (devices::findFactoryDrum ("808 Kick")); // held: the factory keeps none
     const auto kick = devices::getFactoryDrum (devices::findFactoryDrum ("Kick"));
     CHECK (playedKick() == kick808.get());

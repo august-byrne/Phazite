@@ -2,9 +2,11 @@
 #include "internal/ApplySong.h"
 #include "internal/SongDiff.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/notes/internal/Notes.h"
 
 #include <functional>
 #include <map>
@@ -100,6 +102,18 @@ namespace
         return copy;
     }
 
+    // A clip's notes and controllers' values, which the notes' code makes like the other's (Notes.h: makeClipNotesLike()).
+    bool isClipEvent (const juce::ValueTree& element, const juce::ValueTree& child)
+    {
+        return element.hasType (schema::CLIP) && (child.hasType (schema::NOTE) || child.hasType (schema::CONTROL));
+    }
+
+    // Whether makeLike() places a child among the element's: taken, a track only withTracks, never a clip's event.
+    bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, bool withTracks, Taken taken)
+    {
+        return isTaken (taken, element, child) && (withTracks || ! child.hasType (schema::TRACK)) && ! isClipEvent (element, child);
+    }
+
     std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true, Taken taken = Taken::counted)
     {
         std::vector<Child> children;
@@ -108,7 +122,7 @@ namespace
 
         for (const auto& child : element)
         {
-            if (! isTaken (taken, element, child) || (! withTracks && child.hasType (schema::TRACK)))
+            if (! isPlaced (element, child, withTracks, taken))
                 continue;
 
             const auto type = child.getType().toString();
@@ -126,10 +140,13 @@ namespace
     }
 
     // The element made like the other, its children too, but for the tracks in it while withTracks is off (a folder's,
-    // which are things of their own).
-    void makeLike (juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo, bool withTracks = true,
+    // which are things of their own). A clip's notes and controllers' values by the notes' code, in the same history (the
+    // song's, or none while the song is written outside it).
+    void makeLike (Song& song, juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo, bool withTracks = true,
                    Taken taken = Taken::counted, const StandIns& standIns = noStandIns())
     {
+        jassert ((undo == nullptr) == song.isWritingOutsideHistory());
+
         for (int i = live.getNumProperties(); --i >= 0;)
             if (const auto name = live.getPropertyName (i); isTaken (taken, live, name) && ! other.hasProperty (name))
                 live.removeProperty (name, undo);
@@ -167,8 +184,7 @@ namespace
 
         for (const auto& child : wanted)
         {
-            while (place < live.getNumChildren()
-                   && (! isTaken (taken, live, live.getChild (place)) || (! withTracks && live.getChild (place).hasType (schema::TRACK))))
+            while (place < live.getNumChildren() && ! isPlaced (live, live.getChild (place), withTracks, taken))
                 ++place;
 
             if (const auto found = kept.find (child.name); found != kept.end())
@@ -177,7 +193,7 @@ namespace
                 auto tree = found->second;
 
                 if (! isStandIn (child.tree))
-                    makeLike (tree, child.tree, undo, true, taken, standIns);
+                    makeLike (song, tree, child.tree, undo, true, taken, standIns);
 
                 if (const auto index = live.indexOf (tree); index != place)
                     live.moveChild (index, place, undo);
@@ -192,6 +208,13 @@ namespace
             }
 
             ++place;
+        }
+
+        if (live.hasType (schema::CLIP))
+        {
+            const auto id = readID (live[schema::clipID]);
+            jassert (song.getIndex().findClip (id) == live); // the song's one clip of its ID
+            makeClipNotesLike (song, ClipID::fromRaw (id), other);
         }
     }
 
@@ -394,7 +417,7 @@ namespace
     }
 
     // The curves of these devices like the other's.
-    void makeCurvesLike (juce::ValueTree state, juce::UndoManager* undo, const std::set<std::uint64_t>& devices,
+    void makeCurvesLike (Song& song, juce::ValueTree state, juce::UndoManager* undo, const std::set<std::uint64_t>& devices,
                          const juce::ValueTree& other)
     {
         auto automation = state.getChildWithName (schema::AUTOMATION);
@@ -426,7 +449,7 @@ namespace
             if (const auto found = wanted.find (schema::getElementKey (curve)); found != wanted.end())
             {
                 if (! isStandIn (found->second)) // a curve the version couldn't read stays as it is
-                    makeLike (curve, found->second, undo);
+                    makeLike (song, curve, found->second, undo);
 
                 wanted.erase (found);
             }
@@ -467,31 +490,36 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
     auto* undo = &song.getUndoManager();
     const auto standIns = findStandIns (other);
     removeMovedItems (song.getState(), findPlaces (other), undo, standIns);
-    makeLike (song.getState(), other, undo, true, Taken::counted, standIns);
+    makeLike (song, song.getState(), other, undo, true, Taken::counted, standIns);
     countIDsPast (song, other);
 }
 
 void makeSongTheSame (Song& song, const juce::ValueTree& other)
 {
+    // Outside the history, as what the song keeps beside its tree is written too (Song::OutsideHistory).
+    const Song::OutsideHistory outside (song);
+
     // Its count of IDs the larger of the two: what either branch made keeps an ID of its own.
     const auto next = std::max (findNextID (song.getState()), findNextID (other));
     removeMovedItems (song.getState(), findPlaces (other), nullptr);
-    makeLike (song.getState(), other, nullptr, true, Taken::everything);
+    makeLike (song, song.getState(), other, nullptr, true, Taken::everything);
     song.getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
     song.getUndoManager().clearUndoHistory();
 }
 
 void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
 {
+    const Song::OutsideHistory outside (song);
+
     // Everything, outside the history, and its count of IDs as the copy's: what the history holds is the copy's already, so
     // that only what changed without it differs (a property set without a step, view state, the count of IDs).
-    makeLike (song.getState(), copy, nullptr, true, Taken::everything);
+    makeLike (song, song.getState(), copy, nullptr, true, Taken::everything);
     song.getState().setProperty (schema::nextID, copy[schema::nextID], nullptr);
 }
 
 namespace
 {
-    bool makeTrackLikeIn (juce::ValueTree state, TrackID id, const juce::ValueTree& other, juce::UndoManager* undo)
+    bool makeTrackLikeIn (Song& song, juce::ValueTree state, TrackID id, const juce::ValueTree& other, juce::UndoManager* undo)
     {
         auto live = findTrack (state, id.getRaw());
         const auto then = findTrack (other, id.getRaw());
@@ -514,7 +542,7 @@ namespace
             const auto standIns = findStandIns (then);
             removeMovedItems (state, findPlaces (then, false), undo, standIns);
             sendItemsHome (state, live, other, undo);
-            makeLike (live, then, undo, false, Taken::counted, standIns);
+            makeLike (song, live, then, undo, false, Taken::counted, standIns);
         }
         else if (live.isValid())
         {
@@ -564,11 +592,11 @@ namespace
             parent.addChild (copy, index, undo);
         }
 
-        makeCurvesLike (state, undo, devices, other);
+        makeCurvesLike (song, state, undo, devices, other);
         return true;
     }
 
-    void makeSongOwnLikeIn (juce::ValueTree state, const juce::ValueTree& other, juce::UndoManager* undo)
+    void makeSongOwnLikeIn (Song& song, juce::ValueTree state, const juce::ValueTree& other, juce::UndoManager* undo)
     {
         // Its own properties.
         for (int i = state.getNumProperties(); --i >= 0;)
@@ -592,7 +620,7 @@ namespace
                 continue;
 
             if (live.isValid() && then.isValid())
-                makeLike (live, then, undo, true, Taken::counted, findStandIns (then));
+                makeLike (song, live, then, undo, true, Taken::counted, findStandIns (then));
             else if (live.isValid())
                 state.removeChild (live, undo);
             else if (then.isValid())
@@ -640,14 +668,14 @@ namespace
 
 bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
 {
-    const auto done = makeTrackLikeIn (song.getState(), id, other, &song.getUndoManager());
+    const auto done = makeTrackLikeIn (song, song.getState(), id, other, &song.getUndoManager());
     countIDsPast (song, other);
     return done;
 }
 
 void makeSongOwnLike (Song& song, const juce::ValueTree& other)
 {
-    makeSongOwnLikeIn (song.getState(), other, &song.getUndoManager());
+    makeSongOwnLikeIn (song, song.getState(), other, &song.getUndoManager());
     countIDsPast (song, other);
 }
 

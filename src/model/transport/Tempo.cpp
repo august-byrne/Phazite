@@ -5,10 +5,12 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace phazite
 {
@@ -60,35 +62,31 @@ namespace
             if (doPatternsFollowTempo (song) || juce::approximatelyEqual (scale, 1.0))
                 return;
 
+            std::vector<juce::ValueTree> clips;
+            std::vector<ClipID> ids;
+
             for (const auto& clipState : getClipStates (song))
+            {
                 if (! isAudioState (clipState))
-                    keepSpeed (clipState, scale);
+                {
+                    clips.push_back (clipState);
+                    ids.push_back (getClipID (clipState));
+                }
+            }
+
+            // Their notes, each alias group's once (Notes.h); then each clip's own length and offset.
+            scaleClipContent (song, ids, scale);
+
+            for (auto& clipState : clips)
+            {
+                const auto range = getClipRange (clipState);
+                setClipPlace (song, clipState, range.getStart(), range.getLength() * scale, getClipOffset (clipState) * scale);
+            }
         }
 
     private:
         Song& song;
         const double tempoBefore;
-
-        void keepSpeed (juce::ValueTree clipState, double scale)
-        {
-            auto* um = &song.getUndoManager();
-
-            for (auto child : clipState)
-            {
-                if (child.hasType (schema::NOTE))
-                {
-                    child.setProperty (schema::noteStart, (double) child[schema::noteStart] * scale, um);
-                    child.setProperty (schema::noteLength, (double) child[schema::noteLength] * scale, um);
-                }
-                else if (child.hasType (schema::CONTROL))
-                {
-                    child.setProperty (schema::controlBeat, (double) child[schema::controlBeat] * scale, um);
-                }
-            }
-
-            const auto range = getClipRange (clipState);
-            setClipPlace (song, clipState, range.getStart(), range.getLength() * scale, getClipOffset (clipState) * scale);
-        }
     };
 } // namespace
 

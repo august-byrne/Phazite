@@ -106,6 +106,19 @@ void Song::setShowingOther (bool showing)
     undoManager.keepMoreSteps (showing ? 2 : 0);
 }
 
+Song::OutsideHistory::OutsideHistory (Song& s)
+    : song (s)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    ++song.writingOutsideHistory;
+}
+
+Song::OutsideHistory::~OutsideHistory()
+{
+    jassert (song.writingOutsideHistory > 0);
+    --song.writingOutsideHistory;
+}
+
 std::map<std::uint64_t, int> Song::getDeviceChangesHeld() const
 {
     auto counts = deviceChangesOutsideHistory;

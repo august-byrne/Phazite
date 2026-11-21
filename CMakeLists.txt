@@ -349,12 +349,14 @@ target_sources(phazite_core PRIVATE
     src/model/base/Toggles.h
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
+    src/model/base/WholeState.cpp
     src/model/base/internal/Schema.h
     src/model/base/internal/SchemaDescription.h
     src/model/base/internal/Selection.h
     src/model/base/internal/SongIndex.h
     src/model/base/internal/SongText.h
     src/model/base/internal/ValueArea.h
+    src/model/base/internal/WholeState.h
     src/model/chords/ChordModel.cpp
     src/model/chords/ChordModel.h
     src/model/chords/ChordValues.cpp

@@ -28,6 +28,9 @@ std::optional<NoteData> getNoteData (const Song&, const NoteRef&);
 std::vector<NoteData> getNoteData (const Song&, const std::vector<NoteRef>&); // those there
 std::vector<NoteData> getClipNotes (const Song&, ClipID);                     // in the order the clip holds them
 
+// Whether a note is there: hasNote() (model/base/internal/Selection.h, which this includes), below the notes' code, as the
+// selection counts the notes it holds by it.
+
 // How many notes were read from the song as NoteData since the program started: for the speed gates
 // (tests/PerformanceGateTests.cpp), which count what a view's mouse event reads.
 std::uint64_t countNotesRead() noexcept;
@@ -89,6 +92,42 @@ void addControls (Song&, ClipID, const std::vector<ControlValue>&);
 // a beat: what a take after a jump that carries on what the take before let go of at its end takes away (Take.h).
 void removeControls (Song&, ClipID, ControlKind, int number, int channel, BeatPosition from, BeatPosition to);
 void removeControl (Song&, ClipID, const ControlValue&);
+
+// A clip's controllers' values, in the order the clip holds them, each at its song beat (its clip's content start and its
+// own), as addControls() takes them: what joining clips copies into the clip it makes (model/arrangement/internal/
+// Consolidate.h). Those of a kind Phazite knows; nothing for a clip that isn't a MIDI clip of the song's.
+std::vector<ControlValue> getClipControls (const Song&, ClipID);
+
+// A clip's own value of a controller (by its number, if its kind has one) on a MIDI channel at a song beat: the last at or
+// before it, the later in the clip's order of two at one beat; or none. What a take carries on where it began
+// (model/transport/internal/Take.h).
+std::optional<int> findControlValueBefore (const Song&, ClipID, ControlKind, int number, int channel, BeatPosition);
+
+// Scales the beats of these clips' notes (their starts and lengths) and of their controllers' values by a factor, in the
+// song's undo history: what keeping the song's patterns at their speed through a tempo change does (model/transport/
+// internal/Tempo.h), which sets each clip's own length and offset itself. Each alias group's notes once, however many of
+// its clips are named, as its clips hold the same notes: each clip named, and each alias of one, scaled once.
+void scaleClipContent (Song&, const std::vector<ClipID>&, double factor);
+
+//==============================================================================
+// What changes a clip's notes from outside the notes' edits: a version or a merge, as the song takes it in, and a
+// DAWproject read back. Each by the song and IDs; the element given is another song's (a version's, a merge's side).
+
+// A clip of the song's notes and controllers' values made those of another song's clip (its element: a version's, or the
+// result of a merge), as model/versions/internal/ApplySong.h makes the clip's other parts like the other's: those the clip
+// has that the other hasn't go, those both have (a note by its ID, a controller's value by its place among them) take the
+// other's values, and those it hasn't come, all in the other's order. In the song's undo history, or outside it while the
+// song is written outside it (Song::OutsideHistory). The clip alone: ApplySong makes its aliases like theirs in turn.
+void makeClipNotesLike (Song&, ClipID, const juce::ValueTree& otherClip);
+
+// One value of a note of a clip set, or taken away (a void value), in the song's undo history, and the note in each of the
+// clip's aliases made like it (giveClipEvents()): a merge's clash on a note's value chosen (model/versions/VersionsModel.h,
+// chooseClash()), which the merge reported once for the group. Whether the note was there.
+bool setNoteValue (Song&, const NoteRef&, const juce::Identifier& property, const juce::var& value);
+
+// Takes notes out of one clip alone, not out of its aliases, outside the undo history: what reading a DAWproject back into
+// the song made of a version for it does (model/project/internal/DawProject.h), whose clips another DAW changed one by one.
+void removeClipNotesAlone (Song&, ClipID, const std::vector<NoteID>&);
 
 // The piano roll's controller lanes (NoteValues.h: ControlLane), with the song's undo history. As notes are, only the
 // values that play are shown and changed: those in the part of the song their clip covers (from its start, up to its end),

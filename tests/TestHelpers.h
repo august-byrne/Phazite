@@ -5,6 +5,7 @@
 #include "devices/core/Clock.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/internal/AudioWork.h"
+#include "model/base/internal/WholeState.h"
 #include "model/mixer/FreezeModel.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -141,6 +142,15 @@ struct RenderHost : public TrackRenderHost
 
 // What a project's history that went still writes, waited for (model/versions/VersionsModel.h: waitForVersionsFinished()).
 void waitForVersionsWrites();
+
+// The song whole, as a save, a version or a comparison takes it (model/base/internal/WholeState.h: copyWholeSong()), wherever
+// a test means the whole song: never its tree alone (Song::getState().createCopy()), which is to hold less than the song
+// does as its areas move beside the tree (roadmap step S5.20). Message thread. Called by its full name: the model's has the
+// same parameters.
+inline juce::ValueTree copyWholeSong (const Song& song)
+{
+    return phazite::copyWholeSong (song);
+}
 
 // A folder in the temp directory, deleted again at the end of the test, once no project's history that went still writes
 // into it (deleted under such a write, JUCE's TemporaryFile asserted that its file was gone, under load).

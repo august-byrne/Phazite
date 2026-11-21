@@ -145,9 +145,9 @@ TEST_CASE ("Consolidate joins a track's selected MIDI clips into one, their note
     CHECK (notes[2].channel == 7);
     CHECK (notes[3].start == at (9.0));
     CHECK (notes[3].channel == 1);
-    const auto control = phazite::findClipState (model, clips[0]).getChildWithName (phazite::schema::CONTROL);
-    REQUIRE (control.isValid());
-    CHECK (phazite::readChannel (control, phazite::schema::controlChannel) == 4);
+    const auto controls = phazite::getClipControls (model, clips[0]);
+    REQUIRE (! controls.empty());
+    CHECK (controls.front().channel == 4);
 
     CHECK (phazite::describeUndo (&model) == juce::String ("Undo Consolidate"));
     phazite::undo (model);

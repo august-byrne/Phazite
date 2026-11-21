@@ -117,7 +117,7 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
     s.setVolume (bass, -6.0f);
     const auto verse = keepVersion (s.context, "Verse");
     auto& song = *phazite::findSong (s.context);
-    const auto then = song.getState().createCopy();
+    const auto then = phazite::test::copyWholeSong (song);
 
     // Changes of each kind, and some view state.
     s.setVolume (bass, -12.0f);
@@ -128,7 +128,7 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
     s.setTempo (128.0);
     s.rename (bass, "Low");
     phazite::findTrackState (song, bass).setProperty (schema::trackHeight, 140, nullptr);
-    const auto changed = song.getState().createCopy();
+    const auto changed = phazite::test::copyWholeSong (song);
     REQUIRE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, verse); }));
@@ -396,7 +396,7 @@ TEST_CASE ("What is restored into a song opened again as it was saved before it 
         s.addTrack ("Bass");
         keepVersion (s.context, "First");
         REQUIRE (s.getProject().save().wasOk());
-        const auto saved = phazite::findSong (s.context)->getState().createCopy();
+        const auto saved = phazite::test::copyWholeSong (*phazite::findSong (s.context));
 
         keys = s.addTrack ("Keys");
         s.setInstrument (keys, phazite::devices::Synth::typeID);

@@ -138,6 +138,26 @@ public:
     bool isShowingOther() const noexcept { return showingOther; }
     void setShowingHeard (std::function<void (bool showing)> heard) { showingHeard = std::move (heard); }
 
+    // While one is alive, what is written of the song is written outside its undo history, as a write of its tree with no
+    // undo manager is: what makes the song another one whole without a step (model/versions/internal/ApplySong.h:
+    // makeSongTheSame(), makeSongAsCopied()). For what the song is to keep beside its tree (model/base/internal/
+    // ValueArea.h), which can't tell from a notification of its tree whether the write that made it went into the history.
+    // Scopes nest. Message thread.
+    class OutsideHistory final
+    {
+    public:
+        explicit OutsideHistory (Song&);
+        ~OutsideHistory();
+
+    private:
+        Song& song;
+
+        JUCE_DECLARE_NON_COPYABLE (OutsideHistory)
+        JUCE_DECLARE_NON_MOVEABLE (OutsideHistory)
+    };
+
+    bool isWritingOutsideHistory() const noexcept { return writingOutsideHistory > 0; }
+
 private:
     juce::ValueTree state;
     std::unique_ptr<SongIndex> index;
@@ -150,6 +170,7 @@ private:
     std::function<void (std::uint64_t)> deviceStateStore;
     std::function<void (bool)> showingHeard;
     bool showingOther = false;
+    int writingOutsideHistory = 0; // OutsideHistory scopes alive
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (Song)
     JUCE_DECLARE_NON_COPYABLE (Song)

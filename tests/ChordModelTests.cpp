@@ -348,7 +348,7 @@ TEST_CASE ("The chord lane is saved, and read back the same")
 
     // A copy of the song, made from its state as a project opens one, reads the same chords.
     const phazite::test::TemporaryFolder temp;
-    auto copy = phazite::makeSong (song.getSong().getState().createCopy(), temp.folder.getChildFile ("Copy.phazite"));
+    auto copy = phazite::makeSong (phazite::test::copyWholeSong (song.getSong()), temp.folder.getChildFile ("Copy.phazite"));
     REQUIRE (copy != nullptr);
     phazite::ProjectContext other { phazite::test::getEngineContext() };
     setSong (other, copy.get());

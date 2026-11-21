@@ -349,7 +349,7 @@ TEST_CASE ("Selected notes' MIDI channel shows as a range, moves by a step for e
     undo.check ("channel 10 typed", [&] { type (findField (screen, "Channel"), "10"); });
     CHECK (noteOf (c4).channel == 10);
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Change Channel"));
-    CHECK ((int) phazite::findNoteState (*screen.song, c4)[phazite::schema::noteChannel] == 10);
+    CHECK (phazite::getNoteData (*screen.song, c4)->channel == 10);
 
     // Both, on channels 10 and 1: shown as a range; a step up moves each, one at most to 16.
     selection.selectNotes ({ c4, e4 });

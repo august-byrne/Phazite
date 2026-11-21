@@ -1174,26 +1174,7 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
     // A clip's own value of a controller (or the bend, or the pressure) at a beat, as it was before the take: its last one
     // there, or none.
     const auto valueBefore = [&song] (ClipID clip, const PlayedControl& control, BeatPosition beat) -> std::optional<int>
-    {
-        const auto clipState = findClipState (song, clip);
-        const auto contentStart = getContentStart (clipState);
-        std::optional<std::pair<double, int>> last;
-
-        for (const auto& child : clipState)
-        {
-            if (! child.hasType (schema::CONTROL) || findControlKind (child) != control.kind
-                || (hasNumber (control.kind) && (int) child[schema::controlNumber] != control.number)
-                || readChannel (child, schema::controlChannel) != control.channel)
-                continue;
-
-            const auto at = contentStart.inBeats() + (double) child[schema::controlBeat];
-
-            if (at <= beat.inBeats() + 1.0e-9 && (! last.has_value() || at >= last->first))
-                last = std::pair (at, (int) child[schema::controlValue]);
-        }
-
-        return last.has_value() ? std::optional (last->second) : std::nullopt;
-    };
+    { return findControlValueBefore (song, clip, control.kind, control.number, control.channel, beat); };
 
     // The controls beside them, where they were heard, not quantized: those moved in a part in the clip each falls in, as a
     // note would be; then what the part carried in at the start of the clip that holds what was played first in it (before

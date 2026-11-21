@@ -407,7 +407,7 @@ TEST_CASE ("A round of a reference let go of since it was taken works nothing ou
         REQUIRE (request != nullptr);
 
         if (letGo)
-            worker.setReference (song.getState().createCopy(), {}, true, true);
+            worker.setReference (phazite::test::copyWholeSong (song), {}, true, true);
 
         const auto before = phazite::ChangesWorker::countTracksCompared();
         const auto result = phazite::ChangesWorker::work (*request);

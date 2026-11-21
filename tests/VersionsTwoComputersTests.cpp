@@ -106,7 +106,7 @@ struct TwoComputers
 
         {
             phazite::VersionStore b (getFolder(), "computer-b");
-            auto song = phazite::findSong (s.context)->getState().createCopy();
+            auto song = phazite::test::copyWholeSong (*phazite::findSong (s.context));
             renameBass (song);
             phazite::VersionRecord record;
             record.name = "B's";
@@ -441,7 +441,7 @@ TEST_CASE ("A line Verify History found that the store let go of since comes bac
         phazite::VersionRecord record;
         record.name = "Lost";
         record.saved = clock.get();
-        auto copy = song.getState().createCopy();
+        auto copy = phazite::test::copyWholeSong (song);
         copy.setProperty ("madeHere", true, nullptr);
         lostID = here.writeVersion (record, phazite::splitSong (copy));
         REQUIRE (lostID.isNotEmpty());
@@ -485,7 +485,7 @@ TEST_CASE ("A song another computer left on a branch it deleted, recovered here,
         const auto head = b.writeVersion (record, phazite::splitSong (phazite::findSong (t.s.context)->getState()));
         REQUIRE (head.isNotEmpty());
 
-        auto left = phazite::findSong (t.s.context)->getState().createCopy();
+        auto left = phazite::test::copyWholeSong (*phazite::findSong (t.s.context));
         TwoComputers::renameBass (left);
         const auto pieces = phazite::splitSong (left);
         REQUIRE (b.writeSong (pieces));

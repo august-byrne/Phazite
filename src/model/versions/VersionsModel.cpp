@@ -9,11 +9,13 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AppInfo.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Freeze.h"
+#include "model/notes/internal/Notes.h"
 #include "model/playback/internal/AutomationWriter.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
@@ -1672,7 +1674,7 @@ namespace
             if (history->countSongChanges() != start.changesAtCopy)
             {
                 song->storeDeviceStates();
-                start.ours = song->getState().createCopy();
+                start.ours = copyWholeSong (*song);
                 start.ourParameters = history->readPluginParameters();
                 start.changesAtCopy = history->countSongChanges();
 
@@ -1753,7 +1755,7 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
 
     history->mergeFailure.clear();
     song->storeDeviceStates();
-    start.ours = song->getState().createCopy();
+    start.ours = copyWholeSong (*song);
     start.ourParameters = history->readPluginParameters();
     start.changesAtCopy = history->countSongChanges();
 
@@ -2013,7 +2015,7 @@ bool finishMerge (ProjectContext& context)
     if (merge.beforePiece.isNotEmpty() && history->countSongChanges() == merge.beforeChanges)
         return takeMergeIn (context, std::move (merge));
 
-    merge.before = song->getState().createCopy();
+    merge.before = copyWholeSong (*song);
     merge.beforePiece.clear();
     return startCommandRead (
         context, *history, "Keeping the song as it is, for Cancel Merge",
@@ -2109,24 +2111,41 @@ bool chooseClash (ProjectContext& context, int index, int value)
 
     if (clash.property.isValid())
     {
-        auto element = findByPath (song->getState(), clash.path);
-
-        if (! element.isValid())
-            return false;
-
         const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+        const auto noteStep = schema::NOTE.toString() + ":";
 
-        if (values[value]->isVoid())
-            element.removeProperty (clash.property, undo);
+        // A note's value (its path's last step its type and ID, in a clip), which the merge reported once, for its alias
+        // group's keeper (SongMerge.h): set through the notes' code, which gives it to every clip of the group, as the group
+        // holds the same notes.
+        if (auto clipPath = clash.path; clipPath.size() > 1 && clash.path[clash.path.size() - 1].startsWith (noteStep))
+        {
+            clipPath.remove (clipPath.size() - 1);
+
+            if (const auto clip = findByPath (song->getState(), clipPath); clip.hasType (schema::CLIP))
+            {
+                const auto note =
+                    NoteID::fromRaw ((std::uint64_t) clash.path[clash.path.size() - 1].substring (noteStep.length()).getLargeIntValue());
+
+                if (! setNoteValue (*song, { getClipID (clip), note }, clash.property, *values[value]))
+                    return false;
+            }
+            else
+            {
+                return false; // no clip there, so no note
+            }
+        }
         else
-            element.setProperty (clash.property, *values[value], undo);
+        {
+            auto element = findByPath (song->getState(), clash.path);
 
-        // A note's value, which the merge reported once, for its alias group's keeper (SongMerge.h): every clip of the group
-        // takes it, as the group holds the same notes.
-        if (const auto clip = element.getParent(); element.hasType (schema::NOTE) && clip.hasType (schema::CLIP))
-            for (auto alias : getAliasStates (*song, clip))
-                if (alias != clip)
-                    giveClipEvents (clip, alias, undo);
+            if (! element.isValid())
+                return false;
+
+            if (values[value]->isVoid())
+                element.removeProperty (clash.property, undo);
+            else
+                element.setProperty (clash.property, *values[value], undo);
+        }
     }
     else
     {
@@ -3343,7 +3362,7 @@ namespace
             VersionHistory::Shown shown;
             shown.version = versionID;
             shown.number = ++history.shownFromNow;
-            shown.now = song->getState().createCopy();
+            shown.now = copyWholeSong (*song);
             shown.nowParameters = history.readPluginParameters();
             shown.outsideAtOpen = song->getDeviceChangesOutsideHistory();
             shown.mayHaveChanges = history.mayHaveChanges(); // Now's, before the trial changes the song

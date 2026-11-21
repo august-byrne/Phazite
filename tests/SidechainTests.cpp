@@ -161,7 +161,7 @@ TEST_CASE ("A device's sidechain is the song's, by the track's ID, which a song 
 
     // Made again from the song's state alone, it listens to the kick.
     {
-        const auto copy = phazite::makeSong (model.getState().createCopy());
+        const auto copy = phazite::makeSong (phazite::test::copyWholeSong (model));
         REQUIRE (copy != nullptr);
         CHECK (phazite::getSidechainSource (*copy, compressor) == song.kick);
     }

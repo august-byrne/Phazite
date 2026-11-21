@@ -1733,7 +1733,7 @@ TEST_CASE ("Benchmark: a song of 100,000 notes made consistent as it opens, and 
     }
 
     juce::MemoryOutputStream text;
-    phazite::writeProjectText (text, made->getState());
+    phazite::writeProjectText (text, phazite::test::copyWholeSong (*made));
     const auto xml = juce::parseXML (text.toString());
     REQUIRE (xml != nullptr);
     const auto asFile = juce::ValueTree::fromXml (*xml);
@@ -2946,9 +2946,9 @@ TEST_CASE ("Benchmark: what a branch switch and a merge spend on the message thr
         return juce::Time::getMillisecondCounterHiRes() - start;
     };
 
-    const auto split = time ([&] { juce::ignoreUnused (phazite::splitSong (song.getState().createCopy())); });
+    const auto split = time ([&] { juce::ignoreUnused (phazite::splitSong (phazite::test::copyWholeSong (song))); });
     const auto read = time ([&] { juce::ignoreUnused (history->readSong (theirs)); });
-    const auto made = time ([&] { juce::ignoreUnused (phazite::makeSong (song.getState().createCopy())); });
+    const auto made = time ([&] { juce::ignoreUnused (phazite::makeSong (phazite::test::copyWholeSong (song))); });
 
     // Each command to its end (known bug 126: they read on the history's thread, and take what they read in after): how long its
     // call kept the message thread, the longest any one message kept it after (taking it in among them), and the whole.

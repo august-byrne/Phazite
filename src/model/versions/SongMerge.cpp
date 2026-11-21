@@ -3,6 +3,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/NoteElements.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1184,46 +1185,6 @@ namespace
         }
     }
 } // namespace
-
-void giveClipEvents (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager* undo)
-{
-    const auto eventsOf = [] (const juce::ValueTree& clip)
-    {
-        std::vector<juce::ValueTree> events;
-
-        for (const auto& child : clip)
-            if (child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
-                events.push_back (child);
-
-        return events;
-    };
-
-    const auto theirs = eventsOf (from);
-    const auto mine = eventsOf (to);
-
-    // The same kinds of event in the same order: each that differs takes the other's properties, in its place.
-    if (theirs.size() == mine.size()
-        && std::equal (theirs.begin(), theirs.end(), mine.begin(),
-                       [] (const juce::ValueTree& a, const juce::ValueTree& b) { return a.getType() == b.getType(); }))
-    {
-        for (size_t i = 0; i < theirs.size(); ++i)
-            if (! theirs[i].isEquivalentTo (mine[i]))
-                juce::ValueTree (mine[i]).copyPropertiesAndChildrenFrom (theirs[i], undo);
-
-        return;
-    }
-
-    // Otherwise all of them, copies, where its first event was (or after all it holds).
-    auto place = mine.empty() ? to.getNumChildren() : to.indexOf (mine.front());
-
-    for (const auto& event : mine)
-        to.removeChild (event, undo);
-
-    place = juce::jmin (place, to.getNumChildren());
-
-    for (const auto& event : theirs)
-        to.addChild (event.createCopy(), place++, undo);
-}
 
 MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs,
                         const std::function<std::uint64_t()>& makeID)

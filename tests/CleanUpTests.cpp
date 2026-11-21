@@ -305,7 +305,7 @@ TEST_CASE ("Clean Up offers nothing while a song another computer kept can't be 
     keepVersion (s.context, "Before");
     auto& song = *phazite::findSong (s.context);
     const auto take = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Take.wav"), 0.5), 0.0);
-    const auto theirs = phazite::splitSong (song.getState().createCopy());
+    const auto theirs = phazite::splitSong (phazite::test::copyWholeSong (song));
     s.select (take);
     s.run ("edit.delete"); // played here no more: only B's song left on its branch plays it
     REQUIRE (s.getProject().save().wasOk());
@@ -395,7 +395,7 @@ TEST_CASE ("Clean Up offers nothing while a snapshot another computer took can't
     keepVersion (s.context, "Before");
     auto& song = *phazite::findSong (s.context);
     const auto take = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Take.wav"), 0.5), 0.0);
-    const auto theirs = phazite::splitSong (song.getState().createCopy());
+    const auto theirs = phazite::splitSong (phazite::test::copyWholeSong (song));
     s.select (take);
     s.run ("edit.delete");
     REQUIRE (s.getProject().save().wasOk());
@@ -437,7 +437,7 @@ TEST_CASE ("Clean Up offers nothing while the Versions folder holds a pack the s
 
         {
             phazite::VersionStore other (s.getProject().getFolder().getChildFile ("Versions"), "computer-b");
-            auto song = phazite::findSong (s.context)->getState().createCopy();
+            auto song = phazite::test::copyWholeSong (*phazite::findSong (s.context));
             song.setProperty ("madeOnB", true, nullptr);
             REQUIRE (other.writeSong (phazite::splitSong (song)));
             other.getPieces().closeFiles();

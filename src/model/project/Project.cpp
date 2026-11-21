@@ -3,6 +3,7 @@
 #include "devices/core/Clock.h"
 #include "devices/modulation/Modulators.h"
 #include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/BackgroundJobs.h"
@@ -11,6 +12,7 @@
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
@@ -2105,17 +2107,17 @@ Project::~Project()
     finishBackgroundSave(); // a save in the background under way, which took them along: pending again if it failed
     compareWithSavedState();
 
-    if (namesPending && ! changedSinceSave && savedState.isValid())
+    if (namesPending && ! changedSinceSave && savedState.tree.isValid())
     {
         const auto state = song->getState();
 
         for (const auto* name : { &schema::versionsBranch, &schema::versionsBase })
             if (const auto* now = state.getPropertyPointer (*name))
-                savedState.setProperty (*name, *now, nullptr);
+                savedState.tree.setProperty (*name, *now, nullptr);
             else
-                savedState.removeProperty (*name, nullptr);
+                savedState.tree.removeProperty (*name, nullptr);
 
-        if (writeProjectFile (savedState, file).wasOk())
+        if (writeProjectFile (copyWhole (savedState.tree, savedState.values), file).wasOk())
             namesPending = false;
     }
 
@@ -2148,7 +2150,7 @@ bool Project::checkUnsavedChanges()
         storeForSaving (*song);
     }
 
-    if (! holdTheSameProject (song->getState(), savedState))
+    if (! holdTheSameProject (song->getState(), keepValues (*song), savedState.tree, savedState.values))
         return true; // changedSinceSave stays as it was, true
 
     // The song is as saved after all.
@@ -2176,12 +2178,16 @@ juce::Result Project::save()
     backUpProjectFile();
     backedUpAt = getBackupTime();
 
+    // The song copied once: written whole, then the saved copy (nothing changes it between the two).
+    SongCopy copy;
+
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
         storeForSaving (*song);
         compareStoredStates(); // should the write fail, which leaves them out of the file (one that works forgets this)
+        copy = copySong();
 
-        if (const auto written = writeProjectFile (song->getState(), file); written.failed())
+        if (const auto written = writeProjectFile (copyWhole (copy.tree, copy.values), file); written.failed())
             return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ": " + written.getErrorMessage());
     }
 
@@ -2189,7 +2195,7 @@ juce::Result Project::save()
     changedSinceAutosave = false;
     namesPending = namesFailed = false;                    // the versions' names went with the song
     changesOutsideHistory = getOwnChangesOutsideHistory(); // stored in the song as it saved
-    rememberSavedState();                                  // what the file holds now
+    rememberSavedState (std::move (copy));                 // what the file holds now
     getAutosaveFile (file).deleteFile();
     autosavedAt = 0;
     autosaveWriter->forgetWritten();
@@ -2217,7 +2223,7 @@ juce::Result Project::autosave()
         storeForSaving (*song);
         compareStoredStates(); // which the project file doesn't hold
 
-        if (const auto written = writeProjectFile (song->getState(), target); written.failed())
+        if (const auto written = writeProjectFile (copyWholeSong (*song), target); written.failed())
             return juce::Result::fail ("Phazite couldn't write the autosave " + target.getFullPathName() + ": "
                                        + written.getErrorMessage());
     }
@@ -2253,7 +2259,7 @@ void Project::autosaveInBackground()
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*song);
         compareStoredStates(); // which the project file doesn't hold
-        autosaveWriter->write (song->getState().createCopy(), target);
+        autosaveWriter->write (copyWholeSong (*song), target);
     }
 
     changedSinceAutosave = false;
@@ -2274,7 +2280,7 @@ void Project::saveInBackground()
     compareWithSavedState();
 
     // Also for the versions' names alone, where a write of them failed (namesPending).
-    if ((! changedSinceSave && ! (namesPending && namesFailed)) || autosaveWriter->isBusy() || backgroundSave.isValid()
+    if ((! changedSinceSave && ! (namesPending && namesFailed)) || autosaveWriter->isBusy() || backgroundSave.tree.isValid()
         || namesWriter->isBusy())
         return;
 
@@ -2288,8 +2294,10 @@ void Project::saveInBackground()
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*song);
-        backgroundSave = song->getState().createCopy();
-        autosaveWriter->write (backgroundSave.createCopy(), file);
+        // The saved copy once it is written (finishBackgroundSave()), and the song written whole from it, in a tree of the
+        // writer's own.
+        backgroundSave = copySong();
+        autosaveWriter->write (copyWhole (backgroundSave.tree, backgroundSave.values).createCopy(), file);
     }
 
     namesPending = false; // in what it writes; pending again if the write fails (finishBackgroundSave())
@@ -2302,14 +2310,14 @@ bool Project::finishBackgroundSave()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    if (! backgroundSave.isValid() || autosaveWriter->isBusy())
+    if (! backgroundSave.tree.isValid() || autosaveWriter->isBusy())
         return true;
 
     const auto written = std::exchange (backgroundSave, {});
 
     if (autosaveWriter->takeFailure())
     {
-        namesPending = namesPending || written.hasProperty (schema::versionsBase) || written.hasProperty (schema::versionsBranch);
+        namesPending = namesPending || written.tree.hasProperty (schema::versionsBase) || written.tree.hasProperty (schema::versionsBranch);
         return false; // its changes are still to save
     }
 
@@ -2369,7 +2377,7 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
     storeForSaving (*song);
     compareStoredStates(); // which this project's file doesn't hold
 
-    if (const auto written = writeProjectFile (song->getState(), newFile); written.failed())
+    if (const auto written = writeProjectFile (copyWholeSong (*song), newFile); written.failed())
     {
         newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
         error = "Phazite couldn't write the project file " + newFile.getFullPathName() + ": " + written.getErrorMessage();
@@ -2693,9 +2701,20 @@ void Project::clearToCompare()
     toCompare.clear();
 }
 
+Project::SongCopy Project::copySong() const
+{
+    // The tree's half alone (never the song whole: SongCopy), with the values kept at the same moment.
+    return { song->getState().createCopy(), keepValues (*song) };
+}
+
 void Project::rememberSavedState()
 {
-    savedState = song->getState().createCopy();
+    rememberSavedState (copySong());
+}
+
+void Project::rememberSavedState (SongCopy copy)
+{
+    savedState = std::move (copy);
     clearToCompare();
 }
 
@@ -2769,7 +2788,7 @@ juce::ValueTree Project::findSavedCopy (const juce::ValueTree& element) const
     for (auto e = element; e != state; e = e.getParent())
         places.push_back (indexAmongCounted (e.getParent(), e));
 
-    auto copy = savedState;
+    auto copy = savedState.tree;
 
     for (auto place = places.rbegin(); place != places.rend() && copy.isValid(); ++place)
         copy = getCountedChild (copy, *place);
@@ -2793,7 +2812,7 @@ bool Project::isAsSaved (const ToCompare& entry) const
         return false;
 
     if (entry.property.isNull())
-        return holdTheSameProject (entry.element, copy);
+        return holdTheSameProject (entry.element, keepValues (*song), copy, savedState.values);
 
     const auto* now = entry.element.getPropertyPointer (entry.property);
     const auto* saved = copy.getPropertyPointer (entry.property);
@@ -2899,7 +2918,7 @@ void Project::versionsMoved()
     namesPending = true;
     compareWithSavedState();
 
-    if (changedSinceSave || ! savedState.isValid())
+    if (changedSinceSave || ! savedState.tree.isValid())
         changedSinceAutosave = true;
     else
         triggerAsyncUpdate();
@@ -2917,14 +2936,14 @@ void Project::writeVersionsNames()
 
     compareWithSavedState();
 
-    if (changedSinceSave || ! savedState.isValid())
+    if (changedSinceSave || ! savedState.tree.isValid())
     {
         changedSinceAutosave = true; // the next save writes them, and the next autosave holds them
         return;
     }
 
     // Not over another write of the file (a save in the background, or the names before): looked at again in a moment.
-    if (autosaveWriter->isBusy() || backgroundSave.isValid() || namesWriter->isBusy())
+    if (autosaveWriter->isBusy() || backgroundSave.tree.isValid() || namesWriter->isBusy())
     {
         startTimer (20);
         return;
@@ -2936,12 +2955,12 @@ void Project::writeVersionsNames()
     for (const auto* name : { &schema::versionsBranch, &schema::versionsBase })
     {
         if (const auto* now = state.getPropertyPointer (*name))
-            savedState.setProperty (*name, *now, nullptr);
+            savedState.tree.setProperty (*name, *now, nullptr);
         else
-            savedState.removeProperty (*name, nullptr);
+            savedState.tree.removeProperty (*name, nullptr);
     }
 
-    namesWriter->write (savedState.createCopy(), file);
+    namesWriter->write (copyWhole (savedState.tree, savedState.values).createCopy(), file);
     namesPending = false;
     namesWriting = true;
     startTimer (20);
@@ -2999,7 +3018,7 @@ void Project::markChildChanged (const juce::ValueTree& parent, const juce::Value
         markChanged (parent);
 }
 
-bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTree& b)
+bool Project::holdTheSameProject (const juce::ValueTree& a, const ValuesKept& aValues, const juce::ValueTree& b, const ValuesKept& bValues)
 {
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
@@ -3031,6 +3050,10 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTre
     if (numCounted != 0)
         return false;
 
+    // A clip's notes and controllers' values as each song keeps them beside its tree.
+    if (a.hasType (schema::CLIP) && ! holdSameNotes (aValues, bValues, getClipID (a)))
+        return false;
+
     // The counted elements, in the same order, holding the same.
     for (int i = 0, j = 0;; ++i, ++j)
     {
@@ -3043,7 +3066,7 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTre
         if (i == a.getNumChildren() || j == b.getNumChildren())
             return i == a.getNumChildren() && j == b.getNumChildren();
 
-        if (! holdTheSameProject (a.getChild (i), b.getChild (j)))
+        if (! holdTheSameProject (a.getChild (i), aValues, b.getChild (j), bValues))
             return false;
     }
 }

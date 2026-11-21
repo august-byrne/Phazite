@@ -61,7 +61,8 @@ juce::String getClipName (const Song&, const juce::ValueTree& clipState);
 void renameClips (Song&, const std::vector<ClipID>&, const juce::String& name);
 
 // A copy of a clip's element, on no track yet, with an ID of its own and the same notes, with the same IDs, in the same alias
-// group.
+// group: of a clip of the song, whole (model/base/internal/WholeState.h: copyWhole()); of a copy outside it (the clipboard's),
+// as it is.
 juce::ValueTree copyClipState (Song&, const juce::ValueTree& clipState);
 
 // Puts a clip's element on a track's, or moves it there (in the caller's undo step). Returns its ID, or none if the track

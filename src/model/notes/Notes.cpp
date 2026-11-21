@@ -8,6 +8,7 @@
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/SongText.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -866,6 +867,224 @@ void removeControl (Song& song, ClipID clip, const ControlValue& control)
             }
         }
     }
+}
+
+std::vector<ControlValue> getClipControls (const Song& song, ClipID clip)
+{
+    std::vector<ControlValue> values;
+    const auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid())
+        return values;
+
+    const auto contentStart = getContentStart (clipState);
+
+    forEachControl (clipState,
+                    [&] (int, const ControlElement& control)
+                    {
+                        if (const auto kind = control.getKind(); kind.has_value())
+                            values.push_back ({ BeatPosition::fromBeats (contentStart.inBeats() + control.getBeat()), *kind,
+                                                control.getNumber(), control.getValue(), control.getChannel() });
+                    });
+
+    return values;
+}
+
+std::optional<int> findControlValueBefore (const Song& song, ClipID clip, ControlKind kind, int number, int channel, BeatPosition beat)
+{
+    const auto clipState = findMidiClipState (song, clip);
+    const auto contentStart = getContentStart (clipState).inBeats();
+    std::optional<std::pair<double, int>> last;
+
+    forEachControl (clipState,
+                    [&] (int, const ControlElement& control)
+                    {
+                        if (control.getKind() != kind || (hasNumber (kind) && control.getNumber() != number)
+                            || control.getChannel() != channel)
+                            return;
+
+                        const auto at = contentStart + control.getBeat();
+
+                        if (at <= beat.inBeats() + 1.0e-9 && (! last.has_value() || at >= last->first))
+                            last = std::pair (at, control.getValue());
+                    });
+
+    return last.has_value() ? std::optional (last->second) : std::nullopt;
+}
+
+void scaleClipContent (Song& song, const std::vector<ClipID>& clips, double factor)
+{
+    auto* undo = &song.getUndoManager();
+    std::set<ClipID> scaled; // each clip's element once, an alias's too
+
+    for (const auto clip : clips)
+    {
+        const auto clipState = findMidiClipState (song, clip);
+
+        if (! clipState.isValid())
+            continue;
+
+        for (const auto& alias : getAliasStates (song, clipState))
+        {
+            if (! scaled.insert (getClipID (alias)).second)
+                continue;
+
+            for (auto child : alias)
+            {
+                if (child.hasType (schema::NOTE))
+                {
+                    child.setProperty (schema::noteStart, (double) child[schema::noteStart] * factor, undo);
+                    child.setProperty (schema::noteLength, (double) child[schema::noteLength] * factor, undo);
+                }
+                else if (child.hasType (schema::CONTROL))
+                {
+                    child.setProperty (schema::controlBeat, (double) child[schema::controlBeat] * factor, undo);
+                }
+            }
+        }
+    }
+}
+
+//==============================================================================
+namespace
+{
+    bool isClipEvent (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::NOTE) || element.hasType (schema::CONTROL);
+    }
+
+    // A clip's notes and controllers' values, each named as ApplySong names an element's children: a note by its type and
+    // ID, a controller's value (which has no key) by its type and its place among those of its type.
+    struct NamedEvent
+    {
+        juce::ValueTree tree;
+        juce::String name;
+    };
+
+    std::vector<NamedEvent> getNamedEvents (const juce::ValueTree& clipState)
+    {
+        std::vector<NamedEvent> events;
+        std::map<juce::String, int> numUnkeyed;
+        std::set<juce::String> names;
+
+        for (const auto& child : clipState)
+        {
+            if (! isClipEvent (child))
+                continue;
+
+            const auto type = child.getType().toString();
+            const auto key = schema::getElementKey (child);
+            auto name = type + ":" + key;
+
+            if (key.isEmpty() || names.count (name) > 0)
+                name = type + "#" + juce::String (numUnkeyed[type]++);
+
+            names.insert (name);
+            events.push_back ({ child, name });
+        }
+
+        return events;
+    }
+
+    // An event's values made the other's: those it has that the other hasn't go, the others take the other's.
+    void makeEventLike (juce::ValueTree event, const juce::ValueTree& other, juce::UndoManager* undo)
+    {
+        for (int i = event.getNumProperties(); --i >= 0;)
+            if (const auto name = event.getPropertyName (i); ! other.hasProperty (name))
+                event.removeProperty (name, undo);
+
+        for (int i = 0; i < other.getNumProperties(); ++i)
+        {
+            const auto name = other.getPropertyName (i);
+
+            if (const auto* value = event.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
+                event.setProperty (name, other[name], undo);
+        }
+    }
+} // namespace
+
+void makeClipNotesLike (Song& song, ClipID clip, const juce::ValueTree& otherClip)
+{
+    auto clipState = findClipState (song, clip);
+
+    if (! clipState.isValid())
+        return;
+
+    auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+
+    // Those it has that the other hasn't go; then, in the other's order, each it has made like the other's and moved to its
+    // place, and each it hasn't added there.
+    const auto wanted = getNamedEvents (otherClip);
+    std::set<juce::String> wantedNames;
+
+    for (const auto& event : wanted)
+        wantedNames.insert (event.name);
+
+    std::map<juce::String, juce::ValueTree> kept;
+
+    for (const auto& event : getNamedEvents (clipState))
+    {
+        if (wantedNames.count (event.name) == 0)
+            clipState.removeChild (event.tree, undo);
+        else
+            kept.emplace (event.name, event.tree);
+    }
+
+    int place = 0;
+
+    for (const auto& event : wanted)
+    {
+        while (place < clipState.getNumChildren() && ! isClipEvent (clipState.getChild (place)))
+            ++place;
+
+        if (const auto found = kept.find (event.name); found != kept.end())
+        {
+            makeEventLike (found->second, event.tree, undo);
+
+            if (const auto index = clipState.indexOf (found->second); index != place)
+                clipState.moveChild (index, place, undo);
+        }
+        else
+        {
+            clipState.addChild (event.tree.createCopy(), place, undo);
+        }
+
+        ++place;
+    }
+}
+
+bool setNoteValue (Song& song, const NoteRef& ref, const juce::Identifier& property, const juce::var& value)
+{
+    const auto clipState = findClipState (song, ref.clip);
+    auto note = clipState.isValid() ? song.getIndex().findNote (clipState, ref.note.getRaw()) : juce::ValueTree();
+
+    if (! note.isValid())
+        return false;
+
+    auto* undo = &song.getUndoManager();
+
+    if (value.isVoid())
+        note.removeProperty (property, undo);
+    else
+        note.setProperty (property, value, undo);
+
+    for (auto alias : getAliasStates (song, clipState))
+        if (alias != clipState)
+            giveClipEvents (clipState, alias, undo);
+
+    return true;
+}
+
+void removeClipNotesAlone (Song& song, ClipID clip, const std::vector<NoteID>& notes)
+{
+    auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid())
+        return;
+
+    for (const auto id : notes)
+        if (const auto note = song.getIndex().findNote (clipState, id.getRaw()); note.isValid())
+            clipState.removeChild (note, nullptr);
 }
 
 //==============================================================================

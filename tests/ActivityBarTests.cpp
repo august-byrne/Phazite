@@ -1175,7 +1175,7 @@ TEST_CASE ("A double-click on a version opens it live, with no bounce, the bar a
     screen.setFirstTrackVolume (0.5f);
     const auto first = screen.saveVersion ("First");
     screen.setFirstTrackVolume (0.3f); // a change since, which stays
-    const auto nowState = phazite::findSong (context)->getState().createCopy();
+    const auto nowState = phazite::test::copyWholeSong (*phazite::findSong (context));
 
     auto& view = screen.getVersionsView();
     const auto doubleClick = [&view] (int row)
