@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "VersionsModel.h"
 #include "internal/ApplySong.h"
+#include "internal/SongMerge.h"
 #include "internal/VersionHistory.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
@@ -2118,6 +2120,13 @@ bool chooseClash (ProjectContext& context, int index, int value)
             element.removeProperty (clash.property, undo);
         else
             element.setProperty (clash.property, *values[value], undo);
+
+        // A note's value, which the merge reported once, for its alias group's keeper (SongMerge.h): every clip of the group
+        // takes it, as the group holds the same notes.
+        if (const auto clip = element.getParent(); element.hasType (schema::NOTE) && clip.hasType (schema::CLIP))
+            for (auto alias : getAliasStates (*song, clip))
+                if (alias != clip)
+                    giveClipEvents (clip, alias, undo);
     }
     else
     {

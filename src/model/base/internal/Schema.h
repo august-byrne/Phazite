@@ -958,7 +958,10 @@ inline const Property<bool> clipMute { "mute", on (CLIP), byDefault (false), Kin
 
 // On CLIP. int64, or none: the alias group it is in, which has an ID of the song's (Song::makeID()). The clips of a group
 // hold the same notes, with the same IDs: an edit to one clip's notes is made to each (model/notes/internal/Notes.h), as FL
-// Studio's pattern clips play one pattern.
+// Studio's pattern clips play one pattern. As a song opens (makeConsistent()), a group holds together: a clip of another kind
+// than the group's first clip's (in the song's order), or whose notes and controllers' values (every property of each, in
+// the same order) differ from its, is made a clip of its own, its link removed and its notes kept; and a group left with one
+// clip loses its link.
 inline const Property<std::int64_t> clipLink { "link", on (CLIP), Form::songID, Kind::song };
 
 // Child of a MIDI CLIP: a note, in no particular order.

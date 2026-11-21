@@ -5,6 +5,7 @@
 // merged commit already; never two at once; and restores from a damaged commit that can't tell where a line was.
 #include "SongCheck.h"
 #include "SongIDs.h"
+#include "TestClips.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
@@ -20,6 +21,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
@@ -31,6 +33,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <utility>
 
 namespace
 {
@@ -1869,4 +1872,62 @@ TEST_CASE ("A merge whose songs, matched by the IDs earlier merges gave anew, wo
     CHECK (phazite::findChanges (before, song.getState()).empty());
     CHECK (song.getState()[schema::nextID] == before[schema::nextID]);
     checkSong (song);
+}
+
+TEST_CASE ("A note's conflict in an alias group is listed once, and each choice of it reaches every clip of the group")
+{
+    // X on the Bass and its alias Y; idea-2 transposes n by 5 through Y, main by 2 through X: one conflict, the group's keeper's
+    // (SongMerge.h), whose choice every clip of the group takes, as Undo puts it back in every one.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto clip = s.addMidiClip (bass, 0.0, 8.0);
+    s.addNote (clip, 36, 0.0, 1.0);
+    const auto alias = s.copyClip (clip, 8.0, true);
+    keepVersion (s.context, "First");
+    const auto note = phazite::getClipNotes (*phazite::findSong (s.context), clip).front().id;
+
+    const auto transpose = [&s, note] (phazite::ClipID through, int semitones)
+    {
+        auto& song = *phazite::findSong (s.context);
+        const phazite::UndoStep step (song, "Transpose");
+        phazite::transposeNotes (song, { { through, note } }, semitones);
+    };
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+    transpose (alias, 5);
+    const auto theirs = keepVersion (s.context, "A fourth up");
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    transpose (clip, 2);
+    keepVersion (s.context, "A tone up");
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+    phazite::finishMerge (s.context);
+    REQUIRE (phazite::isMerging (s.context));
+    REQUIRE (phazite::getClashes (s.context).size() == 1);
+
+    const auto pitchIn = [&s, note] (phazite::ClipID in)
+    { return phazite::getNoteData (*phazite::findSong (s.context), phazite::NoteRef { in, note }).value().pitch; };
+
+    const auto checkHoldsTogether = [&] (int pitch)
+    {
+        auto& song = *phazite::findSong (s.context);
+        CHECK (pitchIn (clip) == pitch);
+        CHECK (pitchIn (alias) == pitch);
+        CHECK (describeClipNotes (song, clip) == describeClipNotes (song, alias));
+        checkSong (song);
+    };
+
+    checkHoldsTogether (38);
+
+    for (const auto [value, pitch] : { std::pair { 2, 41 }, std::pair { 0, 36 }, std::pair { 1, 38 }, std::pair { 2, 41 } })
+    {
+        INFO ("chosen " << value);
+        REQUIRE (phazite::chooseClash (s.context, 0, value));
+        CHECK (phazite::getClashes (s.context)[0].chosen == value);
+        checkHoldsTogether (pitch);
+    }
+
+    phazite::undo (*phazite::findSong (s.context)); // back to this branch's
+    checkHoldsTogether (38);
 }

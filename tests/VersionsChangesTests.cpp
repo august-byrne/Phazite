@@ -2,17 +2,23 @@
 // The changes since the last version worked out on the history's thread (docs/design/versions.md: Off the message thread;
 // roadmap S4.5): from copies of what the song's notifications said changed, a round at a time, the last list kept until the
 // next is in, whose listeners are told then; never a list of another song's, nor an older one last.
+#include "TestClips.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/ChangesWorker.h"
+#include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/VersionHistory.h"
+
+#include <functional>
 
 namespace
 {
@@ -69,7 +75,102 @@ struct ThreadHeld
 
     void letGo() { phazite::VersionHistory::holdReadsForTests = false; }
 };
+
+// A line of the changes as text: its kind, where it is, its name and what changed.
+juce::String describe (const phazite::VersionChange& line)
+{
+    const auto kind = line.kind == phazite::VersionChange::Kind::added     ? "added"
+                      : line.kind == phazite::VersionChange::Kind::removed ? "removed"
+                                                                           : "changed";
+    const auto where = line.isSong     ? juce::String ("song")
+                       : line.isMaster ? juce::String ("master")
+                                       : "track " + juce::String (line.track.getRaw());
+    return juce::String (kind) + " " + where + " \"" + line.name + "\": " + line.what;
+}
+
+juce::String describe (const phazite::SongChange& change)
+{
+    phazite::VersionChange line;
+    line.kind = change.kind == phazite::SongChange::Kind::added     ? phazite::VersionChange::Kind::added
+                : change.kind == phazite::SongChange::Kind::removed ? phazite::VersionChange::Kind::removed
+                                                                    : phazite::VersionChange::Kind::changed;
+    line.isMaster = change.where == phazite::SongChange::Where::master;
+    line.isSong = change.where == phazite::SongChange::Where::song;
+    line.track = line.isSong ? phazite::TrackID() : phazite::TrackID::fromRaw (change.trackID);
+    line.name = change.name;
+    line.what = change.what.joinIntoString (", ");
+    return describe (line);
+}
+
+// The changes since the last version, as the history worked them out from what the song's notifications said changed,
+// against those of a comparison of the last version's song with the song as it is, whole (SongDiff.h: findChanges()): the
+// same lines, in the same order.
+void checkChangesAreWhole (phazite::ProjectContext& context, const juce::String& after)
+{
+    INFO ("after " << after);
+    juce::StringArray worked, whole;
+
+    for (const auto& line : phazite::getChangesSinceLastVersion (withChangesIn (context)))
+        worked.add (describe (line));
+
+    const auto& history = *phazite::getVersionHistory (context);
+    const auto version = history.readSong (phazite::getLastVersion (context)->id);
+    REQUIRE (version.isValid());
+
+    for (const auto& change : phazite::findChanges (version, phazite::findSong (context)->getState()))
+        whole.add (describe (change));
+
+    CHECK_MESSAGE (worked == whole, "worked out from what changed:\n  " << worked.joinIntoString ("\n  ")
+                                                                        << "\nthe whole songs compared:\n  "
+                                                                        << whole.joinIntoString ("\n  "));
+}
 } // namespace
+
+TEST_CASE ("The changes since the last version, worked out from what changed, are those of the whole songs compared, after note "
+           "and clip edits and their Undo")
+{
+    // A lone clip on the Keys; on the Bass a clip X with an alias Y on the Keys.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto keys = s.addTrack ("Keys");
+    const auto lone = s.addMidiClip (keys, 0.0, 4.0);
+    s.addNote (lone, 60, 0.0, 1.0);
+    const auto clip = s.addMidiClip (bass, 0.0, 4.0);
+    s.addNote (clip, 36, 0.0, 1.0);
+    s.addNote (clip, 40, 2.0, 1.0);
+    const auto alias = s.copyClip (clip, 8.0, true);
+    auto& song = *phazite::findSong (s.context);
+    phazite::moveClip (song, alias, at (8.0), keys);
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    const auto edit = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        {
+            const phazite::UndoStep step (song, name);
+            change();
+        }
+
+        checkChangesAreWhole (s.context, name);
+    };
+
+    edit ("a lone clip's note moved", [&] { phazite::moveNote (song, phazite::getClipNotes (song, lone).front().getRef(), at (1.0), 62); });
+    edit ("a note of the alias made quieter",
+          [&] { phazite::setNoteVelocities (song, { phazite::getClipNotes (song, alias).back().getRef() }, 40); });
+    edit ("a note added through the clip", [&] { phazite::addNote (song, clip, 43, at (3.0), lasting (0.5), 90); });
+    edit ("the lone clip moved onto the Bass", [&] { phazite::moveClip (song, lone, at (12.0), bass); });
+    edit ("the alias moved onto the Bass", [&] { phazite::moveClip (song, alias, at (20.0), bass); });
+    edit ("the clip deleted", [&] { phazite::deleteClips (song, { clip }, false); });
+
+    for (const auto* step : { "the clip deleted", "the alias moved", "the lone clip moved", "the note added", "the velocity" })
+    {
+        phazite::undo (song);
+        checkChangesAreWhole (s.context, juce::String ("Undo of ") + step);
+    }
+
+    phazite::redo (song);
+    checkChangesAreWhole (s.context, "Redo of the velocity");
+}
 
 TEST_CASE ("The changes follow an edit once worked out in the background, the listeners told as they come in")
 {

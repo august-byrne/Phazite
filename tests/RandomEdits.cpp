@@ -25,6 +25,10 @@
 #include "model/presets/internal/Presets.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
 namespace phazite::test
 {
 namespace
@@ -106,7 +110,304 @@ namespace
 
         return tracks;
     }
+
+    // The kinds of edit of notes, controllers' values and clips one by one (RandomEdits::editNotesOrClips()).
+    constexpr int numNoteAndClipKinds = 19;
+
+    // A song beat moved by an amount, at the song's start at the earliest.
+    BeatPosition movedBy (BeatPosition beat, double beats)
+    {
+        return at (std::max (0.0, beat.inBeats() + beats));
+    }
 } // namespace
+
+ClipID RandomEdits::pickMidiClip (bool withNotes)
+{
+    std::vector<ClipID> all, linked;
+
+    for (const auto clip : getAllClips (song, true))
+    {
+        if (withNotes && getClipNotesPlayed (song, clip).empty())
+            continue;
+
+        all.push_back (clip);
+
+        if (findClipState (song, clip).hasProperty (schema::clipLink))
+            linked.push_back (clip);
+    }
+
+    if (all.empty())
+        return {};
+
+    const auto ofAGroup = random.nextBool();
+    return ofAGroup && ! linked.empty() ? pick (linked) : pick (all);
+}
+
+std::vector<NoteData> RandomEdits::pickNotes (ClipID clip)
+{
+    auto played = getClipNotesPlayed (song, clip);
+    std::vector<NoteData> picked;
+    const auto count = 1 + draw (3);
+
+    for (int i = 0; i < count && ! played.empty(); ++i)
+    {
+        const auto index = (size_t) draw ((int) played.size());
+        picked.push_back (played[index]);
+        played.erase (played.begin() + (std::ptrdiff_t) index);
+    }
+
+    return picked;
+}
+
+void RandomEdits::editNotesOrClips (int kind)
+{
+    // The edits of notes and values, through a clip that holds notes that play.
+    if (kind <= 11)
+    {
+        const auto clip = pickMidiClip (kind != 10 && kind != 11);
+
+        if (! clip.isValid())
+            return;
+
+        const auto notes = pickNotes (clip);
+        const auto refs = getRefs (notes);
+        const auto range = getClipRange (song, clip);
+
+        if (notes.empty() && kind <= 9)
+            return;
+
+        switch (kind)
+        {
+            case 0: // a note moved, as the piano roll's drag of one moves it
+            {
+                const auto by = (draw (17) - 8) * 0.25;
+                const auto pitchBy = draw (7) - 3;
+                moveNote (song, refs.front(), movedBy (notes.front().start, by), juce::jlimit (0, 127, notes.front().pitch + pitchBy));
+                break;
+            }
+
+            case 1: // notes placed, as a step of a drag of several
+            {
+                const auto by = (draw (9) - 4) * 0.25;
+                const auto pitchBy = draw (5) - 2;
+                const auto longer = draw (3) * 0.25;
+                auto placed = notes;
+
+                for (auto& note : placed)
+                {
+                    note.start = movedBy (note.start, by);
+                    note.pitch = juce::jlimit (0, 127, note.pitch + pitchBy);
+                    note.length = note.length + lasting (longer);
+                }
+
+                placeNotes (song, placed);
+                break;
+            }
+
+            case 2: // a note's length set, or the notes made longer or shorter
+            {
+                const auto which = draw (2);
+                const auto beats = (draw (16) + 1) * 0.25;
+                const auto by = (draw (9) - 4) * 0.25;
+
+                if (which == 0)
+                    setNoteLength (song, refs.front(), lasting (beats));
+                else
+                    changeNoteLengths (song, refs, lasting (by));
+                break;
+            }
+
+            case 3:
+                deleteNotes (song, refs);
+                break;
+
+            case 4:
+            {
+                const auto semitones = draw (25) - 12;
+                transposeNotes (song, refs, semitones);
+                break;
+            }
+
+            case 5:
+            {
+                const auto by = (draw (9) - 4) * 0.25;
+                nudgeNotes (song, refs, lasting (by));
+                break;
+            }
+
+            case 6: // muted, slid or portamento, or back
+            {
+                const auto which = draw (3);
+
+                if (which == 0)
+                    toggleNotesMuted (song, refs);
+                else if (which == 1)
+                    toggleNotesSlide (song, refs);
+                else
+                    toggleNotesPortamento (song, refs);
+                break;
+            }
+
+            case 7: // velocities set or changed, or the channels set
+            {
+                const auto which = draw (3);
+                const auto velocity = 1 + draw (127);
+                const auto change = draw (41) - 20;
+                const auto channel = 1 + draw (16);
+
+                if (which == 0)
+                    setNoteVelocities (song, refs, velocity);
+                else if (which == 1)
+                    changeNoteVelocities (song, refs, change);
+                else
+                    setNoteChannels (song, refs, channel);
+                break;
+            }
+
+            case 8:
+                duplicateNotes (song, refs);
+                break;
+
+            case 9: // replaced, as a quantize to the half beat (their IDs kept) or a chop into quarter beats replaces them
+            {
+                const auto chopped = random.nextBool();
+                auto replacements = notes;
+
+                if (chopped)
+                {
+                    replacements = chop (notes, 0.25);
+                }
+                else
+                {
+                    for (auto& note : replacements)
+                        note.start = at (std::round (note.start.inBeats() * 2.0) / 2.0);
+                }
+
+                replaceNotes (song, refs, replacements);
+                break;
+            }
+
+            case 10: // the clip's notes set whole, as the chord lane sets a part's
+            {
+                std::vector<NoteData> made;
+                const auto count = draw (5);
+
+                for (int i = 0; i < count; ++i)
+                {
+                    NoteData note;
+                    note.clip = clip;
+                    note.pitch = 36 + draw (48);
+                    const auto along = draw (16) * 0.25;
+                    note.start = range.getStart() + lasting (std::min (along, std::max (0.0, range.getLength().inBeats() - 0.25)));
+                    note.length = lasting (0.25 + draw (8) * 0.25);
+                    note.velocity = 1 + draw (127);
+                    made.push_back (note);
+                }
+
+                setClipNotes (song, clip, made);
+                break;
+            }
+
+            default: // controllers' values: added, recorded, removed, drawn or deleted, the mod wheel's and the bend's
+            {
+                const auto which = draw (6);
+                const auto bend = random.nextBool();
+                const ControlLane lane { bend ? ControlKind::pitchWheel : ControlKind::controller, bend ? 0 : 1, 1 };
+                const auto length = range.getLength().inBeats();
+                const auto first = random.nextDouble() * length;
+                const auto second = random.nextDouble() * length;
+                const auto value = draw (lane.getHighestValue() + 1);
+                const auto otherValue = draw (lane.getHighestValue() + 1);
+                const auto from = range.getStart() + lasting (std::min (first, second));
+                const auto to = range.getStart() + lasting (std::max (first, second));
+
+                if (which == 0)
+                    addControl (song, clip, from, lane.kind, lane.number, value, lane.channel);
+                else if (which == 1)
+                    addControls (song, clip,
+                                 { { from, lane.kind, lane.number, value, lane.channel },
+                                   { to, lane.kind, lane.number, otherValue, lane.channel } });
+                else if (which == 2)
+                    removeControls (song, clip, lane.kind, lane.number, lane.channel, from, to);
+                else if (which == 3)
+                    setControlValues (song, clip, lane, { from, to }, { { {}, from, value, 0 }, { {}, to, otherValue, 0 } });
+                else if (which == 4)
+                    deleteControlValues (song, { clip }, lane, { from, to });
+                else
+                    deleteAllControlValues (song, { clip }, lane);
+                break;
+            }
+        }
+
+        return;
+    }
+
+    // The edits of clips one by one: a MIDI clip's, of a group half of the time, where there is one; or any clip's.
+    const auto anyKind = random.nextBool();
+    const auto clips = getAllClips (song, false);
+    const auto clip = anyKind && ! clips.empty() ? pick (clips) : pickMidiClip (false);
+
+    if (! clip.isValid())
+        return;
+
+    const auto range = getClipRange (song, clip);
+    const auto along = random.nextDouble();
+
+    switch (kind)
+    {
+        case 12:
+        {
+            const auto asAliases = random.nextBool();
+            duplicateClips (song, { clip }, asAliases, nullptr);
+            break;
+        }
+
+        case 13:
+        {
+            const auto closeGap = draw (4) == 0;
+            deleteClips (song, { clip }, closeGap);
+            break;
+        }
+
+        case 14:
+            makeClipsUnique (song, { clip });
+            break;
+
+        case 15: // onto another track, at another beat
+            if (const auto tracks = getPlainTracks (song); ! tracks.empty())
+            {
+                const auto track = pick (tracks);
+                const auto beat = draw (32) * 0.5;
+                moveClip (song, clip, at (beat), track);
+            }
+            break;
+
+        case 16: // its start or its end trimmed, either way
+        {
+            const auto end = random.nextBool();
+            const auto by = (along - 0.5) * range.getLength().inBeats();
+
+            if (end)
+                trimClipEnd (song, clip, movedBy (range.getEnd(), by));
+            else
+                trimClipStart (song, clip, movedBy (range.getStart(), by));
+            break;
+        }
+
+        case 17:
+            splitClips (song, { clip }, range.getStart() + lasting (range.getLength().inBeats() * along));
+            break;
+
+        default: // an alias of it, after it on its track
+        {
+            const auto copies = copyClips (song, { clip }, true);
+
+            if (! copies.empty())
+                moveClip (song, copies.front(), range.getEnd(), getClipTrack (song, clip));
+            break;
+        }
+    }
+}
 
 RandomEdits::RandomEdits (Song& s, juce::int64 seed, const juce::File& soundsFolder)
     : random (seed),
@@ -140,7 +441,13 @@ void RandomEdits::edit()
     const auto track = pick (tracks);
     const auto other = pick (tracks);
     const auto plain = getPlainTracks (song);
-    const auto kind = draw (45);
+    const auto kind = draw (45 + numNoteAndClipKinds);
+
+    if (kind >= 45)
+    {
+        editNotesOrClips (kind - 45);
+        return;
+    }
 
     switch (kind)
     {

@@ -23,6 +23,8 @@
 //           maxBeat), a note longer than nothing, and every parameter's value set by hand and every automation point's value in its parameter's range
 //   path    no sound file a song names (an audio clip's, a device's) on a network share, nor leaving the project's folder
 //           with ".."; a full path of any computer's is one Phazite writes itself; nothing for a song without a file
+//   alias   the clips of an alias group (Schema.h: clipLink) hold the same notes and controllers' values (every property of
+//           each NOTE and CONTROL, in the same order), are of one kind, and are two at least
 #pragma once
 
 #include "TestHelpers.h"
@@ -44,4 +46,9 @@ std::vector<std::string> findSongProblems (const Song&, const schema::Tables&);
 
 // The same, each problem a failed check.
 void checkSong (const Song&);
+
+// A copy of an edited song as a project opens it from its file: without what it keeps only while an undo could bring it back
+// (the curves and lanes of devices taken away: SongIDs.h, which the check takes for names of nothing) and where playback
+// starts. For checking a song an edit, a merge or the fuzzer left. The song itself left as it is.
+Song::Ptr copyAsOpened (const Song&);
 } // namespace phazite::test

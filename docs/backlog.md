@@ -106,6 +106,7 @@ and nothing is listed in both.
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
 | A project and its versions keep no full path that can hold the user's name: an audio file whose copy into the project failed, a plug-in's file in a per-user folder | `src/model/base/internal/Schema.h` | — | — | format audit |
+| Audio clips of an alias group share their tempo, pitch, direction and warp markers (`src/model/arrangement/AudioClips.cpp`), and nothing checks it: the loader's rule for alias groups, the consistency check's and the merge's compare notes and controllers' values alone, so for a group of audio clips all three pass without comparing anything. The same three rules for what audio clips of a group share, with their tests | `src/model/project/Project.cpp` (`keepAliasGroups()`), `tests/SongCheck.cpp`, `src/model/versions/SongMerge.cpp` | M | 5 (S5.20, as the clips move) | review of the alias rules, 2026-11-21 |
 | The formats named and versioned when compatibility starts: a file that names the store's format, its version and its hash, room for a pack's entries to grow, a format name and version on the project file | `src/model/versions/PieceStore.cpp` | (L) | 8 | format audit, product-gaps 12 |
 | Save As copies the project's folders in the background with progress, as the first save does | `src/model/project/Project.cpp` | S | — | plan |
 | A preset's Sounds folder swept of the files its preset no longer names | `src/model/presets/Presets.cpp` | S | — | plan |

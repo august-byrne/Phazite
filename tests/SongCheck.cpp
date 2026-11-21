@@ -3,6 +3,7 @@
 #include "SongIDs.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/modulation/Modulators.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/devices/internal/Devices.h"
@@ -10,11 +11,14 @@
 #include "model/mixer/internal/Containers.h"
 #include "model/modulation/internal/Modulation.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
+#include <vector>
 
 namespace phazite::test
 {
@@ -383,6 +387,126 @@ namespace
                 checkValues (child);
             }
         }
+
+        //==============================================================================
+        // A clip's notes and controllers' values, in the order the clip holds them, each as its type and every property it
+        // has, by name, with its value as text.
+        static std::vector<juce::String> describeEvents (const juce::ValueTree& clip)
+        {
+            std::vector<juce::String> events;
+
+            for (const auto& child : clip)
+            {
+                if (! child.hasType (schema::NOTE) && ! child.hasType (schema::CONTROL))
+                    continue;
+
+                juce::StringArray properties;
+
+                for (int i = 0; i < child.getNumProperties(); ++i)
+                    properties.add (child.getPropertyName (i).toString() + "=" + child[child.getPropertyName (i)].toString());
+
+                properties.sort (false);
+                events.push_back (child.getType().toString() + " " + properties.joinIntoString (" "));
+            }
+
+            return events;
+        }
+
+        // The song's clips that are in an alias group, by the group, each group's in the song's order.
+        void collectGroups (const juce::ValueTree& tree, std::map<juce::String, std::vector<juce::ValueTree>>& groups)
+        {
+            for (const auto& child : tree)
+            {
+                if (! isKnownElementType (child))
+                    continue;
+
+                if (child.hasType (schema::CLIP) && child.hasProperty (schema::clipLink))
+                    groups[juce::String (readID (child[schema::clipLink]))].push_back (child);
+
+                if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+                    collectGroups (child, groups);
+            }
+        }
+
+        // A clip's NOTE and CONTROL elements, in order.
+        static std::vector<juce::ValueTree> getEvents (const juce::ValueTree& clip)
+        {
+            std::vector<juce::ValueTree> events;
+
+            for (const auto& child : clip)
+                if (child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
+                    events.push_back (child);
+
+            return events;
+        }
+
+        // Whether a clip holds the same events as the group's first, each equivalent to the first's in its place, the first's
+        // compared with the clip's in that order (juce::ValueTree::isEquivalentTo(), whose values compare as juce::var's do,
+        // which isn't the same both ways round for a number against text), as the loader compares them.
+        static bool holdTheSameEvents (const juce::ValueTree& first, const juce::ValueTree& clip)
+        {
+            const auto a = getEvents (first);
+            const auto b = getEvents (clip);
+
+            return a.size() == b.size()
+                   && std::equal (a.begin(), a.end(), b.begin(),
+                                  [] (const juce::ValueTree& x, const juce::ValueTree& y) { return x.isEquivalentTo (y); });
+        }
+
+        // The clips of an alias group (Schema.h: clipLink) hold the same notes and controllers' values, every property of
+        // each, in the same order; they are of one kind; and a group has two clips at least.
+        // Clips are compared as the loader compares them (Project.cpp: keepAliasGroups()): as values, so that numbers that are
+        // the same within JUCE's own tolerance (juce::var's, a double's against a number or text that reads as one) are the
+        // same; the message describes each event as text.
+        void checkAliases()
+        {
+            std::map<juce::String, std::vector<juce::ValueTree>> groups;
+            collectGroups (song.getState(), groups);
+
+            for (const auto& [link, clips] : groups)
+            {
+                const auto& first = clips.front();
+
+                if (clips.size() < 2)
+                {
+                    add ("alias", first, "the only clip of its alias group " + link);
+                    continue;
+                }
+
+                const auto events = describeEvents (first);
+
+                for (size_t i = 1; i < clips.size(); ++i)
+                {
+                    const auto& clip = clips[i];
+                    const auto clipText = "clip " + clip[schema::clipID].toString() + " of alias group " + link + ": ";
+
+                    if (clip[schema::clipKind].toString() != first[schema::clipKind].toString())
+                    {
+                        add ("alias", clip,
+                             clipText + "a " + clip[schema::clipKind].toString() + " clip in a group with a "
+                                 + first[schema::clipKind].toString() + " clip");
+                        continue;
+                    }
+
+                    if (holdTheSameEvents (first, clip))
+                        continue;
+
+                    const auto others = describeEvents (clip);
+
+                    // Where they first differ, for the failure's message.
+                    size_t at = 0;
+
+                    while (at < events.size() && at < others.size() && events[at] == others[at])
+                        ++at;
+
+                    add ("alias", clip,
+                         clipText + "its notes and values differ from clip " + first[schema::clipID].toString() + "'s at event "
+                             + juce::String ((int) at + 1) + ": \"" + (at < others.size() ? others[at] : juce::String ("none"))
+                             + "\" against \"" + (at < events.size() ? events[at] : juce::String ("none")) + "\" ("
+                             + juce::String ((int) others.size()) + " against " + juce::String ((int) events.size()) + ")");
+                }
+            }
+        }
     };
 } // namespace
 
@@ -419,6 +543,7 @@ std::vector<std::string> findSongProblems (const Song& song, const schema::Table
     checker.checkKeys (state);
     checker.checkRanges (state);
     checker.checkValues (state);
+    checker.checkAliases();
     return checker.problems;
 }
 
@@ -432,5 +557,33 @@ void checkSong (const Song& song)
 
     // And what finds its items by their IDs holds what it does (model/base/internal/SongIndex.h).
     CHECK (song.getIndex().isExact());
+}
+
+Song::Ptr copyAsOpened (const Song& song)
+{
+    Song::Ptr copy (new Song (song.getState().createCopy()));
+    forgetCurvesOfGoneDevices (*copy);
+    copy->getState().removeProperty (schema::playStart, nullptr);
+    std::set<std::uint64_t> items;
+    findIDProblems (copy->getState(), &items);
+
+    const std::function<void (juce::ValueTree)> visit = [&] (juce::ValueTree tree)
+    {
+        for (auto i = tree.getNumChildren(); --i >= 0;)
+        {
+            auto child = tree.getChild (i);
+
+            if (child.hasType (schema::LANE) && items.count (readID (child[schema::laneDevice])) == 0)
+            {
+                tree.removeChild (i, nullptr);
+                continue;
+            }
+
+            visit (child);
+        }
+    };
+
+    visit (copy->getState());
+    return copy;
 }
 } // namespace phazite::test

@@ -35,7 +35,10 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <set>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -1568,4 +1571,310 @@ TEST_CASE ("A MIDI link to what the song hasn't, a controller's or a parameter's
     CHECK ((int) links[0][schema::midiLinkChannel] == 1);
     CHECK ((int) links[0][schema::midiLinkNumber] == 21);
     CHECK (links[0][schema::midiLinkParameter].toString() == "cutoff");
+}
+
+namespace
+{
+// An alias group of three MIDI clips on the Lead's track, written into a project's file: the Lead's clip (800001, from beat 0)
+// given notes 900001 and 900002 and a mod wheel's value besides the note it holds, and two copies of it (800002 at beat 8 and
+// 800003 at beat 16), all three in the group 800010. Returns the three, in the song's order.
+std::vector<juce::XmlElement*> writeGroupOfThree (juce::XmlElement& song)
+{
+    auto* lead = Edited::findTrack (song, "Lead");
+    auto* clip = lead->getChildByName ("CLIP");
+    REQUIRE (clip != nullptr);
+    clip->setAttribute ("id", "800001");
+    clip->setAttribute ("link", "800010");
+
+    for (const auto& [id, pitch, start] : { std::tuple { "900001", "64", "1" }, std::tuple { "900002", "67", "2" } })
+    {
+        auto* note = clip->createNewChildElement ("NOTE");
+        note->setAttribute ("id", id);
+        note->setAttribute ("pitch", pitch);
+        note->setAttribute ("start", start);
+        note->setAttribute ("length", "0.5");
+        note->setAttribute ("velocity", "90");
+    }
+
+    auto* control = clip->createNewChildElement ("CONTROL");
+    control->setAttribute ("kind", "controller");
+    control->setAttribute ("number", "1");
+    control->setAttribute ("beat", "0.5");
+    control->setAttribute ("value", "40");
+
+    std::vector<juce::XmlElement*> clips { clip };
+
+    for (const auto& [id, start] : { std::pair { "800002", "8" }, std::pair { "800003", "16" } })
+    {
+        auto* copy = new juce::XmlElement (*clip);
+        copy->setAttribute ("id", id);
+        copy->setAttribute ("start", start);
+        lead->addChildElement (copy);
+        clips.push_back (copy);
+    }
+
+    return clips;
+}
+
+// A clip's NOTE and CONTROL elements, in order.
+std::vector<juce::XmlElement*> getEvents (juce::XmlElement& clip)
+{
+    std::vector<juce::XmlElement*> events;
+
+    for (auto* child : clip.getChildIterator())
+        if (child->hasTagName ("NOTE") || child->hasTagName ("CONTROL"))
+            events.push_back (child);
+
+    return events;
+}
+
+// An opened song's clip by its ID, its alias group (empty for none), and its notes as the model reads them.
+juce::ValueTree findClipByID (const phazite::Song& song, std::uint64_t id)
+{
+    return phazite::findClipState (song, phazite::ClipID::fromRaw (id));
+}
+
+juce::String getLink (const phazite::Song& song, std::uint64_t id)
+{
+    const auto clip = findClipByID (song, id);
+    REQUIRE (clip.isValid());
+    return clip[schema::clipLink].toString();
+}
+
+juce::String describeNotesOf (const phazite::Song& song, std::uint64_t id)
+{
+    return describeClipNotes (song, phazite::ClipID::fromRaw (id));
+}
+} // namespace
+
+TEST_CASE ("A clip alone in its alias group opens without its link")
+{
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* clip = Edited::findTrack (song, "Lead")->getChildByName ("CLIP");
+            REQUIRE (clip != nullptr);
+            clip->setAttribute ("id", "800001");
+            clip->setAttribute ("link", "800010");
+        });
+    REQUIRE (project != nullptr);
+    CHECK (getLink (project->getSong(), 800001).isEmpty());
+    CHECK (phazite::getClipNotes (project->getSong(), phazite::ClipID::fromRaw (800001)).size() == 1);
+}
+
+TEST_CASE ("A clip of an alias group whose notes or values differ from the group's first clip's opens as a clip of its own, its "
+           "notes kept")
+{
+    // Three clips of a group; the one that differs, by a note's value, a note more, the notes' order or a controller's value,
+    // made a clip of its own, holding what it held; the other two still a group, under its link. With the first clip the one
+    // that differs, the other two, which hold the same as each other, each differ from it: all three of their own.
+    struct Difference
+    {
+        const char* what;
+        std::function<void (juce::XmlElement& clip)> make;
+        size_t notes; // the clip that differs holds as many
+    };
+
+    const std::vector<Difference> differences {
+        { "a note's value", [] (juce::XmlElement& clip) { getEvents (clip)[1]->setAttribute ("velocity", "91"); }, 3 },
+        { "a note more",
+          [] (juce::XmlElement& clip)
+          {
+              auto* note = new juce::XmlElement (*getEvents (clip)[1]);
+              note->setAttribute ("id", "900003");
+              clip.addChildElement (note);
+          },
+          4 },
+        { "the notes' order",
+          [] (juce::XmlElement& clip)
+          {
+              auto* first = getEvents (clip)[0];
+              clip.removeChildElement (first, false);
+              clip.addChildElement (first);
+          },
+          3 },
+        { "a controller's value", [] (juce::XmlElement& clip) { getEvents (clip)[3]->setAttribute ("value", "41"); }, 3 },
+    };
+
+    for (const auto& difference : differences)
+    {
+        for (const auto differing : { 1, 0 })
+        {
+            INFO (difference.what << ", in the group's " << (differing == 0 ? "first" : "second") << " clip");
+            Edited edited;
+            const auto project = edited.open (
+                [&] (juce::XmlElement& song)
+                {
+                    auto clips = writeGroupOfThree (song);
+                    REQUIRE (getEvents (*clips[0]).size() == 4);
+                    difference.make (*clips[(size_t) differing]);
+                });
+            REQUIRE (project != nullptr);
+            const auto& song = project->getSong();
+            const std::uint64_t odd = differing == 0 ? 800001 : 800002;
+            CHECK (getLink (song, odd).isEmpty());
+
+            if (differing == 0)
+            {
+                CHECK (getLink (song, 800002).isEmpty());
+                CHECK (getLink (song, 800003).isEmpty());
+            }
+            else
+            {
+                CHECK (getLink (song, 800001) == "800010");
+                CHECK (getLink (song, 800003) == "800010");
+                CHECK (describeNotesOf (song, 800001) == describeNotesOf (song, 800003));
+            }
+
+            CHECK (phazite::getClipNotes (song, phazite::ClipID::fromRaw (odd)).size() == difference.notes); // its notes kept
+        }
+    }
+}
+
+TEST_CASE ("An audio clip and MIDI clips under one link open with the audio clip on its own")
+{
+    // The Lead's two MIDI clips of a group, and the Audio track's clip, after them in the song's order, under the same link:
+    // the audio clip loses it, the MIDI clips stay a group. And an audio clip and one MIDI clip: neither keeps it.
+    for (const auto midiClips : { 2, 1 })
+    {
+        INFO (midiClips << " MIDI clips");
+        Edited edited;
+        std::uint64_t audioID = 0;
+        const auto project = edited.open (
+            [&] (juce::XmlElement& song)
+            {
+                auto clips = writeGroupOfThree (song);
+
+                for (auto i = (int) clips.size(); --i >= midiClips;)
+                    Edited::findTrack (song, "Lead")->removeChildElement (clips[(size_t) i], true);
+
+                auto* audio = Edited::findTrack (song, "Audio")->getChildByName ("CLIP");
+                REQUIRE (audio != nullptr);
+                audio->setAttribute ("link", "800010");
+                audioID = (std::uint64_t) audio->getStringAttribute ("id").getLargeIntValue();
+            });
+        REQUIRE (project != nullptr);
+        const auto& song = project->getSong();
+        CHECK (getLink (song, audioID).isEmpty());
+        CHECK (getLink (song, 800001) == (midiClips == 2 ? "800010" : ""));
+
+        if (midiClips == 2)
+            CHECK (getLink (song, 800002) == "800010");
+    }
+}
+
+TEST_CASE ("An alias group that holds together opens as it was written, with its IDs, and an edit through one clip reaches all")
+{
+    Edited edited;
+    const auto project = edited.open ([] (juce::XmlElement& song) { writeGroupOfThree (song); });
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+
+    for (const std::uint64_t id : { 800001, 800002, 800003 })
+    {
+        INFO ("clip " << id);
+        CHECK (getLink (song, id) == "800010");
+        CHECK (describeNotesOf (song, id) == describeNotesOf (song, 800001));
+        std::vector<juce::String> ids;
+
+        for (const auto& child : findClipByID (song, id))
+            if (child.hasType (schema::NOTE))
+                ids.push_back (child[schema::noteID].toString());
+
+        REQUIRE (ids.size() == 3);
+        CHECK (ids[1] == "900001");
+        CHECK (ids[2] == "900002");
+    }
+
+    const auto notes = phazite::getClipNotes (song, phazite::ClipID::fromRaw (800003));
+    REQUIRE (notes.size() == 3);
+    phazite::setNoteVelocities (song, { notes[1].getRef() }, 30);
+    CHECK (describeNotesOf (song, 800001) == describeNotesOf (song, 800003));
+    CHECK (phazite::getNoteData (song, phazite::NoteRef { phazite::ClipID::fromRaw (800002), notes[1].id })->velocity == 30);
+    checkSong (song);
+}
+
+TEST_CASE ("An alias group whose notes' IDs are given anew as it opens stays a group, each note given the same new ID in every "
+           "clip")
+{
+    // Three clips of a group, the same in the file, whose notes' IDs the loader gives anew in each clip (Project.cpp: keepIDs()):
+    // a note's given the same new ID in each, by its place and old ID, so that the group holds together. With one clip whose
+    // note's pitch differs too: that one alone made a clip of its own.
+    struct Wrong
+    {
+        const char* what;
+        std::function<void (juce::XmlElement& clip)> make;
+    };
+
+    const std::vector<Wrong> wrongs {
+        { "an ID of 0", [] (juce::XmlElement& clip) { getEvents (clip)[1]->setAttribute ("id", "0"); } },
+        { "an ID at maxID",
+          [] (juce::XmlElement& clip) { getEvents (clip)[1]->setAttribute ("id", juce::String ((juce::uint64) schema::maxID)); } },
+        { "an ID twice in the clip", [] (juce::XmlElement& clip) { getEvents (clip)[2]->setAttribute ("id", "900001"); } },
+    };
+
+    for (const auto& wrong : wrongs)
+    {
+        for (const auto oneDiffers : { false, true })
+        {
+            INFO (wrong.what << (oneDiffers ? ", the second clip's first note's pitch differing" : ""));
+            Edited edited;
+            const auto project = edited.open (
+                [&] (juce::XmlElement& song)
+                {
+                    const auto clips = writeGroupOfThree (song);
+
+                    for (auto* clip : clips)
+                        wrong.make (*clip);
+
+                    if (oneDiffers)
+                        getEvents (*clips[1])[0]->setAttribute ("pitch", "61");
+                });
+            REQUIRE (project != nullptr);
+            const auto& song = project->getSong();
+
+            // Each clip's notes' IDs, in order: each one of the song's own.
+            const auto getNoteIDs = [&song] (std::uint64_t clip)
+            {
+                std::vector<std::uint64_t> ids;
+                std::set<std::uint64_t> seen;
+
+                for (const auto& child : findClipByID (song, clip))
+                {
+                    if (! child.hasType (schema::NOTE))
+                        continue;
+
+                    const auto id = phazite::readID (child[schema::noteID]);
+                    CHECK (id != 0);
+                    CHECK (id < schema::maxID);
+                    CHECK (seen.insert (id).second);
+                    ids.push_back (id);
+                }
+
+                CHECK (ids.size() == 3);
+                return ids;
+            };
+
+            const auto first = getNoteIDs (800001);
+            CHECK (getLink (song, 800001) == "800010");
+            CHECK (getLink (song, 800003) == "800010");
+            CHECK (getNoteIDs (800003) == first);
+            CHECK (describeNotesOf (song, 800003) == describeNotesOf (song, 800001));
+
+            if (oneDiffers)
+            {
+                CHECK (getLink (song, 800002).isEmpty());
+                getNoteIDs (800002);
+            }
+            else
+            {
+                CHECK (getLink (song, 800002) == "800010");
+                CHECK (getNoteIDs (800002) == first);
+                CHECK (describeNotesOf (song, 800002) == describeNotesOf (song, 800001));
+            }
+
+            checkSong (song);
+        }
+    }
 }

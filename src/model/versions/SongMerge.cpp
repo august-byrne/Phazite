@@ -4,9 +4,12 @@
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <map>
 #include <set>
+#include <vector>
 
 namespace phazite
 {
@@ -1076,7 +1079,151 @@ namespace
 
         return {};
     }
+
+    // A song's clips in alias groups (schema::clipLink), by their groups, each group's in the song's order.
+    void collectLinkedClips (const juce::ValueTree& tree, std::map<std::uint64_t, std::vector<juce::ValueTree>>& groups)
+    {
+        for (const auto& child : tree)
+        {
+            if (child.hasType (schema::CLIP))
+            {
+                if (child.hasProperty (schema::clipLink))
+                    groups[readID (child[schema::clipLink])].push_back (child);
+            }
+            else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+            {
+                collectLinkedClips (child, groups);
+            }
+        }
+    }
+
+    // Each alias group of the merged song holding together: its clips' notes and controllers' values are one thing, which
+    // the merge treats as one. They are its keeper's: the first clip of the group, in the song's order, that the parting and
+    // both sides all hold in that group, whose own were merged three ways, each side's edits in (on each side the group held
+    // the same, so an edit made there through any of its clips reached the keeper too); failing that, the first both sides
+    // hold in it, the first both sides hold at all (a clip one side linked to a new alias), or the first. Every other clip of
+    // the group takes the keeper's (an alias one side added gets what the other side changed), and a clash in them is the
+    // keeper's alone. A group left with one clip (its other clips deleted on one side) loses its link, as deleting a clip
+    // unlinks the last one of its group. The IDs given anew to notes (renumbered, by the clip's group) stay right: the
+    // keeper's notes are every clip's.
+    void keepAliasGroups (MergeResult& result, const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs)
+    {
+        std::map<std::uint64_t, std::vector<juce::ValueTree>> groups;
+        collectLinkedClips (result.song, groups);
+
+        if (groups.empty())
+            return;
+
+        std::map<std::uint64_t, juce::ValueTree> baseClips, ourClips, theirClips;
+        collectClips (base, baseClips);
+        collectClips (ours, ourClips);
+        collectClips (theirs, theirClips);
+
+        for (auto& group : groups)
+        {
+            const auto groupLink = group.first;
+            auto& clips = group.second;
+
+            if (clips.size() == 1)
+            {
+                clips.front().removeProperty (schema::clipLink, nullptr);
+                continue;
+            }
+
+            // Whether a song holds the clip (its ID), in this group or at all.
+            const auto holds =
+                [groupLink] (const std::map<std::uint64_t, juce::ValueTree>& songClips, const juce::ValueTree& clip, bool inGroup)
+            {
+                const auto found = songClips.find (readID (clip[schema::clipID]));
+
+                return found != songClips.end()
+                       && (! inGroup
+                           || (found->second.hasProperty (schema::clipLink) && readID (found->second[schema::clipLink]) == groupLink));
+            };
+
+            const auto findFirst = [&clips] (const std::function<bool (const juce::ValueTree&)>& is)
+            {
+                for (const auto& clip : clips)
+                    if (is (clip))
+                        return clip;
+
+                return juce::ValueTree();
+            };
+
+            auto keeper =
+                findFirst ([&] (const juce::ValueTree& clip)
+                           { return holds (baseClips, clip, true) && holds (ourClips, clip, true) && holds (theirClips, clip, true); });
+
+            if (! keeper.isValid())
+                keeper = findFirst ([&] (const juce::ValueTree& clip)
+                                    { return holds (ourClips, clip, true) && holds (theirClips, clip, true); });
+
+            if (! keeper.isValid())
+                keeper = findFirst ([&] (const juce::ValueTree& clip)
+                                    { return holds (ourClips, clip, false) && holds (theirClips, clip, false); });
+
+            if (! keeper.isValid())
+                keeper = clips.front();
+
+            for (auto& clip : clips)
+            {
+                if (clip == keeper)
+                    continue;
+
+                // A clash in what the clip holds (a note's value) is the keeper's, whose events it now holds.
+                const auto step = keyOf (clip);
+                std::erase_if (result.clashes,
+                               [&step] (const MergeClash& clash)
+                               {
+                                   const auto at = clash.path.indexOf (step);
+                                   return at >= 0 && at < clash.path.size() - 1;
+                               });
+
+                giveClipEvents (keeper, clip, nullptr);
+            }
+        }
+    }
 } // namespace
+
+void giveClipEvents (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager* undo)
+{
+    const auto eventsOf = [] (const juce::ValueTree& clip)
+    {
+        std::vector<juce::ValueTree> events;
+
+        for (const auto& child : clip)
+            if (child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
+                events.push_back (child);
+
+        return events;
+    };
+
+    const auto theirs = eventsOf (from);
+    const auto mine = eventsOf (to);
+
+    // The same kinds of event in the same order: each that differs takes the other's properties, in its place.
+    if (theirs.size() == mine.size()
+        && std::equal (theirs.begin(), theirs.end(), mine.begin(),
+                       [] (const juce::ValueTree& a, const juce::ValueTree& b) { return a.getType() == b.getType(); }))
+    {
+        for (size_t i = 0; i < theirs.size(); ++i)
+            if (! theirs[i].isEquivalentTo (mine[i]))
+                juce::ValueTree (mine[i]).copyPropertiesAndChildrenFrom (theirs[i], undo);
+
+        return;
+    }
+
+    // Otherwise all of them, copies, where its first event was (or after all it holds).
+    auto place = mine.empty() ? to.getNumChildren() : to.indexOf (mine.front());
+
+    for (const auto& event : mine)
+        to.removeChild (event, undo);
+
+    place = juce::jmin (place, to.getNumChildren());
+
+    for (const auto& event : theirs)
+        to.addChild (event.createCopy(), place++, undo);
+}
 
 MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs,
                         const std::function<std::uint64_t()>& makeID)
@@ -1227,6 +1374,10 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
         mergeTrackOrder (base, ours, result.song, other);
     }
 
+    // Last, once every line's clips are where the merge puts them and each clip's notes were merged: a group's notes are its
+    // keeper's, by the other side's song as renumbered (its clips' IDs and links as this side's), whose notes' IDs given anew
+    // (result.renumbered, recorded above by the clip's group) the keeper holds and every clip of its group takes.
+    keepAliasGroups (result, base, ours, other);
     return result;
 }
 

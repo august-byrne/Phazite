@@ -20,7 +20,7 @@ message thread (2026-11-20) and the reviews of its fixes left: the audit's other
 suspects, or would make faster, is in the [backlog](backlog.md). 230 was found by reading JUCE while
 roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 231 to 233 are what
 the tests written before the notes' storage changes found in edits of a note named through two clips of its alias
-group (2026-11-21).
+group (2026-11-21), and 234 what the review of the merge's rule for alias groups found by reading.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -154,6 +154,18 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   own review. Also then: the merge's check that each ID is held once (`holdsEachIDOnce()` in `VersionHistory.cpp`)
   and the loader's (`SongPieces.cpp`) made one function, which looks at a channel's fader and VCA IDs and skips
   elements of kinds it doesn't know, as the loader's does.
+- **234. A line restored from a version can rejoin an alias group whose other clips changed since.** Restoring one
+  line (a track) reads its song in part, and the loader's rule that makes alias groups hold together
+  (`keepAliasGroups()` in `src/model/project/Project.cpp`) is skipped for a song read in part, since a group's other
+  clips may be in pieces that weren't read; nothing on the way in checks the groups again
+  (`removeBrokenReferences()` leaves links alone). So a restored clip that carries its old link holds its old notes
+  beside clips of the group that hold newer ones: an edit through one of them then reaches it only in part, and a
+  later merge gives it the group's notes over its own. Found by reading, while the merge's alias rule was reviewed
+  (2026-11-21); not seen. To fix: where a restored line is taken into the song, each of its clips with a link either
+  takes the group's notes as the song holds them or loses its link (the second is what Restore means: the line as it
+  was), with the consistency check's alias rule run on the result in the versions' tests. Goes away as the notes move
+  (roadmap step S5.20), where a group holds one value and a clip joining it can't hold another.
+
 ## Devices and playback
 
 - **136. The FM leaves a little under its held notes where a modulator sits a few hertz from a whole multiple of its

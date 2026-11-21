@@ -1170,6 +1170,33 @@ namespace
                 state.setProperty (schema::idNumbering, hash.substring (0, schema::idNumberingDigits), nullptr);
             }
 
+            // A note's new ID where it has none of its own after the above (none, one past maxID, or one its clip holds
+            // already): in a clip of an alias group, the same in every clip of the group for the note at the same place among
+            // its clip's notes with the same old ID (givenInGroups, by the group's link), so that clips that held the same
+            // notes still do and stay a group (keepAliasGroups()); clips whose notes differ still differ.
+            std::map<std::uint64_t, std::map<std::pair<int, std::uint64_t>, std::uint64_t>> givenInGroups {};
+
+            std::uint64_t giveNoteAnew (const juce::ValueTree& clip, int place, std::uint64_t old, std::set<std::uint64_t>& noteIDs)
+            {
+                std::map<std::pair<int, std::uint64_t>, std::uint64_t>* given = nullptr;
+
+                if (clip.hasType (schema::CLIP) && clip.hasProperty (schema::clipLink))
+                {
+                    given = &givenInGroups[readID (clip[schema::clipLink])];
+
+                    if (const auto found = given->find ({ place, old }); found != given->end() && noteIDs.insert (found->second).second)
+                        return found->second;
+                }
+
+                const auto made = song.makeID();
+                noteIDs.insert (made);
+
+                if (given != nullptr)
+                    given->try_emplace ({ place, old }, made);
+
+                return made;
+            }
+
             bool isToGiveAnew (std::uint64_t id) const { return id == 0 || id >= maxID || (renumbering && id >= maxCountedID); }
             bool isRenumbered (std::uint64_t id) const { return renumbering && id >= maxCountedID && id < maxID; }
 
@@ -1218,6 +1245,8 @@ namespace
                     return std::adjacent_find (ids.begin(), ids.end()) == ids.end();
                 };
 
+                auto notePlace = 0; // the next note's place among the clip's notes
+
                 for (auto child : tree)
                 {
                     if (! isKnown (child))
@@ -1242,6 +1271,8 @@ namespace
 
                     if (child.hasType (schema::NOTE))
                     {
+                        const auto place = notePlace++;
+
                         if (! notesAreTheirOwn.has_value())
                             notesAreTheirOwn = areTheirOwn();
 
@@ -1269,10 +1300,7 @@ namespace
                         auto& noteIDs = notes.has_value() ? *notes : notes.emplace();
 
                         if (id == 0 || ! noteIDs.insert (id).second)
-                        {
-                            id = song.makeID();
-                            noteIDs.insert (id);
-                        }
+                            id = giveNoteAnew (tree, place, old, noteIDs);
 
                         if (id != old)
                             child.setProperty (schema::noteID, (juce::int64) id, nullptr);
@@ -1592,6 +1620,82 @@ namespace
                 }
             }
 
+            //==============================================================================
+            // Every alias group holding together (Schema.h: clipLink): a clip whose kind, or whose notes and controllers' values
+            // (each with every property, in the same order), differ from the group's first clip's in the song's order is made a
+            // clip of its own, its link removed and its notes kept; then a group left with one clip loses its link. Last, once
+            // every clip that goes has gone (keepPaths()). Not in a song read in part, whose groups' other clips may be in
+            // what wasn't read. Clips are compared as values (juce::ValueTree::isEquivalentTo(): numbers that are the same within
+            // JUCE's own tolerance are the same), the group's first against each other, as the check compares them (SongCheck.cpp).
+            static bool holdTheSameEvents (const juce::ValueTree& a, const juce::ValueTree& b)
+            {
+                const auto isEvent = [] (const juce::ValueTree& child)
+                { return child.hasType (schema::NOTE) || child.hasType (schema::CONTROL); };
+
+                auto i = 0, j = 0;
+
+                for (;;)
+                {
+                    while (i < a.getNumChildren() && ! isEvent (a.getChild (i)))
+                        ++i;
+
+                    while (j < b.getNumChildren() && ! isEvent (b.getChild (j)))
+                        ++j;
+
+                    if (i == a.getNumChildren() || j == b.getNumChildren())
+                        return i == a.getNumChildren() && j == b.getNumChildren();
+
+                    if (! a.getChild (i).isEquivalentTo (b.getChild (j)))
+                        return false;
+
+                    ++i;
+                    ++j;
+                }
+            }
+
+            static void collectLinkedClips (const juce::ValueTree& tree, std::map<std::uint64_t, std::vector<juce::ValueTree>>& groups)
+            {
+                for (const auto& child : tree)
+                {
+                    if (! isKnown (child))
+                        continue;
+
+                    if (child.hasType (schema::CLIP) && child.hasProperty (schema::clipLink))
+                        groups[readID (child[schema::clipLink])].push_back (child);
+                    else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+                        collectLinkedClips (child, groups);
+                }
+            }
+
+            void keepAliasGroups()
+            {
+                if (readInPart)
+                    return;
+
+                std::map<std::uint64_t, std::vector<juce::ValueTree>> groups;
+                collectLinkedClips (song.getState(), groups);
+
+                for (auto& group : groups)
+                {
+                    const auto& clips = group.second;
+                    const auto& first = clips.front();
+                    auto kept = 1;
+
+                    for (size_t i = 1; i < clips.size(); ++i)
+                    {
+                        auto clip = clips[i]; // the same element, which loses its link
+
+                        if (clip[schema::clipKind].toString() == first[schema::clipKind].toString() && holdTheSameEvents (first, clip))
+                            ++kept;
+                        else
+                            clip.removeProperty (schema::clipLink, nullptr);
+                    }
+
+                    if (kept == 1)
+                        juce::ValueTree (first).removeProperty (schema::clipLink, nullptr);
+                }
+            }
+
             void keep()
             {
                 auto state = song.getState();
@@ -1638,6 +1742,7 @@ namespace
                 keepCurves();
                 keepMidiLinks();
                 keepPaths (state);
+                keepAliasGroups();
             }
         };
     } // namespace consistent

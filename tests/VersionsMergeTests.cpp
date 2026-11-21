@@ -30,6 +30,8 @@
 #include "model/versions/internal/SongMerge.h"
 #include "model/versions/internal/VersionHistory.h"
 
+#include <map>
+#include <optional>
 #include <set>
 
 namespace
@@ -56,20 +58,39 @@ struct Sides
         theirs = phazite::makeSong (base->getState().createCopy());
     }
 
-    // The other side's changes, every line of them (a merge takes them all), merged into this side's.
+    // The other side's changes, every line of them (a merge takes them all), merged into this side's; and what that merge
+    // makes of this side's song holds together, as every song must (SongCheck.h, the alias rule with it), each case's.
     phazite::MergeResult merge()
     {
-        return phazite::mergeSongs (base->getState(), ours->getState(), theirs->getState(), [this] { return ours->makeID(); });
+        auto merged = phazite::mergeSongs (base->getState(), ours->getState(), theirs->getState(), [this] { return ours->makeID(); });
+        checkMerged (merged);
+        return merged;
     }
 
     // The merge applied to this side's song, as Merge applies it (VersionsModel.cpp): one step, what names the gone taken away.
+    static void apply (phazite::Song& song, const phazite::MergeResult& merged)
+    {
+        const phazite::UndoStep step (song, "Merge");
+        phazite::makeSongLike (song, merged.song);
+        phazite::removeBrokenReferences (song);
+    }
+
     phazite::MergeResult mergeIntoOurs()
     {
         auto merged = merge();
-        const phazite::UndoStep step (*ours, "Merge");
-        phazite::makeSongLike (*ours, merged.song);
-        phazite::removeBrokenReferences (*ours);
+        apply (*ours, merged);
         return merged;
+    }
+
+    // A merge applied to a copy of this side's song, which then holds together, as it opens (copyAsOpened(): without the
+    // curves of devices taken away, which an edited song keeps for an undo).
+    void checkMerged (const phazite::MergeResult& merged) const
+    {
+        INFO ("the merged song");
+        const auto applied = phazite::makeSong (ours->getState().createCopy());
+        REQUIRE (applied != nullptr);
+        apply (*applied, merged);
+        checkSong (*copyAsOpened (*applied));
     }
 };
 
@@ -402,6 +423,13 @@ TEST_CASE ("Random edits on two sides always merge into a song whose IDs are eac
             const auto seed = 20261104 + 2 * round + side;
             INFO ("side " << side << ", seed " << seed);
             RandomEdits (side == 0 ? *sides.ours : *sides.theirs, seed, sounds.folder).edit (8);
+            // Each side's alias groups as the model made them hold together (the rest of the check is for a song as it opens:
+            // an edited song keeps the curves of devices gone for an undo).
+            for (const auto& problem : findSongProblems (side == 0 ? *sides.ours : *sides.theirs))
+            {
+                INFO (problem);
+                CHECK (problem.rfind ("alias", 0) != 0);
+            }
         }
 
         const auto merged = sides.merge();
@@ -1143,4 +1171,458 @@ TEST_CASE ("A device grouped into a container on one side and changed on the oth
         phazite::setValueSetByHand (*sides.ours, { eq, "band4Gain" }, 6.0f);
         check (sides.merge(), eq);
     }
+}
+
+namespace
+{
+// Sides whose base holds an alias group: the Bass's clip X (from beat 0, notes n at 0 and m at 2) and its alias Y on the
+// Drums, from beat 8. Edits are made through either, as the piano roll makes them.
+struct AliasSides : Sides
+{
+    AliasSides()
+    {
+        m = addMidiNote (*base, clip, 40, at (2.0), lasting (1.0)).note;
+        n = phazite::getClipNotes (*base, clip).front().id;
+        const auto aliases = phazite::copyClips (*base, { clip }, true);
+        REQUIRE (aliases.size() == 1);
+        alias = aliases.front();
+        phazite::moveClip (*base, alias, at (8.0), tracks[1]);
+        REQUIRE (phazite::findClipState (*base, alias)[schema::clipLink] == phazite::findClipState (*base, clip)[schema::clipLink]);
+        ours = phazite::makeSong (base->getState().createCopy());
+        theirs = phazite::makeSong (base->getState().createCopy());
+    }
+
+    // A note as a clip of the merged song holds it, applied to this side's (as Merge applies it).
+    std::optional<phazite::NoteData> noteIn (phazite::ClipID in, phazite::NoteID note) const
+    {
+        return phazite::getNoteData (*ours, phazite::NoteRef { in, note });
+    }
+
+    // Whether X and Y of this side's song hold the same notes.
+    bool holdTheSameNotes() const
+    {
+        return describeClipNotes (*ours, clip) == describeClipNotes (*ours, alias) && ! describeClipNotes (*ours, clip).isEmpty();
+    }
+
+    // This side's clips on both tracks, by their alias groups (none for a clip of its own).
+    std::map<juce::String, std::vector<phazite::ClipID>> getGroups() const
+    {
+        std::map<juce::String, std::vector<phazite::ClipID>> groups;
+
+        for (const auto track : tracks)
+            for (const auto id : phazite::getClips (*ours, track))
+                groups[phazite::findClipState (*ours, id)[schema::clipLink].toString()].push_back (id);
+
+        return groups;
+    }
+
+    // Every alias group of this side's song with at least two clips, each holding the same notes; and the song holding together.
+    void checkGroupsHoldTogether() const
+    {
+        for (const auto& [link, clips] : getGroups())
+        {
+            if (link.isEmpty())
+                continue;
+
+            INFO ("group " << link);
+            CHECK (clips.size() >= 2);
+
+            for (const auto id : clips)
+                CHECK (describeClipNotes (*ours, id) == describeClipNotes (*ours, clips.front()));
+        }
+
+        checkSong (*ours);
+    }
+
+    // A third clip of the group, W, on the Drums from beat 16, in the base and so on both sides.
+    phazite::ClipID addThirdToBase()
+    {
+        const auto copies = phazite::copyClips (*base, { clip }, true);
+        REQUIRE (copies.size() == 1);
+        phazite::moveClip (*base, copies.front(), at (16.0), tracks[1]);
+        ours = phazite::makeSong (base->getState().createCopy());
+        theirs = phazite::makeSong (base->getState().createCopy());
+        return copies.front();
+    }
+
+    phazite::ClipID alias;
+    phazite::NoteID n, m;
+};
+} // namespace
+
+TEST_CASE ("Merged edits of the notes of a clip that has an alias reach both, and the merged song holds together")
+{
+    SUBCASE ("Different notes: one moved here through the clip, another's velocity set there through its alias")
+    {
+        AliasSides sides;
+        phazite::moveNote (*sides.ours, { sides.clip, sides.n }, at (1.0), 38);
+        phazite::setNoteVelocities (*sides.theirs, { { sides.alias, sides.m } }, 50);
+
+        const auto merged = sides.mergeIntoOurs();
+        CHECK (merged.clashes.empty());
+        CHECK (sides.holdTheSameNotes());
+        CHECK (sides.noteIn (sides.alias, sides.n).value().pitch == 38);
+        CHECK (sides.noteIn (sides.clip, sides.m).value().velocity == 50);
+        checkSong (*sides.ours);
+    }
+
+    SUBCASE ("The same note's different values: its pitch here, its velocity there")
+    {
+        AliasSides sides;
+        phazite::transposeNotes (*sides.ours, { { sides.clip, sides.n } }, 2);
+        phazite::setNoteVelocities (*sides.theirs, { { sides.alias, sides.n } }, 64);
+
+        const auto merged = sides.mergeIntoOurs();
+        CHECK (merged.clashes.empty());
+        CHECK (sides.holdTheSameNotes());
+        CHECK (sides.noteIn (sides.alias, sides.n).value().pitch == 38);
+        CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 64);
+        checkSong (*sides.ours);
+    }
+
+    SUBCASE ("The same value changed differently on both sides: a clash, reported once, this side's value kept in both clips")
+    {
+        AliasSides sides;
+        phazite::transposeNotes (*sides.ours, { { sides.clip, sides.n } }, 2);
+        phazite::transposeNotes (*sides.theirs, { { sides.alias, sides.n } }, 5);
+
+        const auto merged = sides.mergeIntoOurs();
+        REQUIRE (merged.clashes.size() == 1); // for the group's keeper, X, alone
+        CHECK (merged.clashes[0].property == schema::notePitch);
+        CHECK (merged.clashes[0].path.contains ("CLIP:" + juce::String ((juce::int64) sides.clip.getRaw())));
+        CHECK ((int) merged.clashes[0].theirs == 41);
+        CHECK (sides.holdTheSameNotes());
+        CHECK (sides.noteIn (sides.clip, sides.n).value().pitch == 38);
+        CHECK (sides.noteIn (sides.alias, sides.n).value().pitch == 38);
+        checkSong (*sides.ours);
+    }
+
+    SUBCASE ("A note added here through the alias, another deleted there through the clip")
+    {
+        AliasSides sides;
+        const auto added = phazite::addNote (*sides.ours, sides.alias, 43, at (12.0), lasting (1.0), 90);
+        REQUIRE (added.isValid());
+        phazite::deleteNotes (*sides.theirs, { { sides.clip, sides.m } });
+
+        const auto merged = sides.mergeIntoOurs();
+        CHECK (merged.clashes.empty());
+        CHECK (sides.holdTheSameNotes());
+        CHECK (sides.noteIn (sides.clip, added.note).has_value());
+        CHECK_FALSE (sides.noteIn (sides.alias, sides.m).has_value());
+        CHECK (phazite::getClipNotes (*sides.ours, sides.alias).size() == 2);
+        checkSong (*sides.ours);
+    }
+
+    SUBCASE ("The alias made unique on one side, a note's velocity set through the clip on the other: both clips their own, "
+             "each with the note as set")
+    {
+        for (const auto uniqueHere : { true, false })
+        {
+            INFO ((uniqueHere ? "made unique here" : "made unique there"));
+            AliasSides sides;
+            phazite::makeClipsUnique (uniqueHere ? *sides.ours : *sides.theirs, { sides.alias });
+            phazite::setNoteVelocities (uniqueHere ? *sides.theirs : *sides.ours, { { sides.clip, sides.n } }, 70);
+
+            const auto merged = sides.mergeIntoOurs();
+            CHECK (merged.clashes.empty());
+            CHECK_FALSE (phazite::findClipState (*sides.ours, sides.clip).hasProperty (schema::clipLink));
+            CHECK_FALSE (phazite::findClipState (*sides.ours, sides.alias).hasProperty (schema::clipLink));
+            CHECK (sides.noteIn (sides.clip, sides.n).value().velocity == 70);
+            CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 70); // the change made to it, while it was an alias
+            checkSong (*sides.ours);
+        }
+    }
+}
+
+TEST_CASE ("An alias added on one side of a clip whose notes the other side changed holds the clip's notes as merged")
+{
+    // Schema.h, clipLink: "The clips of a group hold the same notes, with the same IDs". One side adds an alias Z of X on the
+    // Bass, from beat 16; the other moves n, through X or through Y.
+    for (const auto addedHere : { false, true })
+    {
+        for (const auto throughAlias : { false, true })
+        {
+            INFO ((addedHere ? "added here" : "added there") << (throughAlias ? ", moved through Y" : ", moved through X"));
+            AliasSides sides;
+            auto& adding = addedHere ? *sides.ours : *sides.theirs;
+            auto& moving = addedHere ? *sides.theirs : *sides.ours;
+            const auto copies = phazite::copyClips (adding, { sides.clip }, true);
+            REQUIRE (copies.size() == 1);
+            phazite::moveClip (adding, copies.front(), at (16.0), sides.tracks[0]);
+            phazite::moveNote (moving, { throughAlias ? sides.alias : sides.clip, sides.n }, at (throughAlias ? 9.0 : 1.0), 38);
+
+            const auto merged = sides.mergeIntoOurs();
+            CHECK (merged.clashes.empty());
+            const auto groups = sides.getGroups();
+            REQUIRE (groups.size() == 1); // X, Y and Z in one group
+            REQUIRE (groups.begin()->second.size() == 3);
+
+            for (const auto id : groups.begin()->second)
+                CHECK (sides.noteIn (id, sides.n).value().pitch == 38);
+
+            sides.checkGroupsHoldTogether();
+        }
+    }
+}
+
+TEST_CASE ("An alias deleted on one side and changed on the other comes back into a group that holds together")
+{
+    // Deleting Y unlinks X, the last of its group (Clips.h); Y changed there comes back (taken away here, changed there: it
+    // stays), alone in its group, which it leaves: a clip of its own, with its notes as changed.
+    for (const auto deletedHere : { true, false })
+    {
+        INFO ((deletedHere ? "deleted here" : "deleted there"));
+        AliasSides sides;
+        phazite::deleteClips (deletedHere ? *sides.ours : *sides.theirs, { sides.alias }, false);
+        REQUIRE_FALSE (phazite::findClipState (deletedHere ? *sides.ours : *sides.theirs, sides.clip).hasProperty (schema::clipLink));
+        phazite::setNoteVelocities (deletedHere ? *sides.theirs : *sides.ours, { { sides.alias, sides.n } }, 70);
+
+        const auto merged = sides.mergeIntoOurs();
+        CHECK (merged.clashes.empty());
+        REQUIRE (phazite::findClipState (*sides.ours, sides.alias).isValid()); // kept: changed on one side
+        CHECK_FALSE (phazite::findClipState (*sides.ours, sides.alias).hasProperty (schema::clipLink));
+        CHECK_FALSE (phazite::findClipState (*sides.ours, sides.clip).hasProperty (schema::clipLink));
+        CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 70);
+        CHECK (sides.noteIn (sides.clip, sides.n).value().velocity == 70); // changed while it was Y's alias
+        sides.checkGroupsHoldTogether();
+    }
+}
+
+TEST_CASE ("An alias added on one side and the original clip deleted on the other leave clips that hold together")
+{
+    // One side adds Z, an alias of X on the Bass from beat 16, and sets n's velocity through it (X and Y take it); the other
+    // deletes X (Y, the last of its group, loses its link). X comes back, changed there; X and Z make the group, Y holds the
+    // same notes as a clip of its own.
+    for (const auto addedHere : { true, false })
+    {
+        INFO ((addedHere ? "added here" : "added there"));
+        AliasSides sides;
+        auto& adding = addedHere ? *sides.ours : *sides.theirs;
+        auto& deleting = addedHere ? *sides.theirs : *sides.ours;
+        const auto copies = phazite::copyClips (adding, { sides.clip }, true);
+        REQUIRE (copies.size() == 1);
+        phazite::moveClip (adding, copies.front(), at (16.0), sides.tracks[0]);
+        phazite::setNoteVelocities (adding, { { copies.front(), sides.n } }, 70);
+        phazite::deleteClips (deleting, { sides.clip }, false);
+
+        const auto merged = sides.mergeIntoOurs();
+        CHECK (merged.clashes.empty());
+        CHECK_FALSE (phazite::findClipState (*sides.ours, sides.alias).hasProperty (schema::clipLink));
+        CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 70);
+
+        for (const auto& [link, clips] : sides.getGroups())
+            for (const auto id : clips)
+                CHECK (describeClipNotes (*sides.ours, id) == describeClipNotes (*sides.ours, sides.alias));
+
+        sides.checkGroupsHoldTogether();
+    }
+}
+
+TEST_CASE ("A clip made unique and changed on one side while the other changes its group: the clip its own with both changes, "
+           "the group holding together")
+{
+    // X, Y and W in one group. One side makes Y unique and sets n's velocity in it; the other transposes m through W, which X,
+    // Y and W all took there.
+    for (const auto uniqueHere : { true, false })
+    {
+        INFO ((uniqueHere ? "made unique here" : "made unique there"));
+        AliasSides sides;
+        const auto third = sides.addThirdToBase();
+        auto& unique = uniqueHere ? *sides.ours : *sides.theirs;
+        auto& group = uniqueHere ? *sides.theirs : *sides.ours;
+        phazite::makeClipsUnique (unique, { sides.alias });
+        REQUIRE_FALSE (phazite::findClipState (unique, sides.alias).hasProperty (schema::clipLink));
+        REQUIRE (phazite::findClipState (unique, sides.clip).hasProperty (schema::clipLink)); // X and W still a group
+        phazite::setNoteVelocities (unique, { { sides.alias, sides.n } }, 30);
+        phazite::transposeNotes (group, { { third, sides.m } }, 3);
+
+        const auto merged = sides.mergeIntoOurs();
+        CHECK (merged.clashes.empty());
+        CHECK_FALSE (phazite::findClipState (*sides.ours, sides.alias).hasProperty (schema::clipLink));
+        CHECK (phazite::findClipState (*sides.ours, sides.clip).hasProperty (schema::clipLink));
+        CHECK (describeClipNotes (*sides.ours, sides.clip) == describeClipNotes (*sides.ours, third));
+        CHECK (sides.noteIn (sides.clip, sides.m).value().pitch == 43);
+        CHECK (sides.noteIn (sides.clip, sides.n).value().velocity == 100);
+        CHECK (sides.noteIn (sides.alias, sides.m).value().pitch == 43); // the change made to it, while it was an alias
+        CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 30);
+        sides.checkGroupsHoldTogether();
+    }
+}
+
+TEST_CASE ("A group both sides added a clip to holds together, each side's changes made through its own new clip in every one")
+{
+    // This side adds Z1, an alias of X on the Bass from beat 16, and moves m through it; the other adds Z2, an alias of Y on the
+    // Drums from beat 24 (under the same new ID: both count on from the same place, so the merge gives it another), and sets
+    // n's velocity through it.
+    AliasSides sides;
+    const auto ourCopies = phazite::copyClips (*sides.ours, { sides.clip }, true);
+    const auto theirCopies = phazite::copyClips (*sides.theirs, { sides.alias }, true);
+    REQUIRE (ourCopies.size() == 1);
+    REQUIRE (theirCopies.size() == 1);
+    REQUIRE (ourCopies.front() == theirCopies.front());
+    phazite::moveClip (*sides.ours, ourCopies.front(), at (16.0), sides.tracks[0]);
+    phazite::moveClip (*sides.theirs, theirCopies.front(), at (24.0), sides.tracks[1]);
+    phazite::moveNote (*sides.ours, { ourCopies.front(), sides.m }, at (20.0), 45);
+    phazite::setNoteVelocities (*sides.theirs, { { theirCopies.front(), sides.n } }, 55);
+
+    const auto merged = sides.mergeIntoOurs();
+    CHECK (merged.clashes.empty());
+    const auto groups = sides.getGroups();
+    REQUIRE (groups.size() == 1);
+    REQUIRE (groups.begin()->second.size() == 4); // X, Y, Z1 and Z2
+
+    for (const auto id : groups.begin()->second)
+    {
+        CHECK (sides.noteIn (id, sides.m).value().pitch == 45);
+        CHECK (sides.noteIn (id, sides.n).value().velocity == 55);
+    }
+
+    sides.checkGroupsHoldTogether();
+}
+
+TEST_CASE ("Notes both sides added to a group under one ID: the other side's given a new ID, the same in every clip of the "
+           "group, as its record says")
+{
+    // Both sides add a note through a different clip of the group; both count on from the same place, so the notes share an
+    // ID, and the merge gives the other side's a new one, recorded by the group.
+    AliasSides sides;
+    const auto ours = phazite::addNote (*sides.ours, sides.clip, 50, at (5.0), lasting (1.0), 90);
+    const auto theirs = phazite::addNote (*sides.theirs, sides.alias, 52, at (13.0), lasting (1.0), 80);
+    REQUIRE (ours.note == theirs.note);
+
+    const auto merged = sides.mergeIntoOurs();
+    CHECK (merged.clashes.empty());
+    const auto link = phazite::findClipState (*sides.ours, sides.clip)[schema::clipLink].toString();
+    std::optional<phazite::RenumberedID> given;
+
+    for (const auto& id : merged.renumbered)
+        if (id.clip.isNotEmpty())
+            given = id;
+
+    REQUIRE (given.has_value());
+    CHECK (given->clip == "link " + link);
+    CHECK (given->from == theirs.note.getRaw());
+
+    for (const auto id : { sides.clip, sides.alias })
+    {
+        CHECK (sides.noteIn (id, ours.note).value().pitch == 50);
+        CHECK (sides.noteIn (id, phazite::NoteID::fromRaw (given->to)).value().pitch == 52);
+    }
+
+    sides.checkGroupsHoldTogether();
+}
+
+namespace
+{
+// What a merge reported, for a failure's message: each clash's path and property, and each of its notes.
+juce::String describeMerge (const phazite::MergeResult& merged)
+{
+    juce::StringArray lines;
+
+    for (const auto& clash : merged.clashes)
+        lines.add ("clash " + clash.path.joinIntoString ("/") + " " + clash.property.toString());
+
+    lines.addArray (merged.notes);
+    return lines.joinIntoString ("; ");
+}
+} // namespace
+
+TEST_CASE ("A clip copied as an alias on one side and its notes changed on the other: the alias and the clip both hold the change")
+{
+    // X has no link where the lines part. One side copies it as an alias Z, on the Bass from beat 16 (X and Z now a group,
+    // which the parting didn't hold: the group's keeper is X, the first clip both sides hold); the other moves X's note and
+    // sets its velocity.
+    for (const auto aliasedHere : { true, false })
+    {
+        INFO ((aliasedHere ? "aliased here, changed there" : "aliased there, changed here"));
+        Sides sides;
+        auto& aliasing = aliasedHere ? *sides.ours : *sides.theirs;
+        auto& changing = aliasedHere ? *sides.theirs : *sides.ours;
+        const auto note = phazite::getClipNotes (*sides.base, sides.clip).front().id;
+        const auto copies = phazite::copyClips (aliasing, { sides.clip }, true);
+        REQUIRE (copies.size() == 1);
+        const auto z = copies.front();
+        phazite::moveClip (aliasing, z, at (16.0), sides.tracks[0]);
+        phazite::moveNote (changing, { sides.clip, note }, at (1.0), 38);
+        phazite::setNoteVelocities (changing, { { sides.clip, note } }, 45);
+
+        const auto merged = sides.mergeIntoOurs();
+        INFO (describeMerge (merged));
+        CHECK (merged.clashes.empty());
+        const auto link = phazite::findClipState (*sides.ours, sides.clip)[schema::clipLink].toString();
+        CHECK (link.isNotEmpty());
+        CHECK (phazite::findClipState (*sides.ours, z)[schema::clipLink].toString() == link);
+
+        for (const auto id : { sides.clip, z })
+        {
+            INFO ("clip " << id.getRaw());
+            const auto held = phazite::getNoteData (*sides.ours, phazite::NoteRef { id, note });
+            REQUIRE (held.has_value());
+            CHECK (held->pitch == 38);
+            CHECK (held->velocity == 45);
+        }
+
+        CHECK (describeClipNotes (*sides.ours, sides.clip) == describeClipNotes (*sides.ours, z));
+        checkSong (*sides.ours);
+    }
+}
+
+TEST_CASE ("Every clip of a group deleted on one side and the group changed through one of them on the other: the group stays, "
+           "changed, and holds together")
+{
+    // Taken away on one side, changed on the other: it stays (X changed with Y, its alias). No clip of the group is one both
+    // sides hold, so the keeper is the group's first clip in the merged song's order, X.
+    for (const auto deletedHere : { true, false })
+    {
+        INFO ((deletedHere ? "deleted here, changed there" : "deleted there, changed here"));
+        AliasSides sides;
+        phazite::deleteClips (deletedHere ? *sides.ours : *sides.theirs, { sides.clip, sides.alias }, false);
+        phazite::setNoteVelocities (deletedHere ? *sides.theirs : *sides.ours, { { sides.alias, sides.n } }, 70);
+
+        const auto merged = sides.mergeIntoOurs();
+        INFO (describeMerge (merged));
+        CHECK (merged.clashes.empty());
+        REQUIRE (phazite::findClipState (*sides.ours, sides.clip).isValid());
+        REQUIRE (phazite::findClipState (*sides.ours, sides.alias).isValid());
+        const auto link = phazite::findClipState (*sides.ours, sides.clip)[schema::clipLink].toString();
+        CHECK (link.isNotEmpty());
+        CHECK (phazite::findClipState (*sides.ours, sides.alias)[schema::clipLink].toString() == link);
+        CHECK (sides.holdTheSameNotes());
+        CHECK (sides.noteIn (sides.clip, sides.n).value().velocity == 70);
+        CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 70);
+        sides.checkGroupsHoldTogether();
+    }
+}
+
+TEST_CASE ("A clip both sides copied as the same alias: the copy is the group's keeper, and the group holds together")
+{
+    // X has no link where the lines part; both sides copy it as an alias to the same place, Z, under the same IDs (both count
+    // on from the same place): Z is the same on both sides and keeps its IDs, X's new link on the other side is given anew.
+    // The keeper is the first clip both sides hold in the merged group, Z (the parting held none of it).
+    Sides sides;
+    std::vector<phazite::ClipID> copies;
+
+    for (auto* side : { sides.ours.get(), sides.theirs.get() })
+    {
+        const auto copied = phazite::copyClips (*side, { sides.clip }, true);
+        REQUIRE (copied.size() == 1);
+        phazite::moveClip (*side, copied.front(), at (16.0), sides.tracks[0]);
+        copies.push_back (copied.front());
+    }
+
+    REQUIRE (copies[0] == copies[1]);
+    phazite::setTrackName (*sides.theirs, sides.tracks[1], "Beat"); // a change outside the group
+
+    const auto merged = sides.mergeIntoOurs();
+    INFO (describeMerge (merged));
+
+    // X's link, new on both sides, is a clash (the other side's given anew), this side's kept: X is in Z's group.
+    REQUIRE (merged.clashes.size() == 1);
+    CHECK (merged.clashes[0].property == schema::clipLink);
+    CHECK (merged.clashes[0].path[merged.clashes[0].path.size() - 1] == "CLIP:" + juce::String ((juce::int64) sides.clip.getRaw()));
+    const auto link = phazite::findClipState (*sides.ours, copies[0])[schema::clipLink].toString();
+    CHECK (link.isNotEmpty());
+    CHECK (phazite::findClipState (*sides.ours, sides.clip)[schema::clipLink].toString() == link);
+    CHECK (describeClipNotes (*sides.ours, sides.clip) == describeClipNotes (*sides.ours, copies[0]));
+    checkSong (*sides.ours);
 }

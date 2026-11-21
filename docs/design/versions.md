@@ -219,6 +219,12 @@ removals of the song's, nor taken out by the next version.
   and an addition: it goes where that side put it, with the other side's changes, and stays where this branch put
   it if both moved it. Moved on one side and deleted on the other, it stays where it was moved, and a note says so,
   as for any change against a removal.
+- **Aliases hold together.** The clips of an alias group hold the same notes, so a merge treats a group's notes as one
+  thing: those of the first clip of the group that the newest version both lines have and both lines hold in that group,
+  merged three ways, each line's edits in, whichever clip they were made through. Every other clip of the group takes
+  them (an alias one line added gets what the other line changed), a conflict in them is listed once, and the value chosen
+  reaches every clip of the group. A group the merge leaves with one clip (its other clips deleted on one line) loses its
+  link, as deleting a clip unlinks the last one of its group.
 - **What names the gone goes.** A merge, as every restore and discard, leaves out what names something the song
   hasn't (a send to a return this branch deleted, a modulation of a device gone), and lets go of a sidechain that
   the two lines' changes made into a loop (one side's sidechain, the other's send), as the edit that makes one does.

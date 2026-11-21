@@ -290,6 +290,13 @@ and there are several, the newest, then the greater id). For each element by its
 - added on one side: added; taken away on one side and unchanged on the other: taken away; taken away on one side and
   changed on the other: kept.
 
+Then each alias group of the merged song (the clips with one `link`) holds together: its keeper is its first clip, in the
+song's order, that the parting and both sides hold with that `link`; failing that, the first both sides hold with it; the
+first both sides hold at all; or its first. Every other clip of the group takes the keeper's `NOTE` and `CONTROL` elements,
+copies in their order, and the conflicts found in those clips' notes are dropped, so that a note's conflict is listed (and
+counted in `chosen`) once, in the keeper; a value chosen for it is set in every clip of the group. A group left with one
+clip loses its `link`.
+
 **IDs given anew.** What the other line added gets a new ID where this side has something else with that ID, and what
 names it is changed to match; the merge's version records each (`RENUMBERED`). Before a later merge of the same line,
 the other side's song and where they parted are translated through the records of this line's merge versions since the

@@ -10,8 +10,11 @@
 // taken away goes without the tracks in it, lines of their own. So no item is in the merged song twice. What
 // the other side added keeps its IDs where this side has nothing with them, and gets new ones where this side has
 // something else with them (giveNewIDs()'s lists: holdsID(), namesID()), its notes in clips both have too: no ID collides.
-// Curves, the chord lane and a plug-in's state merge whole; view state and how the song plays are always this side's. Plain
-// functions of trees, for any thread, but for the IDs.
+// Curves, the chord lane and a plug-in's state merge whole; view state and how the song plays are always this side's. An
+// alias group's notes are one thing (Schema.h: clipLink): every clip of a merged group takes those of its keeper, the first
+// clip that the parting and both sides hold in that group (merged three ways, each side's edits in), a clash in them is
+// reported once, for the keeper, and a group left with one clip loses its link. Plain functions of trees, for any thread, but
+// for the IDs.
 #pragma once
 
 #include "SongDiff.h"
@@ -99,4 +102,9 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
 
 // The element a clash's path names in a song, invalid if it has none.
 juce::ValueTree findByPath (const juce::ValueTree& song, const juce::StringArray& path);
+
+// Gives a clip (to) another's notes and controllers' values (from's, its alias group's keeper), in the same order and with
+// the same IDs, where its own were: an alias group's clips hold the same (Schema.h: clipLink). Only what differs is written,
+// so that a clash chosen in one clip of a group reaches the others as one change each.
+void giveClipEvents (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager*);
 } // namespace phazite

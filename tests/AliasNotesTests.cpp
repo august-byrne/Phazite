@@ -5,14 +5,19 @@
 // (not once for each member), every member the same after it, its Undo and its Redo; a note named through two members in
 // one call edited once, whichever is named first; and notes pasted, duplicated and replaced in a member. All through the
 // model's functions and commands (and the piano roll's Quantize, on an EditorScreens.h screen), by IDs and values, so that
-// these hold however the song keeps its notes.
+// these hold however the song keeps its notes. And clips of a group across tracks, files and time: a track duplicated, the
+// song saved and opened again, time inserted, removed, moved and copied, each group holding together after (SongCheck.h).
 #include "EditorScreens.h"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UndoCheck.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -22,6 +27,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1201,4 +1207,209 @@ TEST_CASE ("Notes pasted and duplicated into a clip of a group reach every clip 
 
     check.walkBackAndForth();
     CHECK (haveTheSameNotes (song, a.members));
+}
+
+//==============================================================================
+// Clips of a group across tracks, files and time.
+
+namespace
+{
+// For every clip of the song in an alias group that holds notes that play, its first such note transposed a semitone through
+// it, each one undo step (UndoCheck); after each, every group holds the same notes (SongCheck.h's alias rule): an edit through
+// any clip of a group reaches each.
+void editThroughEachLinkedClip (phazite::Song& song, phazite::test::UndoCheck& check)
+{
+    for (const auto& clipState : phazite::getClipStates (song))
+    {
+        if (! clipState.hasProperty (phazite::schema::clipLink))
+            continue;
+
+        const auto clip = phazite::getClipID (clipState);
+        const auto played = phazite::getClipNotesPlayed (song, clip);
+
+        if (played.empty())
+            continue;
+
+        INFO ("through clip " << clip.getRaw());
+        check.check ("Transpose Note",
+                     [&]
+                     {
+                         const phazite::UndoStep step (song, "Transpose Note");
+                         phazite::transposeNotes (song, { played.front().getRef() }, 1);
+                     });
+        phazite::test::checkSong (song);
+    }
+}
+} // namespace
+
+TEST_CASE ("A duplicated track's clips of an alias group join the group, its lone clip's copy is a clip of its own, and the group "
+           "goes on without the original track, saved and opened again")
+{
+    // Tracks.h, duplicateTracks(): the copy holds "its clips' notes as they are, in their alias groups" (Tracks.cpp): today the
+    // copies of the first clip and the snippet join their group, as copies made as aliases do.
+    Aliased a;
+    auto& song = a.getSong();
+    const auto lone = a.song.addMidiClip (a.song.firstTrack, 24.0, 4.0);
+    a.song.addNote (lone, 50, 24.0, 1.0);
+    song.getUndoManager().clearUndoHistory();
+    auto check = std::make_unique<phazite::test::UndoCheck> (a.song.context);
+
+    std::vector<phazite::TrackID> copies;
+    check->check ("Duplicate Track",
+                  [&]
+                  {
+                      const phazite::UndoStep step (song, "Duplicate Track");
+                      copies = phazite::duplicateTracks (song, { a.song.firstTrack }, nullptr);
+                  });
+    REQUIRE (copies.size() == 1);
+    phazite::test::checkSong (song);
+
+    // The copies by where they start: of the first clip at 0, of the snippet at 17, of the lone clip at 24.
+    ClipID copyOfClip, copyOfSnippet, copyOfLone;
+
+    for (const auto copy : phazite::getClips (song, copies.front()))
+    {
+        const auto start = phazite::getClipRange (song, copy).getStart().inBeats();
+        (start < 1.0 ? copyOfClip : start < 20.0 ? copyOfSnippet : copyOfLone) = copy;
+    }
+
+    REQUIRE (copyOfClip.isValid());
+    REQUIRE (copyOfSnippet.isValid());
+    REQUIRE (copyOfLone.isValid());
+
+    auto group = a.members;
+    group.push_back (copyOfClip);
+    group.push_back (copyOfSnippet);
+    CHECK (sorted (phazite::getLinkedClips (a.song.context, a.clip)) == sorted (group));
+    CHECK (phazite::getLinkedClips (a.song.context, copyOfLone) == std::vector { copyOfLone });
+    CHECK (describeNotes (song, copyOfLone) == describeNotes (song, lone)); // its notes' IDs kept
+    CHECK (haveTheSameNotes (song, group));
+
+    // An edit through a copy reaches every clip of the group.
+    a.members = group;
+    a.checkEdit (
+        *check, "Set Velocity", [&] { phazite::setNoteVelocities (song, { NoteRef { copyOfClip, a.e } }, 33); },
+        [&] { a.inEach (a.e, [] (const NoteData& note, double) { CHECK (note.velocity == 33); }); });
+
+    // The original track deleted: the copies and the clip on the other track are still one group.
+    check->check ("Delete Track",
+                  [&]
+                  {
+                      const phazite::UndoStep step (song, "Delete Track");
+                      phazite::deleteTracks (song, { a.song.firstTrack }, nullptr);
+                  });
+    const std::vector remaining { a.onOther, copyOfClip, copyOfSnippet };
+    CHECK (sorted (phazite::getLinkedClips (a.song.context, a.onOther)) == sorted (remaining));
+    phazite::test::checkSong (song);
+    editThroughEachLinkedClip (song, *check);
+    check->walkBackAndForth();
+    check.reset(); // before the song it follows goes
+
+    // Saved and opened again: one group still, which an edit goes on reaching.
+    const auto before = describeGroup (song, remaining);
+    a.song.reopen();
+    auto& opened = a.getSong();
+    CHECK (describeGroup (opened, remaining) == before);
+    CHECK (sorted (phazite::getLinkedClips (a.song.context, a.onOther)) == sorted (remaining));
+    phazite::test::checkSong (opened);
+    phazite::test::UndoCheck reopened (a.song.context);
+    editThroughEachLinkedClip (opened, reopened);
+    reopened.walkBackAndForth();
+}
+
+TEST_CASE ("A song with an alias group saved and opened again goes on as it was: an edit through one clip reaches all, with a new "
+           "ID, its Undo gives the song as it opened, and Undo with nothing to undo changes nothing")
+{
+    Aliased a;
+    const auto before = describeGroup (a.getSong(), a.members);
+    a.song.reopen();
+    auto& song = a.getSong();
+    CHECK (describeGroup (song, a.members) == before);
+    CHECK (sorted (phazite::getLinkedClips (a.song.context, a.clip)) == sorted (a.members));
+    phazite::test::checkSong (song);
+
+    REQUIRE_FALSE (song.getUndoManager().canUndo());
+    const auto opened = phazite::test::writeSong (song, phazite::test::SongPart::whole);
+    phazite::undo (song);
+    CHECK (phazite::test::writeSong (song, phazite::test::SongPart::whole) == opened);
+
+    // The song counts its IDs on from what it saved: a note added has an ID none of its items had, the same in every clip.
+    const auto saved = (juce::int64) song.getState()[phazite::schema::nextID];
+    phazite::test::UndoCheck check (a.song.context);
+    NoteRef added;
+    a.checkEdit (
+        check, "Add Note", [&] { added = phazite::addNote (song, a.onOther, 72, at (11.0), lasting (0.5), 70); },
+        [&]
+        {
+            CHECK (a.eachHolds (4));
+            CHECK ((juce::int64) added.note.getRaw() >= saved);
+            a.inEach (added.note,
+                      [] (const NoteData& note, double start)
+                      {
+                          CHECK (note.pitch == 72);
+                          CHECK (start == doctest::Approx (3.0));
+                      });
+        });
+
+    a.checkEdit (
+        check, "Move Note", [&] { phazite::moveNote (song, a.through (a.c), at (8.5), 61); },
+        [&]
+        {
+            a.inEach (a.c,
+                      [] (const NoteData& note, double start)
+                      {
+                          CHECK (note.pitch == 61);
+                          CHECK (start == doctest::Approx (0.5));
+                      });
+        });
+
+    check.walkBackAndForth();
+    phazite::test::checkSong (song);
+}
+
+TEST_CASE ("Time inserted, removed, moved and copied across the clips of an alias group leaves every group holding the same notes, "
+           "which an edit through any of its clips reaches")
+{
+    // Arrangement.h: what a time edit cuts, a split cuts, and the pieces of a clip of a group stay in it (Clips.h: splitClips());
+    // copyTime() with asAliases makes the copies aliases of the originals, and without, clips of their own. The first clip is
+    // from 0 to 4 on the first track, its alias from 8 to 12 on the other, and the snippet from 17 to 20 on the first.
+    struct TimeEdit
+    {
+        const char* name;
+        std::function<void (phazite::Song&)> make;
+        int groupGrowsBy; // the clips the group gains, or -1 for some
+    };
+
+    const std::vector<TimeEdit> timeEdits {
+        { "Insert Time", [] (phazite::Song& s) { phazite::insertTime (s, at (2.0), lasting (4.0)); }, -1 },
+        { "Remove Time", [] (phazite::Song& s) { phazite::removeTime (s, { at (1.0), at (3.0) }); }, -1 },
+        { "Move Time", [] (phazite::Song& s) { phazite::moveTime (s, { at (2.0), at (10.0) }, at (24.0)); }, -1 },
+        { "Copy Time", [] (phazite::Song& s) { phazite::copyTime (s, { at (0.0), at (12.0) }, at (24.0), false); }, 0 },
+        { "Copy Time as Aliases", [] (phazite::Song& s) { phazite::copyTime (s, { at (0.0), at (12.0) }, at (24.0), true); }, 2 },
+    };
+
+    for (const auto& timeEdit : timeEdits)
+    {
+        INFO (timeEdit.name);
+        Aliased a;
+        auto& song = a.getSong();
+        phazite::test::UndoCheck check (a.song.context);
+        check.check (timeEdit.name,
+                     [&]
+                     {
+                         const phazite::UndoStep step (song, timeEdit.name);
+                         timeEdit.make (song);
+                     });
+        phazite::test::checkSong (song);
+
+        const auto group = phazite::getLinkedClips (a.song.context, a.onOther);
+
+        if (timeEdit.groupGrowsBy >= 0)
+            CHECK (group.size() == a.members.size() + (size_t) timeEdit.groupGrowsBy);
+        else
+            CHECK (group.size() >= a.members.size());
+
+        editThroughEachLinkedClip (song, check);
+        check.walkBackAndForth();
+    }
 }

@@ -1385,6 +1385,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MessageQueueTests.cpp
         tests/MessageThreadWorkBenchmarks.cpp
         tests/MetronomeTests.cpp
+        tests/ModelFuzzTests.cpp
         tests/ModulationModelTests.cpp
         tests/ModulationUiTests.cpp
         tests/MixerModelTests.cpp
