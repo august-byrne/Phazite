@@ -1305,3 +1305,74 @@ TEST_CASE ("No command says commit or checkout where the user reads it, and the 
                                                                                                                       : "commit"));
     }
 }
+
+TEST_CASE ("The Versions view reads nothing while it is hidden and the versions change, and shows them as it shows again")
+{
+    // The threading audit, 2026-11-20: it read the whole history (every version, every automatic save, the changes, the room)
+    // and made its rows again at each change of the versions, a few times a second while the song was edited, though it is
+    // usually hidden. The Versions icon's badge reads the model itself.
+    Screen screen;
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    auto& view = screen.getVersionsView();
+    screen.saveVersion ("First");
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 0; }));
+
+    // Another view in the left panel: the edits change the versions, and the badge counts the change, but the view reads
+    // nothing.
+    REQUIRE (screen.registry.invoke ("view.browser"));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (view.isShowing());
+
+    for (int i = 0; i < 100; ++i)
+    {
+        screen.setFirstTrackVolume (0.3f + 0.005f * (float) i);
+        phazite::test::dispatchPendingMessages();
+    }
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getBar().getVersionsBadge() == 1; }));
+    screen.waitForVersions();
+    CHECK (view.getNumChanges() == 0);
+
+    // Shown again, it shows the change, as it would have.
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (view.isShowing());
+    CHECK (view.getNumChanges() == 1);
+    CHECK (view.describeChange (0).endsWith (": volume"));
+    CHECK (view.getChangesSection().getDescription() == "1");
+}
+
+TEST_CASE ("Show Automatic Saves switched off while the Versions view is hidden leaves no automatic save selected")
+{
+    // The review of the threading audit's fix, 2026-11-20: the view took the selection from an automatic save as it read the
+    // model, which a hidden view no longer does, so Restore This Automatic Save stayed there for a row nobody saw.
+    Screen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    auto& view = screen.getVersionsView();
+    screen.saveVersion ("First");
+    screen.setFirstTrackVolume (0.4f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
+    REQUIRE (screen.registry.invoke ("version.discardAll"));
+    screen.waitForVersions();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumSnapshots() == 1; }));
+
+    auto& list = view.getHistoryList();
+    phazite::test::Mouse mouse (list);
+    mouse.click (list.getRowPosition (view.getSnapshotRow (0), true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::getSelectedSnapshot (context) != 0);
+    const auto* restore = screen.registry.find ("version.restoreSnapshot");
+    REQUIRE (phazite::CommandRegistry::isEnabled (*restore));
+
+    // The browser in the left panel, and the automatic saves switched off from the command search.
+    REQUIRE (screen.registry.invoke ("view.browser"));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (view.isShowing());
+    REQUIRE (screen.registry.invoke ("version.showAutomatic"));
+    CHECK (phazite::getSelectedSnapshot (context) == 0);
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*restore));
+    REQUIRE (screen.registry.invoke ("version.showAutomatic")); // on again, as the settings had it
+}

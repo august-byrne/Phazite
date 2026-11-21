@@ -222,6 +222,11 @@ public:
     // a whole pixel while the view scrolls under it (for tests).
     double getPlayheadX() const noexcept { return playheadX; }
 
+    // How many times it asked for the content's range to show it in its scroll bar (getContentRange()), and a tick of its
+    // timer, which notices what changed elsewhere (for tests).
+    int getContentAsks() const noexcept { return contentAsks; }
+    void tickNow() { timerCallback(); }
+
     // Scrolling continuously, how far the song has moved past the view's whole step (getViewStep(), a pixel at 100 %), from 0
     // up to the step, by which the editor's parts that draw the time line (addTimelinePart()) are moved left inside their
     // windows, so that the song glides under the playhead rather than stepping a pixel at a time (docs/archive/performance-audit.md,
@@ -489,6 +494,8 @@ private:
     bool followPaused = false, playedWhenFollowed = false; // by a scroll while playing; and whether it played last time
     bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;
     double contentEnd = 0.0;            // in beats, as the scroll bar knows it
+    int contentSongVersion = -1;        // the song's version when it was asked (ProjectContext::getSongVersion())
+    int contentAsks = 0;                // getContentAsks()
     std::optional<BeatRange> shownLoop; // the loop the ruler shows (none while playback doesn't loop), to repaint it on changes
     bool shownPunch = false;            // whether it shows the loop red, Record punching into it (RecordingModel.h)
     juce::Time lastAutoScrollTime;      // the drag's before (juce::MouseEvent::eventTime)

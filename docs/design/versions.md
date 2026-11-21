@@ -52,6 +52,8 @@ From the top: the view's title with its menu (Version, Changes, Branch, the DAWp
 Audio, Verify History, Recover Lost Versions, Reset Branch to Last Readable Version, Show Automatic Saves); the branch button; the name field; the **Save Version** button with its
 menu; then the sections **Changes**, **History** and **Undo History**, each folding under its heading: what changed, every
 version with the automatic saves between them, and this session's undo steps, folded at first. The layout is VS Code's Source Control view's; the words are a producer's.
+While another view shows in the left panel, or the panel is hidden, the view reads nothing, and reads the history as it
+shows again; the Versions icon's badge counts the changes from the model meanwhile.
 
 ### Saving a version
 

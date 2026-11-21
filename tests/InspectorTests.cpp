@@ -2,6 +2,7 @@
 // The inspector (src/ui/mixer/Inspector.h; roadmap step 2.5), driven as the user would: the properties of what is
 // selected (a track, clips, notes, automation points, a section), and the song's with nothing selected; changed from its
 // rows, each one undo step, several items at once.
+#include "AppScreen.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "model/arrangement/AudioClipModel.h"
@@ -28,6 +29,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace
 {
@@ -68,6 +70,29 @@ struct Screen
     phazite::ui::Inspector inspector { commands, context };
     phazite::test::TestWindow window { inspector, 300, 900 };
 };
+
+// Every component in a view, each held so as to tell whether it is still there.
+std::vector<juce::Component::SafePointer<juce::Component>> holdEverything (juce::Component& view)
+{
+    std::vector<juce::Component::SafePointer<juce::Component>> held;
+
+    for (auto* each : phazite::test::findAll<juce::Component> (view))
+        held.emplace_back (each);
+
+    return held;
+}
+
+// How many components in a view weren't there when they were held: made since (one made where another went counts too).
+int countMade (const std::vector<juce::Component::SafePointer<juce::Component>>& held, juce::Component& view)
+{
+    auto made = 0;
+
+    for (auto* each : phazite::test::findAll<juce::Component> (view))
+        if (std::none_of (held.begin(), held.end(), [each] (const auto& one) { return one.getComponent() == each; }))
+            ++made;
+
+    return made;
+}
 } // namespace
 
 TEST_CASE ("With nothing selected the inspector shows the song; a selected track shows its properties, which change it")
@@ -540,4 +565,117 @@ TEST_CASE ("Enter in a name field renames and gives the keys back to the window,
     CHECK (juce::Component::getCurrentlyFocusedComponent() == nullptr);
     CHECK (name->getHighlightedRegion().isEmpty());
     CHECK (phazite::getTrackRow (screen.context, screen.track (1))->name == juce::String ("x"));
+}
+
+TEST_CASE ("The inspector makes nothing while its panel is hidden, shows what is selected as it shows again, and a page takes more "
+           "of its kind")
+{
+    // The threading audit, 2026-11-20: it made a whole page anew at each change of what was selected (a rubber band's at
+    // each turn of the drag), with its panel closed too.
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    const auto track = phazite::getAllPlaylistTracks (context).back();
+    std::vector<phazite::ClipID> clips;
+
+    for (int i = 0; i < 10; ++i)
+    {
+        clips.push_back (phazite::addMidiClipAt (context, track, BeatPosition::fromBeats (4.0 * i)));
+        REQUIRE (clips.back().isValid());
+    }
+
+    auto* inspector = phazite::test::findAll<phazite::ui::Inspector> (screen.shell).getFirst();
+    REQUIRE (inspector != nullptr);
+    auto& selection = context.getSongSelection();
+
+    // Selected as a rubber band selects them, a clip more at each turn of the drag.
+    const auto selectFirst = [&] (size_t count)
+    {
+        selection.clear();
+
+        for (size_t i = 0; i < count; ++i)
+            selection.add (clips[i]);
+
+        phazite::test::dispatchPendingMessages();
+    };
+
+    const auto titled = [inspector] (const juce::String& text)
+    {
+        const auto titles = phazite::test::findAll<phazite::ui::ViewTitle> (*inspector);
+        return std::any_of (titles.begin(), titles.end(), [&text] (phazite::ui::ViewTitle* title) { return title->getName() == text; });
+    };
+
+    // Its panel hidden, a hundred turns of the drag make nothing in it.
+    if (! inspector->isShowing())
+        REQUIRE (screen.registry.invoke ("view.toggleInspector"));
+
+    selectFirst (1);
+    REQUIRE (inspector->getShown() == juce::String ("Clip"));
+    REQUIRE (screen.registry.invoke ("view.toggleInspector"));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (inspector->isShowing());
+    const auto before = holdEverything (*inspector);
+
+    for (int turn = 0; turn < 100; ++turn)
+        selectFirst ((size_t) (turn % 10) + 1);
+
+    CHECK (countMade (before, *inspector) == 0);
+
+    // Shown again, it shows the clips selected last, as it would have.
+    REQUIRE (screen.registry.invoke ("view.toggleInspector"));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (inspector->isShowing());
+    CHECK (inspector->getShown() == juce::String ("Clips"));
+    CHECK (titled ("10 clips"));
+
+    // While it shows, the page of clips takes other clips rather than being made anew (as notes' page takes other notes,
+    // and automation's other points of its parameter).
+    selectFirst (1);
+    REQUIRE (inspector->getShown() == juce::String ("Clip"));
+    const auto shown = holdEverything (*inspector);
+    selectFirst (3);
+    CHECK (inspector->getShown() == juce::String ("Clips"));
+    CHECK (titled ("3 clips"));
+    CHECK (countMade (shown, *inspector) == 0);
+}
+
+TEST_CASE ("While a field of the inspector's page has the keys, other items of its kind selected make a new page")
+{
+    // The review of the threading audit's fix, 2026-11-20: a page took the new selection while its name field had the keys,
+    // so the name typed for one clip, with Enter, would have renamed the clips selected after.
+    Screen screen;
+    auto& selection = screen.context.getSongSelection();
+    std::vector<phazite::ClipID> clips;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        clips.push_back (phazite::addMidiClipAt (screen.context, screen.track (0), BeatPosition::fromBeats (4.0 * i)));
+        REQUIRE (clips.back().isValid());
+    }
+
+    selection.selectOnly (clips[0]);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.inspector.getShown() == juce::String ("Clip"));
+    auto* name = dynamic_cast<juce::TextEditor*> (phazite::test::findComponentWithTitle (screen.inspector, "Name"));
+    REQUIRE (name != nullptr);
+    phazite::test::Mouse mouse (*name);
+    mouse.click (name->getLocalBounds().getCentre());
+    REQUIRE (name->hasKeyboardFocus (false));
+    const juce::Component::SafePointer<juce::Component> typedIn (name);
+
+    for (const auto clip : { clips[1], clips[2] })
+        selection.add (clip);
+
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.inspector.getShown() == juce::String ("Clips"));
+    CHECK (typedIn == nullptr); // made anew, the field with it
+
+    // Without the keys in it, the page of clips takes other clips.
+    const auto shown = holdEverything (screen.inspector);
+    selection.selectOnly (clips[1]);
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.inspector.getShown() == juce::String ("Clip"));
+    CHECK (countMade (shown, screen.inspector) == 0);
 }

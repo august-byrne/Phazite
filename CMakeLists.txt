@@ -823,6 +823,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/ScrollBarFade.h
     src/ui/components/SectionHeader.cpp
     src/ui/components/SectionHeader.h
+    src/ui/components/SightWatcher.h
     src/ui/components/ToolRow.cpp
     src/ui/components/ToolRow.h
     src/ui/components/TrackSwitch.cpp

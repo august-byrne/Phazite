@@ -19,6 +19,7 @@
 
 #include <functional>
 #include <limits>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -1159,6 +1160,7 @@ DevicesView::DevicesView (CommandBridge& bridge, ProjectContext& projectContext)
 
 DevicesView::~DevicesView()
 {
+    cancelPendingUpdate();
     context.getSongSelection().removeChangeListener (this);
     context.removeListener (this);
     bodyView.setViewedComponent (nullptr, false);
@@ -1312,9 +1314,19 @@ void DevicesView::showDevice (DeviceID id)
     if (const auto deviceChannel = getDeviceChannel (context, id))
         setChannel (deviceChannel);
 
-    // On its page, beside the column; and its slot in view in the column, or its container's.
+    // On its page, beside the column; and its slot in view in the column, or its container's (as it shows, while it can't be
+    // seen).
     showPage (getPageOf (id));
     setOpen (id, true);
+
+    if (stale)
+        slotToReveal = id;
+    else
+        revealSlot (id);
+}
+
+void DevicesView::revealSlot (DeviceID id)
+{
     auto* slot = findPanel (id);
 
     if (slot == nullptr)
@@ -1436,19 +1448,58 @@ void DevicesView::setChannel (std::optional<TrackID> newChannel)
     column->instrument = nullptr;
     column->effects = nullptr;
 
-    // The master's modulators are its track's.
+    // The master's modulators are its track's: their few chips made at once, which closes the editor of one of the channel
+    // before that shows over the window.
     column->modulators.setTrack (column->getModulatorTrack());
     showChannelName();
+    columnToTop = true;
+    slotToReveal = {};
     refresh();
-    columnView.setViewPosition (0, 0);
 }
 
 void DevicesView::refresh()
 {
+    if (! isInSight (*this))
+    {
+        stale = true;
+
+        // What shows a device that has gone goes at once, as it did while it showed.
+        if (body != nullptr
+            && (! getDeviceChannel (context, bodyDevice).has_value()
+                || (bodyContainer.isValid() && ! getDeviceChannel (context, bodyContainer).has_value())))
+        {
+            bodyView.setViewedComponent (nullptr, false);
+            body = nullptr;
+            bodyDevice = {};
+            bodyContainer = {};
+        }
+
+        return;
+    }
+
+    stale = false;
     column->refresh();
     showBody();
     resized();
     repaint();
+
+    if (std::exchange (columnToTop, false))
+        columnView.setViewPosition (0, 0);
+
+    if (const auto id = std::exchange (slotToReveal, {}); id.isValid())
+        revealSlot (id);
+}
+
+void DevicesView::showWhereStale()
+{
+    if (stale && isInSight (*this))
+        triggerAsyncUpdate();
+}
+
+void DevicesView::handleAsyncUpdate()
+{
+    if (stale && isInSight (*this))
+        refresh();
 }
 
 void DevicesView::showBody()

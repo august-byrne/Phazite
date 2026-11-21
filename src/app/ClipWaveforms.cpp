@@ -2,6 +2,7 @@
 #include "ClipWaveforms.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/base/BackgroundJobs.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AudioFiles.h"
 #include "model/project/ProjectContext.h"
@@ -11,9 +12,14 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -22,19 +28,112 @@ namespace phazite
 namespace
 {
     // The levels of every file a waveform has drawn, by the file and when it last changed, kept in memory while any waveform
-    // shows (the 200 most recently used), so that a clip that plays a file another has drawn draws at once. Loaded on a
-    // thread of its own.
+    // shows (the 200 most recently used), so that a clip that plays a file another has drawn draws without its file being
+    // opened again: in its first paint where the file's identity on the disk is known, else once its hash is worked out.
+    // Read on a thread of its own; and the files' hashes worked out and the files opened for the waveforms on threads of
+    // their own, never in a paint, where an open waited for the drive (a share, a synced folder).
     struct Levels
     {
         juce::AudioThumbnailCache cache { 200 };
 
-        // Its thread stopped first, however long the slice of a file it reads takes: JUCE's own stop, as the cache goes,
-        // ends a thread that hasn't stopped within 2 s by force, which can leave a lock it held held for ever.
-        // JUCE workaround W1 (docs/juce-workarounds.md).
+        // The hashes whose levels the waveforms put into the cache, which the openings ask (any thread): one of them is
+        // taken from the cache, the file not opened. The cache lets the oldest go, so a hash found here may miss there: it is
+        // forgotten, and the file opened.
+        struct Stored
+        {
+            std::mutex lock;
+            std::set<juce::int64> hashes;
+
+            bool contains (juce::int64 hash)
+            {
+                const std::scoped_lock held (lock);
+                return hashes.count (hash) > 0;
+            }
+        };
+
+        const std::shared_ptr<Stored> stored = std::make_shared<Stored>();
+
+        // The hash last worked out for a file, by the file and its identity on the disk as it was known
+        // (findKnownFileIdentity()), which a paint may ask: a file written again has another identity. Message thread.
+        std::map<juce::String, juce::int64> hashesByIdentity;
+
+        static juce::String getKey (const juce::File& file, const juce::String& identity)
+        {
+            return file.getFullPathName() + "\n" + identity;
+        }
+
+        void remember (juce::int64 hash, const juce::File& file, const juce::String& identity)
+        {
+            {
+                const std::scoped_lock held (stored->lock);
+                stored->hashes.insert (hash);
+            }
+
+            if (identity.isNotEmpty())
+                hashesByIdentity[getKey (file, identity)] = hash;
+        }
+
+        void forget (juce::int64 hash)
+        {
+            {
+                const std::scoped_lock held (stored->lock);
+                stored->hashes.erase (hash);
+            }
+
+            std::erase_if (hashesByIdentity, [hash] (const auto& entry) { return entry.second == hash; });
+        }
+
+        BackgroundJobs openings { "Phazite waveform files", 2, juce::Thread::Priority::normal };
+
+        // As the last waveform goes (the project closes): its thread stopped first, however long the slice of a file it reads
+        // takes, a read of 65,536 of a file's samples at most, through a reader already open: JUCE's own stop, as the cache
+        // goes, ends a thread that hasn't stopped within 2 s by force, which can leave a lock it held held for ever. Then
+        // the openings (its member, which goes after this) drop those that wait and wait for those that run, each the open of
+        // a file and the read of its header, however long the drive takes. JUCE workaround W1 (docs/juce-workarounds.md).
         ~Levels() { cache.getTimeSliceThread().stopThread (-1); }
     };
 
     constexpr int samplesPerLevel = 256; // how many of a file's samples each level the cache keeps sums up
+
+    // What the tests set to run before a file is opened (setBeforeWaveformFileOpens()).
+    std::mutex beforeOpenLock;
+    std::function<void (const juce::File&)> beforeOpen;
+
+    std::function<void (const juce::File&)> getBeforeOpen()
+    {
+        const std::scoped_lock held (beforeOpenLock);
+        return beforeOpen;
+    }
+
+    std::atomic<int> opens { 0 }, opensOnMessageThread { 0 }, readersAlive { 0 }; // countWaveformFiles()
+
+    // A file's reader, counted as it is made and as it goes: the format's own, read whole through JUCE's reader of a part of
+    // another.
+    class CountedReader final : public juce::AudioSubsectionReader
+    {
+    public:
+        explicit CountedReader (juce::AudioFormatReader* reader)
+            : juce::AudioSubsectionReader (reader, 0, reader->lengthInSamples, true)
+        {
+            ++readersAlive;
+        }
+
+        ~CountedReader() override { --readersAlive; }
+    };
+
+    // The one place a waveform opens a file: none if it isn't sound.
+    std::unique_ptr<juce::AudioFormatReader> openReader (const juce::File& file)
+    {
+        ++opens;
+
+        if (juce::MessageManager::existsAndIsCurrentThread())
+            ++opensOnMessageThread;
+
+        if (auto* reader = getAudioFormats().createReaderFor (file))
+            return std::make_unique<CountedReader> (reader);
+
+        return {};
+    }
 
     class Waveform : public ui::ClipWaveform,
                      private juce::ChangeListener,
@@ -52,6 +151,7 @@ namespace
         ~Waveform() override
         {
             removeFileIdentityListener (*this);
+            forgetOpening();
 
             if (thumbnail != nullptr)
                 thumbnail->removeChangeListener (this);
@@ -91,6 +191,30 @@ namespace
         juce::String shownIdentity; // and the file's identity on the disk as it was known then (empty if it wasn't)
         int levelsChanged = 0;      // how often the thumbnail's levels changed: more of them read, or another file's
 
+        // A file being opened for it in the background (open()): whether it still wants what the open makes, which the job
+        // reads; and the waveform to take it, on the message thread, until it goes or wants another file.
+        struct Opening
+        {
+            std::atomic<bool> wanted { true };
+            Waveform* waveform = nullptr;
+        };
+
+        // What an open made: the hash that JUCE's own source of a file gives it, which the cache keeps the levels by; whether
+        // the cache has them, so that the file wasn't opened; else the file's reader (none if it isn't there or isn't sound).
+        struct Opened
+        {
+            juce::int64 hash = 0;
+            bool cached = false;
+            std::unique_ptr<juce::AudioFormatReader> reader;
+        };
+
+        std::shared_ptr<Opening> opening; // the open it waits for, if any
+
+        // While the thumbnail reads the levels from a reader of the file: the hash they go into the cache by, and how many
+        // samples the file has.
+        std::optional<juce::int64> readingHash;
+        juce::int64 readingLength = 0;
+
         // A stretch of the file that plays straight, where it is drawn: the file's times at its left and its right (the later
         // one at its left while the clip plays backwards), and the clip's gain.
         struct Stretch
@@ -127,17 +251,44 @@ namespace
 
         Mask mask;
 
-        // More of the file has been read: what shows it shows it.
+        // More of the file has been read: what shows it shows it. Every level read, the reader goes (letGoOfReader()). JUCE's
+        // levels hold a level for each whole 256 samples, read in blocks of 256 levels: the thumbnail has all it will have
+        // once it has a level for each whole 256 of the file's samples.
         void changeListenerCallback (juce::ChangeBroadcaster*) override
         {
             ++levelsChanged;
+
+            if (hasEveryLevel())
+                letGoOfReader();
 
             if (loaded != nullptr)
                 loaded();
         }
 
+        // Whether the thumbnail, reading from a reader, has every level it will have.
+        bool hasEveryLevel() const
+        {
+            return readingHash.has_value() && thumbnail->getNumSamplesFinished() >= readingLength / samplesPerLevel * samplesPerLevel;
+        }
+
+        // A thumbnail given a reader keeps it until it is cleared (it owns it: juce::AudioThumbnail::setReader()), which kept
+        // the file open for as long as the waveform lived, one for each waveform, past the files a process may have open.
+        // Its levels, every one read, go into the cache (storeThumb(), which JUCE's own thread also does as it finishes),
+        // the thumbnail is cleared, which lets the reader go, and they come back from the cache, which is memory. The clear
+        // waits for a slice of the cache's thread under way for this thumbnail, which, every level being in, reads nothing.
+        // At a zoom finer than a level, JUCE draws from the levels once it has no reader, where it read the file's samples.
+        // JUCE workaround W59 (docs/juce-workarounds.md).
+        void letGoOfReader()
+        {
+            const auto hash = *std::exchange (readingHash, std::nullopt);
+            levels->cache.storeThumb (*thumbnail, hash);
+            thumbnail->clear();
+            levels->cache.loadThumb (*thumbnail, hash);
+            levels->remember (hash, shownFile, shownIdentity);
+        }
+
         // Its file was found written again in its place, by what asked the disk (the player's next plan): its picture let
-        // go, and painted again at once, which reads the file anew (showFileOf()).
+        // go, and painted again at once, which opens the file anew in the background (showFileOf()).
         void fileIdentityChanged (const juce::File& file) override
         {
             if (file != shownFile)
@@ -322,21 +473,141 @@ namespace
             const auto identity = findKnownFileIdentity (file);
 
             if (thumbnail != nullptr && file == shownFile && (identity.isEmpty() || identity == shownIdentity))
+            {
+                // The thumbnail tells of its last levels just before it counts them (setLevels(), then the count, in
+                // JUCE's readNextBlock()), so that message can come while one is still to count, and no other follows:
+                // asked again here, as it paints, so that the reader never stays for that.
+                if (hasEveryLevel())
+                    letGoOfReader();
+
                 return;
+            }
 
             shownFile = file;
             shownIdentity = identity;
             ++levelsChanged;
+            forgetOpening();
+            readingHash.reset();
 
             if (thumbnail == nullptr)
             {
                 thumbnail = std::make_unique<juce::AudioThumbnail> (samplesPerLevel, getAudioFormats(), levels->cache);
                 thumbnail->addChangeListener (this); // repaints as it loads
             }
+            else
+            {
+                thumbnail->clear(); // no other file's levels meanwhile, nor its reader
+            }
 
-            // The levels kept by the file and when it was written: by its path alone, the cache gave the levels of the file it
-            // replaced.
-            thumbnail->setSource (file.existsAsFile() ? new juce::FileInputSource (file, true) : nullptr);
+            // Levels read before for the file as it is known: from the cache at once, in this paint, from memory (a copy of a
+            // clip, the half of one split, a clip brought back by Undo).
+            if (identity.isNotEmpty())
+            {
+                if (const auto found = levels->hashesByIdentity.find (Levels::getKey (file, identity));
+                    found != levels->hashesByIdentity.end())
+                {
+                    if (levels->cache.loadThumb (*thumbnail, found->second))
+                        return;
+
+                    levels->forget (found->second);
+                }
+            }
+
+            open (file);
+        }
+
+        // Works out the file's hash in the background, and opens it there unless the cache has its levels, for the thumbnail
+        // to take on the message thread (take()): JUCE's thumbnail, given the file as a source, asks the disk when it was
+        // written, opens it and reads its header on the thread that gives it the source, which was a paint's.
+        void open (const juce::File& file)
+        {
+            forgetOpening();
+            opening = std::make_shared<Opening>();
+            opening->waveform = this;
+
+            levels->openings.add (
+                [file, wanted = opening, stored = levels->stored] (const BackgroundJobs::ShouldStop& shouldStop)
+                {
+                    if (shouldStop() || ! wanted->wanted)
+                        return;
+
+                    // The levels kept by the file and when it was written, as JUCE's source of a file keys them: by its path
+                    // alone, the cache gave the levels of the file it replaced. A file written again in its place has another
+                    // time, so new levels.
+                    const auto opened = std::make_shared<Opened>();
+
+                    if (file.existsAsFile())
+                    {
+                        opened->hash = juce::FileInputSource (file, true).hashCode();
+                        opened->cached = stored->contains (opened->hash);
+
+                        if (! opened->cached && ! shouldStop())
+                        {
+                            if (const auto before = getBeforeOpen())
+                                before (file);
+
+                            opened->reader = openReader (file);
+                        }
+                    }
+
+                    // A waveform that has gone, or wants another file, takes nothing: the file opened is let go here, on this
+                    // thread. If it goes after this, the message's end lets it go on the message thread, which closes it.
+                    if (! wanted->wanted)
+                        return;
+
+                    juce::MessageManager::callAsync (
+                        [wanted, opened]
+                        {
+                            if (wanted->waveform != nullptr)
+                                wanted->waveform->take (*opened);
+                        });
+                });
+        }
+
+        // The file's levels from the cache; or, opened, read from it on the cache's thread (or found in the cache at once by
+        // the thumbnail), the reader let go once they are in (changeListenerCallback()).
+        void take (Opened& opened)
+        {
+            forgetOpening();
+
+            if (opened.cached)
+            {
+                // Gone from the cache since (it keeps the most recently used): opened after all.
+                if (! levels->cache.loadThumb (*thumbnail, opened.hash))
+                {
+                    levels->forget (opened.hash);
+                    open (shownFile);
+                    return;
+                }
+
+                levels->remember (opened.hash, shownFile, shownIdentity);
+            }
+            else
+            {
+                if (opened.reader != nullptr)
+                {
+                    readingHash = opened.hash;
+                    readingLength = opened.reader->lengthInSamples;
+                }
+
+                thumbnail->setReader (opened.reader.release(), opened.hash);
+            }
+
+            ++levelsChanged;
+            mask = {};
+
+            if (loaded != nullptr)
+                loaded();
+        }
+        // What it waited for opened is no longer wanted.
+        void forgetOpening()
+        {
+            if (opening != nullptr)
+            {
+                opening->wanted = false;
+                opening->waveform = nullptr;
+                opening = nullptr;
+            }
         }
     };
 } // namespace
@@ -345,5 +616,16 @@ ui::ClipWaveformMaker getClipWaveformMaker()
 {
     return [] (ProjectContext& context, ClipID clip, std::function<void()> loaded) -> std::unique_ptr<ui::ClipWaveform>
     { return std::make_unique<Waveform> (context, clip, std::move (loaded)); };
+}
+
+void setBeforeWaveformFileOpens (std::function<void (const juce::File&)> before)
+{
+    const std::scoped_lock held (beforeOpenLock);
+    beforeOpen = std::move (before);
+}
+
+WaveformFiles countWaveformFiles()
+{
+    return { opens.load(), opensOnMessageThread.load(), readersAlive.load() };
 }
 } // namespace phazite

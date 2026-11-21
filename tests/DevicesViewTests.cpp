@@ -222,6 +222,29 @@ struct Screen
     phazite::ui::DevicesView view { commands, context };
     phazite::test::TestWindow window { view, 1600, 380 };
 };
+
+// Every component in a view, each held so as to tell whether it is still there.
+std::vector<juce::Component::SafePointer<juce::Component>> holdEverything (juce::Component& view)
+{
+    std::vector<juce::Component::SafePointer<juce::Component>> held;
+
+    for (auto* each : phazite::test::findAll<juce::Component> (view))
+        held.emplace_back (each);
+
+    return held;
+}
+
+// How many components in a view weren't there when they were held: made since (one made where another went counts too).
+int countMade (const std::vector<juce::Component::SafePointer<juce::Component>>& held, juce::Component& view)
+{
+    auto made = 0;
+
+    for (auto* each : phazite::test::findAll<juce::Component> (view))
+        if (std::none_of (held.begin(), held.end(), [each] (const auto& one) { return one.getComponent() == each; }))
+            ++made;
+
+    return made;
+}
 } // namespace
 
 TEST_CASE ("The Effects tab stacks the selected track's effects in the column, as FL Studio's mixer slots; the one clicked shows beside it")
@@ -1465,4 +1488,56 @@ TEST_CASE ("A device shown in its container shows alone once the container is un
     auto* alone = dynamic_cast<phazite::ui::EqEditor*> (view.getShownBody());
     REQUIRE (alone != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*alone->getParentComponent(), "Macro 1") == nullptr);
+}
+
+TEST_CASE ("The Devices view makes nothing while its panel is hidden, and shows the track selected last as it shows again")
+{
+    // The threading audit, 2026-11-20: it made the selected track's devices and its instrument's whole editor again at each
+    // change of the selected track, at the keys' repeat rate while Up or Down was held, though it didn't show.
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("track.add"));
+    const auto tracks = phazite::getTrackIDs (*phazite::findSong (context));
+    const auto first = tracks[tracks.size() - 2], second = tracks.back();
+    for (const auto track : { first, second })
+        for (const auto& type : phazite::getDeviceTypes (context))
+            if (type.description.fileOrIdentifier == juce::String ("phaziteSynth"))
+                phazite::chooseInstrument (context, track, type);
+
+    const auto secondSynth = phazite::getInstrument (context, second);
+    REQUIRE (secondSynth.has_value());
+    auto& selection = context.getSongSelection();
+    selection.selectOnly (first);
+    phazite::test::dispatchPendingMessages();
+    auto& view = screen.showView<phazite::ui::DevicesView> ("view.instrument");
+    REQUIRE (view.getChannel() == std::optional (first));
+    REQUIRE (countEditors<phazite::ui::SynthEditor> (view) == 1);
+
+    // The lower panel hidden, the selection moves between the tracks a hundred times, as Up and Down held do: nothing is
+    // made in the view.
+    REQUIRE (screen.registry.invoke ("view.toggleEditor"));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (view.isShowing());
+    const auto before = holdEverything (view);
+
+    for (int i = 0; i < 100; ++i)
+    {
+        selection.selectOnly (i % 2 == 0 ? first : second);
+        phazite::test::dispatchPendingMessages();
+    }
+
+    CHECK (countMade (before, view) == 0);
+    CHECK (view.getChannel() == std::optional (second));
+
+    // Shown again, it shows the track selected last, its instrument whole beside the column.
+    REQUIRE (screen.registry.invoke ("view.toggleEditor"));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (view.isShowing());
+    CHECK (view.getChannel() == std::optional (second));
+    CHECK (view.findPanel (secondSynth->id) != nullptr);
+    CHECK (view.isOpen (secondSynth->id));
+    CHECK (countEditors<phazite::ui::SynthEditor> (view) == 1);
 }

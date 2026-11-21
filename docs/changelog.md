@@ -40,7 +40,8 @@ that fails without the fix where one can see it, and a reviewer read each part. 
   Phazite quits, and one stuck on a drive that doesn't answer keeps no other folder from being read; Clean Up's Delete
   works in the background behind a progress window, and refuses while a sound file is being imported; the Project view
   asks the disk which files are missing only in the background, and only when something changed; a clip's waveform
-  opens its file in the background, never in a paint.
+  opens its file in the background, never in a paint, lets it go once its levels are read, and draws at once from
+  levels read before (close in, it is drawn in steps now: known bug 224).
 - **Views that can't be seen build nothing:** the inspector, the Devices view and the Versions view catch up as they
   show, and the time lines ask for the song's extent only after it changed.
 - **Small ones:** the sampler takes a loop shorter than its step round in one go, and refuses a sound file that says

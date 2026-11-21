@@ -10,6 +10,7 @@
 
 #include "model/devices/ParameterRef.h"
 #include "model/project/ProjectContext.h"
+#include "ui/components/SightWatcher.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -76,10 +77,17 @@ private:
     juce::Viewport view; // scrolls the page up and down when the panel is shorter than it
     std::unique_ptr<Page> page;
     Target shown;
-    int titleRoom = 0; // setTitleRoom()
+    int titleRoom = 0;  // setTitleRoom()
+    bool stale = false; // the selection or the song changed while it couldn't be seen: shown as it shows again
+
+    // While it can't be seen (its panel hidden, or in a window of its own that is), it makes nothing: a rubber band's
+    // selection made a whole page at each turn of the drag, with the panel closed too. It shows what is selected and the song
+    // as they are when it is seen again (isInSight(), SightWatcher.h).
+    SightWatcher sight { *this, [this] { showWhereStale(); } };
 
     Target getTarget() const;
-    void showTarget(); // a new page if the selection points to something else
+    void showTarget();     // a new page if the selection points to something else, or the page of its kind takes it
+    void showWhereStale(); // what changed while it couldn't be seen, once it can
     void layOutPage();
 
     void projectChanged() override;

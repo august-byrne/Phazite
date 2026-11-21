@@ -1343,6 +1343,8 @@ void TimelineEditor::updatePlayhead()
 void TimelineEditor::updateScrollBar()
 {
     contentEnd = getContentRange().getEnd().inBeats();
+    contentSongVersion = timelineContext.getSongVersion();
+    ++contentAsks;
     showViewInScrollBar();
 }
 
@@ -1676,8 +1678,18 @@ void TimelineEditor::timerCallback()
     if (! isShowing())
         return;
 
-    if (std::abs (getContentRange().getEnd().inBeats() - contentEnd) > 1.0e-6)
-        updateScrollBar();
+    // Where the content ends, which is asked of the whole song (0.39 ms for House Groove, 2026-11-16), only once the song has
+    // changed since it was asked: what else it depends on (the clips an editor shows, where its bars count from) asks it
+    // again as that changes (updateScrollBar()).
+    if (timelineContext.getSongVersion() != contentSongVersion)
+    {
+        const auto end = getContentRange().getEnd().inBeats();
+        contentSongVersion = timelineContext.getSongVersion();
+        ++contentAsks;
+
+        if (std::abs (end - std::exchange (contentEnd, end)) > 1.0e-6)
+            showViewInScrollBar();
+    }
 
     if (const auto loop = getLoop (timelineContext); ! isNear (loop, shownLoop))
     {

@@ -34,6 +34,7 @@
 #include "services/Settings.h"
 #include "ui/components/ListRowHover.h"
 #include "ui/components/SectionHeader.h"
+#include "ui/components/SightWatcher.h"
 #include "ui/components/ViewTitle.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
@@ -108,7 +109,7 @@ public:
     int getSnapshotGroupRow (int snapshot) const;
     void unfoldAutomaticSaves (int row);
     juce::Rectangle<int> getSnapshotRestorePosition (int row) const;
-    void showAutomaticSavesChanged() { refresh(); } // the setting switched (version.showAutomatic)
+    void showAutomaticSavesChanged(); // the setting switched (version.showAutomatic)
     juce::String getChangesHeading() const;
     juce::String getRoomText() const { return roomText.getText(); }
 
@@ -267,6 +268,19 @@ private:
     void refresh(); // what the model holds now
     void refreshHistoryLines();
 
+    // While it can't be seen (another view in the left panel, the panel hidden), it reads and makes nothing: it is always
+    // there, usually hidden, and the versions change a few times a second while the song is edited, each change read whole
+    // (every version, every automatic save, the changes, the room) with all its rows. It notes that it is out of date, and
+    // reads the model as it shows (isInSight(), SightWatcher.h). What else tells of the versions reads the model itself: the
+    // activity bar's badge (countChanges()), the commands' states.
+    bool stale = false;
+    SightWatcher sight { *this, [this] { refreshWhereStale(); } };
+    void refreshInSight();    // refresh() if it can be seen, else noted
+    void refreshWhereStale(); // what changed while it couldn't be seen, once it can
+
+    // Bounce Each Version, as the settings keep it, for the song open now: kept while the view is hidden, as it is the model's.
+    void followBounceSetting();
+
     // The field as typed, the model's draft: its first line the name, the rest the note. And the draft as one text, and as it
     // was when the view last took or showed it, so that the view shows the draft again only when it changed in the model.
     void takeMessage();
@@ -284,11 +298,22 @@ private:
     {
         unfoldedGroups.clear(); // another project's
         selectedGroup.reset();
-        refresh();
+        followBounceSetting();
+        refreshInSight();
     }
-    void versionsChanged() override { refresh(); }
+    void versionsChanged() override
+    {
+        followBounceSetting();
+        refreshInSight();
+    }
     void songChanged (const SongChanges& changed) override
     {
+        if (! isInSight (*this))
+        {
+            stale = true;
+            return;
+        }
+
         refreshUndoHistory(); // each change is a step, or a step's part
 
         if (changed.devices && shownVersion.isNotEmpty())

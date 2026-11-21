@@ -467,6 +467,17 @@ struct Inspector::Page : public juce::Component
     virtual void refresh() {}      // the song changed: what it shows, as it is now
     virtual void updateValues() {} // a timer: the faders' and switches' values
 
+    // Shows what the selection points to now in place of what it showed, if it is of its kind (other notes, clips, or points
+    // of the same parameter): true if it does.
+    virtual bool take (const Inspector::Target&) { return false; }
+
+    // "Note" or "Notes", "Clip" or "Clips", as it shows one or several.
+    void setKind (const juce::String& kindName)
+    {
+        kind = kindName;
+        setTitle (kindName);
+    }
+
     // A row: its name on the left, a control filling the rest. A row without a control is a heading.
     void addRow (const juce::String& name, juce::Component* control, int height = controlHeight)
     {
@@ -543,7 +554,7 @@ struct Inspector::Page : public juce::Component
         }
     }
 
-    const juce::String kind;
+    juce::String kind;
     juce::Colour colour;
     ViewTitle title { {} }; // the inspector shows it, over the rows, which scroll
     std::vector<Row> rows;
@@ -950,6 +961,17 @@ namespace
             refresh();
         }
 
+        bool take (const Inspector::Target& selected) override
+        {
+            if (selected.kind != Inspector::Target::Kind::clips)
+                return false;
+
+            clips = selected.clips;
+            setKind (clips.size() == 1 ? "Clip" : "Clips");
+            refresh();
+            return true;
+        }
+
         // A command that acts on the selected clips, with these selected.
         void invokeOnClips (const juce::String& id)
         {
@@ -1084,7 +1106,7 @@ namespace
 
         CommandBridge& commands;
         ProjectContext& context;
-        const std::vector<ClipID> clips;
+        std::vector<ClipID> clips;
         BeatPosition start; // the earliest clip's, where lengths are counted in bars
         juce::Label kindLabel, trackLabel, aliasLabel, fadeInLabel, fadeOutLabel;
         MultiField startField { context, "Starts", 0.0, 100000.0, 1.0, "Move Clips" };
@@ -1154,6 +1176,17 @@ namespace
             refresh();
         }
 
+        bool take (const Inspector::Target& selected) override
+        {
+            if (selected.kind != Inspector::Target::Kind::notes)
+                return false;
+
+            notes = selected.notes;
+            setKind (notes.size() == 1 ? "Note" : "Notes");
+            refresh();
+            return true;
+        }
+
         void refresh() override
         {
             std::vector<NoteData> shown;
@@ -1202,7 +1235,7 @@ namespace
 
         CommandBridge& commands;
         ProjectContext& context;
-        const std::vector<NoteRef> notes;
+        std::vector<NoteRef> notes;
         BeatPosition start; // the earliest note's, where lengths are counted in bars
         MultiField startField { context, "Starts", 0.0, 100000.0, 0.25, "Move Notes" };
         MultiField lengthField { context, "Length", 0.0, 1024.0, 0.25, "Change Note Length" }; // the model keeps a 64th at least
@@ -1285,6 +1318,17 @@ namespace
             refresh();
         }
 
+        // Other points of the same parameter (another parameter's have another handle).
+        bool take (const Inspector::Target& selected) override
+        {
+            if (selected.kind != Inspector::Target::Kind::automation || selected.parameter != parameter)
+                return false;
+
+            indices = selected.points;
+            refresh();
+            return true;
+        }
+
         // A value as the parameter's lane and control show it, and one typed so, as the position along the travel it is at.
         ParameterKind getParameterKind() const { return target.has_value() ? target->kind : ParameterKind::other; }
 
@@ -1339,7 +1383,7 @@ namespace
 
         ProjectContext& context;
         const ParameterRef parameter;
-        const std::vector<int> indices;
+        std::vector<int> indices;
         const ParameterHandle handle;
         const std::optional<AutomationTarget> target;
         double earliest = 0.0; // the earliest point's beat
@@ -1546,10 +1590,36 @@ Inspector::Target Inspector::getTarget() const
 
 void Inspector::showTarget()
 {
+    if (! isInSight (*this))
+    {
+        stale = true;
+        return;
+    }
+
+    const auto wasStale = std::exchange (stale, false);
     const auto target = getTarget();
 
     if (target == shown && page != nullptr)
+    {
+        // The song may have changed while it couldn't be seen.
+        if (wasStale)
+        {
+            page->refresh();
+            layOutPage();
+        }
+
         return;
+    }
+
+    // A page of the same kind takes what is selected now (a rubber band's notes, clips or points, more at each turn of the
+    // drag), rather than being made anew; but not while one of its controls is in the middle of an edit (a name typed, a
+    // field dragged), which would go on to act on the items selected now.
+    if (page != nullptr && ! page->hasKeyboardFocus (true) && ! page->isMouseButtonDown (true) && page->take (target))
+    {
+        shown = target;
+        resized();
+        return;
+    }
 
     shown = target;
     view.setViewedComponent (nullptr, false);
@@ -1649,7 +1719,7 @@ void Inspector::songChanged (const SongChanges& changes)
     // What it shows may be gone, or changed.
     showTarget();
 
-    if (page != nullptr
+    if (! stale && page != nullptr
         && (changes.tracks || changes.clips || changes.sections || changes.chords || changes.devices || changes.automation
             || changes.tempo))
     {
@@ -1661,6 +1731,12 @@ void Inspector::songChanged (const SongChanges& changes)
 void Inspector::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     showTarget();
+}
+
+void Inspector::showWhereStale()
+{
+    if (stale && isInSight (*this))
+        showTarget();
 }
 
 void Inspector::timerCallback()

@@ -95,7 +95,8 @@ sends, and the buses and the master they reach.
   meanwhile, as any render not made yet); the old render is asked for no more, and goes as the cache is purged when the
   project closes. A change of a source's modification time alone (files restored without their times) makes its
   stretched clips' renders anew too. A clip's waveform follows its file the same way: a paint never asks the disk, and
-  the waveform shows the file again once a plan (or anything else that asks) finds it changed. Each job of a render
+  the waveform shows the file again once a plan (or anything else that asks) finds it changed. Its file is opened in
+  the background, never in a paint (`src/app/ClipWaveforms.cpp`), and the clip draws its waveform once it is open. Each job of a render
   (an export's stems, one after another) makes the clip renders it needs as its turn comes. Phazite's own renders, recordings, consolidations and imports take names that are free; a freeze
   writes its new file over the track's frozen one in its place, which the player asks about at every plan; and a writer
   that writes where a song played a file before (a DAWproject's audio unpacked into the project) tells the players to ask

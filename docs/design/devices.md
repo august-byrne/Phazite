@@ -255,6 +255,9 @@ At the default window size (1280 by 800), every built-in device shows whole in t
   level meters (`src/ui/components/DisplayTicker.h`), and a picture repaints only when what it draws moved. What goes
   in and out of a device reaches its editor through a lock-free scope that costs nothing while no editor listens
   (`src/devices/core/DeviceScope.h`).
+- **The Devices view makes nothing while it can't be seen** (its tab not chosen, the editor dock hidden): the selected
+  track's devices and the editor beside them are made as it shows again (`src/ui/components/SightWatcher.h`), so that Up
+  or Down held in the playlist makes no editor at each track it passes.
 
 ### Where an editor puts things
 
