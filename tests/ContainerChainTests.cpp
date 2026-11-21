@@ -5,12 +5,20 @@
 // in their ranges; the chains' volumes, pans and crossovers as parameters that automation and macros move; what Phazite's
 // engine plays of all that; and the presets that keep it.
 #include "EnginePlayback.h"
+#include "SongCheck.h"
 #include "TestDevices.h"
 #include "TestSong.h"
+#include "UndoCheck.h"
+#include "devices/dynamics/Compressor.h"
+#include "devices/eq/Equalizer.h"
+#include "devices/fm/FmSynth.h"
+#include "devices/saturation/Saturator.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/Selection.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
@@ -23,6 +31,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <vector>
 
 namespace
 {
@@ -856,4 +866,120 @@ TEST_CASE ("A copy of a track has its containers' chains with IDs of their own, 
     REQUIRE (chains.size() == 2);
     CHECK (chains[1].id != tone.chain (1));
     CHECK (phazite::getAutomationPoints (context, { chains[1].id, phazite::schema::chainVolumeParameter }).size() == 1);
+}
+
+TEST_CASE ("Every edit of containers and their chains is one exact undo step, and the walk back through them all and forth gives "
+           "each song again")
+{
+    // Containers.h's edits, each in a step as a command holds it, and ContainerModel.h's, each a step of its own: effects
+    // grouped into a container and put back out of it, by the devices and by the selection; chains added, copied, moved,
+    // renamed, turned and panned, split into bands with their crossovers put back in order, muted and soloed (no steps), a
+    // device moved between chains, added in one, moved there and removed, chains removed; an empty container; and an
+    // instrument container, its chain's instrument chosen, its keys and velocities.
+    TestSong song;
+    auto& model = *phazite::findSong (song.context);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::Synth::typeID);
+    const auto eq = song.addEffect (track, phazite::devices::Equalizer::typeID);
+    const auto compressor = song.addEffect (track, phazite::devices::Compressor::typeID);
+    const auto keys = song.addTrack ("Keys");
+    song.setInstrument (keys, phazite::devices::Synth::typeID);
+    song.addNote (song.addMidiClip (keys, 0.0, 4.0), 60, 0.0, 1.0);
+    phazite::test::UndoCheck undo (song.context);
+    DeviceID glue, second, copy, saturator, instruments, layer;
+
+    const auto inStep = [&undo, &model] (const char* name, const std::function<void()>& edit)
+    {
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (model, name);
+                        edit();
+                    });
+    };
+
+    inStep ("Group", [&] { glue = phazite::groupIntoContainer (model, { eq, compressor }); });
+    REQUIRE (glue.isValid());
+    REQUIRE (phazite::findContainerOf (model, compressor) == glue);
+    inStep ("Rename Container", [&] { phazite::setContainerName (model, glue, "Glue"); });
+    inStep ("Add Chain", [&] { second = phazite::addChain (model, glue); });
+    REQUIRE (second.isValid());
+    inStep ("Move to Chain", [&] { CHECK (phazite::moveToChain (model, compressor, second) == compressor); });
+    inStep ("Rename Chain", [&] { phazite::setChainName (model, second, "Squash"); });
+    inStep ("Chain Volume", [&] { phazite::setChainVolume (model, second, -6.0f); });
+    inStep ("Chain Pan", [&] { phazite::setChainPan (model, second, -0.5f); });
+    inStep ("Duplicate Chain", [&] { copy = phazite::duplicateChain (model, second); });
+    REQUIRE (copy.isValid());
+    inStep ("Move Chain", [&] { phazite::moveChain (model, copy, 0); });
+    inStep ("Split into Bands", [&] { phazite::setContainerSplit (model, glue, ContainerSplit::bands); });
+    inStep ("Crossover", [&] { phazite::setChainCrossover (model, second, 2000.0f); });
+
+    // The middle chain's band put above the last's, out of order; then each band above the one before it again: the middle
+    // keeps its crossover, and the last's goes between it and the top, in octaves (sqrt (5000 * 20000)).
+    const auto chains = phazite::getChains (model, glue);
+    REQUIRE (chains == std::vector { copy, chains[1], second });
+    inStep ("Crossover Out of Order", [&] { phazite::setChainCrossover (model, chains[1], 5000.0f); });
+    REQUIRE (phazite::getChainCrossover (model, chains[1]) > phazite::getChainCrossover (model, second));
+    inStep ("Crossovers in Order", [&] { phazite::keepCrossoversInOrder (model, glue); });
+    CHECK (phazite::getChainCrossover (model, chains[1]) == doctest::Approx (5000.0f));
+    CHECK (phazite::getChainCrossover (model, second) == doctest::Approx (10000.0f));
+    CHECK (undo.getNumSteps() == 13);
+
+    // A chain muted and soloed, and heard again: switches, as a track's mute and solo, no undo steps, which leave what undo
+    // steps keep alone.
+    undo.check ("Mute Chain", [&] { phazite::setChainMuted (model, second, true); });
+    CHECK (phazite::isChainMuted (model, second));
+    undo.check ("Solo Chain", [&] { phazite::setChainSoloed (model, copy, true); });
+    CHECK (phazite::isChainSoloed (model, copy));
+    CHECK_FALSE (phazite::isChainHeard (model, chains[1]));
+    undo.check ("Unmute Chain", [&] { phazite::setChainMuted (model, second, false); });
+    undo.check ("Unsolo Chain", [&] { phazite::setChainSoloed (model, copy, false); });
+    CHECK (phazite::isChainHeard (model, chains[1]));
+    CHECK (undo.getNumSteps() == 13);
+
+    undo.check ("Add to Chain",
+                [&] { phazite::addEffectToChain (song.context, second, song.findDeviceType (phazite::devices::Saturator::typeID)); });
+    REQUIRE (phazite::getChainDevices (model, second).size() == 2);
+    saturator = phazite::getChainDevices (model, second).back();
+    REQUIRE (saturator != compressor);
+    inStep ("Move in Chain", [&] { phazite::moveInChain (model, saturator, 0); });
+    inStep ("Remove from Chain", [&] { phazite::removeDevice (model, saturator); });
+    inStep ("Remove Chain", [&] { phazite::removeChain (model, copy); });
+    inStep ("Layers", [&] { phazite::setContainerSplit (model, glue, ContainerSplit::layers); });
+    inStep ("Back to the First Chain",
+            [&] { CHECK (phazite::moveToChain (model, compressor, phazite::getChains (model, glue)[0]) == compressor); });
+    inStep ("Remove the Other Chain", [&] { phazite::removeChain (model, second); });
+    REQUIRE (phazite::canUngroupContainer (model, glue));
+    inStep ("Ungroup", [&] { phazite::ungroupContainer (model, glue); });
+    CHECK_FALSE (phazite::findContainerOf (model, compressor).isValid());
+
+    // The same by the selection, as Group into Container and Ungroup Container do it: the container selected, then its
+    // devices.
+    auto& selection = phazite::getSelection (song.context);
+    selection.selectOnly (eq);
+    selection.addToSelection (compressor);
+    REQUIRE (phazite::canGroupSelectedDevices (selection));
+    inStep ("Group Selected", [&] { phazite::groupSelectedDevices (selection); });
+    REQUIRE (selection.getDevices().size() == 1);
+    CHECK (phazite::findContainerOf (model, eq) == selection.getDevices().front());
+    CHECK (phazite::findContainerOf (model, compressor) == selection.getDevices().front());
+    REQUIRE (phazite::canUngroupSelectedContainer (selection));
+    inStep ("Ungroup Selected", [&] { phazite::ungroupSelectedContainer (selection); });
+    CHECK (selection.getDevices().size() == 2);
+    CHECK_FALSE (phazite::findContainerOf (model, eq).isValid());
+    inStep ("Add Container", [&] { CHECK (phazite::addContainer (model, track).isValid()); });
+
+    inStep ("Instrument Container", [&] { instruments = phazite::addInstrumentContainer (model, keys); });
+    REQUIRE (instruments.isValid());
+    inStep ("Add a Layer", [&] { layer = phazite::addChain (model, instruments); });
+    REQUIRE (layer.isValid());
+    undo.check ("The Layer's Instrument",
+                [&] { phazite::chooseChainInstrument (song.context, layer, song.findDeviceType (phazite::devices::FmSynth::typeID)); });
+    CHECK (phazite::getChainDevices (model, layer).size() == 1);
+    inStep ("Keys", [&] { phazite::setChainKeys (model, layer, { 0, 59 }); });
+    inStep ("Velocities", [&] { phazite::setChainVelocities (model, layer, { 1, 100 }); });
+    CHECK (undo.getNumSteps() == 29);
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (model);
 }

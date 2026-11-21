@@ -4,7 +4,9 @@
 // the song plays; a modulator's parameters and a step sequencer's steps; and that they are saved with the project.
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
+#include "SongCheck.h"
 #include "TestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
@@ -19,6 +21,7 @@
 #include "model/transport/internal/Playback.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace
 {
@@ -469,4 +472,63 @@ TEST_CASE ("A modulator switched off moves nothing and keeps what it modulates, 
     phazite::setModulatorOn (context, macro, false);
     CHECK (phazite::isModulatorOn (context, macro));
     CHECK (song.describeUndo() == juce::String ("Undo Add Macro"));
+}
+
+TEST_CASE ("Every edit of modulation is one exact undo step, and the walk back through them all and forth gives each song again")
+{
+    // Modulation.h's edits, each in a step as a command holds it, and ModulationModel.h's, each a step of its own: modulators
+    // and a macro added, switched, a step set, a macro renamed and turned, targets set, their amounts changed and cleared, and
+    // a modulator removed with what it modulates.
+    Song song;
+    auto& model = *song.song;
+    auto& context = song.context;
+    const auto cutoff = song.cutoff(), makeup = song.makeup();
+    const auto volume = phazite::getVolume (context, song.a).getRef();
+    phazite::test::UndoCheck undo (model);
+    ModulatorID lfo, steps, macro, noise;
+
+    const auto inStep = [&undo, &model] (const char* name, const std::function<void()>& edit)
+    {
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (model, name);
+                        edit();
+                    });
+    };
+
+    inStep ("Add LFO", [&] { lfo = phazite::addModulator (model, song.a, ModulatorType::lfo); });
+    inStep ("Add Steps", [&] { steps = phazite::addModulator (model, song.a, ModulatorType::steps); });
+    inStep ("Add Macro", [&] { macro = phazite::addModulator (model, song.a, ModulatorType::macro); });
+    REQUIRE (lfo.isValid());
+    REQUIRE (steps.isValid());
+    REQUIRE (macro.isValid());
+    inStep ("Rename Macro", [&] { phazite::renameMacro (model, macro, "Brightness"); });
+    inStep ("Turn Off", [&] { phazite::setModulatorOn (model, steps, false); });
+    inStep ("Set Step", [&] { phazite::setModulatorStep (model, steps, 3, -0.5f); });
+    inStep ("Modulate", [&] { phazite::setModulation (model, lfo, cutoff, 0.5f); });
+    inStep ("Change Amount", [&] { phazite::setModulation (model, lfo, cutoff, -0.25f); });
+    inStep ("Modulate Another", [&] { phazite::setModulation (model, lfo, makeup, 0.3f); });
+    inStep ("Macro's Target", [&] { phazite::setModulation (model, macro, volume, 0.8f); });
+    inStep ("Target Cleared", [&] { phazite::removeModulation (model, lfo, makeup); });
+
+    undo.check (
+        "Turn the Macro",
+        [&] { phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id).setValue (0.6f); });
+    undo.check ("Change Rate", [&]
+                { phazite::getModulatorParameter (context, lfo, phazite::getModulatorParameters (context, lfo)[0].id).setValue (2.0f); });
+    undo.check ("Add Random", [&] { noise = phazite::addModulator (context, song.a, ModulatorType::random); });
+    undo.check ("Change Step", [&] { phazite::setStep (context, steps, 0, 0.75f); });
+    undo.check ("Turn Modulator On", [&] { phazite::setModulatorOn (context, steps, true); });
+    undo.check ("Rename Macro as the UI does", [&] { phazite::renameMacro (context, macro, "Air"); });
+    undo.check ("Modulate as the UI does", [&] { phazite::modulate (context, noise, makeup, 0.4f); });
+    undo.check ("Remove Modulation", [&] { phazite::removeModulation (context, noise, makeup); });
+    undo.check ("Remove LFO", [&] { phazite::removeModulator (context, lfo); });
+    CHECK (phazite::getModulations (model, cutoff).empty());
+    inStep ("Remove Macro", [&] { phazite::removeModulator (model, macro); });
+    CHECK (phazite::getModulations (model, volume).empty());
+    CHECK (undo.getNumSteps() == 21);
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (model);
 }

@@ -3,11 +3,13 @@
 // Version, each one undo step that what plays follows, with the fewest edits, and what isn't counted left as it is.
 #include "GoldenFiles.h"
 #include "RenderHarness.h"
+#include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestClips.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/AudioClipModel.h"
@@ -29,6 +31,11 @@
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
+
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -105,6 +112,123 @@ std::vector<phazite::VersionChange> readVersionChanges (phazite::ProjectContext&
     REQUIRE (waitForVersionHistory (context));
     return phazite::getVersionChanges (context, versionID);
 }
+
+juce::String findBranch (const phazite::ProjectContext& context, const juce::String& name)
+{
+    for (const auto& branch : phazite::getBranches (context))
+        if (branch.name == name)
+            return branch.id;
+
+    return {};
+}
+
+// The song holds together as its file would open (SongCheck.h: copyAsOpened(), without the curves an undo keeps), by every
+// rule. Or by every rule but that the clips of an alias group hold the same notes, for the edits that take one track's line
+// back alone, which break it today: known bug 234 (docs/known-bugs.md), which the findings below check. A group of one clip,
+// or of clips of different kinds, is still a problem then.
+void checkWhole (const phazite::Song& song, bool notesOfAliasesMayDiffer = false)
+{
+    for (const auto& problem : findSongProblems (*copyAsOpened (song)))
+        if (! (notesOfAliasesMayDiffer && juce::String (problem).contains ("its notes and values differ")))
+            FAIL_CHECK (problem);
+}
+
+// The notes of a track's clips, a clip's after another's in the track's order (TestClips.h: describeClipNotes()).
+juce::String describeTrackNotes (const phazite::Song& song, phazite::TrackID track)
+{
+    juce::StringArray clips;
+
+    for (const auto clip : phazite::getClips (song, track))
+        clips.add (describeClipNotes (song, clip));
+
+    return clips.joinIntoString (" | ");
+}
+
+// The notes of each clip of an alias group, a line each (TestClips.h: describeClipNotes()); and how many different ones
+// they hold: one for a group whose clips hold the same notes.
+juce::String describeGroupNotes (const phazite::Song& song, const std::vector<phazite::ClipID>& group)
+{
+    juce::StringArray lines;
+
+    for (const auto clip : group)
+        lines.add ("clip " + juce::String ((juce::int64) clip.getRaw()) + ": " + describeClipNotes (song, clip));
+
+    return lines.joinIntoString ("\n");
+}
+
+int countDifferentNotes (const phazite::Song& song, const std::vector<phazite::ClipID>& group)
+{
+    juce::StringArray different;
+
+    for (const auto clip : group)
+        different.addIfNotAlreadyThere (describeClipNotes (song, clip));
+
+    return different.size();
+}
+
+// A song for the going-back edits under the undo check (UndoCheck.h): Bass and Keys, each with Phazite's synth; on Bass a
+// clip of three notes, an alias of it on Keys from beat 8 and another on Bass from beat 16, so that a note edited through the
+// alias on Keys changes a line of each track. Kept as "First". Then, unless only First is asked for: a note moved and one
+// added through the alias and Keys made quieter, kept as "Second"; and since, a note transposed and one deleted through the
+// alias, Bass quieter and a track added.
+struct NotesAndAliases
+{
+    explicit NotesAndAliases (bool withSecond = true)
+    {
+        s.setInstrument (bass, phazite::devices::Synth::typeID);
+        s.setInstrument (keys, phazite::devices::Synth::typeID);
+        s.addNote (clip, 36, 0.0, 1.0);
+        s.addNote (clip, 43, 1.0, 1.0);
+        s.addNote (clip, 48, 2.0, 0.5);
+        onKeys = s.copyClip (clip, 8.0, true);
+        phazite::moveClip (s.context, onKeys, phazite::BeatPosition::fromBeats (8.0), keys);
+        later = s.copyClip (clip, 16.0, true);
+        REQUIRE (phazite::getLinkedClips (s.context, clip).size() == 3);
+        REQUIRE (phazite::getClipTrack (song(), onKeys) == keys);
+        first = keepVersion (s.context, "First");
+        firstText = writeSong (song(), SongPart::undoable);
+        firstBass = describeTrackNotes (song(), bass);
+        firstKeys = describeTrackNotes (song(), keys);
+
+        if (! withSecond)
+            return;
+
+        editNote ("Move Note", 0, [] (phazite::Song& edited, phazite::NoteRef note)
+                  { phazite::moveNote (edited, note, phazite::BeatPosition::fromBeats (8.5), 38); });
+        s.addNote (onKeys, 50, 11.0, 0.5);
+        s.setVolume (keys, -6.0f);
+        second = keepVersion (s.context, "Second");
+        secondText = writeSong (song(), SongPart::undoable);
+        secondBass = describeTrackNotes (song(), bass);
+        secondKeys = describeTrackNotes (song(), keys);
+
+        editNote ("Transpose", 1, [] (phazite::Song& edited, phazite::NoteRef note) { phazite::transposeNotes (edited, { note }, 2); });
+        editNote ("Delete Note", 2, [] (phazite::Song& edited, phazite::NoteRef note) { phazite::deleteNotes (edited, { note }); });
+        s.setVolume (bass, -3.0f);
+        s.addTrack ("Strings");
+        checkWhole (song());
+    }
+
+    phazite::Song& song() const { return *phazite::findSong (s.context); }
+
+    // A note of the alias on Keys, by its place in the clip, edited through that alias as one undo step.
+    void editNote (const juce::String& name, int index, const std::function<void (phazite::Song&, phazite::NoteRef)>& edit)
+    {
+        const auto notes = phazite::getClipNotes (song(), onKeys);
+        REQUIRE ((int) notes.size() > index);
+        const phazite::UndoStep step (song(), name);
+        edit (song(), { onKeys, notes[(size_t) index].id });
+    }
+
+    TestSong s;
+    phazite::TrackID bass = s.addTrack ("Bass"), keys = s.addTrack ("Keys");
+    phazite::ClipID clip = s.addMidiClip (bass, 0.0, 4.0), onKeys, later;
+    juce::String first, second;
+
+    // Each version's song as an undo step keeps it (UndoCheck.h: SongPart::undoable), and the notes of Bass's and Keys's clips
+    // in it, as it was saved.
+    juce::String firstText, secondText, firstBass, firstKeys, secondBass, secondKeys;
+};
 } // namespace
 
 TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves its view state as it is")
@@ -710,4 +834,210 @@ TEST_CASE ("A track brought back from a commit whose clip can't be read comes ba
     }
 
     check();
+}
+
+TEST_CASE ("Every way of going back is one exact undo step on a song of notes and aliases, which holds together after it, its Undo and "
+           "its Redo")
+{
+    NotesAndAliases n;
+    auto& s = n.s;
+    auto& song = n.song();
+    phazite::CommandRegistry commands;
+    phazite::addVersionCommands (commands, s.context, [] (std::function<void (bool)> then) { then (true); }, s.renders);
+    UndoCheck undo (s.context);
+
+    const auto lineOf = [&s] (const juce::String& name)
+    {
+        const auto line = findLine (phazite::getListedChanges (withChangesIn (s.context)), name);
+        INFO ("no line " << name.toStdString() << " among " << describeChanges (phazite::getListedChanges (s.context)).toStdString());
+        REQUIRE (line.has_value());
+        return *line;
+    };
+
+    // What a going-back edit must leave: the song as an undo step keeps it, the same as a text kept before; or a track's
+    // clips holding the notes a version held.
+    const auto songIs = [&song] (const juce::String& expected)
+    {
+        return [&song, expected]
+        {
+            const auto differences = describeSongDifferences (expected, writeSong (song, SongPart::undoable));
+            INFO (differences.joinIntoString ("\n").toStdString());
+            CHECK (differences.isEmpty());
+        };
+    };
+
+    const auto notesAre = [&song] (phazite::TrackID track, const juce::String& expected)
+    { return [&song, track, expected] { CHECK (describeTrackNotes (song, track) == expected); }; };
+
+    // Each through the undo check, what it must give checked inside it, the song checked after it, after its Undo and after
+    // its Redo; then undone again, so that the next starts from the changes since Second. An edit of one track's line alone
+    // is checked after it and its Redo with the notes of an alias group's clips allowed to differ, which it breaks today
+    // (known bug 234): the FINDING cases after this one check that of Put Back and of a line restored.
+    const auto goBack = [&] (const juce::String& what, const std::function<bool()>& command, const std::function<void()>& gives,
+                             bool notesOfAliasesMayDiffer = false)
+    {
+        INFO (what.toStdString());
+        undo.check (what,
+                    [&]
+                    {
+                        REQUIRE (phazite::test::finished (s.context, command));
+                        gives();
+                    });
+        checkWhole (song, notesOfAliasesMayDiffer);
+        undo.stepBackOrForth ("Undo " + what, [&song] { phazite::undo (song); });
+        checkWhole (song);
+        undo.stepBackOrForth ("Redo " + what, [&song] { phazite::redo (song); });
+        checkWhole (song, notesOfAliasesMayDiffer);
+        undo.stepBackOrForth ("Undo " + what + " again", [&song] { phazite::undo (song); });
+    };
+
+    // Put Back, a line each, against the last version (Second): Keys (the alias that the notes were edited through), then
+    // Bass (the group's first and last).
+    const auto keysLine = lineOf ("Keys");
+    goBack ("Put Back Keys", [&] { return phazite::takeBack (s.context, keysLine); }, notesAre (n.keys, n.secondKeys), true);
+    const auto bassLine = lineOf ("Bass");
+    goBack ("Put Back Bass", [&] { return phazite::takeBack (s.context, bassLine); }, notesAre (n.bass, n.secondBass), true);
+
+    // Discard All Changes, and Restore This Version on the last version and on the one before, by the command.
+    goBack ("Discard All Changes", [&] { return phazite::discardAllChanges (s.context); }, songIs (n.secondText));
+    goBack ("Restore Second", [&] { return phazite::bringBackVersion (s.context, n.second); }, songIs (n.secondText));
+    phazite::selectVersion (s.context, n.first);
+    REQUIRE (phazite::canBringBack (s.context));
+    goBack ("version.bringBack", [&] { return commands.invoke ("version.bringBack"); }, songIs (n.firstText));
+
+    // Take from This Version: a line of what differs from First, taken from it.
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, n.first); }));
+    const auto keysFromFirst = lineOf ("Keys");
+    goBack ("Take Keys from First", [&] { return phazite::takeBack (s.context, keysFromFirst); }, notesAre (n.keys, n.firstKeys), true);
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, {}); }));
+
+    // A line of what Second changed, restored from First, and one from Second.
+    const auto secondsLines = readVersionChanges (s.context, n.second);
+    const auto keysOfSecond = findLine (secondsLines, "Keys"), bassOfSecond = findLine (secondsLines, "Bass");
+    INFO ("Second's lines: " << describeChanges (secondsLines).toStdString());
+    REQUIRE (keysOfSecond.has_value());
+    REQUIRE (bassOfSecond.has_value());
+    goBack (
+        "Restore Keys from First", [&] { return phazite::restoreFromVersion (s.context, n.first, *keysOfSecond); },
+        notesAre (n.keys, n.firstKeys), true);
+    goBack (
+        "Restore Bass from Second", [&] { return phazite::restoreFromVersion (s.context, n.second, *bassOfSecond); },
+        notesAre (n.bass, n.secondBass), true);
+
+    // An automatic save restored: taken of the song as it is, then a note's velocity set through the alias, and the save
+    // brought back, which gives the song as it was before the velocity (not merely a step that Undo takes back).
+    REQUIRE (waitForVersionHistory (s.context));
+    phazite::getVersionHistory (s.context)->takeSnapshot ("auto");
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE_FALSE (phazite::getSnapshots (s.context).empty());
+    const auto saved = phazite::getSnapshots (s.context).front().time; // the newest
+    const auto beforeVelocity = writeSong (song, SongPart::undoable);
+    undo.check ("a velocity",
+                [&n]
+                {
+                    n.editNote ("Set Velocity", 0,
+                                [] (phazite::Song& edited, phazite::NoteRef note) { phazite::setNoteVelocities (edited, { note }, 70); });
+                });
+    goBack ("Restore the automatic save", [&] { return phazite::restoreSnapshot (s.context, saved); }, songIs (beforeVelocity));
+
+    // A version opened live and closed: the song is the version's while it is open, and Now's again, whole, after Back to Now.
+    const auto now = writeSong (song, SongPart::whole);
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::openVersion (s.context, n.first, s.save); }));
+    REQUIRE (phazite::getOpenVersion (s.context) == n.first);
+    REQUIRE (waitForVersionHistory (s.context));
+    checkWhole (song);
+    CHECK (describeSongDifferences (n.firstText, writeSong (song, SongPart::undoable)).isEmpty());
+    REQUIRE (phazite::backToNow (s.context));
+    CHECK (phazite::getOpenVersion (s.context).isEmpty());
+    CHECK (describeSongDifferences (now, writeSong (song, SongPart::whole)).isEmpty());
+    checkWhole (song);
+
+    // Every step back to where the check began, and forth again.
+    undo.walkBackAndForth();
+    checkWhole (song);
+}
+
+// FINDING (known bug 234): Put Back of one track's line (takeBack(); Take from This Version is the same) makes that track's
+// clips of an alias group what they were and leaves the group's clips on other tracks as they are now, so that the group's
+// clips hold different notes, which Schema.h (clipLink) says they never do. Once fixed, the group's other clips take the
+// restored notes, as a merge gives every clip of a group its keeper's notes (docs/design/versions.md).
+TEST_CASE ("Put Back of one track's line keeps the clips of an alias group on other tracks holding the same notes" * doctest::should_fail())
+{
+    NotesAndAliases n;
+    const auto keys = findLine (phazite::getListedChanges (withChangesIn (n.s.context)), "Keys");
+    REQUIRE (keys.has_value());
+    REQUIRE (phazite::test::finished (n.s.context, [&] { return phazite::takeBack (n.s.context, *keys); }));
+    REQUIRE (describeTrackNotes (n.song(), n.keys) == n.secondKeys);
+
+    // The group's clips, Keys's among them, hold the same notes.
+    const auto group = phazite::getLinkedClips (n.s.context, n.clip);
+    REQUIRE (group.size() == 3);
+    INFO (describeGroupNotes (n.song(), group).toStdString());
+    CHECK (countDifferentNotes (n.song(), group) == 1);
+}
+
+// FINDING (known bug 234): a line of a version restored alone (restoreFromVersion(), version.restoreChange) does the same:
+// the track's clips of an alias group become the version's, the group's clips on other tracks stay as they are, holding
+// other notes. Once fixed, the group's other clips take the restored notes, as a merge gives every clip of a group its
+// keeper's notes (docs/design/versions.md).
+TEST_CASE ("A track's line restored from a version keeps the clips of an alias group on other tracks holding the same notes"
+           * doctest::should_fail())
+{
+    NotesAndAliases n;
+    const auto keys = findLine (readVersionChanges (n.s.context, n.second), "Keys");
+    REQUIRE (keys.has_value());
+    REQUIRE (phazite::test::finished (n.s.context, [&] { return phazite::restoreFromVersion (n.s.context, n.first, *keys); }));
+    REQUIRE (describeTrackNotes (n.song(), n.keys) == n.firstKeys);
+
+    // The group's clips, Keys's among them, hold the same notes.
+    const auto group = phazite::getLinkedClips (n.s.context, n.clip);
+    REQUIRE (group.size() == 3);
+    INFO (describeGroupNotes (n.song(), group).toStdString());
+    CHECK (countDifferentNotes (n.song(), group) == 1);
+}
+
+TEST_CASE ("A merge of note edits made through an alias on both branches is one exact undo step, the group whole after it, its Undo "
+           "and its Redo")
+{
+    NotesAndAliases n (false);
+    auto& s = n.s;
+    auto& song = n.song();
+
+    // idea-2: the first note up two semitones through the alias on Keys. main: the last note's velocity, through it too.
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+    n.editNote ("Transpose", 0, [] (phazite::Song& edited, phazite::NoteRef note) { phazite::transposeNotes (edited, { note }, 2); });
+    const auto theirs = keepVersion (s.context, "Up");
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    n.editNote ("Set Velocity", 2,
+                [] (phazite::Song& edited, phazite::NoteRef note) { phazite::setNoteVelocities (edited, { note }, 70); });
+    keepVersion (s.context, "Softer");
+    const auto mainNotes = phazite::getClipNotes (song, n.clip);
+    REQUIRE (mainNotes.size() == 3);
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+    UndoCheck undo (s.context);
+    undo.check ("Merge", [&s] { REQUIRE (phazite::finishMerge (s.context)); });
+    REQUIRE (phazite::isMerging (s.context));
+    CHECK (phazite::getClashes (s.context).empty());
+    checkWhole (song);
+
+    // Both edits in every clip of the group.
+    for (const auto member : { n.clip, n.onKeys, n.later })
+    {
+        INFO ("clip " << member.getRaw());
+        const auto notes = phazite::getClipNotes (song, member);
+        REQUIRE (notes.size() == 3);
+        CHECK (notes[0].pitch == mainNotes[0].pitch + 2);
+        CHECK (notes[2].velocity == 70);
+    }
+
+    undo.stepBackOrForth ("Undo Merge", [&song] { phazite::undo (song); });
+    CHECK_FALSE (phazite::isMerging (s.context));
+    checkWhole (song);
+    undo.stepBackOrForth ("Redo Merge", [&song] { phazite::redo (song); });
+    CHECK (phazite::isMerging (s.context));
+    checkWhole (song);
+    undo.walkBackAndForth();
+    checkWhole (song);
 }

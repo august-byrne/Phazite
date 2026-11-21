@@ -2,10 +2,12 @@
 // The song's tempo and time signature (src/model/transport/internal/Tempo.h), and what a change of tempo stretches:
 // samples that follow it, which Phazite renders (roadmap step 2.18), and patterns unless they keep their speed.
 #include "EnginePlayback.h"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/TimelineModel.h"
@@ -14,6 +16,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
@@ -22,11 +25,13 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/Preview.h"
+#include "model/mixer/MixerModel.h"
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/TempoModel.h"
 #include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
@@ -869,4 +874,85 @@ TEST_CASE ("Capture in 6/8 makes a clip of whole bars of the song's, three quart
         CAPTURE (i);
         CHECK (notes[i].start.inBeats() == doctest::Approx (3.0 + 0.5 * (double) i).epsilon (0.01));
     }
+}
+
+TEST_CASE ("Every edit of the tempo map is one exact undo step, with a loop that follows the tempo, notes and automation, and the walk "
+           "back and forth gives each song again")
+{
+    // Tempo.h's edits (and TempoModel.h's typed tempo), each through the undo check, on a song with a loop that follows the
+    // tempo, a clip of notes and a volume curve, none of which may move off its beats: the clips' starts, the note's and the
+    // curve's points are checked at the end.
+    phazite::test::TemporaryFolder temp;
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::setSong (context, songPtr.get());
+    const auto tracks = phazite::ensureTracks (song, 2);
+    const auto loop = phazite::importFile (song, tracks[0], writeClicks (temp.folder, 8, 120.0), phazite::BeatPosition());
+    REQUIRE (isAudioClip (song, loop));
+    const auto clip = phazite::test::addMidiClip (song, tracks[1], { phazite::test::at (4.0), phazite::test::at (12.0) });
+    phazite::test::addMidiNote (song, clip, 60, phazite::test::at (1.0), phazite::test::lasting (1.0));
+    const auto volume = phazite::getVolume (context, tracks[1]).getRef();
+    phazite::addPoint (song, volume, { phazite::test::at (0.0), 0.2f });
+    phazite::addPoint (song, volume, { phazite::test::at (16.0), 0.8f });
+    song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (song);
+
+    const auto inStep = [&undo, &song] (const char* name, const std::function<void()>& edit)
+    {
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (song, name);
+                        edit();
+                    });
+    };
+
+    undo.check ("Change Tempo", [&] { phazite::setTempo (song, 100.0); });
+    undo.check ("Add Tempo Change", [&] { CHECK (phazite::addTempoChange (song, phazite::test::at (8.0)) == 1); });
+    undo.check ("Add Tempo Change at a tempo", [&] { CHECK (phazite::addTempoChange (song, phazite::test::at (16.0), 140.0) == 2); });
+    undo.check ("Move Tempo Change", [&] { CHECK (phazite::moveTempoChange (song, 1, phazite::test::at (6.0), 110.0) == 1); });
+    undo.check ("Change Tempo Ramp", [&] { phazite::setTempoCurve (song, 1, phazite::tempoRamp); });
+    undo.check ("Bend the Ramp", [&] { phazite::setTempoCurve (song, 1, 0.4f); });
+    undo.check ("Change Tempo where a beat is", [&] { phazite::setTempoAt (song, phazite::test::at (20.0), 150.0); });
+    undo.check ("Type a Tempo", [&] { phazite::setTempoChangeBpm (context, 1, 112.5); });
+
+    phazite::movePlayhead (song, phazite::test::at (12.0));
+    undo.check ("Add Tempo Change at the Playhead", [&] { phazite::addTempoChangeAtPlayhead (song); });
+    undo.check ("Delete Tempo Change", [&] { phazite::deleteTempoChange (song, 2); });
+    inStep ("Take Tempo Changes",
+            [&]
+            {
+                phazite::takeTempoChanges (
+                    song, { { phazite::test::at (0.0), 96.0, phazite::tempoJump }, { phazite::test::at (4.0), 128.0, phazite::tempoRamp } },
+                    phazite::test::at (24.0));
+            });
+    inStep ("Insert Tempo Map Time", [&] { phazite::insertTempoMapTime (song, phazite::test::at (7.0), phazite::test::lasting (4.0)); });
+    inStep ("Remove Tempo Map Time", [&] { phazite::removeTempoMapTime (song, { phazite::test::at (14.0), phazite::test::at (18.0) }); });
+    undo.check ("Time Signature", [&] { phazite::setTimeSignature (song, { 6, 8 }); });
+    inStep ("Samples Follow Tempo", [&] { phazite::toggleSamplesFollowTempo (song); });
+    inStep ("Patterns Follow Tempo", [&] { phazite::togglePatternsFollowTempo (song); });
+    undo.check ("Remove Tempo Changes", [&] { phazite::removeTempoChanges (song); });
+    CHECK_FALSE (phazite::hasTempoChanges (song));
+    CHECK (undo.getNumSteps() == 17);
+
+    // The tempo map ensured, as a project opens: no undo step, and on a song that has one, nothing changed that undo steps
+    // keep (UndoCheck.h: a change without a step leaves that alone).
+    undo.check ("Ensure the Tempo Map", [&] { phazite::ensureTempoMap (song); });
+    CHECK (undo.getNumSteps() == 17);
+
+    // The notes' clip and the note in it, the loop and the curve's points on their beats all the while.
+    CHECK (phazite::getClipRange (song, clip).getStart().inBeats() == doctest::Approx (4.0));
+    const auto notes = phazite::getClipNotes (song, clip);
+    REQUIRE (notes.size() == 1);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (5.0));
+    CHECK (phazite::getClipRange (song, loop).getStart().inBeats() == doctest::Approx (0.0));
+    const auto points = phazite::getPoints (song, volume);
+    REQUIRE (points.size() == 2);
+    CHECK (points[0].beat.inBeats() == doctest::Approx (0.0));
+    CHECK (points[1].beat.inBeats() == doctest::Approx (16.0));
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (song);
+    phazite::setSong (context, nullptr);
 }

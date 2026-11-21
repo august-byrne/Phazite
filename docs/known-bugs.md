@@ -161,10 +161,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`removeBrokenReferences()` leaves links alone). So a restored clip that carries its old link holds its old notes
   beside clips of the group that hold newer ones: an edit through one of them then reaches it only in part, and a
   later merge gives it the group's notes over its own. Found by reading, while the merge's alias rule was reviewed
-  (2026-11-21); not seen. To fix: where a restored line is taken into the song, each of its clips with a link either
-  takes the group's notes as the song holds them or loses its link (the second is what Restore means: the line as it
-  was), with the consistency check's alias rule run on the result in the versions' tests. Goes away as the notes move
-  (roadmap step S5.20), where a group holds one value and a clip joining it can't hold another.
+  (2026-11-21), then shown: Put Back of one track's line, Take from This Version and a line restored each change
+  that track's clips of a group and leave the group's clips on other tracks as they were (two cases of
+  `tests/VersionsGoingBackTests.cpp` fail until it is fixed), and the next opening of the project then makes the
+  clip a clip of its own. To fix (decided 2026-11-21, as a merge does): the group's other clips take the restored
+  notes, in the same undo step, since putting a line back is an edit of its clips' notes and an edit of a group's
+  notes reaches every clip of it. Fixed as the notes move (roadmap step S5.20), where a group holds one value.
 
 ## Devices and playback
 

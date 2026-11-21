@@ -2,6 +2,8 @@
 // The chord lane as the UI reaches it (src/model/chords/ChordModel.h): its chords and keys, progressions laid over the
 // song, each edit one undo step, chords that go with the song's time, Delete All Chords, where a progression goes, the
 // lane saved and read back, and a progression written out for the previewer.
+#include "SongCheck.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "UndoCheck.h"
 #include "model/arrangement/PlaylistModel.h"
@@ -18,6 +20,8 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+
+#include <functional>
 
 namespace
 {
@@ -395,4 +399,62 @@ TEST_CASE ("A progression written out for the previewer: held chords with their 
     CHECK (lastOff == doctest::Approx (16.0));
     CHECK (phazite::getProgressionLength (song.context, getProgression ("popAnthem"), beat (0.0)).inBeats() == doctest::Approx (16.0));
     CHECK (phazite::getProgressionLength (song.context, getProgression ("twelveBarBlues"), beat (0.0)).inBeats() == doctest::Approx (48.0));
+}
+
+TEST_CASE ("Every edit of the chord lane is one exact undo step, and the walk back through them all and forth gives each song again")
+{
+    // The lane's insides (model/chords/internal/Chords.h), each in a step as a command holds it, then the edits as the UI
+    // reaches them (ChordModel.h), each a step of its own; on a song with a clip of notes, which none of them moves.
+    Song song;
+    auto& model = song.getSong();
+    const auto track = phazite::getTrackIDs (model)[0];
+    const auto clip = phazite::test::addMidiClip (model, track, beats (0.0, 8.0));
+    phazite::test::addMidiNote (model, clip, 60, beat (0.0), phazite::BeatDuration::fromBeats (1.0));
+    phazite::test::addMidiNote (model, clip, 64, beat (4.0), phazite::BeatDuration::fromBeats (1.0));
+    model.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (model);
+
+    const auto inStep = [&undo, &model] (const char* name, const std::function<void()>& edit)
+    {
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (model, name);
+                        edit();
+                    });
+    };
+
+    inStep ("Put Progression", [&] { phazite::putProgression (model, getProgression ("popAnthem"), beats (0.0, 32.0)); });
+    inStep ("Put Chord", [&] { phazite::putLaneChord (model, beats (4.0, 6.0), { 2, 0, ChordType::minor, 0 }); });
+    inStep ("Set Numeral", [&] { phazite::setLaneChordNumeral (model, beat (4.0), { 5, 0, ChordType::dominantSeventh, 1 }); });
+    inStep ("Set Chord End", [&] { phazite::setLaneChordEnd (model, beat (4.0), beat (10.0)); });
+    inStep ("Remove Chord", [&] { phazite::removeLaneChord (model, beat (0.0)); });
+    inStep ("Clear Range", [&] { phazite::clearLaneRange (model, beats (13.0, 15.0)); });
+    inStep ("Set Key", [&] { phazite::setLaneKey (model, beat (16.0), { 5, Scale::major }); });
+    inStep ("Set Song Key", [&] { phazite::setLaneKey (model, beat (0.0), { 2, Scale::minor }); });
+    inStep ("Remove Key Change", [&] { phazite::removeLaneKeyChange (model, beat (16.0)); });
+    inStep ("Set Key Again", [&] { phazite::setLaneKey (model, beat (8.0), { 9, Scale::minor }); });
+    inStep ("Insert Lane Time", [&] { phazite::insertLaneTime (model, beat (6.0), phazite::BeatDuration::fromBeats (4.0)); });
+    inStep ("Remove Lane Time", [&] { phazite::removeLaneTime (model, beats (2.0, 5.0)); });
+    inStep ("Move Lane Time", [&] { phazite::moveLaneTime (model, beats (0.0, 8.0), beat (20.0)); });
+    inStep ("Copy Lane Chords",
+            [&]
+            {
+                const auto copy = phazite::copyLaneChords (model, beats (8.0, 16.0));
+                phazite::pasteLaneChords (model, copy, beat (32.0));
+            });
+
+    undo.check ("Add Chord", [&] { phazite::addLaneChord (song.context, beats (40.0, 44.0), { 4, 0, ChordType::majorSeventh, 0 }); });
+    undo.check ("Change Chord", [&] { phazite::changeLaneChord (song.context, beat (40.0), { 6, 0, ChordType::minorSeventh, 2 }); });
+    undo.check ("Change Chord Length", [&] { phazite::setLaneChordEnd (song.context, beat (40.0), beat (42.0)); });
+    undo.check ("Change Key", [&] { phazite::setLaneKey (song.context, beat (24.0), { 7, Scale::major }); });
+    undo.check ("Remove Key Change", [&] { phazite::removeLaneKeyChange (song.context, beat (24.0)); });
+    undo.check ("Apply Chord Progression", [&] { phazite::applyProgression (song.context, getProgression ("canon"), beats (48.0, 64.0)); });
+    undo.check ("Delete Chord", [&] { phazite::deleteLaneChord (song.context, beat (40.0)); });
+    undo.check ("Delete All Chords", [&] { phazite::deleteAllLaneChords (song.context); });
+    CHECK_FALSE (phazite::hasLaneChords (song.context));
+    CHECK (undo.getNumSteps() == 22);
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (model);
 }

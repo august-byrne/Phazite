@@ -5,6 +5,7 @@
 // commands, and the parameter touched last.
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
+#include "SongCheck.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
@@ -28,6 +29,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <optional>
+#include <vector>
 
 namespace
 {
@@ -901,4 +905,226 @@ TEST_CASE ("A return's row is in the playlist while the return has lanes, after 
 
     phazite::removeAutomationLane (context, phazite::getVolume (context, id).getRef());
     CHECK_FALSE (hasRow());
+}
+
+TEST_CASE ("Every edit of automation is one exact undo step, two points at one beat play the later and keep their order, and the walk "
+           "back and forth gives each song again")
+{
+    // Automation.h's edits, each in a step as a command holds it, and AutomationModel.h's, each a step of its own; on A's
+    // compressor's makeup, A's volume (a curve of one point) and B's pan; curves copied to a compressor on B and forgotten
+    // with it; then the lanes and the write mode, which are no steps.
+    Song song;
+    auto& context = song.context;
+    auto& model = *song.song;
+    const auto makeup = song.makeup();
+    const auto volume = song.volume();
+    const auto pan = phazite::getPan (context, song.b).getRef();
+    phazite::test::UndoCheck undo (model);
+
+    const auto inStep = [&undo, &model] (const char* name, const std::function<void()>& edit)
+    {
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (model, name);
+                        edit();
+                    });
+    };
+
+    const auto positionAt = [&model, &makeup] (double beat) { return phazite::getPositions (model, makeup, { beats (beat) })[0]; };
+
+    inStep ("Add Point", [&] { CHECK (phazite::addPoint (model, makeup, { beats (0), 0.5f }) == 0); });
+    inStep ("Add Point After", [&] { CHECK (phazite::addPoint (model, makeup, { beats (8), 0.7f }) == 1); });
+
+    // A jump down drawn: two points at beat 4, 0.8 then 0.2 (Schema.h: two at one beat in the order they go), so that an
+    // order by value would turn them round. Before the beat the line runs to the first; at the beat, and after, the second
+    // plays.
+    inStep ("Draw a Jump Down",
+            [&]
+            {
+                phazite::replacePoints (model, makeup, { beats (2), beats (6) },
+                                        { { beats (2), 0.5f }, { beats (4), 0.8f }, { beats (4), 0.2f }, { beats (6), 0.5f } });
+            });
+    REQUIRE (beatsOf (phazite::getPoints (model, makeup)) == std::vector { 0.0, 2.0, 4.0, 4.0, 6.0, 8.0 });
+    CHECK (phazite::getPoints (model, makeup)[2].position == doctest::Approx (0.8f));
+    CHECK (phazite::getPoints (model, makeup)[3].position == doctest::Approx (0.2f));
+    CHECK (positionAt (3.0) == doctest::Approx (0.65f));
+    CHECK (positionAt (4.0) == doctest::Approx (0.2f));
+    CHECK (positionAt (5.0) == doctest::Approx (0.35f));
+
+    // And a jump up at beat 10, 0.3 then 0.9: the line from beat 8's 0.7 runs down to the first, and the second plays.
+    inStep ("Draw a Jump Up",
+            [&] { phazite::replacePoints (model, makeup, { beats (9), beats (11) }, { { beats (10), 0.3f }, { beats (10), 0.9f } }); });
+    REQUIRE (beatsOf (phazite::getPoints (model, makeup)) == std::vector { 0.0, 2.0, 4.0, 4.0, 6.0, 8.0, 10.0, 10.0 });
+    CHECK (phazite::getPoints (model, makeup)[6].position == doctest::Approx (0.3f));
+    CHECK (phazite::getPoints (model, makeup)[7].position == doctest::Approx (0.9f));
+    CHECK (positionAt (9.0) == doctest::Approx (0.5f));
+    CHECK (positionAt (10.0) == doctest::Approx (0.9f));
+
+    // Another point moved, and the first of the jump down deleted: undone, both are back in their order.
+    inStep ("Move Point", [&] { phazite::movePoints (model, makeup, { 1 }, BeatDuration::fromBeats (0.5), 0.1f); });
+    CHECK (phazite::getPoints (model, makeup)[2].position == doctest::Approx (0.8f));
+    CHECK (phazite::getPoints (model, makeup)[3].position == doctest::Approx (0.2f));
+    inStep ("Delete Point", [&] { phazite::deletePoints (model, makeup, { 2 }); });
+    CHECK (positionAt (4.0) == doctest::Approx (0.2f));
+    undo.stepBackOrForth ("Undo Delete Point", [&model] { phazite::undo (model); });
+    REQUIRE (beatsOf (phazite::getPoints (model, makeup)) == std::vector { 0.0, 2.5, 4.0, 4.0, 6.0, 8.0, 10.0, 10.0 });
+    CHECK (phazite::getPoints (model, makeup)[2].position == doctest::Approx (0.8f));
+    CHECK (phazite::getPoints (model, makeup)[3].position == doctest::Approx (0.2f));
+    CHECK (positionAt (4.0) == doctest::Approx (0.2f));
+    undo.stepBackOrForth ("Redo Delete Point", [&model] { phazite::redo (model); });
+    undo.stepBackOrForth ("Undo Delete Point again", [&model] { phazite::undo (model); });
+
+    // The jump up undone (after the point moved since) and redone: its two points back in their order.
+    undo.stepBackOrForth ("Undo Move Point", [&model] { phazite::undo (model); });
+    undo.stepBackOrForth ("Undo Draw a Jump Up", [&model] { phazite::undo (model); });
+    CHECK (beatsOf (phazite::getPoints (model, makeup)) == std::vector { 0.0, 2.0, 4.0, 4.0, 6.0, 8.0 });
+    undo.stepBackOrForth ("Redo Draw a Jump Up", [&model] { phazite::redo (model); });
+    undo.stepBackOrForth ("Redo Move Point", [&model] { phazite::redo (model); });
+    CHECK (phazite::getPoints (model, makeup)[6].position == doctest::Approx (0.3f));
+    CHECK (phazite::getPoints (model, makeup)[7].position == doctest::Approx (0.9f));
+
+    inStep ("Bend", [&] { phazite::setCurve (model, makeup, 0, 0.3f); });
+    inStep ("Duplicate Points",
+            [&] { CHECK (phazite::duplicatePoints (model, makeup, { 2, 3 }, BeatDuration::fromBeats (1.0)).size() == 2); });
+    inStep ("Volume's Point", [&] { phazite::addPoint (model, volume, { beats (0), 0.6f }); });
+    inStep ("Move the Only Point", [&] { phazite::moveOnlyPoint (model, volume, -6.0f); });
+    inStep ("Pan's Points",
+            [&]
+            {
+                phazite::replacePoints (model, pan, { beats (0), beats (16) },
+                                        { { beats (0), 0.0f }, { beats (8), 1.0f }, { beats (16), 0.5f } });
+            });
+
+    const std::vector<phazite::AutomationStretch> stretch { { song.a, { beats (0), beats (8) } } };
+    inStep ("Move Automation", [&] { phazite::moveAutomation (model, stretch, BeatDuration::fromBeats (16.0), false); });
+    inStep ("Copy Automation",
+            [&] { phazite::moveAutomation (model, { { song.a, { beats (16), beats (24) } } }, BeatDuration::fromBeats (-16.0), true); });
+    inStep ("Delete Automation", [&] { phazite::deleteAutomation (model, stretch, false); });
+    inStep ("Delete Automation, the Gap Closed",
+            [&] { phazite::deleteAutomation (model, { { song.a, { beats (4), beats (8) } } }, true); });
+    inStep ("Paste Automation",
+            [&]
+            {
+                const auto copy = phazite::copyAutomation (model, { { song.a, { beats (8), beats (20) } } });
+                phazite::pasteAutomation (model, copy, BeatDuration::fromBeats (24.0));
+            });
+    inStep ("Insert Automation Time", [&] { phazite::insertAutomationTime (model, beats (6), BeatDuration::fromBeats (2.0)); });
+    inStep ("Remove Automation Time", [&] { phazite::removeAutomationTime (model, { beats (10), beats (12) }); });
+    inStep ("Automation Edges", [&] { phazite::addAutomationEdges (model, { beats (3), beats (9) }); });
+    inStep ("Points Taken and Put Back Later",
+            [&]
+            {
+                const auto taken = phazite::getAutomationPointsIn (model, { beats (2), beats (6) });
+                phazite::removeAutomationPointsIn (model, { beats (2), beats (6) });
+                auto later = taken;
+
+                for (auto& each : later)
+                    each.point.beat = each.point.beat + BeatDuration::fromBeats (40.0);
+
+                phazite::addAutomationPoints (model, later);
+            });
+
+    // A compressor added to B, and the makeup curve of A's copied to it, as a copy with new IDs gives a copied device its
+    // original's automation; then B's compressor removed, its curve kept while an undo could bring it back, and forgotten
+    // in a step, as a restore from a damaged commit forgets those a song taken in part brought in.
+    undo.check ("Add B's Compressor", [&] { phazite::addEffect (context, song.b, song.find ("phaziteCompressor")); });
+    const auto effectsOfB = phazite::getEffects (context, song.b);
+    REQUIRE (effectsOfB.size() == 1);
+    const ParameterRef makeupOfB { effectsOfB[0].id, "makeup" };
+    inStep ("Copy Curves", [&] { phazite::copyCurves (model, { { makeup.device.getRaw(), makeupOfB.device.getRaw() } }); });
+    CHECK (beatsOf (phazite::getPoints (model, makeupOfB)) == beatsOf (phazite::getPoints (model, makeup)));
+    undo.check ("Remove B's Compressor", [&] { phazite::removeDevice (context, makeupOfB.device); });
+    CHECK_FALSE (phazite::getPoints (model, makeupOfB).empty());
+    inStep ("Forget Curves of Gone Devices",
+            [&] { phazite::forgetCurvesOfGoneDevices (model, &model.getUndoManager(), [] (const juce::ValueTree&) { return true; }); });
+    CHECK (phazite::getPoints (model, makeupOfB).empty());
+    CHECK_FALSE (phazite::getPoints (model, makeup).empty());
+
+    // As the UI reaches them, each a step of its own; and a lane cleared.
+    undo.check ("Add Automation Point", [&] { phazite::addAutomationPoint (context, pan, { beats (2), 0.25f }); });
+    undo.check ("Move Automation Points",
+                [&] { phazite::moveAutomationPoints (context, pan, { 1 }, BeatDuration::fromBeats (1.0), -0.1f); });
+    undo.check ("Bend Automation", [&] { phazite::setAutomationCurve (context, pan, 0, -0.4f); });
+    undo.check ("Set Automation Value", [&] { phazite::setAutomationPointPositions (context, pan, { 0, 1 }, 0.75f); });
+    undo.check ("Bend Automation of several", [&] { phazite::setAutomationCurves (context, pan, { 0, 1 }, 0.2f); });
+    undo.check ("Delete Automation Points", [&] { phazite::deleteAutomationPoints (context, pan, { 0 }); });
+    undo.check (
+        "Draw Automation",
+        [&] { phazite::replaceAutomationPoints (context, pan, { beats (4), beats (12) }, { { beats (5), 0.1f }, { beats (11), 0.9f } }); });
+    undo.check ("Clear the Lane", [&] { phazite::deleteAutomation (phazite::getParameter (context, pan)); });
+    CHECK (phazite::getPoints (model, pan).empty());
+    CHECK (undo.getNumSteps() == 32);
+
+    // The lanes A shows and its write mode, view state and a switch, are no undo steps, and leave what undo steps keep alone
+    // (UndoCheck.h); the walk then goes through every step with them as they are left.
+    const auto panOfA = phazite::getPan (context, song.a).getRef();
+    const auto laneOf = [&model, &song] (const ParameterRef& parameter) -> std::optional<phazite::AutomationLane>
+    {
+        for (const auto& lane : phazite::getLanes (model, song.a))
+            if (lane.parameter == parameter)
+                return lane;
+
+        return std::nullopt;
+    };
+
+    undo.check ("Show Lane", [&] { phazite::showLane (model, song.a, makeup); });
+    REQUIRE (laneOf (makeup).has_value());
+    undo.check ("Lane Height", [&] { phazite::setLaneHeight (model, song.a, makeup, 120); });
+    CHECK (laneOf (makeup)->height == 120);
+    undo.check ("Collapse Lane", [&] { phazite::setLaneCollapsed (model, song.a, makeup, true); });
+    CHECK (laneOf (makeup)->collapsed);
+    undo.check ("Show Another Lane", [&] { phazite::showLane (model, song.a, volume); });
+    undo.check ("Replace Lane", [&] { phazite::replaceLane (model, song.a, volume, panOfA); });
+    CHECK (laneOf (panOfA).has_value());
+    undo.check ("Remove Lane", [&] { phazite::removeLane (model, song.a, panOfA); });
+    CHECK_FALSE (laneOf (panOfA).has_value());
+    undo.check ("Latch", [&] { phazite::setAutomationMode (model, song.a, AutomationMode::latch); });
+    CHECK (phazite::getAutomationMode (model, song.a) == AutomationMode::latch);
+    CHECK (undo.getNumSteps() == 32);
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (model);
+}
+
+TEST_CASE ("Two points at one beat keep their order through a save and the project opened again, a jump down and a jump up")
+{
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (temp.folder, "Jumps", error);
+    REQUIRE (project != nullptr);
+    phazite::test::dispatchPendingMessages();
+
+    auto& song = project->getSong();
+    const auto track = phazite::getTrackIDs (song)[0];
+    const ParameterRef volume { phazite::getFader (song, track), phazite::getVolumeParameterID (song, track) };
+    REQUIRE (volume.isValid());
+
+    // At beat 4, 0.8 then 0.2; at beat 8, 0.3 then 0.9.
+    {
+        const phazite::UndoStep step (song, "Draw Jumps");
+        phazite::replacePoints (
+            song, volume, { beats (0), beats (12) },
+            { { beats (0), 0.5f }, { beats (4), 0.8f }, { beats (4), 0.2f }, { beats (8), 0.3f }, { beats (8), 0.9f } });
+    }
+
+    const auto describe = [] (const std::vector<phazite::AutomationPoint>& points)
+    {
+        juce::StringArray lines;
+
+        for (const auto& point : points)
+            lines.add (juce::String (point.beat.inBeats(), 2) + ": " + juce::String (point.position, 2));
+
+        return lines.joinIntoString ("; ");
+    };
+
+    const juce::String drawn ("0.00: 0.50; 4.00: 0.80; 4.00: 0.20; 8.00: 0.30; 8.00: 0.90");
+    REQUIRE (describe (phazite::getPoints (song, volume)) == drawn);
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project.reset();
+
+    const auto reopened = phazite::Project::open (file, false, error);
+    REQUIRE (reopened != nullptr);
+    CHECK (describe (phazite::getPoints (reopened->getSong(), volume)) == drawn);
 }

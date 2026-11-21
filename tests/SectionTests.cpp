@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/TrackColours.h"
 #include "model/arrangement/internal/Arrangement.h"
@@ -15,6 +17,7 @@
 #include "model/project/internal/Project.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <functional>
 #include <set>
 
 namespace
@@ -616,4 +619,126 @@ TEST_CASE ("Section edits made with the mouse are undo steps of their own, and n
     CHECK (later->range.getStart().inBeats() == doctest::Approx (40.0));
     CHECK (between->range.getStart().inBeats() == doctest::Approx (36.0));
     CHECK (between->range.getEnd().inBeats() == doctest::Approx (40.0));
+}
+
+TEST_CASE ("Every edit of the sections is one exact undo step, and the walk back through them all and forth gives each song again")
+{
+    // Sections.h's edits, each in a step as a command holds it (those that are a step of their own join it), on the electronic
+    // outline with a riff of notes in the Drop and an alias of it on the other track; the song checked at the end.
+    Song song;
+    auto& model = song.getSong();
+    const auto riff = song.addClip (0, 96, 112, "Riff");
+    phazite::test::addMidiNote (model, riff, 60, at (0), lasting (1.0));
+    phazite::test::addMidiNote (model, riff, 67, at (2), lasting (0.5));
+    const auto alias = phazite::copyClips (model, { riff }, true);
+    REQUIRE (alias.size() == 1);
+    phazite::moveClip (model, alias[0], at (260), song.getTrack (1));
+    model.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (model);
+
+    const auto inStep = [&undo, &model] (const char* name, const std::function<void()>& edit)
+    {
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (model, name);
+                        edit();
+                    });
+    };
+
+    inStep ("Insert Section",
+            [&] { REQUIRE (phazite::insertSection (model, at (384), { .name = "Coda", .length = lasting (16) }).isValid()); });
+    inStep ("Append Section", [&] { REQUIRE (phazite::appendSection (model, &song.selection).isValid()); });
+    inStep ("Add Section", [&] { REQUIRE (phazite::addSectionAt (model, at (450), &song.selection).isValid()); });
+    inStep ("Rename Section", [&] { phazite::renameSection (model, song.id (0), "Opening"); });
+    inStep ("Section Colour", [&] { phazite::setSectionColour (model, song.id (1), juce::Colour (0xff336699)); });
+    inStep ("Move Section", [&] { phazite::moveSection (model, song.id (2), at (0)); });
+    inStep ("Copy Section", [&] { REQUIRE (phazite::copySection (model, song.id (1), at (384), false).isValid()); });
+    inStep ("Duplicate Section as Aliases", [&] { REQUIRE (phazite::duplicateSection (model, song.id (0), true).isValid()); });
+    inStep ("Delete Section", [&] { phazite::deleteSection (model, song.id (4)); });
+    inStep ("Delete Sections", [&] { phazite::deleteSections (model, { song.id (1), song.id (3) }); });
+    inStep ("Duplicate Sections", [&] { CHECK (phazite::duplicateSections (model, { song.id (1) }, false, &song.selection).size() == 1); });
+    inStep ("Resize Section", [&] { phazite::resizeSection (model, song.id (0), lasting (48), true); });
+    inStep ("Resize Section Alone", [&] { phazite::resizeSection (model, song.id (1), lasting (16), false); });
+    inStep ("Insert Section Time", [&] { phazite::insertSectionTime (model, at (10), lasting (4)); });
+    inStep ("Remove Section Time", [&] { phazite::removeSectionTime (model, { at (20), at (24) }); });
+    inStep ("Move Section Time", [&] { phazite::moveSectionTime (model, song.section (0).range, phazite::getSectionsEnd (model)); });
+    inStep ("Copy Sections",
+            [&]
+            {
+                const auto copy = phazite::copySections (model, song.section (1).range);
+                phazite::pasteSections (model, copy, phazite::getSectionsEnd (model));
+            });
+    inStep ("Remove Sections", [&] { phazite::removeSections (model); });
+    CHECK (phazite::getSections (model).empty());
+    CHECK (undo.getNumSteps() == 18);
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (model);
+}
+
+TEST_CASE ("Moving and copying time leave a tempo change in the range where it is and copy none, while the clips go with the time")
+{
+    // What moveTime() and copyTime() do today with a tempo change inside the range, pinned: it stays on its beat, and a copy
+    // makes none. This is the documented behaviour: model/arrangement/internal/Arrangement.h (its opening comment) says tempo
+    // changes "stay where they are when a range is moved or copied", and that inserted and removed time carry them (the room
+    // copyTime() makes is inserted time, which carries those after it). The owner has not decided whether a move or a copy
+    // should carry them too, as a tempo change in a section moved or copied might go with it. Electronic outline: the Drop is
+    // 96-160, the Outro 320-384.
+    Song song;
+    auto& model = song.getSong();
+    const auto riff = song.addClip (0, 96, 112, "Riff");
+    phazite::test::addMidiNote (model, riff, 60, at (0), lasting (1.0));
+    REQUIRE (phazite::addTempoChange (model, at (100), 140.0) == 1); // in the Drop
+    REQUIRE (phazite::addTempoChange (model, at (330), 90.0) == 2);  // in the Outro
+    model.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (model);
+
+    const auto tempos = [&model]
+    {
+        juce::StringArray changes;
+
+        for (const auto& change : phazite::getTempoChanges (model))
+            changes.add (juce::String (change.beat.inBeats(), 2) + ": " + juce::String (change.bpm, 2));
+
+        return changes.joinIntoString ("; ");
+    };
+
+    REQUIRE (tempos() == "0.00: 120.00; 100.00: 140.00; 330.00: 90.00");
+
+    // The Drop moved before the first Build-up: the riff goes with it, to 64; the tempo change stays at 100, now 36 beats
+    // into the Drop rather than 4.
+    undo.check ("Move Time",
+                [&]
+                {
+                    const phazite::UndoStep step (model, "Move Time");
+                    phazite::moveTime (model, { at (96), at (160) }, at (64));
+                });
+    CHECK (song.findClip (0, 64).isValid());
+    CHECK (song.getClipName (song.findClip (0, 64)) == juce::String ("Riff"));
+    CHECK (tempos() == "0.00: 120.00; 100.00: 140.00; 330.00: 90.00");
+
+    // The Drop (64-128 now) copied to the Outro's start: the riff's copy at 320; no tempo change copied to 356, and the
+    // Outro's moved on with the room made, from 330 to 394.
+    undo.check ("Copy Time",
+                [&]
+                {
+                    const phazite::UndoStep step (model, "Copy Time");
+                    phazite::copyTime (model, { at (64), at (128) }, at (320), false);
+                });
+    CHECK (song.findClip (0, 320).isValid());
+    CHECK (song.getClipName (song.findClip (0, 320)) == juce::String ("Riff"));
+    CHECK (tempos() == "0.00: 120.00; 100.00: 140.00; 394.00: 90.00");
+
+    // As aliases, the same of the tempo.
+    undo.check ("Copy Time as Aliases",
+                [&]
+                {
+                    const phazite::UndoStep step (model, "Copy Time");
+                    phazite::copyTime (model, { at (64), at (128) }, at (0), true);
+                });
+    CHECK (tempos() == "0.00: 120.00; 164.00: 140.00; 458.00: 90.00");
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (model);
 }

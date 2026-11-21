@@ -84,11 +84,13 @@
 
 #include <array>
 #include <chrono>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 using phazite::test::AudioThreadMonitor;
 using phazite::test::TestSong;
@@ -2420,6 +2422,92 @@ TEST_SUITE ("realtime-audit")
         report ("Edited while it plays: values, notes, a clip, undo and redo", m);
         CHECK (m.peakLevel > 0.01f);                                                   // it plays
         CHECK (phazite::getNotes (song.context, std::vector { chords }).size() == 48); // the note undone
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: edited while it plays: notes moved, deleted, 200 transposed at once, one edited through an alias "
+               "on another track, a controller's value added, and a note edit undone and redone")
+    {
+        // Each edit hands the engine a new plan of the notes, and the old one goes on the message thread: the audio thread
+        // plays on through each without allocating or freeing. A block is 256 samples at 48 kHz, so the playhead is at about
+        // a hundredth of a beat a block: the edits are made under it and just ahead of it.
+        using phazite::test::at, phazite::test::lasting;
+        TestSong song;
+        auto& played = getSong (song);
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat * 0.5, 0.4);
+
+        // A pad of 200 short notes, all through the first beats.
+        const auto pad = song.addTrack ("Pad");
+        song.setInstrument (pad, phazite::devices::Synth::typeID);
+        const auto many = song.addMidiClip (pad, 0.0, 16.0);
+
+        for (int i = 0; i < 200; ++i)
+            song.addNote (many, 48 + i % 24, i * 0.02, 0.1, 60);
+
+        // A bass line, and an alias of it that plays on another track.
+        const auto bass = song.addTrack ("Bass");
+        song.setInstrument (bass, phazite::devices::Synth::typeID);
+        const auto line = song.addMidiClip (bass, 0.0, 8.0);
+
+        for (int beat = 0; beat < 8; ++beat)
+            song.addNote (line, 36 + beat % 4, beat * 0.5, 0.25);
+
+        const auto lead = song.addTrack ("Lead");
+        song.setInstrument (lead, phazite::devices::Synth::typeID);
+        const auto alias = song.copyClip (line, 8.0, true);
+        phazite::moveClip (song.context, alias, at (0.0), lead);
+        REQUIRE (phazite::getClipTrack (played, alias) == lead);
+
+        const auto chordNotes = phazite::getClipNotes (played, chords);
+        const auto padNotes = phazite::getClipNotes (played, many);
+        const auto aliasNotes = phazite::getClipNotes (played, alias);
+        REQUIRE (chordNotes.size() == 48);
+        REQUIRE (padNotes.size() == 200);
+        REQUIRE (aliasNotes.size() == 8);
+        std::vector<phazite::NoteRef> allPad;
+
+        for (const auto& note : padNotes)
+            allPad.push_back (note.getRef());
+
+        const auto inStep = [&played] (const char* name, const std::function<void()>& edit)
+        {
+            const phazite::UndoStep step (played, name);
+            edit();
+        };
+
+        const auto m = playProjectAndMeasure (
+            song.context,
+            Playing { .edits = {
+                          { 10, "a chord's note moved to just ahead of the playhead",
+                            [&] { inStep ("Move Note", [&] { phazite::moveNote (played, chordNotes[6].getRef(), at (0.3), 72); }); } },
+                          { 25, "a note deleted just ahead of the playhead",
+                            [&] { inStep ("Delete Note", [&] { phazite::deleteNotes (played, { chordNotes[3].getRef() }); }); } },
+                          { 40, "the pad's 200 notes transposed in one step",
+                            [&] { inStep ("Transpose", [&] { phazite::transposeNotes (played, allPad, 1); }); } },
+                          { 55, "a controller's value added ahead of the playhead",
+                            [&]
+                            {
+                                inStep ("Add Controller Value",
+                                        [&] { phazite::addControl (played, chords, at (1.0), phazite::ControlKind::controller, 1, 100); });
+                            } },
+                          { 70, "a bass note moved through its alias on the lead track, under the playhead",
+                            [&] { inStep ("Move Note", [&] { phazite::moveNote (played, aliasNotes[1].getRef(), at (0.75), 43); }); } },
+                          { 85, "the note edit undone", [&] { phazite::undo (played); } },
+                          { 100, "and redone", [&] { phazite::redo (played); } },
+                          { 115, "a note's velocity set through the alias, ahead of the playhead", [&]
+                            { inStep ("Set Velocity", [&] { phazite::setNoteVelocities (played, { aliasNotes[3].getRef() }, 30); }); } },
+                      } });
+        report ("Edited while it plays: notes moved, deleted, transposed, through an alias, a controller, undo and redo", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        CHECK (phazite::getClipNotes (played, chords).size() == 47);
+        CHECK (phazite::getClipNotes (played, many)[0].pitch == padNotes[0].pitch + 1);
+        CHECK (phazite::test::describeClipNotes (played, line) == phazite::test::describeClipNotes (played, alias));
+        CHECK (phazite::getClipNotes (played, line)[1].pitch == 43);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
