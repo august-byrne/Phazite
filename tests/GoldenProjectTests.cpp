@@ -739,8 +739,9 @@ struct SchemaName
 };
 
 // The names src/model/base/internal/Schema.h declares for a song, read from the header itself, so that a name added there
-// is found here without being listed anywhere: each `inline const juce::Identifier name { "saved" }` (an element's type in
-// capitals, or a property) and each `inline constexpr const char* name = "saved"` (a value). The names of the versions'
+// is found here without being listed anywhere: each `inline const Element NAME { "saved", ...` (an element's type) and
+// `inline const Property<T> name { "saved", ...` (a property), and each `inline constexpr const char* name = "saved"` (a
+// value). The names of the versions'
 // store and of the presets' files (its namespaces versions and preset) aren't the song's.
 std::vector<SchemaName> readSchemaNames()
 {
@@ -769,13 +770,13 @@ std::vector<SchemaName> readSchemaNames()
             continue;
         }
 
-        if (text.startsWith ("inline const juce::Identifier "))
+        if (text.startsWith ("inline const Element ") || text.startsWith ("inline const Property<"))
         {
-            // One or more of `name { "saved" }`, between commas.
-            for (auto rest = text.fromFirstOccurrenceOf ("juce::Identifier ", false, false); rest.contains ("{ \"");
-                 rest = rest.fromFirstOccurrenceOf ("\" }", false, false))
-                names.push_back ({ rest.upToFirstOccurrenceOf (" {", false, false).trimCharactersAtStart (", "),
-                                   rest.fromFirstOccurrenceOf ("{ \"", false, false).upToFirstOccurrenceOf ("\"", false, false) });
+            // `Element NAME { "saved", ...` or `Property<T> name { "saved", ...`, the name's description (SchemaDescription.h).
+            const auto declared = text.startsWith ("inline const Element ") ? text.fromFirstOccurrenceOf ("Element ", false, false)
+                                                                            : text.fromFirstOccurrenceOf ("> ", false, false);
+            names.push_back ({ declared.upToFirstOccurrenceOf (" {", false, false).trim(),
+                               declared.fromFirstOccurrenceOf ("{ \"", false, false).upToFirstOccurrenceOf ("\"", false, false) });
         }
         else if (text.startsWith ("inline constexpr const char* ") && text.contains (" = \""))
         {

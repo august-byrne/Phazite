@@ -1220,7 +1220,8 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
         notifyElsewhere (many);
         auto remaining = clipState.getChild (0);
 
-        for (const auto* property : { &schema::notePitch, &schema::noteStart, &schema::noteLength, &schema::noteVelocity })
+        for (const auto* property :
+             { &schema::notePitch.getName(), &schema::noteStart.getName(), &schema::noteLength.getName(), &schema::noteVelocity.getName() })
             remaining.setProperty (*property, firstState[*property], nullptr);
 
         phazite::undo (song);

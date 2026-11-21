@@ -22,149 +22,6 @@ namespace
 {
     namespace schema = phazite::schema;
 
-    // Where each element goes, by its parent's type, as Schema.h's "Child of" says.
-    const std::map<juce::String, juce::StringArray>& getPlaces()
-    {
-        static const std::map<juce::String, juce::StringArray> places {
-            { "PHAZITE",
-              { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "MIDILINKS", "SECTIONS", "CHORDLANE", "MERGING" } },
-            { "TEMPOMAP", { "TEMPO", "TIMESIGNATURE" } },
-            { "TRACKS", { "TRACK" } },
-            { "TRACK", { "TRACK", "LANES", "DEVICE", "CONTAINER", "SEND", "MODULATOR", "MACRO", "CLIP" } },
-            { "MASTER", { "LANES", "DEVICE", "CONTAINER", "MODULATOR" } },
-            { "LANES", { "LANE" } },
-            { "DEVICE", { "VALUES", "SOUNDS", "VALUE" } },
-            { "CONTAINER", { "CHAIN", "MACRO" } },
-            { "CHAIN", { "DEVICE" } },
-            { "MODULATOR", { "MODULATES", "VALUES" } },
-            { "MACRO", { "MODULATES" } },
-            { "AUTOMATION", { "CURVE" } },
-            { "CURVE", { "POINT" } },
-            { "MIDILINKS", { "MIDILINK" } },
-            { "SECTIONS", { "SECTION" } },
-            { "CHORDLANE", { "CHORD", "CHORDKEY" } },
-            { "CLIP", { "NOTE", "CONTROL", "WARP" } },
-        };
-        return places;
-    }
-
-    // A number Schema.h gives a range: from, to, and whether it is whole.
-    struct Range
-    {
-        const char* type;
-        const char* property;
-        double low, high;
-        bool whole = false;
-    };
-
-    const std::vector<Range>& getRanges()
-    {
-        constexpr double beat = maxBeat, seconds = 1.0e7, some = 1.0e-9;
-        static const std::vector<Range> ranges {
-            { "PHAZITE", "loopStart", 0.0, beat },
-            { "PHAZITE", "loopEnd", 0.0, beat },
-            { "PHAZITE", "playStart", 0.0, beat },
-            { "PHAZITE", "gridOffset", -3.0, 3.0, true },
-            { "PIANOROLL", "gridOffset", -3.0, 3.0, true },
-            { "TEMPO", "beat", 0.0, beat },
-            { "TEMPO", "bpm", 20.0, 300.0 },
-            { "TEMPO", "curve", -1.0, 1.0 },
-            { "TIMESIGNATURE", "beat", 0.0, beat },
-            { "TIMESIGNATURE", "numerator", 1.0, 32.0, true },
-            { "TIMESIGNATURE", "denominator", 2.0, 16.0, true },
-            { "TRACK", "volume", -100.0, 6.0 },
-            { "TRACK", "pan", -1.0, 1.0 },
-            { "TRACK", "keyRoot", 0.0, 11.0, true },
-            { "TRACK", "pad", 0.0, 127.0, true },
-            { "TRACK", "height", 32.0, 320.0, true },
-            { "MASTER", "volume", -100.0, 6.0 },
-            { "MASTER", "pan", -1.0, 1.0 },
-            { "MASTER", "height", 32.0, 320.0, true },
-            { "LASTKEY", "keyRoot", 0.0, 11.0, true },
-            { "LANE", "height", 32.0, 320.0, true },
-            { "DEVICE", "mix", 0.0, 1.0 },
-            { "VALUE", "value", 0.0, 1.0 },
-            { "CONTAINER", "mix", 0.0, 1.0 },
-            { "CHAIN", "volume", -100.0, 6.0 },
-            { "CHAIN", "pan", -1.0, 1.0 },
-            { "CHAIN", "crossover", 20.0, 20000.0 },
-            { "CHAIN", "lowKey", 0.0, 127.0, true },
-            { "CHAIN", "highKey", 0.0, 127.0, true },
-            { "CHAIN", "lowVelocity", 1.0, 127.0, true },
-            { "CHAIN", "highVelocity", 1.0, 127.0, true },
-            { "SEND", "level", -100.0, 6.0 },
-            { "MACRO", "value", 0.0, 1.0 },
-            { "MODULATES", "amount", -1.0, 1.0 },
-            { "POINT", "beat", 0.0, beat },
-            { "POINT", "curve", -1.0, 1.0 },
-            { "MIDILINK", "channel", 1.0, 16.0, true },
-            { "MIDILINK", "number", 0.0, 119.0, true },
-            { "SECTION", "start", 0.0, beat },
-            { "SECTION", "length", some, beat },
-            { "SECTION", "energy", 0.0, 1.0 },
-            { "CHORD", "start", 0.0, beat },
-            { "CHORD", "length", some, beat },
-            { "CHORD", "degree", 1.0, 7.0, true },
-            { "CHORD", "accidental", -1.0, 1.0, true },
-            { "CHORD", "inversion", 0.0, 16.0, true },
-            { "CHORDKEY", "start", 0.0, beat },
-            { "CHORDKEY", "keyRoot", 0.0, 11.0, true },
-            { "CLIP", "start", 0.0, beat },
-            { "CLIP", "length", some, beat },
-            { "CLIP", "offset", 0.0, beat },
-            { "CLIP", "fileStart", 0.0, seconds },
-            { "CLIP", "fileEnd", 0.0, seconds },
-            { "CLIP", "tempo", 20.0, 300.0 },
-            { "CLIP", "pitch", -48.0, 48.0 },
-            { "CLIP", "gain", -60.0, 24.0 },
-            { "CLIP", "fadeIn", 0.0, seconds },
-            { "CLIP", "fadeOut", 0.0, seconds },
-            { "CLIP", "fadeInBend", -1.0, 1.0 },
-            { "CLIP", "fadeOutBend", -1.0, 1.0 },
-            { "CLIP", "takes", 2.0, 1.0e6, true },
-            { "CLIP", "take", 1.0, 1.0e6, true },
-            { "CLIP", "takeLength", some, seconds },
-            { "NOTE", "pitch", 0.0, 127.0, true },
-            { "NOTE", "start", -beat, beat },
-            { "NOTE", "length", some, beat }, // more than 0: a tempo change scales notes, those that keep their speed below 1/64
-            { "NOTE", "velocity", 1.0, 127.0, true },
-            { "NOTE", "channel", 1.0, 16.0, true },
-            { "CONTROL", "number", 0.0, 127.0, true },
-            { "CONTROL", "beat", -beat, beat },
-            { "CONTROL", "value", 0.0, 16383.0, true },
-            { "CONTROL", "channel", 1.0, 16.0, true },
-            { "WARP", "time", 0.0, seconds },
-            { "WARP", "playsAt", -seconds, seconds },
-        };
-        return ranges;
-    }
-
-    // Words a property must be one of, by its element's type.
-    struct Words
-    {
-        const char* type;
-        const char* property;
-        juce::StringArray words;
-        bool required = false;
-    };
-
-    const std::vector<Words>& getWords()
-    {
-        static const std::vector<Words> words {
-            { "TRACK", "kind", { "track", "folder", "return" }, true },
-            { "CLIP", "kind", { "midi", "audio" }, true },
-            { "CONTROL", "kind", { "controller", "pitchWheel", "channelPressure", "aftertouch", "programChange" }, true },
-            { "TRACK", "automationMode", { "touch", "latch", "write" } },
-            { "MASTER", "automationMode", { "touch", "latch", "write" } },
-            { "TRACK", "monitoring", { "always", "never" } },
-            { "CONTAINER", "split", { "bands", "midSide", "leftRight" } },
-            { "CLIP", "fadeInShape", { "curve", "sCurve" } },
-            { "CLIP", "fadeOutShape", { "curve", "sCurve" } },
-            { "TIMESIGNATURE", "denominator", { "2", "4", "8", "16" } },
-        };
-        return words;
-    }
-
     // A value as a number: a number's own, or text that is a number and nothing else; none for anything else.
     std::optional<double> readNumber (const juce::var& value)
     {
@@ -203,7 +60,8 @@ namespace
     struct Checker
     {
         const Song& song;
-        juce::File folder; // the project's, or none
+        juce::File folder;            // the project's, or none
+        const schema::Tables& tables; // what Schema.h describes, or a test's changed copy of it
         std::vector<std::string> problems;
 
         void add (const char* rule, const juce::ValueTree& element, const juce::String& text)
@@ -214,9 +72,7 @@ namespace
         //==============================================================================
         void checkPlaces (const juce::ValueTree& parent)
         {
-            const auto& places = getPlaces();
             const auto type = parent.getType().toString();
-            const auto found = places.find (type);
 
             for (const auto& child : parent)
             {
@@ -225,7 +81,12 @@ namespace
                 if (! isKnownElementType (child))
                     continue; // one of a type Phazite doesn't know, which stays as it is
 
-                if (found == places.end() || ! found->second.contains (childType))
+                const auto* described = tables.findElement (child.getType());
+
+                if (described == nullptr)
+                    continue; // one the tables given don't describe
+
+                if (! described->goesIn (parent.getType()))
                     add ("place", child, "not a child of " + type);
                 else if (childType == "TRACK" && type == "TRACK" && parent[schema::trackKind].toString() != schema::trackIsFolder)
                     add ("place", child, "a track in a track that isn't a folder");
@@ -338,30 +199,46 @@ namespace
 
         void checkRanges (const juce::ValueTree& element)
         {
-            for (const auto& range : getRanges())
-                if (element.getType().toString() == range.type && element.hasProperty (range.property))
-                    checkNumber (element, range.property, range.low, range.high, range.whole, range.property);
+            const auto& described = tables.on (element.getType());
 
-            // Numbers between spaces: a step sequencer's steps, -1 to 1; the sampler's slices, parts of its sound, 0 to 1.
-            const auto checkList = [this, &element] (const juce::Identifier& property, double low, double high)
+            for (const auto* property : described.ranged)
             {
-                for (const auto& token : juce::StringArray::fromTokens (element[property].toString(), " ", {}))
+                if (! element.hasProperty (*property))
+                    continue;
+
+                const auto& range = *property->getRange();
+                checkNumber (element, *property, range.low, range.high, range.whole, property->toString());
+
+                // Where it says so (a time signature's note value), a power of two.
+                if (const auto number = readNumber (element[*property]);
+                    range.powersOfTwo && number.has_value() && *number > 0.0
+                    && ! juce::exactlyEqual (std::exp2 (std::round (std::log2 (*number))), *number))
+                    add ("range", element, property->toString() + " " + element[*property].toString() + " isn't a power of two");
+            }
+
+            // Numbers between spaces (Form::numbers): a step sequencer's steps, -1 to 1; the sampler's slices, parts of its
+            // sound, 0 to 1.
+            for (const auto* property : described.lists)
+            {
+                for (const auto& token : juce::StringArray::fromTokens (element[*property].toString(), " ", {}))
                 {
                     if (token.isEmpty())
                         continue;
 
                     juce::ValueTree one ("NUMBER");
-                    one.setProperty (property, token, nullptr);
-                    checkNumber (one, property, low, high, false, element.getType().toString() + " " + property.toString());
+                    one.setProperty (*property, token, nullptr);
+                    checkNumber (one, *property, property->getRange()->low, property->getRange()->high, false,
+                                 element.getType().toString() + " " + property->toString());
                 }
-            };
+            }
 
-            if (element.hasType (schema::MODULATOR))
-                checkList (schema::modulatorSteps, -1.0, 1.0);
-
-            if (element.hasType (schema::SOUNDS))
-                for (const auto* slices : { &schema::samplerSlices, &schema::samplerSlicesRemoved })
-                    checkList (*slices, 0.0, 1.0);
+            // Ids written as text: so many lowercase hexadecimal digits, or none (where the song stands in the project's
+            // versions, and the numbering its IDs are in).
+            for (const auto* property : described.hexIDs)
+                if (const auto text = element[*property].toString();
+                    element.hasProperty (*property)
+                    && (text.length() != property->getHexDigits() || ! text.containsOnly ("0123456789abcdef")))
+                    add ("kind", element, property->toString() + " is no id: " + text.substring (0, 80));
         }
 
         // Every item with an ID of its own, and one the song can count on from.
@@ -402,16 +279,17 @@ namespace
                 if (! isKnownElementType (child))
                     continue;
 
-                const auto type = child.getType().toString();
                 checkRanges (child);
 
-                for (const auto& words : getWords())
+                for (const auto* property : tables.on (child.getType()).worded)
                 {
-                    if (type != words.type)
-                        continue;
+                    const auto text = child[*property].toString();
+                    const auto& words = property->getWords();
 
-                    if (child.hasProperty (words.property) ? ! words.words.contains (child[words.property].toString()) : words.required)
-                        add ("kind", child, juce::String (words.property) + " is none of its words: " + child[words.property].toString());
+                    if (child.hasProperty (*property)
+                            ? std::none_of (words.begin(), words.end(), [&text] (const char* word) { return text == word; })
+                            : property->isAlways())
+                        add ("kind", child, property->toString() + " is none of its words: " + text);
                 }
 
                 if (child.hasType (schema::DEVICE))
@@ -510,8 +388,13 @@ namespace
 
 std::vector<std::string> findSongProblems (const Song& song)
 {
+    return findSongProblems (song, schema::getTables());
+}
+
+std::vector<std::string> findSongProblems (const Song& song, const schema::Tables& tables)
+{
     const auto& state = song.getState();
-    Checker checker { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), {} };
+    Checker checker { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), tables, {} };
 
     if (! state.hasType (schema::PHAZITE))
         return { "place: the song isn't a PHAZITE element" };
@@ -531,21 +414,6 @@ std::vector<std::string> findSongProblems (const Song& song)
     // mark once it has loaded, 2^60 below schema::maxID.
     if (next > schema::renumberMark)
         checker.problems.push_back ("id: the song's next ID leaves no room before the largest an ID can be");
-
-    // Where the song stands in the project's versions: a branch's id and a version's, as lowercase hexadecimal digits, or
-    // none (Schema.h: versionsBranch, versionsBase).
-    const auto checkHexID = [&checker, &state] (const juce::Identifier& property, int digits)
-    {
-        if (const auto text = state[property].toString();
-            state.hasProperty (property) && (text.length() != digits || ! text.containsOnly ("0123456789abcdef")))
-            checker.add ("kind", state, property.toString() + " is no id: " + text.substring (0, 80));
-    };
-
-    checkHexID (schema::versionsBranch, 32);
-    checkHexID (schema::versionsBase, 64);
-
-    // The numbering the song's IDs are in: a stamp of 16 lowercase hexadecimal digits, or none (Schema.h: idNumbering).
-    checkHexID (schema::idNumbering, 16);
 
     checker.checkItemIDs (state);
     checker.checkKeys (state);

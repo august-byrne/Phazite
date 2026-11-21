@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What another tool needs to read Phazite's files (docs/versions-format.md, docs/project-format.md), pinned by golden
-// files in tests/golden/format: the song's rules as data (song-rules.json); Phazite's own devices' parameters, with the
+// files in tests/golden/format: the song's rules as data (song-rules.json); the song's description (song-schema.json);
+// Phazite's own devices' parameters, with the
 // names their choices are saved by (devices.json); and test vectors: a small song's pieces in a pack (song.pack) and what
 // they hold, as tools/read-versions.pl lists them (song.txt), which CI checks that reader against.
 #include "GoldenFiles.h"
@@ -138,6 +139,11 @@ TEST_SUITE ("golden")
     TEST_CASE ("Golden format: the song's rules as data")
     {
         checkGoldenText ("format/song-rules.json", juce::JSON::toString (phazite::schema::describeSongRules()) + "\n", compareTexts);
+    }
+
+    TEST_CASE ("Golden format: the song's description, every element and property with its type, range, words, default and kind")
+    {
+        checkGoldenText ("format/song-schema.json", juce::JSON::toString (phazite::schema::describeSchema()) + "\n", compareTexts);
     }
 
     TEST_CASE ("Golden format: Phazite's own devices' parameters, each choice by the name songs save it by")

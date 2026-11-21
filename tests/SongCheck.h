@@ -2,8 +2,10 @@
 // A song checked for consistency, as any song Phazite loads must be, whoever made its file: what the model can't make, a
 // file from elsewhere could hold. Used after every load in the fuzzer (Fuzzer.h, FuzzTests.cpp), on hand-made projects
 // that parse but don't hold together (InconsistentProjectTests.cpp), and on the songs the random edits make
-// (RandomEdits.h). Each rule is written from Schema.h's comments, on its own, rather than from the code that keeps the
-// song so (Project.cpp: makeSong()), so that the check is a second statement of the rules, not the same one again.
+// (RandomEdits.h). Where each element goes, the ranges, the words and the hexadecimal ids are read from Schema.h's
+// description of the song (schema::getTables()), as the loader reads them; each other rule is written on its own, rather
+// than from the code that keeps the song so (Project.cpp: makeSong()), so that the check is a second statement of it.
+// tests/golden/format/song-schema.json records the description, so that a change to a range or a word shows there.
 //
 // The rules, each problem a line that starts with its name:
 //   place   each element of a type Phazite knows in a parent Schema.h puts it in (a CLIP on a track or a return, a NOTE
@@ -25,6 +27,7 @@
 
 #include "TestHelpers.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SchemaDescription.h"
 
 #include <string>
 #include <vector>
@@ -34,8 +37,10 @@ namespace phazite::test
 // The furthest place in beats a song holds anything at: a million beats, a few days of music at any tempo.
 inline constexpr double maxBeat = 1.0e6;
 
-// Each problem with a song, a line each, in the order found; none for a consistent song.
+// Each problem with a song, a line each, in the order found; none for a consistent song. With tables, the places, ranges,
+// words and hexadecimal ids of those (a test's changed copy of the description) rather than the description's.
 std::vector<std::string> findSongProblems (const Song&);
+std::vector<std::string> findSongProblems (const Song&, const schema::Tables&);
 
 // The same, each problem a failed check.
 void checkSong (const Song&);

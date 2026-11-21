@@ -106,6 +106,21 @@ of two songs by ID only where their stamps are the same ([versions-format.md](ve
 where playback starts), and where it stands in its versions, are saved, but are no change to the song: the rules list them
 as `uncountedProperties` and `uncountedElements`.
 
+**The description.** Every element and property a song holds is described once in Phazite's code
+(`src/model/base/internal/Schema.h`), and
+[`tests/golden/format/song-schema.json`](../tests/golden/format/song-schema.json) is that description as data, the test
+vector for the song's names, types and ranges: `elements`, each with its `name`, the elements it goes `in` (none for
+`PHAZITE`), its `kind` (`song`, `view` or `state`) and whether it is `counted` as a change with everything in it; and
+`properties`, each with its `name`, the elements it is `on`, its `type` (`bool`, `int`, `int64`, `float`, `double`, `text`
+or `bytes`, in base 64), its `form` where it is more than its type (`ownID`, an item's own ID; `songID`, another ID of the
+song's it holds; `idName`, the ID of another item it names; `words`; `hexID`, so many lowercase hexadecimal `digits`;
+`colour`; `numbers`, separated by spaces), its `range` (`low`, `high`, `whole`, what a value that is no number becomes,
+whether one outside goes rather than being brought in, and `powersOfTwo`), its `words`, its `default` where it has one,
+its `kind`, and whether it is `counted` (or the elements it is `uncountedOn`). A family of names made in a loop (a drum
+pad's sounds) is one entry, named by its pattern (`pad<note>Sound<layer>`), with the count of its `names`. A file whose
+values keep to it opens as it is; one outside it opens kept to it (section 7). Elements sorted by name, properties by name
+and elements.
+
 ## 4. Devices
 
 A track's devices are `DEVICE` elements in the order the sound goes through them, an instrument first, with containers

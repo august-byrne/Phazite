@@ -210,7 +210,7 @@ void removeTempoMapTime (Song& song, BeatRange range)
     auto* undo = &song.getUndoManager();
     const auto start = range.getStart().inBeats(), end = range.getEnd().inBeats(), length = range.getLength().inBeats();
 
-    for (const auto& type : { schema::TEMPO, schema::TIMESIGNATURE })
+    for (const auto& type : { schema::TEMPO.getName(), schema::TIMESIGNATURE.getName() })
     {
         const auto entries = getEntries (map, type);
         juce::ValueTree last, first;

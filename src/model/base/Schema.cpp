@@ -143,14 +143,137 @@ juce::var writeIDLike (const juce::var& old, std::uint64_t id)
 
 namespace schema
 {
+    //==============================================================================
+    // The description as lookups.
     namespace
     {
-        // The song's rules as tables, which the functions below read and describeSongRules() writes out.
+        // A name by its pooled text (juce::Identifier keeps one of each): what a song's elements and properties are
+        // named by, compared without looking a text up.
+        const void* keyOf (const juce::Identifier& name) noexcept
+        {
+            return name.getCharPointer().getAddress();
+        }
+
+        bool holdsAnID (Form form) noexcept
+        {
+            return form == Form::ownID || form == Form::songID;
+        }
+
+        bool isAmong (const juce::Identifier& name, const std::vector<const PropertyDescription*>& list) noexcept
+        {
+            for (const auto* property : list)
+                if (property->getName() == name)
+                    return true;
+
+            return false;
+        }
+    } // namespace
+
+    Tables::Tables (std::vector<const Element*> elementsToUse, std::vector<const PropertyDescription*> propertiesToUse)
+        : elements (std::move (elementsToUse)),
+          properties (std::move (propertiesToUse))
+    {
+        for (const auto* element : elements)
+            types[keyOf (*element)].element = element;
+
+        for (const auto* property : properties)
+        {
+            const auto form = property->getForm();
+
+            if ((holdsAnID (form) || form == Form::idName)
+                && std::find (idNames.begin(), idNames.end(), keyOf (*property)) == idNames.end())
+                idNames.push_back (keyOf (*property));
+
+            for (const auto* element : property->getElements())
+            {
+                auto& type = types[keyOf (*element)];
+                type.all.push_back (property);
+
+                if (property->isFamily())
+                    for (const auto& name : property->getFamilyNames())
+                        type.byName[keyOf (name)] = property;
+                else
+                    type.byName[keyOf (*property)] = property;
+
+                if (property->getRange().has_value())
+                    (form == Form::numbers ? type.lists : type.ranged).push_back (property);
+
+                if (form == Form::words)
+                    type.worded.push_back (property);
+
+                if (form == Form::hexID)
+                    type.hexIDs.push_back (property);
+
+                if (! property->isCountedOn (*element))
+                    type.uncounted.push_back (property);
+
+                if (holdsAnID (form))
+                    type.holdingIDs.push_back (property);
+
+                if (form == Form::idName)
+                    type.namingIDs.push_back (property);
+
+                if (property->getType() == ValueType::bytes)
+                    type.bytes.push_back (property);
+            }
+        }
+    }
+
+    const Tables::OnType& Tables::on (const juce::Identifier& type) const noexcept
+    {
+        const auto found = types.find (keyOf (type));
+        return found != types.end() ? found->second : none;
+    }
+
+    const PropertyDescription* Tables::findProperty (const juce::Identifier& type, const juce::Identifier& name) const noexcept
+    {
+        const auto& described = on (type).byName;
+        const auto found = described.find (keyOf (name));
+        return found != described.end() ? found->second : nullptr;
+    }
+
+    bool Tables::mayHoldID (const juce::Identifier& name) const noexcept
+    {
+        return std::find (idNames.begin(), idNames.end(), keyOf (name)) != idNames.end();
+    }
+
+    const Tables& getTables()
+    {
+        static const Tables tables { getElements(), getProperties() };
+        return tables;
+    }
+
+    IdentifierList findProperties (const juce::Identifier& type, Kind kind)
+    {
+        IdentifierList found;
+
+        for (const auto* property : getTables().on (type).all)
+            if (property->getKind() == kind)
+                found.push_back (&property->getName());
+
+        return found;
+    }
+
+    //==============================================================================
+    namespace
+    {
+        // The versions' rules as tables, which the functions below read and describeSongRules() writes out, with what the
+        // description says of IDs, bytes and what isn't counted.
+        using NameList = std::vector<const Name*>;
+
+        bool isAmong (const juce::Identifier& name, const NameList& list) noexcept
+        {
+            for (const auto* each : list)
+                if (each->getName() == name)
+                    return true;
+
+            return false;
+        }
 
         // Items: elements with an ID of their own, each kind's named "id" (trackID). The master holds one too.
-        const IdentifierList& getItemTypes()
+        const NameList& getItemTypes()
         {
-            static const IdentifierList types { &TRACK, &DEVICE, &CONTAINER, &CHAIN, &SEND, &MODULATOR, &MACRO, &CLIP, &NOTE, &SECTION };
+            static const NameList types { &TRACK, &DEVICE, &CONTAINER, &CHAIN, &SEND, &MODULATOR, &MACRO, &CLIP, &NOTE, &SECTION };
             return types;
         }
 
@@ -163,8 +286,8 @@ namespace schema
         // that "4" and "4.0" are the same key.
         struct Key
         {
-            const juce::Identifier* type;
-            IdentifierList properties;
+            const Name* type;
+            NameList properties;
             bool isBeat = false;
         };
 
@@ -186,16 +309,16 @@ namespace schema
 
         // Elements with no key: their parent's elements of their type are kept as a whole. Any other element is keyed by its
         // type: the one of its type in its parent.
-        const IdentifierList& getUnkeyedTypes()
+        const NameList& getUnkeyedTypes()
         {
-            static const IdentifierList types { &POINT, &CONTROL, &WARP };
+            static const NameList types { &POINT, &CONTROL, &WARP };
             return types;
         }
 
         // Elements whose order among their parent's means something, by the name of their order.
         struct Order
         {
-            const juce::Identifier* type;
+            const Name* type;
             const char* group;
         };
 
@@ -209,108 +332,71 @@ namespace schema
             return orders;
         }
 
-        // A property of the elements of a type.
-        struct Property
-        {
-            const juce::Identifier* type;
-            const juce::Identifier* property;
-        };
-
-        bool isIn (const std::vector<Property>& table, const juce::ValueTree& element, const juce::Identifier& property)
-        {
-            return std::any_of (table.begin(), table.end(),
-                                [&] (const Property& row) { return element.hasType (*row.type) && property == *row.property; });
-        }
-
-        // What holds an ID of the song's besides each item's own and the master's: a channel's fader and VCA, an alias group.
-        const std::vector<Property>& getOtherIDHolders()
-        {
-            static const std::vector<Property> holders {
-                { &TRACK, &channelFader }, { &MASTER, &channelFader }, { &TRACK, &channelVCA },
-                { &MASTER, &channelVCA },  { &CLIP, &clipLink },
-            };
-            return holders;
-        }
-
-        // What names an ID of the song's: a send's return, a sidechain's track, the device of a lane, a curve, what a
-        // modulator moves or what a MIDI link turns, and the drum sampler whose pad a track plays.
-        const std::vector<Property>& getIDNamers()
-        {
-            static const std::vector<Property> namers {
-                { &SEND, &sendTo },
-                { &DEVICE, &deviceSidechain },
-                { &LANE, &laneDevice },
-                { &CURVE, &curveDevice },
-                { &MODULATES, &modulatesDevice },
-                { &TRACK, &trackPadDevice },
-                { &MIDILINK, &midiLinkDevice },
-            };
-            return namers;
-        }
-
-        // How the song plays, rather than the song: kept on PHAZITE, no change to it (design question 18).
-        const IdentifierList& getPlayingProperties()
-        {
-            static const IdentifierList list { &nextID,    &loopFollowsSong, &punch,     &lastInput, &loop,
-                                               &loopStart, &loopEnd,         &playStart, &metronome };
-            return list;
-        }
-
-        // Where the song stands in the project's versions: kept on PHAZITE, no change to it.
-        const IdentifierList& getVersionsProperties()
-        {
-            static const IdentifierList list { &versionsBranch, &versionsBase };
-            return list;
-        }
-
-        // What isn't counted, by the type of the element it is on.
-        struct Uncounted
-        {
-            const juce::Identifier* type;
-            std::vector<const IdentifierList*> lists;
-        };
-
-        const std::vector<Uncounted>& getUncountedProperties()
-        {
-            static const std::vector<Uncounted> table {
-                { &TRACK, { &getTrackViewProperties() } },
-                { &MASTER, { &getTrackViewProperties() } },
-                { &DEVICE, { &getDeviceViewProperties() } },
-                { &PHAZITE, { &getGridProperties(), &getPlayingProperties(), &getVersionsProperties() } },
-            };
-            return table;
-        }
-
-        // Elements that aren't counted, with everything in them, by their parent's type.
-        struct UncountedElement
-        {
-            const juce::Identifier* parent;
-            const juce::Identifier* type;
-        };
-
-        const std::vector<UncountedElement>& getUncountedElements()
-        {
-            static const std::vector<UncountedElement> table { { &PHAZITE, &PIANOROLL }, { &TRACK, &LANES }, { &MASTER, &LANES } };
-            return table;
-        }
-
         // How a version's pieces split a song.
-        const IdentifierList& getPieceTypes()
+        const NameList& getPieceTypes()
         {
-            static const IdentifierList types { &TRACK, &MASTER, &CLIP, &DEVICE, &CONTAINER, &CURVE };
+            static const NameList types { &TRACK, &MASTER, &CLIP, &DEVICE, &CONTAINER, &CURVE };
             return types;
         }
 
-        const IdentifierList& getRunTypes()
+        const NameList& getRunTypes()
         {
-            static const IdentifierList types { &NOTE, &POINT };
+            static const NameList types { &NOTE, &POINT };
             return types;
         }
 
-        const std::vector<Property>& getBytesProperties()
+        // The order song-rules.json has listed the rows the description gives in since before there was one
+        // (tests/golden/format/song-rules.json, which another tool reads and which stays as it is): the elements of the
+        // uncounted properties, and the properties it lists in another order than the description's. Any other row
+        // follows them, in the description's order.
+        const NameList& getRulesTypeOrder()
         {
-            static const std::vector<Property> properties { { &DEVICE, &pluginState } };
+            static const NameList types { &TRACK, &MASTER, &DEVICE, &PHAZITE };
+            return types;
+        }
+
+        const NameList& getRulesPropertyOrder()
+        {
+            static const NameList properties {
+                &gridSnap,        &gridAdaptive, &gridOffset,      &gridStep,       &gridTriplets,   &nextID,
+                &loopFollowsSong, &punch,        &lastInput,       &loop,           &loopStart,      &loopEnd,
+                &playStart,       &metronome,    &versionsBranch,  &versionsBase,   &sendTo,         &deviceSidechain,
+                &laneDevice,      &curveDevice,  &modulatesDevice, &trackPadDevice, &midiLinkDevice,
+            };
             return properties;
+        }
+
+        // Where in an order list a name is, by its address (two properties may share a saved name); past its end for one it
+        // doesn't list.
+        size_t findRank (const NameList& order, const Name* name)
+        {
+            return (size_t) std::distance (order.begin(), std::find (order.begin(), order.end(), name));
+        }
+
+        // A property on an element, as a row of song-rules.json.
+        struct Row
+        {
+            const Element* type;
+            const PropertyDescription* property;
+        };
+
+        // The rows of the properties of a form, or of bytes, in the order the rules list them.
+        std::vector<Row> findRows (const std::function<bool (const PropertyDescription&)>& isOne)
+        {
+            std::vector<Row> rows;
+
+            for (const auto* property : getProperties())
+                if (isOne (*property))
+                    for (const auto* element : property->getElements())
+                        rows.push_back ({ element, property });
+
+            std::stable_sort (rows.begin(), rows.end(),
+                              [] (const Row& a, const Row& b)
+                              {
+                                  const auto& order = getRulesPropertyOrder();
+                                  return findRank (order, a.property) < findRank (order, b.property);
+                              });
+            return rows;
         }
 
         juce::String beatKey (const juce::var& beat)
@@ -318,7 +404,7 @@ namespace schema
             return juce::String ((double) beat, 6);
         }
 
-        juce::var toNames (const IdentifierList& list)
+        juce::var toNames (const NameList& list)
         {
             juce::Array<juce::var> names;
 
@@ -328,85 +414,52 @@ namespace schema
             return names;
         }
 
-        juce::var toRows (const std::vector<Property>& table)
+        juce::var toRows (const std::vector<Row>& rows)
         {
-            juce::Array<juce::var> rows;
+            juce::Array<juce::var> written;
 
-            for (const auto& row : table)
+            for (const auto& row : rows)
             {
                 auto* object = new juce::DynamicObject();
                 object->setProperty ("type", row.type->toString());
                 object->setProperty ("property", row.property->toString());
-                rows.add (juce::var (object));
+                written.add (juce::var (object));
             }
 
-            return rows;
+            return written;
         }
     } // namespace
 
     const std::map<juce::String, juce::StringArray>& getPlaces()
     {
-        static const std::map<juce::String, juce::StringArray> places {
-            { "PHAZITE",
-              { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "MIDILINKS", "SECTIONS", "CHORDLANE", "MERGING" } },
-            { "TEMPOMAP", { "TEMPO", "TIMESIGNATURE" } },
-            { "TRACKS", { "TRACK" } },
-            { "TRACK", { "TRACK", "LANES", "DEVICE", "CONTAINER", "SEND", "MODULATOR", "MACRO", "CLIP" } },
-            { "MASTER", { "LANES", "DEVICE", "CONTAINER", "MODULATOR" } },
-            { "LANES", { "LANE" } },
-            { "DEVICE", { "VALUES", "SOUNDS", "VALUE" } },
-            { "CONTAINER", { "CHAIN", "MACRO" } },
-            { "CHAIN", { "DEVICE" } },
-            { "MODULATOR", { "MODULATES", "VALUES" } },
-            { "MACRO", { "MODULATES" } },
-            { "AUTOMATION", { "CURVE" } },
-            { "CURVE", { "POINT" } },
-            { "MIDILINKS", { "MIDILINK" } },
-            { "SECTIONS", { "SECTION" } },
-            { "CHORDLANE", { "CHORD", "CHORDKEY" } },
-            { "CLIP", { "NOTE", "CONTROL", "WARP" } },
-        };
+        static const auto places = []
+        {
+            std::map<juce::String, juce::StringArray> made;
+
+            for (const auto* element : getElements())
+                for (const auto* parent : element->getParents())
+                    made[parent->toString()].add (element->toString());
+
+            return made;
+        }();
+
         return places;
     }
 
     bool isKnownType (const juce::Identifier& type)
     {
-        // By the type name's pooled text (juce::Identifier keeps one of each), without looking a text up: the loader asks
-        // this of every element of a song.
-        static const auto known = []
-        {
-            std::unordered_set<const void*> types { PHAZITE.getCharPointer().getAddress() };
-
-            for (const auto& [parent, children] : getPlaces())
-            {
-                types.insert (juce::Identifier (parent).getCharPointer().getAddress());
-
-                for (const auto& child : children)
-                    types.insert (juce::Identifier (child).getCharPointer().getAddress());
-            }
-
-            return types;
-        }();
-
-        return known.count (type.getCharPointer().getAddress()) > 0;
+        return getTables().findElement (type) != nullptr;
     }
 
     bool isUncountedProperty (const juce::ValueTree& tree, const juce::Identifier& property)
     {
-        for (const auto& row : getUncountedProperties())
-            if (tree.hasType (*row.type))
-                for (const auto* list : row.lists)
-                    if (isAmong (property, *list))
-                        return true;
-
-        return false;
+        return isAmong (property, getTables().on (tree.getType()).uncounted);
     }
 
     bool isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)
     {
-        const auto& table = getUncountedElements();
-        return std::any_of (table.begin(), table.end(),
-                            [&] (const UncountedElement& row) { return parent.hasType (*row.parent) && element.hasType (*row.type); });
+        const auto* described = getTables().findElement (element.getType());
+        return described != nullptr && ! described->isCounted() && described->goesIn (parent.getType());
     }
 
     bool isCounted (const juce::ValueTree& tree, const juce::Identifier& property)
@@ -480,15 +533,12 @@ namespace schema
 
     bool holdsID (const juce::ValueTree& element, const juce::Identifier& property)
     {
-        if (property == trackID) // each kind's ID is named "id"
-            return isItem (element) || element.hasType (MASTER);
-
-        return isIn (getOtherIDHolders(), element, property);
+        return isAmong (property, getTables().on (element.getType()).holdingIDs);
     }
 
     bool namesID (const juce::ValueTree& element, const juce::Identifier& property)
     {
-        return isIn (getIDNamers(), element, property);
+        return isAmong (property, getTables().on (element.getType()).namingIDs);
     }
 
     bool isPieceOfItsOwn (const juce::ValueTree& element)
@@ -503,7 +553,7 @@ namespace schema
 
     bool isBytesProperty (const juce::ValueTree& element, const juce::Identifier& property)
     {
-        return isIn (getBytesProperties(), element, property);
+        return isAmong (property, getTables().on (element.getType()).bytes);
     }
 
     juce::var describeSongRules()
@@ -543,33 +593,61 @@ namespace schema
 
         rules->setProperty ("orders", juce::var (orders));
 
-        // IDs, and what names them.
-        rules->setProperty ("otherIDHolders", toRows (getOtherIDHolders()));
-        rules->setProperty ("idNamers", toRows (getIDNamers()));
+        // IDs, and what names them: besides each item's own ID, what holds one; and what names one.
+        rules->setProperty ("otherIDHolders",
+                            toRows (findRows ([] (const PropertyDescription& p) { return p.getForm() == Form::songID; })));
+        rules->setProperty ("idNamers", toRows (findRows ([] (const PropertyDescription& p) { return p.getForm() == Form::idName; })));
 
-        // What isn't counted as a change.
-        auto* uncounted = new juce::DynamicObject();
+        // What isn't counted as a change: properties by their elements' types, and elements by their parents'.
+        std::vector<const Element*> types;
 
-        for (const auto& row : getUncountedProperties())
+        for (const auto* element : getElements())
+            if (! getTables().on (*element).uncounted.empty())
+                types.push_back (element);
+
+        std::stable_sort (types.begin(), types.end(),
+                          [] (const Element* a, const Element* b)
+                          {
+                              const auto& order = getRulesTypeOrder();
+                              return findRank (order, a) < findRank (order, b);
+                          });
+
+        auto* uncountedProperties = new juce::DynamicObject();
+
+        for (const auto* type : types)
         {
-            IdentifierList all;
+            auto properties = getTables().on (*type).uncounted;
+            std::stable_sort (properties.begin(), properties.end(),
+                              [] (const PropertyDescription* a, const PropertyDescription* b)
+                              {
+                                  const auto& order = getRulesPropertyOrder();
+                                  return findRank (order, a) < findRank (order, b);
+                              });
 
-            for (const auto* list : row.lists)
-                all.insert (all.end(), list->begin(), list->end());
+            juce::Array<juce::var> names;
 
-            uncounted->setProperty (*row.type, toNames (all));
+            for (const auto* property : properties)
+                names.add (property->toString());
+
+            uncountedProperties->setProperty (*type, names);
         }
 
-        rules->setProperty ("uncountedProperties", juce::var (uncounted));
+        rules->setProperty ("uncountedProperties", juce::var (uncountedProperties));
 
         juce::Array<juce::var> uncountedElements;
 
-        for (const auto& row : getUncountedElements())
+        for (const auto* element : getElements())
         {
-            auto* object = new juce::DynamicObject();
-            object->setProperty ("parent", row.parent->toString());
-            object->setProperty ("type", row.type->toString());
-            uncountedElements.add (juce::var (object));
+            if (element->isCounted())
+                continue;
+
+            for (const auto* parent : element->getParents())
+            {
+                auto* object = new juce::DynamicObject();
+                object->setProperty ("parent", parent->toString());
+                object->setProperty ("type", element->toString());
+                uncountedElements.add (juce::var (object));
+            }
         }
 
         rules->setProperty ("uncountedElements", uncountedElements);
@@ -577,9 +655,191 @@ namespace schema
         // How a version's pieces split a song, and what is bytes.
         rules->setProperty ("piecesOfTheirOwn", toNames (getPieceTypes()));
         rules->setProperty ("inRuns", toNames (getRunTypes()));
-        rules->setProperty ("bytes", toRows (getBytesProperties()));
+        rules->setProperty ("bytes", toRows (findRows ([] (const PropertyDescription& p) { return p.getType() == ValueType::bytes; })));
 
         return juce::var (rules);
+    }
+
+    //==============================================================================
+    namespace
+    {
+        const char* getName (Kind kind)
+        {
+            switch (kind)
+            {
+                case Kind::song:
+                    return "song";
+                case Kind::view:
+                    return "view";
+                case Kind::state:
+                    return "state";
+            }
+
+            return "song";
+        }
+
+        const char* getName (ValueType type)
+        {
+            switch (type)
+            {
+                case ValueType::boolean:
+                    return "bool";
+                case ValueType::int32:
+                    return "int";
+                case ValueType::int64:
+                    return "int64";
+                case ValueType::float32:
+                    return "float";
+                case ValueType::float64:
+                    return "double";
+                case ValueType::text:
+                    return "text";
+                case ValueType::bytes:
+                    return "bytes";
+            }
+
+            return "text";
+        }
+
+        const char* getName (Form form)
+        {
+            switch (form)
+            {
+                case Form::plain:
+                    return "plain";
+                case Form::ownID:
+                    return "ownID";
+                case Form::songID:
+                    return "songID";
+                case Form::idName:
+                    return "idName";
+                case Form::words:
+                    return "words";
+                case Form::hexID:
+                    return "hexID";
+                case Form::colour:
+                    return "colour";
+                case Form::numbers:
+                    return "numbers";
+            }
+
+            return "plain";
+        }
+
+        juce::var toNames (const std::vector<const Element*>& list)
+        {
+            juce::Array<juce::var> names;
+
+            for (const auto* element : list)
+                names.add (element->toString());
+
+            return names;
+        }
+    } // namespace
+
+    juce::var describeSchema()
+    {
+        auto elements = getElements();
+        std::sort (elements.begin(), elements.end(), [] (const Element* a, const Element* b) { return a->toString() < b->toString(); });
+
+        juce::Array<juce::var> writtenElements;
+
+        for (const auto* element : elements)
+        {
+            auto* object = new juce::DynamicObject();
+            object->setProperty ("name", element->toString());
+            object->setProperty ("in", toNames (element->getParents()));
+            object->setProperty ("kind", getName (element->getKind()));
+            object->setProperty ("counted", element->isCounted());
+
+            if (element->isNamedByParameters())
+                object->setProperty ("propertiesNamedBy", "its device's or modulator's parameters");
+
+            writtenElements.add (juce::var (object));
+        }
+
+        auto properties = getProperties();
+        const auto sortKey = [] (const PropertyDescription* property)
+        {
+            juce::StringArray elementNames;
+
+            for (const auto* element : property->getElements())
+                elementNames.add (element->toString());
+
+            return property->toString() + " " + elementNames.joinIntoString (" ");
+        };
+
+        std::sort (properties.begin(), properties.end(),
+                   [&sortKey] (const PropertyDescription* a, const PropertyDescription* b) { return sortKey (a) < sortKey (b); });
+
+        juce::Array<juce::var> writtenProperties;
+
+        for (const auto* property : properties)
+        {
+            auto* object = new juce::DynamicObject();
+            object->setProperty ("name", property->toString());
+
+            if (property->isFamily())
+                object->setProperty ("names", (int) property->getFamilyNames().size());
+
+            object->setProperty ("on", toNames (property->getElements()));
+            object->setProperty ("type", getName (property->getType()));
+
+            if (property->getForm() != Form::plain)
+                object->setProperty ("form", getName (property->getForm()));
+
+            if (const auto& range = property->getRange())
+            {
+                auto* written = new juce::DynamicObject();
+                written->setProperty ("low", range->low);
+                written->setProperty ("high", range->high);
+                written->setProperty ("whole", range->whole);
+
+                if (range->fallback.has_value())
+                    written->setProperty ("noNumberBecomes", *range->fallback);
+
+                if (range->outsideGoes)
+                    written->setProperty ("outsideGoes", true);
+
+                if (range->powersOfTwo)
+                    written->setProperty ("powersOfTwo", true);
+
+                object->setProperty ("range", juce::var (written));
+            }
+
+            if (! property->getWords().empty())
+            {
+                juce::Array<juce::var> words;
+
+                for (const auto* word : property->getWords())
+                    words.add (juce::String (word));
+
+                object->setProperty ("words", words);
+            }
+
+            if (property->getForm() == Form::hexID)
+                object->setProperty ("digits", property->getHexDigits());
+
+            if (property->isAlways())
+                object->setProperty ("always", true);
+
+            if (! property->getDefault().isVoid())
+                object->setProperty ("default", property->getDefault());
+
+            object->setProperty ("kind", getName (property->getKind()));
+
+            if (property->getUncountedElements().empty())
+                object->setProperty ("counted", true);
+            else
+                object->setProperty ("uncountedOn", toNames (property->getUncountedElements()));
+
+            writtenProperties.add (juce::var (object));
+        }
+
+        auto* described = new juce::DynamicObject();
+        described->setProperty ("elements", writtenElements);
+        described->setProperty ("properties", writtenProperties);
+        return juce::var (described);
     }
 } // namespace schema
 } // namespace phazite

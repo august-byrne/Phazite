@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's state in a project file (src/model/base/internal/Schema.h).
+// Phazite's state in a project file (src/model/base/internal/Schema.h): the song's count of IDs, and the description of
+// what a song holds, which the loader and the consistency check read.
+#include "GoldenFiles.h"
+#include "SongCheck.h"
 #include "TestHelpers.h"
 #include "model/base/internal/Schema.h"
+#include "model/project/internal/Project.h"
+
+#include <algorithm>
+#include <cmath>
+#include <functional>
+#include <map>
+#include <optional>
+#include <set>
 
 TEST_CASE ("A song numbers its items from its own count, which goes past every ID it holds")
 {
@@ -27,4 +38,412 @@ TEST_CASE ("A song numbers its items from its own count, which goes past every I
     song.getState().setProperty (phazite::schema::nextID, (juce::int64) 50, nullptr);
     phazite::countIDs (song);
     CHECK (song.makeID() == 50);
+}
+
+//==============================================================================
+// The description of the song (Schema.h, SchemaDescription.h), and the loader (model/project/internal/Project.h:
+// makeConsistent()) and the consistency check (SongCheck.h), which read it.
+namespace
+{
+namespace schema = phazite::schema;
+using namespace phazite::test;
+
+// The representative golden project as its file holds it (GoldenProjectTests.cpp writes it), every value a text.
+juce::ValueTree readRepresentative()
+{
+    const auto xml = juce::parseXML (getGoldenFolder().getChildFile ("projects/representative.xml"));
+    REQUIRE (xml != nullptr);
+    auto tree = juce::ValueTree::fromXml (*xml);
+    REQUIRE (tree.hasType (schema::PHAZITE));
+
+    // Where the song stands in its versions is a placeholder there ("$BRANCH"), which the golden test writes for the ids.
+    for (const auto* placeholder : { &schema::versionsBranch, &schema::versionsBase })
+        if (tree[*placeholder].toString().startsWithChar ('$'))
+            tree.removeProperty (*placeholder, nullptr);
+
+    return tree;
+}
+
+// The first element of a type in a song, its own first; none if it holds none.
+juce::ValueTree findFirst (const juce::ValueTree& tree, const juce::Identifier& type)
+{
+    if (tree.hasType (type))
+        return tree;
+
+    for (const auto& child : tree)
+        if (const auto found = findFirst (child, type); found.isValid())
+            return found;
+
+    return {};
+}
+
+// Whether an element is still in the song it was found in.
+bool isInSong (const juce::ValueTree& element)
+{
+    auto top = element;
+
+    while (top.getParent().isValid())
+        top = top.getParent();
+
+    return top.hasType (schema::PHAZITE);
+}
+
+// Whether one of the problems is of a rule and names a property.
+bool hasProblem (const std::vector<std::string>& problems, const std::string& rule, const juce::String& property)
+{
+    return std::any_of (problems.begin(), problems.end(), [&] (const std::string& problem)
+                        { return problem.starts_with (rule + ": ") && juce::String (problem).contains (property); });
+}
+
+juce::String describeProblems (const std::vector<std::string>& problems)
+{
+    juce::StringArray lines;
+
+    for (const auto& problem : problems)
+        lines.add (problem);
+
+    return lines.joinIntoString ("\n");
+}
+
+// What the loader keeps a number at, as the description says: brought within the range (made whole first where it is
+// whole, a power of two where it says so), or gone where one outside goes; for what is no finite number, its fallback or
+// none.
+std::optional<double> findKept (const schema::Range& range, std::optional<double> number)
+{
+    if (! number.has_value() || ! std::isfinite (*number))
+        return range.fallback;
+
+    const auto rounded = range.whole ? std::round (*number) : *number;
+
+    if (range.outsideGoes && (rounded < range.low || rounded > range.high))
+        return std::nullopt;
+
+    auto kept = juce::jlimit (range.low, range.high, rounded);
+
+    if (range.powersOfTwo)
+        kept = std::exp2 (std::round (std::log2 (kept)));
+
+    return kept;
+}
+
+// Values outside a range, and in it but not whole, each as text, as a file holds them.
+std::vector<juce::String> findWrongValues (const schema::Range& range)
+{
+    std::vector<juce::String> values { juce::String (range.low - 1.0, 6), juce::String (range.high + 1.0, 6), "not a number" };
+
+    if (range.whole && range.low + 0.5 < range.high)
+        values.push_back (juce::String (range.low + 0.5, 6));
+
+    return values;
+}
+
+// A song of the representative project with one value changed, checked as it is and after the loader; and what the
+// loader made of it, or none if it took it out (or the element it was on).
+struct Changed
+{
+    juce::ValueTree element;
+    std::vector<std::string> problemsBefore;
+    phazite::Song::Ptr loaded;
+    juce::ValueTree loadedElement;
+
+    Changed (const schema::Element& type, const juce::Identifier& property, const juce::var& value,
+             const schema::Tables& tables = schema::getTables())
+    {
+        auto raw = readRepresentative();
+        element = findFirst (raw, type);
+        REQUIRE_MESSAGE (element.isValid(), "the representative project holds no " << type.toString());
+        element.setProperty (property, value, nullptr);
+
+        const phazite::Song rawSong { raw.createCopy() };
+        problemsBefore = findSongProblems (rawSong, tables);
+
+        loaded = phazite::makeSong (raw);
+        REQUIRE (loaded != nullptr);
+
+        if (&tables != &schema::getTables())
+            phazite::makeConsistent (*loaded, phazite::ReadAs::whole, tables);
+
+        loadedElement = isInSong (element) ? element : juce::ValueTree();
+    }
+
+    // What the loaded song holds there: none if it took the value, or the element, out.
+    std::optional<juce::var> getLoaded (const juce::Identifier& property) const
+    {
+        if (! loadedElement.isValid() || ! loadedElement.hasProperty (property))
+            return std::nullopt;
+
+        return loadedElement[property];
+    }
+};
+} // namespace
+
+TEST_CASE ("Every range the description gives is what the loader keeps a number to and what the check allows, on every element "
+           "it is on")
+{
+    for (const auto* property : schema::getProperties())
+    {
+        if (! property->getRange().has_value() || property->getForm() == schema::Form::numbers)
+            continue;
+
+        const auto& range = *property->getRange();
+
+        for (const auto* type : property->getElements())
+        {
+            for (const auto& value : findWrongValues (range))
+            {
+                INFO (type->toString() << "@" << property->toString() << " = " << value);
+                const Changed changed { *type, *property, value };
+                INFO (describeProblems (changed.problemsBefore));
+                CHECK (hasProblem (changed.problemsBefore, "range", property->toString()));
+
+                const auto expected = findKept (range, phazite::readLoadedNumber (value));
+                const auto loaded = changed.getLoaded (*property);
+                REQUIRE (loaded.has_value() == expected.has_value());
+
+                if (expected.has_value())
+                    CHECK (juce::exactlyEqual (phazite::readLoadedNumber (*loaded).value_or (-1.0e300), *expected));
+
+                checkSong (*changed.loaded);
+            }
+        }
+    }
+}
+
+TEST_CASE ("Every list of numbers the description gives a range keeps each number to it, through the loader and the check")
+{
+    for (const auto* property : schema::getProperties())
+    {
+        if (! property->getRange().has_value() || property->getForm() != schema::Form::numbers)
+            continue;
+
+        const auto& range = *property->getRange();
+
+        for (const auto* type : property->getElements())
+        {
+            const auto values = findWrongValues (range);
+            juce::StringArray tokens;
+
+            for (const auto& value : values)
+                tokens.add (value.containsChar (' ') ? "none" : value);
+
+            tokens.add (juce::String ((range.low + range.high) / 2.0, 6));
+            INFO (type->toString() << "@" << property->toString() << " = " << tokens.joinIntoString (" "));
+            const Changed changed { *type, *property, tokens.joinIntoString (" ") };
+            INFO (describeProblems (changed.problemsBefore));
+            CHECK (hasProblem (changed.problemsBefore, "range", property->toString()));
+
+            juce::StringArray expected;
+
+            for (const auto& token : tokens)
+                if (const auto kept = findKept (range, phazite::readLoadedNumber (token)))
+                    expected.add (juce::String (*kept, 6));
+
+            const auto loaded = changed.getLoaded (*property);
+            REQUIRE (loaded.has_value());
+            juce::StringArray read;
+
+            for (const auto& token : juce::StringArray::fromTokens (loaded->toString(), " ", {}))
+                read.add (juce::String (phazite::readLoadedNumber (token).value_or (-1.0e300), 6));
+
+            CHECK (read == expected);
+            checkSong (*changed.loaded);
+        }
+    }
+}
+
+TEST_CASE ("Every word list the description gives is what the loader keeps a word to and what the check allows")
+{
+    for (const auto* property : schema::getProperties())
+    {
+        if (property->getForm() != schema::Form::words)
+            continue;
+
+        for (const auto* type : property->getElements())
+        {
+            INFO (type->toString() << "@" << property->toString());
+            const Changed changed { *type, *property, "notOneOfTheWords" };
+            INFO (describeProblems (changed.problemsBefore));
+            CHECK (hasProblem (changed.problemsBefore, "kind", property->toString()));
+
+            // A word not on the list goes; one every element holds (a track's kind) is given one, or its element goes.
+            const auto loaded = changed.getLoaded (*property);
+
+            if (property->isAlways() && loaded.has_value())
+            {
+                const auto& words = property->getWords();
+                CHECK (std::any_of (words.begin(), words.end(), [&] (const char* word) { return loaded->toString() == word; }));
+            }
+            else
+            {
+                CHECK_FALSE (loaded.has_value());
+            }
+
+            checkSong (*changed.loaded);
+        }
+    }
+}
+
+TEST_CASE ("Every id the description writes in hexadecimal digits keeps to their count, through the loader and the check")
+{
+    for (const auto* property : schema::getProperties())
+    {
+        if (property->getForm() != schema::Form::hexID)
+            continue;
+
+        for (const auto* type : property->getElements())
+        {
+            const auto digits = property->getHexDigits();
+            const auto good = juce::String::repeatedString ("0123456789abcdef", digits).substring (0, digits);
+
+            for (const auto& value : { good.substring (1), good + "0", good.toUpperCase(), juce::String ("not an id") })
+            {
+                INFO (type->toString() << "@" << property->toString() << " = " << value);
+                const Changed changed { *type, *property, value };
+                INFO (describeProblems (changed.problemsBefore));
+                CHECK (hasProblem (changed.problemsBefore, "kind", property->toString()));
+                CHECK_FALSE (changed.getLoaded (*property).has_value());
+                checkSong (*changed.loaded);
+            }
+
+            const Changed kept { *type, *property, good };
+            INFO (describeProblems (kept.problemsBefore));
+            CHECK (kept.problemsBefore.empty());
+            CHECK (kept.getLoaded (*property) == std::optional<juce::var> (good));
+        }
+    }
+}
+
+TEST_CASE ("A range changed in the description changes what the loader keeps a number to and what the check allows")
+{
+    // A copy of the description with a note's pitch at most 100, which nothing else reads.
+    auto narrower = schema::notePitch;
+    narrower.setRange (schema::whole (0.0, 100.0).orElse (60.0));
+    auto properties = schema::getProperties();
+    std::replace (properties.begin(), properties.end(), static_cast<const schema::PropertyDescription*> (&schema::notePitch),
+                  static_cast<const schema::PropertyDescription*> (&narrower));
+    const schema::Tables changed { schema::getElements(), properties };
+
+    // Under the description: a pitch of 110 is one, and stays.
+    const Changed asDescribed { schema::NOTE, schema::notePitch, 110 };
+    CHECK_FALSE (hasProblem (asDescribed.problemsBefore, "range", "pitch"));
+    CHECK (asDescribed.getLoaded (schema::notePitch) == std::optional<juce::var> (110));
+
+    // Under the changed copy: the check finds it, and the loader brings it in.
+    const Changed narrowed { schema::NOTE, schema::notePitch, 110, changed };
+    CHECK (hasProblem (narrowed.problemsBefore, "range", "pitch"));
+    REQUIRE (narrowed.getLoaded (schema::notePitch).has_value());
+    CHECK ((int) *narrowed.getLoaded (schema::notePitch) == 100);
+    CHECK (findSongProblems (*narrowed.loaded, changed).empty());
+}
+
+TEST_CASE ("The description holds together")
+{
+    const auto& elements = schema::getElements();
+    const auto isDescribed = [&elements] (const schema::Element* element)
+    { return std::find (elements.begin(), elements.end(), element) != elements.end(); };
+
+    // Every element in its parents, which are described, but the song's own.
+    for (const auto* element : elements)
+    {
+        INFO (element->toString());
+        CHECK (element->getParents().empty() == (element == &schema::PHAZITE));
+
+        for (const auto* parent : element->getParents())
+            CHECK (isDescribed (parent));
+
+        CHECK (schema::isKnownType (*element));
+    }
+
+    // Every property on described elements, at least one; and no two of one element's with one name.
+    std::map<juce::String, std::set<juce::String>> names;
+
+    for (const auto* property : schema::getProperties())
+    {
+        INFO (property->toString());
+        CHECK_FALSE (property->getElements().empty());
+
+        for (const auto* element : property->getElements())
+        {
+            CHECK (isDescribed (element));
+            auto& onElement = names[element->toString()];
+
+            if (property->isFamily())
+                for (const auto& name : property->getFamilyNames())
+                    CHECK_MESSAGE (onElement.insert (name.toString()).second, element->toString() << "@" << name.toString());
+            else
+                CHECK_MESSAGE (onElement.insert (property->toString()).second, element->toString() << "@" << property->toString());
+
+            CHECK (schema::getTables().findProperty (*element, property->isFamily() ? property->getFamilyNames().front() : *property)
+                   == property);
+        }
+    }
+
+    // Every name the versions' rules give (song-rules.json) described, a property on the element it is given on.
+    const auto rules = schema::describeSongRules();
+    const auto isElement = [] (const juce::var& name) { return schema::isKnownType (juce::Identifier (name.toString())); };
+    const auto isProperty = [] (const juce::var& type, const juce::var& name)
+    { return schema::getTables().findProperty (juce::Identifier (type.toString()), juce::Identifier (name.toString())) != nullptr; };
+
+    for (const auto& type : *rules["items"]["types"].getArray())
+    {
+        CHECK (isElement (type));
+        CHECK (isProperty (type, rules["items"]["idProperty"]));
+    }
+
+    CHECK (isProperty (rules["items"]["alsoHoldingAnID"], rules["items"]["idProperty"]));
+
+    for (const auto& key : *rules["keys"].getArray())
+        for (const auto& property : *key["properties"].getArray())
+            CHECK_MESSAGE (isProperty (key["type"], property), key["type"].toString() << "@" << property.toString());
+
+    for (const auto& type : *rules["unkeyed"].getArray())
+        CHECK (isElement (type));
+
+    for (const auto& order : rules["orders"].getDynamicObject()->getProperties())
+        CHECK (isElement (order.name.toString()));
+
+    for (const auto* table : { "otherIDHolders", "idNamers", "bytes" })
+        for (const auto& row : *rules[table].getArray())
+            CHECK_MESSAGE (isProperty (row["type"], row["property"]),
+                           table << ": " << row["type"].toString() << "@" << row["property"].toString());
+
+    for (const auto& type : rules["uncountedProperties"].getDynamicObject()->getProperties())
+        for (const auto& property : *type.value.getArray())
+            CHECK_MESSAGE (isProperty (type.name.toString(), property), type.name.toString() << "@" << property.toString());
+
+    for (const auto& row : *rules["uncountedElements"].getArray())
+    {
+        CHECK (isElement (row["parent"]));
+        CHECK (isElement (row["type"]));
+    }
+
+    for (const auto* list : { "piecesOfTheirOwn", "inRuns" })
+        for (const auto& type : *rules[list].getArray())
+            CHECK (isElement (type));
+
+    // The representative golden project, which the cases above change one value of, holds together as it is.
+    {
+        const phazite::Song representative { readRepresentative() };
+        const auto problems = findSongProblems (representative);
+        INFO (describeProblems (problems));
+        CHECK (problems.empty());
+    }
+
+    // Every element and property the representative golden project holds described (a device's values set by hand are
+    // named by its parameters).
+    const std::function<void (const juce::ValueTree&)> visit = [&visit] (const juce::ValueTree& element)
+    {
+        const auto* described = schema::getTables().findElement (element.getType());
+        REQUIRE_MESSAGE (described != nullptr, element.getType().toString());
+
+        if (! described->isNamedByParameters())
+            for (int i = 0; i < element.getNumProperties(); ++i)
+                CHECK_MESSAGE (schema::getTables().findProperty (element.getType(), element.getPropertyName (i)) != nullptr,
+                               element.getType().toString() << "@" << element.getPropertyName (i).toString());
+
+        for (const auto& child : element)
+            visit (child);
+    };
+
+    visit (readRepresentative());
 }

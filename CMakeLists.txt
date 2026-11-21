@@ -350,6 +350,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
     src/model/base/internal/Schema.h
+    src/model/base/internal/SchemaDescription.h
     src/model/base/internal/Selection.h
     src/model/base/internal/SongIndex.h
     src/model/base/internal/SongText.h

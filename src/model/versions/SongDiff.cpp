@@ -154,7 +154,7 @@ namespace
                    && getChildren (other).unkeyed.empty());
     }
 
-    bool hasTypeOf (const juce::String& name, std::initializer_list<const juce::Identifier*> types)
+    bool hasTypeOf (const juce::String& name, std::initializer_list<const schema::Element*> types)
     {
         for (const auto* type : types)
             if (name.startsWith (type->toString() + ":"))
@@ -343,7 +343,7 @@ namespace
             what.add ("device order");
 
         // Its sends, and its modulators and macros, each as a whole.
-        const auto differ = [&a, &b] (std::initializer_list<const juce::Identifier*> types, const char* order)
+        const auto differ = [&a, &b] (std::initializer_list<const schema::Element*> types, const char* order)
         {
             for (const auto* children : { &a, &b })
             {

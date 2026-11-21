@@ -613,148 +613,11 @@ namespace
             return found != places.end() && std::find (found->second.begin(), found->second.end(), keyOf (child)) != found->second.end();
         }
 
-        // The furthest place in beats a song holds anything at, and in seconds of a file.
-        constexpr double maxBeat = maxSongBeats, maxSeconds = 1.0e7, some = 1.0e-9;
-
         // The IDs a song gives stay well below where counting them on would overflow (Schema.h): every ID below maxID (2^62);
         // and where an ID or the next ID reaches renumberMark (3 * 2^60), every ID at or past maxCountedID (2^61) given anew,
         // what names it following, counted on from below maxCountedID. Any other song keeps its IDs and its next ID.
         constexpr auto maxID = schema::maxID;
         constexpr auto maxCountedID = schema::maxCountedID;
-
-        // A number Schema.h gives a range, and what it becomes when it is no number at all: none (its default), or a value;
-        // and whether one outside the range goes rather than being brought in (a MIDI link's controller, which brought in
-        // would be another controller).
-        struct Range
-        {
-            const juce::Identifier* type;
-            const juce::Identifier* property;
-            double low, high;
-            bool whole = false;
-            std::optional<double> fallback {};
-            bool goesOutside = false;
-        };
-
-        const std::vector<Range>& getRanges()
-        {
-            using namespace schema;
-            static const std::vector<Range> ranges {
-                { &PHAZITE, &loopStart, 0.0, maxBeat },
-                { &PHAZITE, &loopEnd, 0.0, maxBeat },
-                { &PHAZITE, &gridOffset, -3.0, 3.0, true },
-                { &PIANOROLL, &gridOffset, -3.0, 3.0, true },
-                { &TEMPO, &mapBeat, 0.0, maxBeat, false, 0.0 },
-                { &TEMPO, &bpm, 20.0, 300.0, false, 120.0 },
-                { &TEMPO, &tempoCurve, -1.0, 1.0 },
-                { &TIMESIGNATURE, &mapBeat, 0.0, maxBeat, false, 0.0 },
-                { &TIMESIGNATURE, &numerator, 1.0, 32.0, true, 4.0 },
-                { &TIMESIGNATURE, &denominator, 2.0, 16.0, true, 4.0 },
-                { &TRACK, &channelVolume, -100.0, 6.0 },
-                { &TRACK, &channelPan, -1.0, 1.0 },
-                { &TRACK, &keyRoot, 0.0, 11.0, true },
-                { &TRACK, &trackPad, 0.0, 127.0, true },
-                { &TRACK, &trackHeight, 32.0, 320.0, true },
-                { &MASTER, &channelVolume, -100.0, 6.0 },
-                { &MASTER, &channelPan, -1.0, 1.0 },
-                { &MASTER, &trackHeight, 32.0, 320.0, true },
-                { &LASTKEY, &keyRoot, 0.0, 11.0, true },
-                { &LANE, &laneHeight, 32.0, 320.0, true },
-                { &DEVICE, &deviceMix, 0.0, 1.0 },
-                { &VALUE, &valueSetByHand, 0.0, 1.0, false, 0.0 },
-                { &CONTAINER, &deviceMix, 0.0, 1.0 },
-                { &CHAIN, &channelVolume, -100.0, 6.0 },
-                { &CHAIN, &channelPan, -1.0, 1.0 },
-                { &CHAIN, &chainCrossover, 20.0, 20000.0 },
-                { &CHAIN, &chainLowKey, 0.0, 127.0, true },
-                { &CHAIN, &chainHighKey, 0.0, 127.0, true },
-                { &CHAIN, &chainLowVelocity, 1.0, 127.0, true },
-                { &CHAIN, &chainHighVelocity, 1.0, 127.0, true },
-                { &SEND, &sendLevel, -100.0, 6.0 },
-                { &MACRO, &macroValue, 0.0, 1.0 },
-                { &MODULATES, &modulatesAmount, -1.0, 1.0, false, 0.0 },
-                { &POINT, &pointBeat, 0.0, maxBeat, false, 0.0 },
-                { &POINT, &pointCurve, -1.0, 1.0 },
-                { &MIDILINK, &midiLinkChannel, 1.0, 16.0, true, {}, true },
-                { &MIDILINK, &midiLinkNumber, 0.0, 119.0, true, {}, true },
-                { &SECTION, &sectionStart, 0.0, maxBeat, false, 0.0 },
-                { &SECTION, &sectionLength, some, maxBeat, false, 4.0 },
-                { &SECTION, &sectionEnergy, 0.0, 1.0 },
-                { &CHORD, &chordStart, 0.0, maxBeat, false, 0.0 },
-                { &CHORD, &chordLength, some, maxBeat, false, 4.0 },
-                { &CHORD, &chordDegree, 1.0, 7.0, true, 1.0 },
-                { &CHORD, &chordAccidental, -1.0, 1.0, true },
-                { &CHORD, &chordInversion, 0.0, 16.0, true },
-                { &CHORDKEY, &chordStart, 0.0, maxBeat, false, 0.0 },
-                { &CHORDKEY, &keyRoot, 0.0, 11.0, true },
-                { &CLIP, &clipStart, 0.0, maxBeat, false, 0.0 },
-                { &CLIP, &clipLength, some, maxBeat, false, 4.0 },
-                { &CLIP, &clipOffset, 0.0, maxBeat },
-                { &CLIP, &clipFileStart, 0.0, maxSeconds, false, 0.0 },
-                { &CLIP, &clipFileEnd, 0.0, maxSeconds, false, 0.0 },
-                { &CLIP, &clipTempo, 20.0, 300.0 },
-                { &CLIP, &clipPitch, -48.0, 48.0 },
-                { &CLIP, &clipGain, -60.0, 24.0 },
-                { &CLIP, &clipFadeIn, 0.0, maxSeconds },
-                { &CLIP, &clipFadeOut, 0.0, maxSeconds },
-                { &CLIP, &clipFadeInBend, -1.0, 1.0 },
-                { &CLIP, &clipFadeOutBend, -1.0, 1.0 },
-                { &CLIP, &clipTakes, 2.0, 1.0e6, true },
-                { &CLIP, &clipTake, 1.0, 1.0e6, true },
-                { &CLIP, &clipTakeLength, some, maxSeconds },
-                { &NOTE, &notePitch, 0.0, 127.0, true, 60.0 },
-                { &NOTE, &noteStart, -maxBeat, maxBeat, false, 0.0 },
-                { &NOTE, &noteLength, some, maxBeat, false, 1.0 }, // more than 0: a tempo change scales notes past getMinimumNoteLength()
-                { &NOTE, &noteVelocity, 1.0, 127.0, true, 100.0 },
-                { &NOTE, &noteChannel, 1.0, 16.0, true },
-                { &CONTROL, &controlNumber, 0.0, 127.0, true, 0.0 },
-                { &CONTROL, &controlBeat, -maxBeat, maxBeat, false, 0.0 },
-                { &CONTROL, &controlValue, 0.0, 16383.0, true, 0.0 },
-                { &CONTROL, &controlChannel, 1.0, 16.0, true },
-                { &WARP, &warpTime, 0.0, maxSeconds, false, 0.0 },
-                { &WARP, &warpPlaysAt, -maxSeconds, maxSeconds, false, 0.0 },
-            };
-            return ranges;
-        }
-
-        // Words a property is one of, by its element's type; anything else goes, as if it had none.
-        struct Words
-        {
-            const juce::Identifier* type;
-            const juce::Identifier* property;
-            juce::StringArray words;
-        };
-
-        const std::vector<Words>& getWords()
-        {
-            using namespace schema;
-            static const std::vector<Words> words {
-                { &TRACK, &trackAutomationMode, { automationTouch, automationLatch, automationWrite } },
-                { &MASTER, &trackAutomationMode, { automationTouch, automationLatch, automationWrite } },
-                { &TRACK, &trackMonitoring, { monitorAlways, monitorNever } },
-                { &CONTAINER, &containerSplit, { splitBands, splitMidSide, splitLeftRight } },
-                { &CLIP, &clipFadeInShape, { fadeIsCurve, fadeIsSCurve } },
-                { &CLIP, &clipFadeOutShape, { fadeIsCurve, fadeIsSCurve } },
-            };
-            return words;
-        }
-
-        // Ids written as text, a property's lowercase hexadecimal digits of a length, by its element's type; text of any other
-        // form names nothing, and goes, as if it had none.
-        struct HexID
-        {
-            const juce::Identifier* type;
-            const juce::Identifier* property;
-            int digits;
-        };
-
-        const std::vector<HexID>& getHexIDs()
-        {
-            using namespace schema;
-            static const std::vector<HexID> ids { { &PHAZITE, &versionsBranch, versionsBranchDigits },
-                                                  { &PHAZITE, &versionsBase, versionsBaseDigits },
-                                                  { &PHAZITE, &idNumbering, idNumberingDigits } };
-            return ids;
-        }
 
         bool isHexID (const juce::var& value, int digits)
         {
@@ -851,35 +714,35 @@ namespace
         // held as Phazite writes it (SongText.h: writeValue()), so that a number another tool wrote otherwise ("120.0",
         // "0.7943282127380371") is the same value as the song's own, which the versions' changes and the project's
         // comparison with its saved copy compare as text.
-        void keepInRange (juce::ValueTree element, const juce::Identifier& property, double low, double high, bool whole,
-                          std::optional<double> fallback)
+        void keepInRange (juce::ValueTree element, const juce::Identifier& property, const schema::Range& range)
         {
             const auto number = readNumber (element[property]);
 
             if (! number.has_value() || ! std::isfinite (*number))
             {
-                if (fallback.has_value())
-                    element.setProperty (property, whole ? juce::var ((juce::int64) *fallback) : juce::var (*fallback), nullptr);
+                if (range.fallback.has_value())
+                    element.setProperty (property, range.whole ? juce::var ((juce::int64) *range.fallback) : juce::var (*range.fallback),
+                                         nullptr);
                 else
                     element.removeProperty (property, nullptr);
 
                 return;
             }
 
-            auto kept = juce::jlimit (low, high, whole ? std::round (*number) : *number);
+            auto kept = juce::jlimit (range.low, range.high, range.whole ? std::round (*number) : *number);
 
-            // A time signature's note value is a power of two.
-            if (element.hasType (schema::TIMESIGNATURE) && property == schema::denominator)
+            // Where it is (a time signature's note value), a power of two.
+            if (range.powersOfTwo)
                 kept = std::exp2 (std::round (std::log2 (kept)));
 
-            if (const auto value = whole ? juce::var ((juce::int64) kept) : juce::var (kept);
+            if (const auto value = range.whole ? juce::var ((juce::int64) kept) : juce::var (kept);
                 ! juce::exactlyEqual (kept, *number)
                 || ! (isPlainlyAsWritten (element[property]) || isSameValue (element[property], value)))
                 element.setProperty (property, value, nullptr);
         }
 
         // Whether a number lies outside its range, made whole first where it is a whole one (a number that is none isn't).
-        bool isOutside (const juce::var& value, const Range& range)
+        bool isOutside (const juce::var& value, const schema::Range& range)
         {
             const auto number = readNumber (value);
 
@@ -890,34 +753,34 @@ namespace
             return kept < range.low || kept > range.high;
         }
 
-        // Whether a property holds a number Schema.h writes down, which a reader takes as a double: one the loader's table
-        // gives a range (getRanges()), a device's or a modulator's value set by hand (VALUES), a point's position; or numbers
-        // separated by spaces (inList): a step sequencer's steps, the sampler's slices.
-        bool holdsNumbers (const juce::ValueTree& element, const juce::Identifier& property, bool& inList)
+        bool isAmong (const juce::Identifier& property, const std::vector<const schema::PropertyDescription*>& list)
         {
-            inList =
-                (element.hasType (schema::MODULATOR) && property == schema::modulatorSteps)
-                || (element.hasType (schema::SOUNDS) && (property == schema::samplerSlices || property == schema::samplerSlicesRemoved));
+            for (const auto* each : list)
+                if (each->getName() == property)
+                    return true;
+
+            return false;
+        }
+
+        // Whether a property holds a number Schema.h writes down, which a reader takes as a double: one Schema.h gives a range,
+        // a device's or a modulator's value set by hand (VALUES), a point's position; or numbers separated by spaces
+        // (inList, Form::numbers): a step sequencer's steps, the sampler's slices.
+        bool holdsNumbers (const juce::ValueTree& element, const juce::Identifier& property, bool& inList, const schema::Tables& tables)
+        {
+            const auto& described = tables.on (element.getType());
+            inList = isAmong (property, described.lists);
 
             if (inList || element.hasType (schema::VALUES) || (element.hasType (schema::POINT) && property == schema::pointValue))
                 return true;
 
-            const auto& ranges = getRanges();
-            return std::any_of (ranges.begin(), ranges.end(),
-                                [&] (const Range& range) { return element.hasType (*range.type) && property == *range.property; });
+            return isAmong (property, described.ranged);
         }
 
         // The names of the properties that hold or name an ID of the song's (schema::holdsID(), namesID()), which their
         // elements' types then tell apart.
         bool mayHoldID (const juce::Identifier& property)
         {
-            for (const auto* name : { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink, &schema::sendTo,
-                                      &schema::deviceSidechain, &schema::laneDevice, &schema::curveDevice, &schema::modulatesDevice,
-                                      &schema::trackPadDevice, &schema::midiLinkDevice })
-                if (property == *name)
-                    return true;
-
-            return false;
+            return schema::getTables().mayHoldID (property);
         }
 
         // An ID as Phazite writes one: its whole number, its digits alone, the first not 0.
@@ -926,8 +789,8 @@ namespace
             return text.isNotEmpty() && text.length() <= 19 && text[0] != '0' && text.containsOnly ("0123456789");
         }
 
-        // A number of a list within its range (Schema.h): a step sequencer's steps from -1 to 1, 0 for what is no finite
-        // number; the sampler's slices from 0 to 1, without what is none. One within it stays as it is written.
+        // A number of a list within its range (Schema.h, Form::numbers): a step sequencer's steps from -1 to 1, 0 for what is
+        // no finite number; the sampler's slices from 0 to 1, without what is none. One within it stays as it is written.
         void keepListInRange (juce::ValueTree element, const juce::Identifier& property, double low, double high,
                               std::optional<double> none)
         {
@@ -967,7 +830,7 @@ namespace
         // Phazite writes it, where another tool wrote it otherwise ("true", "false", "12.0"), as the song plays it (a switch as
         // juce::var reads it, an ID as readID() does), so that the versions, which compare text, see no change where there is
         // none (known bug 179); and each list's numbers within their range. What Phazite wrote stays as it is.
-        void keepTexts (juce::ValueTree element, bool exponentsOnly)
+        void keepTexts (juce::ValueTree element, bool exponentsOnly, const schema::Tables& tables)
         {
             const auto type = element.getType();
 
@@ -992,7 +855,7 @@ namespace
                     return false;
                 };
 
-                if (hasE() && holdsNumbers (element, property, inList))
+                if (hasE() && holdsNumbers (element, property, inList, tables))
                 {
                     auto kept = text;
 
@@ -1061,17 +924,13 @@ namespace
                         element.setProperty (*each->property, false, nullptr);
                 }
 
-                if (type == schema::MODULATOR)
-                    keepListInRange (element, schema::modulatorSteps, -1.0, 1.0, 0.0);
-
-                if (type == schema::SOUNDS)
-                    for (const auto* slices : { &schema::samplerSlices, &schema::samplerSlicesRemoved })
-                        keepListInRange (element, *slices, 0.0, 1.0, std::nullopt);
+                for (const auto* list : tables.on (type).lists)
+                    keepListInRange (element, *list, list->getRange()->low, list->getRange()->high, list->getRange()->fallback);
             }
 
             for (auto child : element)
                 if (isKnown (child))
-                    keepTexts (child, exponentsOnly);
+                    keepTexts (child, exponentsOnly, tables);
         }
         // A full path on any system: this one's, one from the root ("/home/...", "\..."), or a Windows drive's ("C:..."). A
         // ':' anywhere else is part of a file's name, which Linux allows ("Audio/Loop 1:2.wav").
@@ -1088,11 +947,23 @@ namespace
             return path.length() >= 2 && (path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/');
         }
 
+        // A property's words, as Schema.h describes them.
+        juce::StringArray getWords (const schema::PropertyDescription& property)
+        {
+            juce::StringArray words;
+
+            for (const auto* word : property.getWords())
+                words.add (word);
+
+            return words;
+        }
+
         struct Keeper
         {
             Song& song;
             juce::File folder;       // the project's, or none
             bool readInPart = false; // makeConsistent()'s ReadAs::inPart: what names an ID the song hasn't may lead into what wasn't read
+            const schema::Tables& tables; // the description's ranges, words and hexadecimal ids, which a test may change
 
             //==============================================================================
             // Each element of a type Phazite knows where Schema.h puts it; one somewhere else goes, with everything in it. One
@@ -1100,11 +971,9 @@ namespace
             void keepPlaces (juce::ValueTree parent)
             {
                 // The words of the kinds, made once: not a list of texts for each controller.
-                static const juce::StringArray trackKinds { schema::trackIsTrack, schema::trackIsFolder, schema::trackIsReturn };
-                static const juce::StringArray clipKinds { schema::clipIsMidi, schema::clipIsAudio };
-                static const juce::StringArray controlKinds { schema::controlIsController, schema::controlIsPitchWheel,
-                                                              schema::controlIsChannelPressure, schema::controlIsAftertouch,
-                                                              schema::controlIsProgramChange };
+                static const auto trackKinds = getWords (schema::trackKind);
+                static const auto clipKinds = getWords (schema::clipKind);
+                static const auto controlKinds = getWords (schema::controlKind);
 
                 for (auto i = parent.getNumChildren(); --i >= 0;)
                 {
@@ -1227,40 +1096,34 @@ namespace
             // Every number Schema.h gives a range within it, every word one of its words, and every id written as text one.
             void keepNumbers (juce::ValueTree element)
             {
-                for (const auto& id : getHexIDs())
-                    if (element.hasType (*id.type) && element.hasProperty (*id.property) && ! isHexID (element[*id.property], id.digits))
-                        element.removeProperty (*id.property, nullptr);
+                // What Schema.h describes on the element's type, looked up once for each element.
+                const auto& described = tables.on (element.getType());
 
-                // The tables' rows by their elements' types, looked up once for each element.
-                static const auto byType = []
+                for (const auto* id : described.hexIDs)
+                    if (element.hasProperty (*id) && ! isHexID (element[*id], id->getHexDigits()))
+                        element.removeProperty (*id, nullptr);
+
+                for (const auto* property : described.ranged)
                 {
-                    std::unordered_map<TypeKey, std::pair<std::vector<const Range*>, std::vector<const Words*>>> table;
+                    if (! element.hasProperty (*property))
+                        continue;
 
-                    for (const auto& range : getRanges())
-                        table[keyOf (*range.type)].first.push_back (&range);
+                    if (const auto& range = *property->getRange(); range.outsideGoes && isOutside (element[*property], range))
+                        element.removeProperty (*property, nullptr); // and what needs it with it (keepMidiLinks())
+                    else
+                        keepInRange (element, *property, range);
+                }
 
-                    for (const auto& words : getWords())
-                        table[keyOf (*words.type)].second.push_back (&words);
-
-                    return table;
-                }();
-
-                if (const auto rows = byType.find (keyOf (element.getType())); rows != byType.end())
+                for (const auto* property : described.worded)
                 {
-                    for (const auto* range : rows->second.first)
-                    {
-                        if (! element.hasProperty (*range->property))
-                            continue;
+                    if (! element.hasProperty (*property))
+                        continue;
 
-                        if (range->goesOutside && isOutside (element[*range->property], *range))
-                            element.removeProperty (*range->property, nullptr); // and what needs it with it (keepMidiLinks())
-                        else
-                            keepInRange (element, *range->property, range->low, range->high, range->whole, range->fallback);
-                    }
+                    const auto text = element[*property].toString();
+                    const auto& words = property->getWords();
 
-                    for (const auto* words : rows->second.second)
-                        if (element.hasProperty (*words->property) && ! words->words.contains (element[*words->property].toString()))
-                            element.removeProperty (*words->property, nullptr);
+                    if (std::none_of (words.begin(), words.end(), [&text] (const char* word) { return text == word; }))
+                        element.removeProperty (*property, nullptr);
                 }
 
                 for (auto child : element)
@@ -1634,7 +1497,7 @@ namespace
                             continue;
                         }
 
-                        keepInRange (point, schema::pointValue, 0.0, 1.0, false, 0.0);
+                        keepInRange (point, schema::pointValue, *schema::pointValue.getRange());
                         ++numPoints;
                     }
 
@@ -1732,7 +1595,7 @@ namespace
             void keep()
             {
                 auto state = song.getState();
-                keepTexts (state, false); // first: before anything reads a number
+                keepTexts (state, false, tables); // first: before anything reads a number
                 keepPlaces (state);
                 keepDevices (state);
                 keepNumbers (state);
@@ -1792,7 +1655,7 @@ void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal)
 
 void makeExponentsReadable (juce::ValueTree song)
 {
-    consistent::keepTexts (std::move (song), true);
+    consistent::keepTexts (std::move (song), true, schema::getTables());
 }
 
 std::optional<double> readLoadedNumber (const juce::var& value)
@@ -1852,7 +1715,13 @@ const std::vector<SwitchProperty>& getSwitchProperties()
 
 void makeConsistent (Song& song, ReadAs read)
 {
-    consistent::Keeper { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), read == ReadAs::inPart }
+    makeConsistent (song, read, schema::getTables());
+}
+
+void makeConsistent (Song& song, ReadAs read, const schema::Tables& tables)
+{
+    consistent::Keeper { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), read == ReadAs::inPart,
+                         tables }
         .keep();
 }
 

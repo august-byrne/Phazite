@@ -59,7 +59,7 @@ namespace
 
                 juce::ValueTree stub (schema::TRACK);
 
-                for (const auto* property : { &schema::trackID, &schema::trackKind, &schema::trackName })
+                for (const auto* property : { &schema::trackID.getName(), &schema::trackKind.getName(), &schema::trackName.getName() })
                     if (child.hasProperty (*property))
                         stub.setProperty (*property, child[*property], nullptr);
 

@@ -16,16 +16,12 @@
 
 namespace phazite::test
 {
-// Whether Phazite knows an element's type (Schema.h). One it doesn't, a later build's or another tool's, stays in a song as it is,
-// with everything in it (docs/project-format.md), and nothing reads it: the checks leave it and what is in it alone.
+// Whether Phazite knows an element's type (Schema.h: an element it describes). One it doesn't, a later build's or another
+// tool's, stays in a song as it is, with everything in it (docs/project-format.md), and nothing reads it: the checks leave
+// it and what is in it alone.
 inline bool isKnownElementType (const juce::ValueTree& element)
 {
-    static const juce::StringArray types { "PHAZITE",    "LASTKEY",   "TEMPOMAP", "TEMPO",    "TIMESIGNATURE", "PIANOROLL", "TRACKS",
-                                           "TRACK",      "MASTER",    "LANES",    "LANE",     "DEVICE",        "VALUES",    "SOUNDS",
-                                           "VALUE",      "CONTAINER", "CHAIN",    "SEND",     "MODULATOR",     "MACRO",     "MODULATES",
-                                           "AUTOMATION", "CURVE",     "POINT",    "SECTIONS", "SECTION",       "CHORDLANE", "CHORD",
-                                           "CHORDKEY",   "CLIP",      "NOTE",     "CONTROL",  "WARP" };
-    return types.contains (element.getType().toString());
+    return schema::isKnownType (element.getType());
 }
 
 // Each problem with a song's IDs, as a line: "id: ..." for an ID held twice (an item's in the song, a note's in its clip),

@@ -4,6 +4,7 @@
 
 #include "model/base/BackgroundJobs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/Schema.h"
 
 #include <juce_data_structures/juce_data_structures.h>
 
@@ -33,8 +34,8 @@ juce::File getDefaultProjectsFolder();
 Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file = {}, const juce::File& cacheFolder = {});
 
 // The furthest place in beats a song holds anything at, as a file from elsewhere is taken in: a million beats, days of music
-// at any tempo.
-inline constexpr double maxSongBeats = 1.0e6;
+// at any tempo (Schema.h: schema::maxBeats, which the song's ranges are described with).
+inline constexpr double maxSongBeats = schema::maxBeats;
 
 // What makeSong() does first, for a song whose file anyone could have written (Phazite takes in projects from others): it
 // repairs only what no Phazite could have written, and changes nothing in a song Phazite saved, whichever build or
@@ -67,14 +68,19 @@ enum class ReadAs
 
 void makeConsistent (Song&, ReadAs = ReadAs::whole);
 
+// The same, keeping to the ranges, words and hexadecimal ids of the description's tables given (Schema.h:
+// schema::getTables()), rather than the description's own: for a test, which changes one in a copy and sees the loader
+// follow (tests/SchemaTests.cpp).
+void makeConsistent (Song&, ReadAs, const schema::Tables&);
+
 // The properties makeConsistent() takes as switches, by their element's type (Schema.h: "bool", or "true, or none"):
 // whether Phazite leaves one that is off out (none), as their setters do, rather than writing it false; and what one that
 // is none means, as Schema.h gives its default (a switch that is on unless it says otherwise can't be left out when off).
 // A switch written in another form ("true", "false") is written as Phazite writes it, its value the same.
 struct SwitchProperty
 {
-    const juce::Identifier* type;
-    const juce::Identifier* property;
+    const schema::Element* type;
+    const schema::PropertyDescription* property;
     bool offIsNone, noneIsOn;
 };
 

@@ -899,7 +899,7 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
 
         // Nor does a copy of a pad's track play the pad, which plays on the original.
         for (auto state : inside)
-            for (const auto* property : { &schema::trackFrozen, &schema::trackPadDevice, &schema::trackPad })
+            for (const auto* property : { &schema::trackFrozen.getName(), &schema::trackPadDevice.getName(), &schema::trackPad.getName() })
                 state.removeProperty (*property, nullptr);
 
         auto parent = original.getParent();

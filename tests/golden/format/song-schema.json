@@ -1,0 +1,2438 @@
+{
+  "elements": [
+    {
+      "name": "AUTOMATION",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "CHAIN",
+      "in": [
+        "CONTAINER"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "CHORD",
+      "in": [
+        "CHORDLANE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "CHORDKEY",
+      "in": [
+        "CHORDLANE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "CHORDLANE",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "CLIP",
+      "in": [
+        "TRACK"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "CONTAINER",
+      "in": [
+        "TRACK",
+        "MASTER"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "CONTROL",
+      "in": [
+        "CLIP"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "CURVE",
+      "in": [
+        "AUTOMATION"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "DEVICE",
+      "in": [
+        "TRACK",
+        "MASTER",
+        "CHAIN"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "LANE",
+      "in": [
+        "LANES"
+      ],
+      "kind": "view",
+      "counted": true
+    },
+    {
+      "name": "LANES",
+      "in": [
+        "TRACK",
+        "MASTER"
+      ],
+      "kind": "view",
+      "counted": false
+    },
+    {
+      "name": "LASTKEY",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "state",
+      "counted": true
+    },
+    {
+      "name": "MACRO",
+      "in": [
+        "TRACK",
+        "CONTAINER"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "MASTER",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "MERGING",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "MIDILINK",
+      "in": [
+        "MIDILINKS"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "MIDILINKS",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "MODULATES",
+      "in": [
+        "MODULATOR",
+        "MACRO"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "MODULATOR",
+      "in": [
+        "TRACK",
+        "MASTER"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "NOTE",
+      "in": [
+        "CLIP"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "PHAZITE",
+      "in": [],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "PIANOROLL",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "view",
+      "counted": false
+    },
+    {
+      "name": "POINT",
+      "in": [
+        "CURVE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "SECTION",
+      "in": [
+        "SECTIONS"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "SECTIONS",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "SEND",
+      "in": [
+        "TRACK"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "SOUNDS",
+      "in": [
+        "DEVICE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "TEMPO",
+      "in": [
+        "TEMPOMAP"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "TEMPOMAP",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "TIMESIGNATURE",
+      "in": [
+        "TEMPOMAP"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "TRACK",
+      "in": [
+        "TRACKS",
+        "TRACK"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "TRACKS",
+      "in": [
+        "PHAZITE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "VALUE",
+      "in": [
+        "DEVICE"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "VALUES",
+      "in": [
+        "DEVICE",
+        "MODULATOR"
+      ],
+      "kind": "song",
+      "counted": true,
+      "propertiesNamedBy": "its device's or modulator's parameters"
+    },
+    {
+      "name": "WARP",
+      "in": [
+        "CLIP"
+      ],
+      "kind": "song",
+      "counted": true
+    }
+  ],
+  "properties": [
+    {
+      "name": "accidental",
+      "on": [
+        "CHORD"
+      ],
+      "type": "int",
+      "range": {
+        "low": -1.0,
+        "high": 1.0,
+        "whole": true
+      },
+      "default": 0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "amount",
+      "on": [
+        "MODULATES"
+      ],
+      "type": "float",
+      "range": {
+        "low": -1.0,
+        "high": 1.0,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "automationMode",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "text",
+      "form": "words",
+      "words": [
+        "touch",
+        "latch",
+        "write"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "beat",
+      "on": [
+        "CONTROL"
+      ],
+      "type": "double",
+      "range": {
+        "low": -1.0e6,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "beat",
+      "on": [
+        "POINT"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "beat",
+      "on": [
+        "TEMPO",
+        "TIMESIGNATURE"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "before",
+      "on": [
+        "MERGING"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "bpm",
+      "on": [
+        "TEMPO"
+      ],
+      "type": "double",
+      "range": {
+        "low": 20.0,
+        "high": 300.0,
+        "whole": false,
+        "noNumberBecomes": 120.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "bus",
+      "on": [
+        "TRACK"
+      ],
+      "type": "bool",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "channel",
+      "on": [
+        "CONTROL"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 16.0,
+        "whole": true
+      },
+      "default": 1,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "channel",
+      "on": [
+        "MIDILINK"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 16.0,
+        "whole": true,
+        "outsideGoes": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "channel",
+      "on": [
+        "NOTE"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 16.0,
+        "whole": true
+      },
+      "default": 1,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "chosen",
+      "on": [
+        "MERGING"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "collapsed",
+      "on": [
+        "LANE"
+      ],
+      "type": "bool",
+      "kind": "view",
+      "counted": true
+    },
+    {
+      "name": "collapsed",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "view",
+      "uncountedOn": [
+        "TRACK",
+        "MASTER"
+      ]
+    },
+    {
+      "name": "colour",
+      "on": [
+        "SECTION"
+      ],
+      "type": "text",
+      "form": "colour",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "colour",
+      "on": [
+        "TRACK"
+      ],
+      "type": "text",
+      "form": "colour",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "crossed",
+      "on": [
+        "MERGING"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "crossover",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "float",
+      "range": {
+        "low": 20.0,
+        "high": 20000.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "curve",
+      "on": [
+        "POINT"
+      ],
+      "type": "float",
+      "range": {
+        "low": -1.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "curve",
+      "on": [
+        "TEMPO"
+      ],
+      "type": "float",
+      "range": {
+        "low": -1.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "degree",
+      "on": [
+        "CHORD"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 7.0,
+        "whole": true,
+        "noNumberBecomes": 1.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "denominator",
+      "on": [
+        "TIMESIGNATURE"
+      ],
+      "type": "int",
+      "range": {
+        "low": 2.0,
+        "high": 16.0,
+        "whole": true,
+        "noNumberBecomes": 4.0,
+        "powersOfTwo": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "device",
+      "on": [
+        "CURVE"
+      ],
+      "type": "int64",
+      "form": "idName",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "device",
+      "on": [
+        "LANE"
+      ],
+      "type": "int64",
+      "form": "idName",
+      "kind": "view",
+      "counted": true
+    },
+    {
+      "name": "device",
+      "on": [
+        "MIDILINK"
+      ],
+      "type": "int64",
+      "form": "idName",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "device",
+      "on": [
+        "MODULATES"
+      ],
+      "type": "int64",
+      "form": "idName",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "drumHidden",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "text",
+      "kind": "view",
+      "uncountedOn": [
+        "TRACK",
+        "MASTER"
+      ]
+    },
+    {
+      "name": "drumMode",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "bool",
+      "kind": "view",
+      "uncountedOn": [
+        "TRACK",
+        "MASTER"
+      ]
+    },
+    {
+      "name": "drumOrder",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "text",
+      "kind": "view",
+      "uncountedOn": [
+        "TRACK",
+        "MASTER"
+      ]
+    },
+    {
+      "name": "energy",
+      "on": [
+        "SECTION"
+      ],
+      "type": "float",
+      "range": {
+        "low": 0.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "default": 0.5,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fadeIn",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e7,
+        "whole": false
+      },
+      "default": 0.0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fadeInBend",
+      "on": [
+        "CLIP"
+      ],
+      "type": "float",
+      "range": {
+        "low": -1.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "default": 0.0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fadeInShape",
+      "on": [
+        "CLIP"
+      ],
+      "type": "text",
+      "form": "words",
+      "words": [
+        "curve",
+        "sCurve"
+      ],
+      "default": "curve",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fadeOut",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e7,
+        "whole": false
+      },
+      "default": 0.0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fadeOutBend",
+      "on": [
+        "CLIP"
+      ],
+      "type": "float",
+      "range": {
+        "low": -1.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "default": 0.0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fadeOutShape",
+      "on": [
+        "CLIP"
+      ],
+      "type": "text",
+      "form": "words",
+      "words": [
+        "curve",
+        "sCurve"
+      ],
+      "default": "curve",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fader",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "int64",
+      "form": "songID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "file",
+      "on": [
+        "CLIP"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fileEnd",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e7,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "fileStart",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e7,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "format",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "formatID",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "text",
+      "kind": "state",
+      "counted": true
+    },
+    {
+      "name": "frozen",
+      "on": [
+        "TRACK"
+      ],
+      "type": "bool",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "gain",
+      "on": [
+        "CLIP"
+      ],
+      "type": "float",
+      "range": {
+        "low": -60.0,
+        "high": 24.0,
+        "whole": false
+      },
+      "default": 0.0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "gridAdaptive",
+      "on": [
+        "PHAZITE",
+        "PIANOROLL"
+      ],
+      "type": "bool",
+      "default": true,
+      "kind": "view",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "gridOffset",
+      "on": [
+        "PHAZITE",
+        "PIANOROLL"
+      ],
+      "type": "int",
+      "range": {
+        "low": -3.0,
+        "high": 3.0,
+        "whole": true
+      },
+      "default": 0,
+      "kind": "view",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "gridSnap",
+      "on": [
+        "PHAZITE",
+        "PIANOROLL"
+      ],
+      "type": "bool",
+      "default": true,
+      "kind": "view",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "gridStep",
+      "on": [
+        "PHAZITE",
+        "PIANOROLL"
+      ],
+      "type": "text",
+      "default": "1/4 beat",
+      "kind": "view",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "gridTriplets",
+      "on": [
+        "PHAZITE",
+        "PIANOROLL"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "view",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "head",
+      "on": [
+        "MERGING"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "height",
+      "on": [
+        "LANE"
+      ],
+      "type": "int",
+      "range": {
+        "low": 32.0,
+        "high": 320.0,
+        "whole": true
+      },
+      "default": 48,
+      "kind": "view",
+      "counted": true
+    },
+    {
+      "name": "height",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "int",
+      "range": {
+        "low": 32.0,
+        "high": 320.0,
+        "whole": true
+      },
+      "default": 64,
+      "kind": "view",
+      "uncountedOn": [
+        "TRACK",
+        "MASTER"
+      ]
+    },
+    {
+      "name": "highKey",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 127.0,
+        "whole": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "highVelocity",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 127.0,
+        "whole": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "id",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "int64",
+      "form": "ownID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "id",
+      "on": [
+        "CLIP"
+      ],
+      "type": "int64",
+      "form": "ownID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "id",
+      "on": [
+        "DEVICE",
+        "CONTAINER"
+      ],
+      "type": "int64",
+      "form": "ownID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "id",
+      "on": [
+        "MODULATOR",
+        "MACRO"
+      ],
+      "type": "int64",
+      "form": "ownID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "id",
+      "on": [
+        "NOTE"
+      ],
+      "type": "int64",
+      "form": "ownID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "id",
+      "on": [
+        "SECTION"
+      ],
+      "type": "int64",
+      "form": "ownID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "id",
+      "on": [
+        "SEND"
+      ],
+      "type": "int64",
+      "form": "ownID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "id",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "int64",
+      "form": "ownID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "idNumbering",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "text",
+      "form": "hexID",
+      "digits": 16,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "identifier",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "input",
+      "on": [
+        "TRACK"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "instrument",
+      "on": [
+        "CONTAINER"
+      ],
+      "type": "bool",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "instrument",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "bool",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "inversion",
+      "on": [
+        "CHORD"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 16.0,
+        "whole": true
+      },
+      "default": 0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "keyRoot",
+      "on": [
+        "TRACK",
+        "LASTKEY",
+        "CHORDKEY"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 11.0,
+        "whole": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "keyScale",
+      "on": [
+        "TRACK",
+        "LASTKEY",
+        "CHORDKEY"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "kind",
+      "on": [
+        "CLIP"
+      ],
+      "type": "text",
+      "form": "words",
+      "words": [
+        "midi",
+        "audio"
+      ],
+      "always": true,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "kind",
+      "on": [
+        "CONTROL"
+      ],
+      "type": "text",
+      "form": "words",
+      "words": [
+        "controller",
+        "pitchWheel",
+        "channelPressure",
+        "aftertouch",
+        "programChange"
+      ],
+      "always": true,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "kind",
+      "on": [
+        "TRACK"
+      ],
+      "type": "text",
+      "form": "words",
+      "words": [
+        "track",
+        "folder",
+        "return"
+      ],
+      "always": true,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "lastInput",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "text",
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "length",
+      "on": [
+        "CHORD"
+      ],
+      "type": "double",
+      "range": {
+        "low": 1.0e-9,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 4.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "length",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 1.0e-9,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 4.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "length",
+      "on": [
+        "NOTE"
+      ],
+      "type": "double",
+      "range": {
+        "low": 1.0e-9,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 1.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "length",
+      "on": [
+        "SECTION"
+      ],
+      "type": "double",
+      "range": {
+        "low": 1.0e-9,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 4.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "level",
+      "on": [
+        "SEND"
+      ],
+      "type": "float",
+      "range": {
+        "low": -100.0,
+        "high": 6.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "link",
+      "on": [
+        "CLIP"
+      ],
+      "type": "int64",
+      "form": "songID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "loop",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "loopEnd",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false
+      },
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "loopFollowsSong",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "bool",
+      "default": true,
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "loopStart",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false
+      },
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "lowKey",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 127.0,
+        "whole": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "lowVelocity",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 127.0,
+        "whole": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "manufacturer",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "metronome",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "mix",
+      "on": [
+        "DEVICE",
+        "CONTAINER"
+      ],
+      "type": "float",
+      "range": {
+        "low": 0.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "monitoring",
+      "on": [
+        "TRACK"
+      ],
+      "type": "text",
+      "form": "words",
+      "words": [
+        "always",
+        "never"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "mute",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "bool",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "mute",
+      "on": [
+        "CLIP"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "mute",
+      "on": [
+        "NOTE"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "mute",
+      "on": [
+        "TRACK"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "name",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "name",
+      "on": [
+        "CLIP"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "name",
+      "on": [
+        "CONTAINER"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "name",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "name",
+      "on": [
+        "MACRO"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "name",
+      "on": [
+        "SECTION"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "name",
+      "on": [
+        "TRACK"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "nextID",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "int64",
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "notes",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "number",
+      "on": [
+        "CONTROL"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 127.0,
+        "whole": true,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "number",
+      "on": [
+        "MIDILINK"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 119.0,
+        "whole": true,
+        "outsideGoes": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "numerator",
+      "on": [
+        "TIMESIGNATURE"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 32.0,
+        "whole": true,
+        "noNumberBecomes": 4.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "off",
+      "on": [
+        "DEVICE",
+        "CONTAINER",
+        "MODULATOR"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "offset",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false
+      },
+      "default": 0.0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "osc<osc>Wavetable",
+      "names": 2,
+      "on": [
+        "SOUNDS"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "osc<osc>WavetableFile",
+      "names": 2,
+      "on": [
+        "SOUNDS"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "outline",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "pad",
+      "on": [
+        "TRACK"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 127.0,
+        "whole": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "pad<note>Sound<layer>",
+      "names": 512,
+      "on": [
+        "SOUNDS"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "pad<note>SoundFile<layer>",
+      "names": 512,
+      "on": [
+        "SOUNDS"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "padDevice",
+      "on": [
+        "TRACK"
+      ],
+      "type": "int64",
+      "form": "idName",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "pan",
+      "on": [
+        "TRACK",
+        "MASTER",
+        "CHAIN"
+      ],
+      "type": "float",
+      "range": {
+        "low": -1.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "parameter",
+      "on": [
+        "CURVE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "parameter",
+      "on": [
+        "LANE"
+      ],
+      "type": "text",
+      "kind": "view",
+      "counted": true
+    },
+    {
+      "name": "parameter",
+      "on": [
+        "MIDILINK"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "parameter",
+      "on": [
+        "MODULATES"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "parameter",
+      "on": [
+        "VALUE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "patternsKeepTheirSpeed",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "pinned",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "view",
+      "uncountedOn": [
+        "TRACK",
+        "MASTER"
+      ]
+    },
+    {
+      "name": "pitch",
+      "on": [
+        "CLIP"
+      ],
+      "type": "float",
+      "range": {
+        "low": -48.0,
+        "high": 48.0,
+        "whole": false
+      },
+      "default": 0.0,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "pitch",
+      "on": [
+        "NOTE"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 127.0,
+        "whole": true,
+        "noNumberBecomes": 60.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "playStart",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "double",
+      "default": 0.0,
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "playsAt",
+      "on": [
+        "WARP"
+      ],
+      "type": "double",
+      "range": {
+        "low": -1.0e7,
+        "high": 1.0e7,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "portamento",
+      "on": [
+        "NOTE"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "preFader",
+      "on": [
+        "SEND"
+      ],
+      "type": "bool",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "program",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "int",
+      "kind": "state",
+      "counted": true
+    },
+    {
+      "name": "punch",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "renumbered",
+      "on": [
+        "MERGING"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "reversed",
+      "on": [
+        "CLIP"
+      ],
+      "type": "bool",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "role",
+      "on": [
+        "SECTION"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "sample",
+      "on": [
+        "SOUNDS"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "sampleFile",
+      "on": [
+        "SOUNDS"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "sampleSlices",
+      "on": [
+        "SOUNDS"
+      ],
+      "type": "text",
+      "form": "numbers",
+      "range": {
+        "low": 0.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "sampleSlicesRemoved",
+      "on": [
+        "SOUNDS"
+      ],
+      "type": "text",
+      "form": "numbers",
+      "range": {
+        "low": 0.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "sidechain",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "int64",
+      "form": "idName",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "slide",
+      "on": [
+        "NOTE"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "solo",
+      "on": [
+        "CHAIN"
+      ],
+      "type": "bool",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "solo",
+      "on": [
+        "TRACK"
+      ],
+      "type": "bool",
+      "default": false,
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "split",
+      "on": [
+        "CONTAINER"
+      ],
+      "type": "text",
+      "form": "words",
+      "words": [
+        "bands",
+        "midSide",
+        "leftRight"
+      ],
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "start",
+      "on": [
+        "CHORD",
+        "CHORDKEY"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "start",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "start",
+      "on": [
+        "NOTE"
+      ],
+      "type": "double",
+      "range": {
+        "low": -1.0e6,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "start",
+      "on": [
+        "SECTION"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "state",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "bytes",
+      "kind": "state",
+      "counted": true
+    },
+    {
+      "name": "steps",
+      "on": [
+        "MODULATOR"
+      ],
+      "type": "text",
+      "form": "numbers",
+      "range": {
+        "low": -1.0,
+        "high": 1.0,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "take",
+      "on": [
+        "CLIP"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 1.0e6,
+        "whole": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "takeLength",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 1.0e-9,
+        "high": 1.0e7,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "takes",
+      "on": [
+        "CLIP"
+      ],
+      "type": "int",
+      "range": {
+        "low": 2.0,
+        "high": 1.0e6,
+        "whole": true
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "tempo",
+      "on": [
+        "CLIP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 20.0,
+        "high": 300.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "time",
+      "on": [
+        "WARP"
+      ],
+      "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e7,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "tip",
+      "on": [
+        "SECTION"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "to",
+      "on": [
+        "SEND"
+      ],
+      "type": "int64",
+      "form": "idName",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "translated",
+      "on": [
+        "MERGING"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "type",
+      "on": [
+        "CHORD"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "type",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "type",
+      "on": [
+        "MODULATOR"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "uid",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "int",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "value",
+      "on": [
+        "CONTROL"
+      ],
+      "type": "int",
+      "range": {
+        "low": 0.0,
+        "high": 16383.0,
+        "whole": true,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "value",
+      "on": [
+        "MACRO"
+      ],
+      "type": "float",
+      "range": {
+        "low": 0.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "value",
+      "on": [
+        "POINT"
+      ],
+      "type": "float",
+      "range": {
+        "low": 0.0,
+        "high": 1.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "value",
+      "on": [
+        "VALUE"
+      ],
+      "type": "float",
+      "range": {
+        "low": 0.0,
+        "high": 1.0,
+        "whole": false,
+        "noNumberBecomes": 0.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "vca",
+      "on": [
+        "TRACK",
+        "MASTER"
+      ],
+      "type": "int64",
+      "form": "songID",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "velocity",
+      "on": [
+        "NOTE"
+      ],
+      "type": "int",
+      "range": {
+        "low": 1.0,
+        "high": 127.0,
+        "whole": true,
+        "noNumberBecomes": 100.0
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "version",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "text",
+      "kind": "state",
+      "counted": true
+    },
+    {
+      "name": "version",
+      "on": [
+        "MERGING"
+      ],
+      "type": "text",
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "versionsBase",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "text",
+      "form": "hexID",
+      "digits": 64,
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "versionsBranch",
+      "on": [
+        "PHAZITE"
+      ],
+      "type": "text",
+      "form": "hexID",
+      "digits": 32,
+      "kind": "state",
+      "uncountedOn": [
+        "PHAZITE"
+      ]
+    },
+    {
+      "name": "volume",
+      "on": [
+        "TRACK",
+        "MASTER",
+        "CHAIN"
+      ],
+      "type": "float",
+      "range": {
+        "low": -100.0,
+        "high": 6.0,
+        "whole": false
+      },
+      "kind": "song",
+      "counted": true
+    },
+    {
+      "name": "windowX",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "int",
+      "kind": "view",
+      "uncountedOn": [
+        "DEVICE"
+      ]
+    },
+    {
+      "name": "windowY",
+      "on": [
+        "DEVICE"
+      ],
+      "type": "int",
+      "kind": "view",
+      "uncountedOn": [
+        "DEVICE"
+      ]
+    }
+  ]
+}

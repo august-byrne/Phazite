@@ -25,7 +25,7 @@ between them, which compiles the song into what plays. The layers and where the 
 | Phazite's own devices, engine-neutral | Built | [devices.md](devices.md) |
 | Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
 | Browser previews on an engine of their own | Built | |
-| Every element of the song described once in code: its type, range, default and kind | Planned | Roadmap step S5.19 |
+| Every element of the song described once in code: its type, range, default and kind | Built | `src/model/base/internal/Schema.h`, `SchemaDescription.h`; `tests/SchemaTests.cpp` |
 | The song as an immutable value, one area at a time | Planned | Roadmap step S5.20 |
 | Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
 | Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
@@ -348,9 +348,8 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
 
 ## Not built
 
-- The song's schema as data, and the song as an immutable value: Planned, before the beta (roadmap steps S5.19 and
-  S5.20). Today `Schema.h` defines the names, their types, ranges and defaults are in its comments and in tables
-  written from them, and the song is a `ValueTree`; the notes alone are reached through typed views
+- The song as an immutable value: Planned, before the beta (roadmap step S5.20). Today the song is a `ValueTree`,
+  every name of it described in `Schema.h` (S5.19, built); the notes alone are reached through typed views
   (`src/model/notes/internal/NoteElements.h`), under which their storage can change.
 - Other stretch modes, such as slicing drums at their hits or re-pitching: Planned.
 - Tracks that aren't being edited pre-rendered in the background: Planned, after v1.

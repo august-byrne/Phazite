@@ -7,9 +7,15 @@
 //
 // Write the names qualified, as schema::outline, never with "using namespace schema": they would clash with
 // parameters and variables of the same name.
+//
+// Each name is defined by its description (SchemaDescription.h): an element type (Element) with the elements it goes in, or
+// a property (Property<T>) with the elements it is on, the C++ type of its value, and what its comment says of it as facts
+// (its range, its words, its default, its kind, whether it counts as a change). The loader (model/project/internal/
+// Project.h: makeConsistent()), the consistency check (tests/SongCheck.h) and the rules below read the descriptions.
 #pragma once
 
 #include "model/base/Song.h"
+#include "model/base/internal/SchemaDescription.h"
 
 #include <algorithm>
 #include <array>
@@ -19,14 +25,60 @@
 namespace phazite::schema
 {
 //==============================================================================
+// The song's elements, each with the elements it goes in ("Child of" below) and its kind, described here before the
+// properties that name them; each is explained below, where what it holds is.
+// clang-format off
+inline const Element PHAZITE       { "PHAZITE", Kind::song };
+inline const Element LASTKEY       { "LASTKEY", under (PHAZITE), Kind::state };
+inline const Element TEMPOMAP      { "TEMPOMAP", under (PHAZITE), Kind::song };
+inline const Element TEMPO         { "TEMPO", under (TEMPOMAP), Kind::song };
+inline const Element TIMESIGNATURE { "TIMESIGNATURE", under (TEMPOMAP), Kind::song };
+inline const Element PIANOROLL     { "PIANOROLL", under (PHAZITE), Kind::view, uncounted };
+inline const Element TRACKS        { "TRACKS", under (PHAZITE), Kind::song };
+inline const Element TRACK         { "TRACK", under (TRACKS, TRACK), Kind::song };
+inline const Element MASTER        { "MASTER", under (PHAZITE), Kind::song };
+inline const Element LANES         { "LANES", under (TRACK, MASTER), Kind::view, uncounted };
+inline const Element LANE          { "LANE", under (LANES), Kind::view };
+inline const Element CONTAINER     { "CONTAINER", under (TRACK, MASTER), Kind::song };
+inline const Element CHAIN         { "CHAIN", under (CONTAINER), Kind::song };
+inline const Element DEVICE        { "DEVICE", under (TRACK, MASTER, CHAIN), Kind::song };
+inline const Element MODULATOR     { "MODULATOR", under (TRACK, MASTER), Kind::song };
+inline const Element VALUES        { "VALUES", under (DEVICE, MODULATOR), Kind::song, namedByParameters };
+inline const Element SOUNDS        { "SOUNDS", under (DEVICE), Kind::song };
+inline const Element VALUE         { "VALUE", under (DEVICE), Kind::song };
+inline const Element SEND          { "SEND", under (TRACK), Kind::song };
+inline const Element MACRO         { "MACRO", under (TRACK, CONTAINER), Kind::song };
+inline const Element MODULATES     { "MODULATES", under (MODULATOR, MACRO), Kind::song };
+inline const Element AUTOMATION    { "AUTOMATION", under (PHAZITE), Kind::song };
+inline const Element CURVE         { "CURVE", under (AUTOMATION), Kind::song };
+inline const Element POINT         { "POINT", under (CURVE), Kind::song };
+inline const Element MIDILINKS     { "MIDILINKS", under (PHAZITE), Kind::song };
+inline const Element MIDILINK      { "MIDILINK", under (MIDILINKS), Kind::song };
+inline const Element MERGING       { "MERGING", under (PHAZITE), Kind::song };
+inline const Element SECTIONS      { "SECTIONS", under (PHAZITE), Kind::song };
+inline const Element SECTION       { "SECTION", under (SECTIONS), Kind::song };
+inline const Element CHORDLANE     { "CHORDLANE", under (PHAZITE), Kind::song };
+inline const Element CHORD         { "CHORD", under (CHORDLANE), Kind::song };
+inline const Element CHORDKEY      { "CHORDKEY", under (CHORDLANE), Kind::song };
+inline const Element CLIP          { "CLIP", under (TRACK), Kind::song };
+inline const Element NOTE          { "NOTE", under (CLIP), Kind::song };
+inline const Element CONTROL       { "CONTROL", under (CLIP), Kind::song };
+inline const Element WARP          { "WARP", under (CLIP), Kind::song };
+// clang-format on
+
+// The furthest place a song holds anything at, in beats (a million, days of music at any tempo) and in seconds of a
+// file; and the least a length that must be more than 0 is.
+inline constexpr double maxBeats = 1.0e6, maxSeconds = 1.0e7, moreThanZero = 1.0e-9;
+
+//==============================================================================
 // The song's own element, and what it keeps for the whole song (Song::getState()).
 
 // The song (model/base/Song.h): the element a project file holds, with everything below in it. song
-inline const juce::Identifier PHAZITE { "PHAZITE" };
+// (PHAZITE, with the elements above.)
 
 // On PHAZITE. int64, above every ID in the song: the next ID it gives an item (Song::makeID()), each kind from the
 // same numbers, never one twice. Written without an undo step, and no change of its own (the item it numbers is). state
-inline const juce::Identifier nextID { "nextID" };
+inline const Property<std::int64_t> nextID { "nextID", on (PHAZITE), Kind::state, uncounted };
 
 // On PHAZITE. Text, 16 lowercase hexadecimal digits (idNumberingDigits): the numbering the song's IDs are in, none until the
 // loader first gives them anew (renumberMark below; model/project/internal/Project.h: makeConsistent()), and then a stamp
@@ -43,12 +95,12 @@ inline const juce::Identifier nextID { "nextID" };
 // Restore of a line and Merge refuse the rest. Written by the loader without an undo step, as it gives the IDs anew; else
 // only as the song is made another whole, with it: in Restore This Version's undo step, and outside the undo history
 // where a version is opened or a branch switched to. song
-inline const juce::Identifier idNumbering { "idNumbering" };
 inline constexpr int idNumberingDigits = 16;
+inline const Property<juce::String> idNumbering { "idNumbering", on (PHAZITE), hexDigits (idNumberingDigits), Kind::song };
 
 // On PHAZITE. bool, default true: the loop follows the song (getSongLoopRange()); false while a range is looped on
 // purpose. Written only when it changes. state
-inline const juce::Identifier loopFollowsSong { "loopFollowsSong" };
+inline const Property<bool> loopFollowsSong { "loopFollowsSong", on (PHAZITE), byDefault (true), Kind::state, uncounted };
 
 // The transport's state that the song keeps (model/transport/internal/Playback.h, Metronome.h). None is an undo step.
 // On PHAZITE:
@@ -56,25 +108,25 @@ inline const juce::Identifier loopFollowsSong { "loopFollowsSong" };
 //   looped on purpose, loopStart to loopEnd (double, in beats from the song's start; none while the loop follows the song);
 // - playStart: double, in beats, default 0: where playback starts, the song's start again as a project opens;
 // - metronome: bool, default false: the metronome clicks while the song plays. state
-inline const juce::Identifier loop { "loop" };
-inline const juce::Identifier loopStart { "loopStart" };
-inline const juce::Identifier loopEnd { "loopEnd" };
-inline const juce::Identifier playStart { "playStart" };
-inline const juce::Identifier metronome { "metronome" };
+inline const Property<bool> loop { "loop", on (PHAZITE), byDefault (false), Kind::state, uncounted };
+inline const Property<double> loopStart { "loopStart", on (PHAZITE), within (0.0, maxBeats), Kind::state, uncounted };
+inline const Property<double> loopEnd { "loopEnd", on (PHAZITE), within (0.0, maxBeats), Kind::state, uncounted };
+inline const Property<double> playStart { "playStart", on (PHAZITE), byDefault (0.0), Kind::state, uncounted };
+inline const Property<bool> metronome { "metronome", on (PHAZITE), byDefault (false), Kind::state, uncounted };
 
 // On PHAZITE. The id of the song outline applied last (Outline::id), or none. song
-inline const juce::Identifier outline { "outline" };
+inline const Property<juce::String> outline { "outline", on (PHAZITE), Kind::song };
 
 // On PHAZITE. bool, default false: a change of the song's tempo leaves its patterns (MIDI clips) at their speed, their
 // notes keeping their times, rather than on their beats (model/transport/internal/Tempo.h). song
-inline const juce::Identifier patternsKeepTheirSpeed { "patternsKeepTheirSpeed" };
+inline const Property<bool> patternsKeepTheirSpeed { "patternsKeepTheirSpeed", on (PHAZITE), byDefault (false), Kind::song };
 
 // On PHAZITE. The project's notes, as the Project view shows them (model/project/ProjectContents.h): text, its lines
 // split by "\n"; none while there are none. song
-inline const juce::Identifier notes { "notes" };
+inline const Property<juce::String> notes { "notes", on (PHAZITE), Kind::song };
 
 // Child of PHAZITE: the key set last on any track (keyRoot and keyScale), which new tracks get. state
-inline const juce::Identifier LASTKEY { "LASTKEY" };
+// (LASTKEY, with the elements above.)
 
 //==============================================================================
 // The song's tempo map (model/transport/internal/Tempo.h): its tempos and time signatures, each from a beat on, which
@@ -85,46 +137,48 @@ inline const juce::Identifier LASTKEY { "LASTKEY" };
 
 // Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tempos (TEMPO) and time
 // signatures (TIMESIGNATURE), in no particular order. Without one, the song is at 120 BPM in 4/4.
-inline const juce::Identifier TEMPOMAP { "TEMPOMAP" };
+// (TEMPOMAP, with the elements above.)
 
 // Child of TEMPOMAP: a tempo, from where it starts (mapBeat) to the next one's start, in quarter notes per minute (bpm, 20..300,
 // to a hundredth), and how it goes on to the next (tempoCurve, float -1..1, as an automation point's pointCurve; without
 // it, 1: held until the next tempo, which it jumps to; 0 ramps straight to the next, and between, the ramp bends). The
 // first starts at 0.
-inline const juce::Identifier TEMPO { "TEMPO" };
-inline const juce::Identifier bpm { "bpm" };
-inline const juce::Identifier tempoCurve { "curve" };
+// (TEMPO, with the elements above.)
+inline const Property<double> bpm { "bpm", on (TEMPO), within (20.0, 300.0).orElse (120.0), Kind::song };
+inline const Property<float> tempoCurve { "curve", on (TEMPO), within (-1.0, 1.0), Kind::song };
 
 // Child of TEMPOMAP: a time signature, from where it starts (mapBeat), as many beats in a bar (numerator, int 1..32) of a
 // note value (denominator: 2, 4, 8 or 16): its bars are numerator x 4 / denominator quarter notes long. The first starts at 0.
-inline const juce::Identifier TIMESIGNATURE { "TIMESIGNATURE" };
-inline const juce::Identifier numerator { "numerator" };
-inline const juce::Identifier denominator { "denominator" };
+// (TIMESIGNATURE, with the elements above.)
+inline const Property<int> numerator { "numerator", on (TIMESIGNATURE), whole (1.0, 32.0).orElse (4.0), Kind::song };
+inline const Property<int> denominator { "denominator", on (TIMESIGNATURE), whole (2.0, 16.0).orElse (4.0).ofPowersOfTwo(), Kind::song };
 
 // On TEMPO and TIMESIGNATURE. double, 0 or more: where it starts, in beats from the song's start.
-inline const juce::Identifier mapBeat { "beat" };
+inline const Property<double> mapBeat { "beat", on (TEMPO, TIMESIGNATURE), within (0.0, maxBeats).orElse (0.0), Kind::song };
 
 //==============================================================================
 // A grid's settings (GridSettings): the playlist's on PHAZITE, the piano roll's on PIANOROLL. view
 
 // bool, default true: positions snap to the grid.
-inline const juce::Identifier gridSnap { "gridSnap" };
+inline const Property<bool> gridSnap { "gridSnap", on (PHAZITE, PIANOROLL), byDefault (true), Kind::view, uncountedOn (PHAZITE) };
 
 // bool, default true: the grid follows the zoom.
-inline const juce::Identifier gridAdaptive { "gridAdaptive" };
+inline const Property<bool> gridAdaptive { "gridAdaptive", on (PHAZITE, PIANOROLL), byDefault (true), Kind::view, uncountedOn (PHAZITE) };
 
 // int -3..3, default 0: how many levels coarser (above 0) or finer than the zoom suggests an adaptive grid is.
-inline const juce::Identifier gridOffset { "gridOffset" };
+inline const Property<int> gridOffset { "gridOffset", on (PHAZITE, PIANOROLL), whole (-3.0, 3.0), byDefault (0),
+                                        Kind::view,   uncountedOn (PHAZITE) };
 
 // The size of a fixed grid, used while gridAdaptive is off: "1/16 beat", "1/8 beat", "1/4 beat" (the default), "1/2 beat",
 // "1 beat", "1 bar", "2 bars", "4 bars" or "8 bars".
-inline const juce::Identifier gridStep { "gridStep" };
+inline const Property<juce::String> gridStep { "gridStep", on (PHAZITE, PIANOROLL), byDefault ("1/4 beat"), Kind::view,
+                                               uncountedOn (PHAZITE) };
 
 // bool, default false: the grid divides beats into triplets.
-inline const juce::Identifier gridTriplets { "gridTriplets" };
+inline const Property<bool> gridTriplets { "gridTriplets", on (PHAZITE, PIANOROLL), byDefault (false), Kind::view, uncountedOn (PHAZITE) };
 
 // Child of PHAZITE: the piano roll's grid settings, added when they are first written. view
-inline const juce::Identifier PIANOROLL { "PIANOROLL" };
+// (PIANOROLL, with the elements above.)
 
 //==============================================================================
 // The song's tracks (model/arrangement/internal/Tracks.h): the playlist's tracks and folders and the mixer's returns,
@@ -133,55 +187,57 @@ inline const juce::Identifier PIANOROLL { "PIANOROLL" };
 
 // Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tracks (TRACK), top to
 // bottom.
-inline const juce::Identifier TRACKS { "TRACKS" };
+// (TRACKS, with the elements above.)
 
 // Child of TRACKS, or of a folder's TRACK: a track.
-inline const juce::Identifier TRACK { "TRACK" };
+// (TRACK, with the elements above.)
 
 // On TRACK, and on MASTER. int64, more than 0: its ID (TrackID), which the song gives it (Song::makeID()).
-inline const juce::Identifier trackID { "id" };
+inline const Property<std::int64_t> trackID { "id", on (TRACK, MASTER), Form::ownID, Kind::song };
 
 // On TRACK: what it is: trackIsTrack (a track, which holds clips), trackIsFolder (a folder, which holds tracks) or
 // trackIsReturn (a return, which takes in what tracks send to it, and which no solo silences).
-inline const juce::Identifier trackKind { "kind" };
 inline constexpr const char* trackIsTrack = "track";
 inline constexpr const char* trackIsFolder = "folder";
 inline constexpr const char* trackIsReturn = "return";
+inline const Property<juce::String> trackKind { "kind", on (TRACK), oneOf (trackIsTrack, trackIsFolder, trackIsReturn), always,
+                                                Kind::song };
 
 // On TRACK: its name; empty or none for a track's number, "Track 3", as it is counted among the tracks and returns.
-inline const juce::Identifier trackName { "name" };
+inline const Property<juce::String> trackName { "name", on (TRACK), Kind::song };
 
 // On TRACK: its color, as juce::Colour::toString() writes it; none for its row's in the palette (TrackColours.h).
-inline const juce::Identifier trackColour { "colour" };
+inline const Property<juce::String> trackColour { "colour", on (TRACK), Form::colour, Kind::song };
 
 // On TRACK. bool, default false: it is muted; and it is soloed. Neither is an undo step (as in many DAWs). song
-inline const juce::Identifier trackMute { "mute" };
-inline const juce::Identifier trackSolo { "solo" };
+inline const Property<bool> trackMute { "mute", on (TRACK), byDefault (false), Kind::song };
+inline const Property<bool> trackSolo { "solo", on (TRACK), byDefault (false), Kind::song };
 
 // On TRACK, and on MASTER: how the track writes its automation as the song plays (AutomationMode): automationTouch,
 // automationLatch or automationWrite; none = read, which plays its lanes and writes nothing. Changing it is no undo step,
 // as mute and solo aren't. song
-inline const juce::Identifier trackAutomationMode { "automationMode" };
 inline constexpr const char* automationTouch = "touch";
 inline constexpr const char* automationLatch = "latch";
 inline constexpr const char* automationWrite = "write";
+inline const Property<juce::String> trackAutomationMode { "automationMode", on (TRACK, MASTER),
+                                                          oneOf (automationTouch, automationLatch, automationWrite), Kind::song };
 
 // On a folder's TRACK. true, or none: the folder was made a bus with the bus switch, so it stays one without effects.
-inline const juce::Identifier folderBus { "bus" };
+inline const Property<bool> folderBus { "bus", on (TRACK), Kind::song };
 
 // On TRACK, and on MASTER: the channel's volume, in decibels (-100 for silence), as its fader sets it (a
 // track's, a return's or a bus's; a plain folder's VCA), none for 0 dB, or for the master's -3 dB, a new song's level; and
 // its pan, from -1 (left) to 1 (right), none for the centre, which a plain folder keeps for when it is a bus again.
-inline const juce::Identifier channelVolume { "volume" };
-inline const juce::Identifier channelPan { "pan" };
+inline const Property<float> channelVolume { "volume", on (TRACK, MASTER, CHAIN), within (-100.0, 6.0), Kind::song };
+inline const Property<float> channelPan { "pan", on (TRACK, MASTER, CHAIN), within (-1.0, 1.0), Kind::song };
 
 // On TRACK, and on MASTER: the device that sets the channel's volume, by its ID (DeviceID, of the song's), which the
 // automation and the modulation of its volume and pan name. A track's, a return's, a bus's (a folder that mixes its
 // tracks) and the master's is a fader (channelFader: its volume and pan, with its meter after it); a plain folder's is a
 // VCA (channelVCA), which sets its tracks' volume. A folder that becomes a bus or plain again gets one of the other kind,
 // with an ID of its own, which its volume's automation and modulation then name; its pan's, which a VCA hasn't, go.
-inline const juce::Identifier channelFader { "fader" };
-inline const juce::Identifier channelVCA { "vca" };
+inline const Property<std::int64_t> channelFader { "fader", on (TRACK, MASTER), Form::songID, Kind::song };
+inline const Property<std::int64_t> channelVCA { "vca", on (TRACK, MASTER), Form::songID, Kind::song };
 
 // The parameters of a channel's fader and of a send, by the IDs their curves and lanes name them with (curveParameter,
 // laneParameter): a track's, a return's or a bus's volume and pan, the master's, a plain folder's VCA's volume, and a send's
@@ -197,79 +253,81 @@ inline constexpr const char* sendLevelParameter = "send level";
 // On a track's TRACK. true, or none: the track plays its frozen file (model/mixer/internal/Freeze.h), which is
 // in the project's Cache folder, in place of its clips and the devices before its freeze point. Neither freezing nor
 // unfreezing is an undo step; a track whose file is gone as the project opens plays live.
-inline const juce::Identifier trackFrozen { "frozen" };
+inline const Property<bool> trackFrozen { "frozen", on (TRACK), Kind::song };
 
 // A key, on a TRACK (song), on LASTKEY (state) and on CHORDKEY (song): the root, int 0..11 (0 is C), none = no key; and the
 // scale: "major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor".
-inline const juce::Identifier keyRoot { "keyRoot" };
-inline const juce::Identifier keyScale { "keyScale" };
+inline const Property<int> keyRoot { "keyRoot", on (TRACK, LASTKEY, CHORDKEY), whole (0.0, 11.0), Kind::song };
+inline const Property<juce::String> keyScale { "keyScale", on (TRACK, LASTKEY, CHORDKEY), Kind::song };
 
 // On TRACK (model/transport/RecordingModel.h; roadmap step 3.4). The audio device's input the track records (AudioInput::id):
 // a channel, counted from 1 ("1"), or a pair of neighbours from an odd-numbered one ("1+2"); none for no input.
-inline const juce::Identifier trackInput { "input" };
+inline const Property<juce::String> trackInput { "input", on (TRACK), Kind::song };
 
 // On a TRACK that plays a drum sampler's pad on a mixer channel of its own (roadmap step 4.12;
 // model/devices/internal/DrumKit.h), as FL Studio's FPC sends a pad to a mixer track: the sampler, by its device's ID
 // (DeviceID, int64), and the pad, by its note (int, 0 to 127). The pad's sound leaves the sampler's track for it. None for
 // any other track.
-inline const juce::Identifier trackPadDevice { "padDevice" };
-inline const juce::Identifier trackPad { "pad" };
+inline const Property<std::int64_t> trackPadDevice { "padDevice", on (TRACK), Form::idName, Kind::song };
+inline const Property<int> trackPad { "pad", on (TRACK), whole (0.0, 127.0), Kind::song };
 
 // On TRACK. When the track's input is heard through it: monitorAlways, monitorNever, or none, while it is armed.
-inline const juce::Identifier trackMonitoring { "monitoring" };
 inline constexpr const char* monitorAlways = "always";
 inline constexpr const char* monitorNever = "never";
+inline const Property<juce::String> trackMonitoring { "monitoring", on (TRACK), oneOf (monitorAlways, monitorNever), Kind::song };
+
+// The view state below is the master's too (its row), and none of it a change (isUncountedProperty()).
 
 // On TRACK. int 32..320, default 64: the track's height in the playlist, in pixels at an interface scale of 100%. view
-inline const juce::Identifier trackHeight { "height" };
+inline const Property<int> trackHeight { "height", on (TRACK, MASTER), whole (32.0, 320.0), byDefault (64), Kind::view, uncounted };
 
 // On TRACK. bool, default false: the track is a thin row with only its name; a collapsed folder hides its tracks. view
-inline const juce::Identifier trackCollapsed { "collapsed" };
+inline const Property<bool> trackCollapsed { "collapsed", on (TRACK, MASTER), byDefault (false), Kind::view, uncounted };
 
 // On TRACK. bool, default false: the track stays in view while the others scroll. view
-inline const juce::Identifier trackPinned { "pinned" };
+inline const Property<bool> trackPinned { "pinned", on (TRACK, MASTER), byDefault (false), Kind::view, uncounted };
 
 // On TRACK. bool: the piano roll shows the track's clips in drum mode; none = on while the track's instrument is
 // Phazite's drum sampler. view
-inline const juce::Identifier drumMode { "drumMode" };
+inline const Property<bool> drumMode { "drumMode", on (TRACK, MASTER), Kind::view, uncounted };
 
 // On TRACK: the order of the drum rows, as note numbers separated by commas, top first; rows it doesn't list come
 // after them. view
-inline const juce::Identifier drumOrder { "drumOrder" };
+inline const Property<juce::String> drumOrder { "drumOrder", on (TRACK, MASTER), Kind::view, uncounted };
 
 // On TRACK: the drum rows hidden, as note numbers separated by commas. view
-inline const juce::Identifier drumHidden { "drumHidden" };
+inline const Property<juce::String> drumHidden { "drumHidden", on (TRACK, MASTER), Kind::view, uncounted };
 
 // Child of PHAZITE, which every project has: the master channel's own element, with its write mode
 // (trackAutomationMode), its volume and pan (channelVolume, channelPan), its devices, and its automation lanes (LANES,
 // view), with an ID of the song's (trackID) like a track's. song, but for its lanes
-inline const juce::Identifier MASTER { "MASTER" };
+// (MASTER, with the elements above.)
 
 // Child of TRACK and of MASTER, once the track has kept a lane: its automation lanes (LANE), in an element of their own.
 // Lanes are view state, added and removed outside the undo history, which finds a track's other elements (its clips,
 // sends, devices and modulators) by their places among the track's elements: a lane added or removed among them would
 // make an undo or a redo take the wrong one. So LANES is added after the track's elements, once, and stays while the song
 // is open, empty or not. view
-inline const juce::Identifier LANES { "LANES" };
+// (LANES, with the elements above.)
 
 // Child of LANES, one for each automation lane the playlist shows under the track, in their order (docs/design.md,
 // section 10): the automation of a parameter of one of the track's devices, its volume and pan included. A lane of a
 // device that isn't on the track any more is ignored, and a parameter with automation but no lane here shows one after
 // these. view
-inline const juce::Identifier LANE { "LANE" };
+// (LANE, with the elements above.)
 
 // On LANE: the device, by its ID (DeviceID: "1042").
-inline const juce::Identifier laneDevice { "device" };
+inline const Property<std::int64_t> laneDevice { "device", on (LANE), Form::idName, Kind::view };
 
 // On LANE: the parameter, by its ID in its device, as its curve names it (curveParameter).
-inline const juce::Identifier laneParameter { "parameter" };
+inline const Property<juce::String> laneParameter { "parameter", on (LANE), Kind::view };
 
 // On LANE. int 32..320, default 48: the lane's height in the playlist while it isn't collapsed, in pixels at an interface
 // scale of 100%.
-inline const juce::Identifier laneHeight { "height" };
+inline const Property<int> laneHeight { "height", on (LANE), whole (32.0, 320.0), byDefault (48), Kind::view };
 
 // On LANE. true, or none: the lane shows as a thin row.
-inline const juce::Identifier laneCollapsed { "collapsed" };
+inline const Property<bool> laneCollapsed { "collapsed", on (LANE), Kind::view };
 
 //==============================================================================
 // The song's devices (model/mixer/internal/Mixer.h): each track's, a folder's (as a bus) and the master's, in the order its
@@ -279,91 +337,91 @@ inline const juce::Identifier laneCollapsed { "collapsed" };
 // the typeID of one of Phazite's own (src/devices/<area>/: "phaziteEq"), deviceIsPlugin for a plug-in, or the type of a
 // device registered for the tests (model/devices/internal/Devices.h: registerDeviceType()); and deviceOff, bool, default
 // false: it is switched off.
-inline const juce::Identifier DEVICE { "DEVICE" };
-inline const juce::Identifier deviceID { "id" };
-inline const juce::Identifier deviceType { "type" };
+// (DEVICE, with the elements above.)
+inline const Property<std::int64_t> deviceID { "id", on (DEVICE, CONTAINER), Form::ownID, Kind::song };
+inline const Property<juce::String> deviceType { "type", on (DEVICE), Kind::song };
 inline constexpr const char* deviceIsPlugin = "plugin";
-inline const juce::Identifier deviceOff { "off" };
+inline const Property<bool> deviceOff { "off", on (DEVICE, CONTAINER, MODULATOR), byDefault (false), Kind::song };
 
 // The format a device type of Phazite's own names in its description (model/mixer/DeviceType.h), as a plug-in's names
 // "VST3", with its type ID as the description's identifier: what the browser, the menus and a drag carry; never saved.
 inline constexpr const char* ownDeviceFormat = "Phazite";
 
 // On a DEVICE: the track it listens to through its sidechain, by the track's ID (TrackID); none for none.
-inline const juce::Identifier deviceSidechain { "sidechain" };
+inline const Property<std::int64_t> deviceSidechain { "sidechain", on (DEVICE), Form::idName, Kind::song };
 
 // On a DEVICE: where its window was, the left and the top of it on the screen (int, pixels), where it opens
 // again; none for a window never moved. view
-inline const juce::Identifier deviceWindowX { "windowX" };
-inline const juce::Identifier deviceWindowY { "windowY" };
+inline const Property<int> deviceWindowX { "windowX", on (DEVICE), Kind::view, uncounted };
+inline const Property<int> deviceWindowY { "windowY", on (DEVICE), Kind::view, uncounted };
 
 // Children of one of Phazite's own devices' DEVICE: VALUES, its parameters' values as they were set by hand (not as
 // automation or a modulator moves them), each a property named by the parameter's ID in the device's description, none
 // for one that was never set (at its default); and SOUNDS, the factory sounds, files, tables and slices it plays, as
 // properties named by getPadSound(), getPadSoundFile(), getOscillatorWavetable(), getOscillatorWavetableFile(),
 // samplerSample, samplerSampleFile, samplerSlices and samplerSlicesRemoved (below).
-inline const juce::Identifier VALUES { "VALUES" };
-inline const juce::Identifier SOUNDS { "SOUNDS" };
+// (VALUES and SOUNDS, with the elements above.)
 
 // On a plug-in's DEVICE: which plug-in it is, as scanning found it and a preset names it (preset::plugin):
 // its format ("VST3"), name, maker (manufacturer), identifier (its file on the computer it was added on, or what its
 // format finds it by) and unique ID (int: JUCE's number for it, which for a VST3 is made from its class ID). A song finds
 // its plug-in by its format, unique ID and maker first, wherever this computer keeps its file
 // (model/mixer/internal/Mixer.h: findKnownPlugin()), then by its file and name, then by its name.
-inline const juce::Identifier pluginFormat { "format" };
-inline const juce::Identifier pluginName { "name" };
-inline const juce::Identifier pluginMaker { "manufacturer" };
-inline const juce::Identifier pluginIdentifier { "identifier" };
-inline const juce::Identifier pluginUid { "uid" };
+inline const Property<juce::String> pluginFormat { "format", on (DEVICE), Kind::song };
+inline const Property<juce::String> pluginName { "name", on (DEVICE), Kind::song };
+inline const Property<juce::String> pluginMaker { "manufacturer", on (DEVICE), Kind::song };
+inline const Property<juce::String> pluginIdentifier { "identifier", on (DEVICE), Kind::song };
+inline const Property<int> pluginUid { "uid", on (DEVICE), Kind::song };
 // On a plug-in's DEVICE: true for an instrument, which turns notes into sound, as its description says; none for an effect.
-inline const juce::Identifier pluginInstrument { "instrument" };
+inline const Property<bool> pluginInstrument { "instrument", on (DEVICE), Kind::song };
 
 // On a plug-in's DEVICE and on a CONTAINER: its mix, 0 to 1, as setMix() sets it; none for 1.
-inline const juce::Identifier deviceMix { "mix" };
+inline const Property<float> deviceMix { "mix", on (DEVICE, CONTAINER), within (0.0, 1.0), Kind::song };
 
 // On a plug-in's DEVICE: what the plug-in keeps of its own, which the project stores outside the undo history as it saves,
 // before it copies the plug-in or takes it away, and as a preset loads into it (model/plugins/internal/PluginInstances.h):
 // its state, the bytes it keeps its settings in (in base 64, as RFC 4648 has it: model/base/internal/SongText.h), none for
 // none, which for a VST3 are its format's own preset file, a .vstpreset (sandbox/core/Vst3State.h), as DAWproject holds a
 // VST3's state too; and its program (int), for a plug-in with programs. state
-inline const juce::Identifier pluginState { "state" };
-inline const juce::Identifier pluginProgram { "program" };
+inline const Property<juce::MemoryBlock> pluginState { "state", on (DEVICE), Kind::state };
+inline const Property<int> pluginProgram { "program", on (DEVICE), Kind::state };
 
 // On a plug-in's DEVICE, stored with its state: its ID in its format, which other hosts know it by (a VST3's class ID, 32
 // hexadecimal digits, as its preset file holds it), none for another format; and the version of the plug-in that made the
 // state, as the plug-in tells it ("1.3.7"), none if it tells none. state
-inline const juce::Identifier pluginFormatID { "formatID" };
-inline const juce::Identifier pluginVersion { "version" };
+inline const Property<juce::String> pluginFormatID { "formatID", on (DEVICE), Kind::state };
+inline const Property<juce::String> pluginVersion { "version", on (DEVICE), Kind::state };
 
 // Children of a plug-in's DEVICE: the values set by hand of its parameters, those set by Phazite's controls, and those of
 // the parameters that automation or a modulator moves away from them, stored with its state (its state holds the others),
 // each a VALUE with the parameter's ID, the plug-in's own (a VST3's number, which can't name a property in a file:
 // sandbox/core/PluginInfo.h), and its value set by hand (float, 0 to 1).
-inline const juce::Identifier VALUE { "VALUE" };
-inline const juce::Identifier valueParameter { "parameter" };
-inline const juce::Identifier valueSetByHand { "value" };
+// (VALUE, with the elements above.)
+inline const Property<juce::String> valueParameter { "parameter", on (VALUE), Kind::song };
+inline const Property<float> valueSetByHand { "value", on (VALUE), within (0.0, 1.0).orElse (0.0), Kind::song };
 
 // Child of TRACK and of MASTER, among its devices: a container (model/mixer/internal/Containers.h), with its ID, deviceOff
 // and deviceMix, as a device has them, and its name. Its children are its chains (CHAIN), one at least, in their order, each
 // with its devices, and its macros (MACRO), with what they modulate. A container of effects plays its chains side by side,
 // each on its part of the sound that comes in (containerSplit), and adds up what they put out; an instrument container
 // (containerInstrument), which is a track's instrument, plays its chains' instruments, each on the notes in its ranges.
-inline const juce::Identifier CONTAINER { "CONTAINER" };
-inline const juce::Identifier containerName { "name" };
+// (CONTAINER, with the elements above.)
+inline const Property<juce::String> containerName { "name", on (CONTAINER), Kind::song };
 
 // On a CONTAINER of effects: what part of the sound each chain plays: splitBands, a band of it, low to high in the chains'
 // order, each from its chain's crossover (the first from the bottom); splitMidSide, the first its middle (what its sides
 // share) and the second its side (what they don't); splitLeftRight, the first its left and the second its right; none for
 // all of it, each chain a layer. The parts add up to the sound, so chains with nothing in them pass it as it came, but
 // layers, which add up as many times.
-inline const juce::Identifier containerSplit { "split" };
 inline constexpr const char* splitBands = "bands";
 inline constexpr const char* splitMidSide = "midSide";
 inline constexpr const char* splitLeftRight = "leftRight";
+inline const Property<juce::String> containerSplit { "split", on (CONTAINER), oneOf (splitBands, splitMidSide, splitLeftRight),
+                                                     Kind::song };
 
 // On a CONTAINER. true, or none: it is an instrument container, a track's instrument, each of whose chains holds an
 // instrument first and the effects after it, and plays the notes in its ranges.
-inline const juce::Identifier containerInstrument { "instrument" };
+inline const Property<bool> containerInstrument { "instrument", on (CONTAINER), Kind::song };
 
 // Child of CONTAINER: a chain, in their order, its devices (DEVICE) its children in the order its sound goes through them. On
 // CHAIN: its ID (DeviceID, of the song's), which its parameters' curves, lanes and modulations name; its name; its volume
@@ -372,16 +430,16 @@ inline const juce::Identifier containerInstrument { "instrument" };
 // the first chain's from the bottom, none for its place's default (model/mixer/internal/Containers.h:
 // getDefaultCrossover()); and on an instrument container's, the notes it plays: chainLowKey and chainHighKey (int 0..127,
 // none for 0 and 127) and chainLowVelocity and chainHighVelocity (int 1..127, none for 1 and 127).
-inline const juce::Identifier CHAIN { "CHAIN" };
-inline const juce::Identifier chainID { "id" };
-inline const juce::Identifier chainName { "name" };
-inline const juce::Identifier chainMute { "mute" };
-inline const juce::Identifier chainSolo { "solo" };
-inline const juce::Identifier chainCrossover { "crossover" };
-inline const juce::Identifier chainLowKey { "lowKey" };
-inline const juce::Identifier chainHighKey { "highKey" };
-inline const juce::Identifier chainLowVelocity { "lowVelocity" };
-inline const juce::Identifier chainHighVelocity { "highVelocity" };
+// (CHAIN, with the elements above.)
+inline const Property<std::int64_t> chainID { "id", on (CHAIN), Form::ownID, Kind::song };
+inline const Property<juce::String> chainName { "name", on (CHAIN), Kind::song };
+inline const Property<bool> chainMute { "mute", on (CHAIN), Kind::song };
+inline const Property<bool> chainSolo { "solo", on (CHAIN), Kind::song };
+inline const Property<float> chainCrossover { "crossover", on (CHAIN), within (20.0, 20000.0), Kind::song };
+inline const Property<int> chainLowKey { "lowKey", on (CHAIN), whole (0.0, 127.0), Kind::song };
+inline const Property<int> chainHighKey { "highKey", on (CHAIN), whole (0.0, 127.0), Kind::song };
+inline const Property<int> chainLowVelocity { "lowVelocity", on (CHAIN), whole (1.0, 127.0), Kind::song };
+inline const Property<int> chainHighVelocity { "highVelocity", on (CHAIN), whole (1.0, 127.0), Kind::song };
 
 // The parameters of a container's chain, by the IDs their curves, lanes and modulations name them with, the chain's ID
 // being their device's: its volume, as a fader's position from 0 to 1; its pan, from -1 to 1; and its crossover, in hertz.
@@ -395,11 +453,11 @@ inline constexpr const char* crossoverParameter = "crossover";
 // decibels, as a fader's (sendLevel; -100 for silence; none for 0 dB); and sendPreFader, true for a send before the
 // track's fader, none for one after it. A send goes with its return, in the same undo step; one to a return the song
 // hasn't goes as the project opens.
-inline const juce::Identifier SEND { "SEND" };
-inline const juce::Identifier sendID { "id" };
-inline const juce::Identifier sendTo { "to" };
-inline const juce::Identifier sendLevel { "level" };
-inline const juce::Identifier sendPreFader { "preFader" };
+// (SEND, with the elements above.)
+inline const Property<std::int64_t> sendID { "id", on (SEND), Form::ownID, Kind::song };
+inline const Property<std::int64_t> sendTo { "to", on (SEND), Form::idName, Kind::song };
+inline const Property<float> sendLevel { "level", on (SEND), within (-100.0, 6.0), Kind::song };
+inline const Property<bool> sendPreFader { "preFader", on (SEND), Kind::song };
 
 //==============================================================================
 // The song's modulation (model/modulation/internal/Modulation.h): each track's modulators and macros, and a container's
@@ -410,24 +468,24 @@ inline const juce::Identifier sendPreFader { "preFader" };
 // hand are its VALUES, by their IDs in its description (devices/modulation/Modulators.h: "rate"), as a device's are, none
 // for one never set; a step sequencer's steps are modulatorSteps: each step's value, -1 to 1, to a ten-thousandth,
 // separated by spaces, without the zeros at the end.
-inline const juce::Identifier MODULATOR { "MODULATOR" };
-inline const juce::Identifier modulatorID { "id" };
-inline const juce::Identifier modulatorType { "type" };
-inline const juce::Identifier modulatorSteps { "steps" };
+// (MODULATOR, with the elements above.)
+inline const Property<std::int64_t> modulatorID { "id", on (MODULATOR, MACRO), Form::ownID, Kind::song };
+inline const Property<juce::String> modulatorType { "type", on (MODULATOR), Kind::song };
+inline const Property<juce::String> modulatorSteps { "steps", on (MODULATOR), Form::numbers, within (-1.0, 1.0).orElse (0.0), Kind::song };
 
 // Child of a track's TRACK and of a CONTAINER: a macro, in their order (a track's on tracks and returns, not on folders;
 // a container has eight). On MACRO: its ID (ModulatorID, of the song's); its name; and its value, 0 to 1, none for 0.
-inline const juce::Identifier MACRO { "MACRO" };
-inline const juce::Identifier macroName { "name" };
-inline const juce::Identifier macroValue { "value" };
+// (MACRO, with the elements above.)
+inline const Property<juce::String> macroName { "name", on (MACRO), Kind::song };
+inline const Property<float> macroValue { "value", on (MACRO), within (0.0, 1.0), Kind::song };
 
 // Child of MODULATOR and of MACRO: what it modulates, in the order its modulations were made. On MODULATES: the parameter,
 // by its device's ID as a curve names it (curveDevice: "1042") and its own ID; and the amount, -1 to 1, to a
 // ten-thousandth.
-inline const juce::Identifier MODULATES { "MODULATES" };
-inline const juce::Identifier modulatesDevice { "device" };
-inline const juce::Identifier modulatesParameter { "parameter" };
-inline const juce::Identifier modulatesAmount { "amount" };
+// (MODULATES, with the elements above.)
+inline const Property<std::int64_t> modulatesDevice { "device", on (MODULATES), Form::idName, Kind::song };
+inline const Property<juce::String> modulatesParameter { "parameter", on (MODULATES), Kind::song };
+inline const Property<float> modulatesAmount { "amount", on (MODULATES), within (-1.0, 1.0).orElse (0.0), Kind::song };
 
 //==============================================================================
 // The song's automation (model/automation/internal/Automation.h): each automated parameter's curve, by its device and its
@@ -435,23 +493,24 @@ inline const juce::Identifier modulatesAmount { "amount" };
 
 // Child of PHAZITE, added with the first curve: the curves (CURVE), in no particular order. A curve whose device the song
 // hasn't any more stays while an undo could bring the device back, and goes as the project opens.
-inline const juce::Identifier AUTOMATION { "AUTOMATION" };
+// (AUTOMATION, with the elements above.)
 
 // Child of AUTOMATION: a parameter's curve, with its points (POINT) in time order, two at one beat in the order they go (a
 // jump). On CURVE: the device, by its ID (DeviceID: "1042"); and the parameter, by its ID in its device, as a lane names
 // them (laneDevice, laneParameter).
-inline const juce::Identifier CURVE { "CURVE" };
-inline const juce::Identifier curveDevice { "device" };
-inline const juce::Identifier curveParameter { "parameter" };
+// (CURVE, with the elements above.)
+inline const Property<std::int64_t> curveDevice { "device", on (CURVE), Form::idName, Kind::song };
+inline const Property<juce::String> curveParameter { "parameter", on (CURVE), Kind::song };
 
 // Child of CURVE: a point. On POINT: where it is, in beats from the song's start (double, 0 or more); where the parameter's
 // control is there, as a position along its travel (float 0..1, from all the way down or left to all the way up or right,
 // as its knob or fader moves, with the parameter's skew: model/automation/AutomationValues.h), so that a straight line is an
-// even turn of the knob; and how the line to the next point bends (float -1..1, 0 for straight).
-inline const juce::Identifier POINT { "POINT" };
-inline const juce::Identifier pointBeat { "beat" };
-inline const juce::Identifier pointValue { "value" };
-inline const juce::Identifier pointCurve { "curve" };
+// even turn of the knob; and how the line to the next point bends (float -1..1, 0 for straight). A point whose value is no
+// number goes as the song loads (model/project/Project.cpp), with a curve left without points.
+// (POINT, with the elements above.)
+inline const Property<double> pointBeat { "beat", on (POINT), within (0.0, maxBeats).orElse (0.0), Kind::song };
+inline const Property<float> pointValue { "value", on (POINT), within (0.0, 1.0), Kind::song };
+inline const Property<float> pointCurve { "curve", on (POINT), within (-1.0, 1.0), Kind::song };
 
 //==============================================================================
 // The song's MIDI links (model/midi/internal/MidiLinks.h): a hardware controller linked to the parameter it turns (MIDI
@@ -460,7 +519,7 @@ inline const juce::Identifier pointCurve { "curve" };
 // Child of PHAZITE, added with the first link: the links (MIDILINK), in no particular order. A link of a device, a chain, a
 // send, a fader, a modulator or a macro that goes leaves with it, in its step (model/mixer/internal/Mixer.h:
 // forgetWhatNamesTheGone()).
-inline const juce::Identifier MIDILINKS { "MIDILINKS" };
+// (MIDILINKS, with the elements above.)
 
 // Child of MIDILINKS: a link. On MIDILINK: the controller, by its channel (int 1..16) and its number (int 0..119: 120 to
 // 127 are channel mode messages, which no link takes; a link with another goes as the song loads); and the parameter it
@@ -468,18 +527,18 @@ inline const juce::Identifier MIDILINKS { "MIDILINKS" };
 // own ID in it (curveParameter: a modulator's parameter by its name, "rate"; a macro's value by the word "value",
 // midiLinkMacroValue, so that a macro given a new ID by a merge or a copy keeps its link). One link of a controller, and
 // one of a parameter.
-inline const juce::Identifier MIDILINK { "MIDILINK" };
-inline const juce::Identifier midiLinkChannel { "channel" };
-inline const juce::Identifier midiLinkNumber { "number" };
-inline const juce::Identifier midiLinkDevice { "device" };
-inline const juce::Identifier midiLinkParameter { "parameter" };
+// (MIDILINK, with the elements above.)
+inline const Property<int> midiLinkChannel { "channel", on (MIDILINK), whole (1.0, 16.0).goingOutside(), Kind::song };
+inline const Property<int> midiLinkNumber { "number", on (MIDILINK), whole (0.0, 119.0).goingOutside(), Kind::song };
+inline const Property<std::int64_t> midiLinkDevice { "device", on (MIDILINK), Form::idName, Kind::song };
+inline const Property<juce::String> midiLinkParameter { "parameter", on (MIDILINK), Kind::song };
 inline constexpr const char* midiLinkMacroValue = "value";
 
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; isUncountedProperty() and
 // isUncountedElement(), below): on tracks and the master (whose row Collapse All collapses), their heights, collapsed and
 // pinned, drum mode and rows, and their automation lanes; on PHAZITE, the playlist's grid; on devices (DEVICE), where their
-// windows were. PIANOROLL and LANES hold view settings only. Keep these lists exact: anything else a project holds is song
-// or state.
+// windows were. PIANOROLL and LANES hold view settings only. These lists are made from the descriptions (their kind view,
+// and the elements they are on): anything else a project holds is song or state.
 using IdentifierList = std::vector<const juce::Identifier*>;
 
 inline bool isAmong (const juce::Identifier& p, const IdentifierList& list)
@@ -487,22 +546,25 @@ inline bool isAmong (const juce::Identifier& p, const IdentifierList& list)
     return std::any_of (list.begin(), list.end(), [&p] (const juce::Identifier* name) { return *name == p; });
 }
 
+// The properties described on an element type of a kind, in their order.
+IdentifierList findProperties (const juce::Identifier& type, Kind);
+
 inline const IdentifierList& getTrackViewProperties()
 {
-    static const IdentifierList list { &trackHeight, &trackCollapsed, &trackPinned, &drumMode, &drumOrder, &drumHidden };
+    static const IdentifierList list = findProperties (TRACK, Kind::view);
     return list;
 }
 
 inline const IdentifierList& getGridProperties()
 {
-    static const IdentifierList list { &gridSnap, &gridAdaptive, &gridOffset, &gridStep, &gridTriplets };
+    static const IdentifierList list = findProperties (PIANOROLL, Kind::view);
     return list;
 }
 
 // Written without the undo manager (model/mixer/internal/Mixer.h: rememberWindowPosition()).
 inline const IdentifierList& getDeviceViewProperties()
 {
-    static const IdentifierList list { &deviceWindowX, &deviceWindowY };
+    static const IdentifierList list = findProperties (DEVICE, Kind::view);
     return list;
 }
 
@@ -519,9 +581,11 @@ inline bool isDeviceViewProperty (const juce::Identifier& p)
     return isAmong (p, getDeviceViewProperties());
 }
 
+// An element of a track's that is view state, with everything in it: one that isn't counted, in a track (LANES).
 inline bool isTrackViewElement (const juce::ValueTree& element)
 {
-    return element.hasType (LANES);
+    const auto* described = getTables().findElement (element.getType());
+    return described != nullptr && ! described->isCounted() && described->goesIn (TRACK);
 }
 
 // What a project saves that is no change to it: view state (above); how the song plays rather than the song (design question
@@ -732,22 +796,23 @@ namespace versions
 // leave out a merge that doesn't hold together. song
 
 // Child of PHAZITE, while a merge waits: what it merged and where, and which value of each of its conflicts the song has.
-inline const juce::Identifier MERGING { "MERGING" };
+// (MERGING, with the elements above.)
 
 // On MERGING: the commit merged in (version), and the current branch's last commit as the merge was taken (head), each a
 // commit's id (64 lowercase hexadecimal digits). The merge waits until a commit of the branch's line finishes it (its
 // commit: one with the one merged in as its second parent, its first following head, recording the IDs it gave), and
 // while the branch's line doesn't hold the one merged in otherwise; its commit follows the branch's last commit then and
 // the one merged in. Nothing is written into it after it is taken.
-inline const juce::Identifier mergingVersion { "version" }, mergingHead { "head" };
+inline const Property<juce::String> mergingVersion { "version", on (MERGING), Kind::song };
+inline const Property<juce::String> mergingHead { "head", on (MERGING), Kind::song };
 
 // On MERGING: the song as it was before the merge was taken (before: a song piece in the project's Versions folder, view
 // state included), which Cancel Merge makes the song again.
-inline const juce::Identifier mergingBefore { "before" };
+inline const Property<juce::String> mergingBefore { "before", on (MERGING), Kind::song };
 
 // On MERGING: which value of each of the merge's conflicts the song has, a digit each in their order: 0 the parting's, 1
 // this branch's, 2 the other line's. None: each this branch's.
-inline const juce::Identifier mergingChosen { "chosen" };
+inline const Property<juce::String> mergingChosen { "chosen", on (MERGING), Kind::song };
 
 // On MERGING: the IDs the merge gave anew, which its commit records (renumbered); those the parting's and the other line's
 // songs were translated through before it (translated; model/versions/internal/SongMerge.h: findTranslation()); and those
@@ -756,7 +821,9 @@ inline const juce::Identifier mergingChosen { "chosen" };
 // crossRenumbering()), a note's by its clip as they number it. Each separated by commas,
 // each "from>to", or for a note "<its clip's group>/from>to" ("clip 66/3>7"), as a commit's RENUMBERED. No ID 0, and no two
 // of one group with the same from, or the same to.
-inline const juce::Identifier mergingRenumbered { "renumbered" }, mergingTranslated { "translated" }, mergingCrossed { "crossed" };
+inline const Property<juce::String> mergingRenumbered { "renumbered", on (MERGING), Kind::song };
+inline const Property<juce::String> mergingTranslated { "translated", on (MERGING), Kind::song };
+inline const Property<juce::String> mergingCrossed { "crossed", on (MERGING), Kind::song };
 
 // On PHAZITE: where the song stands in the project's versions (docs/design/versions.md: The song tied to its version): the
 // branch it is on (versionsBranch: the branch's id, 32 lowercase hexadecimal digits) and the version it grew from
@@ -769,11 +836,12 @@ inline const juce::Identifier mergingRenumbered { "renumbered" }, mergingTransla
 // file as they move (model/project/internal/Project.h). Names that point at nothing the Versions folder holds (a project
 // opened without it, a version that can't be read) leave the versions to take the branch the folder names and its last
 // version (model/versions/internal/VersionHistory.h). state
-inline const juce::Identifier versionsBranch { "versionsBranch" }, versionsBase { "versionsBase" };
-
-// How many lowercase hexadecimal digits each holds, and whether a text is an id of that form: the one check of them, which the
-// loader and the versions use.
+// How many lowercase hexadecimal digits each holds, and whether a text is an id of that form (isVersionsID(), below): the
+// one check of them, which the loader and the versions use.
 inline constexpr int versionsBranchDigits = 32, versionsBaseDigits = 64;
+inline const Property<juce::String> versionsBranch { "versionsBranch", on (PHAZITE), hexDigits (versionsBranchDigits), Kind::state,
+                                                     uncounted };
+inline const Property<juce::String> versionsBase { "versionsBase", on (PHAZITE), hexDigits (versionsBaseDigits), Kind::state, uncounted };
 
 inline bool isVersionsID (const juce::String& text, int digits)
 {
@@ -791,36 +859,36 @@ inline bool isVersionsProperty (const juce::ValueTree& tree, const juce::Identif
 // song over every track. song
 
 // Child of PHAZITE, added with the first section: the sections (SECTION), in no particular order.
-inline const juce::Identifier SECTIONS { "SECTIONS" };
+// (SECTIONS, with the elements above.)
 
 // Child of SECTIONS: a section. Sections don't overlap.
-inline const juce::Identifier SECTION { "SECTION" };
+// (SECTION, with the elements above.)
 
 // On SECTION. int64, more than 0: its ID (SectionID), which the song gives it as it gives its tracks and clips theirs
 // (Song::makeID()), so that no other item of the project has it.
-inline const juce::Identifier sectionID { "id" };
+inline const Property<std::int64_t> sectionID { "id", on (SECTION), Form::ownID, Kind::song };
 
 // On SECTION. double, 0 or more: where it starts, in beats from the song's start.
-inline const juce::Identifier sectionStart { "start" };
+inline const Property<double> sectionStart { "start", on (SECTION), within (0.0, maxBeats).orElse (0.0), Kind::song };
 
 // On SECTION. double, more than 0: how long it lasts, in beats.
-inline const juce::Identifier sectionLength { "length" };
+inline const Property<double> sectionLength { "length", on (SECTION), within (moreThanZero, maxBeats).orElse (4.0), Kind::song };
 
 // On SECTION: its name.
-inline const juce::Identifier sectionName { "name" };
+inline const Property<juce::String> sectionName { "name", on (SECTION), Kind::song };
 
 // On SECTION: what it does in the song, such as "intro", "verse" or "drop", or none.
-inline const juce::Identifier sectionRole { "role" };
+inline const Property<juce::String> sectionRole { "role", on (SECTION), Kind::song };
 
 // On SECTION: a one-line suggestion of what to put in it, or none.
-inline const juce::Identifier sectionTip { "tip" };
+inline const Property<juce::String> sectionTip { "tip", on (SECTION), Kind::song };
 
-// On SECTION. double 0..1, default 0.5: how intense it is, as the inspector shows it.
-inline const juce::Identifier sectionEnergy { "energy" };
+// On SECTION. float 0..1, default 0.5: how intense it is, as the inspector shows it.
+inline const Property<float> sectionEnergy { "energy", on (SECTION), within (0.0, 1.0), byDefault (0.5f), Kind::song };
 
 // On SECTION, if it was given a color of its own: the color, as juce::Colour::toString() writes it. Without it, its
 // role's.
-inline const juce::Identifier sectionColour { "colour" };
+inline const Property<juce::String> sectionColour { "colour", on (SECTION), Form::colour, Kind::song };
 
 //==============================================================================
 // The chord lane (model/chords/ChordModel.h; docs/design.md, section 14): the song's chords, each a Roman numeral in the
@@ -828,120 +896,123 @@ inline const juce::Identifier sectionColour { "colour" };
 
 // Child of PHAZITE, added when the first chord or key is written: the chords (CHORD) and the keys they are in (CHORDKEY),
 // in no particular order.
-inline const juce::Identifier CHORDLANE { "CHORDLANE" };
+// (CHORDLANE, with the elements above.)
 
 // Child of CHORDLANE: a chord over a stretch of the song. Chords don't overlap.
-inline const juce::Identifier CHORD { "CHORD" };
+// (CHORD, with the elements above.)
 
 // On CHORD and CHORDKEY. double, 0 or more: where it starts, in beats from the song's start.
-inline const juce::Identifier chordStart { "start" };
+inline const Property<double> chordStart { "start", on (CHORD, CHORDKEY), within (0.0, maxBeats).orElse (0.0), Kind::song };
 
 // On CHORD. double, more than 0: how long it lasts, in beats.
-inline const juce::Identifier chordLength { "length" };
+inline const Property<double> chordLength { "length", on (CHORD), within (moreThanZero, maxBeats).orElse (4.0), Kind::song };
 
 // On CHORD. int 1..7: the step of the key's scale its root is on (Numeral::degree in model/chords/ChordValues.h).
-inline const juce::Identifier chordDegree { "degree" };
+inline const Property<int> chordDegree { "degree", on (CHORD), whole (1.0, 7.0).orElse (1.0), Kind::song };
 
 // On CHORD. int -1, 0 or 1, default 0: the root a semitone under (-1) or over (1) that step, as in "bVII".
-inline const juce::Identifier chordAccidental { "accidental" };
+inline const Property<int> chordAccidental { "accidental", on (CHORD), whole (-1.0, 1.0), byDefault (0), Kind::song };
 
 // On CHORD: its kind, "major", "minor", "dominantSeventh", "majorSeventh", "minorSeventh", "suspendedSecond",
 // "suspendedFourth", "diminished", "augmented", "majorSixth", "minorSixth", "dominantNinth", "majorNinth", "power",
 // "halfDiminishedSeventh", "diminishedSeventh" or "minorNinth" (getSavedChordTypeName()).
-inline const juce::Identifier chordType { "type" };
+inline const Property<juce::String> chordType { "type", on (CHORD), Kind::song };
 
 // On CHORD. int, default 0: which of its notes is lowest, 0 for its root, 1 for the next one up, and so on.
-inline const juce::Identifier chordInversion { "inversion" };
+inline const Property<int> chordInversion { "inversion", on (CHORD), whole (0.0, 16.0), byDefault (0), Kind::song };
 
 // Child of CHORDLANE: the key the chords are in from where it starts (chordStart) to the next one's start, with
 // keyRoot and keyScale. The first starts at 0; a lane without any is in C major.
-inline const juce::Identifier CHORDKEY { "CHORDKEY" };
+// (CHORDKEY, with the elements above.)
 
 //==============================================================================
 // The song's clips (model/arrangement/internal/Clips.h), each on its track's element: its MIDI clips with their notes,
 // and its audio clips with the part of their files each plays and how. song
 
 // Child of a TRACK that holds clips (trackIsTrack): a clip on it, in no particular order.
-inline const juce::Identifier CLIP { "CLIP" };
+// (CLIP, with the elements above.)
 
 // On CLIP. int64, more than 0: its ID (ClipID), which the song gives it (Song::makeID()).
-inline const juce::Identifier clipID { "id" };
+inline const Property<std::int64_t> clipID { "id", on (CLIP), Form::ownID, Kind::song };
 
 // On CLIP: what it holds: clipIsMidi, notes, or clipIsAudio, a part of an audio file.
-inline const juce::Identifier clipKind { "kind" };
 inline constexpr const char* clipIsMidi = "midi";
 inline constexpr const char* clipIsAudio = "audio";
+inline const Property<juce::String> clipKind { "kind", on (CLIP), oneOf (clipIsMidi, clipIsAudio), always, Kind::song };
 
 // On CLIP, or none: its name. A clip without one (a new MIDI clip, at first) is called after its track, whatever the track is
 // called (model/arrangement/internal/Clips.h: getClipName()).
-inline const juce::Identifier clipName { "name" };
+inline const Property<juce::String> clipName { "name", on (CLIP), Kind::song };
 
 // On CLIP. double, 0 or more: where it starts, in beats from the song's start. On a MIDI CLIP, double, more than 0: how long
 // it lasts, in beats (an audio clip lasts as long as the part of its file it plays takes to play).
-inline const juce::Identifier clipStart { "start" };
-inline const juce::Identifier clipLength { "length" };
+inline const Property<double> clipStart { "start", on (CLIP), within (0.0, maxBeats).orElse (0.0), Kind::song };
+inline const Property<double> clipLength { "length", on (CLIP), within (moreThanZero, maxBeats).orElse (4.0), Kind::song };
 
 // On a MIDI CLIP. double, 0 or more, default 0: how far into its notes it starts, in beats. Its notes count from its content
 // start, that many beats before its start: trimming its start or slipping it moves that.
-inline const juce::Identifier clipOffset { "offset" };
+inline const Property<double> clipOffset { "offset", on (CLIP), within (0.0, maxBeats), byDefault (0.0), Kind::song };
 
 // On CLIP. bool, default false: it is muted.
-inline const juce::Identifier clipMute { "mute" };
+inline const Property<bool> clipMute { "mute", on (CLIP), byDefault (false), Kind::song };
 
 // On CLIP. int64, or none: the alias group it is in, which has an ID of the song's (Song::makeID()). The clips of a group
 // hold the same notes, with the same IDs: an edit to one clip's notes is made to each (model/notes/internal/Notes.h), as FL
 // Studio's pattern clips play one pattern.
-inline const juce::Identifier clipLink { "link" };
+inline const Property<std::int64_t> clipLink { "link", on (CLIP), Form::songID, Kind::song };
 
 // Child of a MIDI CLIP: a note, in no particular order.
-inline const juce::Identifier NOTE { "NOTE" };
+// (NOTE, with the elements above.)
 
 // On NOTE. int64, 1 or more: its ID (NoteID, model/base/IDs.h), which no other note of its clip has, so that selections,
 // undo and scripts can name one note (decided 2026-10-14). A copy of a clip, an alias too, keeps its notes' IDs. A new
 // note's comes from the song's IDs (Song::makeID()), so that it is none a note had before.
-inline const juce::Identifier noteID { "id" };
+inline const Property<std::int64_t> noteID { "id", on (NOTE), Form::ownID, Kind::song };
 
 // On NOTE. int 0..127: its pitch, as a MIDI note number.
-inline const juce::Identifier notePitch { "pitch" };
+inline const Property<int> notePitch { "pitch", on (NOTE), whole (0.0, 127.0).orElse (60.0), Kind::song };
 
 // On NOTE. double: where it starts, in beats from its clip's content start; and double, at least 1/64: how long it lasts,
 // in beats.
-inline const juce::Identifier noteStart { "start" };
-inline const juce::Identifier noteLength { "length" };
+inline const Property<double> noteStart { "start", on (NOTE), within (-maxBeats, maxBeats).orElse (0.0), Kind::song };
+inline const Property<double> noteLength { "length", on (NOTE), within (moreThanZero, maxBeats).orElse (1.0), Kind::song };
 
 // On NOTE. int 1..127: how hard it is played.
-inline const juce::Identifier noteVelocity { "velocity" };
+inline const Property<int> noteVelocity { "velocity", on (NOTE), whole (1.0, 127.0).orElse (100.0), Kind::song };
 
 // On NOTE. bool, default false: it is muted.
-inline const juce::Identifier noteMute { "mute" };
+inline const Property<bool> noteMute { "mute", on (NOTE), byDefault (false), Kind::song };
 
 // On NOTE. bool, default false: it is a slide note, which plays nothing itself but glides the notes sounding as it starts to
 // its pitch over its length; and a portamento note, which glides in from the note played before it (NoteValues.h).
-inline const juce::Identifier noteSlide { "slide" };
-inline const juce::Identifier notePortamento { "portamento" };
+inline const Property<bool> noteSlide { "slide", on (NOTE), byDefault (false), Kind::song };
+inline const Property<bool> notePortamento { "portamento", on (NOTE), byDefault (false), Kind::song };
 
 // On NOTE. int 1..16, default 1 (not written for 1): the MIDI channel it plays on, as musicians count them: which part of
 // a plug-in with several parts plays it. Phazite's own instruments play every channel alike.
-inline const juce::Identifier noteChannel { "channel" };
+inline const Property<int> noteChannel { "channel", on (NOTE), whole (1.0, 16.0), byDefault (1), Kind::song };
 
 // Child of a MIDI CLIP: a controller event a recording took in with the notes, such as a sustain pedal or a bend, in MIDI's
 // own terms: its kind, controlIsController (a MIDI controller: controlNumber 0..127),
 // controlIsPitchWheel, controlIsChannelPressure, controlIsAftertouch (on the note controlNumber) or
 // controlIsProgramChange (which plays: it sets a plug-in's program; its value is the program, 0..127); where it is, in
 // beats from its clip's content start; and its value, 0..127, or 0..16383 for the pitch wheel.
-inline const juce::Identifier CONTROL { "CONTROL" };
-inline const juce::Identifier controlKind { "kind" };
+// (CONTROL, with the elements above.)
 inline constexpr const char* controlIsController = "controller";
 inline constexpr const char* controlIsPitchWheel = "pitchWheel";
 inline constexpr const char* controlIsChannelPressure = "channelPressure";
 inline constexpr const char* controlIsAftertouch = "aftertouch";
 inline constexpr const char* controlIsProgramChange = "programChange";
-inline const juce::Identifier controlNumber { "number" };
-inline const juce::Identifier controlBeat { "beat" };
-inline const juce::Identifier controlValue { "value" };
+inline const Property<juce::String> controlKind { "kind", on (CONTROL),
+                                                  oneOf (controlIsController, controlIsPitchWheel, controlIsChannelPressure,
+                                                         controlIsAftertouch, controlIsProgramChange),
+                                                  always, Kind::song };
+inline const Property<int> controlNumber { "number", on (CONTROL), whole (0.0, 127.0).orElse (0.0), Kind::song };
+inline const Property<double> controlBeat { "beat", on (CONTROL), within (-maxBeats, maxBeats).orElse (0.0), Kind::song };
+inline const Property<int> controlValue { "value", on (CONTROL), whole (0.0, 16383.0).orElse (0.0), Kind::song };
 
 // On CONTROL. int 1..16, default 1 (not written for 1): the MIDI channel it is on, as musicians count them.
-inline const juce::Identifier controlChannel { "channel" };
+inline const Property<int> controlChannel { "channel", on (CONTROL), whole (1.0, 16.0), byDefault (1), Kind::song };
 
 //==============================================================================
 // On an audio CLIP (model/arrangement/internal/AudioClips.h). One that follows the song's tempo, or is pitched or reversed,
@@ -949,45 +1020,47 @@ inline const juce::Identifier controlChannel { "channel" };
 
 // The audio file it plays: a path relative to the project's file, with / between its parts whatever the system, or a full
 // path.
-inline const juce::Identifier clipFile { "file" };
+inline const Property<juce::String> clipFile { "file", on (CLIP), Kind::song };
 
 // double, 0 or more: the part of the file it plays, from and to, in seconds of the file as it was recorded, from < to,
 // whichever way it plays.
-inline const juce::Identifier clipFileStart { "fileStart" };
-inline const juce::Identifier clipFileEnd { "fileEnd" };
+inline const Property<double> clipFileStart { "fileStart", on (CLIP), within (0.0, maxSeconds).orElse (0.0), Kind::song };
+inline const Property<double> clipFileEnd { "fileEnd", on (CLIP), within (0.0, maxSeconds).orElse (0.0), Kind::song };
 
 // double 20..300 (AudioClipModel.h: minClipTempo..maxClipTempo), or none: the tempo the file was played at, in beats per
 // minute, while the clip stretches to follow the song's; none while it plays at the file's own speed.
-inline const juce::Identifier clipTempo { "tempo" };
+inline const Property<double> clipTempo { "tempo", on (CLIP), within (20.0, 300.0), Kind::song };
 
 // float -48..48, default 0: how many semitones it is pitched up or down, with cents as hundredths.
-inline const juce::Identifier clipPitch { "pitch" };
+inline const Property<float> clipPitch { "pitch", on (CLIP), within (-48.0, 48.0), byDefault (0.0f), Kind::song };
 
 // true, or none: it plays its file backwards.
-inline const juce::Identifier clipReversed { "reversed" };
+inline const Property<bool> clipReversed { "reversed", on (CLIP), Kind::song };
 
 // float, default 0: how much louder or quieter it plays, in decibels.
-inline const juce::Identifier clipGain { "gain" };
+inline const Property<float> clipGain { "gain", on (CLIP), within (-60.0, 24.0), byDefault (0.0f), Kind::song };
 
 // double, 0 or more, default 0: how long it fades in, and out, in seconds; the shapes of the fades (PlaylistModel.h:
 // FadeCurve), fadeIsCurve or fadeIsSCurve, default a curve; and how far each bends, a float from -1 to 1, default 0 (straight).
-inline const juce::Identifier clipFadeIn { "fadeIn" };
-inline const juce::Identifier clipFadeOut { "fadeOut" };
-inline const juce::Identifier clipFadeInShape { "fadeInShape" };
-inline const juce::Identifier clipFadeOutShape { "fadeOutShape" };
-inline const juce::Identifier clipFadeInBend { "fadeInBend" };
-inline const juce::Identifier clipFadeOutBend { "fadeOutBend" };
+inline const Property<double> clipFadeIn { "fadeIn", on (CLIP), within (0.0, maxSeconds), byDefault (0.0), Kind::song };
+inline const Property<double> clipFadeOut { "fadeOut", on (CLIP), within (0.0, maxSeconds), byDefault (0.0), Kind::song };
 inline constexpr const char* fadeIsCurve = "curve";
 inline constexpr const char* fadeIsSCurve = "sCurve";
+inline const Property<juce::String> clipFadeInShape { "fadeInShape", on (CLIP), oneOf (fadeIsCurve, fadeIsSCurve), byDefault (fadeIsCurve),
+                                                      Kind::song };
+inline const Property<juce::String> clipFadeOutShape { "fadeOutShape", on (CLIP), oneOf (fadeIsCurve, fadeIsSCurve),
+                                                       byDefault (fadeIsCurve), Kind::song };
+inline const Property<float> clipFadeInBend { "fadeInBend", on (CLIP), within (-1.0, 1.0), byDefault (0.0f), Kind::song };
+inline const Property<float> clipFadeOutBend { "fadeOutBend", on (CLIP), within (-1.0, 1.0), byDefault (0.0f), Kind::song };
 
 // Child of an audio CLIP that follows the song's tempo, in no particular order: a warp marker (AudioClipModel.h), which pins a
 // time of the file to where it plays, the audio between two of them stretched to fit, as Ableton Live's warp markers do. On
 // WARP. double, 0 or more: its time in the file, in seconds as it was recorded; and double: where that time plays, as a time
 // of the file played straight at the clip's tempo (clipTempo), in seconds, so that the markers keep their beats as the clip's
 // tempo changes. song
-inline const juce::Identifier WARP { "WARP" };
-inline const juce::Identifier warpTime { "time" };
-inline const juce::Identifier warpPlaysAt { "playsAt" };
+// (WARP, with the elements above.)
+inline const Property<double> warpTime { "time", on (WARP), within (0.0, maxSeconds).orElse (0.0), Kind::song };
+inline const Property<double> warpPlaysAt { "playsAt", on (WARP), within (-maxSeconds, maxSeconds).orElse (0.0), Kind::song };
 
 //==============================================================================
 // Recording audio (model/transport/RecordingModel.h; roadmap step 3.4).
@@ -995,22 +1068,22 @@ inline const juce::Identifier warpPlaysAt { "playsAt" };
 // A track's input and how it is heard: trackInput and trackMonitoring, with the tracks above.
 
 // On PHAZITE. The input chosen last on any track (an id as trackInput's), which the next track's list shows first. state
-inline const juce::Identifier lastInput { "lastInput" };
+inline const Property<juce::String> lastInput { "lastInput", on (PHAZITE), Kind::state, uncounted };
 
 // On PHAZITE. bool, default false: Record punches in and out at the looped range. Like the loop's switch, not an unsaved
 // change. state
-inline const juce::Identifier punch { "punch" };
+inline const Property<bool> punch { "punch", on (PHAZITE), byDefault (false), Kind::state, uncounted };
 
 // On an audio CLIP recorded round a looped range, whose file holds a take for each time round, one after another
 // (ClipTakes). song
 // int, 2 or more: how many takes the file holds.
-inline const juce::Identifier clipTakes { "takes" };
+inline const Property<int> clipTakes { "takes", on (CLIP), whole (2.0, 1.0e6), Kind::song };
 
 // int, 1..clipTakes: the take the clip plays.
-inline const juce::Identifier clipTake { "take" };
+inline const Property<int> clipTake { "take", on (CLIP), whole (1.0, 1.0e6), Kind::song };
 
 // double, more than 0: how long each take is, in seconds: the looped range's length when it was recorded.
-inline const juce::Identifier clipTakeLength { "takeLength" };
+inline const Property<double> clipTakeLength { "takeLength", on (CLIP), within (moreThanZero, maxSeconds), Kind::song };
 
 // Phazite's drum sampler (devices/drums/DrumSampler.h) keeps in its DEVICE's SOUNDS what each pad's layers play, its pad
 // named by its note (0 to 127): "pad36Sound" names one of its factory sounds for the first layer (devices/drums/
@@ -1034,16 +1107,18 @@ inline std::array<juce::Identifier, drumPads * drumLayers> makePadSoundNames (co
     return made;
 }
 
+// The two families, each pad's layers in order.
+inline const Family padSounds { "pad<note>Sound<layer>", makePadSoundNames ("Sound"), on (SOUNDS), Kind::song };
+inline const Family padSoundFiles { "pad<note>SoundFile<layer>", makePadSoundNames ("SoundFile"), on (SOUNDS), Kind::song };
+
 inline const juce::Identifier& getPadSound (int pad, int layer = 0)
 {
-    static const auto names = makePadSoundNames ("Sound");
-    return names[(size_t) (juce::jlimit (0, drumPads - 1, pad) * drumLayers + juce::jlimit (0, drumLayers - 1, layer))];
+    return padSounds[(size_t) (juce::jlimit (0, drumPads - 1, pad) * drumLayers + juce::jlimit (0, drumLayers - 1, layer))];
 }
 
 inline const juce::Identifier& getPadSoundFile (int pad, int layer = 0)
 {
-    static const auto names = makePadSoundNames ("SoundFile");
-    return names[(size_t) (juce::jlimit (0, drumPads - 1, pad) * drumLayers + juce::jlimit (0, drumLayers - 1, layer))];
+    return padSoundFiles[(size_t) (juce::jlimit (0, drumPads - 1, pad) * drumLayers + juce::jlimit (0, drumLayers - 1, layer))];
 }
 
 // Phazite's synth (devices/synth/Synth.h) keeps in its DEVICE's SOUNDS what each of its two
@@ -1051,16 +1126,19 @@ inline const juce::Identifier& getPadSoundFile (int pad, int layer = 0)
 // FactoryWavetables.h: "Vowels"; with none, or a name that is none of theirs, the first, "Basic Shapes"), and
 // "osc1WavetableFile" and "osc2WavetableFile" a sound file it plays instead while they are there: a path relative to the
 // project's folder ("Audio/Growl.wav"), or in a preset's file to the preset's. osc counts from 0.
+inline const Family oscillatorWavetables { "osc<osc>Wavetable", juce::StringArray { "osc1Wavetable", "osc2Wavetable" }, on (SOUNDS),
+                                           Kind::song };
+inline const Family oscillatorWavetableFiles { "osc<osc>WavetableFile", juce::StringArray { "osc1WavetableFile", "osc2WavetableFile" },
+                                               on (SOUNDS), Kind::song };
+
 inline const juce::Identifier& getOscillatorWavetable (int osc)
 {
-    static const juce::Identifier names[] = { "osc1Wavetable", "osc2Wavetable" };
-    return names[juce::jlimit (0, 1, osc)];
+    return oscillatorWavetables[(size_t) juce::jlimit (0, 1, osc)];
 }
 
 inline const juce::Identifier& getOscillatorWavetableFile (int osc)
 {
-    static const juce::Identifier names[] = { "osc1WavetableFile", "osc2WavetableFile" };
-    return names[juce::jlimit (0, 1, osc)];
+    return oscillatorWavetableFiles[(size_t) juce::jlimit (0, 1, osc)];
 }
 
 // Phazite's sampler (devices/sampler/Sampler.h) keeps in its DEVICE's SOUNDS what it plays: "sample" names one of its
@@ -1069,10 +1147,11 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
 // or in a preset's file to the preset's; "sampleSlices" the slices put in by hand, which stay whatever slices it, their starts as
 // parts of the sound's length from 0 to 1, in order, a space between them ("0.125 0.25"); and "sampleSlicesRemoved" where
 // slices it found were taken away by hand, the same way. None for none.
-inline const juce::Identifier samplerSample { "sample" };
-inline const juce::Identifier samplerSampleFile { "sampleFile" };
-inline const juce::Identifier samplerSlices { "sampleSlices" };
-inline const juce::Identifier samplerSlicesRemoved { "sampleSlicesRemoved" };
+inline const Property<juce::String> samplerSample { "sample", on (SOUNDS), Kind::song };
+inline const Property<juce::String> samplerSampleFile { "sampleFile", on (SOUNDS), Kind::song };
+inline const Property<juce::String> samplerSlices { "sampleSlices", on (SOUNDS), Form::numbers, within (0.0, 1.0), Kind::song };
+inline const Property<juce::String> samplerSlicesRemoved { "sampleSlicesRemoved", on (SOUNDS), Form::numbers, within (0.0, 1.0),
+                                                           Kind::song };
 
 // What of a SOUNDS element names a sound file, rather than a factory sound or a table: a pad's file, an oscillator's or the
 // sampler's.

@@ -10,6 +10,13 @@ The full text of every step, as it was written when it was built, is in the
 
 ## Stage 5. Wide: what a beat maker meets in the first week (from 2026-11-20)
 
+- **S5.19 The song's schema as data.** Every element and property a project file holds is described once in code
+  (`src/model/base/internal/Schema.h`): its type, the elements it is on, its range or its words, its default and its
+  kind. A saved name cannot exist without its description. The loader, the consistency check and the rules of what
+  counts as a change read the description where each kept tables of its own, so a range is written in one place;
+  `tests/golden/format/song-schema.json` is the description as a test vector for other tools. Nothing a project
+  holds or how it loads changed. What the song's move to immutable values (S5.20) is made from. Found on the way: the
+  check never looked at MIDI links, and now does. 2026-11-21.
 - **S5.2 Wider notes: MIDI channels and program changes.** Every note and controller keeps its MIDI channel, from the
   keyboard that played it, a MIDI file, a take, Capture or a DAWproject, through the song to a plug-in, which gets each
   on its channel, so a plug-in with several parts plays each part; Phazite's own instruments take every channel as one.

@@ -279,10 +279,11 @@ namespace
                 if ((bool) chain[*property])
                     set (saved, *key, true);
 
-            for (const auto& [property, key] :
-                 { std::pair { &schema::chainCrossover, &keys::crossover }, std::pair { &schema::chainLowKey, &keys::lowKey },
-                   std::pair { &schema::chainHighKey, &keys::highKey }, std::pair { &schema::chainLowVelocity, &keys::lowVelocity },
-                   std::pair { &schema::chainHighVelocity, &keys::highVelocity } })
+            for (const auto& [property, key] : { std::pair { &schema::chainCrossover.getName(), &keys::crossover },
+                                                 std::pair { &schema::chainLowKey.getName(), &keys::lowKey },
+                                                 std::pair { &schema::chainHighKey.getName(), &keys::highKey },
+                                                 std::pair { &schema::chainLowVelocity.getName(), &keys::lowVelocity },
+                                                 std::pair { &schema::chainHighVelocity.getName(), &keys::highVelocity } })
                 if (chain.hasProperty (*property))
                     set (saved, *key, chain[*property]);
 
@@ -901,8 +902,8 @@ juce::var makeTrackPreset (Song& song, TrackID track)
     set (saved, keys::colour, juce::Colour::fromString (state[schema::trackColour].toString()).toString());
 
     for (const auto& [property, key] :
-         { std::pair { &schema::drumMode, &keys::drumMode }, std::pair { &schema::drumOrder, &keys::drumOrder },
-           std::pair { &schema::drumHidden, &keys::drumHidden } })
+         { std::pair { &schema::drumMode.getName(), &keys::drumMode }, std::pair { &schema::drumOrder.getName(), &keys::drumOrder },
+           std::pair { &schema::drumHidden.getName(), &keys::drumHidden } })
         if (state.hasProperty (*property))
             set (saved, *key, state[*property]);
 
@@ -1101,8 +1102,8 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
         setTrackColour (song, track, juce::Colour::fromString (colour));
 
     for (const auto& [property, key] :
-         { std::pair { &schema::drumMode, &keys::drumMode }, std::pair { &schema::drumOrder, &keys::drumOrder },
-           std::pair { &schema::drumHidden, &keys::drumHidden } })
+         { std::pair { &schema::drumMode.getName(), &keys::drumMode }, std::pair { &schema::drumOrder.getName(), &keys::drumOrder },
+           std::pair { &schema::drumHidden.getName(), &keys::drumHidden } })
         if (saved.hasProperty (*key))
             findTrackState (song, track).setProperty (*property, saved[*key], nullptr); // view state
 
