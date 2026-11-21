@@ -2794,13 +2794,13 @@ void Library::startWalk()
     auto walk = std::make_shared<Indexer> (*this, state, std::move (skip));
     ++walksUnderWay;
 
-    const auto started = juce::Thread::launch (juce::Thread::Priority::low,
-                                               [walk]
-                                               {
-                                                   walk->run();
-                                                   walk->end();
-                                                   --walksUnderWay;
-                                               });
+    const auto started = runLeftBehind ("Phazite library index",
+                                        [walk]
+                                        {
+                                            walk->run();
+                                            walk->end();
+                                            --walksUnderWay;
+                                        });
 
     if (! started)
     {
