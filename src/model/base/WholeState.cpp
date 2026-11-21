@@ -2,6 +2,7 @@
 #include "internal/WholeState.h"
 #include "Song.h"
 #include "internal/Schema.h"
+#include "internal/SongIndex.h"
 
 namespace phazite
 {
@@ -39,6 +40,14 @@ juce::ValueTree copyWhole (const Song& song, const juce::ValueTree& part)
         writeIn (copy, values->notes.get());
 
     return copy;
+}
+
+juce::ValueTree copyWholeClip (const Song& song, ClipID clip)
+{
+    if (const auto clipState = clip.isValid() ? song.getIndex().findClip (clip.getRaw()) : juce::ValueTree(); clipState.isValid())
+        return copyWhole (song, clipState);
+
+    return {};
 }
 
 ValuesKept keepValues (const Song& song)

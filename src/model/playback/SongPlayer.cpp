@@ -62,23 +62,24 @@ namespace
 
     // What a track's MIDI clips play: each clip's notes and controller events where the clip is, cut to it (a note that
     // started before the clip's start plays from it, one that goes past its end stops there), each on its channel; none of a
-    // muted clip or note.
+    // muted clip or note. The clips in the order the track holds them (Clips.h: getClipValues()), which ties between their
+    // events keep.
     std::shared_ptr<const engine::NoteSequence> compileNotes (const Song& song, const juce::ValueTree& trackState)
     {
         std::vector<engine::NoteSequence::Note> notes;
         std::vector<engine::NoteSequence::Control> controls;
 
-        for (const auto& clip : getClipStates (trackState))
+        for (const auto& clip : getClipValues (song, getTrackID (trackState)))
         {
-            if (clip[schema::clipKind].toString() != schema::clipIsMidi || (bool) clip[schema::clipMute])
+            if (! clip.isMidi() || clip.muted)
                 continue;
 
-            const auto start = (double) clip[schema::clipStart];
-            const auto end = start + (double) clip[schema::clipLength];
-            const auto contentStart = start - (double) clip.getProperty (schema::clipOffset, 0.0);
+            const auto start = clip.start.inBeats();
+            const auto end = start + clip.length.inBeats();
+            const auto contentStart = start - clip.offset.inBeats();
 
             forEachEvent (
-                getClipNotesValue (song, getClipID (clip)),
+                getClipNotesValue (song, clip.id),
                 [&] (const NoteValues& note)
                 {
                     if (note.muted)
@@ -478,8 +479,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // A clip whose notes changed: its track's notes, as a change in the clip's element marks them (markChange()). One that is
     // gone isn't on a track any more: taking it off marked the track it was on.
     for (const auto clip : compiling.noteClips)
-        if (const auto clipState = findClipState (song, clip); clipState.isValid())
-            compiling.notes.insert (getID (clipState.getParent(), schema::trackID));
+        if (const auto track = getClipTrack (song, clip); track.isValid())
+            compiling.notes.insert ((std::int64_t) track.getRaw());
 
     compiling.noteClips.clear();
     ++plansCompiled;
@@ -2530,27 +2531,28 @@ engine::AudioRegion SongPlayer::makeRegion (std::int64_t id, std::shared_ptr<eng
     return region;
 }
 
-void SongPlayer::placeRegion (engine::AudioRegion& region, const juce::ValueTree& clipState, const PlayedClip& played) const
+void SongPlayer::placeRegion (engine::AudioRegion& region, const ClipValue& clip, const PlayedClip& played) const
 {
     // Where it plays in samples, from where in its file, at its gain, with its fades (fitted: scaled down together where
     // they would overlap).
     region.start = roundToWhole<std::int64_t> (played.position.start * preparedRate);
     region.length = roundToWhole<std::int64_t> (played.position.end * preparedRate) - region.start;
     region.fileStart = played.position.offset * region.file->getSampleRate();
-    region.gain = juce::Decibels::decibelsToGain ((float) clipState.getProperty (schema::clipGain, 0.0f));
+    region.gain = juce::Decibels::decibelsToGain (clip.gain);
     region.fadeIn = roundToWhole<int> (played.fadeIn * preparedRate);
     region.fadeOut = roundToWhole<int> (played.fadeOut * preparedRate);
-    region.fadeInCurve = toEngineFade (getClipFadeCurve (clipState, true));
-    region.fadeOutCurve = toEngineFade (getClipFadeCurve (clipState, false));
+    region.fadeInCurve = toEngineFade (getFadeCurve (clip.fadeIn));
+    region.fadeOutCurve = toEngineFade (getFadeCurve (clip.fadeOut));
 }
 
 SongPlayer::TrackAudio SongPlayer::makeAudio (const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo, bool askAgain)
 {
     TrackAudio made;
 
-    for (const auto& clip : getClipStates (trackState))
+    // The track's clips in the order it holds them (Clips.h: getClipValues()), which checkAudio() compares the regions in.
+    for (const auto& clip : getClipValues (song, getTrackID (trackState)))
     {
-        if (! isAudioState (clip) || (bool) clip[schema::clipMute])
+        if (! clip.isAudio() || clip.muted)
             continue;
 
         // What plays for it: its file, or Phazite's render of it, where it plays in seconds, the song's tempo read once for
@@ -2571,7 +2573,7 @@ SongPlayer::TrackAudio SongPlayer::makeAudio (const juce::ValueTree& trackState,
             continue;
         }
 
-        const auto id = getID (clip, schema::clipID);
+        const auto id = (std::int64_t) clip.id.getRaw();
         auto region = makeRegion (id, file);
         placeRegion (region, clip, played);
         file->keep (toWhole<std::int64_t> (region.fileStart));
@@ -2637,9 +2639,9 @@ void SongPlayer::checkAudio (const TrackAudio& kept, const juce::ValueTree& trac
     auto same = true;
     size_t index = 0;
 
-    for (const auto& clip : getClipStates (trackState))
+    for (const auto& clip : getClipValues (song, getTrackID (trackState)))
     {
-        if (! isAudioState (clip) || (bool) clip[schema::clipMute])
+        if (! clip.isAudio() || clip.muted)
             continue;
 
         if (! tempo.has_value())
@@ -2648,7 +2650,7 @@ void SongPlayer::checkAudio (const TrackAudio& kept, const juce::ValueTree& trac
         const auto played = getPlayedClip (song, clip, *tempo);
         const auto known = fileKeys.find (played.file.getFullPathName());
         const auto file = known != fileKeys.end() ? files.find (known->second) : files.end();
-        const auto state = regions.find (getID (clip, schema::clipID));
+        const auto state = regions.find ((std::int64_t) clip.id.getRaw());
 
         if (index >= kept.regions.size() || file == files.end() || state == regions.end())
         {

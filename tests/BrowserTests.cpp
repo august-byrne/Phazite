@@ -1105,7 +1105,10 @@ TEST_CASE ("A folder's rows come while a new sound's header is read for the inde
     phazite::test::Mouse mouse (screen.browser.getTree());
     mouse.click (screen.getRow ("Drums").getCentre());
     REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Clap"); }));
-    CHECK (entered->load()); // its header being read still
+    // Its header being read still: the row shows from the folder's listing, and the reader, on its own thread, may
+    // not have reached the header yet when it does (seen under CI's thread sanitizer): waited for, since once in it
+    // stays there until the test lets it go.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([entered] { return entered->load(); }));
     CHECK_FALSE (
         screen.library.getWholeIndex()->find (screen.soundPack.getFolder().getChildFile ("Drums/Clap.wav").getFullPathName()).has_value());
 

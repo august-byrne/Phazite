@@ -2123,12 +2123,22 @@ bool chooseClash (ProjectContext& context, int index, int value)
         {
             clipPath.remove (clipPath.size() - 1);
 
-            if (const auto clip = findByPath (song->getState(), clipPath); clip.hasType (schema::CLIP))
+            // The clip by the ID its step names ("CLIP:<id>"), on the track the path names before it, as the song holds it now.
+            const auto clipStep = schema::CLIP.toString() + ":";
+            const auto& last = clipPath[clipPath.size() - 1];
+            const auto clip = last.startsWith (clipStep)
+                                  ? ClipID::fromRaw ((std::uint64_t) last.substring (clipStep.length()).getLargeIntValue())
+                                  : ClipID();
+            auto trackPath = clipPath;
+            trackPath.remove (trackPath.size() - 1);
+
+            if (const auto track = findByPath (song->getState(), trackPath);
+                clip.isValid() && track.hasType (schema::TRACK) && getClipTrack (*song, clip) == getTrackID (track))
             {
                 const auto note =
                     NoteID::fromRaw ((std::uint64_t) clash.path[clash.path.size() - 1].substring (noteStep.length()).getLargeIntValue());
 
-                if (! setNoteValue (*song, { getClipID (clip), note }, clash.property, *values[value]))
+                if (! setNoteValue (*song, { clip, note }, clash.property, *values[value]))
                     return false;
             }
             else

@@ -128,8 +128,9 @@ juce::StringArray takeDawProject (Song&, const DawProjectFile&);
 // an archive of its size can hold (getUnpackLimit()); in blocks, until shouldStop says stop (a cancelled import, which takes
 // back the file it was unpacking), telling how far it is (0 to 1). What it unpacked, by the paths inside the archive; the
 // files it made, to take away again where the import doesn't finish; and whether it stopped before the end. Then takeDawProject()
-// with them, which unpacks nothing more; and the files it made that a song doesn't play (its file given, which its paths
-// start from) deleted, as an import that didn't finish, or took fewer clips than the file has, leaves them. And how many
+// with them, which unpacks nothing more; and the files it made that a song doesn't play (its clips' files and its devices'
+// sounds: AudioClips.h, findAudioFilePaths(), their paths starting from its file) deleted, as an import that didn't finish,
+// or took fewer clips than the file has, leaves them. And how many
 // bytes were unpacked on the message thread since the program started, which the performance tests count.
 struct UnpackedAudio
 {
@@ -141,7 +142,7 @@ struct UnpackedAudio
 UnpackedAudio unpackDawProjectAudio (const DawProjectFile&, const juce::File& audioFolder, const std::function<bool()>& shouldStop = {},
                                      const std::function<void (float)>& progress = {});
 juce::StringArray takeDawProject (Song&, const DawProjectFile&, const UnpackedAudio&);
-void forgetUnusedAudio (const UnpackedAudio&, const juce::ValueTree& song, const juce::File& projectFile);
+void forgetUnusedAudio (const UnpackedAudio&, const Song&);
 juce::int64 countBytesUnpackedOnMessageThread();
 
 // The same into a new branch from the version it came from, of the open project, whose versions must have it: the version's

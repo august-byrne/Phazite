@@ -13,16 +13,12 @@
 #include "UndoCheck.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Immer.h"
 #include "model/base/internal/ValueArea.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
-
-#include <immer/flex_vector.hpp>
-#include <immer/flex_vector_transient.hpp>
-#include <immer/map.hpp>
-#include <immer/vector.hpp>
 
 #include <algorithm>
 #include <chrono>

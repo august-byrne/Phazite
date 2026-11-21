@@ -352,6 +352,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
     src/model/base/WholeState.cpp
+    src/model/base/internal/Immer.h
     src/model/base/internal/Schema.h
     src/model/base/internal/SchemaDescription.h
     src/model/base/internal/Selection.h
@@ -707,7 +708,8 @@ endif()
 target_include_directories(phazite_core SYSTEM PRIVATE external/r8brain-free-src)
 
 # immer 0.9.1 (BSL-1.0), header-only: the song's values, held in src/model/ (model/base/internal/ValueArea.h; roadmap step
-# S5.20), which tools/check-architecture.sh keeps there (immer-outside-model). The model's headers include it, so its folder
+# S5.20), which tools/check-architecture.sh keeps there (immer-outside-model). The model's headers include it (through
+# model/base/internal/Immer.h, which turns off MSVC's C4702 in immer's headers, which this mark doesn't reach), so its folder
 # reaches every target that includes them: PUBLIC, through phazite_core, as the folder of a system's headers (SYSTEM), so
 # that it raises no warning in Phazite's build; phazite_use_core() passes phazite_core's folders on as they are, and CMake
 # gives a folder that a linked library names SYSTEM the system's flag in each target. Its own CMakeLists.txt, with its

@@ -118,8 +118,9 @@ namespace
                && device[schema::pluginFormat].toString() == "VST3";
     }
 
-    // What of a track another DAW can't play, which its bounce plays: why, or nothing.
-    juce::String findWhyBounced (const juce::ValueTree& track)
+    // What of a track another DAW can't play, which its bounce plays: why, or nothing. Its clips read by their IDs
+    // (Clips.h), after its other parts.
+    juce::String findWhyBounced (const Song& song, const juce::ValueTree& track)
     {
         if ((bool) track[schema::trackFrozen])
             return "frozen";
@@ -132,13 +133,14 @@ namespace
             if ((child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
                 && child.getChildWithName (schema::MODULATES).isValid())
                 return "modulation";
-
-            if (child.hasType (schema::CLIP) && child[schema::clipKind].toString() == schema::clipIsAudio
-                && (! juce::approximatelyEqual ((float) child[schema::clipGain], 0.0f) || child.hasProperty (schema::clipTempo)
-                    || ! juce::approximatelyEqual ((float) child[schema::clipPitch], 0.0f) || (bool) child[schema::clipReversed]
-                    || child.hasProperty (schema::clipTakes)))
-                return "audio clips";
         }
+
+        // An audio clip's gain, tempo (while it follows the song's), pitch, direction and takes, as only Phazite plays them.
+        for (const auto& clip : getClipValues (song, getTrackID (track)))
+            if (clip.isAudio()
+                && (! juce::approximatelyEqual (clip.gain, 0.0f) || clip.sound.tempo > 0.0
+                    || ! juce::approximatelyEqual (clip.sound.pitch, 0.0f) || clip.sound.reversed || clip.takes != 0))
+                return "audio clips";
 
         return {};
     }
@@ -322,10 +324,12 @@ namespace
             const auto colour = getTrackColour (song, trackID, (int) getTrackRow (trackID));
             const auto isFolder = isFolderState (track), isReturn = isReturnState (track);
             const auto bus = isFolder && (bool) track[schema::folderBus];
-            const auto why = isFolder ? juce::String() : findWhyBounced (track);
+            const auto why = isFolder ? juce::String() : findWhyBounced (song, track);
 
             auto* element = parent.createNewChildElement ("Track");
-            element->setAttribute ("contentType", isFolder ? "tracks" : hasAudioClips (track) ? "audio" : "notes");
+            element->setAttribute ("contentType", isFolder                                           ? "tracks"
+                                                  : hasClips (song, trackID, ClipValue::Kind::audio) ? "audio"
+                                                                                                     : "notes");
             element->setAttribute ("loaded", "true");
             element->setAttribute ("id", "t" + juce::String ((juce::int64) id));
             element->setAttribute ("name", name);
@@ -376,15 +380,6 @@ namespace
         {
             const auto tracks = getTrackIDs (song);
             return (size_t) std::distance (tracks.begin(), std::find (tracks.begin(), tracks.end(), track));
-        }
-
-        static bool hasAudioClips (const juce::ValueTree& track)
-        {
-            for (const auto& child : track)
-                if (child.hasType (schema::CLIP) && child[schema::clipKind].toString() == schema::clipIsAudio)
-                    return true;
-
-            return false;
         }
 
         // Where a channel's sound goes: its bus's channel, or the master's.
@@ -562,12 +557,10 @@ namespace
             auto* clips = lane->createNewChildElement ("Clips");
             clips->setAttribute ("id", "k" + juce::String ((juce::int64) id));
 
-            for (const auto& clip : track)
+            // Its clips by their IDs (Clips.h), in the order the track holds them.
+            for (const auto& clip : getClipValues (song, TrackID::fromRaw (id)))
             {
-                if (! clip.hasType (schema::CLIP))
-                    continue;
-
-                if (clip[schema::clipKind].toString() == schema::clipIsAudio)
+                if (clip.isAudio())
                     writeAudioClip (*clips, clip);
                 else
                     writeMidiClip (*clips, clip);
@@ -576,23 +569,23 @@ namespace
             writeAutomation (*lane, track, channelID (id));
         }
 
-        void writeMidiClip (juce::XmlElement& clips, const juce::ValueTree& clip)
+        void writeMidiClip (juce::XmlElement& clips, const ClipValue& clip)
         {
-            const auto id = clip[schema::clipID].toString();
+            const auto id = juce::String ((juce::int64) clip.id.getRaw());
             auto* element = clips.createNewChildElement ("Clip");
-            element->setAttribute ("time", number ((double) clip[schema::clipStart]));
-            element->setAttribute ("duration", number ((double) clip[schema::clipLength]));
-            element->setAttribute ("playStart", number ((double) clip.getProperty (schema::clipOffset, 0.0)));
+            element->setAttribute ("time", number (clip.start.inBeats()));
+            element->setAttribute ("duration", number (clip.length.inBeats()));
+            element->setAttribute ("playStart", number (clip.offset.inBeats()));
             element->setAttribute ("name", getClipName (song, clip));
 
-            if ((bool) clip[schema::clipMute])
+            if (clip.muted)
                 element->setAttribute ("enable", "false");
 
             auto* notes = element->createNewChildElement ("Notes");
             notes->setAttribute ("id", "n" + id);
 
             // Its notes as the song holds them (Notes.h), each where it is among the clip's notes, as DAWproject counts them.
-            const auto clipID = getClipID (clip);
+            const auto clipID = clip.id;
             const auto contentStart = getContentStart (clip);
 
             for (const auto& note : getClipNotes (song, clipID))
@@ -615,9 +608,9 @@ namespace
                 leftOut.addIfNotAlreadyThere ("clips' controller events");
         }
 
-        void writeAudioClip (juce::XmlElement& clips, const juce::ValueTree& clip)
+        void writeAudioClip (juce::XmlElement& clips, const ClipValue& clip)
         {
-            const auto path = clip[schema::clipFile].toString();
+            const auto& path = clip.sound.file;
             const auto file =
                 juce::File::isAbsolutePath (path) ? makeFileOfFullPath (path) : song.getFile().getParentDirectory().getChildFile (path);
             juce::AudioFormatManager formats;
@@ -630,9 +623,14 @@ namespace
                 return;
             }
 
-            const auto start = (double) clip[schema::clipStart];
-            const auto from = (double) clip[schema::clipFileStart];
-            const auto to = (double) clip.getProperty (schema::clipFileEnd, (double) reader->lengthInSamples / reader->sampleRate);
+            const auto start = clip.start.inBeats();
+            const auto from = clip.fileStart;
+            // A clip without its end (only a damaged file's: Phazite writes it on every audio clip, and the loader leaves one that
+            // is absent absent) plays to the file's end; one whose end is 0 (an empty file's, or a part set to nothing) plays
+            // nothing, as Phazite plays it. The clip's value holds both as 0, so whether it has one is read from its element, by
+            // its ID, until the clips' value is their storage and holds "no end" itself (S5.20).
+            const auto hasEnd = findClipState (song, clip.id).hasProperty (schema::clipFileEnd);
+            const auto to = hasEnd ? clip.fileEnd : (double) reader->lengthInSamples / reader->sampleRate;
             const auto end = tempo.toBeats (tempo.toSamples (start) + (to - from));
 
             auto* element = clips.createNewChildElement ("Clip");
@@ -642,18 +640,18 @@ namespace
             element->setAttribute ("playStart", number (from));
             element->setAttribute ("playStop", number (to));
             element->setAttribute ("fadeTimeUnit", "seconds");
-            element->setAttribute ("fadeInTime", number ((double) clip.getProperty (schema::clipFadeIn, 0.0)));
-            element->setAttribute ("fadeOutTime", number ((double) clip.getProperty (schema::clipFadeOut, 0.0)));
+            element->setAttribute ("fadeInTime", number (clip.fadeIn.seconds));
+            element->setAttribute ("fadeOutTime", number (clip.fadeOut.seconds));
             element->setAttribute ("name", getClipName (song, clip));
 
-            if ((bool) clip[schema::clipMute])
+            if (clip.muted)
                 element->setAttribute ("enable", "false");
 
             auto* audio = element->createNewChildElement ("Audio");
             audio->setAttribute ("channels", (int) reader->numChannels);
             audio->setAttribute ("sampleRate", toWhole<int> (reader->sampleRate)); // a file's header says it
             audio->setAttribute ("duration", number ((double) reader->lengthInSamples / reader->sampleRate));
-            audio->setAttribute ("id", "a" + clip[schema::clipID].toString());
+            audio->setAttribute ("id", "a" + juce::String ((juce::int64) clip.id.getRaw()));
             audio->createNewChildElement ("File")->setAttribute ("path", addAudioFile (file));
         }
 
@@ -1764,16 +1762,7 @@ namespace
             return false;
         }
 
-        int getClipCount() const
-        {
-            auto count = 0;
-
-            for (const auto& track : getTrackIDs (song))
-                for (const auto& child : findTrackState (song, track))
-                    count += child.hasType (schema::CLIP) ? 1 : 0;
-
-            return count;
-        }
+        int getClipCount() const { return (int) getAllClips (song).size(); }
 
         void takeFader (TrackID id, const juce::XmlElement* theirs, const juce::XmlElement* ours)
         {
@@ -1798,20 +1787,19 @@ namespace
         // stay as they are; the others come, and the clip's notes it hasn't go (but those a DAWproject has no place for).
         void takeNotes (TrackID id, const std::vector<const juce::XmlElement*>& clips)
         {
-            std::vector<juce::ValueTree> ourClips;
+            std::vector<ClipID> ourClips;
 
-            for (const auto& child : findTrackState (song, id))
-                if (child.hasType (schema::CLIP) && child[schema::clipKind].toString() != schema::clipIsAudio)
-                    ourClips.push_back (child);
+            for (const auto& clip : getClipValues (song, id))
+                if (! clip.isAudio())
+                    ourClips.push_back (clip.id);
 
             if (ourClips.size() != clips.size())
                 notTaken.addIfNotAlreadyThere (getTrackName (song, id) + ": its clips added or taken away");
 
             for (size_t i = 0; i < std::min (ourClips.size(), clips.size()); ++i)
             {
-                auto clip = ourClips[i];
-                const auto clipID = getClipID (clip);
-                const auto contentStart = getContentStart (clip);
+                const auto clipID = ourClips[i];
+                const auto contentStart = getContentStart (song, clipID);
                 std::vector<NoteData> unused; // the song's notes (Notes.h), each where it is among the clip's notes
 
                 for (const auto& note : getClipNotes (song, clipID))
@@ -1851,7 +1839,7 @@ namespace
                     notesAdded.push_back (readNote (clipID, contentStart, *note));
 
                 addNotes (song, notesAdded);
-                keepWithinSong (clip);
+                keepWithinSong (findClipState (song, clipID)); // a write into the clip's element (S5.20 moves the writers next)
             }
         }
 
@@ -1918,13 +1906,14 @@ namespace
                 if (! clipID.isValid())
                     continue;
 
+                // Its offset written into its element (S5.20 moves the writers next), then read as it is by its ID.
                 auto clipState = findClipState (song, clipID);
                 clipState.setProperty (schema::clipOffset, readNumber (*clip, "playStart", 0.0, 0.0, maxSongBeats), nullptr);
-
+                const auto contentStart = getContentStart (song, clipID);
                 std::vector<NoteData> notes;
 
                 for (const auto* note : clip->getChildByName ("Notes")->getChildWithTagNameIterator ("Note"))
-                    notes.push_back (readNote (clipID, getContentStart (clipState), *note));
+                    notes.push_back (readNote (clipID, contentStart, *note));
 
                 addNotes (song, notes);
                 keepWithinSong (clipState);
@@ -2197,10 +2186,11 @@ UnpackedAudio unpackDawProjectAudio (const DawProjectFile& in, const juce::File&
     return unpacked;
 }
 
-void forgetUnusedAudio (const UnpackedAudio& unpacked, const juce::ValueTree& song, const juce::File& projectFile)
+void forgetUnusedAudio (const UnpackedAudio& unpacked, const Song& song)
 {
-    // What the song plays, by its files: a path within the project's folder, or a full one.
-    const auto folder = projectFile.getParentDirectory();
+    // What the song plays, by its files (its clips read by their IDs: AudioClips.h): a path within the project's folder, or a
+    // full one.
+    const auto folder = song.getFile().getParentDirectory();
     std::set<juce::File> played;
 
     for (const auto& path : findAudioFilePaths (song))
@@ -2346,7 +2336,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
                 if (! import->unpacked)
                     import->takeBack = true;
                 else if (auto* song = findSong (context); did && song != nullptr)
-                    forgetUnusedAudio (import->audio, song->getState(), song->getFile());
+                    forgetUnusedAudio (import->audio, *song);
                 else if (import->branch.isEmpty()) // else once the branch made, whose song names them, is gone (below)
                     for (const auto& file : import->audio.made)
                         file.deleteFile();

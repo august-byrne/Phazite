@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/ChangesWorker.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/WholeState.h"
@@ -25,15 +27,22 @@ namespace
         }
     }
 
-    // A track's own parts, or the master's: without the tracks in it (a folder's), which are parts of their own.
+    // A track's own parts, or the master's: without the tracks in it (a folder's), which are parts of their own. Its clips
+    // first, by their IDs (Clips.h), each whole with its notes (WholeState.h: copyWholeClip()), as the song is to hold them
+    // outside its tree (roadmap step S5.20); then its other parts. A comparison finds a clip by its key, in no order among
+    // the rest (Schema.h: CLIP is in no order group).
     juce::ValueTree copyTrack (const Song& song, const juce::ValueTree& track)
     {
         juce::ValueTree copy (track.getType());
         copy.copyPropertiesFrom (track, nullptr);
 
+        if (track.hasType (schema::TRACK))
+            for (const auto clip : getClips (song, getTrackID (track)))
+                copy.appendChild (copyWholeClip (song, clip), nullptr);
+
         for (const auto& child : track)
-            if (! child.hasType (schema::TRACK))
-                copy.appendChild (copyWhole (song, child), nullptr); // a clip with its notes
+            if (! child.hasType (schema::TRACK) && ! child.hasType (schema::CLIP))
+                copy.appendChild (copyWhole (song, child), nullptr);
 
         return copy;
     }

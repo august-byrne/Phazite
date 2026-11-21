@@ -23,6 +23,11 @@ class Song;
 juce::ValueTree copyWholeSong (const Song&);
 juce::ValueTree copyWhole (const Song&, const juce::ValueTree& part);
 
+// A clip of the song by its ID, as a copy of its CLIP element that holds everything the song holds of it (an invalid tree for
+// a clip that isn't the song's): what copies a track's clips without its tree, which is to hold them no more (roadmap step
+// S5.20). Message thread.
+juce::ValueTree copyWholeClip (const Song&, ClipID);
+
 // What the song keeps beside its tree, as it is now: kept for nothing (values share what they hold), for what must write or
 // compare the song later than it copies it (a save in the background, the copy a project compares itself with: model/
 // project/internal/Project.h; what a frozen track's file holds: model/mixer/internal/Freeze.h). Together with a copy of the

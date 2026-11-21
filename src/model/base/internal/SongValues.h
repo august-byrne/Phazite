@@ -16,16 +16,11 @@
 #include "model/base/Beats.h"
 #include "model/base/ControlKinds.h"
 #include "model/base/IDs.h"
+#include "model/base/internal/Immer.h"
 #include "model/base/internal/ValueArea.h"
 
 #include <juce_core/juce_core.h>
 #include <juce_data_structures/juce_data_structures.h>
-
-#include <immer/algorithm.hpp>
-#include <immer/flex_vector.hpp>
-#include <immer/flex_vector_transient.hpp>
-#include <immer/map.hpp>
-#include <immer/map_transient.hpp>
 
 #include <cstdint>
 #include <memory>

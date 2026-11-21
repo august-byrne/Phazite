@@ -2858,7 +2858,7 @@ void Project::compareWithSavedState()
     {
         const auto now = keepValues (*song);
         same = std::all_of (notesToCompare.begin(), notesToCompare.end(), [this, &now] (ClipID clip)
-                            { return ! findClipState (*song, clip).isValid() || holdSameNotes (now, savedState.values, clip); });
+                            { return ! getClipTrack (*song, clip).isValid() || holdSameNotes (now, savedState.values, clip); });
     }
 
     clearToCompare();

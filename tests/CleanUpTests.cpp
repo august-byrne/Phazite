@@ -3,17 +3,33 @@
 // project's Audio and Generated folders that neither its song, nor a version, nor a branch's song as it was left plays, and
 // those ticked deleted.
 #include "HeldFile.h"
+#include "TestClips.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/drums/DrumSampler.h"
+#include "devices/sampler/Sampler.h"
+#include "devices/synth/Synth.h"
+#include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/AudioWork.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumKit.h"
+#include "model/devices/internal/SamplerSound.h"
+#include "model/devices/internal/Wavetables.h"
 #include "model/project/UnusedAudio.h"
+#include "model/project/internal/DawProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/AudioRecorder.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
 #include "model/versions/internal/VersionStore.h"
 #include "ui/shell/CleanUpPanel.h"
+
+#include <algorithm>
+#include <cstdint>
 
 namespace
 {
@@ -183,6 +199,134 @@ TEST_CASE ("Clean Up keeps the audio that the project file as saved, its autosav
 
     writeSound (project.getAudioFolder().getChildFile ("Old take.wav"), 0.5);
     CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Old take.wav"));
+}
+
+TEST_CASE ("Clean Up and an import keep every file the song plays: each clip's by its ID, and its sampler's, pads' and tables'")
+{
+    // What the song plays is read from its clips by their IDs (AudioClips.h: findAudioFilePaths()), not from its tree, which
+    // is to hold them no more (roadmap step S5.20): a look that found no clip there would offer every clip's file, and an
+    // import would delete every file it unpacked. Its devices' files are read from their sounds as before. Neither the
+    // project file as saved nor a version holds these clips and devices, so the song alone keeps their files.
+    TestSong s;
+    s.setTempo (120.0);
+    auto* song = phazite::findSong (s.context);
+    const auto other = s.addTrack ("Other");
+    const auto folded = s.addTrack ("Folded");
+    const auto takes = s.addTrack ("Takes");
+    s.addBus ("Bus", { folded });
+    const auto sound = [&s] (const char* name) { return writeSound (s.getSoundsFolder().getChildFile (name), 0.5); };
+
+    const auto first = s.addAudioClip (s.firstTrack, sound ("First.wav"), 0.0);
+    s.addAudioClip (other, sound ("Second.wav"), 0.0);
+    const auto alias = s.copyClip (first, 4.0, true);
+    phazite::moveClip (s.context, alias, at (4.0), other);
+    s.addAudioClip (folded, sound ("Folded.wav"), 0.0);
+
+    // A clip recorded round a loop of a second three times, its file in the Audio folder, as the recorder writes one.
+    {
+        constexpr std::int64_t second = 48000;
+        phazite::TakePlace take;
+        take.sampleRate = (double) second;
+        take.frames = 3 * second;
+        take.firstFrame = take.start = 4 * second;
+        take.stop = 7 * second;
+        take.loop = phazite::TakeLoop { 4 * second, 5 * second };
+        const auto file = writeSound (s.getProject().getAudioFolder().getChildFile ("Take.wav"), 3.0);
+        const phazite::UndoStep step (*song, "Record");
+        REQUIRE (phazite::placeTake (*song, takes, file, take).size() == 1);
+    }
+
+    // And the files the song's devices play, which no clip names: the sampler's sound, a drum pad's two layers and a synth's
+    // oscillator's table, each copied into the Audio folder as the device's file (Import.h). A function that read the clips
+    // alone would offer each of them as unused.
+    const auto sampler = s.setInstrument (s.addTrack ("Sampler"), phazite::devices::Sampler::typeID);
+    REQUIRE (phazite::setSampleFile (*song, sampler, sound ("Vox.wav")));
+    const auto drums = s.setInstrument (s.addTrack ("Drums"), phazite::devices::DrumSampler::typeID);
+    REQUIRE (phazite::setPadSound (*song, drums, 36, sound ("Kick.wav")));
+    REQUIRE (phazite::setPadSound (*song, drums, 36, sound ("Kick Layer.wav"), 1));
+    const auto synth = s.setInstrument (s.addTrack ("Synth"), phazite::devices::Synth::typeID);
+    REQUIRE (phazite::setWavetableFile (*song, synth, 1, sound ("Table.wav")));
+
+    const auto unused = writeSound (s.getProject().getAudioFolder().getChildFile ("Unused.wav"), 0.5);
+    const juce::StringArray played { "Audio/First.wav", "Audio/Second.wav", "Audio/Folded.wav",     "Audio/Take.wav",
+                                     "Audio/Vox.wav",   "Audio/Kick.wav",   "Audio/Kick Layer.wav", "Audio/Table.wav" };
+
+    // Every clip's file, each once, from the clips themselves: none found would fail here, not pass.
+    const auto checkPaths = [&s, other, folded, takes]
+    {
+        const auto& now = *phazite::findSong (s.context);
+        const auto clips = phazite::getClipValues (now);
+        REQUIRE (clips.size() == 5);
+        const auto count = [&clips] (auto&& isIt) { return std::count_if (clips.begin(), clips.end(), isIt); };
+        CHECK (count ([] (const phazite::ClipValue& clip) { return clip.link != 0; }) == 2);
+        CHECK (count ([other] (const phazite::ClipValue& clip) { return clip.track == other; }) == 2);
+        CHECK (count ([folded] (const phazite::ClipValue& clip) { return clip.track == folded; }) == 1);
+        CHECK (count ([takes] (const phazite::ClipValue& clip) { return clip.track == takes && clip.takes == 3; }) == 1);
+        auto paths = phazite::findAudioFilePaths (now);
+
+        for (const auto& clip : clips)
+        {
+            INFO ("clip " << clip.id.getRaw() << ": " << clip.sound.file);
+            CHECK (clip.isAudio());
+            CHECK (clip.sound.file.isNotEmpty());
+            CHECK (paths.contains (clip.sound.file));
+        }
+
+        paths.sort (false);
+        return paths;
+    };
+
+    auto sortedPlayed = played;
+    sortedPlayed.sort (false);
+    CHECK (checkPaths() == sortedPlayed);
+    REQUIRE (phazite::canCleanUpAudio (s.context));
+    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Unused.wav"));
+
+    // The same after a save and a reopen, from the clips the song opened with.
+    s.reopen();
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK (checkPaths() == sortedPlayed);
+    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Unused.wav"));
+
+    // An import's unpacked audio that no clip plays goes; what a clip plays stays (model/project/internal/DawProject.h).
+    const auto& reopened = *phazite::findSong (s.context);
+    const auto unpackedUnused = writeSound (s.getProject().getAudioFolder().getChildFile ("Unpacked.wav"), 0.5);
+    phazite::UnpackedAudio unpacked;
+    unpacked.made.push_back (unpackedUnused);
+
+    for (const auto clip : phazite::getAllClips (reopened))
+        unpacked.made.push_back (phazite::getClipFile (reopened, clip));
+
+    const juce::StringArray devicesPlay { "Audio/Vox.wav", "Audio/Kick.wav", "Audio/Kick Layer.wav", "Audio/Table.wav" };
+
+    for (const auto& path : devicesPlay)
+        unpacked.made.push_back (s.getProject().getFile().getSiblingFile (path));
+
+    phazite::forgetUnusedAudio (unpacked, reopened);
+    CHECK_FALSE (unpackedUnused.existsAsFile());
+
+    for (const auto clip : phazite::getAllClips (reopened))
+        CHECK (phazite::getClipFile (reopened, clip).existsAsFile());
+
+    for (const auto& path : devicesPlay)
+    {
+        INFO (path);
+        CHECK (s.getProject().getFile().getSiblingFile (path).existsAsFile());
+    }
+
+    // And Delete deletes the unused file alone, however many are asked for.
+    juce::Array<juce::File> every { unused };
+
+    for (const auto& path : played)
+        every.add (s.getProject().getFile().getSiblingFile (path));
+
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE_MESSAGE (phazite::canCleanUpAudio (s.context), phazite::getWhyNotCleanUpAudio (s.context).toStdString());
+    CHECK (deleteUnused (s.context, every) == 1);
+    CHECK_FALSE (unused.existsAsFile());
+
+    for (const auto& path : played)
+        CHECK (s.getProject().getFile().getSiblingFile (path).existsAsFile());
 }
 
 TEST_CASE ("Clean Up keeps the audio that Local History, and the versions Recover Lost Versions brings back, still play")

@@ -225,9 +225,8 @@ int UnsavedFolder::recoverUnusedAudio (Song& song)
 {
     juce::Array<juce::File> played;
 
-    for (const auto& clipState : getClipStates (song))
-        if (isAudioState (clipState))
-            played.add (getClipFile (song, clipState)); // the file, not a render of it
+    for (const auto clip : getAudioClips (song))
+        played.add (getClipFile (song, clip)); // the file, not a render of it
 
     // In the order they were made, as they were recorded.
     auto unused = song.getFile().getSiblingFile ("Audio").findChildFiles (juce::File::findFiles, true);

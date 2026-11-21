@@ -96,6 +96,12 @@ struct PlayedClip
 
 PlayedClip getPlayedClip (const Song&, const juce::ValueTree& clipState, const ClipTempo&);
 
+// The same of a clip's value: its file, from the value; and what plays for a clip of the song, given its value as the song
+// holds it now (else an assertion in Debug), read from the live clip by its ID, as the clips' code works it out from the
+// clip's element for now (as Clips.h's getLiveClipRange()).
+juce::File getClipFile (const Song&, const ClipValue&);
+PlayedClip getPlayedClip (const Song&, const ClipValue&, const ClipTempo&);
+
 // Where it is in beats: from its start for as long as its part takes to play.
 BeatRange getAudioClipRange (const Song&, const juce::ValueTree& clipState);
 
@@ -236,6 +242,14 @@ PeakRead readPeak (const juce::File&, FilePart, const std::function<bool()>& sho
 
 // Every audio clip of the song, on every track.
 std::vector<ClipID> getAudioClips (const Song&);
+
+// The paths of the audio files the song plays, as the song holds them (a path within the project's folder, or a full one),
+// each once: its clips' files, read by their IDs (getClipValues(), whatever holds the clips), in the song's order, track by
+// track; then its devices' sound files (Schema.h: isSoundFileProperty()), in the order its tree holds them. What Clean Up
+// Unused Audio keeps (model/project/UnusedAudio.h), and what an import keeps of the audio it unpacked (model/project/internal/
+// DawProject.h: forgetUnusedAudio()). Never the song's tree read for its clips: the song is to hold them outside it (roadmap
+// step S5.20). For a whole song's tree (a copy, a file read), model/versions/internal/VersionStore.h has its own.
+juce::StringArray findAudioFilePaths (const Song&);
 
 // The commands' switches for the selected clips: the audio clips among them play backwards, or forwards again if all of
 // them do already; and follow the song's tempo, or stop if all of them do already. MIDI clips don't count.

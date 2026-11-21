@@ -81,7 +81,8 @@
 #                             handles: a handle named otherwise isn't seen.
 #   immer-outside-model       includes of the immer library's headers (immer/...) in src/ outside src/model: the
 #                             song's values (src/model/base/internal/ValueArea.h) stay inside the model, and the layers
-#                             above get Phazite's own types of it. The tests may include it.
+#                             above get Phazite's own types of it. The model and the tests include them through
+#                             src/model/base/internal/Immer.h, the one file that includes immer's headers itself.
 # Comments and the text of string and character literals don't count. A C/C++ file in src/ outside the eight
 # layers fails the check whatever the budgets.
 # Exit codes: 0 = every count equals its budget (and every raise checked says why); 1 = a count differs from

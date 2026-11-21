@@ -125,13 +125,13 @@ namespace
         if (isFolderState (state))
         {
             for (const auto inside : getTracksInFolder (song, channel))
-                if (! getClipStates (findTrackState (song, inside)).empty())
+                if (hasClips (song, inside))
                     return true;
 
             return false;
         }
 
-        return ! getClipStates (state).empty();
+        return hasClips (song, channel);
     }
 
     // Reports on the message thread, unless the export that asked has gone by then: its owner, alive while this is

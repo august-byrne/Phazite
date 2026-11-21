@@ -1823,7 +1823,7 @@ void ProjectSession::importUnpacked (const juce::File& file, std::shared_ptr<Daw
                                             }
 
                                             *said = takeDawProject (song, *read, moved);
-                                            forgetUnusedAudio (moved, song.getState(), song.getFile());
+                                            forgetUnusedAudio (moved, song);
                                         });
     juce::ignoreUnused (staging); // deleted with its folder's holder, by the caller
 

@@ -433,6 +433,19 @@ PlayedClip getPlayedClip (const Song& song, const juce::ValueTree& clipState, co
     return played;
 }
 
+juce::File getClipFile (const Song& song, const ClipValue& clip)
+{
+    return findProjectFile (song, clip.sound.file);
+}
+
+PlayedClip getPlayedClip (const Song& song, const ClipValue& clip, const ClipTempo& tempo)
+{
+    // A clip of the song's: its value isn't read again to compare, which a plan's compile would pay for at every clip.
+    const auto clipState = findClipState (song, clip.id);
+    jassert (clipState.isValid() && isAudioState (clipState) == clip.isAudio());
+    return getPlayedClip (song, clipState, tempo);
+}
+
 BeatRange getAudioClipRange (const Song& song, const juce::ValueTree& clipState)
 {
     const auto start = getClipRange (clipState).getStart();
@@ -1017,6 +1030,35 @@ std::vector<ClipID> getAudioClips (const Song& song)
             clips.push_back (getClipID (clipState));
 
     return clips;
+}
+
+namespace
+{
+    // The devices' sound files an element of the song names, and those of what it holds: a clip's elements hold none.
+    void addSoundFilePaths (const juce::ValueTree& element, juce::StringArray& paths)
+    {
+        if (element.hasType (schema::SOUNDS))
+            for (int i = 0; i < element.getNumProperties(); ++i)
+                if (const auto property = element.getPropertyName (i); schema::isSoundFileProperty (property))
+                    if (const auto path = element[property].toString(); path.isNotEmpty())
+                        paths.addIfNotAlreadyThere (path);
+
+        for (const auto& child : element)
+            if (! child.hasType (schema::CLIP))
+                addSoundFilePaths (child, paths);
+    }
+} // namespace
+
+juce::StringArray findAudioFilePaths (const Song& song)
+{
+    juce::StringArray paths;
+
+    for (const auto& clip : getClipValues (song))
+        if (clip.sound.file.isNotEmpty())
+            paths.addIfNotAlreadyThere (clip.sound.file);
+
+    addSoundFilePaths (song.getState(), paths);
+    return paths;
 }
 
 //==============================================================================

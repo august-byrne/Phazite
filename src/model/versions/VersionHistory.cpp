@@ -4,6 +4,7 @@
 #include "internal/StoreSweep.h"
 #include "model/arrangement/TrackColours.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
@@ -3119,8 +3120,8 @@ void VersionHistory::markNotesHeard()
 {
     // A clip gone since was taken off its track, which marked it.
     for (const auto clip : std::exchange (notesHeard, {}))
-        if (const auto clipState = findClipState (song, clip); clipState.isValid())
-            markTrack (clipState.getParent(), false);
+        if (const auto track = getClipTrack (song, clip); track.isValid())
+            markTrack (findTrackState (song, track), false);
 }
 
 void VersionHistory::markCurve (const juce::String& key)

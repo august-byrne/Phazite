@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectContents.h"
 #include "internal/ProjectContext.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/BackgroundJobs.h"
@@ -47,12 +48,13 @@ namespace
         return channels;
     }
 
-    // Everything in a channel's element, but the tracks a folder holds, which are channels of their own.
+    // Everything in a channel's element, but the tracks a folder holds, which are channels of their own, and its clips, which
+    // are read by their IDs (Clips.h: getClipValues()).
     void forEachIn (const juce::ValueTree& element, const std::function<void (const juce::ValueTree&)>& visit)
     {
         for (const auto& child : element)
         {
-            if (child.hasType (schema::TRACK))
+            if (child.hasType (schema::TRACK) || child.hasType (schema::CLIP))
                 continue;
 
             visit (child);
@@ -60,12 +62,10 @@ namespace
         }
     }
 
-    // Each path an element names an audio file by: a clip's file, or a device's sound file (a pad's or an oscillator's).
-    void forEachAudioPath (const juce::ValueTree& element, const std::function<void (const juce::Identifier&)>& visit)
+    // Each path an element names an audio file by: a device's sound file (a pad's, an oscillator's or a sampler's). A clip's
+    // is its value's (ClipSound::file).
+    void forEachSoundPath (const juce::ValueTree& element, const std::function<void (const juce::Identifier&)>& visit)
     {
-        if (element.hasType (schema::CLIP) && element[schema::clipFile].toString().isNotEmpty())
-            visit (schema::clipFile);
-
         if (element.hasType (schema::SOUNDS))
             for (int i = 0; i < element.getNumProperties(); ++i)
                 if (const auto property = element.getPropertyName (i);
@@ -126,26 +126,28 @@ std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext& contex
 
     for (const auto& channel : getChannels (*song))
     {
-        forEachIn (channel.state,
-                   [&] (const juce::ValueTree& element)
-                   {
-                       forEachAudioPath (element,
-                                         [&] (const juce::Identifier& property)
-                                         {
-                                             const auto path = element[property].toString();
-                                             auto [place, isNew] = places.try_emplace (path, files.size());
+        const auto use = [&] (const juce::String& path)
+        {
+            auto [place, isNew] = places.try_emplace (path, files.size());
 
-                                             if (isNew)
-                                             {
-                                                 const auto file = findProjectFile (*song, path);
-                                                 files.push_back ({ .path = path, .file = file, .missing = missing.count (file) > 0 });
-                                             }
+            if (isNew)
+            {
+                const auto file = findProjectFile (*song, path);
+                files.push_back ({ .path = path, .file = file, .missing = missing.count (file) > 0 });
+            }
 
-                                             auto& used = files[place->second];
-                                             used.channels.addIfNotAlreadyThere (channel.name);
-                                             ++used.uses;
-                                         });
-                   });
+            auto& used = files[place->second];
+            used.channels.addIfNotAlreadyThere (channel.name);
+            ++used.uses;
+        };
+
+        // Its clips' files, in its clips' order, then its devices' sounds (a track that plays audio clips has no instrument).
+        for (const auto& clip : getClipValues (*song, channel.id))
+            if (clip.sound.file.isNotEmpty())
+                use (clip.sound.file);
+
+        forEachIn (channel.state, [&] (const juce::ValueTree& element)
+                   { forEachSoundPath (element, [&] (const juce::Identifier& property) { use (element[property].toString()); }); });
     }
 
     return files;
@@ -307,22 +309,29 @@ bool locateAudioFileNow (ProjectContext& context, const juce::String& path, cons
     if (song == nullptr || path.isEmpty() || ! found.existsAsFile())
         return false;
 
-    // Where the song plays the path now.
+    // Where the song plays the path now: its clips (by their IDs) and its devices' sounds.
+    std::vector<ClipID> clips;
     std::vector<std::pair<juce::ValueTree, juce::Identifier>> uses;
 
     for (const auto& channel : getChannels (*song))
+    {
+        for (const auto& clip : getClipValues (*song, channel.id))
+            if (clip.sound.file == path)
+                clips.push_back (clip.id);
+
         forEachIn (channel.state,
                    [&uses, &path] (const juce::ValueTree& element)
                    {
-                       forEachAudioPath (element,
+                       forEachSoundPath (element,
                                          [&] (const juce::Identifier& property)
                                          {
                                              if (element[property].toString() == path)
                                                  uses.emplace_back (element, property);
                                          });
                    });
+    }
 
-    if (uses.empty())
+    if (clips.empty() && uses.empty())
         return false;
 
     // The project's own copy of the file found, by the path the song keeps for it.
@@ -332,6 +341,10 @@ bool locateAudioFileNow (ProjectContext& context, const juce::String& path, cons
         return false;
 
     const UndoStep step (*song, "Locate Audio File");
+
+    // Each clip's file written into its element (roadmap step S5.20 moves this write into the clips' code next).
+    for (const auto clip : clips)
+        findClipState (*song, clip).setProperty (schema::clipFile, newPath, &song->getUndoManager());
 
     for (auto& [element, property] : uses)
         element.setProperty (property, newPath, &song->getUndoManager());

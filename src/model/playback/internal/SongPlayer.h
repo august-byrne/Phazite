@@ -310,7 +310,7 @@ private:
     bool isOnDiskAsKept (const TrackAudio&); // each of its files and sources as the plan before knew it (getFileKey())
     std::shared_ptr<engine::AudioFile> getAudioFile (const juce::File&, bool askAgain, juce::String* key = nullptr);
     engine::AudioRegion makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile>);
-    void placeRegion (engine::AudioRegion&, const juce::ValueTree& clipState, const PlayedClip&) const;
+    void placeRegion (engine::AudioRegion&, const ClipValue&, const PlayedClip&) const;
     TrackAudio makeAudio (const juce::ValueTree& trackState, std::optional<ClipTempo>&, bool askAgain); // the tempo read once
     void addAudio (engine::Plan::Strip&, const juce::ValueTree& trackState, std::optional<ClipTempo>&);
     void checkAudio (const TrackAudio& kept, const juce::ValueTree& trackState, std::optional<ClipTempo>&);

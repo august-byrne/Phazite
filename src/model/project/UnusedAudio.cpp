@@ -2,6 +2,7 @@
 #include "UnusedAudio.h"
 #include "internal/Project.h"
 #include "internal/ProjectContext.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/AudioWork.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/WholeFile.h"
@@ -64,10 +65,10 @@ namespace
         return files;
     }
 
-    // What the song plays.
+    // What the song plays: its clips read by their IDs (AudioClips.h), not its tree, which is to hold them no more.
     juce::StringArray findSongPaths (const ProjectContext& context)
     {
-        return findAudioFilePaths (findSong (context)->getState());
+        return findAudioFilePaths (*findSong (context));
     }
 
     // What the saved files play, each read again only once it changed since the last look; what is kept of one gone since

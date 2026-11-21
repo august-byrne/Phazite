@@ -1152,7 +1152,7 @@ TEST_CASE ("Performance gate: a step of a note's drag in the piano roll doesn't 
     const auto none = visitedFor (0), many = visitedFor (20000);
     INFO ("Elements looked at by a step of a note's drag in a clip of no controller values: " << none << "; of 20,000: " << many);
 
-    CHECK (many - none < 100);
+    CHECK (many < none + 100); // not their difference: the counts are unsigned, and the one with values can come out the smaller
 }
 
 TEST_CASE ("Performance gate: a drag or a paste of many notes looks through its clip's track once, not once for each note")

@@ -12,16 +12,18 @@ namespace phazite
 {
 namespace
 {
-    // Whether the song holds an item of a kind with an ID: a track (or a folder, a return or the master), a clip on a track,
-    // or a device (or a container) of a track, of the master or of a container. Each kind's ID is its element's "id".
+    // Whether the song's tree holds an item of a kind with an ID: a track (or a folder, a return or the master), or a device
+    // (or a container) of a track, of the master or of a container. Each kind's ID is its element's "id". Not a clip, which
+    // the song is to hold outside its tree (roadmap step S5.20): the song's index finds it by its ID.
     bool holds (const juce::ValueTree& parent, Selection::Kind kind, std::uint64_t id)
     {
+        jassert (kind != Selection::Kind::clip);
+
         for (const auto& child : parent)
         {
             const auto isTrack = child.hasType (schema::TRACK) || child.hasType (schema::MASTER);
-            const auto isOfKind = kind == Selection::Kind::track  ? isTrack
-                                  : kind == Selection::Kind::clip ? child.hasType (schema::CLIP)
-                                                                  : child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER);
+            const auto isOfKind =
+                kind == Selection::Kind::track ? isTrack : child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER);
 
             if (isOfKind && (std::uint64_t) (juce::int64) child.getProperty (schema::trackID, (juce::int64) 0) == id)
                 return true;
@@ -132,7 +134,8 @@ bool Selection::isThere (Item item) const
                            : (std::uint64_t) (juce::int64) song->getState().getChildWithName (schema::MASTER)[schema::trackID] == item.id
                                  || index.findTrack (item.id).isValid();
 
-    jassert (! SongIndex::isChecking() || there == holds (song->getState(), item.kind, item.id)); // the index and the song differ
+    // The index and the song's tree differ. A clip's place in the index is checked by the index itself (SongIndex.h: isExact()).
+    jassert (! SongIndex::isChecking() || item.kind == Kind::clip || there == holds (song->getState(), item.kind, item.id));
     return there;
 }
 

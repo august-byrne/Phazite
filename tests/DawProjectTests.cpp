@@ -19,6 +19,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/commands/internal/Undo.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -346,6 +347,43 @@ TEST_CASE ("What another DAW can't play is bounced beside it: the track muted wi
     REQUIRE (echoBounce != nullptr);
     CHECK (echoBounce->getChildByName ("Channel")->getStringAttribute ("role") == "regular");
     CHECK (content.metadata->getChildByName ("Comment")->getAllSubText() == "A comment"); // nothing else left out
+}
+
+TEST_CASE ("A DAWproject's audio clip plays its part of the file, and one whose part ends at 0 plays nothing, as in Phazite")
+{
+    // A saved end of 0 (an empty file's, or a part set to nothing) is a clip that plays nothing in Phazite, so the clip
+    // another DAW reads stops where it starts: never the whole file, which only a clip without an end plays.
+    Song song;
+    TemporaryFolder sounds;
+    const auto drums = song.s.addTrack ("Drums");
+    const auto sound = writeSound (sounds.folder.getChildFile ("Loop.wav"), 1.0);
+    song.s.addAudioClip (drums, sound, 0.0);
+    const auto nothing = song.s.addAudioClip (drums, sound, 8.0);
+    auto& s = *phazite::findSong (song.s.context);
+
+    {
+        const phazite::UndoStep step (s, "Trim");
+        phazite::setAudioPart (s, phazite::findClipState (s, nothing), phazite::BeatPosition::fromBeats (8.0), { 0.0, 0.0 });
+    }
+
+    REQUIRE (phazite::findClipState (s, nothing).hasProperty (phazite::schema::clipFileEnd));
+    REQUIRE (phazite::getFilePart (phazite::findClipState (s, nothing)).end == 0.0);
+
+    auto content = song.describe();
+    const auto* lanes = find (*content.project, "Lanes", "track", id ("t", drums));
+    REQUIRE (lanes != nullptr);
+    const auto* whole = find (*lanes, "Clip", "time", "0");
+    const auto* empty = find (*lanes, "Clip", "time", "8");
+    REQUIRE (whole != nullptr);
+    REQUIRE (empty != nullptr);
+
+    CHECK (whole->getDoubleAttribute ("playStart") == 0.0);
+    CHECK (whole->getDoubleAttribute ("playStop") == doctest::Approx (1.0));
+    CHECK (whole->getDoubleAttribute ("duration") > 0.0);
+
+    CHECK (empty->getDoubleAttribute ("playStart") == 0.0);
+    CHECK (empty->getDoubleAttribute ("playStop") == empty->getDoubleAttribute ("playStart"));
+    CHECK (empty->getDoubleAttribute ("duration") == 0.0);
 }
 
 TEST_CASE ("Export as DAWproject writes a zip of project.xml, metadata.xml, the clips' audio and the bounces, of a version too")

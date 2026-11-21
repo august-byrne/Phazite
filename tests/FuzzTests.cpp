@@ -833,7 +833,7 @@ TEST_CASE ("Fuzz: a DAWproject is taken into a song that holds together, or refu
         auto song = phazite::createSong (project);
         const auto unpacked = phazite::unpackDawProjectAudio (read, audio);
         phazite::takeDawProject (*song, read, unpacked);
-        phazite::forgetUnusedAudio (unpacked, song->getState(), project);
+        phazite::forgetUnusedAudio (unpacked, *song);
         auto problems = findSongProblems (*song);
 
         for (const auto& [name, bytes] : before)
