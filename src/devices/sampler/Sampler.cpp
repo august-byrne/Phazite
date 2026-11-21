@@ -415,6 +415,7 @@ void Sampler::reset()
     lfo.reset();
     grid.reset();
     stepLfo.fill (0.0f);
+    playingTail.store (0.0f, std::memory_order_relaxed);
     startPlaces.setSeed (startSeed);
     numHeld = 0;
     notesPlayed = 0;
@@ -426,7 +427,9 @@ void Sampler::reset()
 
 double Sampler::getTailSeconds() const
 {
-    return (double) tailSeconds.load (std::memory_order_relaxed);
+    // As its values say; or, while it plays a sound to its end that lasts longer (a one-shot transposed down plays longer,
+    // and its silences with it: its runner would let it sleep in one, and lose what comes after), as long as that lasts.
+    return (double) std::max (tailSeconds.load (std::memory_order_relaxed), playingTail.load (std::memory_order_relaxed));
 }
 
 void Sampler::releaseVoice (Voice& voice)
@@ -1067,9 +1070,16 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
                 {
                     // Round the loop, it plays on: the few samples' fade in at its start was for its first time only, as
                     // the start may be where the loop starts.
-                    while (voice.position >= voice.loopEndAt)
+                    // A step longer than the loop (a short loop far up the keys, a sound at a far higher rate than the
+                    // engine's) takes it round more than once: all its rounds at once, never one at a time, so that a
+                    // sample's work doesn't grow with what a sound file says its rate is.
+                    if (voice.position >= voice.loopEndAt)
                     {
                         voice.position -= loopLength;
+
+                        if (voice.position >= voice.loopEndAt)
+                            voice.position = voice.loopStartAt + std::fmod (voice.position - voice.loopStartAt, loopLength);
+
                         voice.fadeIn = 0;
                     }
                 }
@@ -1275,6 +1285,19 @@ void Sampler::process (const ProcessContext& block)
     activeVoices.store (
         (int) std::count_if (voices.begin(), voices.begin() + maxVoices, [] (const Voice& each) { return each.amp.isActive(); }),
         std::memory_order_relaxed);
+
+    // Each voice that plays to its sound's end, from its start to its end at its step now (one that loops is held, or lets
+    // go over its release, which tailSeconds covers). Its runner sleeps once it has been silent for as long as this, and its
+    // silence began after the note did (its runner counts it again from each note): never while a voice still has some of
+    // its sound to play, at whatever step it gets there.
+    auto longest = 0.0;
+
+    for (const auto& voice : voices)
+        if (voice.amp.isActive() && voice.sound != nullptr && ! voice.loops)
+            longest =
+                std::max (longest, (double) voice.age + std::max (0.0, voice.regionEnd - voice.position) / std::max (voice.step, 1.0e-6));
+
+    playingTail.store ((float) (longest / sampleRate), std::memory_order_relaxed);
 
     // For the editor: where each voice is, the newest voice, the LFO and the tempo.
     const Voice* newest = nullptr;

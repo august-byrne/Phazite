@@ -15,7 +15,7 @@ namespace phazite::ui
 namespace
 {
     constexpr int readsPerSecond = 2;
-    constexpr int ticksBetweenReads = 5 * readsPerSecond; // files come and go on the disk: they are looked at again so often
+    constexpr int ticksBetweenReads = 5 * readsPerSecond; // the plug-ins' states change by themselves: read again so often
     constexpr juce::uint32 typingPause = 1500;            // milliseconds without a key that end a burst of typing
     constexpr int fewestNoteLines = 3, mostNoteLines = 12;
     const juce::String audioFilePattern ("*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
@@ -441,8 +441,9 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
 
     refreshTooltips();
     unusedFinder.onFound = [this] { showUnused(); };
+    missingCheck.onChecked = [this] { read (false); };
     context.addListener (this);
-    read();
+    read (true);
 }
 
 ProjectView::~ProjectView()
@@ -477,25 +478,36 @@ void ProjectView::refreshTooltips()
 
 void ProjectView::refreshNow()
 {
-    read();
+    read (true);
 }
 
 //==============================================================================
-void ProjectView::read()
+void ProjectView::read (bool look)
 {
     needsReading = false;
     ticksSinceRead = 0;
 
-    // What shows changes only when what the model holds did: at rest, nothing repaints.
-    auto newFiles = getProjectAudioFiles (context);
+    // What shows changes only when what the model holds did: at rest, nothing repaints. No disk: which files are missing is
+    // what the last check found.
+    auto newFiles = getProjectAudioFiles (context, missingCheck.getMissing());
     auto newPlugins = getProjectPlugins (context);
     auto newLinks = getMidiLinks (context);
     const auto changed = newFiles != audioFiles || newPlugins != plugins || newLinks != links;
     readNotes();
 
-    // The unused files, while it shows: looked for in the background, the count shown once it is found (showUnused()).
-    if (isShowing())
+    // While it shows, and only once something that could change the answers happened: which files are missing, and which in
+    // the project's folder are unused, looked for in the background, what was known shown until the answers come
+    // (onChecked, showUnused()).
+    if (look && isShowing())
+    {
+        juce::Array<juce::File> files;
+
+        for (const auto& file : newFiles)
+            files.add (file.file);
+
+        missingCheck.check (files);
         unusedFinder.find();
+    }
 
     showUnused(); // the button greyed while it can't look
 
@@ -597,7 +609,7 @@ void ProjectView::locate (int row)
         if (safeThis != nullptr && found.existsAsFile())
         {
             locateAudioFile (safeThis->context, path, found);
-            safeThis->read();
+            safeThis->read (true);
         }
     };
 
@@ -622,7 +634,7 @@ void ProjectView::reload (int row)
     if (juce::isPositiveAndBelow (row, (int) plugins.size()) && plugins[(size_t) row].state == PluginState::crashed)
     {
         ui::reloadDevice (context, plugins[(size_t) row].device, pluginList);
-        read();
+        read (false);
     }
 }
 
@@ -739,7 +751,8 @@ void ProjectView::projectChanged()
     links.clear();
     unusedFiles = 0; // none shown until the new project's are found
     unusedProblem.clear();
-    read();
+    read (true);
+    resized(); // the count of the project before hidden, even where the lists are the same (read() lays out what changed)
 }
 
 void ProjectView::songChanged (const SongChanges& changes)
@@ -754,10 +767,12 @@ void ProjectView::songChanged (const SongChanges& changes)
 
 void ProjectView::visibilityChanged()
 {
-    // Read now as it shows, and looked at again while it does; nothing while it doesn't.
+    // Read now as it shows, the disk looked at again, and the model read again while it does; nothing while it doesn't.
     if (isVisible())
     {
-        read();
+        wasInFront = askInFront();
+        deletionsSeen = UnusedAudioFinder::countDeletions();
+        read (true);
         startTimerHz (readsPerSecond);
     }
     else
@@ -773,8 +788,28 @@ void ProjectView::timerCallback()
     if (notesTyping != nullptr && devices::Clock::getMillisecondCounter() - lastTyped > typingPause)
         endTyping();
 
-    if (isShowing() && (needsReading || ++ticksSinceRead >= ticksBetweenReads))
-        read();
+    // The disk looked at again once something could have changed what it says: the song or its versions changed (a file
+    // played or no more: songChanged(), versionsChanged()), Phazite came to the front again (the user back from Explorer or
+    // another program, where files may have gone or come), or Clean Up deleted files. The model alone read again every few
+    // seconds meanwhile (the plug-ins' states).
+    const auto inFront = askInFront();
+    const auto cameForward = inFront && ! wasInFront;
+    wasInFront = inFront;
+    const auto deletions = UnusedAudioFinder::countDeletions();
+    const auto deleted = deletions != deletionsSeen;
+    deletionsSeen = deletions;
+
+    // And a look Clean Up refused (the versions being read or written, an import under way) once it can look.
+    if (isShowing() && (needsReading || cameForward || deleted || unusedFinder.shouldLookAgain()))
+        read (true);
+    else if (isShowing() && ++ticksSinceRead >= ticksBetweenReads)
+        read (false);
+}
+
+//==============================================================================
+bool ProjectView::askInFront() const
+{
+    return isInFront != nullptr ? isInFront() : juce::Process::isForegroundProcess();
 }
 
 //==============================================================================

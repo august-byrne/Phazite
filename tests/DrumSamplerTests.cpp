@@ -5,6 +5,7 @@
 // the pads played from its editor; and in a project (src/model/devices/internal/DrumKit.h), putting a file on a pad as an
 // undo step, which the project keeps a copy of, its samples that aren't numbers read as silence, and the piano roll's rows
 // named after the pads that play.
+#include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "TestClips.h"
 #include "TestDevices.h"
@@ -21,6 +22,7 @@
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/devices/internal/Wavetables.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
@@ -853,6 +855,100 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
     CHECK_FALSE (playedSampler (drums)->hasOwnSound (36));
 }
 
+TEST_CASE ("A pad's sound changed by hand while the song plays isn't read again by the next plan: the other pads ring on")
+{
+    // The audit of 2026-11-20: a pad's sound set by hand is loaded at once (SongPlayer::takeValue()), but the change also
+    // marked the sampler's sounds as changed, and the next plan, after any later edit on the track, loaded every pad again:
+    // each file read anew, each a new sound, and every hit of a file pad still ringing faded out over 5 ms. Pad 36's long
+    // sound rings while the song plays; pad 38's sound is changed by hand; then a note is added, which makes a plan: pad 36
+    // rings on as it does where pad 38 wasn't changed, sample for sample. Its file is written over meanwhile, so that it
+    // would be another sound if it were read again (a file read again unchanged gives the same sound back: the test after).
+    phazite::test::TemporaryFolder elsewhere;
+    const auto longSound = elsewhere.folder.getChildFile ("Long.wav"), shortSound = elsewhere.folder.getChildFile ("Short.wav"),
+               otherSound = elsewhere.folder.getChildFile ("Other.wav");
+    writeWav (longSound, 3.0);
+    writeWav (shortSound, 0.2);
+    writeWav (otherSound, 0.3);
+
+    const auto playedAfterEdit = [&] (bool changePad38)
+    {
+        phazite::test::TestSong song;
+        song.setTempo (120.0);
+        const auto drums = song.setInstrument (song.firstTrack, DrumSampler::typeID);
+        auto& s = *phazite::findSong (song.context);
+        REQUIRE (phazite::setPadSound (s, drums, 36, longSound));
+        REQUIRE (phazite::setPadSound (s, drums, 38, shortSound));
+        song.setParameter (drums, "pad36Hold", DrumSampler::wholeSound);
+        const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+        song.addNote (clip, 36, 0.0, 0.25);
+        phazite::test::EnginePlayback playback (phazite::test::EnginePlayback::Input::silence,
+                                                phazite::test::EnginePlayback::Timing::asRender);
+        song.run ("transport.playStop");
+        playback.play (0.5);
+        const auto copy = song.getProject().getFolder().getChildFile ("Audio/Long.wav");
+        REQUIRE (copy.deleteFile());
+        writeWav (copy, 2.0);
+
+        if (changePad38)
+        {
+            REQUIRE (phazite::setPadSound (s, drums, 38, otherSound));
+            playback.play (0.1);
+        }
+        else
+        {
+            playback.play (0.1);
+        }
+
+        song.addNote (clip, 40, 12.0, 0.25); // far ahead: a plan, and nothing more to hear
+        return playback.play (1.0);
+    };
+
+    const auto plain = playedAfterEdit (false), changed = playedAfterEdit (true);
+    REQUIRE (plain.getMagnitude (0, 0, plain.getNumSamples()) > 0.1f); // pad 36 rings throughout
+    auto largest = 0.0f;
+
+    for (int i = 0; i < plain.getNumSamples(); ++i)
+        largest = std::max (largest, std::abs (changed.getSample (0, i) - plain.getSample (0, i)));
+
+    CHECK (largest < 1.0e-6f);
+}
+
+TEST_CASE ("A pad's file and a wavetable's are read once while anything holds what was read: read again, the same sound comes back")
+{
+    // So that a pad loaded again (an undo that puts a sampler's sounds back, a song applied) plays on, its sound the same: a
+    // new one, though alike, fades out every hit of the old one still ringing. As the sampler's are (readSampleSound()).
+    phazite::test::TestSong song;
+    phazite::test::TemporaryFolder elsewhere;
+    const auto sample = elsewhere.folder.getChildFile ("Hit.wav");
+    writeWav (sample, 0.2);
+    const auto drums = song.setInstrument (song.firstTrack, DrumSampler::typeID);
+    auto& s = *phazite::findSong (song.context);
+    REQUIRE (phazite::setPadSound (s, drums, 36, sample));
+    const auto sounds = phazite::findDeviceState (s, drums).getChildWithName (phazite::schema::SOUNDS);
+
+    DrumSampler first, second;
+    phazite::loadPadSound (first, s, sounds, 36);
+    phazite::loadPadSound (second, s, sounds, 36);
+    REQUIRE (first.hasOwnSound (36));
+    REQUIRE (first.getPadSound (36) != nullptr);
+    CHECK (first.getPadSound (36) == second.getPadSound (36));
+
+    // Written over, it is another sound.
+    const auto copy = song.getProject().getFolder().getChildFile ("Audio/Hit.wav");
+    REQUIRE (copy.deleteFile());
+    writeWav (copy, 0.3);
+    DrumSampler third;
+    phazite::loadPadSound (third, s, sounds, 36);
+    REQUIRE (third.getPadSound (36) != nullptr);
+    CHECK (third.getPadSound (36) != first.getPadSound (36));
+    CHECK (third.getPadSound (36)->audio.getNumSamples() > first.getPadSound (36)->audio.getNumSamples());
+
+    // A wavetable's file the same.
+    const auto table = phazite::readWavetable (sample);
+    REQUIRE (table != nullptr);
+    CHECK (phazite::readWavetable (sample) == table);
+}
+
 TEST_CASE ("A drum pad on a track of its own plays there, leaving its sampler's track, following that track's mute and effects, "
            "heard by sidechains, and comes back as an undo step")
 {
@@ -998,6 +1094,70 @@ TEST_CASE ("A pad on a track of its own rings on after its sampler's own sound h
 
     REQUIRE (loudestEarly > 0.05f);
     CHECK (loudestLate > 0.01f);
+}
+
+TEST_CASE ("A pad tuned down plays the silence inside its sound through, as a render does: the sampler never sleeps under a hit")
+{
+    // The audit of 2026-11-20: the runner lets a device sleep once it has been silent for as long as the tail it reports, and
+    // the drum sampler's was its longest sound's length at its own rate, though Tune plays a sound up to four times as long
+    // (and a Sweep from below longer still). A sound with a stretch of silence inside it, tuned two octaves down, slept in the
+    // middle of its hit and lost what came after, which a render (that never sleeps) played. A sound of a tenth of a second
+    // of a sine, a silence longer than the default kit's longest sound (the tail the sampler reports, its pads' longest), and
+    // a tenth again; two octaves down, four times as long.
+    const auto gap = DrumSampler().getTailSeconds() + 0.25;
+    const auto length = gap + 0.2;
+    auto gapped = std::make_shared<DrumSampler::Sound>();
+    gapped->sampleRate = testRate;
+    gapped->audio.setSize (1, (int) (length * testRate));
+
+    for (int i = 0; i < gapped->audio.getNumSamples(); ++i)
+    {
+        const auto inGap = i >= (int) (0.1 * testRate) && i < (int) ((0.1 + gap) * testRate);
+        gapped->audio.setSample (0, i, inGap ? 0.0f : (float) (0.5 * std::sin (juce::MathConstants<double>::twoPi * 440.0 * i / testRate)));
+    }
+
+    auto values = getDefaults();
+    set (values, 60, DrumSampler::mode, 0.0f); // One Shot
+    set (values, 60, DrumSampler::hold, DrumSampler::wholeSound);
+    set (values, 60, DrumSampler::tune, -24.0f);
+
+    const auto played = [&] (bool rendering)
+    {
+        phazite::engine::DeviceRunner runner (DrumSampler::info, std::make_unique<DrumSampler>());
+        runner.prepare (testRate, testBlockSize);
+        static_cast<DrumSampler&> (runner.getProcessor()).setSound (60, gapped);
+        phazite::engine::DeviceRunner::Block block;
+        block.values = values;
+        block.isPlaying = true;
+        block.isRendering = rendering;
+        juce::AudioBuffer<float> buffer (2, testBlockSize);
+        std::array<NoteEvent, 2> hit { noteOn (0, 60), NoteEvent { NoteEvent::Type::noteOff, 100, 60, 0.0f } };
+        std::vector<float> left;
+
+        for (int done = 0; done < (int) ((4.0 * length + 0.5) * testRate); done += testBlockSize)
+        {
+            buffer.clear();
+            block.events = done == 0 ? std::span<NoteEvent> (hit) : std::span<NoteEvent>();
+            runner.process (buffer, 0, testBlockSize, block);
+
+            for (int i = 0; i < testBlockSize; ++i)
+                left.push_back (buffer.getSample (0, i));
+        }
+
+        return left;
+    };
+
+    const auto live = played (false), rendered = played (true);
+    const auto secondTenth = [&] (const std::vector<float>& sound)
+    { return peakOf (sound, (size_t) ((4.0 * (0.1 + gap) + 0.1) * testRate), (size_t) ((4.0 * length - 0.1) * testRate)); };
+    REQUIRE (secondTenth (rendered) > 0.1f);
+    CHECK (secondTenth (live) > 0.1f);
+    auto largest = 0.0f;
+
+    for (size_t i = 0; i < live.size(); ++i)
+        largest = std::max (largest, std::abs (live[i] - rendered[i]));
+
+    CHECK (largest == 0.0f);
 }
 
 TEST_CASE ("Stopping playback cuts the hits that had only just begun, and lets the others ring")

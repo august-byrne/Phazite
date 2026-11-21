@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The browser's model: sounds by folder and by search, tags from names, favorites and recent items, and previews.
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
@@ -120,6 +121,151 @@ TEST_CASE ("The library's index doesn't follow a folder that links back to where
 
     found.sort (true);
     CHECK (found == juce::StringArray ("Kick", "Snare"));
+}
+
+namespace
+{
+// A walk of the library held in a folder's read until let go, as a folder on a network drive that went, or a disk spinning
+// up: the walk inside the system's call for tens of seconds. One that something waits for is let go at the tests' limit,
+// which fails the test.
+struct HeldWalks
+{
+    explicit HeldWalks (juce::File folderToHoldIn)
+        : folder (std::move (folderToHoldIn))
+    {
+    }
+
+    ~HeldWalks() { state->going = true; }
+
+    std::function<void (const juce::File&)> makeHook() const
+    {
+        return [s = state, held = folder] (const juce::File& listed)
+        {
+            if (listed != held || s->going.load())
+                return;
+
+            ++s->holding;
+            const auto since = juce::Time::getMillisecondCounterHiRes();
+
+            while (! s->going.load() && juce::Time::getMillisecondCounterHiRes() - since < phazite::test::hangTimeout)
+                juce::Thread::sleep (1);
+
+            --s->holding;
+        };
+    }
+
+    struct State
+    {
+        std::atomic<int> holding { 0 };
+        std::atomic<bool> going { false };
+    };
+
+    const juce::File folder;
+    const std::shared_ptr<State> state = std::make_shared<State>();
+};
+
+juce::StringArray getIndexedNames (const phazite::Library& library)
+{
+    juce::StringArray found;
+
+    for (const auto& item : *library.getIndex())
+        found.add (item.name);
+
+    found.sort (true);
+    return found;
+}
+} // namespace
+
+TEST_CASE ("A walk of the library held inside a folder's read holds up neither a change of folders nor the library's going")
+{
+    // The audit of 2026-11-20: changing the folders, and the library's going, waited for the walk on the message thread.
+    TemporaryFolder temp;
+    const auto share = temp.folder.getChildFile ("Share"), asleep = share.getChildFile ("Asleep");
+    writeSound (asleep.getChildFile ("Deep Kick.wav"), 0.1);
+    const auto local = temp.folder.getChildFile ("Local");
+    writeSound (local.getChildFile ("Snare Tight.wav"), 0.1);
+
+    REQUIRE (phazite::test::runTimersUntil ([] { return phazite::Library::getWalksUnderWay() == 0; }));
+    phazite::Settings settings;
+    auto library = std::make_unique<phazite::Library> (phazite::test::getEngineContext(), settings, juce::File());
+    library->addUserFolder (local);
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library->isIndexing(); }));
+
+    {
+        HeldWalks held (asleep);
+        library->setBeforeWalkListing (held.makeHook());
+        library->addUserFolder (share);
+        REQUIRE (phazite::test::runTimersUntil ([&held] { return held.state->holding.load() == 1; }));
+
+        // The folder that doesn't answer removed: it returns while the walk is held.
+        library->removeUserFolder (share);
+        CHECK (held.state->holding.load() == 1);
+        held.state->going = true;
+        REQUIRE (
+            phazite::test::runTimersUntil ([&library] { return phazite::Library::getWalksUnderWay() == 0 && ! library->isIndexing(); }));
+        CHECK (getIndexedNames (*library) == juce::StringArray ("Snare Tight"));
+    }
+
+    // The library goes while its walk is held: it doesn't wait, and the walk, let go, touches nothing of it.
+    {
+        HeldWalks held (asleep);
+        library->setBeforeWalkListing (held.makeHook());
+        library->addUserFolder (share);
+        REQUIRE (phazite::test::runTimersUntil ([&held] { return held.state->holding.load() == 1; }));
+        library = nullptr;
+        CHECK (held.state->holding.load() == 1);
+    }
+
+    CHECK (phazite::test::runTimersUntil ([] { return phazite::Library::getWalksUnderWay() == 0; }));
+}
+
+TEST_CASE ("However often the folders change while a walk is stuck, one more walk starts, which leaves out the stuck root")
+{
+    // The audit's review, 2026-11-20: each change of the folders while a root hung started one more walk, each stuck in the
+    // same root. One walk at a time: the newest wanted waits for the one under way, and starts once that one is known stuck,
+    // without the root it is stuck in; once that one returns, a walk takes the root in again.
+    TemporaryFolder temp;
+    const auto share = temp.folder.getChildFile ("Share"), asleep = share.getChildFile ("Asleep");
+    writeSound (asleep.getChildFile ("Deep Kick.wav"), 0.1);
+    const auto local = temp.folder.getChildFile ("Local");
+    writeSound (local.getChildFile ("Snare Tight.wav"), 0.1);
+
+    REQUIRE (phazite::test::runTimersUntil ([] { return phazite::Library::getWalksUnderWay() == 0; }));
+    phazite::test::HeldClock clock;
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings, juce::File());
+    library.addUserFolder (local);
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
+
+    HeldWalks held (asleep);
+    library.setBeforeWalkListing (held.makeHook());
+    library.addUserFolder (share);
+    REQUIRE (phazite::test::runTimersUntil ([&held] { return held.state->holding.load() == 1; }));
+
+    // Asked for again and again while it is held: no walk more starts until it is known stuck.
+    for (int i = 0; i < 5; ++i)
+    {
+        library.refresh();
+        phazite::test::dispatchPendingMessages();
+        juce::Timer::callPendingTimersSynchronously();
+        CHECK (phazite::Library::getWalksUnderWay() == 1);
+    }
+
+    CHECK (library.isIndexing());
+
+    // Known stuck: one walk more, without the root it is stuck in, which ends; the stuck one is still held.
+    clock.advance (4000.0);
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
+    CHECK (phazite::Library::getWalksUnderWay() == 1);
+    CHECK (held.state->holding.load() == 1);
+    CHECK (getIndexedNames (library) == juce::StringArray ("Snare Tight"));
+
+    // Let go: a walk takes the root in again.
+    held.state->going = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&library]
+        { return phazite::Library::getWalksUnderWay() == 0 && ! library.isIndexing() && getIndexedNames (library).size() == 2; }));
+    CHECK (getIndexedNames (library) == juce::StringArray ("Deep Kick", "Snare Tight"));
 }
 
 TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")

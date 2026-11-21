@@ -3,6 +3,7 @@
 // written as one, in DAWproject's names (Project.xsd, version 1.0), what another DAW can't play bounced beside it, and the
 // zip, from the song as it is and from an old version.
 #include "SongCheck.h"
+#include "TestClips.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "app/ProjectSession.h"
@@ -17,6 +18,7 @@
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
@@ -32,7 +34,9 @@
 #include "services/Settings.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <tuple>
@@ -633,6 +637,163 @@ TEST_CASE ("A DAWproject's counts that a reader takes for ZIP64's are refused to
     REQUIRE (dispatchMessagesUntil ([&song] { return ! song.s.renders.finished.isEmpty(); }));
     CHECK (song.s.renders.finished[0].contains ("4 GB"));
     CHECK (song.s.renders.wrote.isEmpty());
+}
+
+namespace
+{
+// A zip's CRC-32 of some bytes, worked out here bit by bit, apart from the writer's table.
+std::uint32_t getCrc (const void* data, size_t numBytes)
+{
+    std::uint32_t crc = 0xffffffffu;
+
+    for (size_t i = 0; i < numBytes; ++i)
+    {
+        crc ^= static_cast<const std::uint8_t*> (data)[i];
+
+        for (int k = 0; k < 8; ++k)
+            crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+    }
+
+    return ~crc;
+}
+
+// Each entry's CRC as a zip's central directory gives it, by its path.
+std::map<juce::String, std::uint32_t> readCentralCrcs (const juce::File& archive)
+{
+    juce::MemoryBlock bytes;
+    REQUIRE (archive.loadFileAsData (bytes));
+    const auto* data = static_cast<const char*> (bytes.getData());
+    const auto end = bytes.getSize() - 22; // the directory's end, with no comment
+    REQUIRE (juce::ByteOrder::littleEndianInt (data + end) == 0x06054b50u);
+    const auto count = (int) juce::ByteOrder::littleEndianShort (data + end + 10);
+    auto at = (size_t) juce::ByteOrder::littleEndianInt (data + end + 16);
+    std::map<juce::String, std::uint32_t> crcs;
+
+    for (int i = 0; i < count; ++i)
+    {
+        REQUIRE (juce::ByteOrder::littleEndianInt (data + at) == 0x02014b50u);
+        const auto pathBytes = (size_t) juce::ByteOrder::littleEndianShort (data + at + 28);
+        const auto extra =
+            (size_t) juce::ByteOrder::littleEndianShort (data + at + 30) + juce::ByteOrder::littleEndianShort (data + at + 32);
+        crcs[juce::String::fromUTF8 (data + at + 46, (int) pathBytes)] = juce::ByteOrder::littleEndianInt (data + at + 16);
+        at += 46 + pathBytes + extra;
+    }
+
+    return crcs;
+}
+} // namespace
+
+TEST_CASE ("A DAWproject's archive holds each file as it was, a part at a time, with the CRC a reader checks")
+{
+    // Phazite writes the zip itself (JUCE workaround W41): each file streamed in parts, its CRC and sizes written into its
+    // header after it. JUCE's reader takes it back; and each entry's CRC is the one of what it holds, which Java's reader
+    // (Bitwig Studio's) checks.
+    Song song;
+    auto content = song.describe();
+    content.bounces.clear();
+    TemporaryFolder folder;
+    const auto sound = writeSound (folder.folder.getChildFile ("Long.wav"), 30.0); // 2.6 MB: three parts
+    content.files.emplace_back ("audio/Long.wav", sound);
+    content.blobs.emplace_back ("plugins/p.vstpreset", juce::MemoryBlock ("a preset", 8));
+
+    auto parts = 0;
+    phazite::setArchivePartSeam ([&parts] (const std::function<bool()>&) { ++parts; });
+    const auto file = folder.folder.getChildFile ("Song.dawproject");
+    const auto written = phazite::writeDawProject (content, {}, file);
+    phazite::setArchivePartSeam ({});
+    REQUIRE (written.wasOk());
+    CHECK (parts >= 3);
+
+    juce::ZipFile zip (file);
+    const auto crcs = readCentralCrcs (file);
+    REQUIRE (zip.getNumEntries() == 4);
+    CHECK (crcs.size() == 4);
+
+    juce::MemoryBlock original;
+    REQUIRE (sound.loadFileAsData (original));
+
+    for (int i = 0; i < zip.getNumEntries(); ++i)
+    {
+        const auto path = zip.getEntry (i)->filename;
+        INFO (path.toStdString());
+        const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (i));
+        REQUIRE (stream != nullptr);
+        juce::MemoryBlock held;
+        stream->readIntoMemoryBlock (held);
+        REQUIRE (crcs.count (path) == 1);
+        CHECK (crcs.at (path) == getCrc (held.getData(), held.getSize()));
+
+        if (path == "audio/Long.wav")
+            CHECK (held == original);
+        else if (path == "plugins/p.vstpreset")
+            CHECK (held == juce::MemoryBlock ("a preset", 8));
+        else
+            CHECK (juce::parseXML (held.toString()) != nullptr);
+    }
+
+    CHECK (folder.folder.findChildFiles (juce::File::findFiles, false).size() == 2); // the sound and the archive alone
+}
+
+TEST_CASE ("A DAWproject's archive holds an empty entry packed as one: nothing, with its CRC")
+{
+    // The review of the archive writer: an empty text or preset handed JUCE's compressor an empty buffer, which it asserts
+    // against. Packed without a write, it is an entry of nothing that a reader takes back.
+    Song song;
+    auto content = song.describe();
+    content.bounces.clear();
+    content.blobs.emplace_back ("plugins/empty.vstpreset", juce::MemoryBlock());
+    TemporaryFolder folder;
+    const auto file = folder.folder.getChildFile ("Song.dawproject");
+    REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
+
+    juce::ZipFile zip (file);
+    const auto index = zip.getIndexOfFileName ("plugins/empty.vstpreset");
+    REQUIRE (index >= 0);
+    CHECK (zip.getEntry (index)->uncompressedSize == 0);
+    const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (index));
+    REQUIRE (stream != nullptr);
+    CHECK (stream->readEntireStreamAsString().isEmpty());
+    CHECK (readCentralCrcs (file).at ("plugins/empty.vstpreset") == 0u);
+    CHECK (zip.getIndexOfFileName ("project.xml") >= 0);
+}
+
+TEST_CASE ("A DAWproject export cancelled while its archive is written stops there, and leaves neither the archive nor a part of it")
+{
+    // The audit of 2026-11-20: JUCE's zip writer can't be stopped, so a cancel (or the project closing) waited on the render's
+    // thread for the rest of an archive that can be gigabytes. The test's seam holds the write at its first part of the file
+    // until the export is cancelled.
+    TemporaryFolder folder;
+    const auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1)[0];
+    const auto sound = writeSound (folder.folder.getChildFile ("Sounds").getChildFile ("Long.wav"), 30.0);
+    REQUIRE (addAudioClip (*song, track, "Long", sound, 0.0, 30.0).isValid());
+    const auto renders = folder.folder.getChildFile ("Renders");
+    const auto file = renders.getChildFile ("Song.dawproject");
+
+    std::atomic<int> parts { 0 };
+    phazite::setArchivePartSeam (
+        [&parts] (const std::function<bool()>& shouldStop)
+        {
+            if (++parts > 1)
+                return;
+
+            // Held until the export is cancelled.
+            for (int waited = 0; ! shouldStop() && waited < hangTimeout; ++waited)
+                juce::Thread::sleep (1);
+        });
+
+    auto finished = false;
+    auto exporting =
+        phazite::startDawProjectExport (*song, nullptr, file, "Song", {}, [&finished] (const juce::Result&) { finished = true; });
+    REQUIRE (dispatchMessagesUntil ([&parts] { return parts.load() > 0; }));
+    exporting = nullptr; // cancels it, and waits for its thread
+    phazite::setArchivePartSeam ({});
+
+    CHECK (parts.load() == 1); // the first part of the file only, of three: the write stopped there
+    dispatchPendingMessages();
+    CHECK_FALSE (finished);
+    CHECK_FALSE (file.exists());
+    CHECK (renders.findChildFiles (juce::File::findFiles, true).isEmpty());
 }
 
 TEST_CASE ("A DAWproject's long exponents are made readable only where a number is read: a device's ID that looks like one stays")

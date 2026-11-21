@@ -122,7 +122,8 @@ private:
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples,
                                            const juce::AudioIODeviceCallbackContext&) override;
     void audioDeviceAboutToStart (juce::AudioIODevice*) override;
-    void audioDeviceStopped() override { running = false; }
+    void audioDeviceStopped() override;
+    void setIdle (bool); // both engines (engine::Engine::setIdle())
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (PlaybackHost)
     JUCE_DECLARE_NON_COPYABLE (PlaybackHost)

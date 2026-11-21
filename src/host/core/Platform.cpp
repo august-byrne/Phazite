@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the helper process asks of the operating system (Host.h): to end quietly when a plug-in crashes it, to end with
-// Phazite, its errors in a build with a sanitizer, its ID, and its CPU time and memory, which the sandbox's benchmarks read
-// (MessageType::stats).
+// What the helper process asks of the operating system (Host.h): to end quietly when a plug-in crashes it, to run at full
+// speed without a window, to end with Phazite, its errors in a build with a sanitizer, its ID, and its CPU time and memory,
+// which the sandbox's benchmarks read (MessageType::stats).
 #include "Host.h"
 
 #include <cstdlib>
+#include <initializer_list>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -31,6 +32,22 @@ void endQuietlyOnCrashes()
     // No dialog of Windows' for a crash (a plug-in's), which would keep the helper waiting for a click: it ends, and
     // Phazite says so in the plug-in's slot.
     SetErrorMode (SetErrorMode (0) | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+#endif
+}
+
+void keepFullSpeed()
+{
+#if defined(_WIN32)
+    // Each asked on its own, so that a Windows that knows the first and not the second (Windows 10) still takes the first;
+    // one that knows neither refuses both, which changes nothing. As tests/TestMain.cpp keeps the tests' timer asks.
+    for (const auto mask : { PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION })
+    {
+        PROCESS_POWER_THROTTLING_STATE state {};
+        state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        state.ControlMask = (ULONG) mask;
+        state.StateMask = 0; // off
+        SetProcessInformation (GetCurrentProcess(), ProcessPowerThrottling, &state, sizeof (state));
+    }
 #endif
 }
 

@@ -9,6 +9,11 @@
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
 
+#include <iterator>
+#include <map>
+#include <memory>
+#include <tuple>
+
 namespace phazite
 {
 namespace
@@ -18,15 +23,36 @@ namespace
 
     constexpr double longestSound = 30.0; // seconds of a file a pad plays at most
 
-    // A sound file's first seconds, in mono or stereo, or nullptr if it can't be read.
-    std::unique_ptr<DrumSampler::Sound> readSound (const juce::File& file)
+    // A sound file's first seconds, in mono or stereo, or nullptr if it can't be read. Each file read once, while anything
+    // holds what was read, by its path, its size and when it was last written, as a sampler's sound is (readSampleSound()):
+    // a pad loaded again (an undo that puts a sampler's sounds back, a song applied) gets the same sound back, which the
+    // sampler doesn't take anew, so that its hits still ringing ring on (a new sound, though alike, fades them out).
+    std::shared_ptr<const DrumSampler::Sound> readSound (const juce::File& file)
     {
+        struct FileKey
+        {
+            juce::String path;
+            juce::int64 size = 0, written = 0;
+
+            bool operator< (const FileKey& other) const
+            {
+                return std::tie (path, size, written) < std::tie (other.path, other.size, other.written);
+            }
+        };
+
+        static std::map<FileKey, std::weak_ptr<const DrumSampler::Sound>> read; // message thread
+        const FileKey key { file.getFullPathName(), file.getSize(), file.getLastModificationTime().toMilliseconds() };
+
+        if (const auto found = read.find (key); found != read.end())
+            if (auto sound = found->second.lock())
+                return sound;
+
         const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
 
         if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
             return {};
 
-        auto sound = std::make_unique<DrumSampler::Sound>();
+        auto sound = std::make_shared<DrumSampler::Sound>();
         const auto length = (int) std::min (reader->lengthInSamples, (juce::int64) (longestSound * reader->sampleRate));
         sound->audio.setSize (juce::jlimit (1, 2, (int) reader->numChannels), length);
         sound->sampleRate = reader->sampleRate;
@@ -35,6 +61,12 @@ namespace
             return {};
 
         clearWhatIsNotSound (sound->audio);
+
+        // Forget what nothing holds any more.
+        for (auto each = read.begin(); each != read.end();)
+            each = each->second.expired() ? read.erase (each) : std::next (each);
+
+        read[key] = sound;
         return sound;
     }
 

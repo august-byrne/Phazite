@@ -627,18 +627,45 @@ juce::String LibraryItem::getKey() const
 }
 
 //==============================================================================
-struct Library::Indexer : public juce::Thread
+// A walk of the library's roots, on a thread of its own, which nothing waits for: one replaced by the next, or whose library
+// went, stops at its next look at shouldStop() (between a folder's entries, between files), which may be tens of seconds
+// away where it is inside the system's call on a drive that doesn't answer, and is left to end by itself, never ended by
+// force. It owns what it uses: the roots, the members, the audio file extensions and the facts file's path, copied as it
+// starts; the walks' state and the listings' (the tests' hook, the listings' order, the audio formats it reads headers with),
+// shared. It reaches the library only under the walks' lock while the library is still there and the walk is still the
+// current one (Walks), so that what a walk that isn't current any more found changes nothing. It leaves out the roots that a
+// walk left behind is stuck in (skip), which would hold it too.
+struct Library::Indexer
 {
-    Indexer (Library& o, juce::Array<juce::File> rootsToScan, std::vector<Member> membersToFind)
-        : juce::Thread ("Phazite library index"),
-          owner (o),
-          roots (std::move (rootsToScan)),
-          members (std::move (membersToFind))
+    Indexer (const Library& library, std::shared_ptr<WalkState> walkState, std::set<juce::File> rootsToSkip)
+        : walks (library.walks),
+          listings (library.listingsShared),
+          state (std::move (walkState)),
+          number (state->number),
+          rootsGiven (library.getRoots()),
+          skip (std::move (rootsToSkip)),
+          members (library.getAllMembers()),
+          audioExtensions (library.audioExtensions),
+          factsFile (library.factsFile)
     {
     }
 
-    // It looks at threadShouldExit() between files: never ended by force, which can leave a lock it held held for ever.
-    ~Indexer() override { stopThread (-1); }
+    // Whether another walk has started since, or the library went. Asked at each step, which it marks as the walk's last
+    // (a walk whose last step is long past is inside the system's call: WalkState).
+    bool shouldStop() const
+    {
+        state->lastStep = devices::Clock::getMilliseconds();
+        return walks->current.load() != number;
+    }
+
+    // The root it is in now, which the walks after it leave out while it is stuck there.
+    void enter (const juce::File& root) const
+    {
+        const std::scoped_lock held (walks->lock);
+        state->root = root;
+    }
+
+    bool isSoundFile (const juce::File& file) const { return audioExtensions.contains (file.getFileExtension().toLowerCase()); }
 
     // A file found, with its root, its size and when it was last changed (in milliseconds).
     struct Found
@@ -671,22 +698,28 @@ struct Library::Indexer : public juce::Thread
         std::function<void (const juce::File&)> before;
 
         {
-            const std::scoped_lock held (owner.listingsShared->lock);
-            before = owner.listingsShared->beforeWalk;
+            const std::scoped_lock held (listings->lock);
+            before = listings->beforeWalk;
         }
 
         if (before != nullptr)
             before (folder);
 
+        if (shouldStop())
         {
-            const std::scoped_lock held (owner.listingsShared->lock);
-            listedAt[folder.getFullPathName()] = ++owner.listingsShared->sequence;
+            inside.pop_back();
+            return;
+        }
+
+        {
+            const std::scoped_lock held (listings->lock);
+            listedAt[folder.getFullPathName()] = ++listings->sequence;
         }
 
         for (const auto& entry :
              juce::RangedDirectoryIterator (folder, false, "*", juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles))
         {
-            if (threadShouldExit() || (int) files.size() >= maxIndexed)
+            if (shouldStop() || (int) files.size() >= maxIndexed)
                 break;
 
             if (const auto& file = entry.getFile(); entry.isDirectory())
@@ -697,36 +730,65 @@ struct Library::Indexer : public juce::Thread
 
                 walk (file, root, inside, files);
             }
-            else if (owner.isSoundFile (file) || owner.isMidiFile (file) || isPreset (file))
+            else if (isSoundFile (file) || isMidiFile (file) || isPreset (file))
                 files.push_back ({ file, root, entry.getFileSize(), entry.getModificationTime().toMilliseconds() });
         }
 
         inside.pop_back();
     }
 
-    void run() override
+    void run()
     {
+        // The roots that are there; a root inside another (a user's folder that holds the presets' folder, a folder and one of
+        // its own both added) is walked once, with the root it is in: its files would be in the index twice. Here rather than
+        // on the message thread: a root on a drive that doesn't answer holds this walk alone.
+        juce::Array<juce::File> there;
+
+        for (const auto& root : rootsGiven)
+        {
+            const auto stuckThere = std::any_of (skip.begin(), skip.end(), [&root] (const juce::File& stuck)
+                                                 { return root == stuck || root.isAChildOf (stuck) || stuck.isAChildOf (root); });
+
+            if (root == juce::File() || stuckThere || shouldStop())
+                continue;
+
+            enter (root);
+
+            if (root.isDirectory())
+                there.add (root);
+        }
+
+        for (const auto& root : there)
+            if (std::none_of (there.begin(), there.end(), [&root] (const juce::File& other) { return root.isAChildOf (other); }))
+                roots.addIfNotAlreadyThere (root);
+
         std::vector<Found> files;
 
         for (const auto& root : roots)
         {
+            enter (root);
             std::vector<juce::uint64> inside;
             walk (root, root, inside, files);
         }
 
-        if (threadShouldExit())
+        if (shouldStop())
             return;
 
         // What was read of the files before, by the last index or, at first, from one start to the next.
         std::map<juce::String, SoundFacts> known;
 
         {
-            const juce::ScopedLock lock (owner.indexLock);
-            known = *owner.facts;
+            const std::scoped_lock held (walks->lock);
+
+            if (walks->library == nullptr || shouldStop())
+                return;
+
+            const juce::ScopedLock lock (walks->library->indexLock);
+            known = *walks->library->facts;
         }
 
-        if (known.empty() && owner.factsFile.existsAsFile())
-            known = readFactsFile (owner.factsFile);
+        if (known.empty() && factsFile.existsAsFile())
+            known = readFactsFile (factsFile);
 
         // First from their names, with what was read of them before, as it was read.
         std::map<juce::String, SoundFacts> read;
@@ -736,6 +798,9 @@ struct Library::Indexer : public juce::Thread
 
         for (size_t i = 0; i < files.size(); ++i)
         {
+            if (shouldStop())
+                return; // nothing waits for it: it ends soon, as the program may be ending
+
             const auto& found = files[i];
             const SoundFacts* fact = nullptr;
 
@@ -756,7 +821,7 @@ struct Library::Indexer : public juce::Thread
                 }
             }
 
-            items.push_back (owner.makeFileItem (found.file, found.root, fact, true));
+            items.push_back (makeItemOf (found.file, found.root, fact, true));
             items.back().size = found.size;
             items.back().modified = found.modified;
         }
@@ -773,7 +838,9 @@ struct Library::Indexer : public juce::Thread
         }
 
         full = (int) files.size() >= maxIndexed;
-        publish (files, items, read, unread.empty());
+
+        if (! publish (files, items, read, unread.empty()))
+            return;
 
         // The members of the sets that went since, looked for among the files found.
         findMovedMembers (files);
@@ -781,28 +848,39 @@ struct Library::Indexer : public juce::Thread
         // Then again with the loop data of the WAV and AIFF files not read before.
         for (const auto i : unread)
         {
-            if (threadShouldExit())
+            if (shouldStop())
                 return;
 
             const auto& found = files[i];
             auto& fact = read[found.file.getFullPathName()];
-            fact = readFacts (getAudioFormats(), found.file, found.size, found.modified);
-            items[i] = owner.makeFileItem (found.file, found.root, &fact, true);
+            fact = readFacts (listings->formats, found.file, found.size, found.modified);
+            items[i] = makeItemOf (found.file, found.root, &fact, true);
             items[i].size = found.size;
             items[i].modified = found.modified;
         }
 
-        if (! unread.empty())
-            publish (files, items, read, true);
+        if (! unread.empty() && ! publish (files, items, read, true))
+            return;
 
-        // Kept for the next start, when anything changed.
-        if (owner.factsFile != juce::File() && (! unread.empty() || read.size() != known.size()))
-            writeFactsFile (owner.factsFile, read);
+        // Kept for the next start, when anything changed: by one walk at a time, and by none once its library has gone (whose
+        // going waits for a write under way, so that none runs as the program ends).
+        if (factsFile != juce::File() && (! unread.empty() || read.size() != known.size()))
+        {
+            const std::scoped_lock writing (walks->factsFileLock);
+
+            if (! shouldStop())
+                writeFactsFile (factsFile, read);
+        }
     }
 
-    void publish (const std::vector<Found>& files, const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read,
+    // The index made of what the walk found takes the library's index's place; false, changing nothing, where the walk isn't
+    // the current one any more or the library went.
+    bool publish (const std::vector<Found>& files, const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read,
                   bool last)
     {
+        if (shouldStop())
+            return false;
+
         auto made = std::make_shared<LibraryIndex>();
         made->files = items;
         made->fileKeys.reserve (items.size());
@@ -829,19 +907,26 @@ struct Library::Indexer : public juce::Thread
         // With each folder patched after this walk listed it (changed outside, read again since), made again on it: one patch
         // at a time, none between this and its taking the index's place. Once the walk's last is in, the patches it took in
         // (or listed after) are forgotten.
-        const std::scoped_lock patching (owner.patchLock);
-        auto built = owner.withPatches (std::move (made));
+        const std::scoped_lock held (walks->lock);
+        auto* owner = walks->library;
+
+        if (owner == nullptr || shouldStop())
+            return false;
+
+        const std::scoped_lock patching (owner->patchLock);
+        auto built = owner->withPatches (std::move (made));
 
         if (last)
-            owner.patches.clear();
+            owner->patches.clear();
 
         {
-            const juce::ScopedLock lock (owner.indexLock);
-            owner.index = std::move (built);
-            owner.facts = std::make_shared<const Facts> (read);
+            const juce::ScopedLock lock (owner->indexLock);
+            owner->index = std::move (built);
+            owner->facts = std::make_shared<const Facts> (read);
         }
 
-        owner.triggerAsyncUpdate();
+        owner->triggerAsyncUpdate();
+        return true;
     }
 
     std::set<juce::String> loops;                  // the folders the walk met inside themselves
@@ -862,7 +947,7 @@ struct Library::Indexer : public juce::Thread
 
         for (const auto& member : members)
         {
-            if (threadShouldExit())
+            if (shouldStop())
                 return;
 
             if (member.size < 0 || member.start.isEmpty() || isStillThere (member) || ! looked.insert (member.key).second)
@@ -882,6 +967,9 @@ struct Library::Indexer : public juce::Thread
 
             for (const auto& file : candidates)
             {
+                if (shouldStop())
+                    return;
+
                 if (file.getFullPathName() != member.key && file.existsAsFile() && readStart (file) == member.start)
                 {
                     moved[member.key] = file.getFullPathName();
@@ -890,19 +978,63 @@ struct Library::Indexer : public juce::Thread
             }
         }
 
+        const std::scoped_lock held (walks->lock);
+        auto* owner = walks->library;
+
+        if (owner == nullptr || shouldStop())
+            return;
+
         {
-            const juce::ScopedLock lock (owner.indexLock);
-            owner.lookedFor = std::move (looked);
-            owner.movedTo = std::move (moved);
+            const juce::ScopedLock lock (owner->indexLock);
+            owner->lookedFor = std::move (looked);
+            owner->movedTo = std::move (moved);
         }
 
-        owner.triggerAsyncUpdate();
+        owner->triggerAsyncUpdate();
     }
 
-    Library& owner;
-    const juce::Array<juce::File> roots;
-    const std::vector<Member> members; // of the sets, as they were when the index started
-    std::vector<Found> folders;        // as the walk found them
+    // The walk ended: no longer under way. The walk the library wants next starts once the one it waited for (the live walk)
+    // has ended; and one that ends after it was left behind, stuck in a root that the walks after it left out, wants a walk
+    // again, which takes that root in now that it answers. The library hears it on the message thread (WalkStarter).
+    void end()
+    {
+        const std::scoped_lock held (walks->lock);
+        std::erase (walks->under, state);
+        auto startNext = false;
+
+        if (state->leftBehind)
+        {
+            if (walks->skipped)
+            {
+                walks->again = true; // as if the folders changed (reindex())
+                walks->running = true;
+                startNext = true;
+            }
+        }
+        else if (walks->wanted)
+        {
+            startNext = true;
+        }
+        else
+        {
+            walks->running = false;
+        }
+
+        if (startNext && walks->library != nullptr)
+            walks->library->walkStarter.triggerAsyncUpdate();
+    }
+
+    const std::shared_ptr<Walks> walks;
+    const std::shared_ptr<Listings> listings;
+    const std::shared_ptr<WalkState> state;
+    const int number;                         // which walk this is (Walks::current)
+    const juce::Array<juce::File> rootsGiven; // the roots, as the library has them, there or not
+    const std::set<juce::File> skip;          // roots a walk left behind is stuck in, left out
+    juce::Array<juce::File> roots;            // those walked
+    const std::vector<Member> members;        // of the sets, as they were when the index started
+    const juce::StringArray audioExtensions;  // of the formats the engine reads
+    const juce::File factsFile;
+    std::vector<Found> folders; // as the walk found them
     std::vector<LibraryItem> folderItems;
     std::vector<SearchKey> folderKeys;
     bool full = false;
@@ -921,6 +1053,7 @@ Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File 
 {
     listingsShared->library = this;
     listingsShared->formats.registerBasicFormats(); // the listings' own: a read left behind needs nothing of the program's
+    walks->library = this;
     readSets();
     reindex();
 }
@@ -928,6 +1061,24 @@ Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File 
 Library::~Library()
 {
     stuckCheck.stopTimer();
+
+    // The walk under way: told to stop, and left to end by itself, nothing of the library's touched from now on (it waits here
+    // only for what it does under the walks' lock: memory work); and its facts file, if it is writing it, written to the end
+    // (a small file beside the settings), so that no write runs on as the program ends.
+    {
+        const std::scoped_lock held (walks->lock);
+        walks->library = nullptr;
+        ++walks->current;
+        walks->running = false;
+        walks->wanted = false;
+    }
+
+    {
+        const std::scoped_lock written (walks->factsFileLock);
+    }
+
+    walkCheck.stopTimer();
+    walkStarter.cancelPendingUpdate();
 
     // The folders' listings: nothing more of the library's from now on. What waits is dropped; what is past its system
     // call (making items, a patch: no folder's listing) is waited for; a read stuck in the system is left behind.
@@ -950,7 +1101,6 @@ Library::~Library()
 
     leaveBehind (std::move (listings));
     leaveBehind (std::move (spareListings));
-    indexer = nullptr;
     cancelPendingUpdate();
 }
 
@@ -959,7 +1109,7 @@ bool Library::isSoundFile (const juce::File& file) const
     return audioExtensions.contains (file.getFileExtension().toLowerCase());
 }
 
-bool Library::isMidiFile (const juce::File& file) const
+bool Library::isMidiFile (const juce::File& file)
 {
     return file.hasFileExtension (".mid;.midi");
 }
@@ -1016,21 +1166,10 @@ void Library::removeUserFolder (const juce::File& folder)
 
 juce::Array<juce::File> Library::getRoots() const
 {
-    juce::Array<juce::File> roots;
-
-    if (factorySounds.isDirectory())
-        roots.add (factorySounds);
-
-    for (const auto& folder : getUserFolders())
-        if (folder.isDirectory())
-            roots.add (folder);
-
-    if (presetsFolder.isDirectory())
-        roots.add (presetsFolder);
-
-    if (factoryPresetsFolder.isDirectory())
-        roots.add (factoryPresetsFolder);
-
+    juce::Array<juce::File> roots { factorySounds };
+    roots.addArray (getUserFolders());
+    roots.add (presetsFolder);
+    roots.add (factoryPresetsFolder);
     return roots;
 }
 
@@ -2513,7 +2652,7 @@ std::vector<LibraryItem> Library::searchDevices (const juce::String& query) cons
 
 bool Library::isIndexing() const
 {
-    return indexer != nullptr && indexer->isThreadRunning();
+    return walks->running.load(); // a walk under way, or one wanted that waits for it
 }
 
 std::shared_ptr<const LibraryIndex> Library::getWholeIndex() const
@@ -2544,21 +2683,130 @@ juce::StringArray Library::getSoundTypes()
     return types;
 }
 
+std::shared_ptr<Library::WalkState> Library::findLiveWalk() const
+{
+    for (const auto& each : walks->under)
+        if (! each->leftBehind)
+            return each;
+
+    return nullptr;
+}
+
 void Library::reindex()
 {
-    indexer = nullptr; // stops the one before
+    // The walk under way stops at its next look, and what it finds from now on changes nothing; nothing waits for it (it may
+    // be inside the system's call on a drive that doesn't answer, for tens of seconds). One walk at a time: the next starts
+    // once that one has ended (soon, as it stops at its next step), or once it is known stuck (walkCheck), whichever is
+    // first; however often the folders change meanwhile, one walk is wanted, the newest.
+    {
+        const std::scoped_lock held (walks->lock);
 
-    // A root inside another (a user's folder that holds the presets' folder, a folder and one of its own both added) is
-    // walked once, with the root it is in: its files would be in the index twice.
-    const auto all = getRoots();
-    juce::Array<juce::File> roots;
+        if (findLiveWalk() != nullptr)
+        {
+            ++walks->current;
+            walks->wanted = true;
+            walks->running = true;
+            walkCheck.startTimer (walkCheckMilliseconds);
+            return;
+        }
+    }
 
-    for (const auto& root : all)
-        if (std::none_of (all.begin(), all.end(), [&root] (const juce::File& other) { return root.isAChildOf (other); }))
-            roots.addIfNotAlreadyThere (root);
+    startWalk();
+}
 
-    indexer = std::make_unique<Indexer> (*this, roots, getAllMembers());
-    indexer->startThread (juce::Thread::Priority::low);
+void Library::startWantedWalk()
+{
+    {
+        const std::scoped_lock held (walks->lock);
+
+        if (! walks->wanted || walks->library == nullptr)
+            return;
+
+        // The live walk, wanted to stop, is still under way: known stuck once its last step is long past (inside the system's
+        // call on a drive that doesn't answer), it is left behind, and the next starts without the root it is stuck in.
+        if (const auto live = findLiveWalk())
+        {
+            if (devices::Clock::getMilliseconds() - live->lastStep.load() <= stuckMilliseconds)
+                return;
+
+            live->leftBehind = true;
+        }
+    }
+
+    startWalk();
+}
+
+void Library::walkEnded()
+{
+    auto again = false;
+
+    {
+        const std::scoped_lock held (walks->lock);
+        again = std::exchange (walks->again, false);
+    }
+
+    if (again)
+        reindex();
+    else
+        startWantedWalk();
+}
+
+void Library::WalkStarter::handleAsyncUpdate()
+{
+    library.walkEnded();
+}
+
+void Library::WalkCheck::timerCallback()
+{
+    // As the walk starter does, in case its message is late; and on while a walk is wanted, or one is left behind (whose end
+    // wants a walk again).
+    library.walkEnded();
+
+    const std::scoped_lock held (library.walks->lock);
+    const auto leftBehind =
+        std::any_of (library.walks->under.begin(), library.walks->under.end(), [] (const auto& each) { return each->leftBehind; });
+
+    if (! library.walks->wanted && ! library.walks->again && ! leftBehind)
+        stopTimer();
+}
+
+void Library::startWalk()
+{
+    std::shared_ptr<WalkState> state;
+    std::set<juce::File> skip;
+
+    {
+        const std::scoped_lock held (walks->lock);
+        walks->wanted = false;
+        walks->running = true;
+
+        for (const auto& each : walks->under)
+            if (each->leftBehind && each->root != juce::File())
+                skip.insert (each->root);
+
+        walks->skipped = ! skip.empty();
+        state = std::make_shared<WalkState>();
+        state->number = ++walks->current;
+        state->lastStep = devices::Clock::getMilliseconds();
+        walks->under.push_back (state);
+    }
+
+    auto walk = std::make_shared<Indexer> (*this, state, std::move (skip));
+    ++walksUnderWay;
+
+    const auto started = juce::Thread::launch (juce::Thread::Priority::low,
+                                               [walk]
+                                               {
+                                                   walk->run();
+                                                   walk->end();
+                                                   --walksUnderWay;
+                                               });
+
+    if (! started)
+    {
+        walk->end();
+        --walksUnderWay;
+    }
 }
 
 void Library::handleAsyncUpdate()

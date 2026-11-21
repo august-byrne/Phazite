@@ -17,6 +17,7 @@
 
 #include <juce_events/juce_events.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -31,13 +32,14 @@ struct UnusedAudioFile
 };
 
 // Why it can't look now, as a sentence, none while it can: a project is open, it doesn't record (a take being written), its
-// versions are read, and no version or snapshot is being written (which names files the Versions folder doesn't hold yet).
+// versions are read, no version or snapshot is being written (which names files the Versions folder doesn't hold yet), and
+// no audio file's work is under way (an import's copy is in the Audio folder before a clip plays it: AudioWork.h).
 juce::String getWhyNotCleanUpAudio (const ProjectContext&);
 bool canCleanUpAudio (const ProjectContext&);
 
 // What a look found (UnusedAudioFinder): the files nothing plays, by their names; or, where a version couldn't be read
 // whole, why it can't say (unreadable: none offered then); and what it knew of what the versions play, which a deletion
-// checks again (deleteUnusedAudio()).
+// checks again (UnusedAudioFinder::deleteUnused()).
 struct UnusedAudio
 {
     std::vector<UnusedAudioFile> files;
@@ -47,18 +49,12 @@ struct UnusedAudio
     int projectNumber = 0;
 };
 
-// Moves those of the files given that the look found unused and that are still unused to the recycle bin (or deletes
-// them outright: the tests'), and says how many went. What must be fresh is looked at again, cheaply, on the message
-// thread: the song, the saved files, that nothing is being written, and that the versions name what they
-// named at the look (else refused, saying so in refused, to look again).
+// Deleting moves the files to the recycle bin, or (the tests') deletes them outright.
 enum class Removal
 {
     toRecycleBin,
     outright
 };
-
-int deleteUnusedAudio (ProjectContext&, const UnusedAudio&, const juce::Array<juce::File>&, Removal = Removal::toRecycleBin,
-                       juce::String* refused = nullptr);
 
 // The look for the unused files, in the background (BackgroundJobs.h), for what shows them (the Project view's count, the
 // Clean Up window): what the song plays taken on the message thread, the rest read on a thread of its own, each saved
@@ -77,8 +73,48 @@ public:
 
     void find();
     bool isLooking() const noexcept { return looking; }
+
+    // Whether the last find() was refused (getWhyNotCleanUpAudio()) and it could look now: what shows the unused files asks
+    // this at its ticks (cheap: no disk), and finds again, so that a look refused while the versions were read, or written,
+    // or an import ran, isn't left at what it knew before (another project's look, which a refusal forgets).
+    bool shouldLookAgain() const { return refused && ! looking && canCleanUpAudio (context); }
     const std::optional<UnusedAudio>& getFound() const noexcept { return found; } // none before the first look
     std::function<void()> onFound;
+
+    // Deletes those of the files given that the last look found unused (getFound()) and that are still unused, on the
+    // finder's thread, one at a time, the window held meanwhile (ProjectContext::holdForWork(): a progress window after a
+    // second, whose Cancel, and Escape, stop it between two files; a quit too). First, on the message thread, cheaply, what
+    // must be true as it deletes: that it can clean up now (getWhyNotCleanUpAudio()), that the project is the look's, that
+    // every version could be read, and that the versions name what they named at the look; else it is refused at once,
+    // nothing deleted. A file stays that the song plays as Delete is pressed (and the window held from then on, it plays
+    // nothing else until the end), that a version played at the look, or that the project file as saved, its autosave or a
+    // backup plays, read on the finder's thread after the window was held (each again only where it changed since it was
+    // last read). done is told on the message thread, once, with how many went and why it refused or stopped, if it did,
+    // the window's hold let go of first. Not while one is under way, nor while a look is. Message thread: the context given
+    // is the finder's.
+    struct Deleted
+    {
+        int count = 0;
+        juce::String refused; // why it deleted nothing, or why it stopped
+    };
+
+    void deleteUnused (ProjectContext&, const juce::Array<juce::File>&, Removal, std::function<void (Deleted)> done);
+    bool isDeleting() const noexcept { return deleting != nullptr; }
+
+    // How many deletions have ended, by any finder, since the program started: what shows the unused files looks again once
+    // it changes (the Project view, after the Clean Up window's Delete). Message thread.
+    static int countDeletions() noexcept { return deletionsEnded; }
+
+    // Tests: what the finder's thread does before it deletes each file (held until let go: a deletion takes its own copy as
+    // deleteUnused() is called), and how many saved files the looks and the deletions parsed, since the program started (on
+    // the message thread: none).
+    static inline std::function<void (const juce::File&)> beforeDeletingForTests;
+    struct SavedFilesRead
+    {
+        int all = 0, onMessageThread = 0;
+    };
+
+    static SavedFilesRead countSavedFilesRead() noexcept;
 
 private:
     const ProjectContext& context;
@@ -86,9 +122,15 @@ private:
     std::shared_ptr<UnusedAudioLook> saved; // what was read of the saved files, which the looks keep
     std::optional<UnusedAudio> found;
     juce::StringArray lookedFor; // what the song played as the look under way began
-    bool looking = false, lookAgain = false;
+    bool looking = false, lookAgain = false, refused = false;
+
+    // A deletion under way: whether it was cancelled and how far it is (its thread's), and the window's hold.
+    struct Deletion;
+    std::shared_ptr<Deletion> deleting;
+    static inline int deletionsEnded = 0;
 
     void looked (UnusedAudio);
+    void deleted (const std::shared_ptr<Deletion>&, Deleted);
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (UnusedAudioFinder)
     JUCE_DECLARE_NON_COPYABLE (UnusedAudioFinder)

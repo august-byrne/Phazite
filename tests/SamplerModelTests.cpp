@@ -4,7 +4,8 @@
 // pitch, its fine taking back how far off the note it is, its loop from its smpl chunk; one of its factory sounds; the
 // engine playing what the song names; slices moved, added and taken away by hand, which stay whatever slices the sound;
 // its slices written as notes into a clip that plays the loop in time; presets that carry its sound; and a float file's
-// samples that aren't numbers read as silence, as a wavetable's are.
+// samples that aren't numbers read as silence, as a wavetable's are; and a file that says its rate is beyond any sound's,
+// which is none.
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "devices/sampler/FactorySamples.h"
@@ -23,7 +24,11 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <iterator>
 #include <limits>
 #include <unordered_map>
 
@@ -398,4 +403,61 @@ TEST_CASE ("A sampler's or a wavetable's sound file with samples that aren't num
     for (int frame = 0; frame < 2; ++frame)
         for (const auto sample : table->getFrameForDrawing (frame))
             REQUIRE (std::isfinite (sample));
+}
+
+TEST_CASE ("A sound file that says its rate is beyond any sound's is none for the sampler")
+{
+    // A WAV's header takes any number for its rate, and the sampler steps through a sound by it: one of 4 GHz with a short
+    // loop made every sample of every voice go round its loop over a thousand times. The file as JUCE writes it at 48 kHz,
+    // then the rate in its "fmt " chunk written over (the chunk's name, its size, the format and the channels before it).
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Fast.wav");
+    juce::AudioBuffer<float> audio (1, 4096);
+
+    for (int i = 0; i < audio.getNumSamples(); ++i)
+        audio.setSample (0, i, 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * i / 64.0));
+
+    {
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+        auto writer = juce::WavAudioFormat().createWriterFor (
+            stream, juce::AudioFormatWriterOptions {}.withSampleRate (48000.0).withNumChannels (1).withBitsPerSample (16));
+        REQUIRE (writer != nullptr);
+        REQUIRE (writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples()));
+    }
+
+    // As it is, the sampler reads it.
+    REQUIRE (phazite::readSampleSound (file) != nullptr);
+    REQUIRE (phazite::readSampleSettings (file).has_value());
+
+    const auto writeRate = [&file] (std::uint32_t rate)
+    {
+        juce::MemoryBlock bytes;
+        REQUIRE (file.loadFileAsData (bytes));
+        auto* data = static_cast<char*> (bytes.getData());
+        const auto end = data + bytes.getSize();
+        const char name[] = { 'f', 'm', 't', ' ' };
+        auto* chunk = std::search (data, end, std::begin (name), std::end (name));
+        REQUIRE (chunk + 16 <= end);
+        const auto littleEndian = juce::ByteOrder::swapIfBigEndian (rate);
+        std::memcpy (chunk + 12, &littleEndian, sizeof (littleEndian));
+        REQUIRE (file.replaceWithData (bytes.getData(), bytes.getSize()));
+    };
+
+    // The highest rate a sound has is one still. (Let go of before the file is written again: what is read is kept by the
+    // file's path, size and time while anything holds it.)
+    writeRate ((std::uint32_t) phazite::highestSampleRate);
+
+    {
+        const auto highest = phazite::readSampleSound (file);
+        REQUIRE (highest != nullptr);
+        CHECK (juce::exactlyEqual (highest->sampleRate, phazite::highestSampleRate));
+    }
+
+    for (const auto rate : { (std::uint32_t) phazite::highestSampleRate + 1, 4000000000u, 0xffffffffu })
+    {
+        CAPTURE (rate);
+        writeRate (rate);
+        CHECK (phazite::readSampleSound (file) == nullptr);
+        CHECK (! phazite::readSampleSettings (file).has_value());
+    }
 }

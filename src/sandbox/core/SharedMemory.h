@@ -69,6 +69,12 @@ public:
     // timeout passes (negative: no timeout). False if the timeout passed first.
     bool waitWhile (std::uint32_t value, std::int64_t spinNanoseconds, std::int64_t timeoutNanoseconds) noexcept;
 
+    // Its waiter in this process woken by another thread of this process, the counter left as it is: the wait it is in, or
+    // its next if it is in none, ends as though its time were up (false), so that a thread told to stop sees it at once
+    // (Windows: the event it sleeps on set; Linux: its futex woken until it has left its wait). Not real-time safe on Linux,
+    // where it may yield while the waiter goes to sleep.
+    void wake() noexcept;
+
     Bell (const Bell&) = delete;
     Bell& operator= (const Bell&) = delete;
 
@@ -78,6 +84,7 @@ private:
     BellState& state;
     void* event = nullptr; // Windows: the event the waiter sleeps on, and a high-resolution timer for its timeout
     void* timer = nullptr;
+    std::atomic<bool> woken { false }, waiting { false }; // this process's: wake() asked, and its waiter in sleepWhile()
 
     bool sleepWhile (std::uint32_t value, std::int64_t timeoutNanoseconds) noexcept;
 };

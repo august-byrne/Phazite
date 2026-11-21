@@ -95,7 +95,9 @@ void CleanUpPanel::refreshSummary()
     const juce::String kept ("Files a version or an automatic save still plays are kept.");
     juce::String said;
 
-    if (found.has_value() && ! found->unreadable.isEmpty())
+    if (finder.isDeleting())
+        said = "Deleting " + juce::String (count) + (count == 1 ? " file..." : " files...");
+    else if (found.has_value() && ! found->unreadable.isEmpty())
         said = "Phazite can't tell which audio files are unused now: " + found->unreadable.joinIntoString ("; ") + ". " + kept;
     else if (finder.isLooking() || (! found.has_value() && why.isEmpty()))
         said = "Looking for the audio files nothing plays...";
@@ -111,28 +113,29 @@ void CleanUpPanel::refreshSummary()
                + " Undo doesn't bring deleted files back; the recycle bin keeps them.";
 
     summary.setText (done.isNotEmpty() ? done + " " + said : said, juce::dontSendNotification);
-    deleteButton.setEnabled (count > 0 && ! finder.isLooking() && why.isEmpty());
+    deleteButton.setEnabled (count > 0 && ! finder.isLooking() && ! finder.isDeleting() && why.isEmpty());
 }
 
 void CleanUpPanel::deleteTicked()
 {
-    const auto& found = finder.getFound();
-
-    if (! found.has_value())
-        return;
-
     juce::Array<juce::File> toDelete;
 
     for (size_t i = 0; i < files.size(); ++i)
         if (ticked[i])
             toDelete.add (files[i].file);
 
-    juce::String refused;
-    const auto deleted = deleteUnusedAudio (context, *found, toDelete, removal, &refused);
-    const auto counted = juce::String (deleted) + (deleted == 1 ? " file" : " files");
-    done = refused.isNotEmpty()               ? refused
-           : removal == Removal::toRecycleBin ? "Moved " + counted + " to the recycle bin."
-                                              : "Deleted " + counted + ".";
+    // On the finder's thread, the window held meanwhile (model/project/UnusedAudio.h); said here once done.
+    finder.deleteUnused (context, toDelete, removal, [this] (UnusedAudioFinder::Deleted deleted) { showDeleted (deleted); });
+    refreshSummary();
+}
+
+void CleanUpPanel::showDeleted (const UnusedAudioFinder::Deleted& deleted)
+{
+    const auto counted = juce::String (deleted.count) + (deleted.count == 1 ? " file" : " files");
+    const auto moved = removal == Removal::toRecycleBin ? "Moved " + counted + " to the recycle bin." : "Deleted " + counted + ".";
+    done = deleted.count == 0 && deleted.refused.isNotEmpty() ? deleted.refused
+           : deleted.refused.isNotEmpty()                     ? moved + " " + deleted.refused
+                                                              : moved;
     cancelButton.setButtonText ("Close");
     files.clear();
     ticked.clear();

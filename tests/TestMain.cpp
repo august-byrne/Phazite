@@ -12,6 +12,8 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/playback/internal/SongPlayer.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "model/project/ProjectContents.h"
+#include "services/Library.h"
 
 #include <algorithm>
 #include <array>
@@ -666,6 +668,23 @@ bool phazite::test::runTimersUntil (const std::function<bool()>& condition, int 
     return true;
 }
 
+namespace
+{
+// Waits, up to the tests' hang limit, for the threads that nothing else waits for to end; false, said, if any is still under
+// way then (a test that left one held).
+bool waitForThreadsLeftToEnd()
+{
+    const auto left = [] { return phazite::Library::getWalksUnderWay() + phazite::MissingAudioCheck::getChecksUnderWay(); };
+
+    if (phazite::test::runTimersUntil ([&left] { return left() == 0; }))
+        return true;
+
+    std::fprintf (stderr, "%d of the library's walks and the missing files' checks were still under way as the tests ended.\n", left());
+    std::fflush (stderr);
+    return false;
+}
+} // namespace
+
 int main (int argc, char** argv)
 {
     keepTimerResolution();
@@ -719,6 +738,12 @@ int main (int argc, char** argv)
 
         doctest::Context context (argc, argv);
         result = context.run();
+
+        // The library's walks and the missing files' checks, which nothing waits for (services/Library.h, model/project/
+        // ProjectContents.h), ended before the program does: one still unwinding as static objects go trips JUCE's leak
+        // detector (each runs on a juce::Thread of its own), which fails the run after main() has returned.
+        if (! waitForThreadsLeftToEnd() && result == 0)
+            result = EXIT_FAILURE;
 
         testEngineContext = nullptr;
     } // the engine context is destroyed here, before JUCE shuts down

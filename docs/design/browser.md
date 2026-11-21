@@ -199,6 +199,15 @@ of samples) is walked by the index as a whole; a folder that leads back to one i
 through. A root inside another (a user's folder within Phazite Sounds) is walked once, with the root it is in, whose
 folders' words its sounds' tags take, read again or walked.
 
+The index's walk is never waited for either. A walk wanted again (a folder added or removed, a preset saved, a folder
+that came from outside) tells the one under way to stop, and starts once that one has ended, or once it is known stuck:
+no step for three seconds, inside the system's call on a drive that doesn't answer. A stuck walk is left to end by
+itself, what it finds changes nothing (only the newest walk's index is taken), and the walks after it leave out the root
+it is stuck in, so that the roots that answer are walked again within those seconds, and no more walks are stuck than
+there are roots that don't answer; once it returns, a walk takes that root in again. However often the folders change
+meanwhile, one walk is wanted, the newest. Removing the browser folder whose drive hangs doesn't freeze the window, nor
+does closing Phazite. The roots are asked whether they are there on the walk's thread too.
+
 ## Filters
 
 Under the search field is a chip for each of **Type**, **Loop**, **Tempo** and **Key**.

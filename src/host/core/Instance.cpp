@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Instance.h"
 #include "devices/core/AudioThreads.h"
+#include "sandbox/core/SharedMemory.h"
 #include "sandbox/core/Vst3State.h"
 
 #include <algorithm>
@@ -13,8 +14,12 @@ namespace phazite::host
 namespace
 {
     constexpr std::int64_t checkForExitNanoseconds = 100'000'000; // how long the thread sleeps before it checks it should end
-    constexpr int maximumChannels = 32;                           // a plug-in's channels the thread plays at most
-    constexpr int maximumPrograms = 1024;                         // the programs' names Phazite is told at most
+
+    // A plug-in's channels the thread plays at most: fewer than the 32 channel pointers juce::AudioBuffer keeps in itself, so
+    // that the buffer each piece of a block makes on them allocates nothing (32 or more, it allocates its own room for them,
+    // on the audio thread, at every piece).
+    constexpr int maximumChannels = 31;
+    constexpr int maximumPrograms = 1024; // the programs' names Phazite is told at most
 
     // Its main buses in stereo, a stereo sidechain as its second input where it takes one, and no others; failing that,
     // without the sidechain; failing that, its main buses as they are.
@@ -99,6 +104,10 @@ Instance::Instance (std::int64_t instanceID, std::unique_ptr<juce::AudioPluginIn
     parameters = plugin->getParameters();
     changedValues = std::make_unique<std::atomic<float>[]> ((size_t) parameters.size());
     changed = std::make_unique<std::atomic<bool>[]> ((size_t) parameters.size());
+
+    // Whole before any listener is added: a plug-in's thread may tell a change as soon as one is, which reads it.
+    for (auto* parameter : parameters)
+        automatable.push_back (parameter->isAutomatable());
 
     for (auto* parameter : parameters)
         parameter->addListener (this);
@@ -185,10 +194,12 @@ void Instance::start (std::unique_ptr<sandbox::BlockChannel> blockChannel, doubl
 
 void Instance::stop()
 {
-    // Waited for however long the plug-in takes over its block, never ended by force, which could leave the plug-in's
-    // locks held: a plug-in that hangs keeps the helper's message thread from answering, and Phazite ends the helper
-    // (sandbox/client/Helper.h).
+    // Its wait for a block woken, so that it ends at once (the next instance re-prepared or closed doesn't wait a tenth of a
+    // second for each before it); waited for however long the plug-in takes over its block, never ended by force, which
+    // could leave the plug-in's locks held: a plug-in that hangs keeps the helper's message thread from answering, and
+    // Phazite ends the helper (sandbox/client/Helper.h).
     signalThreadShouldExit();
+    channel->wakeWaiter();
     stopThread (-1);
     plugin->releaseResources();
 }
@@ -286,7 +297,7 @@ void Instance::setProgramPlayed (int index, const std::function<void (sandbox::M
     // One of its programs, of a plug-in that has more than one, whatever the message's channel; set as a state is given, not
     // while a block plays. What the plug-in tells of its parameters as it is set is the program's doing, which Phazite isn't
     // told of as a change of the plug-in's own (parameterValueChanged()); Phazite is told the program instead, as the song's,
-    // with those values. JUCE workaround W58 (docs/juce-workarounds.md).
+    // with those values. JUCE workaround W60 (docs/juce-workarounds.md).
     const auto numPrograms = plugin->getNumPrograms();
 
     if (numPrograms <= 1 || ! juce::isPositiveAndBelow (index, numPrograms))
@@ -449,13 +460,52 @@ void Instance::run()
         if (threadShouldExit())
             break;
 
+        // Played under the plug-in's lock, which the message thread holds while it sets the plug-in (a state, a program,
+        // the switch to or from playing offline). A render's block waits for it, as a render waits for the plug-in; a live
+        // block waits for it half its own length at most, spinning, which a quick preset takes well within (so that
+        // auditioning presets as a loop plays doesn't cut the sound), and is answered as one the plug-in didn't play past
+        // that: Phazite's side doesn't take the plug-in for hung however long a sampler takes to read its library, and
+        // hands the block's notes and changes on with the next.
+        auto& lock = plugin->getCallbackLock();
+        auto played = false;
+
+        if (rendering)
         {
-            const juce::ScopedLock held (plugin->getCallbackLock());
+            const juce::ScopedLock held (lock);
             play();
+            played = true;
+        }
+        else if (takeLockWithin (lock, channel->getInfo().numSamples))
+        {
+            play();
+            lock.exit();
+            played = true;
         }
 
+        channel->getInfo().played = played ? 1 : 0;
         channel->finish();
     }
+}
+
+bool Instance::takeLockWithin (const juce::CriticalSection& lock, int numSamples) const noexcept
+{
+    // Tried again and again, a pause between, for half the block's length in real time at the most (a live block's
+    // deadline on Phazite's side is its whole length): never longer, nor given up the core meanwhile.
+    if (lock.tryEnter())
+        return true;
+
+    const auto halfBlock = (std::int64_t) (0.5e9 * std::max (0, numSamples) / std::max (1.0, rate));
+    const auto until = sandbox::getNanoseconds() + halfBlock;
+
+    while (sandbox::getNanoseconds() < until)
+    {
+        devices::pauseInSpin();
+
+        if (lock.tryEnter())
+            return true;
+    }
+
+    return false;
 }
 
 void Instance::play() noexcept
@@ -657,6 +707,15 @@ void Instance::audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails
 void Instance::parameterValueChanged (int index, float value)
 {
     if (! juce::isPositiveAndBelow (index, parameters.size()))
+        return;
+
+    // A parameter that can't be automated, told as the plug-in plays a block (on this thread): what a VST3 outputs to its
+    // host as it processes, which JUCE's VST3 host tells as a change of the parameter (its setValueWithoutUpdatingProcessor()
+    // after process()), a meter's, which the user can't set (VST3's read-only parameters can't be automated). Told, Phazite
+    // would take each for a value set in the plug-in's window, an unsaved change and its state asked again, for as long as
+    // the meter moves. One the plug-in's window sets comes on the message thread, as a VST3's performEdit() does. JUCE
+    // workaround W58 (docs/juce-workarounds.md).
+    if (! automatable[(size_t) index] && juce::Thread::getCurrentThreadId() == getThreadId())
         return;
 
     // The program the song's MIDI set, as the message thread sets it (setProgramPlayed()): no change of the plug-in's own, but

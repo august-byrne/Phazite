@@ -8,6 +8,8 @@
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/stereo/Stereo.h"
+#include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
@@ -363,6 +365,30 @@ TEST_CASE ("A freeze cancelled leaves the track as it was")
         CHECK_FALSE (file.getFileName().startsWith ("Frozen"));
 }
 
+TEST_CASE ("A freeze makes the render of a clip that isn't there yet on its own thread, and freezes the clip's sound")
+{
+    // The audit of 2026-11-20: a freeze made the clips' renders that weren't there on the message thread before it started.
+    Song song;
+    auto& model = song.getSong();
+    phazite::setClipPitch (model, song.clip, 12.0f); // the A an octave up: 440 Hz
+    const auto before = phazite::countClipRendersMade();
+    song.freeze();
+    CHECK (phazite::countClipRendersMade().onMessageThread == before.onMessageThread);
+
+    // The pitched sine is what was frozen: 440 rises a second.
+    double sampleRate = 0.0;
+    const auto audio = readAudio (song.frozenFile(), sampleRate);
+    const auto first = juce::roundToInt (0.1 * sampleRate), last = juce::roundToInt (1.1 * sampleRate);
+    auto rises = 0;
+
+    for (int i = first + 1; i < last; ++i)
+        if (audio.getSample (0, i - 1) < 0.0f && audio.getSample (0, i) >= 0.0f)
+            ++rises;
+
+    CHECK (rises == doctest::Approx (440.0).epsilon (0.01));
+    CHECK (getLevel (song.frozenFile(), 0.1, 1.4) > 0.05);
+}
+
 TEST_CASE ("A track frozen while it is muted, or while another track is soloed, freezes its sound, not silence")
 {
     // A render before the fader hears the track whatever its mute switch or a solo elsewhere says: muted, it rendered its
@@ -513,6 +539,31 @@ TEST_CASE ("Bounce in Place's freeze is kept across a save, holds a track's cont
         CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
         CHECK (getPlayed (model, song.bass).second == 1); // its devices play live, for when it is unmuted
     }
+}
+
+TEST_CASE ("Bounce in Place goes through where its frozen copy can't be made, and leaves the original muted and unfrozen")
+{
+    // The review of the audit's fix: the bounce's copy into the Cache folder, as the original's frozen file, is made on the
+    // render's thread; one that can't be made throws nothing of the bounce away, and the original just isn't frozen.
+    Song song;
+    auto& model = song.getSong();
+    const auto cache = song.project->getCacheFolder();
+    REQUIRE (cache.deleteRecursively());
+    REQUIRE (cache.replaceWithText ("a file where the Cache folder goes")); // so no copy can go there
+    bounce (song);
+
+    const auto tracks = phazite::getTrackIDs (model);
+    REQUIRE (tracks.size() == 3);
+    const auto clips = phazite::getClips (model, tracks[1]);
+    REQUIRE (clips.size() == 1);
+    const auto file = phazite::getClipFile (model, phazite::findClipState (model, clips[0]));
+    CHECK (file.existsAsFile());
+    CHECK (getLevel (file, 0.1, 1.4) > 0.05);
+    CHECK (phazite::isTrackMuted (model, song.bass, false));
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK (phazite::describeUndo (&model) == juce::String ("Undo Bounce in Place"));
+    CHECK (cache.existsAsFile());
+    REQUIRE (cache.deleteFile());
 }
 
 TEST_CASE ("Bounce in Place takes the automation and the modulation of the track's fader and sends along to the new track")

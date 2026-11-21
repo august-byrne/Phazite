@@ -11,8 +11,8 @@ What both sides use.
 
 | File | What it holds |
 |---|---|
-| `SharedMemory.h` | Memory two processes share by name, and the bells between them: a counter one side moves on and the other waits on, woken by the operating system only when it sleeps. |
-| `BlockChannel.h` | The channel a plug-in instance's blocks go through: one round trip a block, with a deadline. |
+| `SharedMemory.h` | Memory two processes share by name, and the bells between them: a counter one side moves on and the other waits on, woken by the operating system only when it sleeps, or by its own process (a thread told to stop). |
+| `BlockChannel.h` | The channel a plug-in instance's blocks go through: one round trip a block, with a deadline; the helper's answer says whether the plug-in played it. |
 | `Messages.h` | The control channel's messages. |
 | `PluginInfo.h` | What a helper tells of a plug-in it hosts: its parameters by their own IDs, and its programs; and the checks of what a helper tells, where it comes in (a value that is no number, a text of any length, a size). |
 | `Vst3State.h` | A VST3's state as its format's own preset file, a `.vstpreset`, as the song keeps it. |

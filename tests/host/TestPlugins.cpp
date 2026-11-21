@@ -72,6 +72,8 @@ namespace
         float getDefaultValue() const override { return initial; }
         juce::String getName (int maximumLength) const override { return name.substring (0, maximumLength); }
         juce::String getLabel() const override { return label; }
+        bool isAutomatable() const override { return automatable; }
+        bool automatable = true; // as it is added: false for one the user can't set (a meter)
 
         juce::String getText (float v, int) const override
         {
@@ -299,6 +301,35 @@ namespace
             level = add ("10", "Level", 0.25f);
         }
 
+        // Its Level, then, where a second value of 1 follows it, a wait while the state gate is shut, its setting file there
+        // meanwhile (TestPlugins::getStateGate()): as a sampler reads its library as it is given a state; where one of 2
+        // follows, half a millisecond, spun for, as a quick preset takes.
+        void setStateInformation (const void* data, int size) override
+        {
+            StandIn::setStateInformation (data, size);
+            juce::MemoryInputStream in (data, (size_t) size, false);
+            in.skipNextBytes (4);
+            const auto then = in.getNumBytesRemaining() >= 4 ? in.readFloat() : 0.0f;
+
+            if (then > 1.5f)
+            {
+                for (const auto until = juce::Time::getMillisecondCounterHiRes() + 0.5; juce::Time::getMillisecondCounterHiRes() < until;)
+                    continue;
+
+                return;
+            }
+
+            if (then < 0.5f)
+                return;
+
+            TestPlugins::getStateSetting().create();
+
+            while (TestPlugins::getStateGate().existsAsFile())
+                juce::Thread::sleep (2);
+
+            TestPlugins::getStateSetting().deleteFile();
+        }
+
         void prepareToPlay (double sampleRate, int) override { rate = sampleRate; }
 
         void reset() override
@@ -491,6 +522,8 @@ namespace
             : StandIn (Kind::latency, stereoEffect())
         {
             longer = add ("40", "Latency", 0.0f);
+            meter = add ("41", "Meter", 0.0f);
+            meter->automatable = false;
             setLatencySamples (64);
         }
 
@@ -518,12 +551,16 @@ namespace
 
                 at = (at + 1) % 128;
             }
+
+            // The peak of what it plays, told as it plays, as a plug-in tells a meter it has as a parameter.
+            meter->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, buffer.getMagnitude (0, buffer.getNumSamples())));
         }
 
     private:
         void handleAsyncUpdate() override { setLatencySamples (said.load()); }
 
         StandInParameter* longer = nullptr;
+        StandInParameter* meter = nullptr;
         std::atomic<int> said { 64 };
         std::array<std::array<float, 128>, 2> rings {};
         int at = 0;
@@ -939,6 +976,16 @@ juce::File TestPlugins::getSlowGate (bool closing)
 juce::File TestPlugins::getHangKeeping()
 {
     return getSlowGate().getSiblingFile ("PhaziteTestHangKeeping");
+}
+
+juce::File TestPlugins::getStateGate()
+{
+    return getSlowGate().getSiblingFile ("PhaziteTestStateGate");
+}
+
+juce::File TestPlugins::getStateSetting()
+{
+    return getSlowGate().getSiblingFile ("PhaziteTestStateSetting");
 }
 
 juce::File TestPlugins::getSlowWaiting (Kind kind)

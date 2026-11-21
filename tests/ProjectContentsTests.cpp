@@ -3,6 +3,7 @@
 // its song plays and its plug-ins, by the project's context.
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "UiTestHelpers.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/SongGesture.h"
 #include "model/commands/internal/Undo.h"
@@ -66,9 +67,16 @@ TEST_CASE ("The project's audio files: each once, with the tracks that play it; 
     CHECK (files[1].channels == juce::StringArray { "Bass" });
     CHECK (files[1].file.existsAsFile());
 
-    // The copy gone: missing.
+    // The copy gone: missing, as a check of the disk finds it in the background (none without one).
     REQUIRE (files[1].file.deleteFile());
-    files = phazite::getProjectAudioFiles (test.context);
+    CHECK_FALSE (phazite::getProjectAudioFiles (test.context)[1].missing);
+    phazite::MissingAudioCheck check;
+    check.check ({ files[0].file, files[1].file });
+    CHECK (check.isChecking());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&check] { return ! check.isChecking(); }));
+    CHECK (check.getMissing() == std::set<juce::File> { files[1].file });
+    files = phazite::getProjectAudioFiles (test.context, check.getMissing());
+    CHECK_FALSE (files[0].missing);
     CHECK (files[1].missing);
 
     // Found again elsewhere: the project's copy of what was found plays in its place, as one undo step.
@@ -77,7 +85,7 @@ TEST_CASE ("The project's audio files: each once, with the tracks that play it; 
     CHECK (phazite::locateAudioFile (test.context, "Audio/Loop.wav", found));
     phazite::test::waitForAudioWork (test.context); // copied into the project in the background (known bug 123)
     CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Locate Audio File"));
-    files = phazite::getProjectAudioFiles (test.context);
+    files = phazite::getProjectAudioFiles (test.context, check.getMissing());
     REQUIRE (files.size() == 2);
     CHECK (files[1].path == juce::String ("Audio/Loop take 2.wav"));
     CHECK_FALSE (files[1].missing);
@@ -89,6 +97,46 @@ TEST_CASE ("The project's audio files: each once, with the tracks that play it; 
     // A path the song doesn't play, or a file that isn't there, changes nothing.
     CHECK_FALSE (phazite::locateAudioFile (test.context, "Audio/Nothing.wav", found));
     CHECK_FALSE (phazite::locateAudioFile (test.context, "Audio/Loop.wav", sounds.getChildFile ("Gone.wav")));
+}
+
+TEST_CASE ("One check of the missing files at a time: those asked for while one is held start one more, the newest")
+{
+    // The audit's review, 2026-11-20: each edit started one more check, and with a file on a share that had stopped
+    // answering, every new check stuck on that same file.
+    phazite::test::TemporaryFolder temp;
+    const auto there = phazite::test::writeSound (temp.folder.getChildFile ("There.wav"), 0.1);
+    const auto gone = temp.folder.getChildFile ("Gone.wav");
+
+    const auto going = std::make_shared<std::atomic<bool>> (false);
+    const auto held = std::make_shared<std::atomic<int>> (0);
+    const juce::ScopeGuard letGo { [going] { *going = true; } };
+    phazite::MissingAudioCheck check;
+    check.setBeforeChecking (
+        [going, held] (const juce::File&)
+        {
+            ++*held;
+            const auto since = juce::Time::getMillisecondCounterHiRes();
+
+            while (! going->load() && juce::Time::getMillisecondCounterHiRes() - since < phazite::test::hangTimeout)
+                juce::Thread::sleep (1);
+        });
+
+    check.check ({ there });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([held] { return held->load() == 1; }));
+
+    for (int i = 0; i < 5; ++i)
+        check.check ({ there, gone });
+
+    phazite::test::dispatchPendingMessages();
+    CHECK (check.getChecksStarted() == 1);
+    CHECK (check.isChecking());
+
+    // Let go: the one held stops, and the newest runs, once.
+    *going = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&check] { return ! check.isChecking(); }));
+    CHECK (check.getChecksStarted() == 2);
+    CHECK (check.getMissing() == std::set<juce::File> { gone });
+    CHECK (phazite::test::dispatchMessagesUntil ([] { return phazite::MissingAudioCheck::getChecksUnderWay() == 0; }));
 }
 
 TEST_CASE ("The project's plug-ins: each on its channel and as it plays; one the plug-in host doesn't know is missing")

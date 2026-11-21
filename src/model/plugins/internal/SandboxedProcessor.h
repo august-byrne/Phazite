@@ -11,8 +11,11 @@
 // that kept a block for 30 seconds), a little at a time: until its helper has gone, which the render then says
 // (hasFailedInRender()), as it does for a plug-in that had crashed before it began (OfflineRender.h), or until the render
 // is cancelled. Once it has waited as long as a hang takes live, the render's window names the plug-in it waits for
-// (OfflineRender::findWait()), so that the user can cancel it. The notes of a block that couldn't be handed over go with the next that
-// is, at its start, so that no note that ended sounds on. Its mix with what came in is the engine's, as for Phazite's own
+// (OfflineRender::findWait()), so that the user can cancel it. A block the helper answers at once without playing it, as its
+// message thread sets the plug-in (a state, a program, the offline switch: host/core/Instance.h), is silent as a late one is,
+// and starts no hang's clock. The notes of a block that couldn't be handed over, or that the helper didn't play, go with the
+// next that is, at its start, so that no note that ended sounds on; and so do the values the changes of one the helper
+// didn't play left its parameters at (a value automation gives back to the one set by hand comes once). Its mix with what came in is the engine's, as for Phazite's own
 // devices. Its parameters are the plug-in's, by its own IDs for them (a VST3's numbers), so that the song's automation,
 // modulators and macros move them on Phazite's engine as they move its own devices': the block goes whole, with their
 // values on each control point as its changes (devices/core/Processor.h), which the helper plays at their samples.
@@ -21,8 +24,10 @@
 #include "SandboxedInstance.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
+#include "sandbox/core/BlockChannel.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
@@ -70,6 +75,10 @@ public:
     // fully wet reverb passed dry is worse than a gap), and to fade in as it plays again.
     static constexpr double fadeSeconds = 0.005;
 
+    // The blocks the helper answered without playing them so far, as its plug-in was being set, or late blocks whose answer
+    // couldn't be read any more, taken so (for the tests' measures; on the thread that plays it).
+    int countUnplayedBlocks() const noexcept { return unplayed; }
+
 private:
     std::shared_ptr<SandboxedInstance> kept;
     SandboxedInstance& instance;
@@ -100,7 +109,24 @@ private:
 
     // The audio thread's: the events of blocks that couldn't be handed over, for the start of the next that is, their room
     // made as this is. A note that began and ended among them isn't played.
-    std::vector<devices::NoteEvent> waiting;
+    std::vector<devices::NoteEvent> waiting, waitingBefore;
+
+    // The audio thread's: what went with the block handed over last (its events, as many as there is room for, and whether
+    // there was room for them all; its parameters' changes; whether it reset the plug-in), kept until it is answered: a
+    // block the helper answers without playing it (its plug-in being set on its message thread) hands them on with the next.
+    std::vector<devices::NoteEvent> handedEvents;
+    std::vector<sandbox::ParameterChange> handedChanges;
+    bool handedAllEvents = true, handedReset = false;
+
+    // The audio thread's: the channel of the block handed over last, while its answer is still to come after its deadline
+    // passed (nullptr for none), and the instance's count of hand-overs with it: once it has come, a block the helper didn't
+    // play hands on what went with it too, as does one whose answer can't be told any more (a render handed blocks of its
+    // own through the channel meanwhile, or the channel was made anew).
+    const sandbox::BlockChannel* lateAnswerOn = nullptr;
+    std::uint64_t lateHandOver = 0;
+    void takeLateAnswer (sandbox::BlockChannel&) noexcept;
+
+    int unplayed = 0; // the audio thread's: the blocks the helper answered without playing them, counted
 
     std::atomic<bool> failedInRender { false }, renderCancelled { false };
     std::atomic<std::int64_t> renderWaitSince { 0 };
@@ -110,6 +136,7 @@ private:
     bool waitInRender() noexcept;                                               // for a render's block: whether it was answered
     void skip (const devices::ProcessContext&) noexcept;                        // a block not handed over: its events kept
     void keep (std::span<const devices::NoteEvent>) noexcept;
+    void keepHanded() noexcept;                              // what went with a block the helper didn't play, kept for the next
     void remember (const devices::ProcessContext&) noexcept; // an effect's input, before it is handed over
     void silence (const devices::ProcessContext&) noexcept;  // what it plays in place of a block it didn't play
     void fadeIn (const devices::ProcessContext&) noexcept;   // a block it played, after one it didn't

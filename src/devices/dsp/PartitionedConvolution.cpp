@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PartitionedConvolution.h"
+#include "ClearedSamples.h"
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 #include <utility>
 
 namespace phazite::devices::dsp
@@ -51,16 +53,13 @@ void PartitionedConvolution::allocate (Kernels& kernels) const
 void PartitionedConvolution::reset() noexcept
 {
     for (auto& side : frames)
-        std::fill (side.begin(), side.end(), 0.0f);
-
-    for (auto& side : inputs)
-        std::fill (side.begin(), side.end(), Complex {});
+        ClearedSamples::clear (std::span (side));
 
     for (auto& set : outputs)
         for (auto& side : set)
-            std::fill (side.begin(), side.end(), 0.0f);
+            ClearedSamples::clear (std::span (side));
 
-    newest = position = 0;
+    newest = position = transformed = 0;
 }
 
 void PartitionedConvolution::setPlayed (const Kernels* kernels) noexcept
@@ -131,15 +130,15 @@ void PartitionedConvolution::process (const float* const* in, int numChannels, i
     }
 }
 
-void PartitionedConvolution::takeApart (const Complex* transformed, int size, Complex* first, Complex* second) noexcept
+void PartitionedConvolution::takeApart (const Complex* together, int size, Complex* first, Complex* second) noexcept
 {
     // z = a + i b, a and b real: A[k] = (Z[k] + conj Z[N - k]) / 2, B[k] = (Z[k] - conj Z[N - k]) / 2i.
     const auto n = 2 * size;
 
     for (int k = 0; k <= size; ++k)
     {
-        const auto z = transformed[k];
-        const auto mirrored = std::conj (transformed[(n - k) % n]);
+        const auto z = together[k];
+        const auto mirrored = std::conj (together[(n - k) % n]);
         const auto sum = z + mirrored, difference = z - mirrored;
         first[k] = { 0.5f * sum.real(), 0.5f * sum.imag() };
         second[k] = { 0.5f * difference.imag(), -0.5f * difference.real() };
@@ -178,6 +177,8 @@ void PartitionedConvolution::transformPartition() noexcept
         difference[k] = (left[k] - right[k]) * 0.5f;
     }
 
+    transformed = std::min (transformed + 1, numPartitions);
+
     for (auto& side : frames)
         std::copy (side.begin() + partitionSize, side.end(), side.begin());
 
@@ -192,6 +193,10 @@ void PartitionedConvolution::convolve (const Kernels& kernels, std::array<std::v
 {
     const auto sides = channelsIn > 1 ? 2 : 1;
     const auto firstInput = kernels.midSide && sides > 1 ? 2 : 0;
+
+    // The partitions transformed since the reset alone: what came in before it is silence, which adds nothing to a sum (a sum
+    // from +0 is never -0, so that leaving out a product that is 0 or -0 leaves it the same, to the bit).
+    const auto heard = std::min (numPartitions, transformed);
 
     for (int out = 0; out < sides; ++out)
     {
@@ -212,6 +217,9 @@ void PartitionedConvolution::convolve (const Kernels& kernels, std::array<std::v
 
                 case Kernels::Kind::delay:
                 {
+                    if (delayPartitions >= heard)
+                        break;
+
                     const auto slot = (newest - delayPartitions + numPartitions) % numPartitions;
                     const auto* x = reinterpret_cast<const float*> (inputs[(size_t) (firstInput + in)].data() + slot * bins);
 
@@ -225,7 +233,7 @@ void PartitionedConvolution::convolve (const Kernels& kernels, std::array<std::v
                 {
                     const auto* kernel = reinterpret_cast<const float*> (kernels.spectra[(size_t) route].data());
 
-                    for (int partition = 0; partition < numPartitions; ++partition)
+                    for (int partition = 0; partition < heard; ++partition)
                     {
                         const auto slot = (newest - partition + numPartitions) % numPartitions;
                         const auto* x = reinterpret_cast<const float*> (inputs[(size_t) (firstInput + in)].data() + slot * bins);

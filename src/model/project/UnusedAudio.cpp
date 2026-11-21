@@ -2,17 +2,30 @@
 #include "UnusedAudio.h"
 #include "internal/Project.h"
 #include "internal/ProjectContext.h"
+#include "model/arrangement/internal/AudioWork.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/WholeFile.h"
 #include "model/transport/internal/Recording.h"
 #include "model/versions/internal/VersionHistory.h"
 
 #include <algorithm>
+#include <atomic>
 #include <map>
 #include <set>
 
 namespace phazite
 {
+// A deletion under way (UnusedAudioFinder::deleteUnused()): whether it was cancelled, how far it is, set on the finder's
+// thread and read at the progress window's ticks; and, on the message thread, the window's hold and what it tells once done.
+struct UnusedAudioFinder::Deletion
+{
+    std::atomic<bool> cancelled { false };
+    std::atomic<float> progress { 0.0f };
+    std::unique_ptr<ProjectContext::WorkHold> hold;
+    std::function<void (Deleted)> done;
+    juce::String why; // why it was cancelled, where a quit said
+};
+
 // What a look for the unused audio needs, taken on the message thread, and what it reads of the project's saved files, by
 // their paths, while they stay as they were: so that a look can run on any thread.
 struct UnusedAudioLook
@@ -33,6 +46,8 @@ struct UnusedAudioLook
 
 namespace
 {
+    std::atomic<int> savedFilesRead { 0 }, savedFilesReadOnMessageThread { 0 };
+
     // A path as a song holds it: within the project's folder, or a full one.
     juce::File resolve (const juce::File& projectFolder, const juce::String& path)
     {
@@ -56,14 +71,18 @@ namespace
     }
 
     // What the saved files play, each read again only once it changed since the last look; what is kept of one gone since
-    // (a backup thinned away) forgotten.
-    void addSavedPaths (UnusedAudioLook& look, juce::StringArray& paths)
+    // (a backup thinned away) forgotten. False where it was told to stop first, between two files: a look under way as its
+    // project closes read every backup that had changed first, the window waiting for it.
+    bool addSavedPaths (UnusedAudioLook& look, juce::StringArray& paths, const std::function<bool()>& shouldStop = nullptr)
     {
         const auto files = findSavedSongFiles (look.projectFile);
         std::erase_if (look.saved, [&files] (const auto& entry) { return ! files.contains (entry.first); });
 
         for (const auto& file : files)
         {
+            if (shouldStop != nullptr && shouldStop())
+                return false;
+
             if (! file.existsAsFile())
                 continue;
 
@@ -73,12 +92,19 @@ namespace
 
             if (saved.size != size || saved.modified != modified)
             {
+                ++savedFilesRead;
+
+                if (juce::MessageManager::existsAndIsCurrentThread())
+                    ++savedFilesReadOnMessageThread;
+
                 const auto xml = juce::XmlDocument::parse (file);
                 saved = { size, modified, xml != nullptr ? findAudioFilePaths (juce::ValueTree::fromXml (*xml)) : juce::StringArray() };
             }
 
             paths.addArray (saved.paths);
         }
+
+        return true;
     }
 
     std::set<juce::File> resolveAll (const juce::File& projectFile, const juce::StringArray& paths)
@@ -115,14 +141,28 @@ namespace
         if (! found.unreadable.isEmpty())
             return found;
 
-        addSavedPaths (look, paths);
+        if (! addSavedPaths (look, paths, shouldStop))
+            return std::nullopt;
+
         const auto used = resolveAll (look.projectFile, paths);
         const auto folder = look.projectFile.getParentDirectory();
+        juce::Array<juce::File> files;
 
+        // The folders' files one at a time, so that it stops between two of them.
         for (const auto* subfolder : { "Audio", "Generated" })
-            for (const auto& file : folder.getChildFile (subfolder).findChildFiles (juce::File::findFiles, true))
-                if (getFileKind (file) == FileKind::audio && used.count (file) == 0)
-                    found.files.push_back ({ file, file.getRelativePathFrom (folder).replaceCharacter ('\\', '/'), file.getSize() });
+        {
+            for (const auto& entry : juce::RangedDirectoryIterator (folder.getChildFile (subfolder), true, "*", juce::File::findFiles))
+            {
+                if (shouldStop != nullptr && shouldStop())
+                    return std::nullopt;
+
+                files.add (entry.getFile());
+            }
+        }
+
+        for (const auto& file : files)
+            if (getFileKind (file) == FileKind::audio && used.count (file) == 0)
+                found.files.push_back ({ file, file.getRelativePathFrom (folder).replaceCharacter ('\\', '/'), file.getSize() });
 
         std::sort (found.files.begin(), found.files.end(),
                    [] (const auto& a, const auto& b) { return a.name.compareNatural (b.name) < 0; });
@@ -140,6 +180,11 @@ juce::String getWhyNotCleanUpAudio (const ProjectContext& context)
 
     if (isRecording (*song))
         return "Not while recording: the take being written is in the Audio folder.";
+
+    // An import's copy, or a sound's, is written into the Audio folder before a clip or a device plays it: it would be offered,
+    // and deleted under the clip its work then makes.
+    if (getAudioWork (context).isBusy())
+        return "Not while an audio file is being imported or read: its copy may be in the Audio folder before the song plays it.";
 
     // An old version open in its place: what the song plays is the version's, not its own (Clean Up's command goes back to
     // Now first).
@@ -161,50 +206,6 @@ bool canCleanUpAudio (const ProjectContext& context)
     return getWhyNotCleanUpAudio (context).isEmpty();
 }
 
-int deleteUnusedAudio (ProjectContext& context, const UnusedAudio& found, const juce::Array<juce::File>& files, Removal removal,
-                       juce::String* refused)
-{
-    const auto refuse = [refused] (const juce::String& why)
-    {
-        if (refused != nullptr)
-            *refused = why;
-
-        return 0;
-    };
-
-    if (const auto why = getWhyNotCleanUpAudio (context); why.isNotEmpty())
-        return refuse (why);
-
-    if (found.projectNumber != context.getProjectNumber())
-        return refuse ("Another project is open since Clean Up looked.");
-
-    if (! found.unreadable.isEmpty())
-        return refuse ("What some versions play can't be read yet: " + found.unreadable.joinIntoString ("; ") + ".");
-
-    // The versions as they were at the look: anything that came since (a commit, a song left on a branch, a snapshot that
-    // arrived from another computer) is looked at again first.
-    const auto* history = getVersionHistory (context);
-
-    if (history != nullptr && history->findVersionsAudioKey() != found.versionsKey)
-        return refuse ("The versions changed since Clean Up looked: it looks again.");
-
-    // What must be fresh, looked at again now: the song and the saved files.
-    UnusedAudioLook again;
-    again.projectFile = findSong (context)->getFile();
-    auto paths = findSongPaths (context);
-    paths.addArray (found.versionPaths);
-    addSavedPaths (again, paths);
-    const auto used = resolveAll (again.projectFile, paths);
-    auto deleted = 0;
-
-    for (const auto& unused : found.files)
-        if (files.contains (unused.file) && used.count (unused.file) == 0 && unused.file.existsAsFile()
-            && (removal == Removal::toRecycleBin ? unused.file.moveToTrash() : unused.file.deleteFile()))
-            ++deleted;
-
-    return deleted;
-}
-
 //==============================================================================
 UnusedAudioFinder::UnusedAudioFinder (const ProjectContext& c)
     : context (c),
@@ -215,14 +216,145 @@ UnusedAudioFinder::UnusedAudioFinder (const ProjectContext& c)
 
 UnusedAudioFinder::~UnusedAudioFinder()
 {
-    jobs.removeAll (true); // a look under way stops at its next step
+    jobs.removeAll (true); // a look or a deletion under way stops at its next step (a deletion's: its next file)
+
+    if (deleting != nullptr)
+        deleting->hold = nullptr; // whose cancel holds the deletion
+}
+
+UnusedAudioFinder::SavedFilesRead UnusedAudioFinder::countSavedFilesRead() noexcept
+{
+    return { savedFilesRead.load(), savedFilesReadOnMessageThread.load() };
+}
+
+void UnusedAudioFinder::deleteUnused (ProjectContext& projectContext, const juce::Array<juce::File>& files, Removal removal,
+                                      std::function<void (Deleted)> done)
+{
+    jassert (&projectContext == &context);
+
+    const auto refuse = [&done] (const juce::String& why)
+    {
+        if (done != nullptr)
+            done ({ 0, why });
+    };
+
+    if (deleting != nullptr || looking)
+        return refuse ("Clean Up is still at work: try again once it is done.");
+
+    if (! found.has_value())
+        return refuse ("Clean Up hasn't looked for the unused audio yet.");
+
+    if (const auto why = getWhyNotCleanUpAudio (context); why.isNotEmpty())
+        return refuse (why);
+
+    if (found->projectNumber != context.getProjectNumber())
+        return refuse ("Another project is open since Clean Up looked.");
+
+    if (! found->unreadable.isEmpty())
+        return refuse ("What some versions play can't be read yet: " + found->unreadable.joinIntoString ("; ") + ".");
+
+    // The versions as they were at the look: anything that came since (a commit, a song left on a branch, a snapshot that
+    // arrived from another computer) is looked at again first.
+    if (const auto* history = getVersionHistory (context); history != nullptr && history->findVersionsAudioKey() != found->versionsKey)
+        return refuse ("The versions changed since Clean Up looked: it looks again.");
+
+    // What the song plays now, which the window's hold keeps as it is until the end (no command runs, nothing is dropped on
+    // it, nothing records), and what the versions played at the look; the saved files are read on the finder's thread.
+    auto paths = findSongPaths (context);
+    paths.addArray (found->versionPaths);
+    juce::Array<juce::File> toDelete;
+
+    for (const auto& unused : found->files)
+        if (files.contains (unused.file))
+            toDelete.add (unused.file);
+
+    auto deletion = std::make_shared<Deletion>();
+    deletion->done = std::move (done);
+    deleting = deletion;
+
+    // Cancelled (the progress window's Cancel, Escape, a quit): stopped before the next file, what went staying gone (the
+    // recycle bin keeps it); the hold let go of as its thread says so, a file's move later at most.
+    deletion->hold = projectContext.holdForWork (
+        "Deleting unused audio",
+        [deletion] (const juce::String& why)
+        {
+            deletion->why = why.isNotEmpty() ? why : juce::String ("Stopped.");
+            deletion->cancelled = true;
+        },
+        [deletion] { return deletion->progress.load(); });
+
+    const auto weak = juce::WeakReference<UnusedAudioFinder> (this);
+
+    jobs.add (
+        [deletion, weak, removal, paths = std::move (paths), toDelete = std::move (toDelete), projectFile = findSong (context)->getFile(),
+         saved = saved, before = beforeDeletingForTests] (const BackgroundJobs::ShouldStop& shouldStop) mutable
+        {
+            const auto stop = [&shouldStop, &deletion] { return shouldStop() || deletion->cancelled.load(); };
+
+            // What the saved files play, each read again only where it changed since a look read it (this thread's, one job at a
+            // time).
+            UnusedAudioLook again;
+            again.projectFile = projectFile;
+            again.saved = std::move (saved->saved);
+            const auto read = addSavedPaths (again, paths, stop);
+            saved->saved = std::move (again.saved);
+            auto count = 0;
+
+            if (read)
+            {
+                const auto used = resolveAll (projectFile, paths);
+
+                for (int i = 0; i < toDelete.size() && ! stop(); ++i)
+                {
+                    const auto& file = toDelete.getReference (i);
+
+                    if (before != nullptr)
+                        before (file);
+
+                    if (used.count (file) == 0 && file.existsAsFile()
+                        && (removal == Removal::toRecycleBin ? file.moveToTrash() : file.deleteFile()))
+                        ++count;
+
+                    deletion->progress = (float) (i + 1) / (float) toDelete.size();
+                }
+            }
+
+            juce::MessageManager::callAsync (
+                [weak, deletion, count]
+                {
+                    if (auto* self = weak.get())
+                        self->deleted (deletion, { count, {} });
+                });
+        });
+}
+
+void UnusedAudioFinder::deleted (const std::shared_ptr<Deletion>& deletion, Deleted result)
+{
+    if (deleting != deletion)
+        return;
+
+    deleting = nullptr;
+    ++deletionsEnded;
+    auto done = std::move (deletion->done);
+    deletion->hold = nullptr; // the window is its own again before done is told
+
+    if (deletion->cancelled.load())
+        result.refused = deletion->why; // set before cancelled, on this thread
+
+    if (done != nullptr)
+        done (result);
 }
 
 void UnusedAudioFinder::find()
 {
     if (! canCleanUpAudio (context))
     {
+        // Refused: looked for again once it can look (shouldLookAgain()). What another project's look found isn't this one's.
         lookAgain = false;
+        refused = true;
+
+        if (found.has_value() && found->projectNumber != context.getProjectNumber())
+            found.reset();
 
         if (onFound != nullptr)
             onFound();
@@ -238,6 +370,7 @@ void UnusedAudioFinder::find()
     }
 
     looking = true;
+    refused = false;
     UnusedAudioLook prepared;
     prepared.projectFile = findSong (context)->getFile();
     prepared.songPaths = findSongPaths (context);

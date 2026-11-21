@@ -41,8 +41,18 @@ public:
     double getSampleRate() const noexcept { return sampleRate; }
     int getMaximumBlockSize() const noexcept { return maximumBlockSize; }
 
-    // Message thread: what it plays from its next block on; or nothing (silence).
+    // Message thread: what it plays from its next block on; or nothing (silence). What it replaces is freed once the audio
+    // thread has finished two blocks since (Handover.h); or at once while the engine is idle (below).
     void setPlan (std::unique_ptr<Plan>);
+
+    // Any thread: whether no audio thread is in one of its blocks, nor starts one until it is told otherwise. Its audio
+    // device's host says so (model/playback/internal/PlaybackHost.h): idle while no device has started, and once the device
+    // has stopped, which then calls it no more; not idle from just before a device starts. While idle, a plan given lets go
+    // of those it replaced at once, as dropPlans() does, rather than keep each until two blocks have played, which none will:
+    // every edit's plan was kept while no device played. Off unless set: a render's engine plays on a thread of its own, and
+    // a test plays the host's by hand, keeping a plan across blocks for its fades.
+    void setIdle (bool shouldBeIdle) noexcept { idle.store (shouldBeIdle); }
+    bool isIdle() const noexcept { return idle.load(); }
 
     // Message thread, while no audio thread calls the engine (it is off): lets go of its plan, and of those it replaced,
     // at once.
@@ -152,8 +162,9 @@ public:
     const std::atomic<std::uint64_t>& getBlocksPlayed() const noexcept { return blocksPlayed; }
 
     // Message thread, while the engine is stopped or not yet given to the audio device: so many threads play each block,
-    // the audio thread one of them (Workers.h).
-    void setNumThreads (int count) { workers.setNumThreads (count); }
+    // the audio thread one of them (Workers.h): an audio device's, at its priority, or a render's, which plays as fast as
+    // it can and so at the normal priority.
+    void setNumThreads (int count, Workers::Use use = Workers::Use::live) { workers.setNumThreads (count, use); }
     int getNumThreads() const noexcept { return workers.getNumThreads(); }
 
     // How loud what goes out is (any thread reads it, and resets its integrated loudness and held peak).
@@ -368,6 +379,7 @@ private:
     std::uint64_t playedAlignment = 0, playedDepartures = 0;
     std::atomic<std::uint32_t> drops { 0 };
     std::uint32_t dropsSeen = 0;
+    std::atomic<bool> idle { false }; // setIdle(): sequentially consistent, as the handover's pointer it is read after
 
     struct StopFade
     {

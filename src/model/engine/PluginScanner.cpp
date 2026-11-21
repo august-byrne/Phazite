@@ -6,14 +6,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <mutex>
+#include <utility>
 
 namespace phazite
 {
 namespace
 {
-    constexpr int startMilliseconds = 20000; // how long a helper may take to start and answer
-
     class Scanner : public juce::KnownPluginList::CustomScanner
     {
     public:
@@ -43,10 +43,16 @@ namespace
             }
         }
 
-        // From another thread: the helper ended, so that the file it is on answers at once.
+        // From another thread: the helper ended, so that the file it is on answers at once; first one that is still starting,
+        // which the scan's thread holds the lock for (a cancel waited there for as long as a helper may take to start: the
+        // plug-in list's window closed 20 seconds later, the window dead meanwhile).
         void cancel()
         {
             abort = true;
+
+            if (const auto fresh = getStarting())
+                fresh->kill();
+
             const std::lock_guard held (lock);
 
             if (helper != nullptr)
@@ -56,9 +62,26 @@ namespace
     private:
         PluginHost& host;
         const int secondsEach;
-        std::mutex lock; // the helper, which a cancel ends from another thread
-        std::unique_ptr<sandbox::Helper> helper;
+        std::mutex lock; // the helper, which a cancel ends from another thread; held while one starts
+        std::shared_ptr<sandbox::Helper> helper;
         std::atomic<bool> abort { false };
+
+        // The helper that is starting, which a cancel ends without the lock its start holds (Helper::kill() may come from
+        // another thread while it starts); kept by both while either uses it.
+        std::mutex startingLock;
+        std::shared_ptr<sandbox::Helper> starting;
+
+        std::shared_ptr<sandbox::Helper> getStarting()
+        {
+            const std::lock_guard held (startingLock);
+            return starting;
+        }
+
+        void setStarting (std::shared_ptr<sandbox::Helper> fresh)
+        {
+            const std::lock_guard held (startingLock);
+            starting = std::move (fresh);
+        }
 
         bool shouldAbort() const { return abort || shouldExit(); }
 
@@ -124,10 +147,16 @@ namespace
 
             if (helper == nullptr || ! helper->isRunning())
             {
-                helper = std::make_unique<sandbox::Helper> (host.getHelperProgram());
+                helper = nullptr;
+                auto fresh = std::make_shared<sandbox::Helper> (host.getHelperProgram());
+                setStarting (fresh);
 
-                if (helper != nullptr && ! helper->start (startMilliseconds))
-                    helper = nullptr;
+                // Not one a cancel came for before it was there to end; one cancelled as it starts fails to.
+                const auto started = ! shouldAbort() && fresh->start (pluginScanStartMilliseconds);
+                setStarting (nullptr);
+
+                if (started)
+                    helper = std::move (fresh);
             }
 
             return helper.get();
@@ -156,6 +185,12 @@ namespace
 std::unique_ptr<juce::KnownPluginList::CustomScanner> createPluginScanner (PluginHost& host, int secondsEach)
 {
     return std::make_unique<Scanner> (host, secondsEach);
+}
+
+void cancelPluginScan (juce::KnownPluginList::CustomScanner& scanner)
+{
+    if (auto* own = dynamic_cast<Scanner*> (&scanner))
+        own->cancel();
 }
 
 void usePluginScannerWithTimeLimit (PluginHost& host)

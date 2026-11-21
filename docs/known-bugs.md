@@ -14,7 +14,11 @@ and entered what it and its reviews found (211 to 214). What stays, each entry s
 test's exception; 137 and 197 wait for the owner's answer; 185, 191 and 213 can only be built and tried on Linux;
 196 is decided (2026-11-20: nothing is deleted by itself, and Free Up Space, roadmap step S4.4, frees the room by hand), and not built; 211
 and 212 are new; and 214 is a fault of the compiler on CI, which waits for the owner's choice of what to do about it.
-215 to 217 are the settings' card's, from its review (2026-11-20). 230 was found by reading JUCE (2026-11-20) and waits to be seen with a plug-in that shows it.
+215 to 217 are the settings' card's, from its review (2026-11-20). 218 to 224 are what the audit of the threads and the
+message thread (2026-11-20) and the reviews of its fixes left: the audit's other findings were fixed at once
+([changelog](changelog.md)); these were found by reading the code and none was measured, and what the audit only
+suspects, or would make faster, is in the [backlog](backlog.md). 230 was found by reading JUCE while
+roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -53,6 +57,37 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   then the helper leaves controllers, the bend and the channel's pressure out of what it hands a plug-in that has no
   mapping (the helper can ask the plug-in's own interfaces through `juce::ExtensionsVisitor`), as JUCE workaround, and
   the fault reported to JUCE.
+
+- **218. Slow plug-ins make the whole song late: each has a block's length from its own hand-over.** Two plug-in
+  effects in series that each take most of a block, at a small buffer, overrun the device's callback, and everything
+  crackles, not those two alone. Why: `SandboxedProcessor::collect()` waits for a block's own length (a millisecond at
+  least) from when that plug-in was handed its block, not from when the callback began; plug-ins in series, one handed
+  its block late in the callback, and each stretch of a block cut at the loop's end get that time each. One that hangs
+  costs one such wait and is skipped after it, so "never the song's" ([realtime-audit.md](realtime-audit.md), finding
+  9) holds for a hang, not for slowness. To fix: the callback's own deadline (its start and its length, less a margin
+  for the rest of the song) handed down in `devices::ProcessContext`, each plug-in waited for until the earlier of the
+  two. It trades a late song for plug-ins that fall silent when what comes before them is slow, as a plug-in that runs
+  inside a DAW never does: the owner's to decide.
+- **220. States given to several instances in one helper each have a minute from when they were sent, though the helper
+  sets them one after another.** A change that gives new states to four instances of a slow sampler at once (an undo,
+  a version opened), each taking 20 seconds to set, has the helper ended about 70 seconds in, on its third, and every
+  instance of that plug-in's file shows as crashed. Why: a state's request holds the heartbeat's hang off for
+  `SandboxedInstance`'s setting limit (60 s) counted from its send (`Helper::Reply::stopHoldingOffHangAfter()`), and
+  the helper's message thread takes the requests in turn. To fix: a reply's time starts when the reply before it in
+  that helper is answered, or the limit is counted from the helper's last answer.
+- **221. A plug-in prepared for live playback while a render plays it at another rate is prepared at the live rate for
+  the rest of the render.** An export at 96 kHz of a song that plays at 48 kHz, during which the live plan is made
+  again (a plug-in changes its latency as it is switched to rendering): the plug-in plays the rest of the export
+  prepared for 48 kHz, at the wrong pitch and speed. Why: `SandboxedInstance::preparedRate` is one value for both, and
+  the render's next `finishPreparing()` prepares the channel for whatever it holds. To fix: the rate a render wants
+  kept apart from the live one, the live prepare waiting until the render gives the plug-in back. Found by the fix of
+  the message thread's wait there (2026-11-20); older than it.
+- **222. A meter that a plug-in tells as a parameter from its own window's timer still counts as a value set by
+  hand.** Phazite drops a change of a parameter that can't be automated when the plug-in tells it on its audio thread
+  (JUCE workaround W58), which is where VST3's output parameters come from; one pushed from the plug-in's editor (its
+  `performEdit` on the helper's message thread) can't be told from a knob turned there, and marks the song changed
+  each time. To fix: needs the parameter's read-only flag, which JUCE's VST3 host doesn't hand on; or a parameter that
+  changes many times a second with no gesture begun taken for a meter.
 
 ## Versions
 
@@ -130,8 +165,28 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 
+- **223. A clip's render is absent for a moment as a newer copy takes its place, and a plan made then plays the clip
+  silent.** An export (which now makes the renders it needs on its own thread) and the background threads may make the
+  same render at once; each writes a part file and moves it over the render (`renderClipAudio()`,
+  `src/model/arrangement/ClipRenders.cpp`), and JUCE's `moveFileTo()` deletes the target before it moves. A compile in
+  that instant finds no file. To fix: replace the file in one step (`writeWholeFile()`'s way, or a move that replaces),
+  and an export that leaves to the background threads the renders they are already making.
+
 ## The window
 
+- **219. The browser opens a sound's file three or four times on the message thread at each step through its list.**
+  At each arrow key the preview checks the file and opens it, a loop that plays in time opens it again and makes its
+  whole stretched buffer, and the details open it for its levels and once more for what they say of it
+  (`Previewer::play()` in `src/model/engine/Preview.cpp`, `SoundView::show()` in `src/ui/browser/SoundView.cpp`).
+  Milliseconds on a local drive; in a OneDrive folder whose files aren't on the disk, or on a share, each step waits
+  for the file. To fix: the length and the format from what the library's listing knows; the readers made on a job, as
+  the clips' waveforms' are; the preview and the details started once the selection has rested a moment.
+- **224. A waveform zoomed in far reads its file's samples inside a paint.** At 256 samples a pixel or closer (the audio
+  clip editor, a playlist zoomed in), JUCE's thumbnail reads the samples themselves for what it draws, on the thread
+  that paints (`juce::AudioThumbnail`'s `CachedWindow::refillCache()`), where further out it draws from the levels it
+  keeps. No file is opened there any more, but on a share that is slow the paint waits for the read. To fix: draw from
+  the kept levels at every zoom (blockier close in), or read the close levels on a job and keep them: a choice of how
+  it looks, for the owner.
 - **215. While the settings show, the system's own Close of the window does nothing** (the taskbar's Close and the
   window's menu on Windows, the window manager's close button on Linux), a click on its taskbar button or Win+Down
   doesn't minimize it, and its sides and bottom don't resize it: each only brings the window forward; Alt+F4 quits,

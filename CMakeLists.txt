@@ -148,6 +148,7 @@ target_sources(phazite_core PRIVATE
     src/devices/drums/FactoryDrums.cpp
     src/devices/drums/FactoryDrums.h
     src/devices/dsp/AlignedShaper.h
+    src/devices/dsp/ClearedSamples.h
     src/devices/dsp/CombFilter.cpp
     src/devices/dsp/CombFilter.h
     src/devices/dsp/ControlGrid.h

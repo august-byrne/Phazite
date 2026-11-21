@@ -17,6 +17,7 @@
 #include "model/modulation/ModulationModel.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/UnusedAudio.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
@@ -175,7 +176,7 @@ TEST_CASE ("The Project view lists the song's audio files, a missing one with it
     const auto copy = song.getFile().getParentDirectory().getChildFile ("Audio/Kick.wav");
     REQUIRE (copy.deleteFile());
     view.refreshNow();
-    CHECK (view.describeAudioFile (0) == "Kick.wav, missing: " + trackName);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return view.describeAudioFile (0) == "Kick.wav, missing: " + trackName; }));
 
     auto& list = view.getAudioList();
     phazite::test::Mouse mouse (list);
@@ -217,6 +218,144 @@ TEST_CASE ("The Project view lists the song's audio files, a missing one with it
     REQUIRE (phazite::test::waitForVersionHistory (screen.session.getContext()));
     view.refreshNow();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getCleanUpButton().isEnabled(); }));
+}
+
+TEST_CASE ("The Project view asks the disk nothing on the message thread, and looks again only once something could have changed")
+{
+    // The audit of 2026-11-20: every five seconds while it showed, and after each edit, the view asked the disk on the message
+    // thread whether each of the song's audio files was there, and started a fresh look for the unused files: on a network
+    // share or a synced folder with hundreds of files, the window stalled every few seconds.
+    Screen screen;
+    REQUIRE (screen.registry.invoke ("project.save")); // a folder of its own, which the audio files are copied into
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); }));
+    auto& song = screen.getSong();
+    const auto track = screen.addTrack();
+    const auto sounds = screen.temp.folder.getChildFile ("Sounds");
+
+    for (int i = 0; i < 12; ++i)
+    {
+        const phazite::UndoStep step (song, "Add File");
+        const auto sound = phazite::test::writeSound (sounds.getChildFile ("Hit " + juce::String (i + 1) + ".wav"), 0.1);
+        REQUIRE (phazite::importFile (song, track, sound, phazite::BeatPosition::fromBeats (4.0 * i)).isValid());
+    }
+
+    REQUIRE (phazite::test::waitForVersionHistory (screen.session.getContext()));
+    auto& view = screen.showView();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return ! view.isLooking(); }));
+    REQUIRE (view.getNumAudioFiles() == 12);
+    const auto audio = song.getFile().getParentDirectory().getChildFile ("Audio");
+    const auto queriesBefore = phazite::getProjectDiskQueriesOnMessageThread();
+
+    // Phazite in front or not as the test says: the system's answer would change as other windows take the front.
+    auto inFront = false;
+    view.isInFront = [&inFront] { return inFront; };
+    view.tickNow();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return ! view.isLooking(); }));
+
+    // Nothing changes: the ticks read the model again, and ask nothing of the disk.
+    for (int i = 0; i < 25; ++i)
+    {
+        view.tickNow();
+        CHECK_FALSE (view.isLooking());
+    }
+
+    // A file gone: the next look, as the song changes, finds it missing; held there, as a drive that doesn't answer, the view
+    // goes on with the song meanwhile, showing what it knew.
+    REQUIRE (audio.getChildFile ("Hit 3.wav").deleteFile());
+    const auto going = std::make_shared<std::atomic<bool>> (false);
+    const auto held = std::make_shared<std::atomic<int>> (0);
+    const juce::ScopeGuard letGo { [going] { *going = true; } };
+    view.getMissingCheck().setBeforeChecking (
+        [going, held] (const juce::File&)
+        {
+            ++*held;
+            const auto since = juce::Time::getMillisecondCounterHiRes();
+
+            while (! going->load() && juce::Time::getMillisecondCounterHiRes() - since < phazite::test::hangTimeout)
+                juce::Thread::sleep (1);
+        });
+
+    phazite::setTrackName (song, track, "Hits");
+    phazite::test::dispatchPendingMessages();
+    view.tickNow();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([held] { return held->load() > 0; }));
+    CHECK (view.isLooking());
+    CHECK (view.describeAudioFile (2) == "Hit 3.wav: Hits"); // the name changed; missing not known yet
+    *going = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return ! view.isLooking(); }));
+    CHECK (view.describeAudioFile (2) == "Hit 3.wav, missing: Hits");
+
+    // The next look, held again: still shown missing meanwhile, and after.
+    *going = false;
+    *held = 0;
+    view.refreshNow();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([held] { return held->load() > 0; }));
+    CHECK (view.describeAudioFile (2) == "Hit 3.wav, missing: Hits");
+    *going = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return ! view.isLooking(); }));
+    CHECK (view.describeAudioFile (2) == "Hit 3.wav, missing: Hits");
+    CHECK (view.describeAudioFile (3) == "Hit 4.wav: Hits");
+    view.getMissingCheck().setBeforeChecking (nullptr);
+
+    // Phazite coming to the front again (the user back from Explorer): a look.
+    inFront = true;
+    view.tickNow();
+    CHECK (view.isLooking());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return ! view.isLooking(); }));
+    view.isInFront = nullptr;
+
+    // getProjectAudioFiles(), read at every tick, asked the disk nothing.
+    CHECK (phazite::getProjectDiskQueriesOnMessageThread() == queriesBefore);
+}
+
+TEST_CASE ("A project opened while its versions are read shows its own count of unused files once they are read, with no edit")
+{
+    // The audit's review, 2026-11-20: Clean Up can't look while the versions are read, so the view kept the project before's
+    // count, and nothing looked again until an edit or a trip to another program.
+    Screen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("project.save"));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); }));
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    phazite::test::writeSound (screen.getSong().getFile().getParentDirectory().getChildFile ("Audio/Old take.wav"), 0.5);
+    auto& view = screen.showView();
+    view.isInFront = [] { return false; };
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getUnusedText().startsWith ("1 file"); }));
+
+    // Another project, with two files nothing plays, opened while its versions' first read is held.
+    juce::File other;
+
+    {
+        juce::String error;
+        const auto made = phazite::Project::create (screen.temp.folder.getChildFile ("Others"), "Other", error);
+        REQUIRE (made != nullptr);
+        other = made->getFile();
+        phazite::test::writeSound (made->getAudioFolder().getChildFile ("Take 1.wav"), 0.2);
+        phazite::test::writeSound (made->getAudioFolder().getChildFile ("Take 2.wav"), 0.2);
+    }
+
+    struct FirstReadHeld
+    {
+        FirstReadHeld() { phazite::VersionHistory::holdFirstReadsForTests = true; }
+        ~FirstReadHeld() { letGo(); }
+        void letGo() { phazite::VersionHistory::holdFirstReadsForTests = false; }
+    } held;
+
+    screen.session.openProject (other);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return phazite::VersionHistory::firstReadsHeldForTests.load() >= 1; }));
+    view.tickNow();
+    CHECK_FALSE (phazite::canCleanUpAudio (context));
+    CHECK_FALSE (view.getCleanUpButton().isVisible()); // no count: not the project before's
+
+    // Read: the view's ticks find its own, with no edit and no trip elsewhere.
+    held.letGo();
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&view]
+        {
+            view.tickNow();
+            return view.getUnusedText().startsWith ("2 files");
+        }));
+    view.isInFront = nullptr;
 }
 
 TEST_CASE ("The Project view finds the unused audio in the background, reading each branch's song once until the versions change")

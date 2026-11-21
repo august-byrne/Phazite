@@ -9,7 +9,10 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/plugins/internal/PluginInstances.h"
 
+#include <juce_events/juce_events.h>
+
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <map>
 
@@ -110,7 +113,7 @@ void setProjectNotes (ProjectContext& context, const juce::String& text)
         song->getState().setProperty (schema::notes, text, &song->getUndoManager());
 }
 
-std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext& context)
+std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext& context, const std::set<juce::File>& missing)
 {
     std::vector<ProjectAudioFile> files;
     const auto* song = findSong (context);
@@ -134,7 +137,7 @@ std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext& contex
                                              if (isNew)
                                              {
                                                  const auto file = findProjectFile (*song, path);
-                                                 files.push_back ({ .path = path, .file = file, .missing = ! file.existsAsFile() });
+                                                 files.push_back ({ .path = path, .file = file, .missing = missing.count (file) > 0 });
                                              }
 
                                              auto& used = files[place->second];
@@ -147,9 +150,134 @@ std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext& contex
     return files;
 }
 
+//==============================================================================
+namespace
+{
+    std::atomic<int> diskQueriesOnMessageThread { 0 }, checksUnderWay { 0 };
+} // namespace
+
+void noteProjectDiskQuery() noexcept
+{
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        ++diskQueriesOnMessageThread;
+}
+
+int getProjectDiskQueriesOnMessageThread() noexcept
+{
+    return diskQueriesOnMessageThread.load();
+}
+
+// A check under way: told that its answer isn't wanted (a newer check waits: it stops at its next file, and says so), or
+// that what asked for it has gone (it stops, and posts nothing).
+struct MissingAudioCheck::Running
+{
+    std::atomic<bool> superseded { false }, gone { false };
+};
+
+MissingAudioCheck::MissingAudioCheck() = default;
+
+MissingAudioCheck::~MissingAudioCheck()
+{
+    if (running != nullptr)
+        running->gone = true; // left to end by itself
+}
+
+int MissingAudioCheck::getChecksUnderWay() noexcept
+{
+    return checksUnderWay.load();
+}
+
+void MissingAudioCheck::check (const juce::Array<juce::File>& files)
+{
+    checking = true;
+
+    // One at a time: the one under way is asked to stop, and this one, the newest, waits for it.
+    if (running != nullptr)
+    {
+        running->superseded = true;
+        next = files;
+        return;
+    }
+
+    start (files);
+}
+
+void MissingAudioCheck::start (const juce::Array<juce::File>& files)
+{
+    running = std::make_shared<Running>();
+    ++started;
+    ++checksUnderWay;
+
+    // On a thread of its own, which nothing waits for: it owns what it uses (the files, the tests' hook, its state), and
+    // once what asked for it has gone it posts nothing.
+    auto checkFiles = [files, state = running, before = beforeChecking, weak = juce::WeakReference<MissingAudioCheck> (this)]
+    {
+        std::set<juce::File> found;
+        auto stopped = false;
+
+        for (const auto& file : files)
+        {
+            if (before != nullptr)
+                before (file);
+
+            if (state->superseded.load() || state->gone.load())
+            {
+                stopped = true;
+                break;
+            }
+
+            if (file != juce::File() && ! file.existsAsFile())
+                found.insert (file);
+        }
+
+        if (! state->gone.load())
+            juce::MessageManager::callAsync (
+                [weak, stopped, missingFound = std::move (found)]() mutable
+                {
+                    if (auto* self = weak.get())
+                        self->ended (stopped, std::move (missingFound));
+                });
+
+        --checksUnderWay;
+    };
+
+    if (! juce::Thread::launch (juce::Thread::Priority::low, std::move (checkFiles)))
+    {
+        --checksUnderWay;
+        running = nullptr;
+        next.reset();
+        checking = false;
+    }
+}
+
+void MissingAudioCheck::ended (bool stopped, std::set<juce::File> found)
+{
+    running = nullptr;
+
+    // The newest asked for while it ran, started now.
+    if (next.has_value())
+    {
+        const auto files = std::move (*next);
+        next.reset();
+        start (files);
+        return;
+    }
+
+    if (! stopped)
+        missing = std::move (found);
+
+    checking = false;
+
+    if (onChecked != nullptr)
+        onChecked();
+}
+
+//==============================================================================
 bool locateAudioFile (ProjectContext& context, const juce::String& path, const juce::File& found)
 {
     auto* song = findSong (context);
+
+    noteProjectDiskQuery(); // the file found: one question, as the user chose it
 
     if (song == nullptr || path.isEmpty() || ! found.existsAsFile())
         return false;
@@ -172,6 +300,8 @@ bool locateAudioFile (ProjectContext& context, const juce::String& path, const j
 bool locateAudioFileNow (ProjectContext& context, const juce::String& path, const juce::File& found)
 {
     auto* song = findSong (context);
+
+    noteProjectDiskQuery();
 
     if (song == nullptr || path.isEmpty() || ! found.existsAsFile())
         return false;

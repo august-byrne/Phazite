@@ -135,6 +135,21 @@ TEST_CASE ("Settings that change often are saved within seconds, the others at o
     CHECK (readFromDisk (xml, Settings::browserFavorites.key).isEmpty());
     settings.saveNow();
     CHECK (readFromDisk (xml, Settings::browserFavorites.key) == "Kick.wav");
+
+    // The two that fields change at each step of a drag are saved soon (the audit of 2026-11-20: a whole file's write and a
+    // flush at each step); and a setting saved now, set to what it holds already, writes nothing, as the audio device's
+    // settings are all set again at each change of the recording correction.
+    settings.set (Settings::recordOverdub, false);
+    REQUIRE (readFromDisk (xml, Settings::recordOverdub.key) == "0");
+    settings.set (Settings::undoSteps, 500.0);
+    settings.set (Settings::recordingCorrection, 2.5);
+    settings.set (Settings::theme, "light");
+    settings.set (Settings::recordOverdub, false);
+    CHECK (readFromDisk (xml, Settings::undoSteps.key).isEmpty());
+    CHECK (readFromDisk (xml, Settings::recordingCorrection.key).isEmpty());
+    settings.saveNow();
+    CHECK (readFromDisk (xml, Settings::undoSteps.key).getDoubleValue() == doctest::Approx (500.0));
+    CHECK (readFromDisk (xml, Settings::recordingCorrection.key).getDoubleValue() == doctest::Approx (2.5));
 }
 
 TEST_CASE ("Recent projects read and write the format JUCE's list used")

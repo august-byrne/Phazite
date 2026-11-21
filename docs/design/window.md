@@ -153,7 +153,11 @@ hides the panel.
     play it; the header counts them and the missing ones. A missing file shows in the warning colour with Locate...
     (also a double-click): the file chosen is copied into the project and takes the missing one's place everywhere, as
     one undo step, "Locate Audio File". Under the list, while the project's folder holds audio files that nothing
-    plays, their count with **Clean Up...**, which runs Clean Up Unused Audio.
+    plays, their count with **Clean Up...**, which runs Clean Up Unused Audio. Which files are missing and which are
+    unused are asked of the disk in the background, never on the window's thread, and only once something could have
+    changed them: the view showing, the song or its versions changing, Phazite coming to the front again, Clean Up
+    deleting files, or Clean Up becoming able to look after it couldn't (the versions being read or written, an import
+    under way); the view shows what it knew meanwhile, never another project's count.
   - *Plug-ins:* each plug-in the song holds, on its track or the master; the header says how many crashed, are not
     installed or are off. A crashed one has Reload. A click selects the plug-in and shows it in the Devices view.
   - *MIDI Links:* each knob or fader of a MIDI controller linked to a parameter (MIDI learn,

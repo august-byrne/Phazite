@@ -177,10 +177,9 @@ void LinearPhase::reset() noexcept
 
     designing = droppedLast = false;
 
-    for (auto& side : history)
-        std::fill (side.begin(), side.end(), 0.0f);
-
+    // Its history forgotten by its count, nothing of it written (playStretch()).
     historyAt = 0;
+    historyHeld = {};
     grid.reset();
     afterReset = true;
     placeKnown = jumped = false;
@@ -741,17 +740,33 @@ void LinearPhase::playStretch (float* const* channels, int numChannels, int from
 
     numChannels = std::min (numChannels, 2);
 
-    // What came in, kept for its copy as late as the latency.
+    // What came in, kept for its copy as late as the latency: silence for what came in before the reset (from the first
+    // sample, a latency after the reset, that what came in since reaches back to).
     for (int channel = 0; channel < numChannels; ++channel)
     {
         auto& kept = history[(size_t) channel];
+        auto& held = historyHeld[(size_t) channel];
+        const auto firstHeld = std::clamp (latency - held, 0, length);
 
-        for (int i = 0; i < length; ++i)
+        // In two runs, so that no sample asks which it is in.
+        for (int i = 0; i < firstHeld; ++i)
+        {
+            kept[(size_t) ((historyAt + i) & historyMask)] = channels[channel][from + i];
+            delayed[(size_t) channel][(size_t) (from + i)] = 0.0f;
+        }
+
+        for (int i = firstHeld; i < length; ++i)
         {
             kept[(size_t) ((historyAt + i) & historyMask)] = channels[channel][from + i];
             delayed[(size_t) channel][(size_t) (from + i)] = kept[(size_t) ((historyAt + i - latency) & historyMask)];
         }
+
+        held = std::min (held + length, historyMask + 1);
     }
+
+    // A side not played keeps nothing of this stretch: what it held is from before it, and silence when it plays again.
+    for (int channel = numChannels; channel < 2; ++channel)
+        historyHeld[(size_t) channel] = 0;
 
     if (numChannels < 2)
         std::copy (delayed[0].begin() + from, delayed[0].begin() + from + length, delayed[1].begin() + from);

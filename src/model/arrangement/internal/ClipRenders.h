@@ -14,6 +14,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -28,11 +29,47 @@ namespace phazite
 bool renderClipAudio (const juce::File& source, const stretch::Settings&, const juce::File& render,
                       const std::function<bool()>& shouldStop = {}, std::atomic<juce::int64>* framesWritten = nullptr);
 
-// Renders, on the calling thread, every clip's render that isn't there yet (its source asked about now, as the render that
-// plays it next asks: getRenderFile()), and has each new one played. What
-// the project's ClipRenders does in the background; exports and freezes call it first, as a render that isn't there plays
-// silence. Returns false if shouldStop stopped it or a render failed.
+// A clip's render that isn't there yet, with what it is made from, and how many frames its source has (as the song's record
+// of files says: getAudioFileInfo()).
+struct ClipRenderToMake
+{
+    juce::File render, source;
+    stretch::Settings settings;
+    juce::int64 sourceLength = 0;
+};
+
+// The clips' renders that aren't there yet, each once, read from the song on the message thread: their sources asked about
+// now, as the player made next asks about each file it doesn't know yet (getRenderFile()), so that each is named as that
+// player will name it (a source written again within the second, under another).
+std::vector<ClipRenderToMake> findMissingClipRenders (const Song&);
+
+// Makes them, on the calling thread (any but the audio thread: nothing of the song is read), one after another, until
+// shouldStop (asked between the stretcher's blocks) says stop, telling how far it has come, from 0 to 1 by their frames, as
+// it asks. Returns those it made, or that someone else made meanwhile.
+juce::Array<juce::File> makeClipRenders (const std::vector<ClipRenderToMake>&, const std::function<bool()>& shouldStop = {},
+                                         const std::function<void (double)>& progress = {});
+
+// For the tests: what is called on the thread that makes them (makeClipRenders()) each time the stretcher asks whether to
+// stop, with what says whether to; none if not set. Set while none are made.
+void setClipRenderStopSeam (std::function<void (const std::function<bool()>& shouldStop)>);
+
+// Has renders newly made played: Phazite's engine plays them from its next plan. Message thread.
+void announceClipRenders (const Song&, const juce::Array<juce::File>& made);
+
+// All three on the calling thread, the message thread: every clip's render that isn't there yet made, and each new one
+// played. What the project's ClipRenders does in the background; the tests call it before they render a song whose renders
+// they need (a render, OfflineRender.h, makes them on its own thread, as each job's turn comes). Returns false if shouldStop
+// stopped it or a render failed.
 bool renderMissingClipAudio (const Song&, const std::function<bool()>& shouldStop = {});
+
+// How many renders renderClipAudio() has made since the program started, on the message thread and on other threads: for
+// the tests that a render makes them off the message thread.
+struct ClipRendersMade
+{
+    int onMessageThread = 0, elsewhere = 0;
+};
+
+ClipRendersMade countClipRendersMade();
 
 // Deletes the renders in the song's cache folder that no clip plays, and any left half-made. When a project closes
 // (model/mixer/internal/Freeze.h: purgeCache()).

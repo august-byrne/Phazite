@@ -16,6 +16,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -43,10 +44,17 @@ public:
     sandbox::RemoteInstance& getRemote() noexcept { return *remote; }
 
     // The channel, for one block: held while it plays, which the audio thread never waits for (tryHold()), and a render
-    // does (hold()). let() gives it back.
+    // does (hold()). let() gives it back. The message thread waits for it only to put a reloaded plug-in in place of a
+    // crashed one (replaceRemote()), which a render lets go of within a slice of its wait (waitForAnswer()); its preparing
+    // doesn't wait for a render that holds it for as long as a plug-in takes (prepareToPlay()).
     bool tryHold() noexcept;
     void hold() noexcept;
     void let() noexcept;
+
+    // The blocks handed over to its helper so far, by whatever plays it (live playback, a render: any thread), so that one
+    // that handed a block over can tell whether others went through the channel before it took the answer.
+    std::uint64_t countHandOvers() const noexcept { return handOvers.load (std::memory_order_acquire); }
+    void noteHandOver() noexcept { handOvers.fetch_add (1, std::memory_order_acq_rel); }
 
     // Whether its helper has gone (any thread), and its being told so (by the plug-in host, on any thread); then what it
     // calls on the message thread (the plug-in host's, which tells the views).
@@ -72,8 +80,10 @@ public:
     int getPreparedBlockSize() const noexcept { return preparedBlockSize.load (std::memory_order_relaxed); }
 
     // Whether its channel for the rate and the longest block it was last prepared for is still to come (any thread): asked of
-    // the helper without waiting, once the helper has given back the block it kept then, if it kept one. The engine skips its
-    // blocks meanwhile, and a render (the channel held, the block back) waits for the channel itself (finishPreparing()).
+    // the helper without waiting, once the helper has given back the block it kept then, if it kept one, and once a render
+    // that holds the channel (waiting for the plug-in, as long as it takes) has let go of it, if prepared meanwhile (the
+    // message thread's timer finishes it then). The engine skips its blocks meanwhile, and a render (the channel held, the
+    // block back) waits for the channel itself (finishPreparing()).
     // The message thread looks a hundred times a second, and ends its helper once the block has been kept as long as a hang
     // takes, or the channel hasn't come in a minute. Nothing waits for the plug-in so (known bug 166: the message thread
     // waited for the helper, behind whatever else it did): cancelling a render that it keeps a block of doesn't wait for
@@ -99,8 +109,11 @@ public:
     Answer waitForAnswer (std::int64_t limitNanoseconds, const std::atomic<bool>* cancelled = nullptr) noexcept;
 
     // The values set since the last block, as the block's changes at its start (on the thread that plays it, the channel
-    // held).
+    // held). And a value a block that wasn't played left a parameter at (automation's, or the value set by hand it gives back
+    // to, which comes once), kept for the next block as such a value is, without changing the value set by hand (on the
+    // thread that plays the blocks).
     void takeChanges (sandbox::BlockInfo&, sandbox::ParameterChange*, int maxChanges) noexcept;
+    void keepChange (int parameter, float value) noexcept;
 
     // The parameters (by their places) whose values Phazite's engine sends with each block, as its automation and
     // modulation move them (SandboxedProcessor.h): a value set by hand of one of them goes with the engine's blocks rather
@@ -254,6 +267,14 @@ public:
     static void setPrepareMilliseconds (int) noexcept;
     static int getPrepareMilliseconds() noexcept;
 
+    // How long a state or a program given to it may take to be set before the helper is taken for hung if its message thread
+    // doesn't answer the heartbeat by then (a minute, as a plug-in may take to load: a sampler that reads its library;
+    // shorter in the tests). Meanwhile its live blocks are answered unplayed (host/core/Instance.h), and the helper isn't
+    // taken for hung; past it, the heartbeat's limit later, it is: nothing else would end a helper whose plug-in never
+    // comes back from being given a state.
+    static void setSettingMilliseconds (int) noexcept;
+    static int getSettingMilliseconds() noexcept;
+
 private:
     class Parameter;
 
@@ -265,7 +286,8 @@ private:
     const juce::PluginDescription description;
     std::atomic<bool> crashed { false }, held { false };
     std::atomic<bool> anyPending { false }; // a value set while a block played, for the next
-    juce::MemoryBlock lastState;            // as it opened from, or was last taken or given: what one whose helper has gone keeps
+    std::atomic<std::uint64_t> handOvers { 0 };
+    juce::MemoryBlock lastState; // as it opened from, or was last taken or given: what one whose helper has gone keeps
 
     // On the message thread: the changes that may have changed its state, counted; the count lastState was taken or given at
     // (-1 for none: it opened from nothing), and the last it was asked at and didn't answer; and the answer still to come,
@@ -280,6 +302,12 @@ private:
     std::shared_ptr<sandbox::Helper::Reply> stateAsked;
     double stateAskedSince = 0.0;
     bool stateAskedUnasked = false;
+
+    // The answer to the state or program given last (message thread), kept so that it holds off the helper's hang until the
+    // plug-in has taken it, or the setting's time is up (getSettingMilliseconds()): the helper takes what it is given in
+    // turn, so the last one given holds it off for those before it too.
+    std::shared_ptr<sandbox::Helper::Reply> given;
+    void keepGiven (std::shared_ptr<sandbox::Helper::Reply>);
     // Its editors shown now, and shown or closed (counted, and as its state was asked); and whether one has shown since its
     // state was last taken.
     int editorsOpen = 0, editorMoves = 0, editorMovesAtAsk = 0;
@@ -296,7 +324,7 @@ private:
     std::atomic<int> preparedBlockSize { 0 };
     double channelRate = 0.0;
     std::atomic<bool> preparing { false };
-    std::int64_t preparingSince = 0;
+    std::atomic<std::int64_t> preparingSince { 0 }; // set as preparing begins, with the channel held or not (prepareToPlay())
     std::unique_ptr<sandbox::RemoteInstance::Preparing> prepareAsked; // the channel asked of the helper, until it comes (held)
 
     // What came from the helper, for the message thread.
@@ -395,6 +423,7 @@ private:
 
     bool isPrepared() noexcept; // its channel for the rate and block asked (held)
     void prepareNow();          // its channel asked for them, or taken in once it has come (held)
+    void prepareHeld();         // prepareToPlay()'s, with the channel held
     void playBlock (juce::AudioBuffer<float>&, const juce::MidiBuffer&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SandboxedInstance)

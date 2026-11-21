@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SandboxedProcessor.h"
+#include "engine/nodes/DeviceRunner.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <iterator>
@@ -125,6 +127,11 @@ SandboxedProcessor::SandboxedProcessor (std::shared_ptr<SandboxedInstance> sandb
 
     info.parameters = parameters;
     waiting.reserve (maximumWaiting);
+    waitingBefore.reserve (maximumWaiting);
+    handedEvents.reserve (maximumWaiting);
+    // As many changes as a channel takes (PluginHost::open() makes each for so many): not read from the channel, which a
+    // render's thread may be making anew meanwhile.
+    handedChanges.reserve ((size_t) engine::DeviceRunner::maximumChanges);
 
     // One that loaded while the engine played silence in its place (LoadingPlugin) fades in as it first plays.
     startsSilent = instance.takeJoinLate();
@@ -160,6 +167,7 @@ void SandboxedProcessor::reset()
     resetWanted = true;
     waiting.clear();
     history.clear();
+    lateAnswerOn = nullptr; // nor what went with a block still to be answered
 }
 
 void SandboxedProcessor::start (const devices::ProcessContext& context)
@@ -273,6 +281,49 @@ void SandboxedProcessor::skip (const devices::ProcessContext& context) noexcept
     silence (context);
 }
 
+void SandboxedProcessor::takeLateAnswer (sandbox::BlockChannel& channel) noexcept
+{
+    // The answer to a block that came after its deadline, once it has come: one the helper didn't play hands on what went
+    // with it, as one answered so in time does (collect()). One whose answer can't be read any more (a render handed its
+    // own blocks through the channel meanwhile, which answer over it, or the channel was made anew) is taken as unplayed
+    // too: a note-on given twice is better than a note-off lost. Nothing of a helper gone.
+    if (lateAnswerOn == nullptr)
+        return;
+
+    const auto readable = lateAnswerOn == &channel && instance.countHandOvers() == lateHandOver;
+
+    if (readable && channel.isBusy() && ! instance.hasCrashed())
+        return;
+
+    if (! instance.hasCrashed() && (! readable || channel.getInfo().played == 0))
+        keepHanded();
+
+    lateAnswerOn = nullptr;
+}
+
+void SandboxedProcessor::keepHanded() noexcept
+{
+    // Before what waits now (what there was no room for in the block, and what came since): the block's own events, in
+    // their order, as a skipped block's are kept; then, if there was no room to keep them all, all notes off, which ends
+    // the notes among those kept whose ends weren't.
+    ++unplayed;
+    waitingBefore.swap (waiting);
+    waiting.clear();
+    keep (handedEvents);
+
+    if (! handedAllEvents)
+        keep (std::array { devices::NoteEvent { devices::NoteEvent::Type::allNotesOff, 0, 0, 0.0f } });
+
+    keep (waitingBefore);
+    waitingBefore.clear();
+
+    // Its changes, the last of each parameter's for the next block, at its start; and its reset, which it didn't make.
+    for (const auto& change : handedChanges)
+        instance.keepChange (change.index, change.value);
+
+    resetWanted = resetWanted || handedReset;
+}
+
 void SandboxedProcessor::keep (std::span<const devices::NoteEvent> events) noexcept
 {
     using Type = devices::NoteEvent::Type;
@@ -358,16 +409,22 @@ void SandboxedProcessor::collect (const devices::ProcessContext& context, std::i
         const auto deadline =
             std::max<std::int64_t> (0, SandboxedInstance::getDeadlineNanoseconds (context.numSamples, maximumBlock, rate) - waited);
         played = channel.waitForAnswer (0, deadline) == sandbox::BlockChannel::Played::done;
+        lateAnswerOn = played ? nullptr : &channel;
     }
 
     // What it played, as it was handed over: by the channels and samples Phazite handed it, never by what the helper's side
     // of the memory says now, which a helper gone wrong could have left anything in (a block that says otherwise is as one
     // it didn't play); unless some of it isn't a number, which every device after it would keep, which is as one it didn't
-    // play too.
+    // play too. One the helper answered without playing it (its plug-in being set on its message thread) is silent as a
+    // late one is, and what went with it goes with the next.
     if (played)
     {
         const auto& block = channel.getInfo();
-        played = block.numChannels == handedChannels && block.numSamples == context.numSamples;
+
+        if (block.played == 0)
+            keepHanded();
+
+        played = block.played != 0 && block.numChannels == handedChannels && block.numSamples == context.numSamples;
 
         for (int i = 0; i < handedChannels && played; ++i)
             played = areNumbers (channel.getChannel (i), context.numSamples);
@@ -400,6 +457,8 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
             return false;
         }
 
+        takeLateAnswer (instance.getRemote().getChannel()); // before the channel is prepared again
+
         // Waited for as a block is (known bug 166), so that the render names it; prepared, or the render fails (its helper
         // gone, or ended as it never came), or it is cancelled: never a block played as silence without a word.
         renderWaitSince.store (sandbox::getNanoseconds(), std::memory_order_release);
@@ -424,6 +483,7 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
 
     auto& channel = instance.getRemote().getChannel();
     const auto& limits = channel.getLimits();
+    takeLateAnswer (channel);
 
     // Still on a block it was late with: one kept too long is a hang, which its helper is ended for (told without waiting).
     if (! instance.hasCrashed() && channel.isBusy())
@@ -532,7 +592,8 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
         while (sentNow < context.events.size() && send (context.events[sentNow], context.events[sentNow].sample))
             ++sentNow;
 
-    // Values set while a block played (none, unless a render set them), then what the engine moves, at their samples.
+    // Values set while a block played (none, unless a render set them), then what the engine moves, at their samples; kept
+    // as they went, for a block the helper doesn't play.
     block.numChanges = 0;
     instance.takeChanges (block, channel.getChanges(), limits.maxChanges);
 
@@ -544,6 +605,11 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
         if (change.parameter < (int) ids.size())
             channel.getChanges()[block.numChanges++] = { change.parameter, change.sample, change.value };
     }
+
+    handedChanges.clear();
+
+    for (int i = 0; i < block.numChanges && handedChanges.size() < handedChanges.capacity(); ++i)
+        handedChanges.push_back (channel.getChanges()[i]);
 
     // Where the song is, as a plug-in's playhead has it: in quarter notes (its ppqPosition) and in samples, the time
     // signature there, and the bar it is in: where it starts and which it is.
@@ -561,7 +627,16 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
 
     if (channel.handOver())
     {
-        resetWanted = false;
+        // What went with it, kept until it is answered (keepHanded()), and which of the channel's hand-overs it was.
+        instance.noteHandOver();
+        lateHandOver = instance.countHandOvers();
+        handedReset = std::exchange (resetWanted, false);
+        handedEvents.clear();
+
+        for (size_t i = 0; i < sentWaiting + sentNow && handedEvents.size() < handedEvents.capacity(); ++i)
+            handedEvents.push_back (i < sentWaiting ? waiting[i] : context.events[i - sentWaiting]);
+
+        handedAllEvents = handedEvents.size() == sentWaiting + sentNow;
         waiting.erase (waiting.begin(), waiting.begin() + (std::ptrdiff_t) sentWaiting);
         keep (context.events.subspan (sentNow));
         return true;

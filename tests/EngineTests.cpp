@@ -4,6 +4,7 @@
 // map, the transport and its metronome, to the sample, and audio files and the clips that play them.
 #include "TestDevices.h"
 #include "TestHelpers.h"
+#include "devices/core/AudioThreads.h"
 #include "devices/delay/Delay.h"
 #include "devices/modulation/Modulators.h"
 #include "devices/motion/Phaser.h"
@@ -1969,10 +1970,14 @@ struct MemoryReader final : engine::SampleReader
         return true;
     }
 
+    // Its samples are worked out from their place: read again, the same (unless a test says otherwise).
+    bool readsAgainTheSame() const override { return exact; }
+
     int numChannels;
     double fileRate;
     std::int64_t length;
     std::optional<float> value;
+    bool exact = true;
 };
 
 // A mono file of a full-scale sine at a frequency, starting at its upward zero crossing.
@@ -2270,6 +2275,102 @@ TEST_CASE ("A file at another rate made ready for where it plays from next plays
 
     playRegion (later, 50000, 20000); // to its start and on
     CHECK (later.state->conversion.get() == laterSpare);
+}
+
+TEST_CASE ("A render's file lets go between its parts of what the last part didn't read, and plays the same, to the last bit")
+{
+    // The audit of 2026-11-20: a render's file let go of nothing, so an export held all the audio it had played, as floats.
+    // Between two parts of a render it lets go of what the part just played didn't read (AudioFile::letGoOfUnread()), and
+    // what plays is what played while it kept it all: a file two regions play in two places at once, and one at another
+    // rate through its resampling, made ready ahead of its start as a render's blocks go.
+    constexpr std::int64_t chunk = engine::AudioFile::chunkSamples, songLength = 30 * chunk;
+    constexpr int block = 512, part = 8192;
+
+    const auto render = [] (bool lettingGo, int& mostHeld)
+    {
+        // Longer than a short file (AudioFile::shortSeconds), which is kept whole: 41 s at 48 kHz, 45 s at 44.1.
+        auto same = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (2, rate, 60 * chunk), nullptr);
+        auto other = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (2, 44100.0, 60 * chunk), nullptr);
+        auto first = makeRegion (same, 0, songLength), second = makeRegion (same, 5 * chunk, songLength - 5 * chunk),
+             resampled = makeRegion (other, 3 * part + 100, songLength / 2);
+        second.fileStart = 20.0 * (double) chunk + 17.0;
+        resampled.fileStart = 1000.0;
+        const engine::AudioRegion* regions[] = { &first, &second, &resampled };
+
+        juce::AudioBuffer<float> out (2, (int) songLength), scratch (2, block);
+        out.clear();
+        mostHeld = 0;
+
+        for (std::int64_t at = 0; at < songLength; at += block)
+        {
+            float* channels[] = { out.getWritePointer (0, (int) at), out.getWritePointer (1, (int) at) };
+
+            for (const auto* region : regions)
+            {
+                region->play (channels, at, block, rate, true, scratch);
+                region->prepare (at + block, true, {}, rate, block);
+            }
+
+            if ((at + block) % part == 0)
+            {
+                if (lettingGo)
+                {
+                    same->letGoOfUnread();
+                    other->letGoOfUnread();
+                }
+
+                mostHeld = std::max (mostHeld, same->countChunksHeld() + other->countChunksHeld());
+            }
+        }
+
+        return out;
+    };
+
+    auto keptAll = 0, keptSome = 0;
+    const auto expected = render (false, keptAll);
+    const auto played = render (true, keptSome);
+    CHECK (keptAll > 30);
+    CHECK (keptSome <= 6); // each place a file plays at, its chunk and the next at most
+
+    auto different = 0;
+
+    for (int channel = 0; channel < 2; ++channel)
+        for (int i = 0; i < expected.getNumSamples(); ++i)
+            different += juce::exactlyEqual (expected.getSample (channel, i), played.getSample (channel, i)) ? 0 : 1;
+
+    CHECK (different == 0);
+    CHECK (played.getMagnitude (0, (int) songLength) > 0.5f);
+}
+
+TEST_CASE ("A render keeps whole a short file, and one whose reader may give other samples for a place read again")
+{
+    // The review of the audit's fix: JUCE's MP3 reader decodes a place read again from a frame before it, so a chunk let go
+    // of and read again could differ from what the render played before; and a short one-shot played again and again would
+    // be read from the disk each time. Only a longer file whose reader reads a place again the same is let go of.
+    constexpr std::int64_t chunk = engine::AudioFile::chunkSamples;
+
+    const auto playThrough = [] (engine::AudioFile& file)
+    {
+        // Every chunk read in turn, the file told between each to let go of what wasn't read since.
+        for (std::int64_t at = 0; at < file.getLength(); at += chunk)
+        {
+            file.readNow (at, chunk);
+            auto numSamples = 1;
+            CHECK (file.getSamples (0, at, numSamples) != nullptr);
+            file.letGoOfUnread();
+        }
+
+        return file.countChunksHeld();
+    };
+
+    auto unsure = std::make_unique<MemoryReader> (2, rate, 60 * chunk);
+    unsure->exact = false;
+    engine::AudioFile inexact (std::move (unsure), nullptr), shortFile (std::make_unique<MemoryReader> (2, rate, 40 * chunk), nullptr),
+        exact (std::make_unique<MemoryReader> (2, rate, 60 * chunk), nullptr);
+
+    CHECK (playThrough (inexact) == 60);   // not let go of: every chunk held
+    CHECK (playThrough (shortFile) == 40); // 27 s: kept whole, as live playback keeps it
+    CHECK (playThrough (exact) <= 1);      // let go of as it goes
 }
 
 TEST_CASE ("A file at another rate made ready for the loop's start follows the loop moved, and a jump's landing during its fade")
@@ -3858,6 +3959,70 @@ TEST_CASE ("The engine's workers take a long job's tasks beside the thread that 
     }
 
     CHECK (job.elsewhere.load() > 0);
+}
+
+TEST_CASE ("A render's workers are plain threads, where an audio device's play in its task")
+{
+    // An export plays flat out on every worker for as long as it takes: at the audio device's priority (MMCSS's Pro Audio
+    // task on Windows, real-time threads elsewhere) its workers kept the window and other programs' sound waiting. Jobs of
+    // tasks long enough for a worker asleep to wake, until a worker has taken one: whether it is one of Phazite's own audio
+    // threads says which it was started as.
+    struct Job
+    {
+        std::thread::id caller;
+        std::atomic<int> elsewhere { 0 }, onAudioThreads { 0 };
+    };
+
+    const auto runOnWorkers = [] (engine::Workers& workers, Job& job)
+    {
+        job.caller = std::this_thread::get_id();
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (phazite::test::hangTimeout);
+
+        while (job.elsewhere.load() == 0 && std::chrono::steady_clock::now() < until)
+        {
+            workers.run (
+                64,
+                [] (void* context, int) noexcept
+                {
+                    auto& running = *static_cast<Job*> (context);
+                    const auto taskEnd = std::chrono::steady_clock::now() + std::chrono::microseconds (20);
+
+                    while (std::chrono::steady_clock::now() < taskEnd)
+                    {
+                    }
+
+                    if (std::this_thread::get_id() != running.caller)
+                    {
+                        if (dev::isOwnAudioThread())
+                            running.onAudioThreads.fetch_add (1);
+
+                        running.elsewhere.fetch_add (1);
+                    }
+                },
+                &job);
+        }
+    };
+
+    engine::Workers workers;
+    Job rendering;
+    workers.setNumThreads (4, engine::Workers::Use::render);
+    runOnWorkers (workers, rendering);
+    REQUIRE (rendering.elsewhere.load() > 0);
+    CHECK (rendering.onAudioThreads.load() == 0);
+
+    // The same count for an audio device then: its workers are made anew, as its own.
+    Job live;
+    workers.setNumThreads (4);
+    runOnWorkers (workers, live);
+    REQUIRE (live.elsewhere.load() > 0);
+    CHECK (live.onAudioThreads.load() == live.elsewhere.load());
+
+    // And back.
+    Job again;
+    workers.setNumThreads (4, engine::Workers::Use::render);
+    runOnWorkers (workers, again);
+    REQUIRE (again.elsewhere.load() > 0);
+    CHECK (again.onAudioThreads.load() == 0);
 }
 
 #if JUCE_WINDOWS

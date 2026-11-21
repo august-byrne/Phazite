@@ -62,32 +62,27 @@ juce::StringArray Settings::get (const ListSetting& setting) const
 
 void Settings::set (const BoolSetting& setting, bool value)
 {
-    storage->setValue (setting.key, value);
-    changed (setting.key, setting.save);
+    store (setting.key, value, setting.save);
 }
 
 void Settings::set (const NumberSetting& setting, double value)
 {
-    storage->setValue (setting.key, value);
-    changed (setting.key, setting.save);
+    store (setting.key, value, setting.save);
 }
 
 void Settings::set (const NumberSettingWithoutDefault& setting, double value)
 {
-    storage->setValue (setting.key, value);
-    changed (setting.key, setting.save);
+    store (setting.key, value, setting.save);
 }
 
 void Settings::set (const TextSetting& setting, const juce::String& value)
 {
-    storage->setValue (setting.key, value);
-    changed (setting.key, setting.save);
+    store (setting.key, value, setting.save);
 }
 
 void Settings::set (const ListSetting& setting, const juce::StringArray& lines)
 {
-    storage->setValue (setting.key, lines.joinIntoString ("\n"));
-    changed (setting.key, setting.save);
+    store (setting.key, lines.joinIntoString ("\n"), setting.save);
 }
 
 juce::String Settings::getKeyChanges (const juce::String& keymapName) const
@@ -97,8 +92,7 @@ juce::String Settings::getKeyChanges (const juce::String& keymapName) const
 
 void Settings::setKeyChanges (const juce::String& keymapName, const juce::String& xml)
 {
-    storage->setValue (keyChangesPrefix + keymapName, xml);
-    changed (keyChangesPrefix + keymapName, SaveTiming::now);
+    store (keyChangesPrefix + keymapName, xml, SaveTiming::now);
 }
 
 void Settings::saveNow()
@@ -109,10 +103,16 @@ void Settings::saveNow()
         file->saveIfNeeded();
 }
 
-void Settings::changed (const juce::String& key, SaveTiming timing)
+void Settings::store (const juce::String& key, const juce::var& value, SaveTiming timing)
 {
-    // A setting saved soon waits for the file's own timer (PropertiesFile saves a while after the last change).
-    if (timing == SaveTiming::now)
+    // A setting saved now is written at once, with whatever waits to be saved soon; one saved soon waits for the file's own
+    // timer (PropertiesFile saves a while after the last change). A setting set to what it holds already writes nothing:
+    // what sets several as one of them changes (the audio device's settings, app/AppServices.cpp) would write the file, and
+    // what waits with it, at each step of a drag of one saved soon.
+    const auto before = storage->getValue (key);
+    storage->setValue (key, value);
+
+    if (timing == SaveTiming::now && storage->getValue (key) != before)
         saveNow();
 
     listeners.call ([&key] (Listener& listener) { listener.settingChanged (key); });

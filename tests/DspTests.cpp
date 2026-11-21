@@ -2,7 +2,9 @@
 // The building blocks of Phazite's devices' DSP (src/devices/dsp/): filters, comb filters, the filter types every Phazite
 // filter offers, envelopes, oscillators, random numbers, delay lines.
 #include "TestHelpers.h"
+#include "devices/delay/Delay.h"
 #include "devices/dsp/AlignedShaper.h"
+#include "devices/dsp/ClearedSamples.h"
 #include "devices/dsp/CombFilter.h"
 #include "devices/dsp/DcBlocker.h"
 #include "devices/dsp/DelayLine.h"
@@ -14,11 +16,17 @@
 #include "devices/dsp/Oscillators.h"
 #include "devices/dsp/Random.h"
 #include "devices/dynamics/TruePeak.h"
+#include "devices/eq/Equalizer.h"
+#include "devices/reverb/Reverb.h"
 
 #include <juce_dsp/juce_dsp.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <cstdint>
+#include <functional>
+#include <memory>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -589,6 +597,198 @@ TEST_CASE ("A delay line returns what was pushed, also between samples")
 
     line.reset();
     CHECK (line.read (100) == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("After a delay line's reset, every read gives what a line made anew gives, to the bit")
+{
+    // Every Play and every jump resets every device, and a reset must leave nothing of what a line held, however it is
+    // made (cleared whole, as it is; a count of what came in since was tried, and cost a compare at every read). Against a
+    // line made anew (silence in all of it), sample for sample: after the reset, partly refilled,
+    // filled past its length, and reset again; every whole delay, those past its room and below 0 too, and between samples,
+    // where a read reaches past what came in by a fraction.
+    dsp::Random random (0x1d3a5u);
+    const auto noise = [&random] { return random.nextBipolar(); };
+    constexpr int longest = 100; // a line of 128
+    dsp::DelayLine line, cleared;
+    line.prepare (longest);
+
+    for (int i = 0; i < 1000; ++i)
+        line.push (noise());
+
+    const auto bitsOf = [] (float value) { return std::bit_cast<std::uint32_t> (value); };
+    const auto compare = [&] (const char* when)
+    {
+        INFO (when);
+        auto differences = 0;
+
+        for (int delay = -3; delay <= 2 * 128 + 3; ++delay)
+        {
+            differences += bitsOf (line.read (delay)) != bitsOf (cleared.read (delay)) ? 1 : 0;
+
+            for (const auto fraction : { 0.25f, 0.5f, 0.875f })
+                differences += bitsOf (line.read ((float) delay + fraction)) != bitsOf (cleared.read ((float) delay + fraction)) ? 1 : 0;
+        }
+
+        CHECK (differences == 0);
+    };
+
+    const auto pushBoth = [&] (int count)
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            const auto sample = noise();
+            line.push (sample);
+            cleared.push (sample);
+        }
+    };
+
+    for (int round = 0; round < 2; ++round)
+    {
+        CAPTURE (round);
+        line.reset();
+        cleared = dsp::DelayLine();
+        cleared.prepare (longest);
+        CHECK (line.read (5) == 0.0f); // it held sound there
+        compare ("just reset");
+
+        for (const auto count : { 1, 1, 2, 60, 63, 1, 1, 200 })
+        {
+            pushBoth (count);
+            compare ("refilled");
+        }
+    }
+}
+
+TEST_CASE ("A comb's reset plays as a comb made anew, whatever it held, to the bit")
+{
+    // A comb's reset leaves nothing of what it held: against a comb made anew and given the same, the one reset after
+    // ringing plays the same, sample for sample, as it fills up and past its length.
+    dsp::Random random (0x7c0bu);
+    const auto coefficients = dsp::makeComb (false, 200.0, testRate, 0.9f);
+    auto comb = makeCombFilter (coefficients);
+
+    for (int i = 0; i < 10000; ++i)
+        comb.process (random.nextBipolar());
+
+    comb.reset();
+    comb.setTarget (coefficients, 16);
+    auto fresh = makeCombFilter (coefficients);
+    auto differences = 0;
+
+    for (int i = 0; i < 6000; ++i)
+    {
+        const auto x = i < 300 ? random.nextBipolar() : 0.0f;
+        differences += std::bit_cast<std::uint32_t> (comb.process (x)) != std::bit_cast<std::uint32_t> (fresh.process (x)) ? 1 : 0;
+    }
+
+    CHECK (differences == 0);
+}
+
+TEST_CASE ("A device reset after sound plays as one reset after silence, to the bit")
+{
+    // The devices whose resets hold most (a Delay's lines, a Reverb's three modes' lines, the EQ's linear phase, which
+    // forgets its history and its convolution's partitions by counts of what came in since, writing none of them). One
+    // device plays two seconds of loud noise, another as much silence; both are reset and given the same: what each plays,
+    // sample for sample, is the same. And what the resets clear through ClearedSamples' count (the linear phase's) is small.
+    namespace devices = phazite::devices;
+    static constexpr int block = 256;
+
+    struct Kind
+    {
+        const char* name;
+        const devices::DeviceInfo& info;
+        std::function<std::unique_ptr<devices::Processor>()> make;
+        std::vector<std::pair<int, float>> values;
+    };
+
+    const auto eqBand = [] (devices::Equalizer::Field field) { return devices::Equalizer::getParameterIndex (2, field); };
+    const auto reverbMode = devices::findParameter (devices::Reverb::info, "mode");
+    const std::vector<Kind> kinds {
+        { "the Delay", devices::Delay::info, [] { return std::make_unique<devices::Delay>(); }, {} },
+        { "the Reverb's room", devices::Reverb::info, [] { return std::make_unique<devices::Reverb>(); }, { { reverbMode, 0.0f } } },
+        { "the Reverb's plate", devices::Reverb::info, [] { return std::make_unique<devices::Reverb>(); }, { { reverbMode, 1.0f } } },
+        { "the Reverb's hall", devices::Reverb::info, [] { return std::make_unique<devices::Reverb>(); }, { { reverbMode, 2.0f } } },
+        { "the EQ in Linear phase",
+          devices::Equalizer::info,
+          [] { return std::make_unique<devices::Equalizer>(); },
+          { { devices::Equalizer::phaseParameter, 1.0f },
+            { eqBand (devices::Equalizer::on), 1.0f },
+            { eqBand (devices::Equalizer::gain), 9.0f } } },
+    };
+
+    for (const auto& kind : kinds)
+    {
+        CAPTURE (kind.name);
+        std::vector<float> values;
+
+        for (const auto& parameter : kind.info.parameters)
+            values.push_back (parameter.defaultValue);
+
+        for (const auto& [index, value] : kind.values)
+            values[(size_t) index] = value;
+
+        const auto play = [&values] (devices::Processor& device, juce::AudioBuffer<float> audio)
+        {
+            for (int done = 0; done < audio.getNumSamples(); done += block)
+            {
+                float* channels[] = { audio.getWritePointer (0, done), audio.getWritePointer (1, done) };
+                devices::ProcessContext context;
+                context.channels = channels;
+                context.numChannels = 2;
+                context.numSamples = std::min (block, audio.getNumSamples() - done);
+                context.parameters = values;
+                device.process (context);
+            }
+
+            return audio;
+        };
+
+        dsp::Random random (0x5eedu);
+        const auto noise = [&random] (int length, float level)
+        {
+            juce::AudioBuffer<float> audio (2, length);
+
+            for (int channel = 0; channel < 2; ++channel)
+                for (int i = 0; i < length; ++i)
+                    audio.setSample (channel, i, level * random.nextBipolar());
+
+            return audio;
+        };
+
+        auto heard = kind.make(), quiet = kind.make();
+
+        for (auto* device : { heard.get(), quiet.get() })
+        {
+            device->takeValuesBeforePrepare (values);
+            device->prepare (testRate, block);
+        }
+
+        play (*heard, noise (2 * (int) testRate, 0.5f));
+        juce::AudioBuffer<float> silence (2, 2 * (int) testRate);
+        silence.clear();
+        play (*quiet, silence);
+
+        const auto cleared = dsp::ClearedSamples::get();
+        heard->reset();
+        quiet->reset();
+        CHECK (dsp::ClearedSamples::get() - cleared < 16384); // the linear phase's partitions in and out, small
+
+        // A short burst, then its tail, longer than a line's room.
+        auto given = noise (12 * block, 0.25f);
+        given.setSize (2, 7 * (int) testRate, true, true);
+        const auto fromHeard = play (*heard, given), fromQuiet = play (*quiet, given);
+        REQUIRE (fromQuiet.getMagnitude (0, fromQuiet.getNumSamples()) > 0.0f);
+        auto differences = 0;
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 0; i < given.getNumSamples(); ++i)
+                differences += std::bit_cast<std::uint32_t> (fromHeard.getSample (channel, i))
+                                       != std::bit_cast<std::uint32_t> (fromQuiet.getSample (channel, i))
+                                   ? 1
+                                   : 0;
+
+        CHECK (differences == 0);
+    }
 }
 
 TEST_CASE ("A comb's peaks fall on its frequency's multiples, Comb -'s on its odd ones, with notches between, as it reports")

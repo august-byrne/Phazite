@@ -101,10 +101,10 @@ says, it can't crash Phazite or make it do anything but open a song.
 
 A preset takes its sounds from its own folder only (a full path in one is not followed), and only the channels handed
 to a helper are read back from shared memory. A DAWproject that would hold 4 GB or more, or more than 65,534 files, is
-refused before its bounces are rendered, its bounces counted as large as they can render: JUCE's zip writer keeps sizes
-and places in 32 bits and has no ZIP64, and readers take 0xFFFF files for ZIP64's marker (`checkDawProjectFits()`,
-`src/model/project/internal/DawProject.h`; JUCE workaround W41). The writer also holds each file in memory while it writes
-it, packed or stored, so that a large recording in a DAWproject takes as much memory as it is long.
+refused before its bounces are rendered, its bounces counted as large as they can render: Phazite's zip writer, as JUCE's,
+keeps sizes and places in 32 bits and has no ZIP64, and readers take 0xFFFF files for ZIP64's marker
+(`checkDawProjectFits()`, `src/model/project/internal/DawProject.h`; JUCE workaround W41). It copies each file into the
+archive a part at a time, never holding it whole, and a cancel stops it between two parts, leaving no archive.
 
 ## Saving
 
@@ -259,7 +259,9 @@ what it exports: the song, or its stems.
   peaks can end up under the target; the report then says by how much.
 - **The file** goes into the project's `Renders` folder, named after the project. It is written next to that name
   and replaces a file there only once it is complete, so a cancelled or failed export leaves the old one.
-- **It runs in the background,** with a progress bar and Cancel. Playback stops for it. Escape asks before it stops
+- **It runs in the background,** with a progress bar and Cancel. Playback stops for it. Stretched, pitched or reversed clips whose
+  renders aren't made yet are rendered first, in the background too: the progress bar moves through them, and Cancel
+  stops them. Escape asks before it stops
   the export ("Stop the export?"), and the window closed while it exports stops it and says so in a notice, so a
   stray key never throws a long export away without a word.
 - **A plug-in that fails, fails the export.** A plug-in that crashes while the song renders, or that holds a block
@@ -297,7 +299,8 @@ devices, up to its fader, and plays that file instead, so that its devices take 
   by undo or redo) unfreezes it, so its sound follows the change.
 - **Freezing and unfreezing are not undo steps.** A track keeps one frozen file, so undo could otherwise bring back
   a frozen state whose file a later freeze had replaced.
-- It renders in the background, with a progress window and Cancel, and its tail ends as an export's does.
+- It renders in the background, with a progress window and Cancel, its clips' renders made first and its tail ended as
+  an export's are.
 - The frozen sound is kept in the project's `Cache` folder, so a frozen track opens frozen. Without its file, the
   track opens unfrozen.
 - Returns, buses and folders are not frozen.
@@ -327,7 +330,11 @@ Consolidate, which joins clips into one, is in [playlist.md](playlist.md).
 
 **Clean Up Unused Audio...** (File menu, `project.cleanUpAudio`) lists the files in the project's `Audio` and
 `Generated` folders that neither the song, nor its file as saved, its autosave or a backup, nor any version or branch
-of its history plays, and deletes the ticked ones.
+of its history plays, and deletes the ticked ones. It looks in the background; its Delete works in the background too,
+the window held meanwhile as for any work it waits for (a progress window after a second, whose Cancel and Escape stop
+it between two files), and keeps any file that the song, a saved file or a version plays as it deletes. Neither its
+look nor its Delete runs while an audio file's work is under way (an import's copy is in the `Audio` folder before a
+clip plays it), as while it records, while a version is open, or while the versions are read or written; it says why.
 
 ## DAWproject
 

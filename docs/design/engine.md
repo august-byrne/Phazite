@@ -266,13 +266,17 @@ surroundings:
 - it lets a device sleep on silence, but never an instrument while it holds a note or its sustain pedal; asleep, its
   parameters still play their modulation, so that what shows them moves. A device sleeps once what comes in and what
   it plays have been silent for a quarter of a second and for as long as the tail it reports: a reverb rings out its
-  decay, a delay its echoes. While the song is stopped, one that has heard nothing since it was last reset or made ready
+  decay, a delay its echoes, and a sampler or the drum sampler, while it plays a sound to its end, as long as that sound
+  lasts at its pitch (tuned down, its silences last longer). While the song is stopped, one that has heard nothing since it was last reset or made ready
   (a project just opened, a device added or switched on) has nothing to ring with, and sleeps after the quarter of a
   second alone; only what can sound counts as heard (a note's start, sound coming in, a pad its editor played), not an
   all-notes-off, a note's end, a bend, a slide, pressure or a controller alone (the stop of a project closed as it
   played reaches the next project's instruments as an all-notes-off). A device is reset by Play, by a jump while the
   song plays and by being switched on; a jump while the song is stopped resets nothing, so what rings on before it is
-  waited for. While the song plays, every device
+  waited for. Every device's reset is made in the one block that starts or lands, so a reset must cost little (a
+  Delay's two lines of five seconds take 0.35 % of a block of 128 samples to clear, a Reverb's 0.6 %:
+  [performance.md](../performance.md)); the EQ's linear phase forgets its history and its partitions by a count of what
+  came in since, and writes none of them. While the song plays, every device
   waits for its tail, so that one whose sound starts within it plays as a render does (a render never sleeps, and a
   reverb's sway runs on through silence). A muted track's devices sleep the same way. Age, whose noise
   plays with the song whatever comes in, sleeps only while the song is stopped, and wakes as it plays. Asleep, a device

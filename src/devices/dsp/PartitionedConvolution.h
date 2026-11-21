@@ -59,7 +59,9 @@ public:
     // Room for a set's kernels. Allocates.
     void allocate (Kernels&) const;
 
-    // Silence in its history and in what it plays next; its partitions counted from here.
+    // Silence in its history and in what it plays next; its partitions counted from here. The spectra of what came in before
+    // are never read again, and nothing of them is written (the EQ's at 48 kHz are 0.25 MiB, 1 MiB at 192 kHz, and every Play
+    // and every jump resets every device: ClearedSamples.h): it clears its last 2 P samples and what it plays next alone.
     void reset() noexcept;
 
     // The set it plays, and the one it glides to (nullptr for none); the part of a partition already under way plays
@@ -80,7 +82,7 @@ public:
 
     // Two partitions of real taps, the first at real and the second at imaginary, transformed together (2 P points) into
     // their spectra: each side's P + 1 points, taken apart.
-    static void takeApart (const Complex* transformed, int partitionSize, Complex* first, Complex* second) noexcept;
+    static void takeApart (const Complex* together, int partitionSize, Complex* first, Complex* second) noexcept;
 
 private:
     int partitionSize = 0, numPartitions = 0, delayPartitions = 0, bins = 0;
@@ -90,6 +92,7 @@ private:
     std::array<std::vector<Complex>, 4> inputs; // the spectra (P + 1 points) of the left, the right, the middle and the side,
                                                 // numPartitions of each, the newest at `newest`
     int newest = 0, position = 0, channelsIn = 2;
+    int transformed = 0; // partitions transformed since the reset, up to numPartitions: the spectra of older ones are silence
     std::vector<Complex> sums, spectrumOut, timeOut; // each side's sum, and a side's whole spectrum for the inverse FFT
     std::array<std::array<std::vector<float>, 2>, 2> outputs;
     const Kernels* played = nullptr;

@@ -117,6 +117,15 @@ void Engine::setPlan (std::unique_ptr<Plan> plan)
         findEarlyStarts (*plan);
 
     plans.give (std::move (plan));
+
+    // Idle, what it replaced goes now, counted as a drop, so that a block after the device starts again never looks at it
+    // (choosePlan()). Read after the plan is given, both sequentially consistent: a device whose host said it starts before
+    // that, whose block may have taken the plan replaced, is seen as not idle, and that plan waits for its blocks as usual.
+    if (idle.load())
+    {
+        plans.freeReplaced();
+        drops.fetch_add (1, std::memory_order_release);
+    }
 }
 
 void Engine::findEarlyStarts (Plan& plan)

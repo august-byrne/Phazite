@@ -29,6 +29,47 @@ The full text of every step, as it was written when it was built, is in the
   the control does, a sweep of it one undo step, written as automation while its track writes, and no longer reaches
   the instrument or a take.
 
+## The audit of the threads and the message thread (2026-11-20)
+
+An audit read how the audio threads, the message thread and the renders work, with the plug-ins' helpers and the
+window; its findings of small and medium size were fixed at once, each confirmed in the code first and with a test
+that fails without the fix where one can see it, and a reviewer read each part. What is left is in
+[known-bugs.md](known-bugs.md) (218 to 224) and the [backlog](backlog.md).
+
+- **The reset at Play, measured:** a start, and every jump while the song plays, reset every device in one block, each
+  delay line cleared whole, which the audit took for a dropout. It isn't: a Delay's reset takes 0.35 % of a block of
+  128 samples and a Reverb's 0.6 %. A reset that wrote nothing of a line was built, measured (a compare at every read:
+  the Reverb 40 % dearer, the Delay 16 %) and taken back; the linear-phase EQ's, which costs nothing for each sample,
+  stays.
+- **An export's threads at the normal priority:** a render's workers played flat out in the audio device's task for as
+  long as an export took, ahead of the window and other programs' sound.
+- **A plug-in given a state that takes long to set** (a sampler reading its library) plays silence meanwhile instead
+  of being ended as hung, and its notes and values go with the next block it plays; a quick one makes no gap. A
+  plug-in's meters told as parameters no longer mark the song changed; preparing a plug-in waits for no render; a
+  helper's instances stop at once; the helper keeps full speed without a window of its own.
+- **Renders make the clips' renders they need on their own thread,** under Cancel and with progress (an export, a
+  freeze, a bounce, Consolidate and a DAWproject export stretched clips on the message thread before they began); a
+  render lets go of the WAV, AIFF and FLAC sound it has played, where it kept every file whole in memory; a
+  DAWproject's archive is written a part at a time and stops at Cancel; Bounce in Place copies its frozen file off
+  the message thread.
+- **A drum pad's sound set by hand** isn't read again, with every other pad's, by the next plan, which cut the pads
+  that rang; a pad's and a wavetable's file are read once while anything holds them.
+- **The samplers stay awake** through silence inside a sound played lower, where a hit tuned down could fall asleep in
+  the middle and differ from its export.
+- **Plans given while no audio device plays are freed at once,** where each edit's was kept until blocks played again.
+- **The window waits for no drive:** the browser's index walk is left to end by itself when its folders change or
+  Phazite quits, and one stuck on a drive that doesn't answer keeps no other folder from being read; Clean Up's Delete
+  works in the background behind a progress window, and refuses while a sound file is being imported; the Project view
+  asks the disk which files are missing only in the background, and only when something changed; a clip's waveform
+  opens its file in the background, never in a paint.
+- **Views that can't be seen build nothing:** the inspector, the Devices view and the Versions view catch up as they
+  show, and the time lines ask for the song's extent only after it changed.
+- **Small ones:** the sampler takes a loop shorter than its step round in one go, and refuses a sound file that says
+  its rate is beyond 768 kHz; a plug-in scan cancelled while its helper starts ends that helper at once (it waited 20
+  seconds); values set on more of a plug-in's parameters than a block takes go with the next block; a helper's pipe is
+  written to by one thread at a time; the transients' thread asks the disk outside its lock and wakes only for work;
+  the Undo Steps and Recording Correction fields no longer write the settings file at each step of a drag.
+
 ## The owner's round of 2026-11-20
 
 - **Stop leaves what rings on as it was:** a Stop that sends the playhead back keeps every automated control, and the

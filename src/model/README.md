@@ -94,7 +94,7 @@ The engine as the app and the UI reach it, and what Phazite reads and opens arou
 | `Export.h`, `internal/Export.h` | Exporting the song and its stems. |
 | `internal/DawProject.h` | The song, or a version of it, written as a DAWproject for other DAWs; and one read back, as a new project's song or as a branch from the version it came from. |
 | `UnusedAudio.h` | The audio files in the project's folder that no song of it plays, for Clean Up Unused Audio, and how many, found in the background for the Project view. |
-| `ProjectContents.h` | What the open project holds, for the Project view: its notes, the audio files its song plays (found or missing), and its plug-ins, as they play. |
+| `ProjectContents.h` | What the open project holds, for the Project view: its notes, the audio files its song plays (found or missing, which `MissingAudioCheck` asks of the disk on a thread of its own), and its plug-ins, as they play. |
 | `ProjectContext.h`, `internal/ProjectContext.h` | The open project as commands and panels find it: its song, selection, range, playback session, clip renders, clipboard and the parameter touched last. The internal header has `findSong()`, `getSelection()`, `getRangeSelection()` and `getSession()`, and the session's `setSong()`. |
 
 ## transport/
@@ -124,7 +124,7 @@ Tracks, clips, sections, the grid, the selection and the time line.
 | `TrackColours.h` | The palette tracks get their colours from, which sections, song outlines and imported files use too. |
 | `internal/Clips.h` | MIDI clips with their notes, on their tracks' elements in the song. |
 | `internal/AudioClips.h` | Audio clips with the parts of their files they play; a clip that follows the tempo, is pitched or reversed plays from a render Phazite makes itself, in the song's cache folder. |
-| `internal/ClipRenders.h` | The project's `ClipRenders`, which make those renders in the background. |
+| `internal/ClipRenders.h` | The project's `ClipRenders`, which make those renders in the background; and the renders a song needs found on the message thread and made on any other, as a render makes them. |
 | `internal/Transients.h` | The hits in an audio clip's audio, found in the background. |
 | `AudioClipModel.h` | An audio clip as the audio clip editor reaches it, by ID: its gain, pitch, reverse and tempo, its warp markers and Quantize Audio. |
 | `internal/Sections.h` | Sections, in the song, as the chord lane is. |
@@ -234,7 +234,7 @@ The song as Phazite's engine plays it.
 | `internal/PlaybackHost.h` | The app's engine on the audio device Phazite opens, with the previews' engine beside it, which `EngineContext` owns; the device's inputs, the Low Latency switch, and the notes played live in the last 30 seconds. |
 | `internal/SongPlayer.h` | The song compiled into what the engine plays (plans), with what sounds on kept by the song's IDs and the values set by hand taken in at once; each plan compiles again only what the song's changes touched (a track's notes and audio, a channel's devices' values), which the tests compare with a read of the song (`setChecking()`). |
 | `internal/PlaybackSession.h` | Each open song's session, which the project context makes for it: it gives the engine the song again as it changes, owns the song's plug-in instances and its recorder, plays the transport, takes live MIDI and guide notes into it, and keeps the take it records. With `renderWithOwnEngine()`, the song rendered offline, which the session lends its plug-ins to while it plays them. |
-| `internal/OfflineRender.h` | The song or a part of it played offline on a thread of its own, for an export, a freeze or a bounce, each job (an export's stem) compiled on the message thread as its turn comes. |
+| `internal/OfflineRender.h` | The song or a part of it played offline on a thread of its own, for an export, a freeze or a bounce, each job (an export's stem) compiled on the message thread as its turn comes, once the clips' renders it plays are made on its own thread; the sound files it plays let go of what it has played. |
 | `internal/AutomationWriter.h` | The automation written by hand while the engine plays, in touch, latch and write. |
 
 ## plugins/

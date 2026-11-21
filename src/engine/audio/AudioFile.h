@@ -31,6 +31,11 @@ public:
 
     // Reads samples as floats, from a sample of the file, into a buffer of the file's channels; false if it can't.
     virtual bool read (juce::AudioBuffer<float>&, std::int64_t start, int numSamples) = 0;
+
+    // Whether a place read again gives the same samples, to the last bit, wherever the reads before it were (a format
+    // without loss that seeks to the sample: WAV, AIFF, FLAC; not one whose decoder starts again from a frame before, as
+    // MP3's): what a render may let go of and read again (AudioFile::letGoOfUnread()). Not unless a reader says so.
+    virtual bool readsAgainTheSame() const { return false; }
 };
 
 class AudioFile
@@ -40,7 +45,7 @@ public:
     static constexpr double shortSeconds = 30.0; // a file no longer is read whole and kept
 
     // Plays the file a reader reads. Blocks counts the blocks of the engine that plays it, after which a chunk let go of is
-    // freed (nullptr for a render's, which lets go of nothing).
+    // freed (nullptr for a render's, which lets go of what it holds only when told: letGoOfUnread()).
     AudioFile (std::unique_ptr<SampleReader>, const std::atomic<std::uint64_t>* blocks);
     ~AudioFile();
 
@@ -92,6 +97,17 @@ public:
     // A render's thread: reads every chunk of a range now, if not read yet.
     void readNow (std::int64_t start, std::int64_t numSamples);
 
+    // A render's thread, for a render's file (made without a count of blocks), between two of its parts, while nothing plays
+    // it: lets go of the chunks not read since it last did, at once (no audio thread can be reading them), and keeps those
+    // that were. One read again later comes from the disk again. Only a longer file's (a short one is kept whole, as live)
+    // whose reader gives the same samples for a place read again (SampleReader::readsAgainTheSame()), so that what a render
+    // plays is what it played while it kept everything; nothing for another, nor for a file the engine's blocks count,
+    // which its reading thread lets go of (readNext()).
+    void letGoOfUnread();
+
+    // Any thread: how many of its chunks are read and held now (for the tests).
+    int countChunksHeld() const noexcept;
+
 private:
     juce::String origin; // setOrigin()'s
     struct Chunk
@@ -108,6 +124,7 @@ private:
     std::int64_t length = 0;
     int numChunks = 0;
     bool whole = true;
+    bool rendersLetGo = false; // a render's file that letGoOfUnread() lets go of
 
     std::unique_ptr<std::atomic<const Chunk*>[]> chunks; // what the audio thread reads
     std::vector<std::unique_ptr<Chunk>> read;            // each chunk read, owned here

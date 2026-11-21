@@ -36,7 +36,7 @@ the model compiles the song into what it plays (`src/model/playback/internal/Son
 
 | File | What it holds |
 |---|---|
-| `AudioFile.h`, `FileReader.h` | Audio files, read ahead of where they play by a reading thread, so that the audio thread never waits for the disk, and where a jump lands first, the message thread never waiting for a read either; what isn't a number in a file of floats read as silence. |
+| `AudioFile.h`, `FileReader.h` | Audio files, read ahead of where they play by a reading thread, so that the audio thread never waits for the disk, and where a jump lands first, the message thread never waiting for a read either; what isn't a number in a file of floats read as silence; a render's files read as they play, and those longer than a short file whose format reads a place again the same (WAV, AIFF, FLAC) let go between its parts of what they no longer read; others kept whole. |
 | `AudioRegion.h` | An audio clip as the engine plays it: a part of a file at its gain, through its fades; one of a file at another rate with a second resampling, made ready a little a block for where it plays from next (the loop's start, its own start ahead). |
 | `Resampler.h` | A file at another rate than the engine's, resampled as it plays by r8brain-free-src, header-only (`external/r8brain-free-src`): `Resampler.cpp` turns its warnings off, and its folder is a system include for GCC and Clang. |
 

@@ -23,6 +23,11 @@ namespace
 PlanCounter::PlanCounter (ProjectContext& contextToUse)
     : context (contextToUse)
 {
+    // The engine as a device that has started and plays no block meanwhile leaves it: not idle, so that it keeps each plan
+    // it replaces (engine::Engine::setIdle(); idle, with no device, it lets go of each at once, and there is nothing to count).
+    auto& playing = getPlaybackHost (getEngineContext()).getEngine();
+    wasIdle = playing.isIdle();
+    playing.setIdle (false);
     dispatchPendingMessages();
     auto* song = findSong (context);
     REQUIRE (song != nullptr);
@@ -34,6 +39,11 @@ PlanCounter::PlanCounter (ProjectContext& contextToUse)
     master = getPlayedPlan().strips.back().state;
     REQUIRE (master != nullptr);
     counted = countNow();
+}
+
+PlanCounter::~PlanCounter()
+{
+    getPlaybackHost (getEngineContext()).getEngine().setIdle (wasIdle);
 }
 
 long PlanCounter::countNow() const

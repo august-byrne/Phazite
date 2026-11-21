@@ -14,6 +14,7 @@
 namespace phazite
 {
 inline constexpr int pluginScanSecondsEach = 60;
+inline constexpr int pluginScanStartMilliseconds = 20000; // how long a helper may take to start and answer
 
 class PluginHost;
 
@@ -21,6 +22,10 @@ class PluginHost;
 // the plug-in host's list (PluginHost::getKnownPlugins()), which its cancelScan() stops, which createEngineContext() sets.
 std::unique_ptr<juce::KnownPluginList::CustomScanner> createPluginScanner (PluginHost&, int secondsEach = pluginScanSecondsEach);
 void usePluginScannerWithTimeLimit (PluginHost&);
+
+// Cancels the scan such a scanner is in, from another thread, as PluginHost::cancelScan() does the host's: its helper is
+// ended at once, one that is still starting too, and the file it is on answers with nothing found.
+void cancelPluginScan (juce::KnownPluginList::CustomScanner&);
 
 // What a helper's answer to a scan says a file holds, as Phazite takes it (known bug 181): no more plug-ins than the
 // answer's bytes could hold, nor than maxScannedPlugins (several thousand: a shell file, as Waves' WaveShell, holds

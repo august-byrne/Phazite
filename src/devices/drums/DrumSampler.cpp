@@ -317,11 +317,35 @@ void DrumSampler::reset()
 {
     for (auto& voice : voices)
         voice = Voice {};
+
+    playingTail.store (0.0, std::memory_order_relaxed);
 }
 
 double DrumSampler::getTailSeconds() const
 {
-    return longestSound.load (std::memory_order_relaxed);
+    // Its longest sound as given; or, while it plays hits that last longer (a sound tuned down plays longer, and its silences
+    // with it: its runner would let it sleep in one, and lose what comes after), as long as those last.
+    return std::max (longestSound.load (std::memory_order_relaxed), playingTail.load (std::memory_order_relaxed));
+}
+
+void DrumSampler::measurePlayingTail() noexcept
+{
+    // Each hit from its start to its sound's end at its slowest step from here: a Sweep from below speeds up to its pitch,
+    // one from above slows down to it. Its runner sleeps once it has been silent for as long as this, and its silence began
+    // after the hit did (its runner counts it again from each note): never while a hit still has some of its sound to play.
+    auto longest = 0.0;
+
+    for (const auto& voice : voices)
+    {
+        if (voice.pad < 0)
+            continue;
+
+        const auto slowest = voice.step * (voice.pitchOffset < 0.0 ? std::exp2 (voice.pitchOffset / 12.0) : 1.0);
+        const auto left = std::max (0.0, (double) voice.sound->audio.getNumSamples() - voice.position);
+        longest = std::max (longest, (double) voice.played + left / std::max (slowest, 1.0e-6));
+    }
+
+    playingTail.store (longest / sampleRate, std::memory_order_relaxed);
 }
 
 void DrumSampler::findLongestSound()
@@ -737,6 +761,8 @@ void DrumSampler::process (const ProcessContext& block)
         render (left + done, right != nullptr ? right + done : nullptr, until - done, block.partOutputs, block.outputOffset + done);
         done = until;
     }
+
+    measurePlayingTail();
 
     // The output's level, over the whole block.
     const auto output = dsp::decibelsToGain (values[outputParameter]);

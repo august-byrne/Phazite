@@ -5,6 +5,7 @@
 #include "HeldFile.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "model/arrangement/internal/AudioWork.h"
 #include "model/project/UnusedAudio.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -62,10 +63,24 @@ juce::StringArray getNames (const phazite::UnusedAudio& found)
     return getNames (found.files);
 }
 
-// Those of the files given that a look finds unused, deleted outright: how many went.
+// Those of the files given that a look finds unused, deleted outright, in the background as the window's Delete deletes them,
+// waited for: how many went, and why it refused, if it did.
+phazite::UnusedAudioFinder::Deleted deleteUnusedSaying (phazite::ProjectContext& context, const juce::Array<juce::File>& files)
+{
+    phazite::UnusedAudioFinder finder (context);
+    finder.find();
+    REQUIRE (dispatchMessagesUntil ([&finder] { return ! finder.isLooking() && finder.getFound().has_value(); }));
+    std::optional<phazite::UnusedAudioFinder::Deleted> deleted;
+    finder.deleteUnused (context, files, phazite::Removal::outright,
+                         [&deleted] (phazite::UnusedAudioFinder::Deleted result) { deleted = std::move (result); });
+    REQUIRE (dispatchMessagesUntil ([&deleted] { return deleted.has_value(); }));
+    CHECK_FALSE (context.isHoldingForWork());
+    return *deleted;
+}
+
 int deleteUnused (phazite::ProjectContext& context, const juce::Array<juce::File>& files)
 {
-    return phazite::deleteUnusedAudio (context, lookForUnused (context), files, phazite::Removal::outright);
+    return deleteUnusedSaying (context, files).count;
 }
 
 // A song that plays one file, a version that plays another, a branch left with a third; and two files nothing plays, in
@@ -314,9 +329,9 @@ TEST_CASE ("Clean Up offers nothing while a song another computer kept can't be 
     CHECK (found.files.empty());
     REQUIRE (found.unreadable.size() == 1);
     CHECK (found.unreadable[0].contains ("computer-b"));
-    juce::String refused;
-    CHECK (phazite::deleteUnusedAudio (s.context, found, { takeFile }, phazite::Removal::outright, &refused) == 0);
-    CHECK (refused.isNotEmpty());
+    const auto refused = deleteUnusedSaying (s.context, { takeFile });
+    CHECK (refused.count == 0);
+    CHECK (refused.refused.isNotEmpty());
     CHECK (takeFile.existsAsFile());
 
     // B's pack arrives: its song read whole, the take is in use, the old take isn't.
@@ -477,7 +492,7 @@ TEST_CASE ("Clean Up reads nothing of the versions on the message thread, howeve
     REQUIRE (panel.getNumFiles() == 1);
     Mouse buttons (panel);
     buttons.click (panel.getDeleteButton().getBounds().getCentre());
-    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isLooking(); }));
+    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isDeleting() && ! panel.isLooking(); }));
     CHECK (panel.getSummary().startsWith ("Deleted 1 file."));
 
     const auto after = phazite::VersionStore::countSongsRead();
@@ -529,10 +544,224 @@ TEST_CASE ("The Clean Up window lists the files ticked, a click keeps one, and D
     Mouse buttons (panel);
     buttons.click (panel.getDeleteButton().getBounds().getCentre());
     dispatchPendingMessages();
-    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isLooking(); }));
+    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isDeleting() && ! panel.isLooking(); }));
     CHECK (panel.getSummary().startsWith ("Deleted 1 file."));
     CHECK (panel.getNumFiles() == 1);
     CHECK (panel.describeFile (0).startsWith ("Generated/Leftover.wav"));
     CHECK (panel.getCancelButton().getButtonText() == "Close");
     CHECK_FALSE (p.s.getProject().getAudioFolder().getChildFile ("Old take.wav").existsAsFile());
+}
+
+TEST_CASE ("Clean Up's Delete works on a thread of its own, the window held, and keeps a file the song came to play since the look")
+{
+    // The audit of 2026-11-20: Delete parsed the project file, its autosave and every backup again, then moved each file to the
+    // recycle bin, all on the message thread: seconds, with no progress, for a large song with many backups or many takes.
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    auto& project = s.getProject();
+
+    for (int i = 0; i < 8; ++i)
+    {
+        s.setVolume (track, -1.0f - (float) i);
+        REQUIRE (project.save().wasOk()); // a backup each
+    }
+
+    juce::Array<juce::File> takes;
+
+    for (int i = 0; i < 6; ++i)
+        takes.add (writeSound (project.getAudioFolder().getChildFile ("Take " + juce::String (i + 1) + ".wav"), 0.2));
+
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE (project.getFolder().getChildFile ("Backups").getNumberOfChildFiles (juce::File::findFiles) > 1);
+    phazite::ui::CleanUpPanel panel (s.context, phazite::Removal::outright);
+    TestWindow window (panel, phazite::ui::CleanUpPanel::width, phazite::ui::CleanUpPanel::height);
+    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isLooking(); }));
+    REQUIRE (panel.getNumFiles() == 6);
+
+    // The song plays one of them after the look.
+    s.addAudioClip (track, takes[2], 0.0);
+
+    // Each file's deletion held, as a recycle bin's move that takes long.
+    struct Held
+    {
+        std::atomic<int> reached { 0 };
+        std::atomic<bool> going { false }, onMessageThread { false };
+    };
+
+    const auto held = std::make_shared<Held>();
+    phazite::UnusedAudioFinder::beforeDeletingForTests = [held] (const juce::File&)
+    {
+        if (juce::MessageManager::existsAndIsCurrentThread())
+            held->onMessageThread = true;
+
+        ++held->reached;
+        const auto since = juce::Time::getMillisecondCounterHiRes();
+
+        // Until let go; on the message thread the test can't let go, and it goes on at the limit, which fails the test.
+        while (! held->going.load() && juce::Time::getMillisecondCounterHiRes() - since < hangTimeout)
+            juce::Thread::sleep (1);
+    };
+
+    const juce::ScopeGuard letGo { [held]
+                                   {
+                                       held->going = true;
+                                       phazite::UnusedAudioFinder::beforeDeletingForTests = nullptr;
+                                   } };
+
+    const auto savedReadBefore = phazite::UnusedAudioFinder::countSavedFilesRead();
+    Mouse buttons (panel);
+    buttons.click (panel.getDeleteButton().getBounds().getCentre());
+
+    // The message thread is free while the first file's deletion is held: the window held, saying so.
+    REQUIRE (dispatchMessagesUntil ([held] { return held->reached.load() == 1; }));
+    CHECK_FALSE (held->onMessageThread.load());
+    CHECK (panel.isDeleting());
+    CHECK (s.context.isHoldingForWork());
+    CHECK (panel.getSummary().startsWith ("Deleting 6 files"));
+    CHECK_FALSE (panel.getDeleteButton().isEnabled());
+
+    held->going = true;
+    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isDeleting() && ! panel.isLooking(); }));
+    CHECK_FALSE (held->onMessageThread.load());
+    CHECK_FALSE (s.context.isHoldingForWork());
+    CHECK (panel.getSummary().startsWith ("Deleted 5 files."));
+    CHECK (takes[2].existsAsFile());
+
+    for (const auto& take : takes)
+        if (take != takes[2])
+            CHECK_FALSE (take.existsAsFile());
+
+    // The saved files read at the look weren't parsed again, and none on the message thread.
+    const auto savedReadAfter = phazite::UnusedAudioFinder::countSavedFilesRead();
+    CHECK (savedReadAfter.onMessageThread == savedReadBefore.onMessageThread);
+    CHECK (savedReadAfter.all == savedReadBefore.all);
+}
+
+TEST_CASE ("Clean Up's Delete stops between two files when it is cancelled, and says what went")
+{
+    TestSong s;
+    s.addTrack ("Audio");
+    s.saveWithPluginStates(); // a folder of its own
+    REQUIRE (waitForVersionHistory (s.context));
+    juce::Array<juce::File> takes;
+
+    for (int i = 0; i < 3; ++i)
+        takes.add (writeSound (s.getProject().getAudioFolder().getChildFile ("Take " + juce::String (i + 1) + ".wav"), 0.2));
+
+    phazite::UnusedAudioFinder finder (s.context);
+    finder.find();
+    REQUIRE (dispatchMessagesUntil ([&finder] { return ! finder.isLooking() && finder.getFound().has_value(); }));
+    REQUIRE (finder.getFound()->files.size() == 3);
+
+    // The window's hold as the app's session gives it, whose cancel the test calls as the progress window's Cancel would.
+    phazite::ProjectContext::Cancel cancel;
+    s.context.setWorkHolder (
+        [&cancel] (const juce::String&, phazite::ProjectContext::Cancel c, phazite::ProjectContext::Progress)
+        {
+            cancel = std::move (c);
+            return std::make_unique<phazite::ProjectContext::WorkHold>();
+        });
+
+    const auto going = std::make_shared<std::atomic<bool>> (false);
+    const auto reached = std::make_shared<std::atomic<int>> (0);
+    phazite::UnusedAudioFinder::beforeDeletingForTests = [going, reached] (const juce::File&)
+    {
+        if (++*reached > 1)
+            return;
+
+        const auto since = juce::Time::getMillisecondCounterHiRes();
+
+        while (! going->load() && juce::Time::getMillisecondCounterHiRes() - since < hangTimeout)
+            juce::Thread::sleep (1);
+    };
+
+    const juce::ScopeGuard letGo { [going]
+                                   {
+                                       *going = true;
+                                       phazite::UnusedAudioFinder::beforeDeletingForTests = nullptr;
+                                   } };
+
+    std::optional<phazite::UnusedAudioFinder::Deleted> deleted;
+    finder.deleteUnused (s.context, { takes[0], takes[1], takes[2] }, phazite::Removal::outright,
+                         [&deleted] (phazite::UnusedAudioFinder::Deleted result) { deleted = std::move (result); });
+    REQUIRE (dispatchMessagesUntil ([reached] { return reached->load() == 1; }));
+    REQUIRE (cancel != nullptr);
+    cancel ({});
+    *going = true;
+    REQUIRE (dispatchMessagesUntil ([&deleted] { return deleted.has_value(); }));
+    CHECK (deleted->count == 1); // the file under way as it was cancelled
+    CHECK (deleted->refused == "Stopped.");
+    CHECK (reached->load() == 1);
+    CHECK_FALSE (s.context.isHoldingForWork());
+    CHECK_FALSE (takes[0].existsAsFile());
+    CHECK (takes[1].existsAsFile());
+    CHECK (takes[2].existsAsFile());
+    s.context.setWorkHolder (nullptr);
+}
+
+namespace
+{
+// An audio file's work (an import's copy, say) held in its read until let go.
+struct HeldAudioJob final : phazite::AudioWork::Job
+{
+    explicit HeldAudioJob (std::shared_ptr<std::atomic<bool>> going)
+        : letGo (std::move (going))
+    {
+    }
+
+    juce::String getTitle() const override { return "Importing Take.wav"; }
+
+    void read (const phazite::BackgroundJobs::ShouldStop& shouldStop, std::atomic<float>&) override
+    {
+        while (! letGo->load() && ! shouldStop())
+            juce::Thread::sleep (1);
+    }
+
+    void finish (phazite::ProjectContext&) override {}
+
+    const std::shared_ptr<std::atomic<bool>> letGo;
+};
+} // namespace
+
+TEST_CASE ("Clean Up neither looks nor deletes while an audio file's work is under way, and looks again once it can")
+{
+    // The audit's review, 2026-11-20: an import's copy is in the Audio folder before a clip plays it, so a look offered it,
+    // and a delete, now behind the window's hold, could delete it under the clip the import's end then made.
+    TestSong s;
+    s.addTrack ("Audio");
+    s.saveWithPluginStates(); // a folder of its own
+    REQUIRE (waitForVersionHistory (s.context));
+    const auto take = writeSound (s.getProject().getAudioFolder().getChildFile ("Take.wav"), 0.5);
+
+    phazite::UnusedAudioFinder finder (s.context);
+    finder.find();
+    REQUIRE (dispatchMessagesUntil ([&finder] { return ! finder.isLooking() && finder.getFound().has_value(); }));
+    REQUIRE (finder.getFound()->files.size() == 1);
+
+    const auto going = std::make_shared<std::atomic<bool>> (false);
+    const juce::ScopeGuard letGo { [going] { *going = true; } };
+    phazite::getAudioWork (s.context).add (std::make_unique<HeldAudioJob> (going));
+    CHECK_FALSE (phazite::canCleanUpAudio (s.context));
+    CHECK (phazite::getWhyNotCleanUpAudio (s.context).contains ("imported"));
+
+    // Delete refused at once, saying why; the take kept.
+    std::optional<phazite::UnusedAudioFinder::Deleted> deleted;
+    finder.deleteUnused (s.context, { take }, phazite::Removal::outright,
+                         [&deleted] (phazite::UnusedAudioFinder::Deleted result) { deleted = std::move (result); });
+    REQUIRE (deleted.has_value());
+    CHECK (deleted->count == 0);
+    CHECK (deleted->refused.contains ("imported"));
+    CHECK (take.existsAsFile());
+
+    // A look refused too, and wanted again once the work is over.
+    finder.find();
+    CHECK_FALSE (finder.isLooking());
+    CHECK_FALSE (finder.shouldLookAgain());
+    *going = true;
+    waitForAudioWork (s.context);
+    CHECK (finder.shouldLookAgain());
+    finder.find();
+    REQUIRE (dispatchMessagesUntil ([&finder] { return ! finder.isLooking() && finder.getFound().has_value(); }));
+    CHECK_FALSE (finder.shouldLookAgain());
+    CHECK (getNames (*finder.getFound()) == juce::StringArray ("Audio/Take.wav"));
 }

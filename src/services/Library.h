@@ -376,8 +376,15 @@ public:
     // thread builds when the library is made and when the folders change: first from the files' names, then again with
     // what their loop data say, read from the WAV and AIFF files it hasn't read before. onIndexChanged is called on the
     // message thread each time it has been built.
+    // A walk that was under way as the folders changed again, or as the library went, isn't waited for: it stops at its next
+    // look between a folder's entries (it may be inside the system's call on a drive that doesn't answer, for tens of
+    // seconds), and what it found changes nothing.
     bool isIndexing() const;
     std::function<void()> onIndexChanged;
+
+    // How many walks are under way: the current one and those left to end by themselves, of every library (tests). Any
+    // thread.
+    static int getWalksUnderWay() noexcept { return walksUnderWay.load(); }
 
     // The index as it was built last: shared, never changed (the next one is another); and its files alone.
     std::shared_ptr<const LibraryIndex> getWholeIndex() const;
@@ -448,7 +455,74 @@ private:
     Settings& settings;
     const juce::File factorySounds, presetsFolder, factoryPresetsFolder, factsFile;
     juce::StringArray audioExtensions; // of the formats the engine reads, as ".wav"
-    std::unique_ptr<Indexer> indexer;
+
+    // What the index's walks (Indexer) share with the library, which a walk left behind keeps: the library while it is there,
+    // the number of the current walk (one whose number isn't it stops at its next look, and changes nothing from then on),
+    // whether that one is under way, and a lock that one walk at a time writes the facts file under. A walk reaches the
+    // library only under the lock, and only while it is the current one; reindex() and the library's going change the number
+    // under it, so that no walk before changes anything once they have returned.
+    //
+    // One walk at a time is live; the walks under way are listed (under), each with its number, the root it is in, and when
+    // it last took a step (devices::Clock: a walk whose last step is stuckMilliseconds past is inside the system's call on a
+    // drive that doesn't answer). A walk wanted while the live one is under way waits for it (wanted: the newest, once,
+    // however often it is asked for), and starts once it ends or once it is known stuck: then the stuck one is left behind,
+    // and every walk after it leaves out the root it is stuck in (skipped), until it ends, which wants a walk again (again),
+    // that root taken in once more. So no more walks are stuck than there are roots that don't answer, and the roots that
+    // do are walked again within those few seconds of each change. Guarded by the lock, but for the atomics.
+    struct WalkState
+    {
+        int number = 0;
+        std::atomic<double> lastStep { 0.0 };
+        juce::File root;
+        bool leftBehind = false;
+    };
+
+    struct Walks
+    {
+        std::mutex lock;
+        Library* library = nullptr;
+        std::atomic<int> current { 0 };
+        std::atomic<bool> running { false }; // a walk under way or wanted, for isIndexing()
+        bool wanted = false, again = false, skipped = false;
+        std::vector<std::shared_ptr<WalkState>> under;
+        std::mutex factsFileLock;
+    };
+
+    const std::shared_ptr<Walks> walks = std::make_shared<Walks>();
+    static inline std::atomic<int> walksUnderWay { 0 };
+    static constexpr int walkCheckMilliseconds = 1000;
+
+    std::shared_ptr<WalkState> findLiveWalk() const; // under walks->lock
+    void startWalk();
+    void startWantedWalk(); // if one is wanted and the live one has ended, or is known stuck
+    void walkEnded();       // the walk a stuck one's end wants (again), else the one wanted, as startWantedWalk()
+
+    // What hears, on the message thread, that a walk ended (Indexer::end()); and what looks once a second, while a walk is
+    // wanted or one is left behind, whether the live one is stuck and whether a walk is wanted again (as the first does).
+    struct WalkStarter final : juce::AsyncUpdater
+    {
+        explicit WalkStarter (Library& l)
+            : library (l)
+        {
+        }
+
+        void handleAsyncUpdate() override;
+        Library& library;
+    };
+
+    struct WalkCheck final : juce::Timer
+    {
+        explicit WalkCheck (Library& l)
+            : library (l)
+        {
+        }
+
+        void timerCallback() override;
+        Library& library;
+    };
+
+    WalkStarter walkStarter { *this };
+    WalkCheck walkCheck { *this };
 
     // The index, what it read of the sounds' files by path, and the members of the sets that went and where those found
     // again went (their keys before and after), guarded by indexLock.
@@ -468,7 +542,7 @@ private:
 
     bool isSoundFile (const juce::File&) const;
     static bool isPreset (const juce::File&); // a preset file Phazite can read
-    bool isMidiFile (const juce::File&) const;
+    static bool isMidiFile (const juce::File&);
     juce::File findRoot (const juce::File&) const;
     juce::File findRootByPath (const juce::File&) const; // the same by paths alone, without asking the disk
 
@@ -495,7 +569,7 @@ private:
     LibraryItem makeFileItem (const juce::File&, const juce::File& root, const SoundFacts*, bool knownFile) const;
 
     std::vector<LibraryItem> getItems (const juce::StringArray& keys) const;
-    juce::Array<juce::File> getRoots() const; // the factory library, the user's folders, and the presets
+    juce::Array<juce::File> getRoots() const; // the factory library, the user's folders, and the presets, there or not: no disk
 
     Member makeMember (const LibraryItem&) const;
     std::vector<LibraryItem> getItems (const std::vector<Member>&) const; // those still there

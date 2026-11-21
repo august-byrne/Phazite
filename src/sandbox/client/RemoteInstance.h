@@ -71,9 +71,12 @@ public:
 
     // Its state, as the plug-in keeps its settings (a VST3's as its format's preset file, which other hosts read:
     // sandbox/core/Vst3State.h), within the time; none if it didn't come. Given one, or a program (below), within the time,
-    // or for 0 without waiting: the helper takes what it is asked in turn, so that what is asked after has its answer after.
+    // or without waiting (askToSetState(), askToSetProgram()), the answer done once the plug-in has taken it, which holds
+    // off the helper's hang while it is kept (Helper::send()): the helper takes what it is asked in turn, so that what is
+    // asked after has its answer after.
     std::optional<juce::MemoryBlock> getState (int timeoutMilliseconds);
     bool setState (const juce::MemoryBlock&, int timeoutMilliseconds);
+    std::shared_ptr<Helper::Reply> askToSetState (const juce::MemoryBlock&);
 
     // Its state asked for without waiting (Helper::send()), and read from the answer once it is done: none if none came.
     std::shared_ptr<Helper::Reply> askState();
@@ -82,6 +85,7 @@ public:
     // Its program (one of getInfo().programs): as it opened, then as it was last set or the helper last told (any thread).
     int getProgram() const noexcept { return program.load (std::memory_order_relaxed); }
     bool setProgram (int index, int timeoutMilliseconds);
+    std::shared_ptr<Helper::Reply> askToSetProgram (int index);
 
     // Its editor, a window of the helper's (getInfo().hasEditor): asked to be made without waiting (known bug 166), then read
     // from the answer once it is done, with its size (each side as readEditorSide() keeps it) and whether it can be resized,

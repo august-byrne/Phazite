@@ -244,6 +244,13 @@ namespace
         return format;
     }
 
+    // Whether a track can be frozen through all its devices (none listens to another track): what Bounce in Place freezes.
+    bool canFreezeWhole (const Song& song, TrackID track)
+    {
+        const auto state = findTrackState (song, track);
+        return canRender (state) && getFrozenDevices (song, track).size() == getDeviceStates (state).size();
+    }
+
     // A file's length in seconds, as JUCE's formats read it; 0 for one they can't.
     double getFileSeconds (const juce::File& file)
     {
@@ -491,8 +498,9 @@ namespace
             alive = nullptr; // no callback from here on
             render = nullptr;
 
-            if (rendered.existsAsFile())
-                rendered.deleteFile();
+            for (const auto& file : { rendered, copyTo })
+                if (file.existsAsFile())
+                    file.deleteFile();
         }
 
         float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
@@ -505,15 +513,16 @@ namespace
         const Song::Ptr song;
         const TrackID track;
         juce::File rendered; // what the engine plays into, used once it is complete
+        juce::File copyTo;   // if any, where a copy of it goes, made on the render's thread once it is complete
 
         // Starts the render: of the track, with so much of its devices (all of them for none), at the audio device's rate.
+        // The clips' renders it plays that aren't there yet are made on the render's thread first (OfflineRender.h).
         void start (std::optional<std::set<std::int64_t>> devices)
         {
             if (isSongPlaying (*song))
                 stopAndReturn (*song);
 
             rendered.getParentDirectory().createDirectory();
-            renderMissingClipAudio (*song); // the engine plays a clip whose render isn't there silent
 
             auto* session = findSession (*song);
             const auto format = getRenderFormat (session);
@@ -523,12 +532,26 @@ namespace
                 .session = session,
                 .makePlayer = [played = song, session]
                 { return std::make_unique<SongPlayer> (*played, session != nullptr ? &session->getPlugins() : nullptr); },
+                .clipsOf = song.get(),
                 .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
                 .sampleRate = format.sampleRate,
                 .blockSize = format.blockSize
             };
 
-            render = std::make_unique<OfflineRender> (setup, std::vector { job }, OfflineRender::Rendered(),
+            // The copy made on the render's thread, not the message thread's once it is done (a bounce of five minutes is
+            // 115 MB). One that can't be made fails nothing: there is no copy, and use() goes on without it (a bounce leaves
+            // the original unfrozen).
+            const auto copyIt = [from = rendered, to = copyTo] (OfflineRender&, int, const engine::LoudnessMeter::Readings&)
+            {
+                jassert (! juce::MessageManager::existsAndIsCurrentThread());
+
+                if (to != juce::File() && ! (to.getParentDirectory().createDirectory().wasOk() && from.copyFileTo (to)))
+                    to.deleteFile();
+
+                return juce::Result::ok();
+            };
+
+            render = std::make_unique<OfflineRender> (setup, std::vector { job }, copyIt,
                                                       [weakAlive = std::weak_ptr<RenderOfTrack*> (alive)] (const juce::Result& result)
                                                       {
                                                           juce::MessageManager::callAsync (
@@ -564,8 +587,10 @@ namespace
                     result = juce::Result::fail ("The track is gone, or Phazite couldn't render it.");
             }
 
-            if (rendered.existsAsFile())
-                rendered.deleteFile();
+            // What use() didn't take.
+            for (const auto& file : { rendered, copyTo })
+                if (file.existsAsFile())
+                    file.deleteFile();
 
             if (const auto callback = onFinished; callback != nullptr)
                 callback (result); // last: it may delete this
@@ -617,6 +642,12 @@ namespace
         {
             target = getRecordingsFolder (s).getNonexistentChildFile (makeUsableFileName (name), ".wav", false);
             rendered = target.getSiblingFile (target.getFileNameWithoutExtension() + " (rendering).wav").getNonexistentSibling (false);
+
+            // The original is frozen too, the bounce its frozen file, where all its devices can be (use()): copied into the
+            // Cache folder on the render's thread.
+            if (canFreezeWhole (s, t))
+                copyTo = getFrozenFile (s, t).getSiblingFile ("Bounced.wav").getNonexistentSibling (false);
+
             start (std::nullopt);
         }
 
@@ -687,11 +718,8 @@ namespace
             // render, and it then costs a file's read at most. Undo unmutes it and plays it live again.
             setTrackMuted (bouncedSong, track, true, &bouncedSong.getUndoManager());
 
-            if (const auto state = findTrackState (bouncedSong, track);
-                canRender (state) && getFrozenDevices (bouncedSong, track).size() == getDeviceStates (state).size())
-                if (const auto copy = getFrozenFile (bouncedSong, track).getSiblingFile ("Bounced.wav").getNonexistentSibling (false);
-                    copy.getParentDirectory().createDirectory().wasOk() && target.copyFileTo (copy))
-                    freezeFromFile (bouncedSong, track, copy, &bouncedSong.getUndoManager());
+            if (canFreezeWhole (bouncedSong, track) && copyTo.existsAsFile())
+                freezeFromFile (bouncedSong, track, copyTo, &bouncedSong.getUndoManager());
 
             getSelection (context).selectOnly (bounced);
             return juce::Result::ok();
@@ -746,8 +774,6 @@ namespace
                 if (part.audio && (bool) findTrackState (*song, part.track)[schema::trackFrozen])
                     unfreeze (*song, part.track);
 
-            renderMissingClipAudio (*song); // the engine plays a clip whose render isn't there silent
-
             std::vector<OfflineRender::Job> jobs;
             std::set<juce::String> taken;
             const auto folder = getRecordingsFolder (*song);
@@ -777,12 +803,14 @@ namespace
                 jobs.push_back (std::move (job));
             }
 
+            // The clips' renders it plays that aren't there yet made on the render's thread first (OfflineRender.h).
             auto* session = findSession (*song);
             const auto format = getRenderFormat (session);
             const OfflineRender::Setup setup {
                 .session = session,
                 .makePlayer = [played = song, session]
                 { return std::make_unique<SongPlayer> (*played, session != nullptr ? &session->getPlugins() : nullptr); },
+                .clipsOf = song.get(),
                 .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
                 .sampleRate = format.sampleRate,
                 .blockSize = format.blockSize

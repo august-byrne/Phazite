@@ -1147,6 +1147,44 @@ TEST_CASE ("A crashed plug-in's slot in the mixer says so, and reloads at a clic
     CHECK_FALSE (getSandboxed (song, crashing).hasCrashed());
 }
 
+TEST_CASE ("Values set on more of a plug-in's parameters than a block takes go with the blocks after it")
+{
+    // A block takes so many changes; the values set past them stayed where they were until another value was set, however
+    // long that was (the look for them was asked for once, and that one look ended at the block's limit).
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    auto& instance = getSandboxed (song, effect);
+    REQUIRE (instance.getParameters().size() == 2);
+
+    // Set from another thread than the message thread, as what plays a block sets them: kept for the next block.
+    std::thread (
+        [&instance]
+        {
+            instance.getParameters()[0]->setValue (0.25f);
+            instance.getParameters()[1]->setValue (0.75f);
+        })
+        .join();
+
+    // Blocks that take one change each: the first parameter's, the second's, then none.
+    phazite::sandbox::ParameterChange change;
+    phazite::sandbox::BlockInfo first;
+    instance.takeChanges (first, &change, 1);
+    REQUIRE (first.numChanges == 1);
+    CHECK (change.index == 0);
+    CHECK (change.value == 0.25f);
+
+    phazite::sandbox::BlockInfo second;
+    instance.takeChanges (second, &change, 1);
+    REQUIRE (second.numChanges == 1);
+    CHECK (change.index == 1);
+    CHECK (change.value == 0.75f);
+
+    phazite::sandbox::BlockInfo third;
+    instance.takeChanges (third, &change, 1);
+    CHECK (third.numChanges == 0);
+}
+
 TEST_CASE ("A shell file's hundreds of plug-ins are all found; what is past what Phazite takes from a file is said, not left out silently")
 {
     // The review of known bug 181: a file's plug-ins past 256 were left out without a word (Waves' WaveShell holds hundreds).
@@ -4872,4 +4910,308 @@ TEST_CASE ("A render whose plug-in's channel doesn't come in the prepare's time 
     phazite::toggleFreeze (song.context, host);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, longWait));
     CHECK (phazite::isFrozen (song.context, track));
+}
+
+namespace
+{
+// The synth's state gate (host/TestPlugins.h): shut while this lives, unless opened, and open again as it goes.
+struct StateGate
+{
+    StateGate()
+    {
+        phazite::test::TestPlugins::getStateSetting().deleteFile();
+        phazite::test::TestPlugins::getStateGate().create();
+    }
+
+    ~StateGate() { open(); }
+    void open() { phazite::test::TestPlugins::getStateGate().deleteFile(); }
+};
+
+// The synth stand-in, in its helper, played straight through its processor, at 48 kHz in blocks of 256.
+struct PlayedSynth
+{
+    PlayedSynth()
+    {
+        juce::String error;
+        instance = SandboxedPlugins::getHost().createInstance (phazite::test::TestPlugins::getDescription (Kind::synth), {}, -1, 48000.0,
+                                                               256, error);
+        REQUIRE_MESSAGE (instance != nullptr, error);
+        processor = std::make_unique<phazite::SandboxedProcessor> (instance);
+        processor->prepare (48000.0, 256);
+    }
+
+    // A block with its events, as a render plays it (waiting for the plug-in, however busy the machine is) or as the audio
+    // device does (never waiting past its deadline); how loud it came back.
+    float play (std::vector<phazite::devices::NoteEvent> events, bool asRender)
+    {
+        buffer.clear();
+        phazite::devices::ProcessContext context;
+        context.channels = buffer.getArrayOfWritePointers();
+        context.numChannels = 2;
+        context.numSamples = buffer.getNumSamples();
+        context.events = events;
+        context.isRendering = asRender;
+        processor->process (context);
+        return buffer.getMagnitude (0, buffer.getNumSamples());
+    }
+
+    // A state that sets its Level, and makes it wait at the state gate as it is set, given as a preset or an undo gives it:
+    // on the message thread, without waiting for the helper; once it has begun to wait.
+    void giveSlowState (float level)
+    {
+        juce::MemoryOutputStream state;
+        state.writeFloat (level);
+        state.writeFloat (1.0f); // the wait
+        instance->setStateInformation (state.getData(), (int) state.getDataSize());
+        REQUIRE (phazite::test::dispatchMessagesUntil ([] { return phazite::test::TestPlugins::getStateSetting().existsAsFile(); }));
+    }
+
+    std::shared_ptr<phazite::SandboxedInstance> instance;
+    std::unique_ptr<phazite::SandboxedProcessor> processor;
+    juce::AudioBuffer<float> buffer { 2, 256 };
+};
+} // namespace
+
+TEST_CASE ("A plug-in whose state takes longer to set than a hang is silent meanwhile, isn't taken for hung, and ends its notes")
+{
+    // The audit of 2026-11-20: the helper's audio thread waited for the plug-in's lock while its message thread gave it a
+    // state, so Phazite found its channel busy at every block and ended the helper once a block had been kept a hang's
+    // time; and the state's answer, let go of at once, held nothing off the heartbeat's limit either. A sampler that reads
+    // its library as it is given a state takes longer than both.
+    using Type = phazite::devices::NoteEvent::Type;
+    SandboxedPlugins sandboxed;
+    SandboxedPlugins::useShortHangLimits(); // a hang's test
+    PlayedSynth synth;
+    CHECK (synth.play ({ { Type::noteOn, 0, 69, 0.8f } }, true) > 0.1f);
+
+    StateGate gate;
+    synth.giveSlowState (0.5f);
+
+    // Live blocks while it sets the state, for twice as long as the longer of the two hang limits: each answered at once,
+    // unplayed, and silent; the helper not taken for hung. The note ends in the first.
+    const auto from = juce::Time::getMillisecondCounterHiRes();
+    const auto lasting = 2.0 * std::max (SandboxedPlugins::messageHangMilliseconds, SandboxedPlugins::audioHangMilliseconds);
+    auto silent = juce::exactlyEqual (synth.play ({ { Type::noteOff, 10, 69, 0.0f } }, false), 0.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            silent = juce::exactlyEqual (synth.play ({}, false), 0.0f) && silent;
+            return synth.instance->hasCrashed() || juce::Time::getMillisecondCounterHiRes() - from >= lasting;
+        }));
+    CHECK (silent);
+    CHECK_FALSE (synth.instance->hasCrashed());
+    CHECK (synth.instance->getRemote().getHelper().isRunning());
+    CHECK (phazite::test::TestPlugins::getStateSetting().existsAsFile()); // still setting it
+
+    // The state set: it plays again. The note's end went with the first block it played, where nothing sounds of it; a new
+    // note sounds, at the Level the state gave it.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return ! phazite::test::TestPlugins::getStateSetting().existsAsFile(); }));
+    CHECK (synth.play ({}, true) == 0.0f);
+    CHECK (synth.play ({}, true) == 0.0f);
+    CHECK (synth.play ({ { Type::noteOn, 0, 72, 0.8f } }, true) == doctest::Approx (0.5f).epsilon (0.05));
+    CHECK_FALSE (synth.instance->hasCrashed());
+}
+
+TEST_CASE ("States set in a fraction of a block each, as presets auditioned while the song plays are, leave no block unplayed")
+{
+    // The review of the audit's fixes (2026-11-20): a live block that found the plug-in's lock held was answered unplayed at
+    // once, so every preset set while the song played cut an instrument to silence for a block, however quick it was.
+    using Type = phazite::devices::NoteEvent::Type;
+    SandboxedPlugins sandboxed;
+    PlayedSynth synth;
+    CHECK (synth.play ({ { Type::noteOn, 0, 69, 0.8f } }, true) > 0.1f);
+
+    // Two hundred states of half a millisecond each (a tenth of the block), a live block after each is sent: the helper's
+    // message thread sets them one after another, holding the plug-in's lock for nearly all of a tenth of a second while the
+    // blocks come; then live blocks until a request sent after them has its answer.
+    juce::MemoryOutputStream state;
+    state.writeFloat (0.25f); // its Level
+    state.writeFloat (2.0f);  // half a millisecond to set
+
+    for (int i = 0; i < 200; ++i)
+    {
+        synth.instance->setStateInformation (state.getData(), (int) state.getDataSize());
+        synth.play ({}, false);
+    }
+
+    const auto after = synth.instance->getRemote().askState();
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            synth.play ({}, false);
+            return after->isDone();
+        }));
+
+    CHECK (synth.processor->countUnplayedBlocks() == 0);
+    CHECK_FALSE (synth.instance->hasCrashed());
+}
+
+TEST_CASE ("A note whose end there was no room to keep with a block the helper didn't play doesn't sound on")
+{
+    // The review of the audit's fixes: a block's events past what is kept of it were ended by an all notes off kept before
+    // them, so a note among those kept whose end was among those dropped began after it, and sounded on.
+    using Type = phazite::devices::NoteEvent::Type;
+    SandboxedPlugins sandboxed;
+    PlayedSynth synth;
+    StateGate gate;
+    synth.giveSlowState (0.25f);
+
+    // A note, more events after it than what is kept of a block holds (slides, which reach no plug-in), then its end, in a
+    // block the helper doesn't play.
+    std::vector<phazite::devices::NoteEvent> events { { Type::noteOn, 0, 60, 0.8f } };
+
+    for (int i = 0; i < 1100; ++i)
+        events.push_back ({ Type::slide, 1, 60, 0.0f });
+
+    events.push_back ({ Type::noteOff, 2, 60, 0.0f });
+    CHECK (synth.play (events, false) == 0.0f);
+    CHECK (synth.processor->countUnplayedBlocks() == 1);
+
+    // Once the state is set, nothing of the note sounds.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return ! phazite::test::TestPlugins::getStateSetting().existsAsFile(); }));
+    CHECK (synth.play ({}, true) == 0.0f);
+    CHECK (synth.play ({}, true) == 0.0f);
+}
+
+TEST_CASE ("A plug-in prepared again at its rate while the audio thread holds its channel for a moment is prepared at once")
+{
+    // The review of the audit's fixes: preparing gave up on a channel held at all and left it to the timer, so a plug-in
+    // whose latency changed as it played (its processor made anew and prepared) was skipped until the timer's next look,
+    // where it used to wait for the audio thread, which lets go within a block.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    auto& instance = getSandboxed (song, effect);
+    CHECK (turnMessageLoop (10)); // what plays the song prepared it, for the rate it opened at
+    const auto rate = instance.getRemote().getSampleRate();
+
+    // The audio thread holds the channel for a moment, as it does as it plays a block.
+    juce::WaitableEvent holding;
+    std::thread audio (
+        [&]
+        {
+            instance.hold();
+            holding.signal();
+            juce::Thread::sleep (2);
+            instance.let();
+        });
+    const juce::ScopeGuard joined { [&audio] { audio.join(); } };
+    REQUIRE (holding.wait (phazite::test::hangTimeout));
+
+    // Prepared meanwhile at its rate, for blocks of 4096 (it tries for the channel as long as one lasts, tens of
+    // milliseconds): nothing to wait for, it isn't preparing.
+    instance.prepareToPlay (rate, 4096);
+    CHECK_FALSE (instance.isPreparing());
+}
+
+TEST_CASE ("A plug-in that never comes back from being given a state is taken for hung once a state's time to be set is up")
+{
+    // What still ends a helper whose message thread a plug-in keeps for ever as it is given a state: its blocks are answered
+    // unplayed meanwhile, never kept, and the state's answer holds off the heartbeat's limit, but only for so long.
+    struct SettingLimit
+    {
+        SettingLimit() { phazite::SandboxedInstance::setSettingMilliseconds (3000); }
+        ~SettingLimit() { phazite::SandboxedInstance::setSettingMilliseconds (0); }
+    } limit;
+
+    SandboxedPlugins sandboxed;
+    SandboxedPlugins::useShortHangLimits(); // a hang's test
+    PlayedSynth synth;
+    StateGate gate;
+    const auto from = juce::Time::getMillisecondCounterHiRes();
+    synth.giveSlowState (0.5f);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            synth.play ({}, false);
+            return synth.instance->hasCrashed();
+        }));
+
+    // Not before the setting's time and the heartbeat's limit after it.
+    CHECK (juce::Time::getMillisecondCounterHiRes() - from
+           >= phazite::SandboxedInstance::getSettingMilliseconds() + SandboxedPlugins::messageHangMilliseconds);
+    CHECK (synth.instance->getRemote().getHelper().wasEndedForHanging());
+}
+
+TEST_CASE ("A plug-in prepared while a render holds its channel waits for no render: it is prepared once the render lets go")
+{
+    // The audit of 2026-11-20: preparing waited for the channel, spinning on the message thread, while a render held it for
+    // as long as a plug-in took over its block (for ever, for one that hung): the live plan, made again on the message thread
+    // as a plug-in said another latency for playing offline, prepared what plays it.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    auto& instance = getSandboxed (song, effect);
+    CHECK (turnMessageLoop (10)); // what plays the song prepared it, for the rate it opened at
+    const auto rate = instance.getRemote().getSampleRate();
+    const auto otherRate = juce::exactlyEqual (rate, 96000.0) ? 44100.0 : 96000.0;
+
+    // A render's thread holds the channel, as it does while it waits for the plug-in, until it is let go of (or a quarter of
+    // the tests' hang limit has passed).
+    const auto heldFor = phazite::test::hangTimeout / 4;
+    juce::WaitableEvent letGo;
+    std::atomic<bool> held { false };
+    std::thread render (
+        [&]
+        {
+            instance.hold();
+            held = true;
+            letGo.wait (heldFor);
+            instance.let();
+        });
+    const juce::ScopeGuard joined { [&]
+                                    {
+                                        letGo.signal();
+                                        render.join();
+                                    } };
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&held] { return held.load(); }));
+
+    // Prepared meanwhile for another rate, as the live plan made again prepares it: at once (a wait would last until the
+    // render lets go: half of that tells them apart however busy the machine is); the engine skips it until it is prepared.
+    CHECK (timeKept ([&] { instance.prepareToPlay (otherRate, 512); }) < heldFor / 2.0);
+    CHECK (instance.isPreparing());
+    CHECK (turnMessageLoop (10));
+    CHECK (instance.isPreparing());
+
+    // The render lets go: prepared then, by the message thread's timer.
+    letGo.signal();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! instance.isPreparing(); }, longWait));
+    CHECK (instance.getRemote().getSampleRate() == otherRate);
+    CHECK_FALSE (instance.hasCrashed());
+}
+
+TEST_CASE ("A meter a plug-in tells as a parameter as it plays changes nothing of the song: it stays saved, its state unasked")
+{
+    // The audit of 2026-11-20: JUCE's VST3 host tells what a plug-in outputs to its host as it plays (a gain-reduction meter
+    // it has as a parameter) as a change of that parameter, which Phazite took for a value set in the plug-in's window:
+    // written into the song as set by hand, an unsaved change, and the plug-in's state asked again, for as long as the meter
+    // moved.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    const auto delay = song.addEffect (track, "PhaziteTestLatency");
+    auto& instance = getSandboxed (song, delay);
+    const auto meter = instance.findParameter ("41");
+    REQUIRE (meter >= 0);
+
+    // Its Latency on, which it says as it plays its next block, after what its Meter told as it played it.
+    song.setParameter (delay, "40", 1.0f);
+    helperHasTaken (song, delay);
+    song.saveWithPluginStates();
+    REQUIRE_FALSE (song.getProject().hasUnsavedChanges());
+    const auto stateChanges = instance.countStateChanges();
+
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    CHECK (levelOf (playback.play (0.5), 0, 0.2, 0.45) > toneLevel - 1.0f); // the tone through it: its Meter moved
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.getRemote().getLatencySamples() == 128; }));
+    phazite::test::dispatchPendingMessages(); // what came before it, taken in on the message thread
+
+    CHECK (instance.getParameterValue (meter) == 0.0f);
+    CHECK (instance.countStateChanges() == stateChanges);
+    CHECK_FALSE (song.getProject().hasUnsavedChanges());
+    CHECK (getSong (song).getChangesOutsideHistory() == 0);
 }

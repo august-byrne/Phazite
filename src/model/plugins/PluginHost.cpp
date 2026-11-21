@@ -403,16 +403,17 @@ PluginHost::Opened PluginHost::open (const juce::PluginDescription& description,
         return opened;
 
     // Where its state left another program: that program, then the state again, so that the settings are never overridden
-    // by a program set after them (a plug-in's state needn't say which program it is on).
-    const auto stateMilliseconds = SandboxedInstance::getStateMilliseconds();
+    // by a program set after them (a plug-in's state needn't say which program it is on). Each within the time a state given
+    // may take to be set, as long as the plug-in had to load with it: the helper isn't taken for hung meanwhile.
+    const auto settingMilliseconds = SandboxedInstance::getSettingMilliseconds();
 
     if (programWanted >= 0 && juce::isPositiveAndBelow (programWanted, (int) opened.remote->getInfo().programs.size())
         && opened.remote->getProgram() != programWanted)
     {
-        opened.remote->setProgram (programWanted, stateMilliseconds);
+        opened.remote->setProgram (programWanted, settingMilliseconds);
 
         if (state.getSize() > 0)
-            opened.remote->setState (state, stateMilliseconds);
+            opened.remote->setState (state, settingMilliseconds);
     }
 
     opened.running = std::move (running);

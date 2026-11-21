@@ -240,7 +240,7 @@ private:
         {
             const juce::ScopedLock held (owner.lock);
 
-            if (owner.isWaiting())
+            if (owner.isWaiting (now))
             {
                 beatSent = now;
                 return false;
@@ -396,7 +396,7 @@ std::shared_ptr<Helper::Reply> Helper::send (MessageWriter& message, bool holdsO
         waiting.push_back (reply);
     }
 
-    if (! pipe->sendMessage (message.take()))
+    if (! write (message))
     {
         const juce::ScopedLock held (lock);
         finish (*reply, {});
@@ -415,19 +415,33 @@ void Helper::finish (Reply& reply, const juce::MemoryBlock& message)
     reply.answered.signal();
 }
 
-bool Helper::isWaiting()
+bool Helper::isWaiting (double now)
 {
     return std::any_of (waiting.begin(), waiting.end(),
-                        [] (const auto& wanted)
+                        [now] (const auto& wanted)
                         {
                             const auto reply = wanted.lock();
-                            return reply != nullptr && ! reply->isDone() && reply->holdsOffHang;
+
+                            if (reply == nullptr || reply->isDone() || ! reply->holdsOffHang)
+                                return false;
+
+                            const auto ends = reply->holdOffEnds.load();
+                            return ends <= 0.0 || now < ends;
                         });
 }
 
 bool Helper::post (MessageWriter& message)
 {
-    return running && pipe->sendMessage (message.take());
+    return running && write (message);
+}
+
+bool Helper::write (MessageWriter& message)
+{
+    // One message at a time: JUCE's connection lets several threads write at once, and on Linux and macOS its pipe writes a
+    // message longer than the pipe takes at once (4,096 bytes) in parts, so a heartbeat or a value set from another thread
+    // could land inside a plug-in's state, after which the helper reads no message right and quits.
+    const juce::ScopedLock sending (sendLock);
+    return pipe->sendMessage (message.take());
 }
 
 void Helper::kill()

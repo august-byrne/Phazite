@@ -20,12 +20,16 @@ namespace phazite::test
 // Counts the plans the open project's playback session gives Phazite's engine (model/playback/internal/PlaybackSession.h:
 // update()), as long as no block plays meanwhile. Every plan holds the master's strip state, which the song's player
 // keeps from plan to plan; and the engine keeps every plan it replaced until a block has played since
-// (engine/core/Handover.h), so while none plays, each plan given holds one more reference to it. Made while the context's
-// project is the one the engine plays, after its song's changes were delivered.
+// (engine/core/Handover.h), so while none plays, each plan given holds one more reference to it. It makes the engine not
+// idle, as a device that has started does, for that (engine::Engine::setIdle()), and as it was again when it goes. Made while
+// the context's project is the one the engine plays, after its song's changes were delivered.
 class PlanCounter
 {
 public:
     explicit PlanCounter (ProjectContext&);
+    ~PlanCounter();
+    PlanCounter (const PlanCounter&) = delete;
+    PlanCounter& operator= (const PlanCounter&) = delete;
 
     // The plans given since it was made, or since this was last asked, the song's changes delivered first
     // (dispatchPendingMessages()).
@@ -37,6 +41,7 @@ public:
 
 private:
     ProjectContext& context;
+    bool wasIdle = false;
     std::shared_ptr<engine::StripState> master;
     long counted = 0;
     long countNow() const;

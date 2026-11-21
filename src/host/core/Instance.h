@@ -2,10 +2,16 @@
 // A plug-in hosted in a helper: the instance JUCE's format loaded, prepared for its channel's blocks with its main
 // buses in stereo and a stereo sidechain where it has one, and the thread that plays them, which waits on the channel's
 // bell, plays the block in place and rings Phazite back. A block's parameter changes play at their samples: the block
-// is played in pieces between them. The plug-in's playhead is the song's place in the block. What the plug-in changes
-// itself (its parameters from its window, and the gestures around them, its latency, its state, its list of parameters)
-// is kept for the message thread to tell Phazite (takeNotices()), never told from the thread that changed it, which may
-// be its audio thread. The audio thread is in MMCSS's Pro Audio task, as Phazite's own are
+// is played in pieces between them. The plug-in's playhead is the song's place in the block. A live block that comes while
+// the helper's message thread sets the plug-in (a state, a program, the switch to or from playing offline, each under the
+// plug-in's callback lock) waits for it half its own length at most, spinning (a quick preset is set within that, and the
+// block plays), then is answered as one the plug-in didn't play (BlockInfo::played), rather than kept until that is done: a sampler that reads its library as it is given a state may take longer than a hang, and Phazite plays such
+// a block as a late one, its notes and changes going with the next; a render's block waits for the plug-in. What the
+// plug-in changes itself (its parameters from its window, and the gestures around them, its latency, its state, its list
+// of parameters) is kept for the message thread to tell Phazite (takeNotices()), never told from the thread that changed
+// it, which may be its audio thread; but not what it says of a parameter that can't be automated as it plays a block (a
+// VST3's output to the host, which JUCE's VST3 host tells as a change of the parameter: a gain-reduction meter's, which the
+// user can't set, and which would make the song read as changed for as long as it moved). The audio thread is in MMCSS's Pro Audio task, as Phazite's own are
 // (devices/core/AudioThreads.h), and rounds denormal numbers to zero, as a plug-in's host does. It keeps which notes it
 // gave the plug-in that haven't ended, and ends each with a note-off of its own where every note is to end (all notes off
 // or all sound off, as playback stops or jumps, and a reset): a plug-in needn't take those controllers (JUCE's VST3 host
@@ -71,6 +77,7 @@ private:
     juce::AudioBuffer<float> extra;                   // channels the plug-in has beyond the channel's: made once, as prepared
     juce::MidiBuffer midi;                            // a piece's MIDI, its room made once
     juce::Array<juce::AudioProcessorParameter*> parameters;
+    std::vector<bool> automatable; // each parameter's, as the plug-in said as it opened: read on the audio thread, never written
 
     // The audio thread's: the notes given to the plug-in that haven't ended, on each MIDI channel; and whether they all end
     // as the block starts, for its reset.
@@ -94,7 +101,7 @@ private:
     // leave; -1 for none), which the message thread sets at its next tick, as the song's own choice, as Phazite's
     // setProgram() is: JUCE's VST3 host hands a VST3 a MIDI program change only as a legacy MIDI event, which few read, and a
     // VST3's programs are a parameter of its own. While the message thread sets it, what the plug-in tells of its
-    // parameters there and then is the program's doing, not a change of its own (settingProgramPlayed). JUCE workaround W58
+    // parameters there and then is the program's doing, not a change of its own (settingProgramPlayed). JUCE workaround W60
     // (docs/juce-workarounds.md).
     // It is left with a number of its own above the program's 7 bits (askForProgram()), which the message thread leaves in
     // programSetFor once it has set it, for a render's block that waits for that.
@@ -123,6 +130,7 @@ private:
     void setOffline (bool); // message thread, no block playing
     void tellOffline();     // message thread: setOffline() where offlineWanted says otherwise than it was told
     void run() override;
+    bool takeLockWithin (const juce::CriticalSection&, int numSamples) const noexcept; // entered, within half a block
     void play() noexcept;
     void playPiece (int start, int numSamples) noexcept;
     void endNotes (int midiChannel, int sample) noexcept; // a note-off into the piece's MIDI for each of a channel's notes

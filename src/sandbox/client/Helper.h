@@ -6,7 +6,7 @@
 // closed, which wakes a write waiting for it to connect. One that hangs is ended (kill()), so that nothing of Phazite's
 // waits for it: by the watching thread, when it hasn't answered as it starts within the time start() gives it, or when its
 // message thread hasn't answered the heartbeat it sends each second for a while, but while a request waits for its own
-// answer (a plug-in loading, its state); or when an audio thread of its has kept a block too long, which the engine tells
+// answer (a plug-in loading, its state asked or given, each for as long as its asker allows); or when an audio thread of its has kept a block too long, which the engine tells
 // it without waiting (reportHung()). The pipe's thread delivers the answers and the notices, the watching thread the
 // loss; requests may come from any other. JUCE workaround W5 (docs/juce-workarounds.md), for the crashes. Built from JUCE's
 // ChildProcess and InterprocessConnection rather than its ChildProcessCoordinator, which can't end a helper that hangs:
@@ -71,11 +71,20 @@ public:
         // what waited for something that may take long (a plug-in's editor made) without giving up on it.
         void stopHoldingOffHang() noexcept { holdsOffHang.store (false); }
 
+        // The same once so many milliseconds have passed from now (any thread): what may take long, but not for ever (a
+        // plug-in given a state that reads a sampler's library), so that a message thread that never comes back from it is
+        // still taken for hung, the heartbeat's limit later.
+        void stopHoldingOffHangAfter (int milliseconds) noexcept
+        {
+            holdOffEnds.store (juce::Time::getMillisecondCounterHiRes() + milliseconds);
+        }
+
     private:
         friend class Helper;
         std::int64_t request = 0;
         std::atomic<bool> holdsOffHang { true };
-        juce::WaitableEvent answered { true }; // stays signalled once it is
+        std::atomic<double> holdOffEnds { 0.0 }; // when it stops holding it off (getMillisecondCounterHiRes()); 0: never
+        juce::WaitableEvent answered { true };   // stays signalled once it is
         juce::MemoryBlock reply;
         std::atomic<bool> done { false };
     };
@@ -131,15 +140,17 @@ private:
     std::atomic<std::int64_t> heartbeat { 0 }; // the heartbeat's request not answered yet, or 0
     std::atomic<double> startDeadline { 0.0 }; // while it starts: when it must have answered (getMillisecondCounterHiRes())
     juce::CriticalSection lock, pipeLock;
+    juce::CriticalSection sendLock;            // held while a message is written to the pipe, by whichever thread sends it
     std::vector<std::weak_ptr<Reply>> waiting; // the requests whose answers are still wanted (those let go of are pruned)
 
-    bool isWaiting();                               // for an answer still wanted (lock held)
+    bool isWaiting (double now);                    // for an answer still wanted that holds off the hang now (lock held)
     void finish (Reply&, const juce::MemoryBlock&); // done, with the reply (lock held)
 
     // The process is looked at by the watching thread while others end it or wait for it, and JUCE's ChildProcess isn't safe
     // to share (finding it gone forgets it): every use of it holds this (linux-tsan found the race, 2026-11-11).
     juce::CriticalSection processLock;
 
+    bool write (MessageWriter&); // into the pipe, whole, one thread at a time
     void received (const juce::MemoryBlock&);
     void helperLost();
     void closePipe(); // as the helper is lost, and before the watching thread is stopped

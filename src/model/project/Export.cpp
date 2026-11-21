@@ -2,7 +2,6 @@
 #include "Export.h"
 #include "engine/nodes/LoudnessMeter.h"
 #include "internal/Export.h"
-#include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/WholeFile.h"
@@ -152,18 +151,14 @@ namespace
     // session, which it lends (none play without one); or, for a song no session plays, with plug-in instances of its own,
     // in the background, on one thread. Each job's player made once every clip's render it plays is there (the engine plays
     // a clip whose render isn't there silent), as that job's turn comes: a source written again since the job before (or
-    // since the export began, while its plug-ins loaded) names a render of its own, made then.
+    // since the export began, while its plug-ins loaded) names a render of its own, made then, on the render's thread.
     OfflineRender::Setup getRenderSetup (Song& song, double sampleRate, PluginInstances* own = nullptr)
     {
         auto* session = findSession (song);
         auto* plugins = session != nullptr ? &session->getPlugins() : own;
         return { .session = session,
-                 .makePlayer =
-                     [&song, plugins]
-                 {
-                     renderMissingClipAudio (song);
-                     return std::make_unique<SongPlayer> (song, plugins);
-                 },
+                 .makePlayer = [&song, plugins] { return std::make_unique<SongPlayer> (song, plugins); },
+                 .clipsOf = &song,
                  .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
                  .sampleRate = sampleRate,
                  .blockSize = renderBlockSize,

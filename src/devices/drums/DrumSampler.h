@@ -191,6 +191,10 @@ private:
     std::atomic<bool> anyPending { false };
     std::atomic<std::uint64_t> clearBlocks { 0 };
     std::atomic<double> longestSound { 0.0 }; // in seconds: its tail, worked out where the sounds are given
+    // In seconds: how long its hits still playing last, each from its start to where it ends at its slowest step (Tune down,
+    // a Sweep from below), the longest; its tail while it is longer than longestSound (measurePlayingTail()).
+    std::atomic<double> playingTail { 0.0 };
+    static_assert (std::atomic<double>::is_always_lock_free);
     // The first maxVoices play hits; the rest fade out what voices played when other hits took them (stealVoice()).
     static constexpr int numFading = maxVoices;
     std::array<Voice, maxVoices + numFading> voices {};
@@ -232,5 +236,6 @@ private:
     void render (float* left, float* right, int numSamples, std::span<const PartOutput>, int outputStart);
     void freeRetired();
     void findLongestSound();
+    void measurePlayingTail() noexcept; // the audio thread's, after each block
 };
 } // namespace phazite::devices
