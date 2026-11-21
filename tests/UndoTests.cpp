@@ -4,11 +4,13 @@
 // (UndoCheck.h): what it finds and what it leaves out, and the song's changes it guards beyond the commands' script
 // (tests/CommandGoldenTests.cpp).
 #include "GoldenFiles.h"
+#include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UndoCheck.h"
 #include "devices/reverb/Reverb.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
@@ -17,10 +19,13 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <functional>
 #include <optional>
+#include <string>
 
 namespace
 {
@@ -804,4 +809,141 @@ TEST_CASE ("What waits for a gesture's end runs after it: committed, rolled back
         next->commit();
         CHECK (ran == std::vector<juce::String> { "first", "at once", "after the next" });
     }
+}
+
+TEST_CASE ("A drag of note edits rolled back, or a trial put back, with steps waiting to be redone: the song as it was found, the same "
+           "steps to redo, and Redo doing what it did")
+{
+    // Undo.h: a Gesture's rollBack() "undoes its changes instead and leaves nothing to redo" of its own, and a Trial's putBack()
+    // "takes it all back, leaving nothing to redo"; each keeps the song's own redo steps as they were as it began
+    // (redoStepsBefore). Steps begun during either join it. A clip from beat 0 to 4 with two notes.
+    using phazite::test::at;
+    using phazite::test::lasting;
+    phazite::test::TestSong song;
+    auto& target = *phazite::findSong (song.context);
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 4.0);
+    const auto first = phazite::addNote (target, clip, 60, at (0.0), lasting (1.0), 100);
+    const auto second = phazite::addNote (target, clip, 64, at (1.0), lasting (1.0), 90);
+    REQUIRE (first.isValid());
+    REQUIRE (second.isValid());
+    target.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck check (song.context);
+
+    // The clip and its notes, as the model gives them.
+    const auto describe = [&]
+    {
+        juce::StringArray parts;
+        const auto range = phazite::getClipRange (target, clip);
+        parts.add ("clip " + juce::String (range.getStart().inBeats()) + "-" + juce::String (range.getEnd().inBeats()));
+
+        for (const auto& note : phazite::getClipNotes (target, clip))
+            parts.add (juce::String (note.pitch) + "@" + juce::String (note.start.inBeats()) + " for "
+                       + juce::String (note.length.inBeats()) + " v" + juce::String (note.velocity));
+
+        return parts.joinIntoString (", ").toStdString();
+    };
+
+    const auto edit = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        check.check (name,
+                     [&]
+                     {
+                         const phazite::UndoStep step (target, name);
+                         change();
+                     });
+    };
+
+    // Two note moves, both undone: two steps to redo.
+    const auto before = describe();
+    edit ("Move First Note", [&] { phazite::moveNote (target, first, at (0.5), 62); });
+    edit ("Move Second Note", [&] { phazite::moveNote (target, second, at (2.0), 65); });
+    const auto afterBoth = describe();
+    check.stepBackOrForth ("Undo", [&target] { phazite::undo (target); });
+    check.stepBackOrForth ("Undo", [&target] { phazite::undo (target); });
+    const auto found = describe();
+    CHECK (found == before);
+    const auto steps = phazite::getHistorySteps (target);
+    REQUIRE (steps.ahead == juce::StringArray { "Move First Note", "Move Second Note" });
+
+    // What each drag or trial below changes: notes moved, nudged and made louder (a model function that begins a step of its
+    // own, which joins it), and the clip moved.
+    const auto drag = [&]
+    {
+        phazite::moveNote (target, first, at (3.0), 72);
+        phazite::nudgeNotes (target, { second }, lasting (0.5));
+        phazite::changeNoteVelocities (target, { first, second }, 10);
+        phazite::moveClip (target, clip, at (8.0), song.firstTrack);
+    };
+
+    // Redo then does what it did before: both moves.
+    const auto redoBoth = [&]
+    {
+        CHECK (phazite::canRedo (target));
+        check.stepBackOrForth ("Redo", [&target] { phazite::redo (target); });
+        check.stepBackOrForth ("Redo", [&target] { phazite::redo (target); });
+        CHECK (describe() == afterBoth);
+        CHECK_FALSE (phazite::canRedo (target));
+    };
+
+    SUBCASE ("A gesture rolled back")
+    {
+        {
+            phazite::Gesture gesture (target, "Drag Notes");
+            drag();
+            CHECK (describe() != found);
+            gesture.rollBack();
+        }
+
+        CHECK (describe() == found);
+        CHECK (phazite::getHistorySteps (target).ahead == steps.ahead);
+        CHECK (phazite::getHistorySteps (target).done == steps.done);
+        redoBoth();
+    }
+
+    SUBCASE ("A gesture committed: one step, with the step begun during it, and the steps that waited gone")
+    {
+        check.check ("Drag Notes",
+                     [&]
+                     {
+                         phazite::Gesture gesture (target, "Drag Notes");
+                         drag();
+                         gesture.commit();
+                     });
+
+        const auto dragged = describe();
+        CHECK (phazite::getHistorySteps (target).done == juce::StringArray { "Drag Notes" });
+        CHECK (phazite::getHistorySteps (target).ahead.isEmpty());
+        check.stepBackOrForth ("Undo Drag Notes", [&target] { phazite::undo (target); });
+        CHECK (describe() == found);
+        check.stepBackOrForth ("Redo Drag Notes", [&target] { phazite::redo (target); });
+        CHECK (describe() == dragged);
+    }
+
+    SUBCASE ("A trial put back, after one tried from its start again")
+    {
+        {
+            phazite::Trial trial (target, "Swap", nullptr);
+            trial.apply (drag);
+            CHECK (describe() != found);
+
+            // From its start: what was tried before is taken back first, so only the second note moves.
+            trial.apply ([&] { phazite::moveNote (target, second, at (3.0), 67); }, true);
+            const auto notes = phazite::getClipNotes (target, clip);
+            REQUIRE (notes.size() == 2);
+            CHECK (phazite::getClipRange (target, clip).getStart() == at (0.0));
+            CHECK (phazite::getNoteData (target, first).value().pitch == 60);
+            CHECK (phazite::getNoteData (target, first).value().velocity == 100);
+            CHECK (phazite::getNoteData (target, second).value().pitch == 67);
+            CHECK (phazite::getNoteData (target, second).value().start == at (3.0));
+
+            trial.putBack();
+        }
+
+        CHECK (describe() == found);
+        CHECK (phazite::getHistorySteps (target).ahead == steps.ahead);
+        CHECK (phazite::getHistorySteps (target).done == steps.done);
+        redoBoth();
+    }
+
+    check.walkBackAndForth();
 }

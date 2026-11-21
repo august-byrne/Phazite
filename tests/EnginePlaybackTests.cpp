@@ -51,10 +51,12 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -277,6 +279,97 @@ TEST_CASE ("A new plan compiles again the notes of the tracks whose clips change
     compile();
     phazite::undo (state);
     CHECK (pitchesOf (*compile(), song.firstTrack) == std::vector { 60, 64 });
+}
+
+TEST_CASE ("A note edited in a clip with an alias on another track plays in both, as do its Undo and its Redo")
+{
+    // The clips of an alias group play the same notes, each where it is (Clips.h: copyClips()). A clip on the first track from
+    // beat 0 to 4 with a note at its start; its alias on another track from beat 8.
+    TestSong song;
+    auto& state = *phazite::findSong (song.context);
+    const auto other = song.addTrack ("Other");
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 4.0);
+    song.addNote (clip, 60, 0.0, 1.0);
+    const auto alias = song.copyClip (clip, 8.0, true);
+    phazite::moveClip (song.context, alias, phazite::BeatPosition::fromBeats (8.0), other);
+    REQUIRE (phazite::getClipTrack (state, alias) == other);
+    const auto notes = phazite::getClipNotes (state, clip);
+    REQUIRE (notes.size() == 1);
+    const auto note = notes.front().id;
+
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    const auto compile = [session] { return session->getPlayer().compile (48000.0, 256, std::nullopt); };
+    const auto notesOf = [] (const phazite::engine::Plan& plan, phazite::TrackID track)
+    {
+        for (const auto& strip : plan.strips)
+            if (strip.id == (std::int64_t) track.getRaw())
+                return strip.notes;
+
+        FAIL ("no strip for the track");
+        return std::shared_ptr<const phazite::engine::NoteSequence>();
+    };
+
+    // What a track plays: each note's pitch, where it starts and ends in the song's beats.
+    const auto playedOf = [&notesOf] (const phazite::engine::Plan& plan, phazite::TrackID track)
+    {
+        juce::StringArray played;
+
+        if (const auto sequence = notesOf (plan, track))
+            for (const auto& each : sequence->getNotes())
+                played.add (juce::String (each.pitch) + " " + juce::String (each.start, 3) + "-" + juce::String (each.end, 3));
+
+        return played.joinIntoString (", ").toStdString();
+    };
+
+    const auto first = compile();
+    CHECK (playedOf (*first, song.firstTrack) == "60 0.000-1.000");
+    CHECK (playedOf (*first, other) == "60 8.000-9.000");
+
+    // Moved through the alias: both tracks play it moved, each from a sequence made again.
+    {
+        const phazite::UndoStep step (state, "Move Note");
+        phazite::moveNote (state, { alias, note }, phazite::BeatPosition::fromBeats (9.5), 62);
+    }
+
+    const auto moved = compile();
+    CHECK (playedOf (*moved, song.firstTrack) == "62 1.500-2.500");
+    CHECK (playedOf (*moved, other) == "62 9.500-10.500");
+    CHECK (notesOf (*moved, song.firstTrack) != notesOf (*first, song.firstTrack));
+    CHECK (notesOf (*moved, other) != notesOf (*first, other));
+
+    // Undone: both as they were; redone: both moved again.
+    phazite::undo (state);
+    const auto undone = compile();
+    CHECK (playedOf (*undone, song.firstTrack) == "60 0.000-1.000");
+    CHECK (playedOf (*undone, other) == "60 8.000-9.000");
+    CHECK (notesOf (*undone, other) != notesOf (*moved, other));
+
+    phazite::redo (state);
+    const auto redone = compile();
+    CHECK (playedOf (*redone, song.firstTrack) == "62 1.500-2.500");
+    CHECK (playedOf (*redone, other) == "62 9.500-10.500");
+    CHECK (notesOf (*redone, other) != notesOf (*undone, other));
+
+    // A note added in the first clip: both tracks play it.
+    {
+        const phazite::UndoStep step (state, "Add Note");
+        REQUIRE (phazite::addNote (state, clip, 67, phazite::BeatPosition::fromBeats (3.0), phazite::BeatDuration::fromBeats (0.5), 100)
+                     .isValid());
+    }
+
+    const auto added = compile();
+    CHECK (playedOf (*added, song.firstTrack) == "62 1.500-2.500, 67 3.000-3.500");
+    CHECK (playedOf (*added, other) == "62 9.500-10.500, 67 11.000-11.500");
+    phazite::undo (state);
+    const auto addUndone = compile();
+    CHECK (playedOf (*addUndone, song.firstTrack) == "62 1.500-2.500");
+    CHECK (playedOf (*addUndone, other) == "62 9.500-10.500");
+    phazite::redo (state);
+    const auto addRedone = compile();
+    CHECK (playedOf (*addRedone, song.firstTrack) == "62 1.500-2.500, 67 3.000-3.500");
+    CHECK (playedOf (*addRedone, other) == "62 9.500-10.500, 67 11.000-11.500");
+    CHECK (notesOf (*addRedone, other) != notesOf (*addUndone, other));
 }
 
 TEST_CASE ("A note sounding as its track's last clip goes ends at once, and one held as the loop moves before the playhead ends")

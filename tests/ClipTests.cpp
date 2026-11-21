@@ -3,6 +3,7 @@
 #include "TestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
@@ -13,10 +14,17 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/timeline/SmartTool.h"
+
+#include <algorithm>
+#include <functional>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -774,4 +782,182 @@ TEST_CASE ("Where linked clips play, an editor showing one of them sees its note
     // A clip made unique has no linked clips.
     phazite::makeClipsUnique (e.song, { original });
     CHECK_FALSE (phazite::getLinkedPlayBeat (e.song, shown, 9.5).has_value());
+}
+
+namespace
+{
+// A clip's notes in their order, all of each (TestClips.h).
+std::string describeNotes (const phazite::Song& song, phazite::ClipID clip)
+{
+    return phazite::test::describeClipNotes (song, clip).toStdString();
+}
+
+// The song of ClipEdit open in a project context, as the playlist reads it: getLinkedClips() names a clip's alias group.
+struct Opened
+{
+    explicit Opened (phazite::Song& song) { setSong (context, &song); }
+    ~Opened() { setSong (context, nullptr); }
+
+    std::vector<phazite::ClipID> groupOf (phazite::ClipID clip) const
+    {
+        auto clips = phazite::getLinkedClips (context, clip);
+        std::sort (clips.begin(), clips.end());
+        return clips;
+    }
+
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+};
+
+std::vector<phazite::ClipID> sorted (std::vector<phazite::ClipID> clips)
+{
+    std::sort (clips.begin(), clips.end());
+    return clips;
+}
+} // namespace
+
+TEST_CASE ("A clip of an alias group split, duplicated, copied, deleted, made unique and moved: which clips are in the group, each "
+           "holding the same notes, Undo and Redo of each")
+{
+    // Clips.h: a split's right half, an alias copied or duplicated join the group; a copy doesn't; deleting a clip unlinks the
+    // last one of its group; Make Unique takes a clip out; a clip moved stays in. The clip X on the first track from beat 0
+    // to 4, with two notes; its alias Y on the second track from 8 to 12.
+    ClipEdit e;
+    const auto x = e.addClip (0, 0.0, 4.0);
+    const auto first = phazite::test::addMidiNote (e.song, x, 60, beats (0.5), lasting (0.5), 100);
+    const auto second = phazite::test::addMidiNote (e.song, x, 64, beats (2.5), lasting (1.0), 90);
+    const auto aliases = phazite::copyClips (e.song, { x }, true);
+    REQUIRE (aliases.size() == 1);
+    const auto y = aliases.front();
+    phazite::moveClip (e.song, y, beats (8.0), e.tracks[1]);
+    e.song.getUndoManager().clearUndoHistory();
+    const Opened opened (e.song);
+    REQUIRE (opened.groupOf (x) == sorted ({ x, y }));
+    phazite::test::UndoCheck check (e.song);
+
+    using Clips = std::vector<phazite::ClipID>;
+    const auto edit = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        check.check (name,
+                     [&]
+                     {
+                         const phazite::UndoStep step (e.song, name);
+                         change();
+                     });
+    };
+
+    // Each clip of a group holds the notes the first holds.
+    const auto holdTheSameNotes = [&e] (const Clips& clips)
+    {
+        for (const auto clip : clips)
+        {
+            INFO ("clip " << clip.getRaw());
+            CHECK (describeNotes (e.song, clip) == describeNotes (e.song, clips.front()));
+        }
+    };
+
+    // The groups as Undo leaves them, then as Redo does.
+    const auto undoAndRedo = [&] (const juce::String& name, const std::function<void()>& undone, const std::function<void()>& redone)
+    {
+        check.stepBackOrForth ("Undo " + name, [&e] { phazite::undo (e.song); });
+        undone();
+        check.stepBackOrForth ("Redo " + name, [&e] { phazite::redo (e.song); });
+        redone();
+    };
+
+    // Split: both halves are in the group, holding its notes; a note edited through the right half is edited in all.
+    phazite::ClipID right;
+    edit ("Split", [&] { right = phazite::splitClips (e.song, { x }, beats (2.0)).at (0); });
+    CHECK (opened.groupOf (x) == sorted ({ x, y, right }));
+    holdTheSameNotes ({ x, y, right });
+    undoAndRedo (
+        "Split", [&] { CHECK (opened.groupOf (x) == sorted ({ x, y })); }, [&] { CHECK (opened.groupOf (x) == sorted ({ x, y, right })); });
+
+    edit ("Transpose Note", [&] { phazite::transposeNotes (e.song, { { right, second.note } }, 1); });
+    holdTheSameNotes ({ x, y, right });
+    CHECK (phazite::getNoteData (e.song, phazite::NoteRef { y, second.note }).value().pitch == 65);
+
+    // Duplicated as an alias: in the group; as a copy: on its own, its notes a copy that no edit of the group reaches.
+    Clips duplicated;
+    edit ("Duplicate as Alias", [&] { duplicated = phazite::duplicateClips (e.song, { y }, true, nullptr); });
+    REQUIRE (duplicated.size() == 1);
+    const auto d = duplicated.front();
+    CHECK (opened.groupOf (x) == sorted ({ x, y, right, d }));
+    holdTheSameNotes ({ x, y, right, d });
+    undoAndRedo (
+        "Duplicate as Alias", [&] { CHECK (opened.groupOf (x) == sorted ({ x, y, right })); },
+        [&] { CHECK (opened.groupOf (d) == sorted ({ x, y, right, d })); });
+
+    edit ("Duplicate", [&] { duplicated = phazite::duplicateClips (e.song, { y }, false, nullptr); });
+    REQUIRE (duplicated.size() == 1);
+    const auto copy = duplicated.front();
+    CHECK (opened.groupOf (copy) == Clips { copy });
+    CHECK (opened.groupOf (x) == sorted ({ x, y, right, d }));
+    holdTheSameNotes ({ y, copy }); // copied as they were
+
+    // Copied as an alias (moved, as a drag does): in the group; as a copy: not.
+    phazite::ClipID a, k;
+    edit ("Copy as Alias",
+          [&]
+          {
+              a = phazite::copyClips (e.song, { x }, true).at (0);
+              phazite::moveClip (e.song, a, beats (20.0), e.tracks[0]);
+          });
+    CHECK (opened.groupOf (x) == sorted ({ x, y, right, d, a }));
+    holdTheSameNotes ({ x, y, right, d, a });
+    undoAndRedo (
+        "Copy as Alias", [&] { CHECK (opened.groupOf (x) == sorted ({ x, y, right, d })); },
+        [&] { CHECK (opened.groupOf (x) == sorted ({ x, y, right, d, a })); });
+
+    edit ("Copy",
+          [&]
+          {
+              k = phazite::copyClips (e.song, { x }, false).at (0);
+              phazite::moveClip (e.song, k, beats (28.0), e.tracks[0]);
+          });
+    CHECK (opened.groupOf (k) == Clips { k });
+    edit ("Transpose Note", [&] { phazite::transposeNotes (e.song, { { a, first.note } }, -2); });
+    holdTheSameNotes ({ x, y, right, d, a });
+    CHECK (phazite::getNoteData (e.song, phazite::NoteRef { k, first.note }).value().pitch == 60); // the copy's own, as it was
+    CHECK (phazite::getNoteData (e.song, phazite::NoteRef { right, first.note }).value().pitch == 58);
+
+    // One deleted: the others stay a group. All but one: it is no one's alias, linked to nothing.
+    edit ("Delete Clip", [&] { phazite::deleteClips (e.song, { d }, false); });
+    CHECK (opened.groupOf (x) == sorted ({ x, y, right, a }));
+    undoAndRedo (
+        "Delete Clip", [&] { CHECK (opened.groupOf (x) == sorted ({ x, y, right, d, a })); },
+        [&] { CHECK (opened.groupOf (x) == sorted ({ x, y, right, a })); });
+
+    edit ("Delete Clips", [&] { phazite::deleteClips (e.song, { x, right, a }, false); });
+    CHECK (opened.groupOf (y) == Clips { y });
+    CHECK_FALSE (phazite::hasAliases (e.song, { y }));
+    undoAndRedo (
+        "Delete Clips", [&] { CHECK (opened.groupOf (y) == sorted ({ x, y, right, a })); },
+        [&] { CHECK (opened.groupOf (y) == Clips { y }); });
+    check.stepBackOrForth ("Undo Delete Clips", [&e] { phazite::undo (e.song); });
+    REQUIRE (opened.groupOf (y) == sorted ({ x, y, right, a }));
+    holdTheSameNotes ({ x, y, right, a });
+
+    // Made unique: out of the group, its notes its own; the rest a group still.
+    edit ("Make Unique", [&] { phazite::makeClipsUnique (e.song, { y }); });
+    CHECK (opened.groupOf (y) == Clips { y });
+    CHECK (opened.groupOf (x) == sorted ({ x, right, a }));
+    undoAndRedo (
+        "Make Unique", [&] { CHECK (opened.groupOf (y) == sorted ({ x, y, right, a })); },
+        [&] { CHECK (opened.groupOf (x) == sorted ({ x, right, a })); });
+    edit ("Transpose Note", [&] { phazite::transposeNotes (e.song, { { x, second.note } }, 2); });
+    holdTheSameNotes ({ x, right, a });
+    CHECK (phazite::getNoteData (e.song, phazite::NoteRef { a, second.note }).value().pitch == 67);
+    CHECK (phazite::getNoteData (e.song, phazite::NoteRef { y, second.note }).value().pitch == 65);
+
+    // Moved to another track: still in the group.
+    edit ("Move Clip", [&] { phazite::moveClip (e.song, right, beats (24.0), e.tracks[1]); });
+    CHECK (phazite::getClipTrack (e.song, right) == e.tracks[1]);
+    CHECK (opened.groupOf (right) == sorted ({ x, right, a }));
+    holdTheSameNotes ({ x, right, a });
+    undoAndRedo (
+        "Move Clip", [&] { CHECK (phazite::getClipTrack (e.song, right) == e.tracks[0]); },
+        [&] { CHECK (opened.groupOf (right) == sorted ({ x, right, a })); });
+
+    check.walkBackAndForth();
+    CHECK (opened.groupOf (x) == sorted ({ x, right, a }));
 }

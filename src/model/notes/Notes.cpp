@@ -1271,8 +1271,9 @@ void nudgeNotes (Song& song, const std::vector<NoteRef>& notes, BeatDuration amo
     Rooms rooms (song);
 
     // The note nearest its clip's start decides how far back they can go: none at all with one that starts before it. And
-    // the one nearest where its clip stops playing it, how far on (keepPlayed()).
-    for (const auto& note : unique)
+    // the one nearest where its clip stops playing it, how far on (keepPlayed()). Each note as it was named, its copies in
+    // its clip's aliases too: a note named through two clips of its group stays where both play it, whichever comes first.
+    for (const auto& note : getNoteData (song, notes))
     {
         const auto clipState = findMidiClipState (song, note.clip);
         amount = keepPlayed (rooms, clipState, note.start, note.start + amount) - note.start;

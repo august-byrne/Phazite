@@ -9,6 +9,8 @@
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <cmath>
+
 namespace phazite::test
 {
 // A MIDI clip on a track from a beat to another, with a name. Returns its ID, or none for a track that can't hold it.
@@ -42,5 +44,34 @@ inline BeatPosition at (double beats)
 inline BeatDuration lasting (double beats)
 {
     return BeatDuration::fromBeats (beats);
+}
+
+// Where a clip's notes count from: its start, less how far into its notes it starts (Clips.h: getClipStartOffset()).
+inline BeatPosition getContentStartOf (const Song& song, ClipID clip)
+{
+    const auto start = getClipRange (song, clip).getStart();
+    return toBeats (song, toSeconds (song, start) - getClipStartOffset (song, clip));
+}
+
+// Beats as text, to a millionth, with no sign on nothing.
+inline juce::String describeBeats (double beats)
+{
+    return juce::String (std::round (beats * 1.0e6) / 1.0e6 + 0.0, 6);
+}
+
+// A clip's notes in the order getClipNotes() gives them, each with all it is: its ID, pitch, start counted from the clip's
+// content start, length, velocity, channel and flags. Two clips that hold the same notes (aliases) describe them the same.
+inline juce::String describeClipNotes (const Song& song, ClipID clip)
+{
+    const auto from = getContentStartOf (song, clip);
+    juce::StringArray notes;
+
+    for (const auto& note : getClipNotes (song, clip))
+        notes.add (juce::String ((juce::int64) note.id.getRaw()) + ": " + juce::String (note.pitch) + " at "
+                   + describeBeats ((note.start - from).inBeats()) + " for " + describeBeats (note.length.inBeats()) + " v"
+                   + juce::String (note.velocity) + " ch" + juce::String (note.channel) + (note.muted ? " muted" : "")
+                   + (note.slide ? " slide" : "") + (note.portamento ? " portamento" : ""));
+
+    return notes.joinIntoString ("; ");
 }
 } // namespace phazite::test

@@ -9,16 +9,23 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
+
+#include <algorithm>
+#include <functional>
+#include <utility>
+#include <vector>
 
 TEST_CASE ("The open project's song and selection move together")
 {
@@ -306,6 +313,118 @@ TEST_CASE ("Views hear where the changes of clips and devices were: the clips, t
     CHECK (changes.clipTracks.any);
     song->getState().removeChild (stray, nullptr);
     take();
+
+    setSong (context, nullptr);
+    context.removeListener (&view);
+}
+
+TEST_CASE ("Views hear a note edit, its Undo and its Redo as a change of its clip, every alias of it and their tracks, and of nothing "
+           "else")
+{
+    // ProjectContext.h, SongChanges: clips "added, changed (their notes included)", with "the clips added, changed ... and the
+    // tracks they were on". A lone clip on the third track; a clip on the first with an alias on the second.
+    struct View : phazite::ProjectContext::Listener
+    {
+        void projectChanged() override {}
+        void songChanged (const phazite::SongChanges& changes) override { heard.push_back (changes); }
+
+        std::vector<phazite::SongChanges> heard;
+    };
+
+    using phazite::test::at;
+    using phazite::test::lasting;
+    using Clips = std::vector<phazite::ClipID>;
+    using Tracks = std::vector<phazite::TrackID>;
+
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 3);
+    const auto lone = phazite::test::addMidiClip (*song, tracks[2], { at (0.0), at (4.0) });
+    const auto clip = phazite::test::addMidiClip (*song, tracks[0], { at (0.0), at (4.0) });
+    const auto aliases = phazite::copyClips (*song, { clip }, true);
+    REQUIRE (aliases.size() == 1);
+    const auto alias = aliases.front();
+    phazite::moveClip (*song, alias, at (8.0), tracks[1]);
+    const auto note = phazite::test::addMidiNote (*song, clip, 60, at (0.0), lasting (1.0), 100);
+    const auto loneNote = phazite::test::addMidiNote (*song, lone, 60, at (0.0), lasting (1.0), 100);
+    REQUIRE (note.isValid());
+    REQUIRE (loneNote.isValid());
+    song->getUndoManager().clearUndoHistory();
+
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+    setSong (context, song.get());
+    View view;
+    context.addListener (&view);
+    phazite::test::dispatchPendingMessages();
+    view.heard.clear();
+
+    const auto sortedClips = [] (Clips ids)
+    {
+        std::sort (ids.begin(), ids.end());
+        return ids;
+    };
+
+    const auto sortedTracks = [] (Tracks ids)
+    {
+        std::sort (ids.begin(), ids.end());
+        return ids;
+    };
+
+    // What the view hears of one turn of the message loop: the clips' group alone, naming these clips and their tracks.
+    const auto hears = [&] (const juce::String& when, const Clips& clips, const Tracks& clipTracks)
+    {
+        INFO (when.toStdString());
+        phazite::test::dispatchPendingMessages();
+        REQUIRE (view.heard.size() == 1);
+        const auto changes = std::exchange (view.heard, {}).front();
+        CHECK (changes.clips);
+        CHECK_FALSE (changes.tracks);
+        CHECK_FALSE (changes.devices);
+        CHECK_FALSE (changes.automation);
+        CHECK_FALSE (changes.modulation);
+        CHECK_FALSE (changes.sections);
+        CHECK_FALSE (changes.chords);
+        CHECK_FALSE (changes.tempo);
+        CHECK_FALSE (changes.view);
+        CHECK_FALSE (changes.notes);
+        CHECK_FALSE (changes.midiLinks);
+        CHECK_FALSE (changes.changedClips.any);
+        CHECK (sortedClips (changes.changedClips.named) == sortedClips (clips));
+        CHECK_FALSE (changes.clipTracks.any);
+        CHECK (sortedTracks (changes.clipTracks.named) == sortedTracks (clipTracks));
+        CHECK_FALSE (changes.deviceChannels.any);
+        CHECK (changes.deviceChannels.named.empty());
+    };
+
+    // An edit as one undo step, heard; then its Undo and its Redo, each heard the same.
+    const auto checkEdit = [&] (const juce::String& name, const std::function<void()>& edit, const Clips& clips, const Tracks& clipTracks)
+    {
+        {
+            const phazite::UndoStep step (*song, name);
+            edit();
+        }
+
+        hears (name, clips, clipTracks);
+        phazite::undo (*song);
+        hears ("Undo " + name, clips, clipTracks);
+        phazite::redo (*song);
+        hears ("Redo " + name, clips, clipTracks);
+    };
+
+    checkEdit ("Add Note", [&] { REQUIRE (phazite::addNote (*song, lone, 62, at (1.0), lasting (1.0), 100).isValid()); }, { lone },
+               { tracks[2] });
+    checkEdit ("Move Note", [&] { phazite::moveNote (*song, loneNote, at (2.0), 64); }, { lone }, { tracks[2] });
+    checkEdit ("Add Control", [&] { phazite::addControl (*song, lone, at (1.0), phazite::ControlKind::controller, 1, 64, 1); }, { lone },
+               { tracks[2] });
+    checkEdit ("Delete Note", [&] { phazite::deleteNotes (*song, { loneNote }); }, { lone }, { tracks[2] });
+
+    // In a clip with an alias, through either: both clips and both tracks.
+    checkEdit ("Move Note", [&] { phazite::moveNote (*song, { alias, note.note }, at (9.0), 62); }, { clip, alias },
+               { tracks[0], tracks[1] });
+    checkEdit ("Add Note", [&] { REQUIRE (phazite::addNote (*song, clip, 67, at (2.0), lasting (1.0), 100).isValid()); }, { clip, alias },
+               { tracks[0], tracks[1] });
+    checkEdit ("Add Control", [&] { phazite::addControl (*song, alias, at (9.5), phazite::ControlKind::controller, 1, 64, 1); },
+               { clip, alias }, { tracks[0], tracks[1] });
+    checkEdit ("Delete Note", [&] { phazite::deleteNotes (*song, { note }); }, { clip, alias }, { tracks[0], tracks[1] });
 
     setSong (context, nullptr);
     context.removeListener (&view);
