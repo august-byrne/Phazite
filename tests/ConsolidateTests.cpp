@@ -5,6 +5,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "devices/stereo/Stereo.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Consolidate.h"
@@ -173,7 +174,10 @@ TEST_CASE ("Consolidate renders a track's audio clips before its devices into on
     selection.selectOnly (loud);
     selection.addToSelection (quiet);
     CHECK (phazite::doesConsolidateRender (song.context));
-    song.consolidate();
+
+    // One undo step, exact: Undo gives both clips back as they were, Redo the clip it made (UndoCheck.h).
+    phazite::test::UndoCheck undoCheck (song.context);
+    undoCheck.check ("Consolidate", [&song] { song.consolidate(); });
     REQUIRE (song.host.finished == juce::StringArray { "Consolidating: ok" });
 
     // One audio clip from the first's start to the last's end, named as they were, its file in the project's Audio folder.

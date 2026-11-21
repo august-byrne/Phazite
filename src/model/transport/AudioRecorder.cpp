@@ -254,8 +254,9 @@ std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, con
     const auto place = [&] (double clipStart, double clipEnd, double fileStart)
     {
         const auto partStart = std::max (0.0, fileStart);
-        const auto clipState = makeAudioClipState (song, name, file, beatsOf (clipStart), { partStart, partStart + (clipEnd - clipStart) });
-        const auto clip = placeClipState (song, clipState, track);
+        auto made = makeAudioClip (song, name, file, beatsOf (clipStart), { partStart, partStart + (clipEnd - clipStart) });
+        made.track = track;
+        const auto clip = addClip (song, made);
 
         if (clip.isValid() && isSteady (beatsOf (clipStart), beatsOf (clipEnd)))
             setClipFollowsTempo (song, clip, true);
@@ -340,11 +341,14 @@ std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, con
 
             if (const auto clip = placeBetween (loop->start, loop->end, loop->getRoundStart (playing)); clip.isValid())
             {
-                auto clipState = findClipState (song, clip);
-                auto* undo = &song.getUndoManager();
-                clipState.setProperty (schema::clipTakes, lastRound + 1, undo);
-                clipState.setProperty (schema::clipTake, playing + 1, undo);
-                clipState.setProperty (schema::clipTakeLength, seconds (loop->getLength()), undo);
+                if (auto taken = getClipValue (song, clip))
+                {
+                    taken->takes = lastRound + 1;
+                    taken->take = playing + 1;
+                    taken->takeLength = seconds (loop->getLength());
+                    setClip (song, *taken);
+                }
+
                 kept.emplace_back (std::max (first, loop->start), last);
             }
 

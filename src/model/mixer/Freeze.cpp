@@ -757,8 +757,10 @@ namespace
                 if (copied.contains (send.getRaw()))
                     removeSend (bouncedSong, send);
 
-            if (! placeClipState (bouncedSong, makeAudioClipState (bouncedSong, name, target, BeatPosition(), { 0.0, length }), bounced)
-                      .isValid())
+            auto bouncedClip = makeAudioClip (bouncedSong, name, target, BeatPosition(), { 0.0, length });
+            bouncedClip.track = bounced;
+
+            if (! addClip (bouncedSong, bouncedClip).isValid())
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");
 
             // Muted in the step, and shown as it was: collapsing it, view state, would be outside the step, and Undo would

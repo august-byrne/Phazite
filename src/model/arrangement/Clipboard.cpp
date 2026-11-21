@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Clipboard.h"
 #include "SongSelection.h"
-#include "internal/AudioClips.h"
 #include "internal/Clips.h"
 #include "internal/Selection.h"
 #include "internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/WholeState.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -42,11 +41,13 @@ namespace
     }
 
     // A clip made from what Copy kept, where it was, on a track: a copy, in no alias group, with an ID of its own.
-    ClipID pasteClip (Song& song, const juce::ValueTree& kept, TrackID track)
+    ClipID pasteClip (Song& song, const Clipboard::CopiedClip& kept, TrackID track)
     {
-        auto clipState = copyClipState (song, kept);
-        clipState.removeProperty (schema::clipLink, nullptr);
-        return placeClipState (song, clipState, track);
+        auto clip = kept.clip;
+        clip.id = {};
+        clip.track = track;
+        clip.link = 0;
+        return addClip (song, clip, clip.isMidi() ? &kept.notes : nullptr);
     }
 
     // Keeps the clips, each with its track's place from the first of them, and the time from the earliest start to the latest
@@ -69,7 +70,8 @@ namespace
             span = span.has_value() ? span->getUnionWith (beats) : beats;
 
             if (const auto index = value.has_value() ? indexOf (tracks, value->track) : -1; index >= 0)
-                clipboard.clips.push_back ({ copyWhole (song, findClipState (song, clip)), beats, index - first }); // with its notes
+                clipboard.clips.push_back (
+                    { *value, value->isMidi() ? getClipNotesValue (song, clip) : ClipNotes(), beats, index - first }); // with its notes
         }
 
         if (range.has_value())
@@ -245,7 +247,7 @@ namespace
 
         for (const auto& copied : clipboard.clips)
         {
-            const auto audio = isAudioState (copied.state);
+            const auto audio = copied.clip.isAudio();
             const auto canTake = [&] (TrackID track)
             {
                 const auto found = given.find (track);
@@ -287,7 +289,7 @@ namespace
             if (! track.isValid())
                 continue;
 
-            auto clip = pasteClip (*song, copied.state, track);
+            auto clip = pasteClip (*song, copied, track);
 
             if (! clip.isValid())
                 continue;

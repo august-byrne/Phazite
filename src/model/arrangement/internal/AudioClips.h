@@ -46,6 +46,10 @@ FadeCurve getFadeCurve (const ClipFade&);
 // A new audio clip's element, with an ID of the song's, on no track yet: playing a part of a file from a beat.
 juce::ValueTree makeAudioClipState (Song&, const juce::String& name, const juce::File&, BeatPosition start, FilePart);
 
+// The same as a value (its track the caller's to give; Clips.h: addClip() adds it), its start not before the song's and its
+// file by the path the song keeps for it, relative to the project's folder.
+ClipValue makeAudioClip (Song&, const juce::String& name, const juce::File&, BeatPosition start, FilePart);
+
 // The file it plays (Song::getFile() is where a kept path starts), how long that file is in seconds, and how it plays it:
 // at the song's tempo where it starts, or along the song's tempo changes (followsTempoChanges()).
 juce::File getClipFile (const Song&, const juce::ValueTree& clipState);
@@ -94,8 +98,6 @@ struct PlayedClip
     double fadeIn = 0.0, fadeOut = 0.0;
 };
 
-PlayedClip getPlayedClip (const Song&, const juce::ValueTree& clipState, const ClipTempo&);
-
 // The same of a clip's value: its file, from the value; and what plays for a clip of the song, given its value as the song
 // holds it now (else an assertion in Debug), read from the live clip by its ID, as the clips' code works it out from the
 // clip's element for now (as Clips.h's getLiveClipRange()).
@@ -111,9 +113,6 @@ void setAudioPart (Song&, juce::ValueTree clipState, BeatPosition start, FilePar
 // How long it fades in and out, in seconds, and the fades' shapes, in the caller's undo step; and the shape as Phazite's
 // engine plays it.
 double getClipFade (const juce::ValueTree& clipState, bool fadeIn);
-
-// Its fades as they play, in seconds: as set, but scaled down together where they would overrun it.
-std::pair<double, double> getFittedFades (const Song&, const juce::ValueTree& clipState);
 void setClipFade (Song&, juce::ValueTree clipState, bool fadeIn, double seconds);
 FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn);
 void setClipFadeCurve (Song&, juce::ValueTree clipState, bool fadeIn, FadeCurve);
@@ -128,6 +127,8 @@ double getClipFileLength (const Song&, ClipID);
 bool followsTempoChanges (const Song&, ClipID);
 juce::File getPlayedFile (const Song&, ClipID);
 PlayedPosition getPlayedPosition (const Song&, ClipID);
+
+// Its fades as they play, in seconds: as set, but scaled down together where they would overrun it.
 std::pair<double, double> getFittedFades (const Song&, ClipID);
 
 // How the clip plays its file, at the song's tempo where it starts: stretched to that from the clip's own tempo while it

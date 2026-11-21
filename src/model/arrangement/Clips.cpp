@@ -58,15 +58,40 @@ namespace
     }
 
     //==============================================================================
+    // Moves a clip's element to start at a beat, playing what it did (in the caller's undo step).
+    void moveClipState (Song& song, juce::ValueTree clipState, BeatPosition start)
+    {
+        if (isAudioState (clipState))
+            setAudioPart (song, clipState, start, getFilePart (clipState));
+        else
+            setClipPlace (song, clipState, start, getClipRange (clipState).getLength(), getClipOffset (clipState));
+    }
+
+    // A copy of a clip's element, on no track yet, with an ID of its own and the same notes, with the same IDs, in the same
+    // alias group: its value (model/base/internal/SongValues.h) given to the copy's ID, shared until either is edited, in the
+    // caller's undo step (so the copy is to join the song in that step), rather than a walk through its notes; of a song that
+    // keeps everything in its tree, its notes in the copy.
+    juce::ValueTree copyClipState (Song& song, const juce::ValueTree& clipState)
+    {
+        auto copy = clipState.createCopy();
+        const auto id = ClipID::fromRaw (song.makeID());
+        copy.setProperty (schema::clipID, (juce::int64) id.getRaw(), nullptr);
+
+        if (auto* values = song.getValues(); values != nullptr && clipState.isAChildOf (song.getState()))
+            values->copyClipNotes (song, getClipID (clipState), id);
+
+        return copy;
+    }
+
     void removeClipState (Song& song, juce::ValueTree clipState)
     {
         // The last one left of a group of linked clips leaves it, as Make Unique leaves it (makeClipsUnique()): it would
         // still show as linked to nothing.
         if (clipState.hasProperty (schema::clipLink))
             if (auto aliases = getAliasStates (song, clipState); aliases.size() == 2)
-                aliases[1].removeProperty (schema::clipLink, &song.getUndoManager());
+                aliases[1].removeProperty (schema::clipLink, getUndoOf (song));
 
-        clipState.getParent().removeChild (clipState, &song.getUndoManager());
+        clipState.getParent().removeChild (clipState, getUndoOf (song));
     }
 
     // Moves a clip's start to a beat, its end staying where it is, and what it plays too.
@@ -124,7 +149,7 @@ namespace
 
         auto right = copyClipState (song, clipState);
         right.setProperty (schema::clipStart, beat.inBeats(), nullptr);
-        auto* undo = &song.getUndoManager();
+        auto* undo = getUndoOf (song);
 
         if (isAudioState (clipState))
         {
@@ -233,6 +258,26 @@ namespace
         const auto range = getClipRange (clipState);
         return { getClipID (clipState), audio ? ClipValue::Kind::audio : ClipValue::Kind::midi, range.getStart(),
                  audio ? BeatDuration() : range.getLength(), getClipOffset (clipState) };
+    }
+
+    // Whether a track's element holds clips: a track's, not a folder's or a return's (Schema.h: trackKind).
+    bool holdsClips (const juce::ValueTree& trackState)
+    {
+        return trackState.hasType (schema::TRACK) && ! isFolderState (trackState) && ! isReturnState (trackState);
+    }
+
+    // Where among a track's elements a clip goes to be at a place among its clips (from 0): before the clip there now, or
+    // after them all (-1) for a place past them, or none (-1).
+    int findChildIndexForClip (const juce::ValueTree& trackState, int place)
+    {
+        if (place < 0)
+            return -1;
+
+        for (int i = 0, clips = 0; i < trackState.getNumChildren(); ++i)
+            if (trackState.getChild (i).hasType (schema::CLIP) && clips++ == place)
+                return i;
+
+        return -1;
     }
 } // namespace
 
@@ -362,6 +407,172 @@ juce::String getClipName (const Song& song, const ClipValue& clip)
 }
 
 //==============================================================================
+ClipValue makeMidiClip (Song& song, const juce::String& name, BeatRange range)
+{
+    // As makeMidiClipState() makes its element.
+    ClipValue clip;
+    clip.id = ClipID::fromRaw (song.makeID());
+    clip.kind = ClipValue::Kind::midi;
+    clip.name = name;
+    clip.start = BeatPosition::fromBeats (std::max (0.0, range.getStart().inBeats()));
+    clip.length = BeatDuration::fromBeats (std::max (range.getLength().inBeats(), minimumClipLength.inBeats()));
+    return clip;
+}
+
+ClipID addClip (Song& song, ClipValue clip, const ClipNotes* notes, int index)
+{
+    auto trackState = findTrackState (song, clip.track);
+
+    if (! holdsClips (trackState))
+        return {};
+
+    if (! clip.id.isValid() || findClipState (song, clip.id).isValid())
+        clip.id = ClipID::fromRaw (song.makeID());
+
+    // Its element written as its maker writes a new one; its notes given to it as it joins the song, without a walk through
+    // them (SongValues.h: a clip of a song that holds its values holds none in its element; one of a song that keeps
+    // everything in its tree, its elements).
+    juce::ValueTree clipState (schema::CLIP);
+    writeClipElement (clip, clipState, nullptr);
+
+    if (notes != nullptr && clip.isMidi())
+    {
+        if (auto* values = song.getValues())
+            values->setClipNotes (song, clip.id, *notes);
+        else
+            writeClipNotes (*notes, clipState);
+    }
+
+    trackState.addChild (clipState, findChildIndexForClip (trackState, index), getUndoOf (song));
+    return clip.id;
+}
+
+void setClip (Song& song, const ClipValue& clip)
+{
+    auto clipState = findClipState (song, clip.id);
+
+    if (! clipState.isValid())
+        return;
+
+    auto* undo = getUndoOf (song);
+    auto held = readClipValue (clipState);
+    held.track = clip.track;
+
+    if (! (held == clip))
+        writeClipElement (clip, clipState, undo);
+
+    // To the end of another track's clips, as placeClipState() moves it.
+    if (auto trackState = findTrackState (song, clip.track); holdsClips (trackState) && clipState.getParent() != trackState)
+    {
+        clipState.getParent().removeChild (clipState, undo);
+        trackState.appendChild (clipState, undo);
+    }
+}
+
+std::optional<ClipValue> getClipValueAsSet (const Song& song, const ClipValue& clip)
+{
+    const auto clipState = findClipState (song, clip.id);
+
+    if (! clipState.isValid())
+        return std::nullopt;
+
+    // Written by the one writer, as setClip() writes it, into a copy of what of its element it writes (its properties and
+    // its markers, not its notes), and read back.
+    juce::ValueTree copy (schema::CLIP);
+    copy.copyPropertiesFrom (clipState, nullptr);
+
+    for (const auto& child : clipState)
+        if (child.hasType (schema::WARP))
+            copy.appendChild (child.createCopy(), nullptr);
+
+    writeClipElement (clip, copy, nullptr);
+    auto held = readClipValue (copy);
+    held.track = holdsClips (findTrackState (song, clip.track)) ? clip.track : getClipTrack (song, clip.id);
+    return held;
+}
+
+void setClipLink (Song& song, ClipID clip, std::uint64_t link)
+{
+    // The one property alone, as the clips' code writes it (Clips.cpp: copyClips(), makeClipsUnique()).
+    auto clipState = findClipState (song, clip);
+
+    if (! clipState.isValid())
+        return;
+
+    if (link != 0)
+        clipState.setProperty (schema::clipLink, (juce::int64) link, getUndoOf (song));
+    else
+        clipState.removeProperty (schema::clipLink, getUndoOf (song));
+}
+
+bool setClipFiles (Song& song, const juce::String& path, const juce::String& newPath)
+{
+    auto any = false;
+
+    for (auto clipState : getClipStates (song))
+    {
+        if (clipState[schema::clipFile].toString() == path)
+        {
+            clipState.setProperty (schema::clipFile, newPath, getUndoOf (song));
+            any = true;
+        }
+    }
+
+    return any;
+}
+
+void copyTrackClips (Song& song, TrackID from, TrackID to, const std::map<std::uint64_t, std::uint64_t>& ids, bool asAliases)
+{
+    const auto fromState = findTrackState (song, from);
+    auto toState = findTrackState (song, to);
+
+    if (! fromState.isValid() || ! holdsClips (toState) || fromState == toState)
+        return;
+
+    auto* values = song.getValues();
+
+    for (int i = 0; i < fromState.getNumChildren(); ++i)
+    {
+        const auto clipState = fromState.getChild (i);
+
+        if (! clipState.hasType (schema::CLIP))
+            continue;
+
+        // Its element as it is, its notes in it where the song keeps everything in its tree; else its value shared.
+        const auto old = getClipID (clipState);
+        const auto found = ids.find (old.getRaw());
+        const auto id = ClipID::fromRaw (found != ids.end() ? found->second : song.makeID());
+        auto copy = clipState.createCopy();
+        copy.setProperty (schema::clipID, (juce::int64) id.getRaw(), nullptr);
+
+        if (! asAliases)
+            copy.removeProperty (schema::clipLink, nullptr);
+
+        if (values != nullptr)
+            values->copyClipNotes (song, old, id);
+
+        toState.addChild (copy, i, getUndoOf (song));
+    }
+}
+
+void moveClipStart (Song& song, ClipID clip, BeatPosition start)
+{
+    if (const auto clipState = findClipState (song, clip); clipState.isValid())
+        moveClipState (song, clipState, start);
+}
+
+void setClipPlace (Song& song, ClipID clip, BeatPosition start, BeatDuration length, BeatDuration offset)
+{
+    if (const auto clipState = findClipState (song, clip); clipState.isValid())
+        setClipPlace (song, clipState, start, length, offset);
+}
+
+//==============================================================================
+juce::UndoManager* getUndoOf (Song& song)
+{
+    return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+}
+
 juce::ValueTree findClipState (const Song& song, ClipID id)
 {
     return id.isValid() ? song.getIndex().findClip (id.getRaw()) : juce::ValueTree();
@@ -449,14 +660,6 @@ BeatPosition getClipsEnd (const Song& song)
     return end;
 }
 
-void moveClipState (Song& song, juce::ValueTree clipState, BeatPosition start)
-{
-    if (isAudioState (clipState))
-        setAudioPart (song, clipState, start, getFilePart (clipState));
-    else
-        setClipPlace (song, clipState, start, getClipRange (clipState).getLength(), getClipOffset (clipState));
-}
-
 BeatDuration getClipOffset (const juce::ValueTree& clipState)
 {
     return BeatDuration::fromBeats (clipState.getProperty (schema::clipOffset, 0.0));
@@ -470,21 +673,6 @@ BeatPosition getContentStart (const juce::ValueTree& clipState)
 std::vector<juce::ValueTree> getAliasStates (const Song& song, const juce::ValueTree& clipState)
 {
     return song.getIndex().findLinked (clipState);
-}
-
-juce::ValueTree copyClipState (Song& song, const juce::ValueTree& clipState)
-{
-    // A clip of the song gives its copy its value (SongValues.h), shared until either is edited, rather than a walk through
-    // its notes; one outside it (what the clipboard kept, a copy) holds its notes already, which the song takes in as the
-    // copy joins it.
-    auto copy = clipState.createCopy();
-    const auto id = ClipID::fromRaw (song.makeID());
-    copy.setProperty (schema::clipID, (juce::int64) id.getRaw(), nullptr);
-
-    if (auto* values = song.getValues(); values != nullptr && clipState.isAChildOf (song.getState()))
-        values->copyClipNotes (song, getClipID (clipState), id);
-
-    return copy;
 }
 
 juce::ValueTree makeMidiClipState (Song& song, const juce::String& name, BeatRange range)
@@ -513,9 +701,9 @@ ClipID placeClipState (Song& song, juce::ValueTree clipState, TrackID track)
     if (clipState.getParent() != trackState)
     {
         if (auto parent = clipState.getParent(); parent.isValid())
-            parent.removeChild (clipState, &song.getUndoManager());
+            parent.removeChild (clipState, getUndoOf (song));
 
-        trackState.appendChild (clipState, &song.getUndoManager());
+        trackState.appendChild (clipState, getUndoOf (song));
     }
 
     return getClipID (clipState);
@@ -537,7 +725,7 @@ bool canTrackHold (const Song& song, TrackID track, bool midi, const std::vector
 
 void setClipPlace (Song& song, juce::ValueTree clipState, BeatPosition start, BeatDuration length, BeatDuration offset)
 {
-    auto* undo = &song.getUndoManager();
+    auto* undo = getUndoOf (song);
     clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), undo);
     clipState.setProperty (schema::clipLength, std::max (length.inBeats(), minimumClipLength.inBeats()), undo);
 
@@ -653,7 +841,7 @@ std::vector<ClipID> copyClips (Song& song, const std::vector<ClipID>& clips, boo
         // Aliases share an alias group, which the original gets if it is in none; a copy that isn't an alias leaves the
         // original's.
         if (asAliases && ! clipState.hasProperty (schema::clipLink))
-            clipState.setProperty (schema::clipLink, (juce::int64) song.makeID(), &song.getUndoManager());
+            clipState.setProperty (schema::clipLink, (juce::int64) song.makeID(), getUndoOf (song));
 
         auto copy = copyClipState (song, clipState);
 
@@ -675,7 +863,7 @@ void moveClip (Song& song, ClipID clip, BeatPosition start, TrackID track)
         if (clipState.getParent() != findTrackState (song, track) && ! canTrackHold (song, track, isMidiState (clipState)))
             return;
 
-        clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), &song.getUndoManager());
+        clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), getUndoOf (song));
         placeClipState (song, clipState, track);
     }
 }
@@ -931,7 +1119,7 @@ void unlinkLoneClips (Song& song)
 
     for (auto& [link, members] : groups)
         if (members.size() == 1)
-            members.front().removeProperty (schema::clipLink, &song.getUndoManager());
+            members.front().removeProperty (schema::clipLink, getUndoOf (song));
 }
 
 void makeClipsUnique (Song& song, const std::vector<ClipID>& clips)
@@ -944,11 +1132,11 @@ void makeClipsUnique (Song& song, const std::vector<ClipID>& clips)
             continue;
 
         const auto aliases = getAliasStates (song, clipState);
-        clipState.removeProperty (schema::clipLink, &song.getUndoManager());
+        clipState.removeProperty (schema::clipLink, getUndoOf (song));
 
         // The last one left in the group leaves it too.
         if (auto last = aliases.size() == 2 ? aliases[1] : juce::ValueTree(); last.isValid())
-            last.removeProperty (schema::clipLink, &song.getUndoManager());
+            last.removeProperty (schema::clipLink, getUndoOf (song));
     }
 }
 
@@ -982,9 +1170,9 @@ void renameClips (Song& song, const std::vector<ClipID>& clips, const juce::Stri
     for (auto clipState : renamed)
     {
         if (const auto own = ownNameOf (clipState); own.isNotEmpty())
-            clipState.setProperty (schema::clipName, own, &song.getUndoManager());
+            clipState.setProperty (schema::clipName, own, getUndoOf (song));
         else
-            clipState.removeProperty (schema::clipName, &song.getUndoManager());
+            clipState.removeProperty (schema::clipName, getUndoOf (song));
     }
 }
 
@@ -1002,9 +1190,9 @@ void toggleClipsMuted (Song& song, const std::vector<ClipID>& clips)
             if (auto clipState = findClipState (song, id); clipState.isValid())
             {
                 if (on) // off is no property at all, as it is at first
-                    clipState.setProperty (schema::clipMute, true, &song.getUndoManager());
+                    clipState.setProperty (schema::clipMute, true, getUndoOf (song));
                 else
-                    clipState.removeProperty (schema::clipMute, &song.getUndoManager());
+                    clipState.removeProperty (schema::clipMute, getUndoOf (song));
             }
         });
 }

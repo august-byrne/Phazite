@@ -158,9 +158,10 @@ std::vector<ClipID> consolidatePart (Song& song, const ConsolidatePart& part, co
     if (part.audio && renderedAudio.existsAsFile())
     {
         const auto seconds = getAudioFileInfo (renderedAudio).getSeconds();
-        const auto clipState = makeAudioClipState (song, audioName, renderedAudio, part.range.getStart(), { 0.0, seconds });
+        auto joined = makeAudioClip (song, audioName, renderedAudio, part.range.getStart(), { 0.0, seconds });
+        joined.track = part.track;
 
-        if (const auto clip = placeClipState (song, clipState, part.track); clip.isValid())
+        if (const auto clip = addClip (song, joined); clip.isValid())
         {
             // At the tempo it was rendered at, it follows the song's as the clips it joins did.
             if (allFollow && getTempoMap (song).isSteadyBetween (part.range.getStart().inBeats(), part.range.getEnd().inBeats()))

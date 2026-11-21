@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
@@ -335,4 +336,40 @@ TEST_CASE ("Dropped files go on the track that suits them, or on new tracks belo
 
     phazite::undo (song);
     CHECK (phazite::getTrackIDs (song).size() == 2);
+}
+
+TEST_CASE ("An import of a MIDI file with notes and a controller and of an audio file is one exact undo step")
+{
+    TemporaryFolder temp;
+    const auto kick = temp.folder.getChildFile ("Kick.wav");
+    writeWav (kick, 22050);
+    const auto bass = temp.folder.getChildFile ("Bass.mid");
+    {
+        juce::MidiMessageSequence notes;
+        notes.addEvent (juce::MidiMessage::controllerEvent (1, 74, 100), 480.0);
+        notes.addEvent (juce::MidiMessage::noteOn (1, 40, (juce::uint8) 90), 960.0);
+        notes.addEvent (juce::MidiMessage::noteOff (1, 40), 1920.0);
+        notes.addEvent (juce::MidiMessage::noteOn (2, 43, (juce::uint8) 70), 1920.0);
+        notes.addEvent (juce::MidiMessage::noteOff (2, 43), 2400.0);
+        juce::MidiFile midi;
+        midi.setTicksPerQuarterNote (960);
+        midi.addTrack (notes);
+        juce::FileOutputStream stream (bass);
+        REQUIRE (midi.writeTo (stream));
+    }
+
+    auto project = createProject (temp.folder.getChildFile ("Project"));
+    auto& song = project->getSong();
+    const auto target = phazite::getTrackIDs (song).front();
+    phazite::test::UndoCheck undo (song);
+    std::vector<phazite::ClipID> added;
+    undo.check ("Add Files",
+                [&] { added = phazite::importFiles (song, { kick.getFullPathName(), bass.getFullPathName() }, target, beats (4.0)); });
+    REQUIRE (added.size() == 2);
+    CHECK (phazite::isAudioClip (song, added[0]));
+    CHECK (phazite::getClipNotes (song, added[1]).size() == 2);
+    CHECK (phazite::getClipControls (song, added[1]).size() == 1);
+
+    undo.check ("Add File", [&] { phazite::importFiles (song, { bass.getFullPathName() }, target, beats (0.0)); });
+    undo.walkBackAndForth();
 }

@@ -1839,16 +1839,19 @@ namespace
                     notesAdded.push_back (readNote (clipID, contentStart, *note));
 
                 addNotes (song, notesAdded);
-                keepWithinSong (findClipState (song, clipID)); // a write into the clip's element (S5.20 moves the writers next)
+                keepWithinSong (clipID);
             }
         }
 
         // A clip grows to hold a note put past its end: no longer than a song's clips can be, for a note a million beats
         // along.
-        static void keepWithinSong (juce::ValueTree clip)
+        void keepWithinSong (ClipID id)
         {
-            if ((double) clip[schema::clipLength] > maxSongBeats)
-                clip.setProperty (schema::clipLength, maxSongBeats, nullptr);
+            if (auto clip = getClipValue (song, id); clip.has_value() && clip->length.inBeats() > maxSongBeats)
+            {
+                clip->length = BeatDuration::fromBeats (maxSongBeats);
+                setClip (song, *clip);
+            }
         }
 
         // A note's MIDI channel, which DAWproject counts from 0: as the song counts them, from 1 to 16.
@@ -1896,19 +1899,16 @@ namespace
                 // (getClipName()).
                 const auto start = readNumber (*clip, "time", 0.0, 0.0, maxSongBeats);
                 const auto name = clip->getStringAttribute ("name");
-                const auto clipID = placeClipState (
-                    song,
-                    makeMidiClipState (song, name == getTrackName (song, id) ? juce::String() : name,
-                                       { BeatPosition::fromBeats (start),
-                                         BeatPosition::fromBeats (start + readNumber (*clip, "duration", 4.0, 0.25, maxSongBeats)) }),
-                    id);
+                auto made = makeMidiClip (song, name == getTrackName (song, id) ? juce::String() : name,
+                                          { BeatPosition::fromBeats (start),
+                                            BeatPosition::fromBeats (start + readNumber (*clip, "duration", 4.0, 0.25, maxSongBeats)) });
+                made.track = id;
+                made.offset = BeatDuration::fromBeats (readNumber (*clip, "playStart", 0.0, 0.0, maxSongBeats));
+                const auto clipID = addClip (song, made);
 
                 if (! clipID.isValid())
                     continue;
 
-                // Its offset written into its element (S5.20 moves the writers next), then read as it is by its ID.
-                auto clipState = findClipState (song, clipID);
-                clipState.setProperty (schema::clipOffset, readNumber (*clip, "playStart", 0.0, 0.0, maxSongBeats), nullptr);
                 const auto contentStart = getContentStart (song, clipID);
                 std::vector<NoteData> notes;
 
@@ -1916,7 +1916,7 @@ namespace
                     notes.push_back (readNote (clipID, contentStart, *note));
 
                 addNotes (song, notes);
-                keepWithinSong (clipState);
+                keepWithinSong (clipID);
             }
 
             juce::StringArray audioNotTaken;
@@ -1974,19 +1974,20 @@ namespace
             const auto to = warped ? points.back().contentTime
                                    : readNumber (event, "playStop", readNumber (*found.audio, "duration", from + 1.0, 0.0, maxSeconds), 0.0,
                                                  maxSeconds);
-            auto state = makeAudioClipState (song, clip.getStringAttribute ("name", copied.getFileNameWithoutExtension()), copied,
-                                             BeatPosition::fromBeats (std::max (0.0, start)),
-                                             { from, std::min (maxSeconds, std::max (from + 0.001, to)) });
+            auto made = makeAudioClip (song, clip.getStringAttribute ("name", copied.getFileNameWithoutExtension()), copied,
+                                       BeatPosition::fromBeats (std::max (0.0, start)),
+                                       { from, std::min (maxSeconds, std::max (from + 0.001, to)) });
+            made.track = track;
 
             // Fades in seconds, or in beats at the song's tempo.
             if (const auto unit = clip.getStringAttribute ("fadeTimeUnit", "seconds"); unit == "seconds" || unit == "beats")
             {
                 const auto toSeconds = unit == "beats" ? 60.0 / getTempo (song) : 1.0;
-                state.setProperty (schema::clipFadeIn, readNumber (clip, "fadeInTime", 0.0, 0.0, maxSeconds) * toSeconds, nullptr);
-                state.setProperty (schema::clipFadeOut, readNumber (clip, "fadeOutTime", 0.0, 0.0, maxSeconds) * toSeconds, nullptr);
+                made.fadeIn.seconds = readNumber (clip, "fadeInTime", 0.0, 0.0, maxSeconds) * toSeconds;
+                made.fadeOut.seconds = readNumber (clip, "fadeOutTime", 0.0, 0.0, maxSeconds) * toSeconds;
             }
 
-            const auto id = placeClipState (song, state, track);
+            const auto id = addClip (song, made);
 
             if (id.isValid() && warped)
             {

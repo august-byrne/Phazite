@@ -9,6 +9,7 @@
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -1120,6 +1121,50 @@ TEST_CASE ("A take punched in over an audio clip cross-fades with it: what was t
     CHECK (seconds (after.start) == doctest::Approx (2.0 - crossfade / 2.0));
     CHECK (after.fadeIn.seconds == doctest::Approx (crossfade));
     CHECK (juce::exactlyEqual (after.fadeOut.seconds, 0.0));
+}
+
+TEST_CASE ("A take placed round a looped range, and one punched in over a clip, are each one exact undo step")
+{
+    // Placed as the recorder places a take as it stops (placeTake()), in a step "Record" as the session places it.
+    auto song = phazite::createSong();
+    const auto track = phazite::getTrackIDs (*song).front();
+    const phazite::test::TemporaryFolder temporary;
+    phazite::test::addAudioClip (*song, track, "Earlier", phazite::test::writeSound (temporary.folder.getChildFile ("Earlier.wav"), 4.0),
+                                 6.0, 4.0);
+    phazite::test::UndoCheck undo (*song);
+    const auto second = (std::int64_t) 48000;
+    const auto placeRecorded = [&] (const phazite::TakePlace& take, const juce::String& name)
+    {
+        const auto file = phazite::test::writeSound (temporary.folder.getChildFile (name), 4.0);
+        undo.check ("Record",
+                    [&]
+                    {
+                        const phazite::UndoStep step (*song, "Record");
+                        CHECK (phazite::placeTake (*song, track, file, take).size() == 1);
+                    });
+    };
+
+    // Three times round a second's range from the song's start: one clip of three takes, the last playing.
+    phazite::TakePlace looped;
+    looped.sampleRate = (double) second;
+    looped.frames = looped.stop = 3 * second;
+    looped.loop = phazite::TakeLoop { 0, second };
+    placeRecorded (looped, "Looped.wav");
+    const auto taken = phazite::getClips (*song, track).back();
+    CHECK (phazite::getClipTakeCount (*song, taken) == 3);
+    CHECK (phazite::getClipTake (*song, taken) == 3);
+
+    // Punched in from 7 to 8 seconds over the earlier clip, which it cuts in two.
+    phazite::TakePlace punched;
+    punched.sampleRate = (double) second;
+    punched.firstFrame = punched.start = 6 * second;
+    punched.frames = 4 * second;
+    punched.stop = 10 * second;
+    punched.punch = juce::Range<std::int64_t> (7 * second, 8 * second);
+    placeRecorded (punched, "Punched.wav");
+    CHECK (phazite::getClips (*song, track).size() == 4);
+
+    undo.walkBackAndForth();
 }
 
 TEST_CASE ("An input recorded on a new track adds a track called Audio after the selected one, armed with it, as one undo step")

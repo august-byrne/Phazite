@@ -2093,6 +2093,36 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
     return infos;
 }
 
+namespace
+{
+    // Whether a path in the song (SongMerge.h: findByPath()) ends at a clip or goes through one.
+    bool isPathThroughClip (const juce::StringArray& path)
+    {
+        const auto clipStep = schema::CLIP.toString() + ":";
+        return std::any_of (path.begin(), path.end(), [&clipStep] (const juce::String& step) { return step.startsWith (clipStep); });
+    }
+
+    // The clip a path ends at, by the ID its last step names ("CLIP:<id>"), on the track the path names before it, as the song
+    // holds it now: none for a path that ends elsewhere, or a clip the song hasn't there.
+    std::optional<ClipID> findClipOnPath (const Song& song, const juce::StringArray& path)
+    {
+        const auto clipStep = schema::CLIP.toString() + ":";
+
+        if (path.size() < 2 || ! path[path.size() - 1].startsWith (clipStep))
+            return std::nullopt;
+
+        const auto clip = ClipID::fromRaw ((std::uint64_t) path[path.size() - 1].substring (clipStep.length()).getLargeIntValue());
+        auto trackPath = path;
+        trackPath.remove (trackPath.size() - 1);
+        const auto track = findByPath (song.getState(), trackPath);
+
+        if (! clip.isValid() || ! track.hasType (schema::TRACK) || getClipTrack (song, clip) != getTrackID (track))
+            return std::nullopt;
+
+        return clip;
+    }
+} // namespace
+
 bool chooseClash (ProjectContext& context, int index, int value)
 {
     if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
@@ -2146,33 +2176,83 @@ bool chooseClash (ProjectContext& context, int index, int value)
                 return false; // no clip there, so no note
             }
         }
+        else if (const auto clip = findClipOnPath (*song, clash.path); clip.has_value())
+        {
+            // A clip's own property (its path's last step its type and ID, on the track the path names before it), set
+            // through the clips' code; what the audio clips of an alias group share (AudioClips.h: shareTheSound()), which
+            // the merge reported once, for the group's keeper, in every clip of the group, as an edit through one of them
+            // sets it. Never its ID or its kind, which name and make it; nor a property that isn't a clip's.
+            const auto held = getClipValue (*song, *clip);
+
+            // Refused: a clash on a clip's ID or its kind, on a property that isn't a clip's, or (below) on an element inside a
+            // clip other than a note. A merge of two songs Phazite holds makes none of them (a clip's ID names it and its kind
+            // makes it; what a clip holds besides its notes merges as lists), but this is no assertion: a commit's song may come
+            // from anyone who shares the Versions folder, and the fuzz test chooses every clash of a damaged merge
+            // (tests/FuzzTests.cpp). The caller sees false, and the choice stays as it was.
+            if (! held.has_value() || clash.property == schema::clipID || clash.property == schema::clipKind)
+                return false;
+
+            if (auto chosen = *held; ! setClipProperty (chosen, clash.property, *values[value]))
+                return false;
+
+            const auto shared = held->isAudio() && isSharedInAliasGroup (clash.property);
+            std::vector<ClipValue> chosen;
+
+            for (const auto each : shared ? getAliasClips (*song, *clip) : std::vector<ClipID> { *clip })
+            {
+                auto given = getClipValue (*song, each);
+
+                if (! given.has_value())
+                    continue;
+
+                setClipProperty (*given, clash.property, *values[value]);
+
+                // Nothing written where a clip wouldn't hold the value chosen as it is (a start before the song's, a MIDI
+                // clip's length under the shortest, a property of the other kind of clip's: Clips.h, getClipValueAsSet()):
+                // what it would hold compared with it, set again, as the value compares (a number exactly, text exactly),
+                // its length too, which an audio clip's value doesn't compare. The choice stays as it was.
+                const auto asSet = getClipValueAsSet (*song, *given);
+
+                if (! asSet.has_value())
+                    return false;
+
+                auto again = *asSet;
+                setClipProperty (again, clash.property, *values[value]);
+
+                if (! (again == *asSet) || again.length != asSet->length)
+                    return false;
+
+                chosen.push_back (*given);
+            }
+
+            for (const auto& each : chosen)
+                setClip (*song, each);
+        }
         else
         {
             auto element = findByPath (song->getState(), clash.path);
 
-            if (! element.isValid())
+            // Nothing inside a clip but its notes has a property a merge reports (its markers and controllers' values merge
+            // as lists): a path through one names nothing to set, refused as a clash on a clip's ID is (above).
+            if (! element.isValid() || isPathThroughClip (clash.path))
                 return false;
 
-            // What the audio clips of an alias group share (AudioClips.h: shareTheSound()), which the merge reported once, for
-            // the group's keeper: set in every clip of the group, as an edit through one of them sets it.
-            std::vector<juce::ValueTree> elements { element };
-
-            if (element.hasType (schema::CLIP) && isAudioState (element) && isSharedInAliasGroup (clash.property))
-                elements = getAliasStates (*song, element);
-
-            for (auto each : elements)
-            {
-                if (values[value]->isVoid())
-                    each.removeProperty (clash.property, undo);
-                else
-                    each.setProperty (clash.property, *values[value], undo);
-            }
+            if (values[value]->isVoid())
+                element.removeProperty (clash.property, undo);
+            else
+                element.setProperty (clash.property, *values[value], undo);
         }
     }
     else
     {
         auto parentPath = clash.path;
         parentPath.remove (parentPath.size() - 1);
+
+        // A whole element in a clip, which no merge reports (what is merged whole is a curve, the chord lane, the key set
+        // last and a MIDI link, none of them a clip's): none to replace, refused as a clash on a clip's ID is (above).
+        if (isPathThroughClip (clash.path))
+            return false;
+
         auto parent = findByPath (song->getState(), parentPath);
 
         if (! parent.isValid())

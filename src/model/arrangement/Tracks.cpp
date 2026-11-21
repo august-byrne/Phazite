@@ -15,7 +15,9 @@
 #include "model/notes/internal/Notes.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
+#include <map>
 
 namespace phazite
 {
@@ -896,35 +898,34 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         auto copy = original.createCopy();
         const auto copied = giveNewIDs (song, copy);
 
-        // Each MIDI clip's copy given its clip's value (SongValues.h), shared until either is edited: the song's tree holds
-        // no notes (a song that keeps everything in its tree: the copy holds them).
-        if (auto* values = song.getValues())
-        {
-            const std::function<void (const juce::ValueTree&)> giveValues = [&] (const juce::ValueTree& state)
-            {
-                for (const auto& child : state)
-                {
-                    if (child.hasType (schema::TRACK))
-                        giveValues (child);
-                    else if (const auto found = copied.find (getClipID (child).getRaw());
-                             child.hasType (schema::CLIP) && found != copied.end())
-                        values->copyClipNotes (song, getClipID (child), ClipID::fromRaw (found->second));
-                }
-            };
-
-            giveValues (original);
-        }
-
         std::vector<juce::ValueTree> inside { copy };
         collectTrackStates (copy, inside);
 
-        // Nor does a copy of a pad's track play the pad, which plays on the original.
+        // Nor does a copy of a pad's track play the pad, which plays on the original. Its clips aren't the copy's tree's: the
+        // clips' code copies each track's in (copyTrackClips()), with the IDs the copy gave them, once the copy is the song's.
         for (auto state : inside)
+        {
             for (const auto* property : { &schema::trackFrozen.getName(), &schema::trackPadDevice.getName(), &schema::trackPad.getName() })
                 state.removeProperty (*property, nullptr);
 
+            for (auto i = state.getNumChildren(); --i >= 0;)
+                if (state.getChild (i).hasType (schema::CLIP))
+                    state.removeChild (i, nullptr);
+        }
+
         auto parent = original.getParent();
         parent.addChild (copy, parent.indexOf (original) + 1, &song.getUndoManager());
+
+        // Each track's clips onto its copy, in their alias groups, from the original by the copy's ID.
+        std::map<std::uint64_t, std::uint64_t> originals;
+
+        for (const auto& [old, made] : copied)
+            originals[made] = old;
+
+        for (const auto& state : inside)
+            if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
+                copyTrackClips (song, TrackID::fromRaw (found->second), getTrackID (state), copied, true);
+
         copyCurves (song, copied);
         copies.push_back (getTrackID (copy));
     }

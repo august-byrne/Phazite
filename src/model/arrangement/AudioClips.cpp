@@ -58,7 +58,7 @@ namespace
 
     void writeSound (Song& song, juce::ValueTree& clipState, const Sound& sound)
     {
-        auto* um = &song.getUndoManager();
+        auto* um = getUndoOf (song);
         setOrRemove (clipState, schema::clipTempo, sound.tempo > 0.0 ? juce::var (sound.tempo) : juce::var(), um);
         setOrRemove (clipState, schema::clipPitch, juce::exactlyEqual (sound.pitch, 0.0f) ? juce::var() : juce::var (sound.pitch), um);
         setOrRemove (clipState, schema::clipReversed, sound.reversed ? juce::var (true) : juce::var(), um);
@@ -148,7 +148,7 @@ namespace
     // A clip's warp markers, in each clip of its alias group (which play the same audio), in place of those there.
     void writeWarpPoints (Song& song, const juce::ValueTree& clipState, const std::vector<std::pair<double, double>>& points)
     {
-        auto* um = &song.getUndoManager();
+        auto* um = getUndoOf (song);
 
         for (auto alias : getAliasStates (song, clipState))
         {
@@ -355,6 +355,21 @@ juce::ValueTree makeAudioClipState (Song& song, const juce::String& name, const 
     return clipState;
 }
 
+ClipValue makeAudioClip (Song& song, const juce::String& name, const juce::File& file, BeatPosition start, FilePart part)
+{
+    // As makeAudioClipState() makes its element.
+    ClipValue clip;
+    clip.id = ClipID::fromRaw (song.makeID());
+    clip.kind = ClipValue::Kind::audio;
+    clip.length = {};
+    clip.name = name;
+    clip.start = BeatPosition::fromBeats (std::max (0.0, start.inBeats()));
+    clip.sound.file = getProjectPath (song, file);
+    clip.fileStart = part.start;
+    clip.fileEnd = part.end;
+    return clip;
+}
+
 juce::File getClipFile (const Song& song, const juce::ValueTree& clipState)
 {
     return findProjectFile (song, clipState[schema::clipFile].toString());
@@ -421,17 +436,21 @@ ClipTempo::ClipTempo (const Song& song)
 {
 }
 
-PlayedClip getPlayedClip (const Song& song, const juce::ValueTree& clipState, const ClipTempo& tempo)
+namespace
 {
-    // Each worked out once, as getPlayedFile(), getPlayedPosition() and getFittedFades() work it out.
-    const auto mapped = findMappedTime (song, clipState, tempo);
-    const auto settings = getStretch (song, clipState, tempo, mapped);
-    const auto file = getClipFile (song, clipState);
-    PlayedClip played { stretch::isUnchanged (settings) ? file : getRenderFile (song, file, settings),
-                        getPosition (song, clipState, tempo, mapped, settings) };
-    std::tie (played.fadeIn, played.fadeOut) = getFades (clipState, played.position);
-    return played;
-}
+    // What plays for a clip's element (getPlayedClip()).
+    PlayedClip getPlayedClip (const Song& song, const juce::ValueTree& clipState, const ClipTempo& tempo)
+    {
+        // Each worked out once, as getPlayedFile(), getPlayedPosition() and getFittedFades() work it out.
+        const auto mapped = findMappedTime (song, clipState, tempo);
+        const auto settings = getStretch (song, clipState, tempo, mapped);
+        const auto file = getClipFile (song, clipState);
+        PlayedClip played { stretch::isUnchanged (settings) ? file : getRenderFile (song, file, settings),
+                            getPosition (song, clipState, tempo, mapped, settings) };
+        std::tie (played.fadeIn, played.fadeOut) = getFades (clipState, played.position);
+        return played;
+    }
+} // namespace
 
 juce::File getClipFile (const Song& song, const ClipValue& clip)
 {
@@ -454,7 +473,7 @@ BeatRange getAudioClipRange (const Song& song, const juce::ValueTree& clipState)
 
 void setAudioPart (Song& song, juce::ValueTree clipState, BeatPosition start, FilePart part)
 {
-    auto* um = &song.getUndoManager();
+    auto* um = getUndoOf (song);
     clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), um);
     clipState.setProperty (schema::clipFileStart, std::max (0.0, part.start), um);
     clipState.setProperty (schema::clipFileEnd, std::max (part.start, part.end), um);
@@ -465,19 +484,14 @@ double getClipFade (const juce::ValueTree& clipState, bool fadeIn)
     return (double) clipState.getProperty (fadeIn ? schema::clipFadeIn : schema::clipFadeOut, 0.0);
 }
 
-std::pair<double, double> getFittedFades (const Song& song, const juce::ValueTree& clipState)
-{
-    return getFades (clipState, getPlayedPosition (song, clipState));
-}
-
 void setClipFade (Song& song, juce::ValueTree clipState, bool fadeIn, double seconds)
 {
     const auto& property = fadeIn ? schema::clipFadeIn : schema::clipFadeOut;
 
     if (seconds > 0.0)
-        clipState.setProperty (property, seconds, &song.getUndoManager());
+        clipState.setProperty (property, seconds, getUndoOf (song));
     else
-        clipState.removeProperty (property, &song.getUndoManager());
+        clipState.removeProperty (property, getUndoOf (song));
 }
 
 FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn)
@@ -490,7 +504,7 @@ FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn)
 void setClipFadeCurve (Song& song, juce::ValueTree clipState, bool fadeIn, FadeCurve curve)
 {
     // What is as at first isn't written: a straight curve.
-    auto* um = &song.getUndoManager();
+    auto* um = getUndoOf (song);
     const auto& shapeProperty = fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape;
     const auto& bendProperty = fadeIn ? schema::clipFadeInBend : schema::clipFadeOutBend;
     const auto bend = juce::jlimit (-1.0f, 1.0f, curve.bend);
@@ -559,7 +573,7 @@ PlayedPosition getPlayedPosition (const Song& song, ClipID clip)
 std::pair<double, double> getFittedFades (const Song& song, ClipID clip)
 {
     const auto clipState = findAudioState (song, clip);
-    return clipState.isValid() ? getFittedFades (song, clipState) : std::pair<double, double>();
+    return clipState.isValid() ? getFades (clipState, getPlayedPosition (song, clipState)) : std::pair<double, double>();
 }
 
 SecondsRange getAudioFileRange (const Song& song, ClipID clip)
@@ -653,7 +667,7 @@ void setClipGain (Song& song, ClipID clip, float decibels)
     if (auto clipState = findAudioState (song, clip); clipState.isValid())
     {
         const auto gain = juce::jlimit (minClipGain, maxClipGain, decibels);
-        setOrRemove (clipState, schema::clipGain, juce::exactlyEqual (gain, 0.0f) ? juce::var() : juce::var (gain), &song.getUndoManager());
+        setOrRemove (clipState, schema::clipGain, juce::exactlyEqual (gain, 0.0f) ? juce::var() : juce::var (gain), getUndoOf (song));
     }
 }
 
@@ -1017,7 +1031,7 @@ void playTake (Song& song, ClipID clip, int take)
     // The takes lie one after another in the clip's file, each as long as the range they were recorded round.
     const auto shift = (double) clipState[schema::clipTakeLength] * (take - playing);
     const auto part = getFilePart (clipState);
-    clipState.setProperty (schema::clipTake, take, &song.getUndoManager());
+    clipState.setProperty (schema::clipTake, take, getUndoOf (song));
     setAudioPart (song, clipState, getClipRange (clipState).getStart(), { part.start + shift, part.end + shift });
 }
 

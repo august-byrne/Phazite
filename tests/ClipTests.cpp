@@ -197,6 +197,72 @@ TEST_CASE ("Moving a clip keeps its length, and can take it to another track")
     CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (0.0));
 }
 
+TEST_CASE ("What writes a clip by its value adds it among a track's clips, changes, moves, links and copies it, each undone exactly")
+{
+    ClipEdit e;
+    const auto first = e.addClip (0, 0.0, 4.0);
+    phazite::test::addMidiNote (e.song, first, 60, beats (0.0), lasting (1.0), 100);
+    phazite::test::UndoCheck undo (e.song);
+
+    // Added before the track's first clip, with the notes given, keeping the ID its value was made with.
+    phazite::ClipID added;
+    undo.checkSeveral ("a clip added before another",
+                       [&]
+                       {
+                           auto clip = phazite::makeMidiClip (e.song, "Lead", { beats (8.0), beats (12.0) });
+                           clip.track = e.tracks[0];
+                           const auto notes = phazite::getClipNotesValue (e.song, first);
+                           added = phazite::addClip (e.song, clip, &notes, 0);
+                           CHECK (added == clip.id);
+                       });
+    CHECK (phazite::getClips (e.song, e.tracks[0]) == std::vector<phazite::ClipID> { added, first });
+    CHECK (phazite::getClipNotes (e.song, added).size() == 1);
+    CHECK (e.rangeOf (added).getStart().inBeats() == doctest::Approx (8.0));
+
+    // Changed and moved to the end of another track's clips by its value.
+    undo.checkSeveral ("a clip changed and moved",
+                       [&]
+                       {
+                           auto clip = *phazite::getClipValue (e.song, added);
+                           clip.muted = true;
+                           clip.name = {};
+                           clip.track = e.tracks[1];
+                           phazite::setClip (e.song, clip);
+                       });
+    CHECK (phazite::getClipTrack (e.song, added) == e.tracks[1]);
+    CHECK (phazite::areAllClipsMuted (e.song, { added }));
+    CHECK (phazite::getClipName (e.song, added) == phazite::getTrackName (e.song, e.tracks[1]));
+
+    // In one alias group, and in none again.
+    undo.checkSeveral ("two clips linked",
+                       [&]
+                       {
+                           const auto link = e.song.makeID();
+                           phazite::setClipLink (e.song, first, link);
+                           phazite::setClipLink (e.song, added, link);
+                       });
+    CHECK (phazite::getAliasClips (e.song, first) == std::vector<phazite::ClipID> { first, added });
+    undo.checkSeveral ("two clips unlinked",
+                       [&]
+                       {
+                           phazite::setClipLink (e.song, added, 0);
+                           phazite::setClipLink (e.song, first, 0);
+                       });
+    CHECK_FALSE (phazite::hasAliases (e.song, { first, added }));
+
+    // A track's clips copied onto another, each with an ID of its own and its notes.
+    undo.checkSeveral ("a track's clips copied", [&] { phazite::copyTrackClips (e.song, e.tracks[1], e.tracks[0], {}, false); });
+    auto copies = phazite::getClips (e.song, e.tracks[0]);
+    REQUIRE (copies.size() == 2);
+    REQUIRE (std::find (copies.begin(), copies.end(), first) != copies.end());
+    copies.erase (std::find (copies.begin(), copies.end(), first));
+    REQUIRE (copies.size() == 1);
+    CHECK (copies[0] != added);
+    CHECK (phazite::getClipNotes (e.song, copies[0]).size() == 1);
+
+    undo.walkBackAndForth();
+}
+
 TEST_CASE ("Trimming a clip leaves its content in place")
 {
     ClipEdit e;

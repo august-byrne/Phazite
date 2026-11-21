@@ -16,6 +16,7 @@
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/SongValues.h"
 #include "model/notes/NoteValues.h"
 
 #include <vector>
@@ -36,11 +37,13 @@ struct Clipboard
         range // a time range's clips, cut to it
     };
 
-    // A clip as it was: a copy of the song's element for it, where it was in the song, and its track's place from the first of
-    // the copy's tracks, counting those that hold clips in the playlist's order.
+    // A clip as it was: its value and, a MIDI clip's, its notes and controllers' values (model/base/internal/SongValues.h),
+    // where it was in the song, and its track's place from the first of the copy's tracks, counting those that hold clips in
+    // the playlist's order.
     struct CopiedClip
     {
-        juce::ValueTree state;
+        ClipValue clip;
+        ClipNotes notes;
         BeatRange beats;
         int trackOffset = 0;
     };

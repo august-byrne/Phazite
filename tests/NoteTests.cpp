@@ -1674,18 +1674,43 @@ TEST_CASE ("One value of a note set through its clip reaches the note in each of
 
 TEST_CASE ("Notes taken out of one clip alone stay in its aliases, and outside the undo history")
 {
-    Notes n;
-    const auto note = n.add (60, 5.0, 1.0);
-    const auto stays = n.add (62, 6.0, 1.0);
-    const auto aliases = phazite::copyClips (n.song, { n.clip }, true);
-    REQUIRE (aliases.size() == 1);
-    n.song.getUndoManager().clearUndoHistory();
+    // The clip leaves its alias group, which holds one value: with one alias, the alias left alone leaves it too; with two,
+    // they stay a group of two. Each alias keeps every note.
+    for (const auto copies : { 1, 2 })
+    {
+        INFO (copies << " aliases");
+        Notes n;
+        const auto note = n.add (60, 5.0, 1.0);
+        const auto stays = n.add (62, 6.0, 1.0);
+        std::vector<phazite::ClipID> aliases;
 
-    phazite::removeClipNotesAlone (n.song, n.clip, { note.note });
-    CHECK_FALSE (phazite::hasNote (n.song, note));
-    CHECK (phazite::hasNote (n.song, stays));
-    CHECK (phazite::hasNote (n.song, { aliases.front(), note.note }));
-    CHECK_FALSE (n.song.getUndoManager().canUndo());
+        for (int i = 0; i < copies; ++i)
+        {
+            const auto made = phazite::copyClips (n.song, { n.clip }, true);
+            REQUIRE (made.size() == 1);
+            aliases.push_back (made.front());
+        }
+
+        REQUIRE (phazite::getAliasClips (n.song, n.clip).size() == aliases.size() + 1);
+        n.song.getUndoManager().clearUndoHistory();
+
+        phazite::removeClipNotesAlone (n.song, n.clip, { note.note });
+        CHECK_FALSE (phazite::hasNote (n.song, note));
+        CHECK (phazite::hasNote (n.song, stays));
+        CHECK (phazite::getAliasClips (n.song, n.clip) == std::vector { n.clip });
+        CHECK (phazite::getClipValue (n.song, n.clip)->link == 0);
+
+        for (const auto alias : aliases)
+        {
+            INFO ("alias " << alias.getRaw());
+            CHECK (phazite::hasNote (n.song, { alias, note.note }));
+            CHECK (phazite::hasNote (n.song, { alias, stays.note }));
+            CHECK (phazite::getAliasClips (n.song, alias).size() == (copies == 1 ? size_t { 1 } : aliases.size()));
+            CHECK ((phazite::getClipValue (n.song, alias)->link == 0) == (copies == 1));
+        }
+
+        CHECK_FALSE (n.song.getUndoManager().canUndo());
+    }
 }
 
 TEST_CASE ("A note given twice to placeNotes() goes where it was given last, as placing each in turn left it")

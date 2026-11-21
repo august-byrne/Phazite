@@ -5,6 +5,7 @@
 #include "internal/Tracks.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
@@ -587,8 +588,9 @@ ClipID addImportedFile (Song& song, TrackID track, const ImportedFile& imported,
             if (info.getSeconds() <= 0.0)
                 return {};
 
-            const auto clipState = makeAudioClipState (song, file.getFileNameWithoutExtension(), copy, start, { 0.0, info.getSeconds() });
-            const auto clip = placeClipState (song, clipState, track);
+            auto made = makeAudioClip (song, file.getFileNameWithoutExtension(), copy, start, { 0.0, info.getSeconds() });
+            made.track = track;
+            const auto clip = addClip (song, made);
 
             // A loop that knows its beats (from its loop data, or from its name when it lasts whole bars) follows the song's
             // tempo, as the browser's preview played it: stretched to its beats from where it starts.
@@ -619,19 +621,22 @@ ClipID addImportedFile (Song& song, TrackID track, const ImportedFile& imported,
 
             const auto bars = getBars (song);
             const auto end = bars.getBarStart (bars.getBarAt (BeatPosition::fromBeats (std::max (0.0, content->lastBeat - 1.0e-6))) + 1);
-            auto clipState = makeMidiClipState (song, content->name, { BeatPosition(), end });
+            auto clip = makeMidiClip (song, content->name, { BeatPosition(), end });
+
+            // Its notes and values read as a clip's are, each note with an ID of the song's.
+            std::vector<juce::ValueTree> events;
 
             for (auto note : content->notes)
             {
                 note.setProperty (schema::noteID, (juce::int64) song.makeID(), nullptr);
-                clipState.appendChild (note, nullptr);
+                events.push_back (note);
             }
 
-            for (const auto& control : content->controls)
-                clipState.appendChild (control, nullptr);
-
-            clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), nullptr);
-            return placeClipState (song, clipState, track);
+            events.insert (events.end(), content->controls.begin(), content->controls.end());
+            clip.start = BeatPosition::fromBeats (std::max (0.0, start.inBeats()));
+            clip.track = track;
+            const auto notes = readClipNotes (events);
+            return addClip (song, clip, &notes);
         }
 
         case FileKind::other:

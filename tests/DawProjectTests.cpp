@@ -569,6 +569,77 @@ TEST_CASE ("A DAWproject opens as a new song: its tracks with their notes, audio
     CHECK (said.contains ("Bass: its sends"));
 }
 
+TEST_CASE ("A DAWproject's clips open as the file holds them: a MIDI clip that starts into its notes, an audio clip's part and fades")
+{
+    // Bass's riff trimmed at its start, so that it starts a beat into its notes; a loop on Drums trimmed at both ends, so that
+    // it plays a part of its file, and faded in and out. Written as a DAWproject and opened as a new song: each clip's value
+    // as the file holds it, where the song's was.
+    Song song;
+    TemporaryFolder sounds;
+    auto& from = *phazite::findSong (song.s.context);
+    const auto drums = song.s.addTrack ("Drums");
+    const auto loop = song.s.addAudioClip (drums, writeSound (sounds.folder.getChildFile ("Loop.wav"), 2.0), 8.0);
+
+    {
+        const phazite::UndoStep step (from, "Shape the clips");
+        phazite::trimClipStart (from, song.riff, at (1.0));
+        phazite::trimClipStart (from, loop, at (8.5));
+        phazite::trimClipEnd (from, loop, at (11.0));
+        phazite::setClipFade (from, loop, true, 0.125);
+        phazite::setClipFade (from, loop, false, 0.25);
+    }
+
+    const auto riffWritten = phazite::getClipValue (from, song.riff).value();
+    const auto loopWritten = phazite::getClipValue (from, loop).value();
+    REQUIRE (riffWritten.offset.inBeats() == doctest::Approx (1.0));
+    REQUIRE (loopWritten.fileStart > 0.0);
+    REQUIRE (loopWritten.fileEnd < 2.0);
+
+    auto content = song.describe();
+    content.bounces.clear(); // what another DAW would play of Lead, not rendered here
+    const auto file = sounds.folder.getChildFile ("Song.dawproject");
+    REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
+    const auto read = phazite::readDawProject (file);
+    REQUIRE (read.project != nullptr);
+    TestSong into;
+    phazite::takeDawProject (*phazite::findSong (into.context), read);
+    const auto& imported = *phazite::findSong (into.context);
+
+    const auto onTrack = [&imported] (const juce::String& name)
+    {
+        for (const auto track : phazite::getTrackIDs (imported))
+            if (phazite::getTrackName (imported, track) == name)
+                return phazite::getClips (imported, track);
+
+        return std::vector<phazite::ClipID>();
+    };
+
+    const auto riffs = onTrack ("Bass"), loops = onTrack ("Drums");
+    REQUIRE (riffs.size() == 1);
+    REQUIRE (loops.size() == 1);
+    const auto riff = phazite::getClipValue (imported, riffs.front()).value();
+    const auto played = phazite::getClipValue (imported, loops.front()).value();
+
+    CHECK (riff.isMidi());
+    CHECK (riff.start == riffWritten.start);
+    CHECK (riff.length == riffWritten.length);
+    CHECK (riff.offset == riffWritten.offset);
+    CHECK (riff.name == riffWritten.name);
+    CHECK_FALSE (riff.muted);
+    CHECK (riff.link == 0);
+    CHECK (getPitches (imported, riffs.front()) == std::vector<int> { 36, 43 });
+
+    CHECK (played.isAudio());
+    CHECK (played.name == loopWritten.name);
+    CHECK (played.start.inBeats() == doctest::Approx (loopWritten.start.inBeats()));
+    CHECK (played.fileStart == doctest::Approx (loopWritten.fileStart));
+    CHECK (played.fileEnd == doctest::Approx (loopWritten.fileEnd));
+    CHECK (played.fadeIn.seconds == doctest::Approx (0.125));
+    CHECK (played.fadeOut.seconds == doctest::Approx (0.25));
+    CHECK (played.sound.file == juce::String ("Audio/Loop.wav"));
+    checkSong (imported);
+}
+
 TEST_CASE ("A note's MIDI channel goes into a DAWproject, counted from 0 there, and comes back as it was")
 {
     Song song;

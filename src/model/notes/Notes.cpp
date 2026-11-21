@@ -451,7 +451,7 @@ namespace
 
         if (newEnd > range.getEnd() + tinyBeats)
         {
-            setClipPlace (song, findClipState (song, clip.id), range.getStart(), newEnd - range.getStart(), clip.offset);
+            setClipPlace (song, clip.id, range.getStart(), newEnd - range.getStart(), clip.offset);
 
             if (auto now = findMidiClip (song, clip.id))
                 clip = std::move (*now);
@@ -1145,10 +1145,10 @@ void removeClipNotesAlone (Song& song, ClipID clip, const std::vector<NoteID>& n
     if (value->link != 0)
     {
         const auto aliases = getAliasClips (song, clip);
-        findClipState (song, clip).removeProperty (schema::clipLink, nullptr);
+        setClipLink (song, clip, 0);
 
         if (aliases.size() == 2)
-            findClipState (song, aliases[1]).removeProperty (schema::clipLink, nullptr);
+            setClipLink (song, aliases[1], 0);
     }
 
     setClipNotesValue (song, clip, next);

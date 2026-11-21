@@ -656,28 +656,43 @@ NoteValues readNoteValues (const juce::ValueTree& note)
              readChannel (note, schema::noteChannel) };
 }
 
+namespace
+{
+    // NOTE and CONTROL elements read into a clip's value, each kind in its order; anything else left out.
+    template <typename Elements>
+    ClipNotes readEvents (const Elements& elements)
+    {
+        auto notes = immer::flex_vector<NoteValues>().transient();
+        auto places = immer::map<std::uint64_t, std::uint32_t>().transient();
+        auto controls = immer::flex_vector<ControlValues>().transient();
+
+        for (const auto& child : elements)
+        {
+            if (child.hasType (schema::NOTE))
+            {
+                const auto note = readNoteValues (child);
+                places.set (note.id.getRaw(), (std::uint32_t) notes.size());
+                notes.push_back (note);
+            }
+            else if (child.hasType (schema::CONTROL))
+            {
+                if (const auto control = readControlValues (child))
+                    controls.push_back (*control);
+            }
+        }
+
+        return { notes.persistent(), places.persistent(), controls.persistent() };
+    }
+} // namespace
+
 ClipNotes readClipNotes (const juce::ValueTree& clipState)
 {
-    auto notes = immer::flex_vector<NoteValues>().transient();
-    auto places = immer::map<std::uint64_t, std::uint32_t>().transient();
-    auto controls = immer::flex_vector<ControlValues>().transient();
+    return readEvents (clipState);
+}
 
-    for (const auto& child : clipState)
-    {
-        if (child.hasType (schema::NOTE))
-        {
-            const auto note = readNoteValues (child);
-            places.set (note.id.getRaw(), (std::uint32_t) notes.size());
-            notes.push_back (note);
-        }
-        else if (child.hasType (schema::CONTROL))
-        {
-            if (const auto control = readControlValues (child))
-                controls.push_back (*control);
-        }
-    }
-
-    return { notes.persistent(), places.persistent(), controls.persistent() };
+ClipNotes readClipNotes (const std::vector<juce::ValueTree>& events)
+{
+    return readEvents (events);
 }
 
 void writeClipNotes (const ClipNotes& value, juce::ValueTree& clip)

@@ -24,7 +24,7 @@ namespace
     void moveLater (Song& song, ClipID clip, BeatDuration beats)
     {
         if (const auto value = getClipValue (song, clip))
-            moveClipState (song, findClipState (song, clip), value->start + beats);
+            moveClipStart (song, clip, value->start + beats);
     }
 } // namespace
 

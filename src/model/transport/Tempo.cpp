@@ -78,8 +78,7 @@ namespace
             scaleClipContent (song, ids, scale);
 
             for (const auto& clip : clips)
-                setClipPlace (song, findClipState (song, clip.id), clip.start, getClipRange (clip).getLength() * scale,
-                              clip.offset * scale);
+                setClipPlace (song, clip.id, clip.start, getClipRange (clip).getLength() * scale, clip.offset * scale);
         }
 
     private:

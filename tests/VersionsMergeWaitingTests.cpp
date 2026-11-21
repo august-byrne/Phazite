@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <tuple>
 #include <utility>
 
 namespace
@@ -1988,6 +1989,134 @@ TEST_CASE ("A conflict in what the audio clips of an alias group share is listed
 
     phazite::undo (*phazite::findSong (s.context)); // back to this branch's
     checkHoldsTogether (2.0f);
+}
+
+namespace
+{
+// The index of a waiting merge's conflict on a property, or -1.
+int findClash (const phazite::ProjectContext& context, const juce::Identifier& property)
+{
+    const auto& clashes = phazite::getVersionHistory (context)->getMerging()->clashes;
+
+    for (size_t i = 0; i < clashes.size(); ++i)
+        if (clashes[i].property == property)
+            return (int) i;
+
+    return -1;
+}
+} // namespace
+
+TEST_CASE ("A conflict on a MIDI clip's own start and name is chosen each way, each choice one exact undo step")
+{
+    // A clip on the Bass; idea-2 moves it to beat 4 and names it There, main moves it to beat 2 and names it Here: two
+    // conflicts on the clip, whose choices the clips' code sets (Clips.h: setClip()), each Undo and Redo exact.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto clip = s.addMidiClip (bass, 0.0, 8.0);
+    s.addNote (clip, 36, 0.0, 1.0);
+    keepVersion (s.context, "First");
+
+    const auto change = [&s, clip] (double start, const juce::String& name)
+    {
+        auto& song = *phazite::findSong (s.context);
+        const phazite::UndoStep step (song, "Move and Rename");
+        phazite::moveClipStart (song, clip, phazite::BeatPosition::fromBeats (start));
+        phazite::renameClips (song, { clip }, name);
+    };
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+    change (4.0, "There");
+    const auto theirs = keepVersion (s.context, "There");
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    change (2.0, "Here");
+    keepVersion (s.context, "Here");
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+    phazite::finishMerge (s.context);
+    REQUIRE (phazite::isMerging (s.context));
+    REQUIRE (phazite::getClashes (s.context).size() == 2);
+    const auto onStart = findClash (s.context, schema::clipStart), onName = findClash (s.context, schema::clipName);
+    REQUIRE (onStart >= 0);
+    REQUIRE (onName >= 0);
+
+    auto& song = *phazite::findSong (s.context);
+    const auto held = [&song, clip] { return phazite::getClipValue (song, clip).value(); };
+    CHECK (held().start.inBeats() == doctest::Approx (2.0));
+    CHECK (held().name == "Here");
+
+    UndoCheck undo (s.context);
+
+    for (const auto& [value, start, name] :
+         { std::tuple<int, double, juce::String> { 2, 4.0, "There" }, std::tuple<int, double, juce::String> { 0, 0.0, "" },
+           std::tuple<int, double, juce::String> { 1, 2.0, "Here" } })
+    {
+        INFO ("chosen " << value);
+        undo.check (phazite::getClashChoiceName (value) + ": its start",
+                    [&s, onStart, chosen = value] { REQUIRE (phazite::chooseClash (s.context, onStart, chosen)); });
+        undo.check (phazite::getClashChoiceName (value) + ": its name",
+                    [&s, onName, chosen = value] { REQUIRE (phazite::chooseClash (s.context, onName, chosen)); });
+        CHECK (phazite::getClashes (s.context)[(size_t) onStart].chosen == value);
+        CHECK (phazite::getClashes (s.context)[(size_t) onName].chosen == value);
+        CHECK (held().start.inBeats() == doctest::Approx (start));
+        CHECK (held().name == name);
+        CHECK (held().length.inBeats() == doctest::Approx (8.0));
+        CHECK (phazite::getClipNotes (song, clip).size() == 1);
+        checkSong (song);
+    }
+
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("A conflict's choice a clip can't hold as it is, a MIDI clip shorter than the shortest, is refused and changes nothing")
+{
+    // idea-2's clip made shorter than a clip can be (a commit's song may come from anyone; a length above 0 opens as it is),
+    // main's 6 beats long. The other branch's would be kept to the shortest a clip is, so it is refused: false, the song as it
+    // was and the choice this branch's. What was before is taken.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto clip = s.addMidiClip (bass, 0.0, 8.0);
+    keepVersion (s.context, "First");
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+
+    {
+        auto& song = *phazite::findSong (s.context);
+        const phazite::UndoStep step (song, "Shorten by Hand");
+        phazite::findClipState (song, clip).setProperty (schema::clipLength, phazite::shortestClipBeats / 16.0, &song.getUndoManager());
+    }
+
+    const auto theirs = keepVersion (s.context, "Too short");
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+
+    {
+        auto& song = *phazite::findSong (s.context);
+        const phazite::UndoStep step (song, "Shorten");
+        phazite::setClipPlace (song, clip, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (6.0), {});
+    }
+
+    keepVersion (s.context, "Six beats");
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+    phazite::finishMerge (s.context);
+    REQUIRE (phazite::isMerging (s.context));
+    REQUIRE (phazite::getClashes (s.context).size() == 1);
+    REQUIRE (findClash (s.context, schema::clipLength) == 0);
+
+    auto& song = *phazite::findSong (s.context);
+    const auto length = [&song, clip] { return phazite::getClipValue (song, clip).value().length.inBeats(); };
+    const auto before = writeSong (song, SongPart::whole);
+    UndoCheck undo (s.context);
+
+    undo.check ("Take the Other Branch's, refused", [&s] { CHECK_FALSE (phazite::chooseClash (s.context, 0, 2)); });
+    CHECK (writeSong (song, SongPart::whole) == before);
+    CHECK (phazite::getClashes (s.context)[0].chosen == 1);
+    CHECK (length() == doctest::Approx (6.0));
+
+    undo.check ("Take What Was Before", [&s] { REQUIRE (phazite::chooseClash (s.context, 0, 0)); });
+    CHECK (phazite::getClashes (s.context)[0].chosen == 0);
+    CHECK (length() == doctest::Approx (8.0));
+    checkSong (song);
 }
 
 TEST_CASE ("An audio alias group whose file one branch located anew while the other added an alias merges with every clip of the "

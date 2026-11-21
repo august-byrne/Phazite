@@ -384,7 +384,7 @@ public:
     void eraseClipNotes (Song&, ClipID);
 
     // A copy of a clip (to, not in the song yet) given the clip's value: the same value, shared until one of them is edited.
-    // What the clips' code that copies a clip in the song does (model/arrangement/internal/Clips.h: copyClipState()), so that
+    // What the clips' code that copies a clip in the song does (model/arrangement/Clips.cpp: copyClipState()), so that
     // the copy, an alias or not, holds what the clip holds without a walk through its notes.
     void copyClipNotes (Song&, ClipID from, ClipID to);
 
@@ -435,6 +435,9 @@ void writeChannel (juce::ValueTree& element, const juce::Identifier& property, i
 // nor is a CONTROL of a kind Phazite doesn't know (which the loader takes out of a song: model/project/Project.cpp); any
 // other child of the clip stays in its element.
 ClipNotes readClipNotes (const juce::ValueTree& clipState);
+
+// The same of NOTE and CONTROL elements on no clip (a MIDI file's read for an import), in their order.
+ClipNotes readClipNotes (const std::vector<juce::ValueTree>& events);
 
 // One note's values, read from its NOTE element, as readClipNotes() reads it.
 NoteValues readNoteValues (const juce::ValueTree& noteState);

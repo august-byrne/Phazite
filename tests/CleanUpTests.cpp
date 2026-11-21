@@ -276,17 +276,37 @@ TEST_CASE ("Clean Up and an import keep every file the song plays: each clip's b
         return paths;
     };
 
+    // What a look offers of the Audio folder. A render Phazite made for a clip in the background (the Generated folder) and
+    // no longer uses is offered too, sooner or later as the machine has it: that is another case's subject, and what CI's
+    // release build is taken to have seen here after the reopen (everything offered is in the failure's message, to tell).
+    std::string offered;
+    CAPTURE (offered);
+    const auto lookInAudioFolder = [&s, &offered]
+    {
+        const auto all = getNames (lookForUnused (s.context));
+        offered = all.joinIntoString (", ").toStdString();
+        juce::StringArray inAudio;
+
+        for (const auto& name : all)
+            if (name.startsWith ("Audio/"))
+                inAudio.add (name);
+
+        return inAudio;
+    };
+
     auto sortedPlayed = played;
     sortedPlayed.sort (false);
     CHECK (checkPaths() == sortedPlayed);
     REQUIRE (phazite::canCleanUpAudio (s.context));
-    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Unused.wav"));
+    CHECK (lookInAudioFolder() == juce::StringArray ("Audio/Unused.wav"));
 
     // The same after a save and a reopen, from the clips the song opened with.
     s.reopen();
     REQUIRE (waitForVersionHistory (s.context));
     CHECK (checkPaths() == sortedPlayed);
-    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Unused.wav"));
+    dispatchMessagesUntil ([&s] { return phazite::canCleanUpAudio (s.context); }); // the history may still be writing
+    REQUIRE_MESSAGE (phazite::canCleanUpAudio (s.context), phazite::getWhyNotCleanUpAudio (s.context).toStdString());
+    CHECK (lookInAudioFolder() == juce::StringArray ("Audio/Unused.wav"));
 
     // An import's unpacked audio that no clip plays goes; what a clip plays stays (model/project/internal/DawProject.h).
     const auto& reopened = *phazite::findSong (s.context);

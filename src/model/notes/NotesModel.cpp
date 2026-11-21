@@ -408,7 +408,7 @@ void restoreClipEnds (ProjectContext& context, const ClipEnds& ends)
             continue;
 
         if (const auto range = getClipRange (*value); range.getEnd() > end && end > range.getStart())
-            setClipPlace (*song, findClipState (*song, clip), range.getStart(), end - range.getStart(), value->offset);
+            setClipPlace (*song, clip, range.getStart(), end - range.getStart(), value->offset);
     }
 }
 

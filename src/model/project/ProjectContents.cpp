@@ -342,9 +342,7 @@ bool locateAudioFileNow (ProjectContext& context, const juce::String& path, cons
 
     const UndoStep step (*song, "Locate Audio File");
 
-    // Each clip's file written into its element (roadmap step S5.20 moves this write into the clips' code next).
-    for (const auto clip : clips)
-        findClipState (*song, clip).setProperty (schema::clipFile, newPath, &song->getUndoManager());
+    setClipFiles (*song, path, newPath);
 
     for (auto& [element, property] : uses)
         element.setProperty (property, newPath, &song->getUndoManager());

@@ -18,7 +18,8 @@ and 212 are new; and 214 is a fault of the compiler on CI, which waits for the o
 message thread (2026-11-20) and the reviews of its fixes left: the audit's other findings were fixed at once
 ([changelog](changelog.md)); these were found by reading the code and none was measured, and what the audit only
 suspects, or would make faster, is in the [backlog](backlog.md). 230 was found by reading JUCE while
-roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it.
+roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 235 was found by reading while
+the clips' writers were reviewed (2026-11-21), as 237 was, and 236 is a test that failed once on CI that day.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -152,6 +153,15 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   own review. Also then: the merge's check that each ID is held once (`holdsEachIDOnce()` in `VersionHistory.cpp`)
   and the loader's (`SongPieces.cpp`) made one function, which looks at a channel's fader and VCA IDs and skips
   elements of kinds it doesn't know, as the loader's does.
+- **237. A merge's choice for where an audio clip's part of its file starts can move where it ends, and the end's own
+  clash still shows the choice made before.** Both lines moved the start and the end of one audio clip's part of its
+  file, differently; the start chosen first, past the end the song holds, takes the end along (a clip's part never
+  ends before it starts), and the clash on the end still shows its old choice, which chosen again is then refused.
+  Choosing the end first, or the other value for the end after, works. Why: a choice on a clip's property sets the
+  clip's whole value (`chooseClash()`, `src/model/versions/VersionsModel.cpp`), and a value keeps the part in order.
+  Found by reading (2026-11-21); needs both clashes on one clip. To fix: a choice that would move another property
+  of the clip that has a clash of its own sets both clashes' choices to what the song then holds (or to none), with a
+  test in `tests/VersionsMergeWaitingTests.cpp`.
 
 ## Devices and playback
 
@@ -172,6 +182,17 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `src/model/arrangement/ClipRenders.cpp`), and JUCE's `moveFileTo()` deletes the target before it moves. A compile in
   that instant finds no file. To fix: replace the file in one step (`writeWholeFile()`'s way, or a move that replaces),
   and an export that leaves to the background threads the renders they are already making.
+
+## Notes and clips
+
+- **235. A DAWproject import can put MIDI clips and audio clips on one track.** Audio and notes don't share a track
+  in Phazite (a model function that puts a clip on a track asks `canTrackHold()`), and the import's reader
+  (`src/model/project/DawProject.cpp`, where it adds a track's clips) puts whatever the file's track holds on one
+  track without asking. Such a track then plays both, and the edits that ask `canTrackHold()` refuse on it what the
+  import did. Found by reading, while the clips' writers were reviewed (2026-11-21); not seen with a real file. To
+  fix: the import gives a track's audio clips a track of their own beside it (as the file's track is named, with
+  " (audio)"), with a test in `tests/DawProjectTests.cpp` on a file whose track holds both; then the clips' own
+  `addClip()` can ask `canTrackHold()` itself.
 
 ## The window
 
@@ -236,6 +257,13 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   run the test on Linux with the plug-in's status and error said at each step (`TestSong::describePlugin()` shows
   how), and which of the two helpers the failed load was sent to (`getHelper()`'s second try in
   `src/model/plugins/PluginHost.cpp`).
+- **236. `LockFreeTests`, the transport's race: on CI's Windows release build it once found no block held.** The case
+  that races the window's reads of the playhead against the audio thread's blocks (`tests/LockFreeTests.cpp`, "the
+  race held places": `CHECK (heldBlocks > 0)`) failed with 0 on 2026-11-21 (the run of 1ef4d615), and passed on
+  the runs before and after and on every local run. The check says that the race really met the state it is for;
+  on a runner where the two threads never overlap in it, it is 0 and nothing was raced. To fix: the race runs
+  until it has held a block or a count of rounds has passed (as its asks were spread over the blocks in e53425de),
+  never a fixed number of reads that a slow start can use up.
 
 ## The build
 
