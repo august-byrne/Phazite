@@ -510,15 +510,15 @@ void PianoRoll::setKey (const std::optional<Key>& key)
 }
 
 //==============================================================================
-void PianoRoll::audition (ClipID clip, int pitch, int velocity)
+void PianoRoll::audition (ClipID clip, int pitch, int velocity, int channel)
 {
-    audition (clip, std::vector<int> { pitch }, velocity);
+    audition (clip, std::vector<int> { pitch }, velocity, channel);
 }
 
-void PianoRoll::audition (ClipID clip, const std::vector<int>& pitches, int velocity)
+void PianoRoll::audition (ClipID clip, const std::vector<int>& pitches, int velocity, int channel)
 {
     stopAudition();
-    auditionTrack = auditionNotes (context, clip, pitches, velocity);
+    auditionTrack = auditionNotes (context, clip, pitches, velocity, channel);
 }
 
 void PianoRoll::stopAudition()

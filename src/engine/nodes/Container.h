@@ -132,7 +132,7 @@ private:
         playedBaseCrossover { crossoverInfo.defaultValue };
     std::atomic<bool> crossoverWriting { false };
     std::atomic<int> lowKey { 0 }, highKey { 127 }, lowVelocity { 1 }, highVelocity { 127 };
-    std::bitset<128> sounding; // the notes it started, which end in it
+    std::bitset<16 * 128> sounding; // the notes it started, which end in it, by their channels and pitches
 };
 
 // One of a container's chains, as a split hands it its part: its state, its crossover's automation (none for none) and

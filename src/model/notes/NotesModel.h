@@ -130,14 +130,15 @@ private:
 // is open (a field's drag: SongGesture.h), whose one step it joins. Changed by an amount (dragged, scrolled or stepped),
 // every note changes by it: notes moved (no earlier than each one's clip lets it) or transposed together by as much as
 // all of them can go, so that a chord keeps its shape, and each length (at least getMinimumNoteLength(), as a drag keeps
-// it) and velocity (1 to 127) kept in range. Set to a value (typed), each length and velocity becomes it, and the
-// earliest start and the lowest pitch move to it, the others with them.
+// it), velocity (1 to 127) and MIDI channel (1 to 16) kept in range. Set to a value (typed), each length, velocity and
+// channel becomes it, and the earliest start and the lowest pitch move to it, the others with them.
 enum class NoteProperty
 {
     start,
     length,
     pitch,
-    velocity
+    velocity,
+    channel
 };
 
 void changeNotes (ProjectContext&, const std::vector<NoteRef>&, NoteProperty, double amount);
@@ -166,10 +167,10 @@ void hideDrumRow (ProjectContext&, TrackID, int note);
 void showAllDrumRows (ProjectContext&, TrackID);
 
 //==============================================================================
-// Notes played on a clip's track and MIDI channel as they are placed, or as their keys are clicked, until they are
-// stopped: nothing plays on a track without an instrument. Returns the track they play on, for stopAuditioning(), or an
-// empty ID.
-TrackID auditionNotes (ProjectContext&, ClipID, const std::vector<int>& pitches, int velocity);
+// Notes played on a clip's track as they are placed, or as their keys are clicked, until they are stopped, on a MIDI
+// channel (1 to 16): a note's own as it is dragged or clicked, the first for a key clicked or a new note. Nothing plays on a
+// track without an instrument. Returns the track they play on, for stopAuditioning(), or an empty ID.
+TrackID auditionNotes (ProjectContext&, ClipID, const std::vector<int>& pitches, int velocity, int channel = 1);
 void stopAuditioning (ProjectContext&, TrackID);
 
 //==============================================================================

@@ -1099,8 +1099,8 @@ namespace
     };
 
     //==============================================================================
-    // Notes selected in the piano roll: where they start, how long they are, their pitch and velocity, whether they play,
-    // and the clip they are in. Several share the fields, which act on all of them, as Bitwig's inspector edits notes.
+    // Notes selected in the piano roll: where they start, how long they are, their pitch, velocity and MIDI channel, whether
+    // they play, and the clip they are in. Several share the fields, which act on all of them, as Bitwig's inspector edits notes.
     struct NotesPage : public Inspector::Page
     {
         NotesPage (CommandBridge& bridge, ProjectContext& c, std::vector<NoteRef> shown)
@@ -1141,6 +1141,10 @@ namespace
             setUp (velocityField, NoteProperty::velocity, "How hard the notes are played, from 1 to 127");
             velocityField.format = [] (double velocity) { return juce::String ((int) std::lround (velocity)); };
 
+            setUp (channelField, NoteProperty::channel,
+                   "The notes' MIDI channel, from 1 to 16: which part of a plug-in with several parts plays them");
+            channelField.format = [] (double channel) { return juce::String ((int) std::lround (channel)); };
+
             mutedToggle.setTitle ("Muted");
             mutedToggle.setTooltip ("A muted note doesn't play");
             mutedToggle.onClick = [this] { commands.invoke ("edit.mute"); }; // the selected notes, which these are
@@ -1149,6 +1153,7 @@ namespace
             addRow ("Length", &lengthField);
             addRow ("Pitch", &pitchField);
             addRow ("Velocity", &velocityField);
+            addRow ("Channel", &channelField);
             addRow ("Muted", &mutedToggle);
             addRow ("Clip", &clipLabel);
             refresh();
@@ -1187,6 +1192,8 @@ namespace
             pitchField.show (lowest, highest);
             const auto [softest, hardest] = range ([] (const NoteData& note) { return (double) note.velocity; });
             velocityField.show (softest, hardest);
+            const auto [firstChannel, lastChannel] = range ([] (const NoteData& note) { return (double) note.channel; });
+            channelField.show (firstChannel, lastChannel);
 
             mutedToggle.setToggleState (std::all_of (shown.begin(), shown.end(), [] (const NoteData& note) { return note.muted; }),
                                         juce::dontSendNotification);
@@ -1208,6 +1215,7 @@ namespace
         MultiField lengthField { context, "Length", 0.0, 1024.0, 0.25, "Change Note Length" }; // the model keeps a 64th at least
         MultiField pitchField { context, "Pitch", 0.0, 127.0, 1.0, "Transpose Notes" };
         MultiField velocityField { context, "Velocity", 1.0, 127.0, 1.0, "Change Velocity" };
+        MultiField channelField { context, "Channel", 1.0, 16.0, 1.0, "Change Channel" };
         juce::ToggleButton mutedToggle;
         juce::Label clipLabel;
     };

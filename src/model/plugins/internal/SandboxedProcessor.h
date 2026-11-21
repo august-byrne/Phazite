@@ -52,6 +52,7 @@ public:
     double getTailSeconds() const override;
     bool sleepsOnSilence() const noexcept override { return false; }
     bool takesWholeBlocks() const noexcept override { return true; }
+    bool playsChannelsApart() const noexcept override { return true; } // each message on its channel
 
     // An instrument is handed its block as the engine's block starts, so that the plug-in instruments of every track play
     // side by side in their helpers (docs/archive/performance-audit.md, section 10).
@@ -78,9 +79,10 @@ private:
     devices::DeviceInfo info;
     double rate = 44100.0;
     int maximumBlock = 512;
-    std::int64_t busySince = 0; // the audio thread's: when it found the channel still on a block, in high-resolution ticks
-    bool resetWanted = false;   // the audio thread's: reset() since a block was last handed over
-    int handedChannels = 0;     // the audio thread's: the channels of the block handed over last, which it reads back
+    std::int64_t busySince = 0;          // the audio thread's: when it found the channel still on a block, in high-resolution ticks
+    bool resetWanted = false;            // the audio thread's: reset() since a block was last handed over
+    int handedChannels = 0;              // the audio thread's: the channels of the block handed over last, which it reads back
+    std::uint16_t channelsWithNotes = 0; // the audio thread's: the MIDI channels it has given the plug-in notes on, a bit each
 
     // The audio thread's: how much of the plug-in's sound is heard (0 while it plays nothing, rising and falling over the
     // fade), and an effect's input over the last of its latency and a block, from which it fades out as late as the plug-in

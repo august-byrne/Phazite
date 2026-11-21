@@ -101,7 +101,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
                 else
                     roll.selectNotes ({ hit->getRef() }, false);
 
-                roll.audition (hit->clip, hit->pitch, hit->velocity);
+                roll.audition (hit->clip, hit->pitch, hit->velocity, hit->channel);
                 return;
             }
 
@@ -529,7 +529,7 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
         if (const auto note = getNote (roll.context, anchor.note); note.has_value() && note->pitch != gesture->auditionedPitch)
         {
             gesture->auditionedPitch = note->pitch;
-            roll.audition (anchor.note.clip, note->pitch, note->velocity);
+            roll.audition (anchor.note.clip, note->pitch, note->velocity, note->channel);
         }
 
         return;

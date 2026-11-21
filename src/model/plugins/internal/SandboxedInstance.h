@@ -137,6 +137,10 @@ public:
     // (anything it keeps that its values don't say); and its latency.
     std::function<void (int parameter, float value)> onParameterChanged;
     std::function<void (int parameter, bool starting)> onGesture;
+
+    // A value a program the song's MIDI set set (message thread): the song's own, no change of the plug-in's, which this
+    // has taken in.
+    std::function<void (int parameter, float value)> onParameterSetByProgram;
     std::function<void()> onStateChanged, onLatencyChanged;
     std::function<void()> onStateMayChange; // any change counted that may have changed its state, whoever made it (message thread)
 
@@ -299,6 +303,7 @@ private:
     juce::CriticalSection lock;
     std::vector<std::pair<int, float>> changedByPlugin; // each parameter's last value, once, in the order they first came
     std::vector<int> changedSlots;                      // each parameter's place there, or -1
+    std::vector<std::pair<int, float>> setByProgram;    // as they came, a program the song set setting them
     // Each parameter's gesture as the helper told it last between two turns, and whether it began one meanwhile, as values
     // are kept: nothing dropped, however many came, so that every begin is paired with its end (the second review of known
     // bug 181: an end dropped past a cap left a gesture begun, and Touch writing).
@@ -378,6 +383,7 @@ private:
     void takeTextAnswers();
 
     void parameterChanged (int index, float value) override;
+    void parameterSetByProgram (int index, float value) override;
     void gestureChanged (int index, bool starting) override;
     void latencyChanged (int samples) override;
     void stateChanged() override;

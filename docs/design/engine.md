@@ -146,7 +146,21 @@ r8brain-free-src and Phazite's devices only.
   place), so that the block that starts, lands or goes round does no more than a few hundred steps for a track. Where
   playback starts or lands, every device starts from silence, and so does every path's ring, which a reset leaves as it
   is in memory, its past silence. A track whose clips hold no controller gets none: only its notes. A controller that
-  changes exactly where playback starts is sent once, its own value.
+  changes exactly where playback starts is sent once, its own value. Each MIDI channel's controllers, bend and pressure
+  are its own, chased and reset on that channel. A program change is chased too, but sent only where it differs from
+  the program the instrument was sent last on that channel (from the song or played live; each strip keeps these from
+  one plan to the next, for the instrument they were sent to: another instrument in its place, or a plug-in loaded
+  again after a crash, has been sent none), so that a plug-in that loads samples for a program doesn't load them again
+  at every round of a loop; before a channel's first program change in the clips nothing is sent, and the instrument
+  keeps the program it has.
+- **MIDI channels.** A note and a controller play on their MIDI channel (the song's 1 to 16, the events' 0 to 15:
+  `devices::NoteEvent::channel`): from the song, from a MIDI input as it was played (the computer keyboard and a note
+  drawn in the piano roll are on channel 1), into a take. Two notes of one pitch on two channels both sound, each to
+  its own end; on one channel the second ends the first, as MIDI can't play a note twice at once. All notes off and a
+  slide are every channel's. Phazite's own instruments take every channel as one and ignore program changes: as they let
+  go of a pitch at its first note-off, their runner (`DeviceRunner`) keeps which channels hold each pitch and hands one
+  a note's end only where no other channel still holds it, so a pitch held on two channels sounds until the later end.
+  A plug-in gets each message on its channel ([plugin-hosting.md](plugin-hosting.md)).
 - **Audio clips at another rate** keep a second resampling, made ready a little each block ahead of where they play
   from next without playing on to there (the loop's start, where playback will start, their own start half a second
   ahead), so that the loop goes round without starting a resampler from nothing (it takes 832 samples of a 44.1 kHz file

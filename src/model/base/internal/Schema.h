@@ -898,11 +898,15 @@ inline const juce::Identifier noteMute { "mute" };
 inline const juce::Identifier noteSlide { "slide" };
 inline const juce::Identifier notePortamento { "portamento" };
 
+// On NOTE. int 1..16, default 1 (not written for 1): the MIDI channel it plays on, as musicians count them: which part of
+// a plug-in with several parts plays it. Phazite's own instruments play every channel alike.
+inline const juce::Identifier noteChannel { "channel" };
+
 // Child of a MIDI CLIP: a controller event a recording took in with the notes, such as a sustain pedal or a bend, in MIDI's
 // own terms: its kind, controlIsController (a MIDI controller: controlNumber 0..127),
 // controlIsPitchWheel, controlIsChannelPressure, controlIsAftertouch (on the note controlNumber) or
-// controlIsProgramChange; where it is, in beats from its clip's content start; and its value, 0..127, or 0..16383 for the
-// pitch wheel.
+// controlIsProgramChange (which plays: it sets a plug-in's program; its value is the program, 0..127); where it is, in
+// beats from its clip's content start; and its value, 0..127, or 0..16383 for the pitch wheel.
 inline const juce::Identifier CONTROL { "CONTROL" };
 inline const juce::Identifier controlKind { "kind" };
 inline constexpr const char* controlIsController = "controller";
@@ -913,6 +917,9 @@ inline constexpr const char* controlIsProgramChange = "programChange";
 inline const juce::Identifier controlNumber { "number" };
 inline const juce::Identifier controlBeat { "beat" };
 inline const juce::Identifier controlValue { "value" };
+
+// On CONTROL. int 1..16, default 1 (not written for 1): the MIDI channel it is on, as musicians count them.
+inline const juce::Identifier controlChannel { "channel" };
 
 //==============================================================================
 // On an audio CLIP (model/arrangement/internal/AudioClips.h). One that follows the song's tempo, or is pitched or reversed,

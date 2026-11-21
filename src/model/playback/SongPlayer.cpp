@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <set>
 #include <vector>
 
@@ -44,8 +45,23 @@ namespace
         return (juce::int64) state[property];
     }
 
+    // A note's or a controller's MIDI channel, as the engine takes it: the song's 1 to 16 (1 where none is written) as 0 to
+    // 15, kept within them.
+    std::uint8_t toEngineChannel (const juce::ValueTree& element, const juce::Identifier& property)
+    {
+        return (std::uint8_t) (juce::jlimit (1, 16, (int) element.getProperty (property, 1)) - 1);
+    }
+
+    // A number mixed into what tells a strip's instrument from another (engine::Plan::Strip::instrument), FNV-1a's way.
+    std::uint64_t mixInto (std::uint64_t mixed, std::uint64_t number) noexcept
+    {
+        constexpr std::uint64_t basis = 14695981039346656037ull, prime = 1099511628211ull;
+        return ((mixed == 0 ? basis : mixed) ^ number) * prime;
+    }
+
     // What a track's MIDI clips play: each clip's notes and controller events where the clip is, cut to it (a note that
-    // started before the clip's start plays from it, one that goes past its end stops there); none of a muted clip or note.
+    // started before the clip's start plays from it, one that goes past its end stops there), each on its channel; none of a
+    // muted clip or note.
     std::shared_ptr<const engine::NoteSequence> compileNotes (const juce::ValueTree& trackState)
     {
         std::vector<engine::NoteSequence::Note> notes;
@@ -70,26 +86,31 @@ namespace
                     if (const auto playedFrom = std::max (from, start), playedTo = std::min (to, end); playedTo > playedFrom)
                         notes.push_back ({ playedFrom, playedTo, (int) child[schema::notePitch],
                                            (float) (int) child[schema::noteVelocity] / 127.0f, (bool) child[schema::noteSlide],
-                                           (bool) child[schema::notePortamento] });
+                                           (bool) child[schema::notePortamento], toEngineChannel (child, schema::noteChannel) });
                 }
                 else if (child.hasType (schema::CONTROL))
                 {
                     const auto beat = contentStart + (double) child[schema::controlBeat];
                     const auto kind = child[schema::controlKind].toString();
                     const auto value = (int) child[schema::controlValue];
+                    const auto channel = toEngineChannel (child, schema::controlChannel);
 
                     if (beat < start || beat >= end)
                         continue;
 
                     if (kind == schema::controlIsController)
-                        controls.push_back ({ beat, EventType::controller, (int) child[schema::controlNumber], (float) value / 127.0f });
+                        controls.push_back (
+                            { beat, EventType::controller, (int) child[schema::controlNumber], (float) value / 127.0f, channel });
                     else if (kind == schema::controlIsPitchWheel)
-                        controls.push_back ({ beat, EventType::pitchBend, 0, (float) (value - 8192) / 8192.0f });
+                        controls.push_back ({ beat, EventType::pitchBend, 0, (float) (value - 8192) / 8192.0f, channel });
                     else if (kind == schema::controlIsChannelPressure)
-                        controls.push_back ({ beat, EventType::channelPressure, 0, (float) juce::jlimit (0, 127, value) / 127.0f });
+                        controls.push_back (
+                            { beat, EventType::channelPressure, 0, (float) juce::jlimit (0, 127, value) / 127.0f, channel });
                     else if (kind == schema::controlIsAftertouch)
                         controls.push_back ({ beat, EventType::aftertouch, (int) child[schema::controlNumber],
-                                              (float) juce::jlimit (0, 127, value) / 127.0f });
+                                              (float) juce::jlimit (0, 127, value) / 127.0f, channel });
+                    else if (kind == schema::controlIsProgramChange)
+                        controls.push_back ({ beat, EventType::programChange, juce::jlimit (0, 127, value), 0.0f, channel });
                 }
             }
         }
@@ -108,7 +129,8 @@ namespace
 
         const auto same = [] (const engine::NoteSequence::Event& x, const engine::NoteSequence::Event& y)
         {
-            return juce::exactlyEqual (x.beat, y.beat) && x.type == y.type && x.number == y.number && juce::exactlyEqual (x.value, y.value);
+            return juce::exactlyEqual (x.beat, y.beat) && x.type == y.type && x.number == y.number && juce::exactlyEqual (x.value, y.value)
+                   && x.channel == y.channel;
         };
 
         return std::equal (a->getEvents().begin(), a->getEvents().end(), b->getEvents().begin(), b->getEvents().end(), same);
@@ -914,6 +936,20 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
 
         engine::Plan::Device device { std::move (node) };
         const auto id = getDeviceID (deviceState).getRaw();
+
+        // What tells an instrument from the one before in its place, from plan to plan: its device, and a plug-in's instance
+        // with the times it was loaded again after a crash (one still loading, silent meanwhile, is another).
+        if (device.node->getDeviceInfo().kind == devices::DeviceKind::instrument)
+        {
+            strip.instrument = mixInto (strip.instrument, (std::uint64_t) id);
+
+            if (const auto* sandboxed = dynamic_cast<const SandboxedProcessor*> (&device.node->getRunner().getProcessor()))
+            {
+                strip.instrument = mixInto (strip.instrument, (std::uint64_t) reinterpret_cast<std::uintptr_t> (&sandboxed->getInstance()));
+                strip.instrument = mixInto (strip.instrument,
+                                            (std::uint64_t) (plugins != nullptr ? plugins->getGeneration (getDeviceID (deviceState)) : 0));
+            }
+        }
 
         // What its sidechain listens to, lined up with its sound. One that comes later than the device's own sound (a kick
         // through a linear-phase EQ keying a compressor on a bass) holds back what comes into the device by as much, so that

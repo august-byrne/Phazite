@@ -109,8 +109,10 @@ TEST_CASE ("Consolidate joins a track's selected MIDI clips into one, their note
     phazite::test::addMidiNote (model, first, 62, at (3.5), lasting (2.0));
     phazite::trimClipEnd (model, first, at (4.0));
     const auto second = phazite::test::addMidiClip (model, song.keys, { at (6.0), at (12.0) });
-    phazite::test::addMidiNote (model, second, 64, at (1.5), lasting (1.0));
+    const auto onSeven = phazite::test::addMidiNote (model, second, 64, at (1.5), lasting (1.0));
     phazite::test::addMidiNote (model, second, 65, at (3.0), lasting (1.0));
+    phazite::setNoteChannels (model, { onSeven }, 7); // and the mod wheel on channel 4: each keeps its MIDI channel
+    phazite::addControl (model, first, at (2.0), phazite::ControlKind::controller, 1, 60, 4);
     phazite::trimClipStart (model, second, at (8.0)); // its note at beat 7.5 now plays from 8
     REQUIRE (phazite::getClipRange (model, first) == phazite::BeatRange (at (0.0), at (4.0)));
     REQUIRE (phazite::getClipRange (model, second) == phazite::BeatRange (at (8.0), at (12.0)));
@@ -140,7 +142,12 @@ TEST_CASE ("Consolidate joins a track's selected MIDI clips into one, their note
     CHECK (notes[2].pitch == 64);
     CHECK (notes[2].start == at (8.0)); // from where its clip started
     CHECK (notes[2].length == lasting (0.5));
+    CHECK (notes[2].channel == 7);
     CHECK (notes[3].start == at (9.0));
+    CHECK (notes[3].channel == 1);
+    const auto control = phazite::findClipState (model, clips[0]).getChildWithName (phazite::schema::CONTROL);
+    REQUIRE (control.isValid());
+    CHECK (phazite::readChannel (control, phazite::schema::controlChannel) == 4);
 
     CHECK (phazite::describeUndo (&model) == juce::String ("Undo Consolidate"));
     phazite::undo (model);

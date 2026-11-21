@@ -14,7 +14,7 @@ and entered what it and its reviews found (211 to 214). What stays, each entry s
 test's exception; 137 and 197 wait for the owner's answer; 185, 191 and 213 can only be built and tried on Linux;
 196 is decided (2026-11-20: nothing is deleted by itself, and Free Up Space, roadmap step S4.4, frees the room by hand), and not built; 211
 and 212 are new; and 214 is a fault of the compiler on CI, which waits for the owner's choice of what to do about it.
-215 to 217 are the settings' card's, from its review (2026-11-20).
+215 to 217 are the settings' card's, from its review (2026-11-20). 230 was found by reading JUCE (2026-11-20) and waits to be seen with a plug-in that shows it.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -40,6 +40,19 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (the retry after a scan takes only plug-ins that weren't known). The reason is kept now
   (`PluginInstances::getError()`), and nothing shows it. To fix: a status of its own, shown in the slot with its
   reason, which a click reloads as it does a crashed plug-in, and which `getPluginsMissing()` leaves out.
+- **230. A controller, the pitch bend or the channel's pressure may move the first parameter of a VST3 that has no
+  MIDI mapping** (2026-11-20, found by reading JUCE while roadmap step S5.2 was reviewed; not reproduced, since both
+  of the tests' VST3s are built with JUCE, which always has the mapping). Played live or from a clip into such a
+  plug-in, the mod wheel, the pedal or the bend would set the parameter whose VST3 ID is 0 (often the plug-in's first)
+  to the controller's value, and Phazite's copy of it. Why: JUCE's VST3 host looks each controller up in a table of the
+  plug-in's MIDI mapping (`StoredMidiMapping`, `juce_VST3Common.h`), which starts with every entry at parameter ID 0
+  and is filled only for a plug-in that has the mapping's interface (`updateMidiMappings()`,
+  `juce_VST3PluginFormatImpl.h`); for one without it, "no parameter" is never stored, so every controller is sent on as
+  a change of parameter 0. It was so before S5.2, for the controllers and the bend that already reached plug-ins. To
+  fix: first see it, with a VST3 built without the interface (not with JUCE) among the plug-ins of roadmap step S3.4;
+  then the helper leaves controllers, the bend and the channel's pressure out of what it hands a plug-in that has no
+  mapping (the helper can ask the plug-in's own interfaces through `juce::ExtensionsVisitor`), as JUCE workaround, and
+  the fault reported to JUCE.
 
 ## Versions
 

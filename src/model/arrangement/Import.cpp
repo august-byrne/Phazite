@@ -8,6 +8,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -100,6 +101,7 @@ namespace
                     note.setProperty (schema::noteStart, beat, nullptr);
                     note.setProperty (schema::noteLength, std::max (end - beat, 1.0 / 64.0), nullptr);
                     note.setProperty (schema::noteVelocity, (int) message.getVelocity(), nullptr);
+                    writeChannel (note, schema::noteChannel, message.getChannel(), nullptr);
                     clip.notes.push_back (note);
                     clip.lastBeat = std::max (clip.lastBeat, end);
                 }
@@ -134,6 +136,7 @@ namespace
                 if (control.hasProperty (schema::controlKind))
                 {
                     control.setProperty (schema::controlBeat, beat, nullptr);
+                    writeChannel (control, schema::controlChannel, message.getChannel(), nullptr);
                     clip.lastBeat = std::max (clip.lastBeat, beat);
                     clip.controls.push_back (control);
                 }

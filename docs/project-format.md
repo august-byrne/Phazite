@@ -82,6 +82,10 @@ MIDI files and DAWproject count it, so that the song keeps its notes on their be
 `numerator` x 4 / `denominator` beats long (3 in 6/8, 3.5 in 7/8). An audio clip's part of its file is in seconds of
 the file.
 
+**MIDI channels.** A MIDI clip's `NOTE` and `CONTROL` (a controller event: a controller, the pitch wheel, pressure or a
+program change) each play on a MIDI channel, `channel`, from 1 to 16 as musicians count them; one without it is on
+channel 1, which Phazite never writes. A `CONTROL` of kind `programChange` plays: its `value` is the program, 0 to 127.
+
 **IDs.** Every track, clip, note (within its clip), device, container, chain, send, modulator, macro and section has an
 ID, a positive 64-bit number the song gives (`nextID` on `PHAZITE` is the next), never twice. What one element says of
 another names it by its ID. Copies get new IDs; the rules of which properties hold or name an ID are data, in

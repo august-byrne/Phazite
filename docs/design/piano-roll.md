@@ -282,8 +282,9 @@ plays the earlier render at once.
 
 ## Not built
 
-- Controller, pitch-bend and per-note expression lanes: Planned. Controllers that a MIDI file brought in play, but the
-  piano roll does not show them.
+- Controller, pitch-bend, program-change and per-note expression lanes: Planned. Controllers and program changes that a
+  MIDI file brought in play, but the piano roll does not show them. A note's MIDI channel (1 to 16; a new note's is 1)
+  shows and changes in the inspector; the piano roll shows no channel (no colour by channel, no channel filter).
 - Pitch glides between notes sent to plug-ins as MPE note expression: Planned, after version 1.
 - A choice of ghost notes per track, and a single click on a ghost note to go to its track: Planned; today one switch
   shows every other track's notes, and a double-right-click on one shows its clip.

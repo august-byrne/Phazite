@@ -18,7 +18,8 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 | A plug-in's own window inside Phazite's | Built | |
 | Parameters named by the plug-in's own IDs | Built | |
 | A plug-in's state kept as its `.vstpreset` | Built | Not yet tried by a person with a preset going to another DAW and back |
-| Notes ended on Stop, whatever the plug-in takes | Built | |
+| Notes ended on Stop, whatever the plug-in takes | Built | On every MIDI channel it was given a note on |
+| Each MIDI message on its channel; a program change sets the plug-in's program as the song's | Built | |
 | A plug-in that fails during an export, freeze or bounce fails it | Built | |
 | Plug-ins opened, added, reloaded, saved and closed without the window waiting for them | Built | |
 | Stores, preparing, plug-in windows opened and closed, and values' texts without the window waiting | Built | Linux's window closing not yet tried on a Linux desktop |
@@ -170,11 +171,41 @@ window opens, or as its values' texts are written and read, as most DAWs' window
   update, through Windows' Restart Manager) ends no session: Phazite quits as it would from its own menu, and a close
   the user cancels leaves it as it was.
 
+## The MIDI a plug-in gets
+
+- **Each message on its MIDI channel,** as the song or the MIDI input has it: notes, controllers, the bend, a note's
+  and the channel's pressure, and program changes (Phazite's slide notes are left out, and a portamento note is a
+  plain note). Phazite's own instruments take every channel as one: their runner hands one a note's end only where no
+  other channel still holds the pitch. A plug-in with several parts plays each channel's on its part.
+- **What a VST3 gets of it,** through JUCE's VST3 host: notes as note events; a controller, the bend and the channel's
+  pressure only as changes of the parameters the plug-in maps them to (its MIDI mapping), one it doesn't map not at all;
+  a program change as a legacy MIDI event, which few plug-ins read. A VST3 built with JUCE maps every controller, the
+  bend and the pressure to parameters of its own by default, and turns them and a legacy program change back into MIDI
+  messages, so it gets a program change twice: as the message, and as its program, which the helper sets to the same.
+- **A program change selects a plug-in's program.** The plug-in gets the message on its channel, and its helper also
+  sets its program to that number if it has programs (more than one) and the number is one of them, whatever the
+  message's channel: a VST3's programs are a parameter of its own. The helper's audio thread leaves the program asked
+  for (the latest wins), and its message thread sets it at its next tick; in a render (an export, a freeze, a bounce),
+  a block that holds a program change waits for its message thread to have set it, so that the program plays from the
+  start of that block, the same in every render. A program set so is the song's own choice, as one Phazite sets is:
+  Phazite is told the program (`programPlayed`) with the values the plug-in says its parameters took as it was set,
+  which Phazite takes in as the song's own (what its controls show and what plays), and neither is an unsaved change,
+  an undo step or a touch of a parameter. The song's program (`pluginProgram`) stays as it was until the next save stores the one the
+  plug-in is on, which the versions then show as changed. While the plug-in loads a program the song set, it is
+  silent, as when Phazite sets its program. An Undo that sets the device's stored program or state back puts the
+  plug-in on the stored program, whatever the song had set. Program changes are chased where playback starts or jumps,
+  but only where they differ from the program sent last to that instrument on their channel ([engine.md](engine.md));
+  another instrument in its place, or a plug-in loaded again after a crash, has been sent none.
+- What the plug-in tells of its parameters later, of its own accord (a JUCE plug-in's restart a moment after its
+  program changed), is told as its own change, as it is for a program set by hand.
+
 ## Stop ends every note
 
-The helper keeps which notes it gave a plug-in that have not ended. Where every note is to end (as playback stops or
-jumps, and on a reset), it ends each with a note-off of its own. A plug-in need not take the "all notes off" and
-"all sound off" controllers, and a note-off it always takes.
+The helper keeps which notes it gave a plug-in that have not ended, on each MIDI channel. Where every note is to end
+(as playback stops or jumps, and on a reset), Phazite sends "all notes off" on the first channel and on each channel
+it gave the plug-in a note on, and the helper ends each note it gave there with a note-off of its own. A plug-in need
+not take the "all notes off" and "all sound off" controllers, and a note-off it always takes. A clip's own "all notes
+off" on a channel ends that channel's notes alone.
 
 ## Renders
 
@@ -297,7 +328,8 @@ thread's layout, so that a key it took always means to Phazite what Phazite aske
 - `src/app/PluginWindow.h`, `src/app/SandboxedEditor.h`: a plug-in's window.
 - `src/model/devices/internal/Parameters.h`, `src/model/devices/ParameterRef.h`: parameters by reference.
 - Tests: `tests/SandboxTests.cpp`, `tests/SandboxedPluginTests.cpp`, `tests/PluginParametersTests.cpp`,
-  `tests/PluginWindowTests.cpp`, `tests/Vst3StateTests.cpp`; the stand-in plug-ins are in `tests/host/`.
+  `tests/PluginWindowTests.cpp`, `tests/Vst3StateTests.cpp`, `tests/Vst3PluginTests.cpp` (the tests' real VST3s: MIDI
+  channels, the bend, programs); the stand-in plug-ins are in `tests/host/`.
 - [../juce-workarounds.md](../juce-workarounds.md) lists where the hosting works around JUCE.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH.

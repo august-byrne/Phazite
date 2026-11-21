@@ -18,8 +18,9 @@
 // so; and where the drive has room for little recording, starting says so. Stopping waits for the writing thread to finish
 // what it is writing, however long the drive takes. The notes keep those played just before the take's start, moved to it
 // (a downbeat played a little early after the count-in), and the sustain pedal, the mod wheel and every other controller,
-// the pitch bend and the keys' pressure (the channel's, and each note's: aftertouch) played on the track go into its clips
-// beside them, as a MIDI file's import makes them.
+// the pitch bend, the keys' pressure (the channel's, and each note's: aftertouch) and program changes played on the track
+// go into its clips beside them, as a MIDI file's import makes them: each on the MIDI channel it was played on, and what a
+// take keeps and lets go of for each controller, for each channel.
 #pragma once
 
 #include "AudioRecorder.h"
@@ -144,10 +145,12 @@ public:
     // operating system fails it, and one over what a file holds already (its header, as the file is ended) doesn't.
     void fillDrive() noexcept { driveFull.store (true); }
 
-    // Each controller's own place among what a take (and Capture) keeps of each: the MIDI controllers' by their numbers,
-    // then the bend's, the channel's pressure's and each note's pressure's by its note.
-    static constexpr std::size_t numControlKeys = 130 + 128;
-    static std::size_t getKey (ControlKind, int number) noexcept;
+    // Each controller's own place among what a take (and Capture) keeps of each, on each MIDI channel (1 to 16): the MIDI
+    // controllers' by their numbers, then the bend's, the channel's pressure's, each note's pressure's by its note and the
+    // program's.
+    static constexpr std::size_t controlKeysPerChannel = 130 + 128 + 1;
+    static constexpr std::size_t numControlKeys = 16 * controlKeysPerChannel;
+    static std::size_t getKey (ControlKind, int number, int channel) noexcept;
 
     // How often a take and Capture keep a value of each controller at most, a note's pressure by its note: once a
     // millisecond, the latest at the time of the first, besides leaving out a value that repeats the one before. Not to be
@@ -158,8 +161,9 @@ public:
     static constexpr double controlSeconds = 0.001;
 
     // A controller's change played live (one of the engine's events), in MIDI's terms: its kind, its number (a controller's,
-    // or a note's for its pressure; 0 for the others) and its value (0 to 127, the bend 0 to 16383); none for a note.
-    static std::optional<std::tuple<ControlKind, int, int>> toControl (const devices::NoteEvent&);
+    // or a note's for its pressure; 0 for the others), its value (0 to 127, the bend 0 to 16383, a program change's the
+    // program) and its channel (1 to 16), without a beat; none for a note.
+    static std::optional<ControlValue> toControl (const devices::NoteEvent&);
 
 private:
     explicit Take (PlaybackSession&);
@@ -200,24 +204,26 @@ private:
     void write (std::int64_t upTo);
 
     // A note played live: its pitch and velocity, and where it was heard in the song, as if nothing looped, to where it
-    // ended (or the take did, while it is held), in samples.
+    // ended (or the take did, while it is held), in samples; and its MIDI channel (1 to 16).
     struct Played
     {
         int pitch = 60, velocity = 100;
         std::int64_t start = 0, end = 0;
+        int channel = 1;
     };
 
-    // A controller moved, the pitch bend or a key's pressure played live: in MIDI's own terms (a controller's number, or a
-    // note's for its pressure, and the value from 0 to 127, or the bend from 0 to 16383, 8192 its middle), and where it was
-    // heard in the song, as if nothing looped.
+    // A controller moved, the pitch bend, a key's pressure or a program change played live: in MIDI's own terms (a
+    // controller's number, or a note's for its pressure, and the value from 0 to 127, or the bend from 0 to 16383, 8192 its
+    // middle), and where it was heard in the song, as if nothing looped; and its MIDI channel (1 to 16).
     struct PlayedControl
     {
         ControlKind kind = ControlKind::controller;
         int number = 0, value = 0;
         std::int64_t at = 0;
+        int channel = 1;
     };
 
-    static std::size_t getKey (const PlayedControl& control) noexcept { return getKey (control.kind, control.number); }
+    static std::size_t getKey (const PlayedControl& control) noexcept { return getKey (control.kind, control.number, control.channel); }
 
     // Notes and controls played live, in order, each where it goes in the song, and the samples of the song a clip of them
     // would go between: round a looped range, the range's (looped), whose notes are every time round's. Only what was played
@@ -225,14 +231,19 @@ private:
     // bend away from its middle, the channel's pressure held, a controller moved a moment before) and the pedal, the bend and
     // the pressure let go of just before its end (released: a control at or past a clip's end isn't played, and the song
     // plays its clips' controls as one stream, so a pedal left down would hold the next clip's notes) go only into a clip
-    // that what was played made.
+    // that what was played made. Each channel's are its own.
+    struct ChannelEnd
+    {
+        int pedal = 0, bend = 8192, pressure = 0; // the pedal's, the bend's and the channel pressure's at a part's end
+    };
+
     struct PlayedNotes
     {
         std::vector<Played> notes {};
         std::int64_t from = 0, to = 0;
         bool looped = false;
         std::vector<PlayedControl> controls {}, carried {}, released {};
-        int endPedal = 0, endBend = 8192, endPressure = 0; // the pedal's, the bend's and the channel pressure's at its end
+        std::array<ChannelEnd, 16> ends {}; // each MIDI channel's, by its number less 1
     };
 
     // Whether a control carried into a part (or a take) that starts where another ends carries on what that one let go of at

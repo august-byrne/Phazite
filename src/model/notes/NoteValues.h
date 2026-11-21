@@ -32,6 +32,10 @@ struct NoteData
     // them; plug-ins get no slide notes, and portamento notes as plain ones.
     bool slide = false, portamento = false;
 
+    // The MIDI channel it plays on, from 1 to 16, as musicians count them: which part of a plug-in with several parts plays
+    // it. A new note's is 1; Phazite's own instruments play every channel alike.
+    int channel = 1;
+
     NoteRef getRef() const noexcept { return { clip, id }; }
     BeatPosition getEnd() const noexcept { return start + length; }
 };

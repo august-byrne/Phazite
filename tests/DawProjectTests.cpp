@@ -19,6 +19,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/DawProject.h"
 #include "model/project/internal/Project.h"
@@ -523,6 +524,42 @@ TEST_CASE ("A DAWproject opens as a new song: its tracks with their notes, audio
     REQUIRE (phazite::getSections (imported).size() == 1);
     CHECK (phazite::getSections (imported).front().name == "Intro");
     CHECK (said.contains ("Bass: its sends"));
+}
+
+TEST_CASE ("A note's MIDI channel goes into a DAWproject, counted from 0 there, and comes back as it was")
+{
+    Song song;
+    TemporaryFolder sounds;
+    auto& source = *phazite::findSong (song.s.context);
+    const auto notes = phazite::getClipNotes (source, song.riff);
+    REQUIRE (notes.size() == 2);
+    phazite::setNoteChannels (source, { notes[1].getRef() }, 10); // the G, on channel 10
+
+    auto content = song.describe();
+    content.bounces.clear();
+    const auto file = sounds.folder.getChildFile ("Channels.dawproject");
+    REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
+    const auto read = phazite::readDawProject (file);
+    REQUIRE (read.project != nullptr);
+    const auto* g = find (*read.project, "Note", "key", "43");
+    const auto* c = find (*read.project, "Note", "key", "36");
+    REQUIRE (g != nullptr);
+    REQUIRE (c != nullptr);
+    CHECK (g->getIntAttribute ("channel") == 9);
+    CHECK (c->getIntAttribute ("channel") == 0);
+
+    TestSong into;
+    phazite::takeDawProject (*phazite::findSong (into.context), read);
+    const auto& imported = *phazite::findSong (into.context);
+    std::map<int, int> channels; // by pitch
+
+    for (const auto track : phazite::getTrackIDs (imported))
+        for (const auto clip : phazite::getClips (imported, track))
+            for (const auto& note : phazite::getClipNotes (imported, clip))
+                channels[note.pitch] = note.channel;
+
+    CHECK (channels[43] == 10);
+    CHECK (channels[36] == 1);
 }
 
 TEST_CASE ("A DAWproject past what the zip writer holds, 4 GB or 65,535 files, is refused before it is written, saying what to do")

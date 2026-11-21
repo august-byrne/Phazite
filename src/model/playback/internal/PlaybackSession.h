@@ -142,9 +142,9 @@ public:
     bool recordsLiveTrack() const noexcept { return liveTrackRecords; }
     void setRecordsLiveTrack (bool records) noexcept { liveTrackRecords = records; }
 
-    // The piano roll's guide notes into a track, and a preset's tried in the browser; and their ends. Neither Capture nor a
-    // take records them (Engine::playLive()'s recordable).
-    void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity);
+    // The piano roll's guide notes into a track, on a MIDI channel (1 to 16), and a preset's tried in the browser; and their
+    // ends, each on its channel. Neither Capture nor a take records them (Engine::playLive()'s recordable).
+    void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity, int channel = 1);
     void stopGuideNotes (std::int64_t track);
 
     // Gives the engine the song as it is now, if this is the project it plays (and none while a render has its plug-ins).
@@ -170,7 +170,13 @@ private:
 
     TrackID liveTrack;
     bool liveTrackRecords = true;
-    std::vector<std::pair<std::int64_t, int>> guideNotes; // each track's sounding
+    struct GuideNote
+    {
+        std::int64_t track = 0;
+        int pitch = 60, channel = 0; // the engine's channel, from 0
+    };
+
+    std::vector<GuideNote> guideNotes; // each track's sounding
 
     std::unique_ptr<Take> take;
     std::vector<std::unique_ptr<Take>> takesToPlace; // ended during a drag (placeTake())
@@ -190,9 +196,10 @@ private:
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent, {}); }
     void handleAsyncUpdate() override { update(); }
 
-    // A value set by hand (a plug-in's, by a control or in its window, plays at once); a plug-in's own window's gestures;
-    // and its latency, which needs a new plan.
+    // A value set by hand (a plug-in's, by a control or in its window, plays at once), and one a program the song set set (a
+    // plug-in's, which plays at once too); a plug-in's own window's gestures; and its latency, which needs a new plan.
     void valueSetByHand (const ParameterRef&, float value, bool byPlugin) override;
+    void valueSetByProgram (const ParameterRef&, float value) override;
     void pluginGestureChanged (const ParameterRef&, bool starting) override;
     void pluginLatencyChanged() override { triggerAsyncUpdate(); }
 

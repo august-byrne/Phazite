@@ -110,7 +110,7 @@ The engine as the app and the UI reach it, and what Phazite reads and opens arou
 | `RecordingModel.h` | Audio recording, which Phazite does itself: inputs, arming (audio and MIDI), punch-in and takes by IDs, what Record records onto, a track for an input, and what is being recorded as it comes in. |
 | `RecordingValues.h` | The plain values of `RecordingModel.h`. |
 | `internal/AudioRecorder.h` | The arming, and the device's inputs the tracks need. |
-| `internal/Take.h` | A take recorded through Phazite's engine: its inputs into files, and the notes, controllers and bends played into clips. |
+| `internal/Take.h` | A take recorded through Phazite's engine: its inputs into files, and the notes, controllers, bends and program changes played into clips, each on its MIDI channel. |
 | `TransportModel.h` | The transport as the top bar reaches it. |
 
 ## arrangement/
@@ -147,7 +147,7 @@ Tracks, clips, sections, the grid, the selection and the time line.
 |---|---|
 | `NoteValues.h` | Notes as plain values, with the transforms, keys and scales, chord stamps and drums' names. |
 | `NotesModel.h` | The notes as the piano roll reaches them, by IDs. |
-| `internal/Notes.h` | Notes in MIDI clips, as the song holds them, by their IDs (`NoteID`, in `src/model/base/IDs.h`). |
+| `internal/Notes.h` | Notes in MIDI clips, as the song holds them, by their IDs (`NoteID`, in `src/model/base/IDs.h`), and their controllers' values (`ControlKind`), each on a MIDI channel. |
 
 ## chords/
 
@@ -237,4 +237,4 @@ Plug-ins hosted in helper processes, the only way Phazite hosts them.
 | `internal/PluginHost.h` | The host that starts one helper for each plug-in file and makes its instances, which the engine context owns, opening them in the background beside each other as a project opens and ending each helper that goes on a thread of its own: the plug-ins scanning found and what it left out of a file (`takeScanProblems()`), the reload of one that crashed, the plug-ins kept off that crashed as they loaded, and none loaded after a crash of Phazite's until the user says (`setLoadsPlugins()`). |
 | `internal/PluginInstances.h` | A song's plug-ins, each an instance by its device's ID, made from the song and kept in step with it, which its playback session owns and which stores their states into the song: loaded in the background as the song opens, as one is added, brought back or reloaded (a render of a song no session plays waits for them with `whenLoaded()`), and asked for their states at once, without the message thread waiting, as it saves. |
 | `internal/SandboxedInstance.h` | Each instance as a plug-in instance of JUCE's. |
-| `internal/SandboxedProcessor.h` | What Phazite's engine plays of it: a block whole through its channel, with a deadline. |
+| `internal/SandboxedProcessor.h` | What Phazite's engine plays of it: a block whole through its channel, with a deadline, its events as MIDI on their channels. |

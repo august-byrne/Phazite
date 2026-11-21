@@ -3601,6 +3601,106 @@ TEST_CASE ("Where playback starts, jumps or goes round the loop, the clips' cont
         });
 }
 
+TEST_CASE ("Each MIDI channel's controllers are chased on their own channel, and a program only where it differs from the one sent")
+{
+    // As docs/design/engine.md says: where playback starts, jumps or goes round the loop, each channel's controllers and
+    // bend as the clips have them there, on that channel; a program change before there sent only where it
+    // differs from the program sent last to the instrument on its channel (a plug-in that loads samples for a program mustn't
+    // load them at every round of a loop), and nothing before a channel's first. A program change exactly where playback
+    // starts plays there once. Note 60 on channels 1 and 2 from beat 0 to 16; the mod wheel at 100 on channel 1 at beat 1 and
+    // at 30 on channel 2 at beat 1.5, a bend on channel 2 at beat 2; program 7 on channel 2 at beat 0, program 4 on channel 1
+    // at beat 3.
+    using Type = phazite::devices::NoteEvent::Type;
+    using Given = std::tuple<Type, int, int, int>; // type, channel (from 1), number, value in MIDI's steps
+
+    phazite::test::atEveryCondition (
+        [] (const phazite::test::PlaybackCondition& condition)
+        {
+            TestSong song;
+            song.setTempo (condition.getTempo());
+            auto& state = *phazite::findSong (song.context);
+            const auto toneID = phazite::test::addTestDevice (state, song.firstTrack, phazite::test::TestTone::typeID);
+            const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+            const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+            phazite::addNote (state, clip, 60, at (0.0), phazite::BeatDuration::fromBeats (16.0), 100, 1);
+            phazite::addNote (state, clip, 60, at (0.0), phazite::BeatDuration::fromBeats (16.0), 100, 2);
+            phazite::addControl (state, clip, at (1.0), phazite::ControlKind::controller, 1, 100, 1);
+            phazite::addControl (state, clip, at (1.5), phazite::ControlKind::controller, 1, 30, 2);
+            phazite::addControl (state, clip, at (2.0), phazite::ControlKind::pitchWheel, 0, 12288, 2);
+            phazite::addControl (state, clip, at (0.0), phazite::ControlKind::programChange, 0, 7, 2);
+            phazite::addControl (state, clip, at (3.0), phazite::ControlKind::programChange, 0, 4, 1);
+            EnginePlayback playback (condition);
+            playback.play (0.01);
+
+            const auto tone = [&song, toneID]() -> phazite::test::TestTone&
+            {
+                auto* node = phazite::findPlayingSession (*phazite::findSong (song.context))
+                                 ->getPlayer()
+                                 .findDevice ((std::int64_t) toneID.getRaw());
+                REQUIRE (node != nullptr);
+                return dynamic_cast<phazite::test::TestTone&> (node->getRunner().getProcessor());
+            };
+
+            const auto heardNext = [&] (double seconds)
+            {
+                tone().received.clear();
+                playback.play (seconds);
+                std::vector<Given> given;
+
+                for (const auto& event : tone().received)
+                {
+                    const auto channel = (int) event.channel + 1;
+
+                    if (event.type == Type::pitchBend)
+                        given.emplace_back (event.type, channel, event.number, juce::roundToInt (event.value * 8192.0f) + 8192);
+                    else if (event.type == Type::controller || event.type == Type::noteOn || event.type == Type::programChange)
+                        given.emplace_back (event.type, channel, event.number, juce::roundToInt (event.value * 127.0f));
+                }
+
+                return given;
+            };
+
+            // Playback started at beat 0: each channel's values as they are before the clips change them, on their channels;
+            // then the program change there, once, and the notes, each on its channel.
+            const std::vector<Given> atTheStart { { Type::controller, 1, 1, 0 },
+                                                  { Type::controller, 2, 1, 0 },
+                                                  { Type::pitchBend, 2, 0, 8192 } };
+            auto started = atTheStart;
+            started.insert (started.end(),
+                            { { Type::programChange, 2, 7, 0 }, { Type::noteOn, 1, 60, 100 }, { Type::noteOn, 2, 60, 100 } });
+            phazite::playOrStop (state);
+            CHECK (heardNext (0.05) == started);
+
+            // A jump to beat 4: each channel's mod wheel and channel 2's bend, and channel 1's program; channel 2's program is
+            // the one sent, so it isn't sent again.
+            const std::vector<Given> atFour { { Type::controller, 1, 1, 100 },  { Type::controller, 2, 1, 30 },
+                                              { Type::pitchBend, 2, 0, 12288 }, { Type::programChange, 1, 4, 0 },
+                                              { Type::noteOn, 1, 60, 100 },     { Type::noteOn, 2, 60, 100 } };
+            phazite::movePlayhead (state, at (4.0));
+            CHECK (heardNext (0.05) == atFour);
+
+            // Back to beat 0.5: the values before the clips change them again, on their channels; no program, as channel 1
+            // has none before there (it keeps program 4) and channel 2's is the one sent.
+            auto atHalf = atTheStart;
+            atHalf.insert (atHalf.end(), { { Type::noteOn, 1, 60, 100 }, { Type::noteOn, 2, 60, 100 } });
+            phazite::movePlayhead (state, at (0.5));
+            CHECK (heardNext (0.05) == atHalf);
+
+            // Round a loop from beat 4 to 5: at each time round, each channel's values again, but no program: channel 1 was
+            // last sent its program at beat 3 as the jump to beat 4 found it.
+            phazite::movePlayhead (state, at (4.0));
+            heardNext (0.05);
+            phazite::loopBeats (state, { at (4.0), at (5.0) });
+            phazite::movePlayhead (state, at (4.5));
+            heardNext (0.05);
+            auto withoutPrograms = atFour;
+            std::erase_if (withoutPrograms, [] (const Given& given) { return std::get<0> (given) == Type::programChange; });
+            CHECK (heardNext (60.0 / condition.getTempo() * 0.6) == withoutPrograms); // round the loop once
+            CHECK (heardNext (60.0 / condition.getTempo()) == withoutPrograms);       // and again
+            phazite::stopAndReturn (state);
+        });
+}
+
 TEST_CASE ("Phazite's synth plays a note started after a bend bent, whether playback reached it or jumped to it")
 {
     // Known bug 85's review: after a jump, the synth (its bend reset with it) played the note sounding there unbent. A note
@@ -3638,4 +3738,56 @@ TEST_CASE ("Phazite's synth plays a note started after a bend bent, whether play
 
     CHECK (through > 230); // 440 Hz bent up: more than 220 crossings
     CHECK (std::abs (jumped - through) <= 2);
+}
+
+TEST_CASE ("Phazite's own instruments hold a pitch while any MIDI channel holds it, and on one channel end notes as they come")
+{
+    // Phazite's instruments take every channel as one and let go of a pitch at its first note-off: one is handed a note's end
+    // only where no other channel still holds its pitch. Note 60 on channel 1 from beat 0 to 4, and on channel 2 (or channel
+    // 1 again) from beat 1 to 6.
+    using Type = phazite::devices::NoteEvent::Type;
+
+    const auto play = [] (bool synth, int secondChannel)
+    {
+        TestSong song;
+        song.setTempo (120.0);
+        auto& state = *phazite::findSong (song.context);
+        const auto device = synth ? song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID)
+                                  : phazite::test::addTestDevice (state, song.firstTrack, phazite::test::TestTone::typeID);
+        const auto clip = song.addMidiClip (song.firstTrack, 0.0, 8.0);
+        phazite::addNote (state, clip, 60, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (4.0), 100, 1);
+        phazite::addNote (state, clip, 60, phazite::BeatPosition::fromBeats (1.0), phazite::BeatDuration::fromBeats (5.0), 100,
+                          secondChannel);
+        EnginePlayback playback;
+        playback.play (0.01);
+        phazite::playOrStop (state);
+        const auto audio = playback.play (3.6);  // to beat 7.2
+        std::vector<std::pair<Type, int>> given; // the notes' starts and ends, each with its channel (from 1)
+
+        if (auto* node = phazite::findPlayingSession (state)->getPlayer().findDevice ((std::int64_t) device.getRaw()))
+            if (auto* tone = dynamic_cast<phazite::test::TestTone*> (&node->getRunner().getProcessor()))
+                for (const auto& event : tone->received)
+                    if (event.type == Type::noteOn || event.type == Type::noteOff)
+                        given.emplace_back (event.type, (int) event.channel + 1);
+
+        phazite::stopAndReturn (state);
+        return std::pair { audio, given };
+    };
+
+    const auto levelOf = [] (const juce::AudioBuffer<float>& audio, double from, double to)
+    {
+        const auto start = (int) (from * EnginePlayback::sampleRate);
+        return audio.getRMSLevel (0, start, (int) (to * EnginePlayback::sampleRate) - start);
+    };
+
+    // The synth, the notes on two channels: it sounds until beat 6, then its release ends.
+    const auto apart = play (true, 2).first;
+    CHECK (levelOf (apart, 2.4, 2.9) > 0.01f); // beats 4.8 to 5.8
+    CHECK (levelOf (apart, 3.4, 3.6) < 1.0e-4f);
+
+    // Handed the events: on two channels, the first note's end held back; on one, the first note ends where the second
+    // starts, as the song has it, and each end is handed on.
+    using Given = std::vector<std::pair<Type, int>>;
+    CHECK (play (false, 2).second == Given { { Type::noteOn, 1 }, { Type::noteOn, 2 }, { Type::noteOff, 2 } });
+    CHECK (play (false, 1).second == Given { { Type::noteOn, 1 }, { Type::noteOff, 1 }, { Type::noteOn, 1 }, { Type::noteOff, 1 } });
 }

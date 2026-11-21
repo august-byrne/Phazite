@@ -430,7 +430,19 @@ TEST_CASE ("MIDI reaches a device as events at their samples, and an instrument 
     CHECK (controller->number == 74);
     CHECK (controller->value == doctest::Approx (1.0f));
     CHECK (allOff->type == Type::allNotesOff);
-    CHECK_FALSE (engine::toNoteEvent (juce::MidiMessage::programChange (1, 3), 505).has_value());
+    CHECK_FALSE (engine::toNoteEvent (juce::MidiMessage::songPositionPointer (16), 505).has_value());
+
+    // Each on the MIDI channel it came on (counted from 0), a program change too: its number is the program.
+    const auto program = engine::toNoteEvent (juce::MidiMessage::programChange (5, 3), 505);
+    const auto onSixteen = engine::toNoteEvent (juce::MidiMessage::noteOn (16, 62, (juce::uint8) 100), 7);
+    REQUIRE (program.has_value());
+    REQUIRE (onSixteen.has_value());
+    CHECK (program->type == Type::programChange);
+    CHECK (program->number == 3);
+    CHECK (program->channel == 4);
+    CHECK (onSixteen->channel == 15);
+    CHECK (on->channel == 0);
+    CHECK (engine::toNoteEvent (juce::MidiMessage::pitchWheel (9, 0), 0)->channel == 8);
 
     // The keys' pressure (known bug 173: dropped): a note's, and the channel's.
     const auto aftertouch = engine::toNoteEvent (juce::MidiMessage::aftertouchChange (1, 61, 100), 10);
@@ -1547,6 +1559,85 @@ TEST_CASE ("A track's notes sounding at a place are found by the sequence's inde
     engine::NoteSequence().forEachSounding (10.0, 10.0, [&count] (const auto&) { ++count; });
     engine::NoteSequence ({ { 1.0, 3.0, 60, 0.8f } }, {}).forEachSounding (2.0, 2.0, [&count] (const auto&) { ++count; });
     CHECK (count == 1);
+}
+
+TEST_CASE ("Two notes of one pitch on two MIDI channels both play, each to its own end; on one channel the second ends the first")
+{
+    using Type = phazite::devices::NoteEvent::Type;
+    using Played = std::tuple<double, Type, int>; // beat, type, channel (from 0)
+
+    const auto played = [] (const engine::NoteSequence& sequence)
+    {
+        std::vector<Played> events;
+
+        for (const auto& event : sequence.getEvents())
+            events.emplace_back (event.beat, event.type, (int) event.channel);
+
+        return events;
+    };
+
+    const auto soundingAt = [] (const engine::NoteSequence& sequence, double beat)
+    {
+        auto count = 0;
+        sequence.forEachSounding (beat, beat, [&count] (const auto&) { ++count; });
+        return count;
+    };
+
+    // Note 60 on channel 1 from beat 0 to 4, and on channel 2 from beat 1 to 3: both sound at beat 2.
+    const engine::NoteSequence two ({ { 0.0, 4.0, 60, 0.8f, false, false, 0 }, { 1.0, 3.0, 60, 0.8f, false, false, 1 } }, {});
+    CHECK (played (two)
+           == std::vector<Played> { { 0.0, Type::noteOn, 0 },
+                                    { 1.0, Type::noteOn, 1 },
+                                    { 3.0, Type::noteOff, 1 },
+                                    { 4.0, Type::noteOff, 0 } });
+    CHECK (soundingAt (two, 2.0) == 2);
+    CHECK (soundingAt (two, 3.5) == 1);
+
+    // The same on one channel: the second ends the first where it starts, as a MIDI note can't play twice at once.
+    const engine::NoteSequence one ({ { 0.0, 4.0, 60, 0.8f, false, false, 2 }, { 1.0, 3.0, 60, 0.8f, false, false, 2 } }, {});
+    CHECK (played (one)
+           == std::vector<Played> { { 0.0, Type::noteOn, 2 },
+                                    { 1.0, Type::noteOff, 2 },
+                                    { 1.0, Type::noteOn, 2 },
+                                    { 3.0, Type::noteOff, 2 } });
+    CHECK (soundingAt (one, 2.0) == 1);
+}
+
+TEST_CASE ("A sequence's controllers are each channel's own where playback starts, and a program change's is its program")
+{
+    // The mod wheel on channel 1 at beat 1 and on channel 2 at beat 2, a program change to 7 on channel 2 at beat 0.5: each
+    // as it is just before a beat, by its channel, the program as its number.
+    using Type = phazite::devices::NoteEvent::Type;
+    const engine::NoteSequence sequence (
+        { { 0.0, 8.0, 60, 0.8f } },
+        { { 1.0, Type::controller, 1, 0.5f, 0 }, { 2.0, Type::controller, 1, 0.25f, 1 }, { 0.5, Type::programChange, 7, 0.0f, 1 } });
+    using Found = std::tuple<Type, int, int, int, bool>; // type, channel, number, value in hundredths, held
+
+    const auto controlsAt = [&sequence] (double beat)
+    {
+        std::vector<Found> found;
+        sequence.forEachControlAt (beat, beat,
+                                   [&found] (const engine::NoteSequence::ControlAt& control)
+                                   {
+                                       found.emplace_back (control.type, (int) control.channel, control.number,
+                                                           juce::roundToInt (control.value * 100.0f), control.held);
+                                   });
+        std::sort (found.begin(), found.end());
+        return found;
+    };
+
+    CHECK (controlsAt (3.0)
+           == std::vector<Found> { { Type::controller, 0, 1, 50, true },
+                                   { Type::controller, 1, 1, 25, true },
+                                   { Type::programChange, 1, 7, 0, true } });
+    CHECK (controlsAt (1.5)
+           == std::vector<Found> { { Type::controller, 0, 1, 50, true },
+                                   { Type::controller, 1, 1, 0, false },
+                                   { Type::programChange, 1, 7, 0, true } });
+    CHECK (controlsAt (0.25)
+           == std::vector<Found> { { Type::controller, 0, 1, 0, false },
+                                   { Type::controller, 1, 1, 0, false },
+                                   { Type::programChange, 1, 0, 0, false } });
 }
 
 TEST_CASE ("The engine plays a track's notes on their samples, and ends what sounds at the loop's end and starts it again")

@@ -922,10 +922,12 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's own engine, chords on three plug-in synths in their helpers, handed their blocks early")
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords on three plug-in synths in their helpers, handed their blocks early, "
+               "on several MIDI channels with bends and program changes")
     {
         phazite::test::SandboxedPlugins sandboxed;
         TestSong song;
+        using phazite::BeatPosition;
 
         for (int i = 0; i < 3; ++i)
         {
@@ -935,6 +937,26 @@ TEST_SUITE ("realtime-audit")
 
             for (int beat = 0; beat < 16; ++beat)
                 song.addChord (clip, { 48 + 12 * i + beat % 3, 52 + 12 * i, 55 + 12 * i }, beat, 0.75);
+
+            // A line on channel 2 and on channel 10 (each a part of a plug-in with several), each bent on its channel, and a
+            // program change on each at the start and half way.
+            auto& played = getSong (song);
+
+            for (int beat = 0; beat < 16; ++beat)
+            {
+                for (const auto channel : { 2, 10 })
+                {
+                    phazite::addNote (played, clip, 60 + 12 * i + channel, BeatPosition::fromBeats (beat + 0.5),
+                                      phazite::BeatDuration::fromBeats (0.25), 90, channel);
+                    phazite::addControl (played, clip, BeatPosition::fromBeats (beat + 0.25), phazite::ControlKind::pitchWheel, 0,
+                                         beat % 2 == 0 ? 10000 : 8192, channel);
+                }
+            }
+
+            for (const auto beat : { 0.0, 8.0 })
+                for (const auto channel : { 2, 10 })
+                    phazite::addControl (played, clip, BeatPosition::fromBeats (beat), phazite::ControlKind::programChange, 0,
+                                         (int) beat / 8, channel);
         }
 
         const auto m = playProjectAndMeasure (song.context);

@@ -103,10 +103,11 @@ public:
     // end, a controller), which plays as a plan comes again.
     void playLive (std::int64_t track, devices::NoteEvent, bool recordable = true) noexcept;
 
-    // Every note held live on a track lets go, each as a note's end that a take and Capture record, and its sustain pedal
-    // if it is held down live (any thread): the track live MIDI plays went to another, or a MIDI input went, and the notes
-    // held on it would get no end. The song's own notes and pedal there play on. Live events don't say which input played
-    // them, so a MIDI input that goes ends what every input and the computer keyboard hold live on the track.
+    // Every note held live on a track lets go, each as a note's end on its own channel that a take and Capture record, and
+    // the sustain pedal of each channel where it is held down live (any thread): for when live MIDI goes to another track,
+    // or a MIDI input goes, after which the notes held on the track would get no end. The song's own notes and pedal there
+    // play on. Live events don't say which input played them, so a MIDI input that goes ends what every input and the
+    // computer keyboard hold live on the track.
     void endLive (std::int64_t track) noexcept;
 
     // A note played live, as the engine played it: into a track, at the engine's clock as it came in (getClock()), and
@@ -483,15 +484,16 @@ private:
     int numEndsWaiting = 0;
     void dropLiveEvents() noexcept;
 
-    // What each track holds live (the notes played live into it, each as often as it was started, and whether its pedal is
-    // down), as the audio thread takes them, for endLive(), which ends those alone: never the song's own notes or pedal.
-    // As many tracks at once as fit; one played live past them isn't followed.
+    // What each track holds live (the notes played live into it, each by its channel and pitch, channel x 128 + pitch, as
+    // often as it was started, and the channels whose pedal is down, a bit for each), as the audio thread takes them, for
+    // endLive(), which ends those alone, each on its own channel: never the song's own notes or pedal. As many tracks at
+    // once as fit; one played live past them isn't followed.
     struct LiveHold
     {
         std::int64_t track = 0;
-        std::array<std::uint8_t, 128> notes {};
+        std::array<std::uint8_t, 16 * 128> notes {};
         int numNotes = 0;
-        bool pedalDown = false;
+        std::uint16_t pedalsDown = 0;
     };
 
     std::array<LiveHold, 16> liveHolds {};

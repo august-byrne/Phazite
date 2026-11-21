@@ -208,7 +208,8 @@ namespace
                  (int) noteState[schema::noteVelocity],
                  (bool) noteState[schema::noteMute],
                  (bool) noteState[schema::noteSlide],
-                 (bool) noteState[schema::notePortamento] };
+                 (bool) noteState[schema::notePortamento],
+                 readChannel (noteState, schema::noteChannel) };
     }
 
     // Changes the note with an ID in a clip, and in each of its aliases, which hold the same notes.
@@ -227,15 +228,16 @@ namespace
     }
 
     // What a note is besides its place, pitch and velocity: muted, a slide note or a portamento note, each written on its
-    // element only while it is (Schema.h).
+    // element only while it is (Schema.h); and its MIDI channel, written only for another than the first.
     struct NoteFlags
     {
         bool muted = false, slide = false, portamento = false;
+        int channel = 1;
     };
 
     NoteFlags getFlags (const NoteData& data)
     {
-        return { data.muted, data.slide, data.portamento };
+        return { data.muted, data.slide, data.portamento, data.channel };
     }
 
     void writeFlags (juce::ValueTree& note, NoteFlags flags)
@@ -244,6 +246,8 @@ namespace
                                             std::pair { &schema::notePortamento, flags.portamento } })
             if (on)
                 note.setProperty (*property, true, nullptr);
+
+        writeChannel (note, schema::noteChannel, flags.channel, nullptr);
     }
 
     // Adds a note to a clip and to each of its aliases, at a beat among its notes, with the ID wanted if no note of the clip
@@ -423,6 +427,19 @@ namespace
 std::uint64_t countNotesRead() noexcept
 {
     return notesRead;
+}
+
+int readChannel (const juce::ValueTree& element, const juce::Identifier& property)
+{
+    return juce::jlimit (1, 16, (int) element.getProperty (property, 1));
+}
+
+void writeChannel (juce::ValueTree& element, const juce::Identifier& property, int channel, juce::UndoManager* undo)
+{
+    if (channel = juce::jlimit (1, 16, channel); channel == 1)
+        element.removeProperty (property, undo);
+    else
+        element.setProperty (property, channel, undo);
 }
 
 juce::ValueTree findNoteState (const Song& song, const NoteRef& ref)
@@ -605,10 +622,12 @@ namespace
     }
 } // namespace
 
-NoteRef addNote (Song& song, ClipID clip, int pitch, BeatPosition start, BeatDuration length, int velocity)
+NoteRef addNote (Song& song, ClipID clip, int pitch, BeatPosition start, BeatDuration length, int velocity, int channel)
 {
     Rooms rooms (song);
-    return addNoteTo (song, rooms, clip, {}, pitch, start, length, velocity, {});
+    NoteFlags flags;
+    flags.channel = channel;
+    return addNoteTo (song, rooms, clip, {}, pitch, start, length, velocity, flags);
 }
 
 const char* getSchemaKind (ControlKind kind) noexcept
@@ -623,6 +642,8 @@ const char* getSchemaKind (ControlKind kind) noexcept
             return schema::controlIsChannelPressure;
         case ControlKind::aftertouch:
             return schema::controlIsAftertouch;
+        case ControlKind::programChange:
+            return schema::controlIsProgramChange;
     }
 
     return schema::controlIsController;
@@ -642,7 +663,8 @@ std::optional<ControlKind> findControlKind (const juce::ValueTree& control)
 {
     const auto kind = control[schema::controlKind].toString();
 
-    for (const auto each : { ControlKind::controller, ControlKind::pitchWheel, ControlKind::channelPressure, ControlKind::aftertouch })
+    for (const auto each : { ControlKind::controller, ControlKind::pitchWheel, ControlKind::channelPressure, ControlKind::aftertouch,
+                             ControlKind::programChange })
         if (kind == getSchemaKind (each))
             return each;
 
@@ -661,18 +683,20 @@ namespace
 
         control.setProperty (schema::controlBeat, std::max (0.0, (each.beat - contentStart).inBeats()), nullptr);
         control.setProperty (schema::controlValue, juce::jlimit (0, getHighestValue (each.kind), each.value), nullptr);
+        writeChannel (control, schema::controlChannel, each.channel, nullptr);
         return control;
     }
 
-    // Whether a clip's element is a value of a controller (by its number, if its kind has one).
-    bool isControlOf (const juce::ValueTree& child, ControlKind kind, int number)
+    // Whether a clip's element is a value of a controller on a channel (by its number, if its kind has one).
+    bool isControlOf (const juce::ValueTree& child, ControlKind kind, int number, int channel)
     {
         return child.hasType (schema::CONTROL) && findControlKind (child) == kind
-               && (! hasNumber (kind) || (int) child[schema::controlNumber] == number);
+               && (! hasNumber (kind) || (int) child[schema::controlNumber] == number)
+               && readChannel (child, schema::controlChannel) == juce::jlimit (1, 16, channel);
     }
 } // namespace
 
-void addControl (Song& song, ClipID clip, BeatPosition beat, ControlKind kind, int number, int value)
+void addControl (Song& song, ClipID clip, BeatPosition beat, ControlKind kind, int number, int value, int channel)
 {
     const auto clipState = findMidiClipState (song, clip);
 
@@ -680,7 +704,7 @@ void addControl (Song& song, ClipID clip, BeatPosition beat, ControlKind kind, i
         return;
 
     for (auto alias : getAliasStates (song, clipState))
-        alias.appendChild (makeControlState ({ beat, kind, number, value }, getContentStart (clipState)), &song.getUndoManager());
+        alias.appendChild (makeControlState ({ beat, kind, number, value, channel }, getContentStart (clipState)), &song.getUndoManager());
 }
 
 void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& values)
@@ -710,7 +734,7 @@ void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& valu
     }
 }
 
-void removeControls (Song& song, ClipID clip, ControlKind kind, int number, BeatPosition from, BeatPosition to)
+void removeControls (Song& song, ClipID clip, ControlKind kind, int number, int channel, BeatPosition from, BeatPosition to)
 {
     const auto clipState = findMidiClipState (song, clip);
 
@@ -726,7 +750,7 @@ void removeControls (Song& song, ClipID clip, ControlKind kind, int number, Beat
         {
             const auto child = alias.getChild (i);
 
-            if (! isControlOf (child, kind, number))
+            if (! isControlOf (child, kind, number, channel))
                 continue;
 
             if (const auto beat = (double) child[schema::controlBeat]; beat >= first && beat <= last)
@@ -751,8 +775,8 @@ void removeControl (Song& song, ClipID clip, const ControlValue& control)
         {
             const auto child = alias.getChild (i);
 
-            if (isControlOf (child, control.kind, control.number) && std::abs ((double) child[schema::controlBeat] - beat) <= near
-                && (int) child[schema::controlValue] == control.value)
+            if (isControlOf (child, control.kind, control.number, control.channel)
+                && std::abs ((double) child[schema::controlBeat] - beat) <= near && (int) child[schema::controlValue] == control.value)
             {
                 alias.removeChild (i, &song.getUndoManager());
                 break;
@@ -957,6 +981,13 @@ void setNoteVelocities (Song& song, const std::vector<NoteRef>& notes, int veloc
     for (const auto& ref : withoutAliasCopies (song, notes))
         changeNote (song, ref,
                     [clamped] (juce::ValueTree& note, juce::UndoManager* undo) { note.setProperty (schema::noteVelocity, clamped, undo); });
+}
+
+void setNoteChannels (Song& song, const std::vector<NoteRef>& notes, int channel)
+{
+    for (const auto& ref : withoutAliasCopies (song, notes))
+        changeNote (song, ref, [channel] (juce::ValueTree& note, juce::UndoManager* undo)
+                    { writeChannel (note, schema::noteChannel, channel, undo); });
 }
 
 void changeNoteVelocities (Song& song, const std::vector<NoteRef>& notes, int change)

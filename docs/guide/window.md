@@ -135,13 +135,17 @@ The inspector on the right shows the properties of what is selected, a name and 
 | Nothing | The song's tempo, time signature, key and length |
 | A track | Its name, colour, volume, pan, mute and solo, output, instrument, effects, automation mode and sends |
 | Clips | Name, start, length, mute and fades; for audio clips also gain and pitch |
-| Notes | Start, length, pitch, velocity and mute |
+| Notes | Start, length, pitch, velocity, MIDI channel and mute |
 | Automation points | The parameter, place, value and bend |
 | A section | Name, colour, place and length |
 
 Values are fields: drag, scroll or type in them. With several notes, clips or points selected, a value that differs
 among them shows its range ("64 to 100"). Dragged or scrolled, each changes by as much; typed, each takes the value you
 typed.
+
+A note's **Channel**, 1 to 16, is the MIDI channel it plays on: a plug-in with several parts (a multitimbral sampler, a
+General MIDI player) plays each channel's notes with its part, and Phazite's own instruments play every channel alike. A
+note you draw is on channel 1; one you record keeps the channel your keyboard played it on.
 
 ## The status bar
 

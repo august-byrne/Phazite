@@ -66,10 +66,11 @@ in. Audio is written as a WAV file into the project's Audio folder, named after 
 lands in the song where you played it. If the audio device's driver reports its delays wrongly, **Recording Correction**, in the
 **Recording** group of **Settings**, moves recordings earlier or later by a number of milliseconds.
 
-What you play on a MIDI keyboard is recorded with its sustain pedal, mod wheel, other controllers, pitch bend and the
-keys' pressure (aftertouch, a note's or the whole keyboard's), and a note played a moment before the count-in ends starts
-on the first beat. A plug-in instrument that uses pressure hears it, live and played back; Phazite's own instruments
-don't use it yet. If the drive fills up while recording, Phazite
+What you play on a MIDI keyboard is recorded with its sustain pedal, mod wheel, other controllers, pitch bend, the
+keys' pressure (aftertouch, a note's or the whole keyboard's) and program changes, each on the MIDI channel your keyboard
+played it on, and a note played a moment before the count-in ends starts on the first beat. A plug-in instrument that
+uses pressure hears it, live and played back; Phazite's own instruments don't use it yet. A program change selects a
+plug-in's program, live and played back, without making the project unsaved. If the drive fills up while recording, Phazite
 stops recording, keeps what it wrote and says so; it warns before recording when little room is left. If the audio
 device starts again (another sample rate or buffer size), Phazite stops recording and keeps what it had recorded, and
 closing the project or quitting while recording stops recording first and keeps the take.

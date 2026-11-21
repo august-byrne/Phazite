@@ -306,6 +306,25 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
     if (type == MessageType::stateChanged && told == nullptr)
         program = std::max (0, (int) notice.readInt());
 
+    // A program the song's MIDI set: its program now, and the values it set, which are no change of the plug-in's own.
+    if (type == MessageType::programPlayed)
+    {
+        program = std::max (0, (int) notice.readInt());
+
+        if (told != nullptr)
+        {
+            while (notice.getNumBytesLeft() >= 12) // an index and a value
+            {
+                const auto index = notice.readInt();
+
+                if (const auto value = readUnitValue (notice))
+                    told->parameterSetByProgram (index, *value);
+            }
+        }
+
+        return;
+    }
+
     if (told == nullptr)
         return;
 
@@ -380,6 +399,7 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         case MessageType::placeEditor:
         case MessageType::setEditorKeys:
         case MessageType::playLive:
+        case MessageType::programPlayed:
         case MessageType::reply:
             break;
     }

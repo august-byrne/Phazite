@@ -163,6 +163,7 @@ PluginInstances::~PluginInstances()
         if (instance != nullptr)
         {
             instance->onParameterChanged = nullptr;
+            instance->onParameterSetByProgram = nullptr;
             instance->onGesture = nullptr;
             instance->onStateChanged = nullptr;
             instance->onLatencyChanged = nullptr;
@@ -642,6 +643,14 @@ void PluginInstances::listen (DeviceID id, SandboxedInstance& instance)
         lookSoon();
     };
 
+    // A value a program the song set set: the song's own, as the program is (which the next save stores with the plug-in's
+    // state), for what plays the song alone: no unsaved change, no undo step, and no one's touch.
+    instance.onParameterSetByProgram = [this, refOf] (int parameter, float value)
+    {
+        if (const auto ref = refOf (parameter); ref.isValid())
+            song.tellValueSetByProgram (ref, value);
+    };
+
     instance.onGesture = [this, refOf] (int parameter, bool starting)
     {
         if (const auto ref = refOf (parameter); ref.isValid() && listener != nullptr)
@@ -684,6 +693,7 @@ void PluginInstances::sync()
                        if (const auto& instance = entry.second.instance)
                        {
                            instance->onParameterChanged = nullptr;
+                           instance->onParameterSetByProgram = nullptr;
                            instance->onGesture = nullptr;
                            instance->onStateChanged = nullptr;
                            instance->onLatencyChanged = nullptr;
@@ -892,6 +902,7 @@ void PluginInstances::takeAnswers()
 
         // Told of nothing more: it isn't the song's.
         waiting.instance->onParameterChanged = nullptr;
+        waiting.instance->onParameterSetByProgram = nullptr;
         waiting.instance->onGesture = nullptr;
         waiting.instance->onStateChanged = nullptr;
         waiting.instance->onLatencyChanged = nullptr;

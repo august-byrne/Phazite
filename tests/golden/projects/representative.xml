@@ -11,7 +11,7 @@
          loopFollowsSong="0"
          loopStart="0"
          metronome="1"
-         nextID="115"
+         nextID="116"
          notes="Mix notes:&#10;turn the pad down"
          outline="golden"
          patternsKeepTheirSpeed="1"
@@ -39,7 +39,7 @@
       <POINT beat="16"
              value="0.625"/>
     </CURVE>
-    <CURVE device="110"
+    <CURVE device="111"
            parameter="vca">
       <POINT beat="0"
              value="0.5"/>
@@ -330,6 +330,11 @@
                    kind="controller"
                    number="64"
                    value="127"/>
+          <CONTROL beat="0.25"
+                   channel="3"
+                   kind="controller"
+                   number="1"
+                   value="40"/>
           <CONTROL beat="0.5"
                    kind="pitchWheel"
                    value="9000"/>
@@ -348,6 +353,12 @@
                 pitch="64"
                 start="0"
                 velocity="96"/>
+          <NOTE channel="3"
+                id="102"
+                length="1"
+                pitch="67"
+                start="0"
+                velocity="90"/>
         </CLIP>
         <CONTAINER id="37"
                    instrument="1"
@@ -457,7 +468,7 @@
               fileEnd="2.4"
               fileStart="0"
               gain="3"
-              id="102"
+              id="103"
               kind="audio"
               name="Clicks 100 BPM"
               pitch="-2.5"
@@ -581,7 +592,7 @@
         <VALUES mix="1"/>
       </DEVICE>
       <DEVICE format="Test"
-              id="111"
+              id="112"
               identifier="PhaziteTestEffect"
               manufacturer="Phazite Tests"
               mix="0.5"
@@ -596,14 +607,14 @@
       </DEVICE>
     </TRACK>
     <TRACK colour="ff3366cc"
-           id="108"
+           id="109"
            kind="folder"
            name="Takes"
-           vca="110">
+           vca="111">
       <TRACK colour="ff3366cc"
-             fader="104"
+             fader="105"
              frozen="1"
-             id="103"
+             id="104"
              input="1"
              keyRoot="2"
              keyScale="minor"
@@ -613,7 +624,7 @@
         <CLIP file="Audio/Voice Take 1.wav"
               fileEnd="1.015479"
               fileStart="0.01547917"
-              id="107"
+              id="108"
               kind="audio"
               name="Voice"
               start="0"
@@ -623,8 +634,8 @@
               tempo="120"/>
       </TRACK>
       <TRACK colour="ffe69f00"
-             fader="106"
-             id="105"
+             fader="107"
+             id="106"
              input="2"
              keyRoot="2"
              keyScale="minor"
@@ -633,14 +644,14 @@
              name="Guitar"/>
     </TRACK>
     <TRACK colour="ff56b4e9"
-           fader="113"
-           id="112"
+           fader="114"
+           id="113"
            keyRoot="2"
            keyScale="minor"
            kind="track"
            name="Bells">
       <DEVICE format="Test"
-              id="114"
+              id="115"
               identifier="PhaziteTestSynth"
               instrument="1"
               manufacturer="Phazite Tests"

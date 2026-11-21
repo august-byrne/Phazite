@@ -45,6 +45,12 @@ namespace
         }
     }
 
+    // A note's key among a strip's notes sounding (StripState::sounding): its channel and pitch.
+    size_t getNoteKey (int channel, int pitch) noexcept
+    {
+        return (size_t) (channel & 15) * 128 + (size_t) std::clamp (pitch, 0, 127);
+    }
+
     // Whether every sample is sound, as the devices take it (devices::soundOf()): a number, and none beyond any level, as a
     // filter gone wrong plays on its way to infinity.
     bool isFinite (const float* samples, int numSamples) noexcept
@@ -669,8 +675,8 @@ void Engine::endLive (std::int64_t track) noexcept
 
 void Engine::dropLiveEvents() noexcept
 {
-    // What lets go, each once (a note's end by its track and pitch, a controller by its number, what endLive() ends by its
-    // track), kept; the rest dropped.
+    // What lets go, each once (a note's end by its track, channel and pitch, a controller by its channel and number, what
+    // endLive() ends by its track), kept; the rest dropped.
     using Type = devices::NoteEvent::Type;
 
     for (LiveEvent live; liveQueue.pop (live);)
@@ -683,7 +689,7 @@ void Engine::dropLiveEvents() noexcept
         const auto same = [&live] (const LiveEvent& waiting)
         {
             return waiting.track == live.track && waiting.endsLive == live.endsLive && waiting.event.type == live.event.type
-                   && waiting.event.number == live.event.number;
+                   && waiting.event.number == live.event.number && waiting.event.channel == live.event.channel;
         };
 
         if (const auto end = std::find_if (endsWaiting.begin(), endsWaiting.begin() + numEndsWaiting, same);
@@ -714,20 +720,25 @@ void Engine::followLive (const LiveEvent& live) noexcept
     if (hold == nullptr && starts)
     {
         for (int i = 0; i < numLiveHolds && hold == nullptr; ++i)
-            if (liveHolds[(size_t) i].numNotes == 0 && ! liveHolds[(size_t) i].pedalDown)
+            if (liveHolds[(size_t) i].numNotes == 0 && liveHolds[(size_t) i].pedalsDown == 0)
                 hold = &liveHolds[(size_t) i];
 
         if (hold == nullptr && numLiveHolds < (int) liveHolds.size())
             hold = &liveHolds[(size_t) numLiveHolds++];
 
         if (hold != nullptr)
-            *hold = { live.track };
+        {
+            hold->track = live.track;
+            hold->notes.fill (0);
+            hold->numNotes = 0;
+            hold->pedalsDown = 0;
+        }
     }
 
     if (hold == nullptr)
         return;
 
-    auto& times = hold->notes[(size_t) std::clamp (event.number, 0, 127)];
+    auto& times = hold->notes[(size_t) (event.channel & 15) * 128 + (size_t) std::clamp (event.number, 0, 127)];
 
     if ((event.type == Type::noteOn || event.type == Type::portamentoOn) && times < 255)
     {
@@ -746,14 +757,15 @@ void Engine::followLive (const LiveEvent& live) noexcept
     }
     else if (event.type == Type::controller && event.number == sustainPedal)
     {
-        hold->pedalDown = event.value >= 0.5f;
+        const auto bit = (std::uint16_t) (1u << (event.channel & 15));
+        hold->pedalsDown = (std::uint16_t) (event.value >= 0.5f ? (hold->pedalsDown | bit) : (hold->pedalsDown & ~bit));
     }
 }
 
 void Engine::addLiveEvent (LiveEvent live, std::int64_t loopStart, std::int64_t loopEnd) noexcept
 {
-    // endLive(): each note its track holds live ends, as often as it was started, and its pedal, if it holds it down; as
-    // live events of their own, so that a take and Capture record the notes' ends where they came.
+    // endLive(): each note its track holds live ends, on its channel, as often as it was started, and each channel's pedal
+    // it holds down; as live events of their own, so that a take and Capture record the notes' ends where they came.
     if (live.endsLive)
     {
         using Type = devices::NoteEvent::Type;
@@ -766,14 +778,17 @@ void Engine::addLiveEvent (LiveEvent live, std::int64_t loopStart, std::int64_t 
 
         const auto hold = *held; // a copy: the ends below change it
 
-        for (int pitch = 0; pitch < 128; ++pitch)
-            for (int times = 0; times < hold.notes[(size_t) pitch]; ++times)
-                addLiveEvent ({ live.track, { Type::noteOff, live.event.sample, pitch, 0.0f }, live.milliseconds, live.recordable },
-                              loopStart, loopEnd);
+        for (int key = 0; key < (int) hold.notes.size(); ++key)
+            for (int times = 0; times < hold.notes[(size_t) key]; ++times)
+                addLiveEvent (
+                    { live.track, { Type::noteOff, live.event.sample, key % 128, 0.0f, key / 128 }, live.milliseconds, live.recordable },
+                    loopStart, loopEnd);
 
-        if (hold.pedalDown)
-            addLiveEvent ({ live.track, { Type::controller, live.event.sample, sustainPedal, 0.0f }, live.milliseconds, false }, loopStart,
-                          loopEnd);
+        for (int channel = 0; channel < 16; ++channel)
+            if ((hold.pedalsDown & (1u << channel)) != 0)
+                addLiveEvent (
+                    { live.track, { Type::controller, live.event.sample, sustainPedal, 0.0f, channel }, live.milliseconds, false },
+                    loopStart, loopEnd);
 
         return;
     }
@@ -1363,6 +1378,14 @@ void Engine::takeEvents (const Span& span, const Plan::Strip& strip) noexcept
     // What its instrument plays: its notes, and what is played live into it.
     auto& state = *strip.state;
     state.numEvents = 0;
+
+    // The programs sent last are the instrument's: another in its place has been sent none.
+    if (state.programsSentTo != strip.instrument)
+    {
+        state.programsSent = StripState::makeNoPrograms();
+        state.programsSentTo = strip.instrument;
+    }
+
     addNotes (strip, *span.plan, span.numSamples);
 
     for (int i = 0; i < numLiveEvents; ++i)
@@ -1378,6 +1401,12 @@ void Engine::takeEvents (const Span& span, const Plan::Strip& strip) noexcept
     }
 
     state.sortEvents();
+
+    // The program each channel's last program change sets, from the song or played live: what the chase compares with.
+    for (int i = 0; i < state.numEvents; ++i)
+        if (const auto& event = state.events[(size_t) i]; event.type == devices::NoteEvent::Type::programChange)
+            state.programsSent[event.channel] = (std::int8_t) std::clamp (event.number, 0, 127);
+
     playModulators (strip);
 }
 
@@ -1898,14 +1927,18 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     if (! transport.playing)
         return;
 
+    // A note sounding, by its key there (channel x 128 + pitch), ends at a sample.
+    const auto endSounding = [&state] (size_t key, int sample)
+    { state.addEvent ({ Type::noteOff, sample, (int) (key % 128), 0.0f, (int) (key / 128) }); };
+
     // None now (the song changed as it played: the track's clips gone, or their notes): what the notes before sounded ends.
     if (notes == nullptr)
     {
         if (state.sequence != nullptr)
         {
-            for (size_t pitch = 0; pitch < 128; ++pitch)
-                if (state.sounding[pitch])
-                    state.addEvent ({ Type::noteOff, 0, (int) pitch, 0.0f });
+            for (size_t key = 0; key < state.sounding.size(); ++key)
+                if (state.sounding[key])
+                    endSounding (key, 0);
 
             state.sounding.reset();
             state.sequence = nullptr;
@@ -1937,15 +1970,15 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     {
         // Another sequence (the song changed as it played, or the first): what it doesn't play any more ends, and what it
         // plays and didn't starts, while the notes both play sound on.
-        std::bitset<128> nowSounding;
-        forEachSounding ([&nowSounding] (const NoteSequence::Note& note) { nowSounding.set ((size_t) note.pitch); });
+        std::bitset<16 * 128> nowSounding;
+        forEachSounding ([&nowSounding] (const NoteSequence::Note& note) { nowSounding.set (getNoteKey (note.channel, note.pitch)); });
 
-        for (size_t pitch = 0; pitch < 128; ++pitch)
+        for (size_t key = 0; key < state.sounding.size(); ++key)
         {
-            if (state.sounding[pitch] && ! nowSounding[pitch])
+            if (state.sounding[key] && ! nowSounding[key])
             {
-                state.addEvent ({ Type::noteOff, 0, (int) pitch, 0.0f });
-                state.sounding.reset (pitch);
+                endSounding (key, 0);
+                state.sounding.reset (key);
             }
         }
 
@@ -1964,8 +1997,12 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
         // that MIDI's Reset All Controllers resets (RP-015: the mod wheel, breath, the foot, expression at full and the
         // pedals) to that; any other controller the clips change only later (a volume, a pan) is left as it is, having no
         // value of its own to go back to. One that changes where playback starts (on its first sample) isn't chased: its own
-        // change plays there, once. Not where the song changed as it played (a new sequence): its controllers are as they
-        // were. A search through its changes for each one the track changes, nothing allocated.
+        // change plays there, once. Each channel's are its own, chased and reset on that channel. The program too, but only
+        // where it differs from the one sent last to the instrument on that channel (StripState::programsSent): a plug-in
+        // that loads samples for a program mustn't load them again at every round of a loop; and before a channel's first
+        // program change, nothing, so that the instrument keeps the program it has. Not where the song changed as it played
+        // (a new sequence): its controllers are as they were. A search through its changes for each one the track changes,
+        // nothing allocated.
         const auto chasesControls = transport.chase;
 
         if (chasesControls)
@@ -1976,48 +2013,61 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
                                          if (control.type == Type::aftertouch)
                                              return;
 
+                                         if (control.type == Type::programChange)
+                                         {
+                                             if (control.held && state.programsSent[control.channel] != control.number)
+                                                 state.addEvent ({ control.type, 0, control.number, 0.0f, control.channel });
+
+                                             return;
+                                         }
+
                                          if (control.held)
                                          {
-                                             state.addEvent ({ control.type, 0, control.number, control.value });
+                                             state.addEvent ({ control.type, 0, control.number, control.value, control.channel });
                                              return;
                                          }
 
                                          if (control.type != Type::controller)
                                          {
-                                             state.addEvent ({ control.type, 0, control.number, 0.0f }); // the middle, none
+                                             state.addEvent (
+                                                 { control.type, 0, control.number, 0.0f, control.channel }); // the middle, none
                                              return;
                                          }
 
                                          if (const auto reset = getResetValue (control.number))
-                                             state.addEvent ({ control.type, 0, control.number, *reset });
+                                             state.addEvent ({ control.type, 0, control.number, *reset, control.channel });
                                      });
         }
 
-        // The notes sounding here start, each from where it started.
-        std::array<double, 128> startedAt;
-        startedAt.fill (-1.0);
+        // The notes sounding here start, each from where it started, by their channels and pitches (where each started,
+        // kept from the first of them on: a track with nothing sounding here fills none).
+        std::array<double, 16 * 128> startedAt;
+        auto anyStarted = false;
 
         forEachSounding (
-            [&state, &startedAt] (const NoteSequence::Note& note)
+            [&state, &startedAt, &anyStarted] (const NoteSequence::Note& note)
             {
-                if (! state.sounding[(size_t) note.pitch])
+                if (const auto key = getNoteKey (note.channel, note.pitch); ! state.sounding[key])
                 {
-                    state.addEvent ({ Type::noteOn, 0, note.pitch, note.velocity });
-                    state.sounding.set ((size_t) note.pitch);
-                    startedAt[(size_t) note.pitch] = note.start;
+                    if (! std::exchange (anyStarted, true))
+                        startedAt.fill (-1.0);
+
+                    state.addEvent ({ Type::noteOn, 0, note.pitch, note.velocity, note.channel });
+                    state.sounding.set (key);
+                    startedAt[key] = note.start;
                 }
             });
 
-        // And a note's own pressure, where it changed since that note started.
-        if (chasesControls)
+        // And a note's own pressure, where it changed since that note started, on its channel.
+        if (chasesControls && anyStarted)
             notes->forEachControlAt (fromBeat, firstSampleEnd,
                                      [&state, &startedAt] (const NoteSequence::ControlAt& control)
                                      {
-                                         const auto pitch = (size_t) std::clamp (control.number, 0, 127);
+                                         const auto key = getNoteKey (control.channel, control.number);
 
-                                         if (control.type == Type::aftertouch && control.held && startedAt[pitch] >= 0.0
-                                             && control.beat >= startedAt[pitch])
-                                             state.addEvent ({ control.type, 0, control.number, control.value });
+                                         if (control.type == Type::aftertouch && control.held && startedAt[key] >= 0.0
+                                             && control.beat >= startedAt[key])
+                                             state.addEvent ({ control.type, 0, control.number, control.value, control.channel });
                                      });
 
         state.mustChase = false;
@@ -2043,20 +2093,20 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
             event.type == Type::slide
                 ? (float) ((plan.tempo.toSamples (event.beat + (double) event.value) - plan.tempo.toSamples (event.beat)) / sampleRate)
                 : event.value;
-        state.addEvent ({ event.type, sample, event.number, value });
+        state.addEvent ({ event.type, sample, event.number, value, event.channel });
 
         if (event.type == Type::noteOn || event.type == Type::portamentoOn)
-            state.sounding.set ((size_t) event.number);
+            state.sounding.set (getNoteKey (event.channel, event.number));
         else if (event.type == Type::noteOff)
-            state.sounding.reset ((size_t) event.number);
+            state.sounding.reset (getNoteKey (event.channel, event.number));
     }
 
-    // The loop's end: what sounds ends on its last sample.
-    if (endsAtLoop)
+    // The loop's end: what sounds ends on its last sample (a track with nothing sounding has none to look for).
+    if (endsAtLoop && state.sounding.any())
     {
-        for (size_t pitch = 0; pitch < 128; ++pitch)
-            if (state.sounding[pitch])
-                state.addEvent ({ Type::noteOff, numSamples - 1, (int) pitch, 0.0f });
+        for (size_t key = 0; key < state.sounding.size(); ++key)
+            if (state.sounding[key])
+                endSounding (key, numSamples - 1);
 
         state.sounding.reset();
     }

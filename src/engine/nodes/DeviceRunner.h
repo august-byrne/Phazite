@@ -64,7 +64,8 @@ struct Modulation
     std::vector<int> modulated;    // the parameters modulated, by their indices, each once
 };
 
-// A MIDI message as a device's event at a sample, or nothing for the messages devices don't use. The channel doesn't matter.
+// A MIDI message as a device's event at a sample, on its channel, or nothing for the messages devices don't use. All notes
+// off and all sound off, on any channel, are every channel's.
 std::optional<devices::NoteEvent> toNoteEvent (const juce::MidiMessage&, int sample);
 
 class DeviceRunner
@@ -206,6 +207,7 @@ private:
         bool settled = false; // nothing moved since the last block: its values as they were, untouched
         bool automationMoves = false, inStretches = false, isMixMoved = false, hasSidechain = false, quietIn = false;
         float targetMix = 1.0f;
+        std::span<devices::NoteEvent> events; // what the device is handed of the block's events (mergeChannels())
     };
 
     Begun begin (juce::AudioBuffer<float>&, int start, int numSamples, const Block&);
@@ -262,13 +264,22 @@ private:
     bool valuesMovedInSleep (const Block&, int numSamples) noexcept;
     std::atomic<std::uint64_t> blocksWorked { 0 }; // written by the audio thread alone
     static_assert (std::atomic<std::uint64_t>::is_always_lock_free);
-    // How many times it holds each note (the song's and a key played live can hold the same one), how many in all, and
-    // whether its pedal is down.
+    // How many times it holds each note, on any channel (the song's and a key played live can hold the same one), how many
+    // in all, and the channels whose pedal is down (a bit for each).
     std::array<std::uint8_t, 128> held {};
     int numHeld = 0;
-    bool pedalDown = false;
+    std::uint16_t pedalsDown = 0;
     void followNotes (std::span<const devices::NoteEvent>) noexcept;
     void letGoOfNotes() noexcept;
+
+    // For an instrument that takes every MIDI channel as one (devices::Processor::playsChannelsApart() false), the channels
+    // that hold each pitch (a bit for each: set by a note's start, cleared by its end on that channel, all cleared by an
+    // all-notes-off and a reset), and the block's events as it is handed them, made once: a note's end only where no other
+    // channel still holds its pitch, so that a note on one channel doesn't end the same pitch held on another. One channel
+    // alone is handed every event as it comes.
+    std::array<std::uint16_t, 128> channelsHolding {};
+    std::vector<devices::NoteEvent> merged;
+    std::span<devices::NoteEvent> mergeChannels (std::span<devices::NoteEvent>) noexcept;
 
     DeviceRunner (const DeviceRunner&) = delete;
     DeviceRunner& operator= (const DeviceRunner&) = delete;

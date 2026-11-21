@@ -217,16 +217,16 @@ where their actions are.
 | --- | --- |
 | A track | Name, colour, volume, pan, mute and solo, where its sound goes, its sends, its instrument, its effects and its automation mode |
 | Clips | Name, start, length, mute, fades, whether it is an alias; for audio clips also gain and pitch |
-| Notes | Start, length, pitch, velocity, mute |
+| Notes | Start, length, pitch, velocity, MIDI channel (1 to 16: which part of a plug-in with several parts plays them), mute |
 | Automation points | Parameter, position, value, bend |
 | A section | Name, colour, place, length, energy and tip |
 | Nothing | The song's tempo (or its range), time signature and length |
 
 - Values are fields to drag, scroll, step or type in. A drag is one undo step.
 - Several notes, clips or points show together. A value shows the range of theirs while they differ ("64 to 100").
-  Dragged, scrolled or stepped, each changes by as much, and notes and clips move together only as far as all can go.
-  Typed, each length, velocity, gain and value becomes what was typed; the earliest start and the lowest pitch go
-  there, the others with them.
+  Dragged, scrolled or stepped, each changes by as much, and notes and clips move together only as far as all can go
+  (a note's channel moves on its own, kept within 1 to 16). Typed, each length, velocity, channel, gain and value
+  becomes what was typed; the earliest start and the lowest pitch go there, the others with them.
 - No key combinations change how a value applies to several items.
 - Each page shows only what the selection has.
 - A sound in the browser is not in the song, so the inspector does not show it; the browser does.

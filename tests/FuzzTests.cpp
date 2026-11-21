@@ -1040,6 +1040,7 @@ TEST_CASE ("Fuzz: what a helper tells of a plug-in is read within its message, w
                 case MessageType::gesture:
                 case MessageType::latencyChanged:
                 case MessageType::stateChanged:
+                case MessageType::programPlayed:
                 case MessageType::reply:
                     break;
             }

@@ -152,8 +152,8 @@ TEST_CASE ("A note's value typed that is no finite number changes nothing")
     const auto refs = phazite::getRefs (phazite::getClipNotes (song, clip));
     REQUIRE (refs.size() == 1);
 
-    for (const auto property :
-         { phazite::NoteProperty::velocity, phazite::NoteProperty::pitch, phazite::NoteProperty::start, phazite::NoteProperty::length })
+    for (const auto property : { phazite::NoteProperty::velocity, phazite::NoteProperty::pitch, phazite::NoteProperty::start,
+                                 phazite::NoteProperty::length, phazite::NoteProperty::channel })
     {
         phazite::setNotesTo (s.context, refs, property, std::numeric_limits<double>::infinity()); // as typed "1e999" reads
         phazite::changeNotes (s.context, refs, property, std::numeric_limits<double>::quiet_NaN());
@@ -164,4 +164,5 @@ TEST_CASE ("A note's value typed that is no finite number changes nothing")
     CHECK (note.pitch == 60);
     CHECK (note.start.inBeats() == doctest::Approx (0.0));
     CHECK (note.length.inBeats() == doctest::Approx (1.0));
+    CHECK (note.channel == 1);
 }

@@ -12,6 +12,7 @@ Record having been pressed.
 | --- | --- | --- |
 | Live MIDI plays one track, without arming it by hand | Built | |
 | MIDI recording, with Overdub and Quantize Recordings | Built | |
+| Notes, controllers and program changes recorded on the MIDI channel they were played on | Built | |
 | Capture: the last 30 seconds of MIDI as a clip | Built | |
 | An arm switch on every track that records | Built | |
 | Audio recording from an input, one channel or a pair | Built | Not yet tried by a person with an ASIO® interface |
@@ -115,6 +116,12 @@ what feeds the channel.
   its earlier values there from its first move in the take to its last. Capture keeps them too. The computer keyboard
   plays notes alone. A take after a jump keeps no notes from before its start: the take before kept them, whose clips,
   as Stop's, wait for a drag under way to end, a Record step of their own that the drag's Escape doesn't take back.
+- **MIDI channels:** a note and a controller are recorded on the MIDI channel they were played on (the computer
+  keyboard plays on channel 1), and everything above holds for each channel on its own: a note's end is its start's on
+  its channel and pitch; the pedal, the bend and the channel's pressure held as the take starts or let go of at its
+  end are each channel's, on that channel; a controller is thinned, and with Overdub takes the place of its earlier
+  values, on its channel alone. A program change played during a take is recorded as a value of its own on its channel,
+  thinned as the others, and never let go of.
 
 ### Audio
 

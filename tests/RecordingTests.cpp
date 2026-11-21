@@ -36,6 +36,9 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 TEST_CASE ("Overdub and quantizing recordings are the app's settings, which their commands switch")
 {
@@ -677,12 +680,14 @@ TEST_CASE ("A note played a moment before a take starts, as its count-in ends, s
 
 namespace
 {
-// The controller elements of a MIDI clip, as a MIDI file's import makes them: their kind, number, value and beat in the song.
+// The controller elements of a MIDI clip, as a MIDI file's import makes them: their kind, number, value and beat in the song,
+// and their MIDI channel.
 struct RecordedControl
 {
     juce::String kind;
     int number = 0, value = 0;
     double beat = 0.0;
+    int channel = 1;
 };
 
 // A controller or a bend played into live MIDI's track as a MIDI input's driver plays it (AudioIO.h), into the engine: the
@@ -706,7 +711,8 @@ std::vector<RecordedControl> getControls (const phazite::Song& song, phazite::Cl
         if (child.hasType (phazite::schema::CONTROL))
             controls.push_back ({ child[phazite::schema::controlKind].toString(), (int) child[phazite::schema::controlNumber],
                                   (int) child[phazite::schema::controlValue],
-                                  phazite::getContentStart (clipState).inBeats() + (double) child[phazite::schema::controlBeat] });
+                                  phazite::getContentStart (clipState).inBeats() + (double) child[phazite::schema::controlBeat],
+                                  phazite::readChannel (child, phazite::schema::controlChannel) });
 
     return controls;
 }
@@ -966,6 +972,142 @@ TEST_CASE ("With Overdub, a controller recorded into a clip takes the place of i
     CHECK (pedal[2].second == 0);
     CHECK (modWheel == 1);
     CHECK (take.getNotes().size() == 2);
+}
+
+TEST_CASE ("Notes, a pedal and a program change played on MIDI channel 3 go into the take on channel 3")
+{
+    // Each kept on the channel it was played on, as a keyboard set to channel 3 plays them: the note's end paired with its
+    // start by its channel and pitch (a note of the same pitch on channel 1 is another), the pedal on channel 3 and let go of
+    // there, the program change kept as played, never let go of.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    take.song.run ("transport.record");
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (3, 64, 127));
+    playFromMidiInput (juce::MidiMessage::programChange (3, 9));
+    playFromMidiInput (juce::MidiMessage::noteOn (3, 60, 0.8f));
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::noteOn (1, 60, 0.5f));
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::noteOff (1, 60));
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::noteOff (3, 60));
+    playFromMidiInput (juce::MidiMessage::controllerEvent (3, 64, 0));
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+
+    const auto notes = take.getNotes();
+    REQUIRE (notes.size() == 2);
+    CHECK (notes[0].channel == 3);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (0.5).epsilon (withinABlock));
+    CHECK (notes[0].length.inBeats() == doctest::Approx (1.5).epsilon (withinABlock)); // to its own end, past channel 1's
+    CHECK (notes[1].channel == 1);
+    CHECK (notes[1].length.inBeats() == doctest::Approx (0.5).epsilon (withinABlock));
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto controls = getControls (song, clips[0].id);
+    REQUIRE (controls.size() == 3);
+    CHECK (controls[0].number == 64);
+    CHECK (controls[0].value == 127);
+    CHECK (controls[0].channel == 3);
+    CHECK (controls[1].kind == juce::String (phazite::schema::controlIsProgramChange));
+    CHECK (controls[1].value == 9);
+    CHECK (controls[1].channel == 3);
+    CHECK (controls[2].number == 64);
+    CHECK (controls[2].value == 0);
+    CHECK (controls[2].channel == 3);
+}
+
+TEST_CASE ("A pedal held on channel 3 and a bend on channel 1 as a take ends are each let go of on their own channel")
+{
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    take.song.run ("transport.record");
+    take.playback.play (0.1);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (3, 64, 127));
+    playFromMidiInput (juce::MidiMessage::pitchWheel (1, 12288));
+    take.playNote (60, 0.15, 0.25);
+    take.playback.play (0.5);
+    take.song.run ("transport.record");
+    playFromMidiInput (juce::MidiMessage::controllerEvent (3, 64, 0));
+    playFromMidiInput (juce::MidiMessage::pitchWheel (1, 8192));
+    take.playback.play (0.05);
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    std::vector<std::tuple<juce::String, int, int>> released; // kind, value, channel, of those let go of at the take's end
+
+    for (const auto& control : getControls (song, clips[0].id))
+        if (control.beat > 1.5) // played at beat 0.2, let go of just before the take's end, at beat 1.8
+            released.emplace_back (control.kind, control.value, control.channel);
+
+    std::sort (released.begin(), released.end());
+    CHECK (released
+           == std::vector<std::tuple<juce::String, int, int>> { { phazite::schema::controlIsController, 0, 3 },
+                                                                { phazite::schema::controlIsPitchWheel, 8192, 1 } });
+}
+
+TEST_CASE ("With Overdub, a controller recorded on one MIDI channel takes the place of its earlier values on that channel alone")
+{
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    const auto there = take.song.addMidiClip (take.song.firstTrack, 0.0, 8.0);
+    take.song.addNote (there, 48, 0.0, 1.0);
+    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.5), phazite::ControlKind::controller, 1, 90, 1);
+    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.5), phazite::ControlKind::controller, 1, 50, 2);
+
+    // The mod wheel on channel 1 moved from beat 1 to beat 2.
+    take.song.run ("transport.record");
+    take.playback.play (0.5);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 1, 20));
+    take.playNote (60, 0.1, 0.1);
+    take.playback.play (0.3);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 1, 30));
+    take.playback.play (0.1);
+    take.song.run ("transport.record");
+
+    std::vector<std::pair<int, int>> modWheel; // value, channel
+
+    for (const auto& control : getControls (song, there))
+        if (control.number == 1)
+            modWheel.emplace_back (control.value, control.channel);
+
+    std::sort (modWheel.begin(), modWheel.end());
+    CHECK (modWheel == std::vector<std::pair<int, int>> { { 20, 1 }, { 30, 1 }, { 50, 2 } });
+}
+
+TEST_CASE ("Capture keeps the notes and the pedal on the MIDI channel they were played on")
+{
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (2, 64, 127));
+    take.playback.play (0.1);
+
+    for (const auto pitch : { 60, 64, 67, 72 })
+    {
+        take.playback.play (0.25);
+        playFromMidiInput (juce::MidiMessage::noteOn (2, pitch, 0.8f));
+        take.playback.play (0.25);
+        playFromMidiInput (juce::MidiMessage::noteOff (2, pitch));
+    }
+
+    take.playback.play (0.1);
+    take.song.run ("transport.capture");
+
+    const auto notes = take.getNotes();
+    REQUIRE (notes.size() == 4);
+    CHECK (std::all_of (notes.begin(), notes.end(), [] (const phazite::NoteData& note) { return note.channel == 2; }));
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto controls = getControls (song, clips[0].id);
+    REQUIRE (controls.size() == 2); // down from the clip's start, let go of at its end: the pedal still held
+    CHECK (controls[0].value == 127);
+    CHECK (controls[0].channel == 2);
+    CHECK (controls[1].value == 0);
+    CHECK (controls[1].channel == 2);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (2, 64, 0));
+    take.playback.play (0.05);
 }
 
 TEST_CASE ("A take longer than the notes played are kept for still starts with the pedal held as it started")

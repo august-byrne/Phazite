@@ -1556,9 +1556,12 @@ if(PHAZITE_BUILD_TESTS)
     # phazite_tests needs them (never by the Phazite or installer targets), left in their own folders under the build
     # (COPY_PLUGIN_AFTER_BUILD off), never next to the app or in the installer. Without the VST3 manifest step
     # (VST3_AUTO_MANIFEST off), which would build a helper of JUCE's at build time and load the plug-in into it (and can't
-    # load a plug-in built with a sanitizer); hosts don't need the manifest. Without JUCE's MIDI controllers as parameters
-    # (JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0), as many VST3s are: JUCE's host hands such a plug-in no controller.
-    function(phazite_add_test_vst3 target)
+    # load a plug-in built with a sanitizer); hosts don't need the manifest. The effect without JUCE's MIDI controllers as
+    # parameters (JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0), as many VST3s are: JUCE's host hands such a plug-in no
+    # controller. The instrument with them (JUCE's default for a plug-in that takes MIDI), as VST3 instruments that take the
+    # pitch bend have: a VST3 has no MIDI controller events, and JUCE's host hands a bend, a controller or the channel's
+    # pressure on only as a change of the parameter the plug-in maps it to (a program change goes as a legacy MIDI event).
+    function(phazite_add_test_vst3 target midiControllers)
         juce_add_plugin(${target} ${ARGN}
             COMPANY_NAME "Phazite Tests"
             PLUGIN_MANUFACTURER_CODE Phzt
@@ -1570,7 +1573,7 @@ if(PHAZITE_BUILD_TESTS)
         target_compile_features(${target} PRIVATE cxx_std_20)
         target_compile_definitions(${target} PUBLIC
             JUCE_VST3_CAN_REPLACE_VST2=0
-            JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0
+            JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=${midiControllers}
             JUCE_USE_CURL=0
             JUCE_WEB_BROWSER=0)
         target_link_libraries(${target} PRIVATE juce::juce_audio_processors juce::juce_recommended_warning_flags)
@@ -1582,7 +1585,7 @@ if(PHAZITE_BUILD_TESTS)
         add_dependencies(phazite_tests ${target}_VST3)
     endfunction()
 
-    phazite_add_test_vst3(phazite_test_vst3_effect
+    phazite_add_test_vst3(phazite_test_vst3_effect 0
         PRODUCT_NAME "PhaziteTestVst3Effect"
         PLUGIN_NAME "Test VST3 Effect"
         BUNDLE_ID "io.github.august-byrne.phazite.tests.vst3-effect"
@@ -1591,7 +1594,7 @@ if(PHAZITE_BUILD_TESTS)
         NEEDS_MIDI_INPUT FALSE)
     target_sources(phazite_test_vst3_effect PRIVATE tests/vst3/TestVst3Effect.cpp tests/vst3/TestVst3s.h)
 
-    phazite_add_test_vst3(phazite_test_vst3_synth
+    phazite_add_test_vst3(phazite_test_vst3_synth 1
         PRODUCT_NAME "PhaziteTestVst3Synth"
         PLUGIN_NAME "Test VST3 Synth"
         BUNDLE_ID "io.github.august-byrne.phazite.tests.vst3-synth"

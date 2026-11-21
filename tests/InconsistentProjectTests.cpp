@@ -32,6 +32,8 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
+#include <utility>
 
 namespace
 {
@@ -150,6 +152,44 @@ TEST_CASE ("A track's volume beyond any fader's opens at the top of its range, a
     CHECK (phazite::getChannelVolume (song, edited.lead) == doctest::Approx (phazite::highestVolume));
     CHECK (phazite::getChannelVolume (song, edited.drums) == doctest::Approx (0.0f));
     CHECK (phazite::getChannelPan (song, edited.drums) == doctest::Approx (-1.0f));
+}
+
+TEST_CASE ("A note's and a controller's MIDI channel open within 1 to 16, one in it as it was")
+{
+    // Channel 0 opens on 1, 40 on 16, one that is no number on 1 (none written), and 9 as it is.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* clip = Edited::findTrack (song, "Lead")->getChildByName ("CLIP");
+            REQUIRE (clip != nullptr);
+            auto* note = clip->getChildByName ("NOTE");
+            REQUIRE (note != nullptr);
+            note->setAttribute ("channel", "40");
+
+            for (const auto& [channel, value] : { std::pair ("0", 1), std::pair ("nan", 2), std::pair ("9", 3) })
+            {
+                auto* control = clip->createNewChildElement ("CONTROL");
+                control->setAttribute ("kind", "controller");
+                control->setAttribute ("number", 1);
+                control->setAttribute ("beat", 0.5);
+                control->setAttribute ("value", value);
+                control->setAttribute ("channel", channel);
+            }
+        });
+    REQUIRE (project != nullptr);
+    const auto notes = findAll (project->getSong().getState(), schema::NOTE);
+    REQUIRE (notes.size() == 1);
+    CHECK ((int) notes[0][schema::noteChannel] == 16);
+
+    std::map<int, juce::var> channels; // by value
+    for (const auto& control : findAll (project->getSong().getState(), schema::CONTROL))
+        channels[(int) control[schema::controlValue]] = control[schema::controlChannel];
+
+    REQUIRE (channels.size() == 3);
+    CHECK ((int) channels[1] == 1);
+    CHECK (channels[2].isVoid());
+    CHECK ((int) channels[3] == 9);
 }
 
 TEST_CASE ("A clip where no track holds clips, and a note outside a MIDI clip, are left out")

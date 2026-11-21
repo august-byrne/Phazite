@@ -804,8 +804,9 @@ void Sampler::handle (const NoteEvent& event, std::span<const float> values)
             bend = event.value;
             break;
 
-        case NoteEvent::Type::aftertouch: // it doesn't play by pressure
+        case NoteEvent::Type::aftertouch: // it doesn't play by pressure, and has no programs
         case NoteEvent::Type::channelPressure:
+        case NoteEvent::Type::programChange:
             break;
 
         case NoteEvent::Type::controller:
@@ -1228,9 +1229,7 @@ void Sampler::process (const ProcessContext& block)
         if ((int) (now - waiting.playedAt) > longestAuditionWait && waiting.velocity > 0.0f)
             return;
 
-        handle ({ .type = waiting.velocity > 0.0f ? NoteEvent::Type::noteOn : NoteEvent::Type::noteOff,
-                  .number = waiting.note,
-                  .value = waiting.velocity },
+        handle ({ waiting.velocity > 0.0f ? NoteEvent::Type::noteOn : NoteEvent::Type::noteOff, 0, waiting.note, waiting.velocity },
                 values);
     };
     const auto scope = auditionFifo.read (auditionFifo.getNumReady());

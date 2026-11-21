@@ -27,6 +27,11 @@ std::optional<NoteData> getNoteData (const Song&, const NoteRef&);
 std::vector<NoteData> getNoteData (const Song&, const std::vector<NoteRef>&); // those there
 std::vector<NoteData> getClipNotes (const Song&, ClipID);                     // in the order the clip holds them
 
+// A note's or a controller's MIDI channel in the song (schema::noteChannel, controlChannel), from 1 to 16: 1 where none is
+// written, and one beyond them kept within them. And written so, as nothing for the first.
+int readChannel (const juce::ValueTree& element, const juce::Identifier& property);
+void writeChannel (juce::ValueTree& element, const juce::Identifier& property, int channel, juce::UndoManager*);
+
 // How many notes were read from the song as NoteData since the program started: for the speed gates
 // (tests/PerformanceGateTests.cpp), which count what a view's mouse event reads.
 std::uint64_t countNotesRead() noexcept;
@@ -57,28 +62,32 @@ void selectNotes (Selection&, const std::vector<NoteRef>&);
 
 // Adds a note at a song beat. If it ends after the clip, the clip grows to the end of that bar, but only into the empty
 // space after it: never past the start of the next clip on its track. A note beyond that stays in the clip without
-// playing, as outside a trimmed clip. Returns it, or none for a clip that isn't a MIDI clip of the song's.
-NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity);
+// playing, as outside a trimmed clip. On a MIDI channel (1 to 16): the first, unless one is given (a note recorded on
+// another, or read from a file). Returns it, or none for a clip that isn't a MIDI clip of the song's.
+NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity, int channel = 1);
 
 // The kinds of controller events a recording takes in with the notes (schema::CONTROL), as MIDI has them: a MIDI controller
 // (by its number: the sustain pedal 64, the mod wheel 1; its value 0 to 127), the pitch bend (0 to 16383, its middle
-// 8192), the channel's pressure (0 to 127) and a note's pressure, polyphonic aftertouch (by the note's number; 0 to 127).
+// 8192), the channel's pressure (0 to 127), a note's pressure, polyphonic aftertouch (by the note's number; 0 to 127),
+// and a program change (its value the program, 0 to 127). Each on a MIDI channel, from 1 to 16.
 enum class ControlKind
 {
     controller,
     pitchWheel,
     channelPressure,
-    aftertouch
+    aftertouch,
+    programChange
 };
 
 const char* getSchemaKind (ControlKind) noexcept;                            // its controlKind in the song
 bool hasNumber (ControlKind) noexcept;                                       // a controller's and a note's pressure have one
 int getHighestValue (ControlKind) noexcept;                                  // 16383 for the pitch bend, 127 for the others
-std::optional<ControlKind> findControlKind (const juce::ValueTree& control); // none for a kind playback doesn't take
+std::optional<ControlKind> findControlKind (const juce::ValueTree& control); // none for a kind Phazite doesn't know
 
-// Adds a controller's value at a song beat, as a recording takes it in with the notes. The clip doesn't grow for it: one
-// past the clip's end or before its start plays nothing. Nothing for a clip that isn't a MIDI clip of the song's.
-void addControl (Song&, ClipID, BeatPosition, ControlKind, int number, int value);
+// Adds a controller's value at a song beat, on a MIDI channel (1 to 16), as a recording takes it in with the notes. The
+// clip doesn't grow for it: one past the clip's end or before its start plays nothing. Nothing for a clip that isn't a
+// MIDI clip of the song's.
+void addControl (Song&, ClipID, BeatPosition, ControlKind, int number, int value, int channel = 1);
 
 // The same for many at once, into one clip, each as addControl() says: what a take recorded (a bend sweep holds thousands).
 // The clip and each of its aliases is filled as a copy and put in its place (one removal and one insertion, the same clip by
@@ -88,14 +97,15 @@ struct ControlValue
     BeatPosition beat;
     ControlKind kind = ControlKind::controller;
     int number = 0, value = 0;
+    int channel = 1; // from 1 to 16
 };
 
 void addControls (Song&, ClipID, const std::vector<ControlValue>&);
 
-// Removes a controller's values (by its number, if its kind has one) from a clip and its aliases, from one song beat to
-// another, both included: what a recording made with Overdub takes the place of. And one value alone, at a beat: what a
-// take after a jump that carries on what the take before let go of at its end takes away (Take.h).
-void removeControls (Song&, ClipID, ControlKind, int number, BeatPosition from, BeatPosition to);
+// Removes a controller's values on one MIDI channel (by its number, if its kind has one) from a clip and its aliases, from
+// one song beat to another, both included: what a recording made with Overdub takes the place of. And one value alone, at
+// a beat: what a take after a jump that carries on what the take before let go of at its end takes away (Take.h).
+void removeControls (Song&, ClipID, ControlKind, int number, int channel, BeatPosition from, BeatPosition to);
 void removeControl (Song&, ClipID, const ControlValue&);
 
 // Moves a note to a song beat and a pitch. It can't go to before its clip's start (one that starts before it already,
@@ -130,6 +140,7 @@ void changeNoteLengths (Song&, const std::vector<NoteRef>&, BeatDuration);
 bool areAllNotesMuted (const Song&, const std::vector<NoteRef>&);
 void toggleNotesMuted (Song&, const std::vector<NoteRef>&); // mutes them, or unmutes them if they all are
 void setNoteVelocities (Song&, const std::vector<NoteRef>&, int velocity);
+void setNoteChannels (Song&, const std::vector<NoteRef>&, int channel); // 1 to 16, kept within them
 
 // Slide and portamento notes (NoteValues.h), switched on for all of them, or off if all are, in the caller's undo step.
 bool areAllNotesSlides (const Song&, const std::vector<NoteRef>&);

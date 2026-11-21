@@ -184,7 +184,7 @@ double percentOfCore (const DeviceCase& c)
     std::vector<dev::NoteEvent> notes;
 
     for (int n = 0; n < c.notes; ++n)
-        notes.push_back ({ .type = dev::NoteEvent::Type::noteOn, .sample = 0, .number = isDrums (c) ? 36 + n : 48 + n * 3, .value = 0.8f });
+        notes.push_back ({ dev::NoteEvent::Type::noteOn, 0, isDrums (c) ? 36 + n : 48 + n * 3, 0.8f });
 
     const int numBlocks = juce::roundToInt (20.0 * benchRate / benchBlock);
     const int warmUp = 20;
@@ -224,7 +224,7 @@ std::pair<double, double> timeToSound (const DeviceCase& c)
     processor->prepare (benchRate, benchBlock);
     const auto values = defaultsOf (*c.info);
     juce::AudioBuffer<float> buffer (2, benchBlock);
-    const dev::NoteEvent note { .type = dev::NoteEvent::Type::noteOn, .sample = 0, .number = isDrums (c) ? 36 : 60, .value = 0.8f };
+    const dev::NoteEvent note { dev::NoteEvent::Type::noteOn, 0, isDrums (c) ? 36 : 60, 0.8f };
     double quiet = -1.0, loud = -1.0;
 
     for (int b = 0; b < 20 && loud < 0.0; ++b)
@@ -516,7 +516,7 @@ TEST_CASE ("Benchmark: each device's reset, as Play and a jump reset every devic
         std::vector<dev::NoteEvent> notes;
 
         for (int n = 0; n < 8; ++n)
-            notes.push_back ({ .type = dev::NoteEvent::Type::noteOn, .sample = 0, .number = 48 + n * 3, .value = 0.8f });
+            notes.push_back ({ dev::NoteEvent::Type::noteOn, 0, 48 + n * 3, 0.8f });
 
         std::vector<double> times;
 

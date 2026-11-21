@@ -12,51 +12,57 @@ namespace phazite
 {
 namespace
 {
-    // A note event as a MIDI message on the first channel; 0 bytes for one that has none.
-    int toMidi (const devices::NoteEvent& event, std::uint8_t* bytes) noexcept
+    // A note event as a MIDI message on its channel; 0 bytes for one that has none. All notes off is every channel's, which
+    // the caller writes on each channel it is to end notes on (onChannel).
+    int toMidi (const devices::NoteEvent& event, std::uint8_t* bytes, int onChannel = 0) noexcept
     {
         using Type = devices::NoteEvent::Type;
         const auto byte = [] (int value) { return (std::uint8_t) juce::jlimit (0, 127, value); };
+        const auto status = [&event] (int kind) { return (std::uint8_t) (kind | (event.channel & 15)); };
 
         switch (event.type)
         {
             case Type::noteOn:
             case Type::portamentoOn: // a plug-in plays it as a plain note, as FL Studio's portamento notes reach plug-ins
-                bytes[0] = 0x90;
+                bytes[0] = status (0x90);
                 bytes[1] = byte (event.number);
                 bytes[2] = byte (std::max (1, juce::roundToInt (event.value * 127.0f)));
                 return 3;
             case Type::noteOff:
-                bytes[0] = 0x80;
+                bytes[0] = status (0x80);
                 bytes[1] = byte (event.number);
                 bytes[2] = byte (juce::roundToInt (event.value * 127.0f));
                 return 3;
             case Type::pitchBend:
             {
                 const auto bend = juce::jlimit (0, 16383, juce::roundToInt ((event.value + 1.0f) * 8192.0f));
-                bytes[0] = 0xe0;
+                bytes[0] = status (0xe0);
                 bytes[1] = (std::uint8_t) (bend & 0x7f);
                 bytes[2] = (std::uint8_t) (bend >> 7);
                 return 3;
             }
             case Type::controller:
-                bytes[0] = 0xb0;
+                bytes[0] = status (0xb0);
                 bytes[1] = byte (event.number);
                 bytes[2] = byte (juce::roundToInt (event.value * 127.0f));
                 return 3;
-            case Type::allNotesOff: // which the helper ends the notes it gave the plug-in for (host/core/Instance.h)
-                bytes[0] = 0xb0;
+            case Type::allNotesOff: // which the helper ends the notes it gave the plug-in on that channel for (host/core/Instance.h)
+                bytes[0] = (std::uint8_t) (0xb0 | (onChannel & 15));
                 bytes[1] = 123;
                 bytes[2] = 0;
                 return 3;
             case Type::aftertouch: // polyphonic: the note's
-                bytes[0] = 0xa0;
+                bytes[0] = status (0xa0);
                 bytes[1] = byte (event.number);
                 bytes[2] = byte (juce::roundToInt (event.value * 127.0f));
                 return 3;
             case Type::channelPressure:
-                bytes[0] = 0xd0;
+                bytes[0] = status (0xd0);
                 bytes[1] = byte (juce::roundToInt (event.value * 127.0f));
+                return 2;
+            case Type::programChange:
+                bytes[0] = status (0xc0);
+                bytes[1] = byte (event.number);
                 return 2;
             case Type::slide: // MIDI has no slide of one note to another
                 return 0;
@@ -281,8 +287,12 @@ void SandboxedProcessor::keep (std::span<const devices::NoteEvent> events) noexc
         if (event.type == Type::noteOff)
         {
             // A note that began among them: neither its start nor its end is played.
-            const auto last = std::find_if (waiting.rbegin(), waiting.rend(), [&event] (const devices::NoteEvent& other)
-                                            { return (isNoteOn (other) || other.type == Type::noteOff) && other.number == event.number; });
+            const auto last = std::find_if (waiting.rbegin(), waiting.rend(),
+                                            [&event] (const devices::NoteEvent& other)
+                                            {
+                                                return (isNoteOn (other) || other.type == Type::noteOff) && other.number == event.number
+                                                       && other.channel == event.channel;
+                                            });
 
             if (last != waiting.rend() && isNoteOn (*last))
             {
@@ -472,8 +482,31 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
     // The events that waited for a block, at its start, then its own; those there is no room for wait for the next.
     block.numEvents = 0;
 
-    const auto send = [&block, &channel, &limits] (const devices::NoteEvent& event, int sample) noexcept
+    const auto send = [this, &block, &channel, &limits] (const devices::NoteEvent& event, int sample) noexcept
     {
+        // All notes off on the first channel and on each the plug-in was ever given a note on: a CC 123 on each, at which the
+        // helper ends the notes it gave it there (a clip's own CC 123 on a channel ends that channel's alone). Nothing
+        // allocated: a bit for each channel.
+        if (event.type == devices::NoteEvent::Type::allNotesOff)
+        {
+            const auto channels = (std::uint16_t) (channelsWithNotes | 1u);
+
+            if (block.numEvents + juce::countNumberOfBits ((juce::uint32) channels) > limits.maxEvents)
+                return false;
+
+            for (int on = 0; on < 16; ++on)
+            {
+                if ((channels & (1u << on)) == 0)
+                    continue;
+
+                auto& midi = channel.getEvents()[block.numEvents++];
+                midi.sample = sample;
+                midi.size = (std::uint8_t) toMidi (event, midi.bytes, on);
+            }
+
+            return true;
+        }
+
         if (block.numEvents >= limits.maxEvents)
             return false;
 
@@ -483,6 +516,9 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
 
         if (midi.size > 0)
             ++block.numEvents;
+
+        if (isNoteOn (event))
+            channelsWithNotes = (std::uint16_t) (channelsWithNotes | (1u << (event.channel & 15)));
 
         return true;
     };

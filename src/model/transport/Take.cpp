@@ -79,22 +79,28 @@ namespace
     constexpr int sustainPedal = 64, bendMiddle = 8192;
 } // namespace
 
-std::optional<std::tuple<ControlKind, int, int>> Take::toControl (const devices::NoteEvent& event)
+std::optional<ControlValue> Take::toControl (const devices::NoteEvent& event)
 {
     using Type = devices::NoteEvent::Type;
     const auto toByte = [] (float value) { return juce::jlimit (0, 127, juce::roundToInt (value * 127.0f)); };
+    const auto channel = (event.channel & 15) + 1;
 
     switch (event.type)
     {
         case Type::controller:
-            return std::tuple (ControlKind::controller, juce::jlimit (0, 127, event.number), toByte (event.value));
+            return ControlValue { {}, ControlKind::controller, juce::jlimit (0, 127, event.number), toByte (event.value), channel };
         case Type::pitchBend:
-            return std::tuple (ControlKind::pitchWheel, 0,
-                               juce::jlimit (0, 16383, juce::roundToInt (event.value * (float) bendMiddle) + bendMiddle));
+            return ControlValue { {},
+                                  ControlKind::pitchWheel,
+                                  0,
+                                  juce::jlimit (0, 16383, juce::roundToInt (event.value * (float) bendMiddle) + bendMiddle),
+                                  channel };
         case Type::channelPressure:
-            return std::tuple (ControlKind::channelPressure, 0, toByte (event.value));
+            return ControlValue { {}, ControlKind::channelPressure, 0, toByte (event.value), channel };
         case Type::aftertouch:
-            return std::tuple (ControlKind::aftertouch, juce::jlimit (0, 127, event.number), toByte (event.value));
+            return ControlValue { {}, ControlKind::aftertouch, juce::jlimit (0, 127, event.number), toByte (event.value), channel };
+        case Type::programChange:
+            return ControlValue { {}, ControlKind::programChange, 0, juce::jlimit (0, 127, event.number), channel };
         case Type::noteOn:
         case Type::noteOff:
         case Type::allNotesOff:
@@ -106,36 +112,43 @@ std::optional<std::tuple<ControlKind, int, int>> Take::toControl (const devices:
     return std::nullopt;
 }
 
-std::size_t Take::getKey (ControlKind kind, int number) noexcept
+std::size_t Take::getKey (ControlKind kind, int number, int channel) noexcept
 {
+    const auto first = (std::size_t) (juce::jlimit (1, 16, channel) - 1) * controlKeysPerChannel;
+
     switch (kind)
     {
         case ControlKind::controller:
-            return (std::size_t) juce::jlimit (0, 127, number);
+            return first + (std::size_t) juce::jlimit (0, 127, number);
         case ControlKind::pitchWheel:
-            return 128;
+            return first + 128;
         case ControlKind::channelPressure:
-            return 129;
+            return first + 129;
         case ControlKind::aftertouch:
-            return 130 + (std::size_t) juce::jlimit (0, 127, number);
+            return first + 130 + (std::size_t) juce::jlimit (0, 127, number);
+        case ControlKind::programChange:
+            return first + 258;
     }
 
-    return 0;
+    return first;
 }
 
 bool Take::carriesOn (const PlayedControl& carried, const PlayedControl& release, const PlayedNotes& endedPart) noexcept
 {
-    if (carried.kind != release.kind || carried.number != release.number)
+    if (carried.kind != release.kind || carried.number != release.number || carried.channel != release.channel)
         return false;
+
+    const auto& end = endedPart.ends[(size_t) (juce::jlimit (1, 16, release.channel) - 1)];
 
     switch (release.kind)
     {
         case ControlKind::pitchWheel:
-            return carried.value == endedPart.endBend;
+            return carried.value == end.bend;
         case ControlKind::channelPressure:
-            return carried.value == endedPart.endPressure;
+            return carried.value == end.pressure;
         case ControlKind::controller: // the pedal
         case ControlKind::aftertouch:
+        case ControlKind::programChange: // never let go of
             break;
     }
 
@@ -455,7 +468,7 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session, Take* goesOnFrom)
     for (const auto& event : session.getPlayedEvents())
         if (event.track == (std::int64_t) take->midiTrack.getRaw())
             if (const auto control = toControl (event.event))
-                take->heldAtStart[getKey (std::get<0> (*control), std::get<1> (*control))] = std::get<2> (*control);
+                take->heldAtStart[getKey (control->kind, control->number, control->channel)] = control->value;
 
     // Each armed track's input the audio device has, into a file of its own.
     std::vector<std::unique_ptr<engine::Recording::Input>> inputs;
@@ -774,22 +787,19 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
     std::vector<PlayedControl> controls;               // every one played, before the take's start too
     const auto end = startSample + length - midiShift; // what was heard last, as if nothing looped
     const auto early = afterJump ? (std::int64_t) 0 : roundToWhole<std::int64_t> (earlyNoteSeconds * rate);
-    std::array<int, numControlKeys> lastValue; // each controller's (by getKey()), as played last
-    lastValue.fill (-1);
-    std::array<std::ptrdiff_t, numControlKeys> lastIndex; // and where its last one kept is in controls
-    lastIndex.fill (-1);
+    std::vector<int> lastValue (numControlKeys, -1);            // each controller's (by getKey()), as played last
+    std::vector<std::ptrdiff_t> lastIndex (numControlKeys, -1); // and where its last one kept is in controls
     const auto millisecond = roundToWhole<std::int64_t> (controlSeconds * rate);
 
     // Each note played into the track, from where it was heard to where it ended, as if nothing looped; one still held
     // ends where the take does. One played a moment before the take started (a downbeat played early after the count-in,
     // or in the first samples the output's latency covers) starts where it did, as Ableton Live, Logic Pro and Cubase keep
-    // a note played just before the count-in ends.
-    std::array<int, 128> sounding;
-    sounding.fill (-1);
+    // a note played just before the count-in ends. A note's end is its start's on its channel and pitch.
+    std::vector<int> sounding (16 * 128, -1); // by channel x 128 + pitch
 
-    const auto endNote = [&notes, &sounding] (int pitch, std::int64_t at)
+    const auto endNote = [&notes, &sounding] (size_t key, std::int64_t at)
     {
-        if (auto& index = sounding[(size_t) pitch]; index >= 0)
+        if (auto& index = sounding[key]; index >= 0)
         {
             notes[(size_t) index].end = std::max (at, notes[(size_t) index].start);
             index = -1;
@@ -806,30 +816,32 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
         using Type = devices::NoteEvent::Type;
         const auto& note = event.event;
         const auto pitch = juce::jlimit (0, 127, note.number);
+        const auto noteKey = (size_t) (note.channel & 15) * 128 + (size_t) pitch;
 
         if (note.type == Type::noteOn)
         {
-            endNote (pitch, at);
+            endNote (noteKey, at);
 
             if (at >= startSample - early)
             {
-                sounding[(size_t) pitch] = (int) notes.size();
-                notes.push_back ({ pitch, juce::jlimit (1, 127, juce::roundToInt (note.value * 127.0f)), std::max (at, startSample), end });
+                sounding[noteKey] = (int) notes.size();
+                notes.push_back ({ pitch, juce::jlimit (1, 127, juce::roundToInt (note.value * 127.0f)), std::max (at, startSample), end,
+                                   (note.channel & 15) + 1 });
             }
         }
         else if (note.type == Type::noteOff)
         {
-            endNote (pitch, at);
+            endNote (noteKey, at);
         }
         else if (note.type == Type::allNotesOff)
         {
-            for (int p = 0; p < 128; ++p)
-                endNote (p, at);
+            for (size_t k = 0; k < sounding.size(); ++k)
+                endNote (k, at);
         }
         else if (const auto played = toControl (note))
         {
             // A value that repeats the one before it changes nothing.
-            const PlayedControl control { std::get<0> (*played), std::get<1> (*played), std::get<2> (*played), at };
+            const PlayedControl control { played->kind, played->number, played->value, at, played->channel };
             const auto key = getKey (control);
 
             if (std::exchange (lastValue[key], control.value) == control.value)
@@ -852,10 +864,11 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
     // asked; those whose values hold as it starts (carried in: the pedal held down, the bend away from its middle, the
     // channel's pressure held, and any controller moved a moment before, as the notes played then are kept); and the
     // pedal, the bend and the channel's pressure let go of at its end, where they are still down, away from the middle or
-    // pressed then. A note's pressure goes with its note, which ends.
+    // pressed then; each channel's on that channel. A note's pressure goes with its note, which ends; a program change is
+    // never let go of.
     const auto controlsIn = [this, &controls, early] (std::int64_t from, std::int64_t to, const TakeLoop* fold, PlayedNotes& part)
     {
-        std::array<bool, numControlKeys> found {}; // each controller's last value before the part
+        std::vector<bool> found (numControlKeys, false); // each controller's last value before the part
 
         const auto holds = [] (const PlayedControl& control)
         {
@@ -866,20 +879,23 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
 
         for (auto control = controls.rbegin(); control != controls.rend(); ++control)
         {
-            if (control->at >= from || std::exchange (found[getKey (*control)], true))
+            if (control->at >= from || found[getKey (*control)])
                 continue;
 
+            found[getKey (*control)] = true;
+
             if (holds (*control) || control->at >= from - early)
-                part.carried.push_back ({ control->kind, control->number, control->value, from });
+                part.carried.push_back ({ control->kind, control->number, control->value, from, control->channel });
         }
 
-        // The pedal, the bend and the pressure as the take started, where nothing played since is kept to say (what was
-        // played before it goes after 30 seconds: PlaybackHost::getPlayedEvents()).
-        for (const auto& [kind, number] : { std::pair (ControlKind::controller, sustainPedal), std::pair (ControlKind::pitchWheel, 0),
-                                            std::pair (ControlKind::channelPressure, 0) })
-            if (const auto key = getKey (kind, number); ! found[key] && heldAtStart[key] >= 0)
-                if (const PlayedControl held { kind, number, heldAtStart[key], from }; holds (held))
-                    part.carried.push_back (held);
+        // The pedal, the bend and the pressure as the take started, on each channel, where nothing played since is kept to
+        // say (what was played before it goes after 30 seconds: PlaybackHost::getPlayedEvents()).
+        for (int channel = 1; channel <= 16; ++channel)
+            for (const auto& [kind, number] : { std::pair (ControlKind::controller, sustainPedal), std::pair (ControlKind::pitchWheel, 0),
+                                                std::pair (ControlKind::channelPressure, 0) })
+                if (const auto key = getKey (kind, number, channel); ! found[key] && heldAtStart[key] >= 0)
+                    if (const PlayedControl held { kind, number, heldAtStart[key], from, channel }; holds (held))
+                        part.carried.push_back (held);
 
         for (auto control : controls)
         {
@@ -895,33 +911,34 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
         std::stable_sort (part.controls.begin(), part.controls.end(),
                           [] (const PlayedControl& a, const PlayedControl& b) { return a.at < b.at; });
 
-        auto pedal = 0, bend = bendMiddle, pressure = 0;
-
         for (const auto* list : { &part.carried, &part.controls })
         {
             for (const auto& control : *list)
             {
+                auto& at = part.ends[(size_t) (juce::jlimit (1, 16, control.channel) - 1)];
+
                 if (control.kind == ControlKind::pitchWheel)
-                    bend = control.value;
+                    at.bend = control.value;
                 else if (control.kind == ControlKind::channelPressure)
-                    pressure = control.value;
+                    at.pressure = control.value;
                 else if (control.kind == ControlKind::controller && control.number == sustainPedal)
-                    pedal = control.value;
+                    at.pedal = control.value;
             }
         }
 
-        part.endPedal = pedal;
-        part.endBend = bend;
-        part.endPressure = pressure;
+        for (int channel = 1; channel <= 16; ++channel)
+        {
+            const auto& at = part.ends[(size_t) channel - 1];
 
-        if (pedal >= 64)
-            part.released.push_back ({ ControlKind::controller, sustainPedal, 0, part.to });
+            if (at.pedal >= 64)
+                part.released.push_back ({ ControlKind::controller, sustainPedal, 0, part.to, channel });
 
-        if (bend != bendMiddle)
-            part.released.push_back ({ ControlKind::pitchWheel, 0, bendMiddle, part.to });
+            if (at.bend != bendMiddle)
+                part.released.push_back ({ ControlKind::pitchWheel, 0, bendMiddle, part.to, channel });
 
-        if (pressure > 0)
-            part.released.push_back ({ ControlKind::channelPressure, 0, 0, part.to });
+            if (at.pressure > 0)
+                part.released.push_back ({ ControlKind::channelPressure, 0, 0, part.to, channel });
+        }
     };
 
     // Where each goes in the song, in the parts a clip of them goes over (collectNotes() in Take.h says which).
@@ -1020,6 +1037,7 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
         int pitch = 60, velocity = 100;
         double start = 0.0, length = 0.0;
         size_t part = 0;
+        int channel = 1;
     };
 
     std::vector<Placed> placed;
@@ -1047,7 +1065,7 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
                     ++in;
             }
 
-            placed.push_back ({ note.pitch, note.velocity, start, noteLength, in });
+            placed.push_back ({ note.pitch, note.velocity, start, noteLength, in, note.channel });
         }
     }
 
@@ -1148,7 +1166,7 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
         if (const auto clip = clipFor (note.part, beat, true); clip.isValid())
         {
             addNote (song, clip, note.pitch, beat, BeatDuration::fromBeats (std::max (note.length, getMinimumNoteLength().inBeats())),
-                     note.velocity);
+                     note.velocity, note.channel);
             reach[note.part].add (beat, clip);
         }
     }
@@ -1164,7 +1182,8 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
         for (const auto& child : clipState)
         {
             if (! child.hasType (schema::CONTROL) || findControlKind (child) != control.kind
-                || (hasNumber (control.kind) && (int) child[schema::controlNumber] != control.number))
+                || (hasNumber (control.kind) && (int) child[schema::controlNumber] != control.number)
+                || readChannel (child, schema::controlChannel) != control.channel)
                 continue;
 
             const auto at = contentStart.inBeats() + (double) child[schema::controlBeat];
@@ -1241,31 +1260,30 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
 
                 writes.push_back ({ last->second, beat, control });
                 seam.end.released.push_back (control);
-                seam.writes.push_back ({ beat, control.kind, control.number, control.value });
+                seam.writes.push_back ({ beat, control.kind, control.number, control.value, control.channel });
             }
 
             // What the take after a jump may carry on (followOn()).
             if (p + 1 == parts.size())
             {
-                seam.end.endPedal = parts[p].endPedal;
-                seam.end.endBend = parts[p].endBend;
-                seam.end.endPressure = parts[p].endPressure;
+                seam.end.ends = parts[p].ends;
                 *seamAtEnd = std::move (seam);
             }
         }
     }
 
-    // A controller recorded into a clip that was there takes the place of its earlier values in it, from its first move in
-    // the take to its last, as Ableton Live overdubs a clip's envelope; the clip's other controllers and its notes stay.
+    // A controller recorded into a clip that was there takes the place of its earlier values in it on its channel, from its
+    // first move in the take to its last, as Ableton Live overdubs a clip's envelope; the clip's other controllers, those on
+    // other channels and its notes stay.
     {
-        std::map<std::tuple<std::uint64_t, ControlKind, int>, std::pair<BeatPosition, BeatPosition>> spans;
+        std::map<std::tuple<std::uint64_t, ControlKind, int, int>, std::pair<BeatPosition, BeatPosition>> spans;
 
         for (const auto& write : writes)
         {
             if (! write.moved || made.contains (write.clip.getRaw()))
                 continue;
 
-            const auto key = std::tuple (write.clip.getRaw(), write.control.kind, write.control.number);
+            const auto key = std::tuple (write.clip.getRaw(), write.control.kind, write.control.number, write.control.channel);
 
             if (auto found = spans.find (key); found == spans.end())
                 spans.emplace (key, std::pair (write.beat, write.beat));
@@ -1274,14 +1292,16 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
         }
 
         for (const auto& [key, span] : spans)
-            removeControls (song, ClipID::fromRaw (std::get<0> (key)), std::get<1> (key), std::get<2> (key), span.first, span.second);
+            removeControls (song, ClipID::fromRaw (std::get<0> (key)), std::get<1> (key), std::get<2> (key), std::get<3> (key), span.first,
+                            span.second);
     }
 
     // Each clip's at once, in order (a bend sweep holds thousands).
     std::map<std::uint64_t, std::vector<ControlValue>> byClip;
 
     for (const auto& write : writes)
-        byClip[write.clip.getRaw()].push_back ({ write.beat, write.control.kind, write.control.number, write.control.value });
+        byClip[write.clip.getRaw()].push_back (
+            { write.beat, write.control.kind, write.control.number, write.control.value, write.control.channel });
 
     for (const auto& [clip, values] : byClip)
         addControls (song, ClipID::fromRaw (clip), values);

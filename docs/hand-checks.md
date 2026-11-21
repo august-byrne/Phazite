@@ -341,6 +341,16 @@ the [changelog](changelog.md).
 | Z4 | The view's ... menu: untick Show Automatic Saves; look in Settings under Versions; tick it again there | The grey rows go and come back, and the menu and the setting follow each other | |
 | Z5 | Switch to another branch, change something, discard it, and switch back | That automatic save's ring is in the other branch's column, and its row says "on" that branch | |
 
+## What stage 5 built (from 2026-11-20)
+
+| # | Check | Proves | Checked on |
+|---|---|---|---|
+| W1 | Load a plug-in with several parts (a sampler with instruments on channels 1 and 2) on a track, draw two notes, select one and set the inspector's Channel to 2; play | Each note plays its own part; the field shows 2 for that note, and Undo ("Change Channel") puts it back | |
+| W2 | Set a MIDI keyboard to send on channel 3 and record a phrase with the sustain pedal into a plug-in with a part on channel 3; select the recorded notes | The part on channel 3 is heard while playing and from the take; the inspector shows Channel 3 | |
+| W3 | Move the keyboard's pitch-bend wheel into a plug-in synth while holding a note; record it and play the take | The note bends as the wheel moves, and again from the take | |
+| W4 | Import a MIDI file that holds program changes onto a plug-in with programs (or press a program button on the keyboard while recording), and play from the start, from after the change, and round a loop after it | The plug-in changes its program where the file says; starting after the change it is on that program at once; the loop does not load the program again each round; the title bar shows no unsaved change from playing | |
+| W5 | Export that song twice | Both files are the same, and the program changes where the song says | |
+
 ## Performance on other machines
 
 Numbers and how to run the benchmarks are in [performance.md](performance.md).

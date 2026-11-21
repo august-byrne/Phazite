@@ -17,40 +17,45 @@ namespace phazite::engine
 class NoteSequence
 {
 public:
-    // A note as it plays: from its start to its end, in beats, at most to its clip's end. A slide note plays nothing itself
-    // but a slide event at its start, which glides what sounds then to its pitch by its end; a portamento note starts with a
-    // portamento note on (devices/core/Processor.h).
+    // A note as it plays: from its start to its end, in beats, at most to its clip's end, on a MIDI channel (0 to 15, MIDI's
+    // 1 to 16). A slide note plays nothing itself but a slide event at its start, which glides what sounds then to its pitch
+    // by its end, on every channel; a portamento note starts with a portamento note on (devices/core/Processor.h).
     struct Note
     {
         double start = 0.0, end = 0.0;
         int pitch = 60;
         float velocity = 0.8f; // 0 to 1
         bool slide = false, portamento = false;
+        std::uint8_t channel = 0;
     };
 
-    // A controller's change (a pitch bend or a MIDI controller), at a beat.
+    // A controller's change (a pitch bend, a MIDI controller, pressure or a program change), at a beat, on a channel. A
+    // program change's number is its program (0 to 127), its value 0.
     struct Control
     {
         double beat = 0.0;
         devices::NoteEvent::Type type = devices::NoteEvent::Type::controller;
         int number = 0;
         float value = 0.0f; // as a device takes it (devices/core/Processor.h)
+        std::uint8_t channel = 0;
     };
 
     // What happens at a beat, in the order played: a note's start or end, a controller's change, or a slide (whose value is
-    // its length in beats, which the engine plays in seconds).
+    // its length in beats, which the engine plays in seconds), on its channel (a slide's is 0: it is every channel's).
     struct Event
     {
         double beat = 0.0;
         devices::NoteEvent::Type type = devices::NoteEvent::Type::noteOn;
         int number = 0;
         float value = 0.0f;
+        std::uint8_t channel = 0;
     };
 
     NoteSequence() = default;
 
-    // From the notes and controller events of a track's clips. A note that starts again on a pitch still sounding ends the
-    // one before it there, as a MIDI note can't play twice at once.
+    // From the notes and controller events of a track's clips. A note that starts again on a pitch still sounding on its
+    // channel ends the one before it there, as a MIDI note can't play twice at once on a channel; two notes of one pitch on
+    // two channels both play.
     NoteSequence (std::vector<Note>, std::vector<Control>);
 
     const std::vector<Event>& getEvents() const noexcept { return events; } // in time order, ends before starts at a beat
@@ -63,8 +68,8 @@ public:
     // it: where a stretch played from a beat starts, the notes sounding there), by their starts, as a look through every
     // note before it would find them; without looking through them (known bug 85: a loop's wrap and a jump did, on every
     // track, in one block). It looks through the notes since the last of its marks before the beat and those its mark holds:
-    // at most 63 and 128, as no pitch sounds twice at once (the sequence ends a note where the next on its pitch starts, so
-    // a mark holds one note of a pitch at most however a file's notes overlap).
+    // at most 63 and 16 x 128, as no pitch sounds twice at once on a channel (the sequence ends a note where the next on its
+    // channel and pitch starts, so a mark holds one note of a channel's pitch at most however a file's notes overlap).
     template <typename Action>
     void forEachSounding (double before, double endsAfter, Action&& action) const noexcept
     {
@@ -84,9 +89,10 @@ public:
                 action (notes[i]);
     }
 
-    // A controller (by its number), the bend, the channel's pressure or a note's pressure (by the note) that the sequence
-    // changes somewhere, and its value as it is just before a beat: its last change before there, and where that was, or
-    // none (held false).
+    // A controller (by its number), the bend, the channel's pressure, a note's pressure (by the note) or the program, each
+    // on its channel, that the sequence changes somewhere, and its value as it is just before a beat: its last change before
+    // there, and where that was, or none (held false). A program change's is the program, as its number (its value is 0);
+    // without one held, the number says nothing.
     struct ControlAt
     {
         devices::NoteEvent::Type type = devices::NoteEvent::Type::controller;
@@ -94,11 +100,12 @@ public:
         float value = 0.0f; // as a device takes it
         double beat = 0.0;
         bool held = false;
+        std::uint8_t channel = 0;
     };
 
     // Real-time safe: calls an action with each of them, as it is just before a beat (what playback that starts or jumps
     // there chases: Engine.h), but for those that change between that beat and another (whose change there plays where
-    // playback starts: the first sample's): a search through its own changes for each one the sequence changes (258 at
+    // playback starts: the first sample's): a search through its own changes for each one the sequence changes (16 x 259 at
     // most), nothing allocated.
     template <typename Action>
     void forEachControlAt (double before, double changesUntil, Action&& action) const noexcept
@@ -120,6 +127,9 @@ public:
                 control.value = change.value;
                 control.beat = change.beat;
                 control.held = true;
+
+                if (control.type == devices::NoteEvent::Type::programChange)
+                    control.number = change.number;
             }
 
             action (std::as_const (control));
@@ -135,10 +145,12 @@ private:
     std::vector<Note> notes;
     std::vector<Event> events;
 
-    // The index of the controllers' values (forEachControlAt()): each that changes anywhere once (by its type and number),
-    // and its changes, by their places among the events, in their order, one after another (each one's from its start in
-    // controlStarts to the next's): as many as the changes, whatever their kinds.
-    static constexpr std::size_t maximumControlKeys = 128 + 2 + 128;
+    // The index of the controllers' values (forEachControlAt()): each that changes anywhere once (by its type, channel and
+    // number; a program change by its type and channel alone), and its changes, by their places among the events, in their
+    // order, one after another (each one's from its start in controlStarts to the next's): as many as the changes, whatever
+    // their kinds. Each channel's keys: 128 controllers, the bend, the channel's pressure, 128 notes' pressure, the program.
+    static constexpr std::size_t controlKeysPerChannel = 128 + 2 + 128 + 1;
+    static constexpr std::size_t maximumControlKeys = 16 * controlKeysPerChannel;
     std::vector<ControlAt> controlKeys;
     std::vector<std::uint32_t> controlChanges, controlStarts;
 

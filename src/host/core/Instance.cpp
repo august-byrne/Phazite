@@ -281,6 +281,44 @@ void Instance::setProgram (int index)
     toldProgram = plugin->getCurrentProgram(); // Phazite's own choice, which it knows of
 }
 
+void Instance::setProgramPlayed (int index, const std::function<void (sandbox::MessageWriter&)>& send)
+{
+    // One of its programs, of a plug-in that has more than one, whatever the message's channel; set as a state is given, not
+    // while a block plays. What the plug-in tells of its parameters as it is set is the program's doing, which Phazite isn't
+    // told of as a change of the plug-in's own (parameterValueChanged()); Phazite is told the program instead, as the song's,
+    // with those values. JUCE workaround W58 (docs/juce-workarounds.md).
+    const auto numPrograms = plugin->getNumPrograms();
+
+    if (numPrograms <= 1 || ! juce::isPositiveAndBelow (index, numPrograms))
+        return;
+
+    if (index == plugin->getCurrentProgram() && index == toldProgram)
+        return;
+
+    programValues.clear();
+
+    if (index != plugin->getCurrentProgram())
+    {
+        settingProgramPlayed = true;
+
+        {
+            const juce::ScopedLock held (plugin->getCallbackLock());
+            plugin->setCurrentProgram (index);
+        }
+
+        settingProgramPlayed = false;
+    }
+
+    toldProgram = plugin->getCurrentProgram();
+    sandbox::MessageWriter message (sandbox::MessageType::programPlayed, 0);
+    message.add (id).add ((std::int32_t) toldProgram);
+
+    for (const auto& [parameter, value] : programValues)
+        message.add ((std::int32_t) parameter).add ((double) value);
+
+    send (message);
+}
+
 void Instance::setParameter (int index, float value)
 {
     if (juce::isPositiveAndBelow (index, parameters.size()))
@@ -343,6 +381,12 @@ void Instance::takeNotices (const std::function<void (sandbox::MessageWriter&)>&
 
     tellOffline();
 
+    if (const auto wanted = programPlayed.exchange (-1); wanted >= 0)
+    {
+        setProgramPlayed (wanted & 0x7f, send);
+        programSetFor = wanted >> 7;
+    }
+
     // Another program than Phazite knows of, however it was said (a restart's echo of the same program changes nothing).
     if (programMayHaveChanged.exchange (false) && plugin->getCurrentProgram() != toldProgram)
         stateChanged = true;
@@ -390,6 +434,17 @@ void Instance::run()
 
         while (rendering && ! offline.load() && ! threadShouldExit())
             juce::Thread::sleep (1);
+
+        // A render's block that holds a program change waits, the same way, for the message thread to have set the program
+        // (setProgramPlayed()), so that in every render the program plays from the start of the block its change lies in. A
+        // live block plays at once, the program coming at the next tick.
+        if (const auto program = rendering ? findProgramChange() : -1; program >= 0)
+        {
+            const auto ticket = askForProgram (program);
+
+            while (programSetFor.load() != ticket && ! threadShouldExit())
+                juce::Thread::sleep (1);
+        }
 
         if (threadShouldExit())
             break;
@@ -509,6 +564,10 @@ void Instance::playPiece (int start, int numSamples) noexcept
             else if (status == 0xb0 && (number == 123 || number == 120)) // all notes off, all sound off
                 endNotes (midiChannel, at);
         }
+        else if (event.size == 2 && (event.bytes[0] & 0xf0) == 0xc0)
+        {
+            askForProgram (event.bytes[1] & 0x7f); // which the message thread sets (takeNotices())
+        }
 
         midi.addEvent (event.bytes, event.size, at);
     }
@@ -551,6 +610,26 @@ void Instance::endNotes (int midiChannel, int sample) noexcept
     notes.reset();
 }
 
+int Instance::findProgramChange() const noexcept
+{
+    const auto& info = channel->getInfo();
+    const auto* events = channel->getEvents();
+    auto program = -1;
+
+    for (int i = 0; i < juce::jlimit (0, channel->getLimits().maxEvents, info.numEvents); ++i)
+        if (events[i].size == 2 && (events[i].bytes[0] & 0xf0) == 0xc0)
+            program = events[i].bytes[1] & 0x7f;
+
+    return program;
+}
+
+int Instance::askForProgram (int program) noexcept
+{
+    programTicket = programTicket % maximumProgramTicket + 1;
+    programPlayed.store ((programTicket << 7) | program);
+    return programTicket;
+}
+
 void Instance::audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& details)
 {
     if (details.latencyChanged)
@@ -563,7 +642,10 @@ void Instance::audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails
     // changed, with new parameter info, at every restartComponent() a VST3 makes, for its latency or its parameters' names
     // too, which many make as they sit there: that alone changes nothing (the values it changes come as theirs), and counting
     // it made an idle project's plug-ins an unsaved change. JUCE workaround W3 (docs/juce-workarounds.md).
-    if (details.nonParameterStateChanged || (details.programChanged && ! details.parameterInfoChanged))
+    // Not what the program the song's MIDI set says as it is set (setProgramPlayed()), which is the song's own choice.
+    const auto playedProgram = settingProgramPlayed.load() && juce::MessageManager::existsAndIsCurrentThread();
+
+    if (! playedProgram && (details.nonParameterStateChanged || (details.programChanged && ! details.parameterInfoChanged)))
         stateChanged = true;
 
     // A restart that does change the program (a MIDI program change, as JUCE's VST3 host tells it) is one, which the
@@ -576,6 +658,14 @@ void Instance::parameterValueChanged (int index, float value)
 {
     if (! juce::isPositiveAndBelow (index, parameters.size()))
         return;
+
+    // The program the song's MIDI set, as the message thread sets it (setProgramPlayed()): no change of the plug-in's own, but
+    // the song's, told with the program.
+    if (settingProgramPlayed.load() && juce::MessageManager::existsAndIsCurrentThread())
+    {
+        programValues.emplace_back (index, value);
+        return;
+    }
 
     changedValues[(size_t) index] = value;
     changed[(size_t) index] = true;

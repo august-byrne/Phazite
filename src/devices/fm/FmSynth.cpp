@@ -802,8 +802,9 @@ void FmSynth::handle (const NoteEvent& event, std::span<const float> values)
             bend = event.value;
             break;
 
-        case NoteEvent::Type::aftertouch: // it doesn't play by pressure
+        case NoteEvent::Type::aftertouch: // it doesn't play by pressure, and has no programs
         case NoteEvent::Type::channelPressure:
+        case NoteEvent::Type::programChange:
             break;
 
         case NoteEvent::Type::controller:

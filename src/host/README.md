@@ -10,7 +10,7 @@ in `tests/host/`) link; it links `phazite_core` for JUCE and the sandbox. It inc
 | File | What it holds |
 |---|---|
 | `Host.h` | The pipe to Phazite and its requests, handled on the helper's message thread. |
-| `Instance.h` | A plug-in it hosts, and the thread that plays its blocks, in pieces between its parameters' changes, each with the song's place, time signature and bar on its playhead; and what the plug-in changes itself, told to Phazite from the message thread. |
+| `Instance.h` | A plug-in it hosts, and the thread that plays its blocks, in pieces between its parameters' changes, each with the song's place, time signature and bar on its playhead; and what the plug-in changes itself, told to Phazite from the message thread, and the program a MIDI program change asks for, which the message thread sets as the song's. |
 | `Editor.h` | The plug-in's editor, in a window of the helper's inside Phazite's where Phazite places it, which tells Phazite's window nothing of what happens in it (so that the helper waits for nothing of Phazite's), catching the keys Phazite takes over it. |
 | `Platform.cpp` | What the helper asks of the operating system, and its watch for Phazite's end on Linux and macOS. |
 

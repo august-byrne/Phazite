@@ -103,6 +103,8 @@ float ChainState::findCrossover (const Curve* automation, double beat, std::span
 bool ChainState::takes (const devices::NoteEvent& event) noexcept
 {
     using Type = devices::NoteEvent::Type;
+    const auto pitch = std::clamp (event.number, 0, 127);
+    const auto key = (size_t) (event.channel & 15) * 128 + (size_t) pitch; // a note by its channel and pitch
 
     switch (event.type)
     {
@@ -110,26 +112,23 @@ bool ChainState::takes (const devices::NoteEvent& event) noexcept
         case Type::portamentoOn:
         {
             // In its ranges, by the note's velocity as a clip has it (1 to 127).
-            const auto pitch = std::clamp (event.number, 0, 127);
             const auto velocity = std::clamp ((int) std::lround (event.value * 127.0f), 1, 127);
 
             if (pitch < lowKey.load (std::memory_order_relaxed) || pitch > highKey.load (std::memory_order_relaxed)
                 || velocity < lowVelocity.load (std::memory_order_relaxed) || velocity > highVelocity.load (std::memory_order_relaxed))
                 return false;
 
-            sounding.set ((size_t) pitch);
+            sounding.set (key);
             return true;
         }
 
         case Type::noteOff:
         {
             // Wherever its range is now: a note ends in the chain it started in.
-            const auto pitch = (size_t) std::clamp (event.number, 0, 127);
-
-            if (! sounding.test (pitch))
+            if (! sounding.test (key))
                 return false;
 
-            sounding.reset (pitch);
+            sounding.reset (key);
             return true;
         }
 
@@ -139,12 +138,13 @@ bool ChainState::takes (const devices::NoteEvent& event) noexcept
 
         // A note's pressure goes where the note sounds.
         case Type::aftertouch:
-            return sounding.test ((size_t) std::clamp (event.number, 0, 127));
+            return sounding.test (key);
 
         case Type::pitchBend:
         case Type::controller:
         case Type::slide:
         case Type::channelPressure:
+        case Type::programChange:
             break;
     }
 

@@ -13,7 +13,7 @@ model saves and automation and modulation move.
 | File | What it holds |
 |---|---|
 | `DeviceInfo.h` | How a device and its parameters are described, and each knob's travel (`Scale`: logarithmic for every frequency from above 0, else linear or skewed around a midpoint; `Travel`, the same as plain numbers for the audio thread). |
-| `Processor.h` | What a device does with a block: what plays it prepares it, then hands it each block's audio, notes and parameter values. |
+| `Processor.h` | What a device does with a block: what plays it prepares it, then hands it each block's audio, notes and parameter values. A note or a controller's change (`NoteEvent`) is on a MIDI channel, which Phazite's own devices never read (they take every channel as one), and a program change, which they ignore. |
 | `Clock.h` | The clock Phazite reads where a test must steer time (the timeouts that something must not end before, the CPU meters' measure, the engine's block times and playhead stamps): JUCE's high-resolution clock, unless a test holds it. |
 | `AudioThreads.h` | How Phazite's own threads that play audio (the engine's workers, the helpers' threads that play plug-ins) get the audio device's priority, never raising the whole process's. |
 | `DeviceScope.h` | What goes into a device and what comes out of it, for its editor's displays, at no cost until an editor listens. |

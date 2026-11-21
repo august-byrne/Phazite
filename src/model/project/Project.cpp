@@ -699,9 +699,11 @@ namespace
                 { &NOTE, &noteStart, -maxBeat, maxBeat, false, 0.0 },
                 { &NOTE, &noteLength, some, maxBeat, false, 1.0 }, // more than 0: a tempo change scales notes past getMinimumNoteLength()
                 { &NOTE, &noteVelocity, 1.0, 127.0, true, 100.0 },
+                { &NOTE, &noteChannel, 1.0, 16.0, true },
                 { &CONTROL, &controlNumber, 0.0, 127.0, true, 0.0 },
                 { &CONTROL, &controlBeat, -maxBeat, maxBeat, false, 0.0 },
                 { &CONTROL, &controlValue, 0.0, 16383.0, true, 0.0 },
+                { &CONTROL, &controlChannel, 1.0, 16.0, true },
                 { &WARP, &warpTime, 0.0, maxSeconds, false, 0.0 },
                 { &WARP, &warpPlaysAt, -maxSeconds, maxSeconds, false, 0.0 },
             };

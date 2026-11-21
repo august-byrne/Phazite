@@ -11,8 +11,8 @@ namespace
 {
     using Type = devices::NoteEvent::Type;
 
-    // At the same beat: notes end first, then controllers change (the channel's pressure too), then notes start, then a
-    // note's pressure (after its start) and what sounds slides.
+    // At the same beat: notes end first, then controllers change (the channel's pressure too, and a bank select), then the
+    // program, then notes start, then a note's pressure (after its start) and what sounds slides.
     int getOrder (Type type)
     {
         switch (type)
@@ -24,15 +24,23 @@ namespace
             case Type::pitchBend:
             case Type::channelPressure:
                 return 1;
+            case Type::programChange:
+                return 2;
             case Type::noteOn:
             case Type::portamentoOn:
-                return 2;
+                return 3;
             case Type::aftertouch:
             case Type::slide:
-                return 3;
+                return 4;
         }
 
-        return 2;
+        return 3;
+    }
+
+    // A note's key among a channel's notes and the other channels': its channel and pitch.
+    size_t getNoteKey (int channel, int pitch)
+    {
+        return (size_t) (channel & 15) * 128 + (size_t) std::clamp (pitch, 0, 127);
     }
 } // namespace
 
@@ -46,17 +54,19 @@ NoteSequence::NoteSequence (std::vector<Note> allNotes, std::vector<Control> con
 
     std::stable_sort (notes.begin(), notes.end(), [] (const Note& a, const Note& b) { return a.start < b.start; });
 
-    // A pitch that starts again while it sounds ends there first.
-    std::array<Note*, 128> sounding {};
+    // A pitch that starts again on its channel while it sounds there ends there first.
+    std::array<Note*, 16 * 128> sounding {};
 
     for (auto& note : notes)
     {
         note.pitch = std::clamp (note.pitch, 0, 127);
+        note.channel &= 15;
+        auto*& before = sounding[getNoteKey (note.channel, note.pitch)];
 
-        if (auto* before = sounding[(size_t) note.pitch]; before != nullptr && before->end > note.start)
+        if (before != nullptr && before->end > note.start)
             before->end = note.start;
 
-        sounding[(size_t) note.pitch] = &note;
+        before = &note;
     }
 
     std::erase_if (notes, [] (const Note& note) { return note.end <= note.start; });
@@ -85,26 +95,28 @@ NoteSequence::NoteSequence (std::vector<Note> allNotes, std::vector<Control> con
 
     for (const auto& note : notes)
     {
-        events.push_back ({ note.start, note.portamento ? Type::portamentoOn : Type::noteOn, note.pitch, note.velocity });
-        events.push_back ({ note.end, Type::noteOff, note.pitch, 0.0f });
+        events.push_back ({ note.start, note.portamento ? Type::portamentoOn : Type::noteOn, note.pitch, note.velocity, note.channel });
+        events.push_back ({ note.end, Type::noteOff, note.pitch, 0.0f, note.channel });
     }
 
     for (const auto& slide : slides)
         if (slide.end > slide.start)
-            events.push_back ({ slide.start, Type::slide, std::clamp (slide.pitch, 0, 127), (float) (slide.end - slide.start) });
+            events.push_back ({ slide.start, Type::slide, std::clamp (slide.pitch, 0, 127), (float) (slide.end - slide.start), 0 });
 
     for (const auto& control : controls)
-        events.push_back ({ control.beat, control.type, control.number, control.value });
+        events.push_back ({ control.beat, control.type, control.number, control.value, (std::uint8_t) (control.channel & 15) });
 
     std::stable_sort (events.begin(), events.end(), [] (const Event& a, const Event& b)
                       { return a.beat < b.beat || (! (b.beat < a.beat) && getOrder (a.type) < getOrder (b.type)); });
 
     // The index of the controllers' values: each that changes anywhere, a slot of its own (in the order they first change),
-    // and its changes one after another, in their order: counted, then put in their places.
+    // and its changes one after another, in their order: counted, then put in their places. A key's place among its
+    // channel's (controlKeysPerChannel): a controller's by its number, then the bend, the channel's pressure, a note's
+    // pressure by its note, and the program.
     std::array<int, maximumControlKeys> slotOf;
     slotOf.fill (-1);
 
-    const auto keyOf = [] (Type type, int number) -> int
+    const auto placeOf = [] (Type type, int number) -> int
     {
         switch (type)
         {
@@ -116,6 +128,8 @@ NoteSequence::NoteSequence (std::vector<Note> allNotes, std::vector<Control> con
                 return 129;
             case Type::aftertouch:
                 return 130 + std::clamp (number, 0, 127);
+            case Type::programChange:
+                return 258;
             case Type::noteOn:
             case Type::noteOff:
             case Type::allNotesOff:
@@ -127,11 +141,17 @@ NoteSequence::NoteSequence (std::vector<Note> allNotes, std::vector<Control> con
         return -1;
     };
 
+    const auto keyOf = [&placeOf] (const Event& event) -> int
+    {
+        const auto place = placeOf (event.type, event.number);
+        return place < 0 ? -1 : (int) (event.channel & 15) * (int) controlKeysPerChannel + place;
+    };
+
     std::vector<std::uint32_t> counts;
 
     for (const auto& event : events)
     {
-        const auto key = keyOf (event.type, event.number);
+        const auto key = keyOf (event);
 
         if (key < 0)
             continue;
@@ -140,8 +160,10 @@ NoteSequence::NoteSequence (std::vector<Note> allNotes, std::vector<Control> con
 
         if (slot < 0)
         {
+            const auto place = key % (int) controlKeysPerChannel;
+            const auto number = place < 128 ? place : (place >= 130 && place < 258 ? place - 130 : 0);
             slot = (int) controlKeys.size();
-            controlKeys.push_back ({ event.type, key >= 130 ? key - 130 : (key < 128 ? key : 0), 0.0f, 0.0, false });
+            controlKeys.push_back ({ event.type, number, 0.0f, 0.0, false, event.channel });
             counts.push_back (0);
         }
 
@@ -160,7 +182,7 @@ NoteSequence::NoteSequence (std::vector<Note> allNotes, std::vector<Control> con
     auto placed = std::vector<std::uint32_t> (controlStarts.begin(), controlStarts.end() - 1);
 
     for (std::size_t i = 0; i < events.size(); ++i)
-        if (const auto key = keyOf (events[i].type, events[i].number); key >= 0)
+        if (const auto key = keyOf (events[i]); key >= 0)
             controlChanges[placed[(size_t) slotOf[(size_t) key]]++] = (std::uint32_t) i;
 }
 

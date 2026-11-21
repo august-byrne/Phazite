@@ -386,7 +386,7 @@ TEST_CASE ("The FM synth's filter has its envelope and velocity as the synth's h
     juce::AudioBuffer<float> buffer (2, 4800);
     buffer.clear();
     float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
-    const phazite::devices::NoteEvent note { .type = phazite::devices::NoteEvent::Type::noteOn, .sample = 0, .number = 60, .value = 1.0f };
+    const phazite::devices::NoteEvent note { phazite::devices::NoteEvent::Type::noteOn, 0, 60, 1.0f };
     phazite::devices::ProcessContext block;
     block.channels = channels;
     block.numChannels = 2;

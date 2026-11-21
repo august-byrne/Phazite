@@ -518,6 +518,113 @@ TEST_CASE ("A plug-in on a track of notes alone is given only its notes at Play,
     phazite::stopAndReturn (state);
 }
 
+TEST_CASE ("A plug-in in a helper is given each event on its MIDI channel, and a clip's program change not again at each round of a loop")
+{
+    // The MIDI log stand-in keeps what it is given since it was last reset (at Play and at a jump). A note on channel 3, the
+    // mod wheel on channel 2, program 5 on channel 3 at beat 1; beats 2 to 4 looped. At Stop, all notes off on channel 1 and
+    // on each channel the plug-in was given a note on, at which the helper ends those notes.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    auto& state = getSong (song);
+    const auto midiLog = song.setInstrument (song.firstTrack, "PhaziteTestMidiLog");
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+    const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+    phazite::addNote (state, clip, 60, at (0.0), phazite::BeatDuration::fromBeats (16.0), 100, 3);
+    phazite::addControl (state, clip, at (0.5), phazite::ControlKind::controller, 1, 64, 2);
+    phazite::addControl (state, clip, at (1.0), phazite::ControlKind::programChange, 0, 5, 3);
+    phazite::loopBeats (state, { at (2.0), at (4.0) });
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    playback.play (0.05);
+
+    // What it was given since it was last reset, as words with the channel ("3: on 60", "2: cc 1 64", "3: program 5").
+    const auto heard = [&song, midiLog]
+    {
+        const auto block = getSandboxed (song, midiLog).getRemote().getState (10000);
+        REQUIRE (block.has_value());
+        std::vector<std::string> words;
+
+        for (const auto& message : phazite::test::TestPlugins::readMidiLog (*block))
+        {
+            auto word = std::to_string (message.getChannel()) + ": ";
+
+            if (message.isNoteOn())
+                word += "on " + std::to_string (message.getNoteNumber());
+            else if (message.isNoteOff())
+                word += "off " + std::to_string (message.getNoteNumber());
+            else if (message.isController())
+                word += "cc " + std::to_string (message.getControllerNumber()) + " " + std::to_string (message.getControllerValue());
+            else if (message.isProgramChange())
+                word += "program " + std::to_string (message.getProgramChangeNumber());
+            else
+                word += "other";
+
+            words.push_back (word);
+        }
+
+        return words;
+    };
+
+    phazite::playOrStop (state);
+    playback.play (0.75); // to beat 1.5
+    CHECK (heard() == std::vector<std::string> { "2: cc 1 0", "3: on 60", "2: cc 1 64", "3: program 5" });
+
+    // Round the loop twice: the mod wheel chased at each round, the program not sent again.
+    playback.play (4.0);
+    const auto looped = heard();
+    CHECK (std::count (looped.begin(), looped.end(), "3: program 5") == 1);
+    CHECK (std::count (looped.begin(), looped.end(), "2: cc 1 64") >= 3);
+
+    // Stopped: all notes off on channels 1 and 3.
+    song.run ("transport.playStop");
+    playback.play (0.1);
+    const auto stopped = heard();
+    CHECK (std::find (stopped.begin(), stopped.end(), "1: cc 123 0") != stopped.end());
+    CHECK (std::find (stopped.begin(), stopped.end(), "3: cc 123 0") != stopped.end());
+    CHECK (std::find (stopped.begin(), stopped.end(), "2: cc 123 0") == stopped.end());
+}
+
+TEST_CASE ("The program sent last is the instrument's: another instrument in its place is sent the program where playback starts")
+{
+    // Program 5 on channel 3 at beat 1, played past; the instrument then replaced by another instance of the MIDI log
+    // stand-in. Played from beat 2, the new one is sent program 5, chased, which the one before had been sent.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    auto& state = getSong (song);
+    auto midiLog = song.setInstrument (song.firstTrack, "PhaziteTestMidiLog");
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+    phazite::addControl (state, clip, phazite::BeatPosition::fromBeats (1.0), phazite::ControlKind::programChange, 0, 5, 3);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    playback.play (0.05);
+
+    const auto programsHeard = [&song, &midiLog]
+    {
+        const auto block = getSandboxed (song, midiLog).getRemote().getState (10000);
+        REQUIRE (block.has_value());
+        std::vector<int> programs;
+
+        for (const auto& message : phazite::test::TestPlugins::readMidiLog (*block))
+            if (message.isProgramChange())
+                programs.push_back (message.getProgramChangeNumber());
+
+        return programs;
+    };
+
+    phazite::playOrStop (state);
+    playback.play (0.75); // to beat 1.5
+    CHECK (programsHeard() == std::vector<int> { 5 });
+    phazite::stopAndReturn (state);
+    playback.play (0.1);
+
+    midiLog = song.setInstrument (song.firstTrack, "PhaziteTestMidiLog");
+    phazite::movePlayhead (state, phazite::BeatPosition::fromBeats (2.0));
+    phazite::playOrStop (state);
+    playback.play (0.25);
+    CHECK (programsHeard() == std::vector<int> { 5 });
+    phazite::stopAndReturn (state);
+}
+
 TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the parameter last touched, which touch writes while it is grabbed")
 {
     SandboxedPlugins sandboxed;

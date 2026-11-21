@@ -1024,6 +1024,23 @@ void SandboxedInstance::parameterChanged (int index, float value)
     triggerAsyncUpdate();
 }
 
+void SandboxedInstance::parameterSetByProgram (int index, float value)
+{
+    if (! std::isfinite (value))
+        return;
+
+    {
+        const juce::ScopedLock locked (lock);
+
+        if (! juce::isPositiveAndBelow (index, (int) changedSlots.size()) || setByProgram.size() >= changedSlots.size() + maxNoticesWaiting)
+            return;
+
+        setByProgram.emplace_back (index, value);
+    }
+
+    triggerAsyncUpdate();
+}
+
 void SandboxedInstance::gestureChanged (int index, bool starting)
 {
     {
@@ -1094,7 +1111,7 @@ void SandboxedInstance::editorKey (bool isDown, int keyCode, int modifiers, int 
 
 void SandboxedInstance::handleAsyncUpdate()
 {
-    std::vector<std::pair<int, float>> changes;
+    std::vector<std::pair<int, float>> changes, programChanges;
     struct Told
     {
         int index;
@@ -1110,6 +1127,7 @@ void SandboxedInstance::handleAsyncUpdate()
     {
         const juce::ScopedLock locked (lock);
         changes.swap (changedByPlugin);
+        programChanges.swap (setByProgram);
 
         for (const auto& [index, value] : changes)
             changedSlots[(size_t) index] = -1;
@@ -1171,6 +1189,20 @@ void SandboxedInstance::handleAsyncUpdate()
         if (! told.begun && inGesture[(size_t) index]
             && std::find (gesturesToEnd.begin(), gesturesToEnd.end(), index) == gesturesToEnd.end())
             gesturesToEnd.push_back (index);
+    }
+
+    // What a program the song set set, which came before what the plug-in tells of its own after: Phazite's copy of the
+    // values, no change of the plug-in's own (nor an unsaved one), so that the plug-in telling the same again changes nothing.
+    for (const auto& [index, value] : programChanges)
+    {
+        if (juce::isPositiveAndBelow (index, (int) parameters.size())
+            && ! juce::exactlyEqual (parameters[(size_t) index]->getValue(), value))
+        {
+            parameters[(size_t) index]->setFromPlugin (value);
+
+            if (onParameterSetByProgram != nullptr)
+                onParameterSetByProgram (index, value);
+        }
     }
 
     // A value it tells again as it was (many plug-ins do, as their windows open) changes nothing, nor is an unsaved change.

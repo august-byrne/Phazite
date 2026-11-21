@@ -22,9 +22,9 @@ the model compiles the song into what it plays (`src/model/playback/internal/Son
 
 | File | What it holds |
 |---|---|
-| `DeviceRunner.h` | One of Phazite's devices, or a plug-in in its helper, as any engine plays it: what every device gets around its DSP (its parameters glided, automated and modulated on the song's control points, its mix). |
+| `DeviceRunner.h` | One of Phazite's devices, or a plug-in in its helper, as any engine plays it: what every device gets around its DSP (its parameters glided, automated and modulated on the song's control points, its mix; for an instrument that takes every MIDI channel as one, a note's end only where no other channel still holds its pitch). |
 | `DeviceNode.h` | A device as Phazite's engine keeps it from plan to plan, with its values set by hand. |
-| `NoteSequence.h` | A track's notes and controllers' changes, in beats, with an index of the notes sounding at a place and each controller's changes, made with it, which a start, a jump and the loop's wrap find them and the controllers' values (the chase) by. |
+| `NoteSequence.h` | A track's notes and controllers' changes (program changes too), in beats, each on its MIDI channel, with an index of the notes sounding at a place and each controller's changes by its channel, made with it, which a start, a jump and the loop's wrap find them and the controllers' values (the chase) by. |
 | `PartOutput.h` | A part of a device's sound on a mixer channel of its own (a drum sampler's pad on a track of its own): the buffer the device plays it into, which the pad's track adds up. |
 | `Channel.h`, `LevelMeter.h` | A channel's fader, pan, mute and meter. |
 | `Strip.h` | A track's, bus's, return's or the master's state, with what joins paths: the rings of what came out of a strip at a point (its taps, which the paths from there share), the delay that lines a path up (a sidechain's, a chain's, and what a device holds back for its sidechain too) and a send's level, which follows its automation and modulation as a fader's volume does. |

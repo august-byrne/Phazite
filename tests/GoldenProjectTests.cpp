@@ -273,7 +273,8 @@ void addModulators (phazite::ProjectContext& context, const Tracks& tracks)
     phazite::modulate (context, macro, phazite::getVolume (context, tracks.keys).getRef(), -0.5f);
 }
 
-// A MIDI file with a note and one of each kind of controller event a recording takes in.
+// A MIDI file with a note and one of each kind of controller event a recording takes in, and a note and a controller on
+// another MIDI channel.
 juce::File writeMidiFile (const juce::File& file)
 {
     juce::MidiMessageSequence events;
@@ -290,6 +291,9 @@ juce::File writeMidiFile (const juce::File& file)
     add (juce::MidiMessage::aftertouchChange (1, 64, 70), 720.0);
     add (juce::MidiMessage::programChange (1, 5), 840.0);
     add (juce::MidiMessage::noteOff (1, 64), 960.0);
+    add (juce::MidiMessage::noteOn (3, 67, (juce::uint8) 90), 0.0);
+    add (juce::MidiMessage::controllerEvent (3, 1, 40), 120.0);
+    add (juce::MidiMessage::noteOff (3, 67), 480.0);
     events.updateMatchedPairs();
 
     juce::MidiFile midi;

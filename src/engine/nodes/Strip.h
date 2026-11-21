@@ -36,12 +36,27 @@ public:
     // after the fader; and what its audio clips read (AudioRegion::play()).
     juce::AudioBuffer<float> buffer, beforeFader, beforeMute, scratch;
 
-    // Where its notes are: the sequence played last, its next event, the pitches sounding, and whether the notes sounding
-    // where it plays from must start (after a jump, the loop's start, or playback starting).
+    // Where its notes are: the sequence played last, its next event, the notes sounding (by their channels and pitches:
+    // channel x 128 + pitch), and whether the notes sounding where it plays from must start (after a jump, the loop's
+    // start, or playback starting).
     const NoteSequence* sequence = nullptr;
     std::size_t nextEvent = 0;
-    std::bitset<128> sounding;
+    std::bitset<16 * 128> sounding;
     bool mustChase = true;
+
+    // The program its instrument was sent last on each MIDI channel, from the song or played live, or -1 for none: what the
+    // chase where playback starts or jumps compares a program with, sending it only where it differs (Engine.cpp), so that
+    // a plug-in that loads samples for a program doesn't load them again at every round of a loop. Kept from one plan to
+    // the next with the strip, for the instrument they were sent to (Plan::Strip::instrument): another one in its place, or
+    // a strip made anew, starts at none.
+    std::array<std::int8_t, 16> programsSent = makeNoPrograms();
+    std::uint64_t programsSentTo = 0;
+    static constexpr std::array<std::int8_t, 16> makeNoPrograms() noexcept
+    {
+        std::array<std::int8_t, 16> none {};
+        none.fill (-1);
+        return none;
+    }
 
     // What its instrument plays in a stretch of a block, in time order.
     std::array<devices::NoteEvent, DeviceRunner::maximumEvents> events {};

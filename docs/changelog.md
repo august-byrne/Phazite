@@ -8,6 +8,15 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## Stage 5. Wide: what a beat maker meets in the first week (from 2026-11-20)
+
+- **S5.2 Wider notes: MIDI channels and program changes.** Every note and controller keeps its MIDI channel, from the
+  keyboard that played it, a MIDI file, a take, Capture or a DAWproject, through the song to a plug-in, which gets each
+  on its channel, so a plug-in with several parts plays each part; Phazite's own instruments take every channel as one.
+  The inspector shows and sets the selected notes' channel. A program change, played on a keyboard or from a clip,
+  selects a plug-in's program, and is chased where playback starts or jumps only where the program differs from the
+  one set last, in a render from the block it lies in; a song that plays one stays without unsaved changes.
+
 ## The owner's round of 2026-11-20
 
 - **Stop leaves what rings on as it was:** a Stop that sends the playhead back keeps every automated control, and the

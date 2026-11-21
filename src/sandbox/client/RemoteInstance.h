@@ -31,6 +31,9 @@ public:
         virtual void parametersChanged (const std::vector<ParameterInfo>&) = 0;
         virtual void editorResized (int width, int height) = 0;
         virtual void editorKey (bool isDown, int keyCode, int modifiers, int scanCode) = 0;
+
+        // A parameter's value that a program the song's MIDI set set: the song's, no change of the plug-in's own.
+        virtual void parameterSetByProgram (int /* index */, float /* value */) {}
     };
 
     // Opened in the helper, from the plug-in's description (JUCE's XML for it) and state (empty for its own defaults), at

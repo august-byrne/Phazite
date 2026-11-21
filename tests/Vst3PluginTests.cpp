@@ -7,21 +7,28 @@
 #include "DspProbe.h"
 #include "EnginePlayback.h"
 #include "TestSong.h"
+#include "engine/nodes/DeviceRunner.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/PluginScanner.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
+#include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/plugins/internal/SandboxedInstance.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
 #include "sandbox/core/Vst3State.h"
 #include "vst3/TestVst3s.h"
 
+#include <cmath>
 #include <optional>
 
 using phazite::test::EnginePlayback;
@@ -212,7 +219,7 @@ TEST_CASE ("The plug-in scan finds the tests' VST3s in a helper and describes th
 TEST_CASE ("A VST3 instrument with an input bus plays its notes at their pitch and velocity, and Stop ends them")
 {
     // The audit of 2026-11-13: a plug-in with an input was played as an effect and got no notes; and Stop sent nothing but
-    // controller 123, which JUCE's VST3 host hands only to a plug-in that maps it (this one maps none).
+    // controller 123, which JUCE's VST3 host hands only to a plug-in that maps it (this one takes none it is handed).
     Vst3Plugins plugins;
     TestSong song;
     song.setTempo (120.0);
@@ -474,4 +481,269 @@ TEST_CASE (
     MESSAGE ("Open with a VST3 Now lacks: first open " << firstOpen << " s (read), its plug-in loaded at " << firstLoaded << " s; back "
                                                        << back << " s; open again " << againOpen << " s, loaded at " << againLoaded
                                                        << " s; back " << backAgain << " s");
+}
+
+namespace
+{
+// The level of a tone in what was played, on the left, from one second to another, as an amplitude. A tone a semitone away
+// shows in it at a few hundredths of its own level: a stretch of a few tenths of a second doesn't tell them apart further.
+double toneIn (const juce::AudioBuffer<float>& audio, double hertz, double from, double to)
+{
+    constexpr auto rate = EnginePlayback::sampleRate;
+    return phazite::test::probe::getToneLevel (audio, 0, hertz, rate, (int) (from * rate), (int) ((to - from) * rate));
+}
+
+// A note's pitch, bent by so many semitones, in hertz.
+double hertzOf (int note, double semitones = 0.0)
+{
+    return 440.0 * std::pow (2.0, ((double) note - 69.0 + semitones) / 12.0);
+}
+
+// The amplitude of the synth's sine for a note at full velocity on channel 1, through the master's -3 dB; and on its second
+// program, whose Level is lower.
+const double fullTone = vst3::synth::fullLevel * juce::Decibels::decibelsToGain (-3.0);
+const double secondProgramTone = fullTone * vst3::synth::programLevels[1];
+
+// A message into live MIDI's track as a MIDI input's driver plays it there (AudioIO: the engine's event of it, by
+// engine::toNoteEvent(), played live into the track; the computer keyboard plays notes alone).
+void playFromMidiInput (phazite::Song& song, const juce::MidiMessage& message)
+{
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    const auto event = phazite::engine::toNoteEvent (message, 0);
+    REQUIRE (event.has_value());
+    host.getEngine().playLive ((std::int64_t) phazite::findSession (song)->getLiveTrack().getRaw(), *event);
+}
+} // namespace
+
+TEST_CASE ("A VST3 instrument bends for a pitch bend played live and one played from a clip, each channel's notes by its own bend")
+{
+    // The bend reaches a plug-in, live and from a clip, as the sine's pitch shows; and each MIDI channel's notes play at
+    // their channel's level and bend by their channel's bend alone (vst3/TestVst3s.h).
+    Vst3Plugins plugins;
+    TestSong song;
+    song.setTempo (120.0);
+    song.setInstrument (song.firstTrack, Vst3Plugins::synthType());
+    auto& s = getSong (song);
+    phazite::routeLiveMidiInput (s);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    playback.play (0.05);
+
+    // Live: A4 on channel 1, then bent up a semitone, then a bend on channel 2, which leaves it as it is.
+    playFromMidiInput (s, juce::MidiMessage::noteOn (1, 69, 1.0f));
+    auto audio = playback.play (0.5);
+    CHECK (toneIn (audio, hertzOf (69), 0.1, 0.5) == doctest::Approx (fullTone).epsilon (0.01));
+    CHECK (toneIn (audio, hertzOf (69, 1.0), 0.1, 0.5) < 0.05 * fullTone);
+
+    playFromMidiInput (s, juce::MidiMessage::pitchWheel (1, 12288)); // half way up: a semitone
+    audio = playback.play (0.5);
+    CHECK (toneIn (audio, hertzOf (69, 1.0), 0.1, 0.5) == doctest::Approx (fullTone).epsilon (0.01));
+    CHECK (toneIn (audio, hertzOf (69), 0.1, 0.5) < 0.05 * fullTone);
+
+    playFromMidiInput (s, juce::MidiMessage::pitchWheel (2, 0));
+    audio = playback.play (0.5);
+    CHECK (toneIn (audio, hertzOf (69, 1.0), 0.1, 0.5) == doctest::Approx (fullTone).epsilon (0.01));
+
+    // A note on channel 4, live: a quarter as loud, unbent.
+    playFromMidiInput (s, juce::MidiMessage::noteOn (4, 76, 1.0f));
+    audio = playback.play (0.5);
+    CHECK (toneIn (audio, hertzOf (76), 0.1, 0.5) == doctest::Approx (fullTone / 4.0).epsilon (0.01));
+
+    playFromMidiInput (s, juce::MidiMessage::noteOff (1, 69));
+    playFromMidiInput (s, juce::MidiMessage::noteOff (4, 76));
+    playFromMidiInput (s, juce::MidiMessage::pitchWheel (1, 8192));
+    playback.play (0.2);
+
+    // From a clip: A4 on channel 1 and E5 on channel 4 from the start; channel 1 bent up a semitone at beat 2, channel 4
+    // down a whole tone at beat 1. Playback starts with each channel's bend at its middle (chased: none before).
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 8.0);
+    phazite::addNote (s, clip, 69, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (8.0), 127, 1);
+    phazite::addNote (s, clip, 76, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (8.0), 127, 4);
+    phazite::addControl (s, clip, phazite::BeatPosition::fromBeats (2.0), phazite::ControlKind::pitchWheel, 0, 12288, 1);
+    phazite::addControl (s, clip, phazite::BeatPosition::fromBeats (1.0), phazite::ControlKind::pitchWheel, 0, 0, 4);
+    song.run ("transport.playStop");
+    audio = playback.play (1.8);
+    CHECK (toneIn (audio, hertzOf (69), 0.05, 0.45) == doctest::Approx (fullTone).epsilon (0.01));
+    CHECK (toneIn (audio, hertzOf (76), 0.05, 0.45) == doctest::Approx (fullTone / 4.0).epsilon (0.01));
+    CHECK (toneIn (audio, hertzOf (76, -2.0), 0.55, 0.95) == doctest::Approx (fullTone / 4.0).epsilon (0.01)); // beat 1 on
+    CHECK (toneIn (audio, hertzOf (69), 0.55, 0.95) == doctest::Approx (fullTone).epsilon (0.01));             // channel 1 as it was
+    CHECK (toneIn (audio, hertzOf (69, 1.0), 1.05, 1.75) == doctest::Approx (fullTone).epsilon (0.01));        // beat 2 on
+    CHECK (toneIn (audio, hertzOf (69), 1.05, 1.75) < 0.05 * fullTone);
+    CHECK (toneIn (audio, hertzOf (76, -2.0), 1.05, 1.75) == doctest::Approx (fullTone / 4.0).epsilon (0.01));
+    song.run ("transport.playStop");
+}
+
+TEST_CASE ("Stop ends a VST3 instrument's notes on every MIDI channel it was given one on, though it takes no all-notes-off")
+{
+    // A note held on channel 5 when the song stops: the helper ends the notes it gave the plug-in on each channel all notes
+    // off comes on (host/core/Instance.h), and Phazite sends it on each channel the plug-in was given a note on.
+    Vst3Plugins plugins;
+    TestSong song;
+    song.setTempo (120.0);
+    song.setInstrument (song.firstTrack, Vst3Plugins::synthType());
+    auto& s = getSong (song);
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 32.0);
+    phazite::addNote (s, clip, 69, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (32.0), 127, 5);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    CHECK (toneIn (playback.play (0.5), hertzOf (69), 0.1, 0.5) == doctest::Approx (fullTone / 5.0).epsilon (0.01));
+    song.run ("transport.playStop");
+    const auto stopped = playback.play (0.4);
+    CHECK (stopped.getMagnitude (EnginePlayback::blockSize, stopped.getNumSamples() - EnginePlayback::blockSize) < 1.0e-6f);
+}
+
+TEST_CASE ("A program change sets a VST3's program as the song's own: played from a clip or live, chased only where it differs")
+{
+    // A VST3 reads a MIDI program change only as a legacy event, which few do (this one doesn't): its helper sets the plug-in's
+    // program instead (host/core/Instance.h), as the song's own choice, as a program Phazite sets is. Playing it makes no
+    // unsaved change: the song's program is as it was until the next save stores it. The synth's second program plays an
+    // octave higher.
+    Vst3Plugins plugins;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto synth = song.setInstrument (song.firstTrack, Vst3Plugins::synthType());
+    auto& s = getSong (song);
+    auto& instance = getSandboxed (song, synth);
+    REQUIRE (instance.getNumPrograms() == 2);
+    REQUIRE (instance.getCurrentProgram() == 0);
+
+    // A note through the clip; program 1 at beat 4.
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 32.0);
+    phazite::addNote (s, clip, 69, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (32.0), 127, 1);
+    phazite::addControl (s, clip, phazite::BeatPosition::fromBeats (4.0), phazite::ControlKind::programChange, 0, 1, 1);
+    song.saveWithPluginStates();
+    REQUIRE_FALSE (song.getProject().hasUnsavedChanges());
+    const auto storedProgram = phazite::findDeviceState (s, synth)[phazite::schema::pluginProgram];
+    const auto stepsBefore = s.getUndoManager().getUndoDescriptions().size();
+
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    phazite::routeLiveMidiInput (s);
+    const auto onProgram = [&instance] (int program)
+    { return phazite::test::dispatchMessagesUntil ([&instance, program] { return instance.getCurrentProgram() == program; }); };
+
+    // Played: the first program, then from beat 4 on, once the helper has set it, the second, an octave up.
+    song.run ("transport.playStop");
+    auto audio = playback.play (1.5);
+    CHECK (toneIn (audio, hertzOf (69), 0.1, 1.4) == doctest::Approx (fullTone).epsilon (0.01));
+    playback.play (1.0); // past beat 4
+    REQUIRE (onProgram (1));
+    audio = playback.play (0.5);
+    CHECK (toneIn (audio, hertzOf (81), 0.1, 0.5) == doctest::Approx (secondProgramTone).epsilon (0.01));
+    CHECK (toneIn (audio, hertzOf (69), 0.1, 0.5) < 0.01 * fullTone);
+
+    // The song as it was: no unsaved change, no step to undo, its program the one saved, until a save stores the plug-in's.
+    // The Level the program set is Phazite's too, as a control reads it, and no parameter touched.
+    const phazite::ParameterRef level { synth, getVst3ID (vst3::synth::levelID) };
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return juce::exactlyEqual (phazite::getParameter (song.context, level).getValue(), vst3::synth::programLevels[1]); }));
+    phazite::test::dispatchPendingMessages();
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (song.getProject().hasUnsavedChanges());
+    CHECK (s.getUndoManager().getUndoDescriptions().size() == stepsBefore);
+    CHECK (phazite::getLastTouchedParameter (song.context) != level);
+    CHECK (phazite::findDeviceState (s, synth)[phazite::schema::pluginProgram] == storedProgram);
+
+    // A jump back to before the program change: the second program plays on, nothing being chased there.
+    phazite::movePlayhead (s, phazite::BeatPosition::fromBeats (1.0));
+    audio = playback.play (0.5);
+    CHECK (toneIn (audio, hertzOf (81), 0.1, 0.4) == doctest::Approx (secondProgramTone).epsilon (0.01));
+    CHECK (instance.getCurrentProgram() == 1);
+
+    // Live, on any channel: back to the first, as the song's too.
+    playFromMidiInput (s, juce::MidiMessage::programChange (3, 0));
+    playback.play (0.1);
+    REQUIRE (onProgram (0));
+    audio = playback.play (0.3);
+    CHECK (toneIn (audio, hertzOf (69), 0.05, 0.3) == doctest::Approx (fullTone).epsilon (0.01));
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (song.getProject().hasUnsavedChanges());
+    song.run ("transport.playStop");
+
+    // Saved: the song stores the program the plug-in is on.
+    playFromMidiInput (s, juce::MidiMessage::programChange (1, 1));
+    playback.play (0.1);
+    REQUIRE (onProgram (1));
+    song.saveWithPluginStates();
+    CHECK ((int) phazite::findDeviceState (s, synth)[phazite::schema::pluginProgram] == 1);
+}
+
+TEST_CASE ("A VST3's program is chased where playback jumps: the one before there, where it differs from the one sent last")
+{
+    // Program 0 at the clip's start and program 1 at beat 4: a jump back to between them plays the first again, and one from
+    // before the second to after it plays the second.
+    Vst3Plugins plugins;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto synth = song.setInstrument (song.firstTrack, Vst3Plugins::synthType());
+    auto& s = getSong (song);
+    auto& instance = getSandboxed (song, synth);
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 32.0);
+    phazite::addNote (s, clip, 69, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (32.0), 127, 1);
+    phazite::addControl (s, clip, phazite::BeatPosition(), phazite::ControlKind::programChange, 0, 0, 1);
+    phazite::addControl (s, clip, phazite::BeatPosition::fromBeats (4.0), phazite::ControlKind::programChange, 0, 1, 1);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    const auto onProgram = [&instance] (int program)
+    { return phazite::test::dispatchMessagesUntil ([&instance, program] { return instance.getCurrentProgram() == program; }); };
+
+    song.run ("transport.playStop");
+    playback.play (2.5); // past beat 4
+    REQUIRE (onProgram (1));
+
+    // Back to beat 2: the first program, chased.
+    phazite::movePlayhead (s, phazite::BeatPosition::fromBeats (2.0));
+    playback.play (0.1);
+    REQUIRE (onProgram (0));
+    auto audio = playback.play (0.4);
+    CHECK (toneIn (audio, hertzOf (69), 0.05, 0.4) == doctest::Approx (fullTone).epsilon (0.01));
+
+    // From there to beat 6: the second, chased.
+    phazite::movePlayhead (s, phazite::BeatPosition::fromBeats (6.0));
+    playback.play (0.1);
+    REQUIRE (onProgram (1));
+    audio = playback.play (0.4);
+    CHECK (toneIn (audio, hertzOf (81), 0.05, 0.4) == doctest::Approx (secondProgramTone).epsilon (0.01));
+    song.run ("transport.playStop");
+}
+
+TEST_CASE ("In a render, a program change plays from the start of its block, the same in every render")
+{
+    // A render's blocks come as fast as they play, faster than the helper's message thread sets a program: a block that
+    // holds a program change waits for it to be set. Program 1 at the song's start, under a note from there; program 0 in
+    // the silence between that note and the next. Each note plays its program from its first sample, in both renders.
+    Vst3Plugins plugins;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto synth = song.setInstrument (song.firstTrack, Vst3Plugins::synthType());
+    auto& s = getSong (song);
+    REQUIRE (getSandboxed (song, synth).getCurrentProgram() == 0);
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 8.0);
+    phazite::addControl (s, clip, phazite::BeatPosition(), phazite::ControlKind::programChange, 0, 1, 1);
+    phazite::addNote (s, clip, 69, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (2.0), 127, 1); // 0 s to 1 s
+    phazite::addControl (s, clip, phazite::BeatPosition::fromBeats (3.0), phazite::ControlKind::programChange, 0, 0, 1);
+    phazite::addNote (s, clip, 69, phazite::BeatPosition::fromBeats (4.0), phazite::BeatDuration::fromBeats (2.0), 127, 1); // 2 s to 3 s
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+
+    const auto render = [&]
+    {
+        phazite::movePlayhead (s, phazite::BeatPosition());
+        song.run ("transport.playStop");
+        auto audio = playback.play (3.2);
+        song.run ("transport.playStop");
+        return audio;
+    };
+
+    const auto first = render();
+    CHECK (toneIn (first, hertzOf (81), 0.05, 0.9) == doctest::Approx (secondProgramTone).epsilon (0.01));
+    CHECK (toneIn (first, hertzOf (69), 0.0, 0.9) < 0.01 * fullTone);
+    CHECK (toneIn (first, hertzOf (69), 2.05, 2.9) == doctest::Approx (fullTone).epsilon (0.01));
+    CHECK (toneIn (first, hertzOf (81), 2.0, 2.9) < 0.01 * fullTone);
+
+    // The second the same, but for the first render's first moment, where the track's path, new to the song, fades in.
+    const auto second = render();
+    auto largest = 0.0f;
+
+    for (int side = 0; side < 2; ++side)
+        for (int i = (int) (0.01 * EnginePlayback::sampleRate); i < first.getNumSamples(); ++i)
+            largest = std::max (largest, std::abs (first.getSample (side, i) - second.getSample (side, i)));
+
+    CHECK (largest < 1.0e-6f);
 }

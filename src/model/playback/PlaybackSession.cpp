@@ -153,6 +153,11 @@ void PlaybackSession::valueSetByHand (const ParameterRef& parameter, float value
     writer.parameterChanged (parameter, value);
 }
 
+void PlaybackSession::valueSetByProgram (const ParameterRef& parameter, float value)
+{
+    player.takeValueSetByHand (parameter, value);
+}
+
 void PlaybackSession::pluginGestureChanged (const ParameterRef& parameter, bool starting)
 {
     writer.pluginGestureChanged (parameter, starting);
@@ -442,24 +447,26 @@ void PlaybackSession::followLiveMidi()
         getAudioIO().setLiveMidi (&host.getEngine(), (std::int64_t) liveTrack.getRaw());
 }
 
-void PlaybackSession::playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity)
+void PlaybackSession::playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity, int channel)
 {
+    const auto engineChannel = juce::jlimit (1, 16, channel) - 1;
+
     for (const auto pitch : pitches)
     {
         // Not recordable: Capture and a take leave them out.
-        host.getEngine().playLive (track, { devices::NoteEvent::Type::noteOn, 0, pitch, (float) juce::jlimit (1, 127, velocity) / 127.0f },
-                                   false);
-        guideNotes.emplace_back (track, pitch);
+        host.getEngine().playLive (
+            track, { devices::NoteEvent::Type::noteOn, 0, pitch, (float) juce::jlimit (1, 127, velocity) / 127.0f, engineChannel }, false);
+        guideNotes.push_back ({ track, pitch, engineChannel });
     }
 }
 
 void PlaybackSession::stopGuideNotes (std::int64_t track)
 {
-    for (const auto& [on, pitch] : guideNotes)
-        if (on == track)
-            host.getEngine().playLive (track, { devices::NoteEvent::Type::noteOff, 0, pitch, 0.0f }, false);
+    for (const auto& note : guideNotes)
+        if (note.track == track)
+            host.getEngine().playLive (track, { devices::NoteEvent::Type::noteOff, 0, note.pitch, 0.0f, note.channel }, false);
 
-    std::erase_if (guideNotes, [track] (const auto& note) { return note.first == track; });
+    std::erase_if (guideNotes, [track] (const GuideNote& note) { return note.track == track; });
 }
 
 void PlaybackSession::update()

@@ -10,28 +10,33 @@ namespace phazite::engine
 std::optional<devices::NoteEvent> toNoteEvent (const juce::MidiMessage& message, int sample)
 {
     using Type = devices::NoteEvent::Type;
+    const auto channel = juce::jlimit (1, 16, message.getChannel()) - 1; // JUCE counts them from 1
 
     if (message.isNoteOn())
-        return devices::NoteEvent { Type::noteOn, sample, message.getNoteNumber(), message.getFloatVelocity() };
+        return devices::NoteEvent { Type::noteOn, sample, message.getNoteNumber(), message.getFloatVelocity(), channel };
 
     if (message.isNoteOff()) // a note-on of velocity 0 too
-        return devices::NoteEvent { Type::noteOff, sample, message.getNoteNumber(), message.getFloatVelocity() };
+        return devices::NoteEvent { Type::noteOff, sample, message.getNoteNumber(), message.getFloatVelocity(), channel };
 
     if (message.isAllNotesOff() || message.isAllSoundOff())
         return devices::NoteEvent { Type::allNotesOff, sample, 0, 0.0f };
 
     if (message.isPitchWheel())
-        return devices::NoteEvent { Type::pitchBend, sample, 0, (float) (message.getPitchWheelValue() - 8192) / 8192.0f };
+        return devices::NoteEvent { Type::pitchBend, sample, 0, (float) (message.getPitchWheelValue() - 8192) / 8192.0f, channel };
 
     if (message.isController())
-        return devices::NoteEvent { Type::controller, sample, message.getControllerNumber(),
-                                    (float) message.getControllerValue() / 127.0f };
+        return devices::NoteEvent { Type::controller, sample, message.getControllerNumber(), (float) message.getControllerValue() / 127.0f,
+                                    channel };
 
     if (message.isAftertouch())
-        return devices::NoteEvent { Type::aftertouch, sample, message.getNoteNumber(), (float) message.getAfterTouchValue() / 127.0f };
+        return devices::NoteEvent { Type::aftertouch, sample, message.getNoteNumber(), (float) message.getAfterTouchValue() / 127.0f,
+                                    channel };
 
     if (message.isChannelPressure())
-        return devices::NoteEvent { Type::channelPressure, sample, 0, (float) message.getChannelPressureValue() / 127.0f };
+        return devices::NoteEvent { Type::channelPressure, sample, 0, (float) message.getChannelPressureValue() / 127.0f, channel };
+
+    if (message.isProgramChange())
+        return devices::NoteEvent { Type::programChange, sample, message.getProgramChangeNumber(), 0.0f, channel };
 
     return {};
 }
@@ -67,6 +72,9 @@ DeviceRunner::DeviceRunner (const devices::DeviceInfo& deviceInfo, std::unique_p
         sentValues.assign (info.parameters.size(), 0.0f);
         changes.reserve ((size_t) maximumChanges);
     }
+
+    if (isInstrument() && ! processor->playsChannelsApart())
+        merged.resize ((size_t) maximumEvents);
 }
 
 void DeviceRunner::prepare (double rate, int maximumBlockSize)
@@ -170,7 +178,47 @@ void DeviceRunner::letGoOfNotes() noexcept
 {
     held.fill (0);
     numHeld = 0;
-    pedalDown = false;
+    pedalsDown = 0;
+    channelsHolding.fill (0);
+}
+
+std::span<devices::NoteEvent> DeviceRunner::mergeChannels (std::span<devices::NoteEvent> events) noexcept
+{
+    using Type = devices::NoteEvent::Type;
+
+    if (merged.empty())
+        return events;
+
+    size_t count = 0;
+
+    for (const auto& event : events)
+    {
+        if (count == merged.size())
+            break;
+
+        auto& holding = channelsHolding[(size_t) std::clamp (event.number, 0, 127)];
+        const auto bit = (std::uint16_t) (1u << (event.channel & 15));
+
+        if (event.type == Type::noteOn || event.type == Type::portamentoOn)
+        {
+            holding = (std::uint16_t) (holding | bit);
+        }
+        else if (event.type == Type::noteOff)
+        {
+            holding = (std::uint16_t) (holding & ~bit);
+
+            if (holding != 0)
+                continue;
+        }
+        else if (event.type == Type::allNotesOff)
+        {
+            channelsHolding.fill (0);
+        }
+
+        merged[count++] = event;
+    }
+
+    return { merged.data(), count };
 }
 
 void DeviceRunner::followNotes (std::span<const devices::NoteEvent> events) noexcept
@@ -198,7 +246,8 @@ void DeviceRunner::followNotes (std::span<const devices::NoteEvent> events) noex
         }
         else if (event.type == Type::controller && event.number == sustainPedal)
         {
-            pedalDown = event.value >= 0.5f;
+            const auto bit = (std::uint16_t) (1u << (event.channel & 15));
+            pedalsDown = (std::uint16_t) (event.value >= 0.5f ? (pedalsDown | bit) : (pedalsDown & ~bit));
         }
     }
 }
@@ -259,6 +308,8 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
 
     if (isSynth)
         followNotes (in.events);
+
+    begun.events = isSynth ? mergeChannels (in.events) : in.events;
 
     if (isSynth) // its own channels, not a sidechain's
         for (int channel = 0; channel < std::min (2, buffer.getNumChannels()); ++channel)
@@ -357,7 +408,7 @@ void DeviceRunner::end (juce::AudioBuffer<float>& buffer, int start, int numSamp
         asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence()
                  && ! (in.isPlaying && processor->playsWithTheSong())
                  && ((! heard && ! in.isPlaying) || (double) silentSamples >= processor->getTailSeconds() * sampleRate) && numHeld == 0
-                 && ! pedalDown;
+                 && pedalsDown == 0;
 
         // Falling asleep, the values it was given last, which a device that wakes when they change is woken for.
         if (asleep && ! sleptValues.empty())
@@ -413,7 +464,7 @@ void DeviceRunner::start (juce::AudioBuffer<float>& buffer, int start, int numSa
     block.channels = channels;
     block.numChannels = 2;
     block.numSamples = numSamples;
-    block.events = getEventsBefore (in.events, numSamples);
+    block.events = getEventsBefore (early.events, numSamples);
     block.changes = changes;
     processor->start (block);
 }
@@ -436,7 +487,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         block.channels = channels;
         block.numChannels = 2;
         block.numSamples = numSamples;
-        block.events = getEventsBefore (in.events, numSamples);
+        block.events = getEventsBefore (early.events, numSamples);
         block.changes = changes;
         processor->process (block);
         end (buffer, start, numSamples, in, early);
@@ -450,7 +501,8 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
 
     const auto whole = processor->takesWholeBlocks();
     const auto isMono = buffer.getNumChannels() < 2;
-    const auto numEvents = (int) in.events.size();
+    const auto events = begun.events;
+    const auto numEvents = (int) events.size();
     auto block = makeContext (in);
     const float* sidechain[2] = {};
 
@@ -519,8 +571,8 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         // This stretch's events, counted from its start.
         const auto firstEvent = nextEvent;
 
-        while (nextEvent < numEvents && in.events[(size_t) nextEvent].sample < done + length)
-            in.events[(size_t) nextEvent++].sample -= done;
+        while (nextEvent < numEvents && events[(size_t) nextEvent].sample < done + length)
+            events[(size_t) nextEvent++].sample -= done;
 
         block.channels = channels;
         block.numChannels = 2;
@@ -532,7 +584,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         block.bars = in.bars + done * in.barsPerSample;
         block.barStart = in.barStart + (std::floor (block.bars) - std::floor (in.bars)) * in.barLength;
         block.songSample = in.songSample + (in.isPlaying ? done : 0);
-        block.events = in.events.subspan ((size_t) firstEvent, (size_t) (nextEvent - firstEvent));
+        block.events = events.subspan ((size_t) firstEvent, (size_t) (nextEvent - firstEvent));
         block.changes = changes;
 
         if (begun.hasSidechain)

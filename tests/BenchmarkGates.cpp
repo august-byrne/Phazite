@@ -157,7 +157,7 @@ public:
         const auto drums = &info == &dev::DrumSampler::info;
 
         for (int n = 0; n < (drums ? 4 : 8); ++n)
-            notes.push_back ({ .type = dev::NoteEvent::Type::noteOn, .sample = 0, .number = drums ? 36 + n : 48 + n * 3, .value = 0.8f });
+            notes.push_back ({ dev::NoteEvent::Type::noteOn, 0, drums ? 36 + n : 48 + n * 3, 0.8f });
 
         playBlocks (20); // warmed up
     }

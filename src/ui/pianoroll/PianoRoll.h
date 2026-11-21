@@ -246,9 +246,10 @@ private:
     // time line's edges are (TimelineView::beatToEdge()), which move with the song as it scrolls, its top and foot rounded.
     juce::Rectangle<float> getNoteShape (const NoteData&, float scale) const;
 
-    // Playing notes as they are placed or clicked, on their track's instrument.
-    void audition (ClipID, int pitch, int velocity);
-    void audition (ClipID, const std::vector<int>& pitches, int velocity);
+    // Playing notes as they are placed or clicked, on their track's instrument: a note's on its MIDI channel, a new note or
+    // a key on the first.
+    void audition (ClipID, int pitch, int velocity, int channel = 1);
+    void audition (ClipID, const std::vector<int>& pitches, int velocity, int channel = 1);
     void stopAudition();
 
     void updateSettings();    // what the settings down the left say: the clips, the instrument, the key, the next note, the chord

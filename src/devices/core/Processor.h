@@ -12,32 +12,49 @@
 
 namespace phazite::devices
 {
-// A note or a controller's change for an instrument, at its sample within the block.
+// A note or a controller's change for an instrument, at its sample within the block, on a MIDI channel: from 0 to 15, MIDI's
+// channels 1 to 16. Phazite's own instruments take every channel as one (they never read it); a plug-in gets each event on
+// its channel.
 struct NoteEvent
 {
     enum class Type : std::uint8_t
     {
         noteOn,
         noteOff,
-        pitchBend,   // value: from -1 to 1
-        controller,  // number: the controller; value: from 0 to 1
-        allNotesOff, // every note lets go: playback stopped or jumped; when it stopped, those that only just began stop at once
+        pitchBend,  // value: from -1 to 1
+        controller, // number: the controller; value: from 0 to 1
+        allNotesOff, // every note on every channel lets go: playback stopped or jumped; when it stopped, those that only just began stop at once
         // A note on that glides in from the note played before it, as FL Studio's portamento notes do (an instrument
-        // without glides plays it as a note on); and every sounding note gliding to the pitch number, evenly, over value
-        // seconds, as FL Studio's slide notes make them (an instrument without glides ignores it).
+        // without glides plays it as a note on); and every sounding note, on every channel, gliding to the pitch number,
+        // evenly, over value seconds, as FL Studio's slide notes make them (an instrument without glides ignores it).
         portamentoOn,
         slide,
         // How hard a key is pressed while it is held: one note's (polyphonic aftertouch; number: the note), or every note's
         // on the channel (channel pressure); value: from 0 to 1. An instrument that doesn't use pressure ignores both.
         aftertouch,
-        channelPressure
+        channelPressure,
+        programChange // number: the program, from 0 to 127 (value 0); a device without programs ignores it
     };
 
+    NoteEvent() = default;
+
+    constexpr NoteEvent (Type eventType, int eventSample, int eventNumber, float eventValue, int eventChannel = 0) noexcept
+        : type (eventType),
+          channel ((std::uint8_t) (eventChannel & 15)),
+          sample (eventSample),
+          number (eventNumber),
+          value (eventValue)
+    {
+    }
+
     Type type = Type::noteOn;
-    int sample = 0;     // within the block, from 0
-    int number = 0;     // the note, or the controller
-    float value = 0.0f; // a note's velocity (from 0 to 1), or the bend's or controller's value
+    std::uint8_t channel = 0; // from 0 to 15
+    int sample = 0;           // within the block, from 0
+    int number = 0;           // the note, the controller or the program
+    float value = 0.0f;       // a note's velocity (from 0 to 1), or the bend's or controller's value
 };
+
+static_assert (sizeof (NoteEvent) == 16);
 
 // A parameter's value from a sample of the block on, for a device that takes its blocks whole (takesWholeBlocks()).
 struct ParameterChange
@@ -162,6 +179,11 @@ public:
     // Real-time safe.
     virtual bool startsEarly() const noexcept { return false; }
     virtual void start (const ProcessContext&) {}
+
+    // Whether an instrument plays each MIDI channel's notes apart (a plug-in), rather than take every channel as one (Phazite's
+    // own, which let go of a pitch at its first note-off): its runner hands one of those a note-off only where no other channel
+    // still holds the pitch.
+    virtual bool playsChannelsApart() const noexcept { return false; }
 
     // Whether something came in other than as a note or sound and waits for its next block, such as a pad its editor
     // played: its runner, asleep on silence, wakes for it. Real-time safe.

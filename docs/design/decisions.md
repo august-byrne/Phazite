@@ -99,6 +99,8 @@ What still waits for an answer is in [open-questions.md](../open-questions.md).
 | A take round a looped range keeps everything played, including what came before the range and a first, partial time round. | Nothing played is thrown away. | [recording.md](recording.md) |
 | Nothing normalizes by itself. The playlist draws clips at their own level, and Normalize is a command that sets a clip's gain. | Every DAW checked draws and plays clips at the level they have. | [piano-roll.md](piano-roll.md) |
 | A project saves a plug-in's parameter by the plug-in's own ID for it. | Automation and modulation follow the parameter through the plug-in's updates. | [plugin-hosting.md](plugin-hosting.md) |
+| A note and a controller keep the MIDI channel they were played or written on, from the keyboard through the song to a plug-in. Nothing rewrites a channel; Phazite's own instruments take every channel as one. | A plug-in with several parts needs the channels, and a channel changed behind the user's back could not be found again. | [engine.md](engine.md) |
+| A program change selects a plug-in's program, and playback that starts or jumps sets a program only where it differs from the one the song set last. | A plug-in that loads samples for a program must not load them again at every round of a loop. | [plugin-hosting.md](plugin-hosting.md) |
 
 ## Projects and versions
 

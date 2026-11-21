@@ -161,8 +161,9 @@ The menu also has **Cut**, **Copy**, **Paste**, **Duplicate**, **Delete** and **
 
 ## Not yet
 
-- Lanes for controllers, pitch bend and per-note expression: planned. Controllers, pitch bend and the keys' pressure
-  a MIDI file brought in, or a recording took in, play, but the piano roll doesn't show them.
+- Lanes for controllers, pitch bend, program changes and per-note expression: planned. Controllers, pitch bend, the
+  keys' pressure and program changes a MIDI file brought in, or a recording took in, play, but the piano roll doesn't
+  show them. A note's MIDI channel shows and changes in the inspector.
 - Ghost notes chosen track by track: planned; the switch shows every other track's notes.
 - Flam, velocity scaling, reverse and flip transforms: planned.
 - Editing a whole track in song time rather than clip by clip: planned.

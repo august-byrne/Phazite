@@ -74,6 +74,11 @@ void Song::tellValueSetByHand (const ParameterRef& parameter, float value, bool 
     parameterListeners.call ([&] (ParameterListener& l) { l.valueSetByHand (parameter, value, byPlugin); });
 }
 
+void Song::tellValueSetByProgram (const ParameterRef& parameter, float value)
+{
+    parameterListeners.call ([&] (ParameterListener& l) { l.valueSetByProgram (parameter, value); });
+}
+
 void Song::setDeviceStateStore (std::function<void (std::uint64_t)> store)
 {
     deviceStateStore = std::move (store);

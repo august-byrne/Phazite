@@ -437,7 +437,7 @@ TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonan
     juce::AudioBuffer<float> buffer (2, 4800);
     buffer.clear();
     float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
-    const phazite::devices::NoteEvent note { .type = phazite::devices::NoteEvent::Type::noteOn, .sample = 0, .number = 60, .value = 1.0f };
+    const phazite::devices::NoteEvent note { phazite::devices::NoteEvent::Type::noteOn, 0, 60, 1.0f };
     phazite::devices::ProcessContext block;
     block.channels = channels;
     block.numChannels = 2;
@@ -630,7 +630,7 @@ TEST_CASE ("The synth's wavetable picture draws the frame it plays through its w
     juce::AudioBuffer<float> buffer (2, 4800);
     buffer.clear();
     float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
-    const phazite::devices::NoteEvent note { .type = phazite::devices::NoteEvent::Type::noteOn, .sample = 0, .number = 60, .value = 1.0f };
+    const phazite::devices::NoteEvent note { phazite::devices::NoteEvent::Type::noteOn, 0, 60, 1.0f };
     phazite::devices::ProcessContext block;
     block.channels = channels;
     block.numChannels = 2;
@@ -731,7 +731,7 @@ TEST_CASE ("The synth's matrix ring adds what a slot on another's amount moves, 
     juce::AudioBuffer<float> buffer (2, 4800);
     buffer.clear();
     float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
-    const phazite::devices::NoteEvent note { .type = phazite::devices::NoteEvent::Type::noteOn, .sample = 0, .number = 72, .value = 1.0f };
+    const phazite::devices::NoteEvent note { phazite::devices::NoteEvent::Type::noteOn, 0, 72, 1.0f };
     phazite::devices::ProcessContext block;
     block.channels = channels;
     block.numChannels = 2;

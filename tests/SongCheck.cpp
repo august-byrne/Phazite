@@ -124,9 +124,11 @@ namespace
             { "NOTE", "start", -beat, beat },
             { "NOTE", "length", some, beat }, // more than 0: a tempo change scales notes, those that keep their speed below 1/64
             { "NOTE", "velocity", 1.0, 127.0, true },
+            { "NOTE", "channel", 1.0, 16.0, true },
             { "CONTROL", "number", 0.0, 127.0, true },
             { "CONTROL", "beat", -beat, beat },
             { "CONTROL", "value", 0.0, 16383.0, true },
+            { "CONTROL", "channel", 1.0, 16.0, true },
             { "WARP", "time", 0.0, seconds },
             { "WARP", "playsAt", -seconds, seconds },
         };

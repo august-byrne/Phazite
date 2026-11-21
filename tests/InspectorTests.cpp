@@ -14,6 +14,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -299,6 +300,48 @@ TEST_CASE ("Typing the lowest of several items' values sets every item to it, as
     undo.check ("a step up after it", [&] { step (findField (screen, "Velocity"), true); });
     CHECK (noteOf (c4).velocity == 66);
     CHECK (noteOf (e4).velocity == 66);
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("Selected notes' MIDI channel shows as a range, moves by a step for each within 1 to 16, and typed becomes each one's")
+{
+    // A new note is on channel 1; the inspector's Channel field sets the selected notes' channel, as the other fields do.
+    Screen screen;
+    using phazite::BeatDuration;
+    const auto clip = phazite::addMidiClipAt (screen.context, screen.track (0), BeatPosition());
+    const auto c4 = phazite::addNote (screen.context, clip, 60, BeatPosition(), BeatDuration::fromBeats (1.0), 64);
+    const auto e4 = phazite::addNote (screen.context, clip, 64, BeatPosition::fromBeats (1.0), BeatDuration::fromBeats (0.5), 100);
+    screen.song->getUndoManager().clearUndoHistory();
+    auto& selection = screen.context.getSongSelection();
+    selection.setNoteClips ({ clip });
+    selection.selectNotes ({ c4 });
+    phazite::test::dispatchPendingMessages();
+    const auto noteOf = [&screen] (phazite::NoteRef ref) { return *phazite::getNote (screen.context, ref); };
+    REQUIRE (noteOf (c4).channel == 1);
+    phazite::test::UndoCheck undo (*screen.song);
+
+    // One note: typed, its channel; the song keeps it.
+    undo.check ("channel 10 typed", [&] { type (findField (screen, "Channel"), "10"); });
+    CHECK (noteOf (c4).channel == 10);
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Change Channel"));
+    CHECK ((int) phazite::findNoteState (*screen.song, c4)[phazite::schema::noteChannel] == 10);
+
+    // Both, on channels 10 and 1: shown as a range; a step up moves each, one at most to 16.
+    selection.selectNotes ({ c4, e4 });
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.shows ("1 to 10"));
+    undo.check ("a step up", [&] { step (findField (screen, "Channel"), true); });
+    CHECK (noteOf (c4).channel == 11);
+    CHECK (noteOf (e4).channel == 2);
+    phazite::changeNotes (screen.context, { c4, e4 }, phazite::NoteProperty::channel, 10.0);
+    CHECK (noteOf (c4).channel == 16);
+    CHECK (noteOf (e4).channel == 12);
+
+    // Typed, each becomes it; back to 1, the song writes none.
+    undo.check ("channel 1 typed", [&] { type (findField (screen, "Channel"), "1"); });
+    CHECK (noteOf (c4).channel == 1);
+    CHECK (noteOf (e4).channel == 1);
+    CHECK_FALSE (phazite::findNoteState (*screen.song, c4).hasProperty (phazite::schema::noteChannel));
     undo.walkBackAndForth();
 }
 

@@ -17,7 +17,7 @@ namespace phazite::sandbox
 // have.
 inline constexpr const char* helperProcessID = "PhaziteSandbox";
 inline constexpr const char* helperErrorsID = "PhaziteSandboxErrors";
-inline constexpr std::int32_t protocolVersion = 8;
+inline constexpr std::int32_t protocolVersion = 9;
 
 enum class MessageType : std::int32_t
 {
@@ -59,6 +59,8 @@ enum class MessageType : std::int32_t
     editorResized,         // instance, width, height: the plug-in resized its editor itself
     editorKey,             // instance, whether it went down, its code, modifiers and scan code (0 for none): a key Phazite takes,
                            // in the editor
+    programPlayed,         // instance, its program, then each parameter's value it set (index, value): a program change in the
+                           // MIDI Phazite handed it set its program, as the song's own choice (no change of the plug-in's own)
 
     reply = 100 // an answer: its fields are the request's
 };

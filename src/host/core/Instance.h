@@ -23,6 +23,7 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -88,6 +89,26 @@ private:
     // VST3's restart), and the program Phazite was last told it is on, or set it to (message thread).
     std::atomic<bool> programMayHaveChanged { false };
     int toldProgram = 0;
+
+    // The program a program change in the MIDI Phazite handed it asked for last, the latest winning (the audio thread's to
+    // leave; -1 for none), which the message thread sets at its next tick, as the song's own choice, as Phazite's
+    // setProgram() is: JUCE's VST3 host hands a VST3 a MIDI program change only as a legacy MIDI event, which few read, and a
+    // VST3's programs are a parameter of its own. While the message thread sets it, what the plug-in tells of its
+    // parameters there and then is the program's doing, not a change of its own (settingProgramPlayed). JUCE workaround W58
+    // (docs/juce-workarounds.md).
+    // It is left with a number of its own above the program's 7 bits (askForProgram()), which the message thread leaves in
+    // programSetFor once it has set it, for a render's block that waits for that.
+    std::atomic<int> programPlayed { -1 };
+    std::atomic<bool> settingProgramPlayed { false };
+    std::atomic<int> programSetFor { 0 };
+    int programTicket = 0; // the audio thread's: the number the program asked for last was left with
+    // What the plug-in told of its parameters there and then (message thread), which Phazite is told with the program, as
+    // the song's own values.
+    std::vector<std::pair<int, float>> programValues;
+    static constexpr int maximumProgramTicket = 1 << 20;
+    void setProgramPlayed (int index, const std::function<void (sandbox::MessageWriter&)>& send);
+    int findProgramChange() const noexcept;   // the program the block's last program change asks for, or -1
+    int askForProgram (int program) noexcept; // left for the message thread; gives the number it was left with
 
     // Whether the blocks Phazite hands it now are a render's (the audio thread's to say), and whether the plug-in has been
     // told that it plays offline (the message thread's to tell it: setOffline()).

@@ -213,6 +213,7 @@ void Host::handle (const juce::MemoryBlock& message)
         case MessageType::parametersChanged:
         case MessageType::editorResized:
         case MessageType::editorKey:
+        case MessageType::programPlayed:
         case MessageType::reply:
             return;
     }

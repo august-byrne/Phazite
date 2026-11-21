@@ -605,7 +605,7 @@ namespace
                 auto* written = notes->createNewChildElement ("Note");
                 written->setAttribute ("time", number ((double) note[schema::noteStart]));
                 written->setAttribute ("duration", number ((double) note[schema::noteLength]));
-                written->setAttribute ("channel", 0);
+                written->setAttribute ("channel", readChannel (note, schema::noteChannel) - 1); // counted from 0 there
                 written->setAttribute ("key", (int) note[schema::notePitch]);
                 written->setAttribute ("vel", number ((int) note.getProperty (schema::noteVelocity, 100) / 127.0));
             }
@@ -1618,6 +1618,7 @@ namespace
                                       [note] (const juce::ValueTree& ours)
                                       {
                                           return (int) ours[schema::notePitch] == note->getIntAttribute ("key")
+                                                 && readChannel (ours, schema::noteChannel) == readNoteChannel (*note)
                                                  && isClose ((double) ours[schema::noteStart], note->getDoubleAttribute ("time"))
                                                  && isClose ((double) ours[schema::noteLength], note->getDoubleAttribute ("duration"))
                                                  && std::abs ((int) ours.getProperty (schema::noteVelocity, 100)
@@ -1652,12 +1653,18 @@ namespace
                 clip.setProperty (schema::clipLength, maxSongBeats, nullptr);
         }
 
+        // A note's MIDI channel, which DAWproject counts from 0: as the song counts them, from 1 to 16.
+        static int readNoteChannel (const juce::XmlElement& note)
+        {
+            return juce::roundToInt (readNumber (note, "channel", 0.0, 0.0, 15.0)) + 1;
+        }
+
         void addNoteFrom (ClipID clip, BeatPosition contentStart, const juce::XmlElement& note)
         {
             addNote (song, clip, juce::jlimit (0, 127, note.getIntAttribute ("key")),
                      contentStart + BeatDuration::fromBeats (readNumber (note, "time", 0.0, -maxSongBeats, maxSongBeats)),
                      BeatDuration::fromBeats (readNumber (note, "duration", 1.0, 1.0 / 64.0, maxSongBeats)),
-                     juce::jlimit (1, 127, juce::roundToInt (readNumber (note, "vel", 0.8, 0.0, 1.0) * 127.0)));
+                     juce::jlimit (1, 127, juce::roundToInt (readNumber (note, "vel", 0.8, 0.0, 1.0) * 127.0)), readNoteChannel (note));
         }
 
         void addTrack (const juce::XmlElement& track, const ReadTracks& theirs)

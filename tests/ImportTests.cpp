@@ -11,6 +11,8 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <utility>
+#include <vector>
 
 namespace
 {
@@ -177,6 +179,60 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
     CHECK ((int) control[phazite::schema::controlNumber] == 74);
     CHECK ((int) control[phazite::schema::controlValue] == 100);
     CHECK ((double) control[phazite::schema::controlBeat] == doctest::Approx (0.5));
+}
+
+TEST_CASE ("A MIDI file's notes and controllers on two channels keep their channels, a note on each of one pitch at once")
+{
+    // A track of two parts: middle C on channel 1 and on channel 10 at once, each ending where it does, the mod wheel on
+    // channel 10 and a program change on channel 1. Channel 1 isn't written into the song (Schema.h).
+    TemporaryFolder temp;
+    juce::MidiMessageSequence events;
+    events.addEvent (juce::MidiMessage::programChange (1, 12), 0.0);
+    events.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0.0);
+    events.addEvent (juce::MidiMessage::noteOn (10, 60, (juce::uint8) 80), 0.0);
+    events.addEvent (juce::MidiMessage::controllerEvent (10, 1, 50), 480.0);
+    events.addEvent (juce::MidiMessage::noteOff (10, 60), 960.0);
+    events.addEvent (juce::MidiMessage::noteOff (1, 60), 2.0 * 960.0);
+    events.updateMatchedPairs();
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote (960);
+    midi.addTrack (events);
+    const auto file = temp.folder.getChildFile ("Two parts.mid");
+    {
+        juce::FileOutputStream stream (file);
+        REQUIRE (midi.writeTo (stream));
+    }
+
+    auto project = createProject (temp.folder.getChildFile ("Projects"));
+    auto& song = project->getSong();
+    const auto clip = phazite::importFile (song, phazite::getTrackIDs (song).front(), file, beats (0.0));
+    REQUIRE (clip.isValid());
+
+    auto notes = phazite::getClipNotes (song, clip);
+    REQUIRE (notes.size() == 2);
+    std::sort (notes.begin(), notes.end(), [] (const auto& a, const auto& b) { return a.channel < b.channel; });
+    CHECK (notes[0].channel == 1);
+    CHECK (notes[0].length.inBeats() == doctest::Approx (2.0));
+    CHECK (notes[1].channel == 10);
+    CHECK (notes[1].velocity == 80);
+    CHECK (notes[1].length.inBeats() == doctest::Approx (1.0));
+
+    const auto clipState = phazite::findClipState (song, clip);
+    std::vector<std::pair<juce::String, int>> controls; // kind and channel
+
+    for (const auto& child : clipState)
+        if (child.hasType (phazite::schema::CONTROL))
+            controls.emplace_back (child[phazite::schema::controlKind].toString(),
+                                   phazite::readChannel (child, phazite::schema::controlChannel));
+
+    std::sort (controls.begin(), controls.end());
+    CHECK (controls
+           == std::vector<std::pair<juce::String, int>> { { phazite::schema::controlIsController, 10 },
+                                                          { phazite::schema::controlIsProgramChange, 1 } });
+
+    for (const auto& child : clipState)
+        if (child.hasType (phazite::schema::NOTE) && phazite::readChannel (child, phazite::schema::noteChannel) == 1)
+            CHECK_FALSE (child.hasProperty (phazite::schema::noteChannel));
 }
 
 TEST_CASE ("A MIDI file's quarter notes are a song's in 6/8: at 120 BPM, a note a quarter note in plays half a second in")

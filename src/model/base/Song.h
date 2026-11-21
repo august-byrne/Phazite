@@ -108,15 +108,19 @@ public:
     // Values set by hand as they are set: by a control, a command or a preset (setValueSetByHand(),
     // model/devices/internal/Parameters.h), or by a plug-in itself, in its window. For what plays the song, what writes its
     // automation while it plays and what remembers the parameter touched last. Message thread only.
+    // And a plug-in's value that a program the song's MIDI set set (model/plugins/internal/PluginInstances.h): the song's
+    // own, for what plays it alone, which no one touched and which writes no automation.
     struct ParameterListener
     {
         virtual ~ParameterListener() = default;
         virtual void valueSetByHand (const ParameterRef&, float value, bool byPlugin) = 0;
+        virtual void valueSetByProgram (const ParameterRef&, float /* value */) {}
     };
 
     void addParameterListener (ParameterListener*);
     void removeParameterListener (ParameterListener*);
     void tellValueSetByHand (const ParameterRef&, float value, bool byPlugin);
+    void tellValueSetByProgram (const ParameterRef&, float value);
 
     // What the devices that play the song hold of their state outside it (a plug-in's own settings), stored into the
     // song's elements of them, outside the undo history, before the song is saved or copied: a track's devices (by the

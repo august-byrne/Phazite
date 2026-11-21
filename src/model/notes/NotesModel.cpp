@@ -234,6 +234,8 @@ namespace
                 return "Change Note Length";
             case NoteProperty::pitch:
                 return "Transpose Notes";
+            case NoteProperty::channel:
+                return "Change Channel";
             case NoteProperty::velocity:
             default:
                 return "Change Velocity";
@@ -250,6 +252,8 @@ namespace
                 return note.length.inBeats();
             case NoteProperty::pitch:
                 return note.pitch;
+            case NoteProperty::channel:
+                return note.channel;
             case NoteProperty::velocity:
             default:
                 return note.velocity;
@@ -320,17 +324,29 @@ namespace
                 case NoteProperty::velocity:
                     note.velocity = juce::jlimit (1, 127, roundToWhole<int> (value, note.velocity));
                     break;
+                case NoteProperty::channel:
+                    note.channel = juce::jlimit (1, 16, roundToWhole<int> (value, note.channel));
+                    break;
             }
         }
 
-        if (property != NoteProperty::velocity)
+        if (property == NoteProperty::velocity)
         {
-            setNotes (context, changed);
+            for (const auto& note : changed)
+                setNoteVelocities (context, { note.getRef() }, note.velocity);
+
             return;
         }
 
-        for (const auto& note : changed)
-            setNoteVelocities (context, { note.getRef() }, note.velocity);
+        if (property == NoteProperty::channel)
+        {
+            for (const auto& note : changed)
+                setNoteChannels (*song, { note.getRef() }, note.channel);
+
+            return;
+        }
+
+        setNotes (context, changed);
     }
 } // namespace
 
@@ -353,7 +369,7 @@ void setNotesTo (ProjectContext& context, const std::vector<NoteRef>& refs, Note
     if (! std::isfinite (value)) // typed: "1e999" changes nothing (known bug 148)
         return;
 
-    const auto each = property == NoteProperty::length || property == NoteProperty::velocity;
+    const auto each = property == NoteProperty::length || property == NoteProperty::velocity || property == NoteProperty::channel;
     setEach (context, refs, property, [each, value] (Range range, double own) { return each ? value : own + value - range.first; });
 }
 
@@ -551,7 +567,7 @@ void showAllDrumRows (ProjectContext& context, TrackID id)
 }
 
 //==============================================================================
-TrackID auditionNotes (ProjectContext& context, ClipID id, const std::vector<int>& pitches, int velocity)
+TrackID auditionNotes (ProjectContext& context, ClipID id, const std::vector<int>& pitches, int velocity, int channel)
 {
     auto* song = findSong (context);
     const auto track = song != nullptr ? getClipTrack (*song, id) : TrackID();
@@ -565,7 +581,7 @@ TrackID auditionNotes (ProjectContext& context, ClipID id, const std::vector<int
     if (session == nullptr)
         return {};
 
-    session->playGuideNotes ((juce::int64) track.getRaw(), pitches, velocity);
+    session->playGuideNotes ((juce::int64) track.getRaw(), pitches, velocity, channel);
     return track;
 }
 

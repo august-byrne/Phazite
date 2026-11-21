@@ -146,6 +146,11 @@ struct Plan
         std::vector<AudioRegion> audio;            // its audio clips, which play beside its instrument
         std::vector<Device> devices;               // in the order the sound goes through them, an instrument first
         bool hasInstrument = false;
+
+        // What tells the instrument it plays its notes into (or an instrument container's) from another, the same from plan
+        // to plan for one loaded instrument: another instrument in its place, or a plug-in loaded again after a crash, has
+        // another, and is sent the programs the chase finds as new (StripState::programsSent). 0 for none.
+        std::uint64_t instrument = 0;
         std::vector<Input> inputs;
 
         // The audio device's inputs it hears (a track without an instrument): one, on both sides, or a pair, by their
