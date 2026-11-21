@@ -140,6 +140,16 @@ TEST_CASE ("Notes typed in the Project view go into the song, a burst of typing 
     CHECK_FALSE (phazite::Gesture::isInProgress (screen.getSong()));
     CHECK (screen.getSong().getUndoManager().getUndoDescription() == juce::String ("Change Notes"));
     CHECK (phazite::getProjectNotes (context) == juce::String ("Verse"));
+
+    // The project read again between a key and the field's telling of it, a message later (the answer of the check for
+    // missing files comes at any time, and reads it): what was typed stays in the field and goes into the song. It put the
+    // song's notes back over it, and the change the field then told of was those (CI's Linux, 2026-11-20).
+    phazite::test::dispatchPendingMessages();
+    notes.insertTextAtCaret (", then a bridge");
+    view.refreshNow();
+    CHECK (notes.getText() == juce::String ("Verse, then a bridge"));
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getProjectNotes (context) == juce::String ("Verse, then a bridge"));
 }
 
 TEST_CASE ("The Project view lists the song's audio files, a missing one with its Locate, and the files nothing plays")

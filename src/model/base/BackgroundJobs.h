@@ -79,4 +79,12 @@ private:
     // Runs the next job on a thread of its own; false if none waits.
     bool runNext (const juce::Thread&);
 };
+// A job on a thread of its own that nothing waits for, which ends when the job returns: for work that may be inside the
+// system for as long as a drive takes to answer (a folder listed on a share that has gone), left behind by whoever
+// started it. The job must own everything it touches, or share it with what may be gone by then only behind a lock and a
+// word that says so. False if no thread could be started (the job is not run). Not juce::Thread::launch(): its thread
+// deletes itself as it ends, which can be before the startThread() that started it has let go of the thread's own lock,
+// so that a job that ends at once (one told to stop before it began) has the lock destroyed while it is held
+// (ThreadSanitizer, 2026-11-20). JUCE workaround W61 (docs/juce-workarounds.md).
+bool runLeftBehind (const juce::String& threadName, std::function<void()> job);
 } // namespace phazite

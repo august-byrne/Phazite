@@ -493,12 +493,18 @@ void ProjectView::showUnused()
 
 void ProjectView::readNotes()
 {
-    // Not while a burst of typing goes on: the field holds what the song is getting.
-    if (notesTyping != nullptr)
+    // Not while a burst of typing goes on: the field holds what the song is getting. Nor while the field holds what was
+    // typed and it hasn't told of yet (a text field tells of a change a message later): a read between the two, which the
+    // check of the missing files' answer can be, put the song's notes back over what was typed, and the change the field
+    // then told of was those.
+    if (notesTyping != nullptr || notesField->getText() != notesSynced)
         return;
 
-    if (const auto notes = getProjectNotes (context); notesField->getText() != notes)
+    if (const auto notes = getProjectNotes (context); notesSynced != notes)
+    {
+        notesSynced = notes;
         notesField->setText (notes, false);
+    }
 }
 
 void ProjectView::notesChanged()
@@ -516,7 +522,8 @@ void ProjectView::notesChanged()
     }
 
     lastTyped = devices::Clock::getMillisecondCounter();
-    setProjectNotes (context, notesField->getText());
+    notesSynced = notesField->getText();
+    setProjectNotes (context, notesSynced);
 }
 
 void ProjectView::endTyping()
@@ -631,6 +638,7 @@ void ProjectView::projectChanged()
 {
     endTyping(); // the closing project's song keeps what was typed into it
     notesField->setText ({}, false);
+    notesSynced.clear();
     audioFiles.clear();
     plugins.clear();
     unusedFiles = 0; // none shown until the new project's are found

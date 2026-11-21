@@ -99,6 +99,7 @@ private:
     std::unique_ptr<NotesField> notesField;
     std::unique_ptr<SongGesture> notesTyping; // a burst of typing's one undo step, until a pause or the keys go elsewhere
     juce::uint32 lastTyped = 0;               // when the last key of the burst changed the notes
+    juce::String notesSynced;                 // the field's text as it was last read from the song or given to it
     std::unique_ptr<AudioModel> audioModel;
     std::unique_ptr<PluginModel> pluginModel;
     juce::ListBox audioList, pluginList;

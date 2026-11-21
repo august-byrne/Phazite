@@ -3,6 +3,7 @@
 #include "internal/ProjectContext.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/BackgroundJobs.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
@@ -241,7 +242,7 @@ void MissingAudioCheck::start (const juce::Array<juce::File>& files)
         --checksUnderWay;
     };
 
-    if (! juce::Thread::launch (juce::Thread::Priority::low, std::move (checkFiles)))
+    if (! runLeftBehind ("Phazite missing files", std::move (checkFiles)))
     {
         --checksUnderWay;
         running = nullptr;

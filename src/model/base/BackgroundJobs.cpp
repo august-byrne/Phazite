@@ -2,6 +2,9 @@
 #include "BackgroundJobs.h"
 
 #include <algorithm>
+#include <system_error>
+#include <thread>
+#include <utility>
 
 namespace phazite
 {
@@ -136,6 +139,27 @@ bool BackgroundJobs::runNext (const juce::Thread& thread)
     }
 
     finished.notify_all();
+    return true;
+}
+
+bool runLeftBehind (const juce::String& threadName, std::function<void()> job)
+{
+    try
+    {
+        std::thread (
+            [threadName, run = std::move (job)]() mutable
+            {
+                juce::Thread::setCurrentThreadName (threadName);
+                run();
+                run = nullptr; // what it holds goes while the thread is still there
+            })
+            .detach();
+    }
+    catch (const std::system_error&)
+    {
+        return false; // no thread to be had
+    }
+
     return true;
 }
 } // namespace phazite
