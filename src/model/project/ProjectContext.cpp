@@ -11,6 +11,7 @@
 #include "model/arrangement/internal/Transients.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/internal/Freeze.h"
@@ -20,6 +21,12 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/versions/internal/VersionHistory.h"
+
+#include <algorithm>
+#include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -34,6 +41,7 @@ namespace
     // Listens to the open song and tells the context's listeners which groups changed, once per turn of the message loop. A
     // plug-in whose helper went, or that was reloaded, changes what its device shows (model/plugins/internal/PluginHost.h).
     struct SongWatcher : private juce::ValueTree::Listener,
+                         private SongValues::NotesListener,
                          private juce::ChangeListener,
                          private juce::AsyncUpdater
     {
@@ -47,17 +55,27 @@ namespace
         ~SongWatcher() override
         {
             plugins.removeChangeListener (this);
-            setState ({});
+            setSong (nullptr);
         }
 
-        void setState (juce::ValueTree newState)
+        void setSong (Song* newSong)
         {
+            if (song != nullptr)
+                if (auto* values = song->getValues())
+                    values->removeNotesListener (this);
+
             state.removeListener (this);
             cancelPendingUpdate();
             pending = {};
+            notesChanged.clear();
             ++version;
-            state = std::move (newState);
+            song = newSong;
+            state = song != nullptr ? song->getState() : juce::ValueTree();
             state.addListener (this);
+
+            if (song != nullptr)
+                if (auto* values = song->getValues())
+                    values->addNotesListener (this);
         }
 
         int getVersion() const noexcept { return version; }
@@ -65,9 +83,30 @@ namespace
     private:
         juce::ListenerList<ProjectContext::Listener>& listeners;
         PluginHost& plugins;
+        juce::WeakReference<Song> song; // which may go before it lets go of it
         juce::ValueTree state;
         SongChanges pending;
-        int version = 0; // ProjectContext::getSongVersion()
+        std::vector<ClipID> notesChanged; // named as the changes are delivered, with their tracks
+        int version = 0;                  // ProjectContext::getSongVersion()
+
+        // A clip's notes and controllers' values, which the song holds beside its tree (SongValues.h): a change in the clip,
+        // as one of its elements was.
+        void clipNotesChanged (const std::vector<ClipID>& clips) override
+        {
+            notesChanged.insert (notesChanged.end(), clips.begin(), clips.end());
+            add (pending.clips);
+        }
+
+        // Each clip whose notes changed named, on its track; one gone since was named as it was taken off its track.
+        void nameNotesChanged()
+        {
+            if (song == nullptr)
+                return;
+
+            for (const auto clip : std::exchange (notesChanged, {}))
+                if (const auto clipState = findClipState (*song.get(), clip); clipState.isValid())
+                    nameClip (clipState, clipState.getParent());
+        }
 
         void changeListenerCallback (juce::ChangeBroadcaster*) override
         {
@@ -193,6 +232,7 @@ namespace
 
         void handleAsyncUpdate() override
         {
+            nameNotesChanged();
             makeExact (pending.changedClips);
             makeExact (pending.clipTracks);
             makeExact (pending.deviceChannels);
@@ -635,7 +675,7 @@ void setSong (ProjectContext& context, Song* song)
             *song, [&impl] { impl.listeners.call ([] (ProjectContext::Listener& l) { l.versionsChanged(); }); });
     }
 
-    impl.songWatcher->setState (song != nullptr ? song->getState() : juce::ValueTree());
+    impl.songWatcher->setSong (song);
     impl.listeners.call ([] (ProjectContext::Listener& l) { l.projectChanged(); });
 }
 

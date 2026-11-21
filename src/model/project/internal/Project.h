@@ -5,6 +5,7 @@
 #include "model/base/BackgroundJobs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -31,7 +32,9 @@ juce::File getDefaultProjectsFolder();
 
 // A song made of a state (Schema.h: PHAZITE, which it takes), with what every song has added (its tempo map, its track list
 // with the master, its next ID), as a project opens. Its file, if given, is where its audio files' paths start from, and
-// its cache folder where its frozen tracks' files are. No undo steps. Nothing for a state that isn't a song.
+// its cache folder where its frozen tracks' files are. No undo steps. Nothing for a state that isn't a song. Once it is
+// consistent, its clips' notes and controllers' values leave the state for values beside it (Song::holdValues()): the
+// state given doesn't hold them then. Message thread.
 Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file = {}, const juce::File& cacheFolder = {});
 
 // The furthest place in beats a song holds anything at, as a file from elsewhere is taken in: a million beats, days of music
@@ -134,6 +137,7 @@ void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal);
 //
 // Create, open and destroy Projects on the message thread.
 class Project : private juce::ValueTree::Listener,
+                private SongValues::NotesListener,
                 private juce::AsyncUpdater,
                 private juce::Timer
 {
@@ -360,6 +364,12 @@ private:
     std::vector<ToCompare> toCompare;
     bool comparingWhole = false; // past mostToCompare: each one's track, or the song's element, whole
     void clearToCompare();
+
+    // The clips whose notes and controllers' values changed (the song holds them beside its tree: SongValues.h), compared
+    // with savedState's values when asked, as an element that notified is (holdSameNotes()). A clip taken out of the song
+    // compares as its track does, which notified.
+    std::vector<ClipID> notesToCompare;
+    void clipNotesChanged (const std::vector<ClipID>&) override;
 
     // What a store of the plug-ins' states wrote into the song without notifying (storeForSaving() while isWriting) where
     // the project file doesn't get it (Save a Copy As, an autosave, a save whose write fails): the tracks and the master

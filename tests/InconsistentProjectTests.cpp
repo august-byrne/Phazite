@@ -162,7 +162,8 @@ TEST_CASE ("A track's volume beyond any fader's opens at the top of its range, a
 
 TEST_CASE ("A note's and a controller's MIDI channel open within 1 to 16, one in it as it was")
 {
-    // Channel 0 opens on 1, 40 on 16, one that is no number on 1 (none written), and 9 as it is.
+    // Channel 0 opens on 1, 40 on 16, one that is no number on 1, and 9 as it is; the first channel written as none, as a
+    // clip's value writes it (model/base/internal/SongValues.h).
     Edited edited;
     const auto project = edited.open (
         [] (juce::XmlElement& song)
@@ -193,7 +194,7 @@ TEST_CASE ("A note's and a controller's MIDI channel open within 1 to 16, one in
         channels[(int) control[schema::controlValue]] = control[schema::controlChannel];
 
     REQUIRE (channels.size() == 3);
-    CHECK ((int) channels[1] == 1);
+    CHECK (channels[1].isVoid());
     CHECK (channels[2].isVoid());
     CHECK ((int) channels[3] == 9);
 }
@@ -1464,7 +1465,7 @@ TEST_CASE ("A chain's crossover's automation stays while its container isn't spl
     CHECK (phazite::getPoints (*phazite::findSong (s.context), crossover).size() == 2);
 }
 
-TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as they are, and are saved again")
+TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as they are, and are saved again, but in a clip's notes")
 {
     Edited edited;
     const auto project = edited.open (
@@ -1492,7 +1493,9 @@ TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as
     const auto* lead = Edited::findTrack (*saved, "Lead");
     CHECK (lead->getStringAttribute ("laterProperty") == "1");
     CHECK (lead->getChildByName ("TOOLDATA") != nullptr);
-    CHECK (lead->getChildByName ("CLIP")->getChildByName ("NOTE")->getChildByName ("EXPRESSION") != nullptr);
+    // But a note's and a controller's value: what Phazite doesn't know on a NOTE or a CONTROL isn't kept, as a clip's notes
+    // are values beside the song's tree (docs/project-format.md).
+    CHECK (lead->getChildByName ("CLIP")->getChildByName ("NOTE")->getChildByName ("EXPRESSION") == nullptr);
 }
 
 TEST_CASE ("A DAWproject's project.xml with a byte order mark and no XML declaration is read")

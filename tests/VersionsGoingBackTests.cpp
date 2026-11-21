@@ -6,6 +6,7 @@
 #include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestClips.h"
+#include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -14,6 +15,7 @@
 #include "devices/synth/Synth.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -32,6 +34,7 @@
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
 
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -123,14 +126,14 @@ juce::String findBranch (const phazite::ProjectContext& context, const juce::Str
 }
 
 // The song holds together as its file would open (SongCheck.h: copyAsOpened(), without the curves an undo keeps), by every
-// rule. Or by every rule but that the clips of an alias group hold the same notes, for the edits that take one track's line
-// back alone, which break it today: known bug 234 (docs/known-bugs.md), which the findings below check. A group of one clip,
-// or of clips of different kinds, is still a problem then.
-void checkWhole (const phazite::Song& song, bool notesOfAliasesMayDiffer = false)
+// rule, the clips of an alias group holding the same notes among them; and its own values are kept with its tree (values).
+void checkWhole (const phazite::Song& song)
 {
     for (const auto& problem : findSongProblems (*copyAsOpened (song)))
-        if (! (notesOfAliasesMayDiffer && juce::String (problem).contains ("its notes and values differ")))
-            FAIL_CHECK (problem);
+        FAIL_CHECK (problem);
+
+    for (const auto& problem : findValueProblems (song))
+        FAIL_CHECK (problem);
 }
 
 // The notes of a track's clips, a clip's after another's in the track's order (TestClips.h: describeClipNotes()).
@@ -871,10 +874,8 @@ TEST_CASE ("Every way of going back is one exact undo step on a song of notes an
 
     // Each through the undo check, what it must give checked inside it, the song checked after it, after its Undo and after
     // its Redo; then undone again, so that the next starts from the changes since Second. An edit of one track's line alone
-    // is checked after it and its Redo with the notes of an alias group's clips allowed to differ, which it breaks today
-    // (known bug 234): the FINDING cases after this one check that of Put Back and of a line restored.
-    const auto goBack = [&] (const juce::String& what, const std::function<bool()>& command, const std::function<void()>& gives,
-                             bool notesOfAliasesMayDiffer = false)
+    // gives the clips of an alias group on other tracks the notes it restores (known bug 234, fixed: the cases after this one).
+    const auto goBack = [&] (const juce::String& what, const std::function<bool()>& command, const std::function<void()>& gives)
     {
         INFO (what.toStdString());
         undo.check (what,
@@ -883,20 +884,20 @@ TEST_CASE ("Every way of going back is one exact undo step on a song of notes an
                         REQUIRE (phazite::test::finished (s.context, command));
                         gives();
                     });
-        checkWhole (song, notesOfAliasesMayDiffer);
+        checkWhole (song);
         undo.stepBackOrForth ("Undo " + what, [&song] { phazite::undo (song); });
         checkWhole (song);
         undo.stepBackOrForth ("Redo " + what, [&song] { phazite::redo (song); });
-        checkWhole (song, notesOfAliasesMayDiffer);
+        checkWhole (song);
         undo.stepBackOrForth ("Undo " + what + " again", [&song] { phazite::undo (song); });
     };
 
     // Put Back, a line each, against the last version (Second): Keys (the alias that the notes were edited through), then
     // Bass (the group's first and last).
     const auto keysLine = lineOf ("Keys");
-    goBack ("Put Back Keys", [&] { return phazite::takeBack (s.context, keysLine); }, notesAre (n.keys, n.secondKeys), true);
+    goBack ("Put Back Keys", [&] { return phazite::takeBack (s.context, keysLine); }, notesAre (n.keys, n.secondKeys));
     const auto bassLine = lineOf ("Bass");
-    goBack ("Put Back Bass", [&] { return phazite::takeBack (s.context, bassLine); }, notesAre (n.bass, n.secondBass), true);
+    goBack ("Put Back Bass", [&] { return phazite::takeBack (s.context, bassLine); }, notesAre (n.bass, n.secondBass));
 
     // Discard All Changes, and Restore This Version on the last version and on the one before, by the command.
     goBack ("Discard All Changes", [&] { return phazite::discardAllChanges (s.context); }, songIs (n.secondText));
@@ -908,7 +909,7 @@ TEST_CASE ("Every way of going back is one exact undo step on a song of notes an
     // Take from This Version: a line of what differs from First, taken from it.
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, n.first); }));
     const auto keysFromFirst = lineOf ("Keys");
-    goBack ("Take Keys from First", [&] { return phazite::takeBack (s.context, keysFromFirst); }, notesAre (n.keys, n.firstKeys), true);
+    goBack ("Take Keys from First", [&] { return phazite::takeBack (s.context, keysFromFirst); }, notesAre (n.keys, n.firstKeys));
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, {}); }));
 
     // A line of what Second changed, restored from First, and one from Second.
@@ -919,10 +920,10 @@ TEST_CASE ("Every way of going back is one exact undo step on a song of notes an
     REQUIRE (bassOfSecond.has_value());
     goBack (
         "Restore Keys from First", [&] { return phazite::restoreFromVersion (s.context, n.first, *keysOfSecond); },
-        notesAre (n.keys, n.firstKeys), true);
+        notesAre (n.keys, n.firstKeys));
     goBack (
         "Restore Bass from Second", [&] { return phazite::restoreFromVersion (s.context, n.second, *bassOfSecond); },
-        notesAre (n.bass, n.secondBass), true);
+        notesAre (n.bass, n.secondBass));
 
     // An automatic save restored: taken of the song as it is, then a note's velocity set through the alias, and the save
     // brought back, which gives the song as it was before the velocity (not merely a step that Undo takes back).
@@ -957,11 +958,114 @@ TEST_CASE ("Every way of going back is one exact undo step on a song of notes an
     checkWhole (song);
 }
 
-// FINDING (known bug 234): Put Back of one track's line (takeBack(); Take from This Version is the same) makes that track's
-// clips of an alias group what they were and leaves the group's clips on other tracks as they are now, so that the group's
-// clips hold different notes, which Schema.h (clipLink) says they never do. Once fixed, the group's other clips take the
-// restored notes, as a merge gives every clip of a group its keeper's notes (docs/design/versions.md).
-TEST_CASE ("Put Back of one track's line keeps the clips of an alias group on other tracks holding the same notes" * doctest::should_fail())
+// What the audio clips of an alias group share (AudioClips.h: shareTheSound(): the file, tempo, pitch, direction and warp
+// markers) is given by one track's line put back, taken from a version or restored to every clip of the group, those on other
+// tracks too, in the same undo step (known bug 234, its audio half): a group of three clips on Drums and Loops, the shared
+// pitch changed and a warp marker added through the clip on Loops, kept as Second; the pitch changed again since; then
+// Drums's line taken back each way, and once more with Drums deleted since, each through the undo check.
+TEST_CASE ("Every way of going back a track's line gives the audio clips of an alias group on other tracks what the group shares, "
+           "as one exact undo step")
+{
+    TestSong s;
+    const auto drums = s.addTrack ("Drums"), loops = s.addTrack ("Loops");
+    const auto file = writeSound (s.getSoundsFolder().getChildFile ("Tone.wav"), 2.0);
+    const auto clip = s.addAudioClip (drums, file, 0.0);
+    const auto onLoops = s.copyClip (clip, 8.0, true);
+    phazite::moveClip (s.context, onLoops, phazite::BeatPosition::fromBeats (8.0), loops);
+    const auto later = s.copyClip (clip, 16.0, true);
+    std::vector members { clip, onLoops, later };
+    auto& song = *phazite::findSong (s.context);
+    REQUIRE (phazite::getLinkedClips (s.context, clip).size() == 3);
+    REQUIRE (phazite::getClipTrack (song, onLoops) == loops);
+    const auto first = keepVersion (s.context, "First");
+
+    phazite::setClipPitch (s.context, onLoops, 3.5f);
+    REQUIRE (phazite::addWarpMarker (s.context, onLoops, 0.5));
+    const auto second = keepVersion (s.context, "Second");
+    phazite::setClipPitch (s.context, onLoops, -2.0f);
+
+    // Every clip of the group shares the sound of the first, at a pitch, with so many warp markers.
+    const auto shareAt = [&song, &members] (float pitch, std::size_t markers)
+    {
+        return [&song, &members, pitch, markers]
+        {
+            const auto firstState = phazite::findClipState (song, members.front());
+
+            for (const auto member : members)
+            {
+                INFO ("clip " << member.getRaw());
+                CHECK (phazite::shareTheSound (firstState, phazite::findClipState (song, member)));
+                CHECK (phazite::getClipPitch (song, member) == doctest::Approx (pitch));
+                CHECK (phazite::getWarpMarkers (song, member).size() == markers);
+            }
+        };
+    };
+
+    UndoCheck undo (s.context);
+    const auto lineOf = [&s] (const juce::String& name)
+    {
+        const auto line = findLine (phazite::getListedChanges (withChangesIn (s.context)), name);
+        INFO ("no line " << name.toStdString() << " among " << describeChanges (phazite::getListedChanges (s.context)).toStdString());
+        REQUIRE (line.has_value());
+        return *line;
+    };
+
+    // As the case above does: through the undo check, the song checked (the alias rule among the rest) after it, its Undo and
+    // its Redo, then undone again.
+    const auto goBack = [&] (const juce::String& what, const std::function<bool()>& command, const std::function<void()>& gives)
+    {
+        INFO (what.toStdString());
+        undo.check (what,
+                    [&]
+                    {
+                        REQUIRE (phazite::test::finished (s.context, command));
+                        gives();
+                    });
+        checkWhole (song);
+        undo.stepBackOrForth ("Undo " + what, [&song] { phazite::undo (song); });
+        checkWhole (song);
+        undo.stepBackOrForth ("Redo " + what, [&song] { phazite::redo (song); });
+        checkWhole (song);
+        undo.stepBackOrForth ("Undo " + what + " again", [&song] { phazite::undo (song); });
+    };
+
+    const auto drumsLine = lineOf ("Drums");
+    goBack ("Put Back Drums", [&] { return phazite::takeBack (s.context, drumsLine); }, shareAt (3.5f, 1u));
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, first); }));
+    const auto drumsFromFirst = lineOf ("Drums");
+    goBack ("Take Drums from First", [&] { return phazite::takeBack (s.context, drumsFromFirst); }, shareAt (0.0f, 0u));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, {}); }));
+
+    const auto drumsOfSecond = findLine (readVersionChanges (s.context, second), "Drums");
+    REQUIRE (drumsOfSecond.has_value());
+    goBack ("Restore Drums from First", [&] { return phazite::restoreFromVersion (s.context, first, *drumsOfSecond); }, shareAt (0.0f, 0u));
+
+    // A second alias on Loops, so that the group outlives Drums (its last clip would leave it); Drums deleted since, the
+    // group's clips left on Loops given another pitch, and Drums's line put back: the track comes back with its clips of the
+    // group, whose sound the clips on Loops take.
+    undo.checkSeveral ("Alias on Loops", [&] { members.push_back (s.copyClip (onLoops, 24.0, true)); });
+    REQUIRE (phazite::getLinkedClips (s.context, clip).size() == 4);
+    undo.check ("Delete Track",
+                [&]
+                {
+                    const phazite::UndoStep step (song, "Delete Track");
+                    phazite::deleteTracks (song, { drums }, nullptr);
+                });
+    undo.check ("Change Clip Pitch", [&] { phazite::setClipPitch (s.context, onLoops, 5.0f); });
+    REQUIRE (phazite::getLinkedClips (s.context, onLoops).size() == 2);
+    const auto drumsGone = lineOf ("Drums");
+    goBack ("Put Back Drums, deleted since", [&] { return phazite::takeBack (s.context, drumsGone); }, shareAt (3.5f, 1u));
+
+    undo.walkBackAndForth();
+    checkWhole (song);
+}
+
+// Put Back of one track's line (takeBack(); Take from This Version is the same) makes that track's clips of an alias group what
+// they were, as one value of the group (Notes.h: makeClipNotesLike()), so that the group's clips on other tracks take the
+// restored notes too, as a merge gives every clip of a group its keeper's notes (docs/design/versions.md): known bug 234,
+// which left them as they were.
+TEST_CASE ("Put Back of one track's line keeps the clips of an alias group on other tracks holding the same notes")
 {
     NotesAndAliases n;
     const auto keys = findLine (phazite::getListedChanges (withChangesIn (n.s.context)), "Keys");
@@ -976,12 +1080,9 @@ TEST_CASE ("Put Back of one track's line keeps the clips of an alias group on ot
     CHECK (countDifferentNotes (n.song(), group) == 1);
 }
 
-// FINDING (known bug 234): a line of a version restored alone (restoreFromVersion(), version.restoreChange) does the same:
-// the track's clips of an alias group become the version's, the group's clips on other tracks stay as they are, holding
-// other notes. Once fixed, the group's other clips take the restored notes, as a merge gives every clip of a group its
-// keeper's notes (docs/design/versions.md).
-TEST_CASE ("A track's line restored from a version keeps the clips of an alias group on other tracks holding the same notes"
-           * doctest::should_fail())
+// A line of a version restored alone (restoreFromVersion(), version.restoreChange) does the same: the track's clips of an alias
+// group become the version's, and so do the group's clips on other tracks (known bug 234).
+TEST_CASE ("A track's line restored from a version keeps the clips of an alias group on other tracks holding the same notes")
 {
     NotesAndAliases n;
     const auto keys = findLine (readVersionChanges (n.s.context, n.second), "Keys");

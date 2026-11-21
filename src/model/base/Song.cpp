@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Song.h"
 #include "internal/SongIndex.h"
+#include "internal/SongValues.h"
 
 #include <atomic>
 
@@ -35,6 +36,8 @@ Song::Song (juce::ValueTree s)
 
 Song::~Song()
 {
+    values = nullptr; // its keeper listens to the tree
+
     if (ownCacheFolder != juce::File())
         ownCacheFolder.deleteRecursively();
 }

@@ -3,6 +3,7 @@
 #include "internal/ApplySong.h"
 #include "internal/StoreSweep.h"
 #include "model/arrangement/TrackColours.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
@@ -818,6 +819,10 @@ VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
     outsideSeen = song.getDeviceChangesOutsideHistory();
     pluginsLoadingSeen = getPluginsLoading (song).size();
     state.addListener (this);
+
+    if (auto* values = song.getValues())
+        values->addNotesListener (this);
+
     open();
     startTimer (tickMilliseconds);
 }
@@ -833,6 +838,9 @@ VersionHistory::~VersionHistory()
 
     stopTimer();
     backgroundBounce = nullptr; // cancelled, before what it renders goes
+    if (auto* values = song.getValues())
+        values->removeNotesListener (this);
+
     state.removeListener (this);
 
     // A version open: the song as it was again, so that whatever holds it on (a test's song, which outlives its project) holds
@@ -1052,6 +1060,8 @@ void VersionHistory::startWhatWaitedForTheCopy()
     if (std::exchange (openSnapshotWaiting, false) && ! versions.empty())
     {
         // Once its changes are known to be some (changesWorked()), if they aren't yet.
+        markNotesHeard();
+
         if (sinceBase.isUpToDate())
         {
             if (hasChanges())
@@ -2866,6 +2876,11 @@ std::set<std::uint64_t> VersionHistory::findReported (const ReportCounts& then, 
 
 void VersionHistory::baselineChanged (bool songIsIt)
 {
+    // The clips whose notes were heard to change marked first, as the tree's changes mark at once: the comparison with the
+    // version compared keeps them, and the one with the baseline starts again below, so that none is left waiting for the
+    // next ask (which kept mayHaveChanges() true with no changes since a version saved at once).
+    markNotesHeard();
+
     // Compared again with the song from here on, in the background: at once known to be none, where the song is it.
     if (baseline.isValid())
         sinceBase.setReference (baseline, baselineParameters, true, songIsIt);
@@ -2908,7 +2923,7 @@ bool VersionHistory::hasChanges()
 
 bool VersionHistory::areChangesWorkedOut() const
 {
-    return sinceBase.isUpToDate() && (comparedVersion.isEmpty() || againstCompared.isUpToDate());
+    return notesHeard.empty() && sinceBase.isUpToDate() && (comparedVersion.isEmpty() || againstCompared.isUpToDate());
 }
 
 bool VersionHistory::mayHaveChanges()
@@ -2917,11 +2932,13 @@ bool VersionHistory::mayHaveChanges()
     if (shown.has_value())
         return shown->mayHaveChanges;
 
-    return hasChanges() || (hasRead && baseline.isValid() && ! sinceBase.isUpToDate());
+    return hasChanges() || (hasRead && baseline.isValid() && (! notesHeard.empty() || ! sinceBase.isUpToDate()));
 }
 
 void VersionHistory::askForChanges()
 {
+    markNotesHeard();
+
     if (! hasRead || store == nullptr)
         return;
 
@@ -3086,6 +3103,24 @@ void VersionHistory::markTrack (const juce::ValueTree& track, bool withTracksInI
                 markTrack (child, true);
 
     changesMayDiffer();
+}
+
+void VersionHistory::clipNotesChanged (const std::vector<ClipID>& clips)
+{
+    // A change of the song as its tree's are (valueTreePropertyChanged()), in a clip: its track's line, once its track is
+    // known (markNotesHeard()).
+    ++songChanges;
+    edited();
+    notesHeard.insert (notesHeard.end(), clips.begin(), clips.end());
+    changesMayDiffer();
+}
+
+void VersionHistory::markNotesHeard()
+{
+    // A clip gone since was taken off its track, which marked it.
+    for (const auto clip : std::exchange (notesHeard, {}))
+        if (const auto clipState = findClipState (song, clip); clipState.isValid())
+            markTrack (clipState.getParent(), false);
 }
 
 void VersionHistory::markCurve (const juce::String& key)

@@ -74,10 +74,11 @@ to it.
 
 ## How the song becomes sound
 
-The song lives in the model (`src/model/base/Song.h`). Each open song has a playback session
+The song lives in the model (`src/model/base/Song.h`): its tree, and beside it its clips' notes and controllers'
+values as immutable values (`src/model/base/internal/SongValues.h`). Each open song has a playback session
 (`src/model/playback/internal/PlaybackSession.h`), which compiles the song into a plan (`src/engine/core/Plan.h`)
-through `SongPlayer` (`src/model/playback/internal/SongPlayer.h`) and gives the engine a new plan as the song changes,
-at most once a turn of the message loop; values set by hand reach what plays at once, without a new plan. A plan is
+through `SongPlayer` (`src/model/playback/internal/SongPlayer.h`), the notes read from their values, and gives the
+engine a new plan as the song or its values change, at most once a turn of the message loop; values set by hand reach what plays at once, without a new plan. A plan is
 built on the message thread and handed to the audio thread whole (`src/engine/core/Handover.h`); what sounds on from one
 plan to the next, such as a reverb's tail or a fader, is kept by the song's IDs, so that a new plan doesn't reset it.
 The engine (`src/engine/core/Engine.h`) plays each block from the audio device's callback, with worker threads for the

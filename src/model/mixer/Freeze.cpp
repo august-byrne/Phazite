@@ -168,29 +168,35 @@ namespace
         return parts;
     }
 
-    juce::ValueTree copyWhatTheFreezeHolds (const Song& song, TrackID track)
+    FreezeKeeper::Holds copyWhatTheFreezeHolds (const Song& song, TrackID track)
     {
         juce::ValueTree copy ("FROZEN");
 
         for (const auto& part : getWhatTheFreezeHolds (song, track))
-            copy.appendChild (copyWhole (song, part), nullptr); // a clip with its notes
+            copy.appendChild (part.createCopy(), nullptr); // a clip's notes in the values kept
 
-        return copy;
+        return { copy, keepValues (song) };
     }
 
-    bool holdsWhatWasFrozen (const Song& song, TrackID track, const juce::ValueTree& frozen)
+    bool holdsWhatWasFrozen (const Song& song, TrackID track, const FreezeKeeper::Holds& frozen)
     {
         const auto parts = getWhatTheFreezeHolds (song, track);
 
-        if ((int) parts.size() != frozen.getNumChildren())
+        if ((int) parts.size() != frozen.parts.getNumChildren())
             return false;
 
         // Each as it is in the song, against its copy as copyWhatTheFreezeHolds() made it: in place, since this runs at every
-        // change in a frozen track (a fader dragged). Once a clip's notes are kept beside the tree, the copy is kept as a tree
-        // and the values kept with it, and the notes compared as values (roadmap step S5.20).
+        // change in a frozen track (a fader dragged); a clip's notes as values, the same value or one alike.
+        const auto now = keepValues (song);
+
         for (int i = 0; i < (int) parts.size(); ++i)
-            if (! isSameSound (parts[(size_t) i], frozen.getChild (i)))
+        {
+            const auto& part = parts[(size_t) i];
+
+            if (! isSameSound (part, frozen.parts.getChild (i))
+                || (part.hasType (schema::CLIP) && ! holdSameNotes (now, frozen.values, getClipID (part))))
                 return false;
+        }
 
         return true;
     }
@@ -372,17 +378,53 @@ FreezeKeeper::FreezeKeeper (Song& s)
 {
     takeFrozenTracks();
     state.addListener (this);
+
+    if (auto* values = song.getValues())
+        values->addNotesListener (this);
 }
 
 FreezeKeeper::~FreezeKeeper()
 {
+    cancelPendingUpdate();
+
+    if (auto* values = song.getValues())
+        values->removeNotesListener (this);
+
     state.removeListener (this);
+}
+
+void FreezeKeeper::clipNotesChanged (const std::vector<ClipID>& clips)
+{
+    if (frozen.empty())
+        return;
+
+    notesChanged.insert (notesChanged.end(), clips.begin(), clips.end());
+    triggerAsyncUpdate();
+}
+
+void FreezeKeeper::compareNotesChanged()
+{
+    if (checking || notesChanged.empty())
+        return;
+
+    // Each frozen track one of whose clips' notes changed: compared whole now (a clip gone took its track's tree with it,
+    // which check() heard).
+    std::set<TrackID> tracks;
+
+    for (const auto clip : std::exchange (notesChanged, {}))
+        if (const auto track = getClipTrack (song, clip); frozen.contains (track))
+            tracks.insert (track);
+
+    const juce::ScopedValueSetter<bool> busy (checking, true);
+
+    for (const auto track : tracks)
+        compare (track);
 }
 
 void FreezeKeeper::takeFrozenTracks()
 {
     // The tracks that are frozen now, each with what its file holds, kept from before if it was frozen then.
-    std::map<TrackID, juce::ValueTree> now;
+    std::map<TrackID, Holds> now;
 
     for (const auto track : getFrozenTracks (song))
     {
@@ -398,10 +440,14 @@ void FreezeKeeper::takeFrozenTracks()
 
 bool FreezeKeeper::keepThrough (const std::function<bool()>& apply)
 {
+    compareNotesChanged(); // what changed before
+
     const juce::ScopedValueSetter<bool> busy (checking, true); // what it changes, and the unfreezing, aren't checked
 
     if (! apply())
         return false;
+
+    notesChanged.clear(); // what apply changed: compared below
 
     // A frozen track stays frozen where its file holds what it plays now.
     frozen.clear();

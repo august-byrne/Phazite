@@ -22,15 +22,15 @@ namespace phazite
 {
 class CommandRegistry;
 
-// A clip's notes and controllers' values as the song holds them now: nothing for a clip that isn't a MIDI clip of the song's.
-// Message thread. While the clip's element still stores them (roadmap step S5.20's first piece), the element's NOTE and
-// CONTROL children read (SongValues.h: readClipNotes()), a walk through them.
+// A clip's notes and controllers' values as the song holds them now, beside its tree (model/base/internal/SongValues.h): a
+// copy that shares what it holds. Nothing for a clip that isn't a MIDI clip of the song's. Message thread. Of a song that
+// keeps everything in its tree (one made to be read or checked: Song::getValues()), its clip's NOTE and CONTROL children read.
 ClipNotes getClipNotesValue (const Song&, ClipID);
 
 // Gives a clip, and each clip of its alias group, these notes and values: in the song's undo history (the step in progress),
-// or outside it while the song is written outside its history (Song::isWritingOutsideHistory()). While the clips' elements
-// still store them, what differs written into each (SongValues.h: writeClipNotes()). Nothing for a clip that isn't a MIDI
-// clip of the song's.
+// or outside it while the song is written outside its history (Song::isWritingOutsideHistory()); SongValues::setClipNotes().
+// Nothing for a clip that isn't a MIDI clip of the song's, nor for a song that keeps everything in its tree, which isn't
+// edited.
 void setClipNotesValue (Song&, ClipID, const ClipNotes&);
 
 // What a note is, by where it is in the song; none for a note that is gone. Notes' IDs (schema::noteID) are each note's,
@@ -97,8 +97,7 @@ void growClipForNote (Song&, ClipID, BeatPosition start, BeatDuration);
 void addControl (Song&, ClipID, BeatPosition, ControlKind, int number, int value, int channel = 1);
 
 // The same for many at once, into one clip, each as addControl() says: what a take recorded (a bend sweep holds thousands).
-// The clip and each of its aliases is filled as a copy and put in its place (one removal and one insertion, the same clip by
-// its ID), so that what listens to the song hears one change, and Undo takes it all back.
+// One change of the clip's group's value, which Undo takes back whole.
 struct ControlValue
 {
     BeatPosition beat;
@@ -138,8 +137,10 @@ void scaleClipContent (Song&, const std::vector<ClipID>&, double factor);
 // A clip of the song's notes and controllers' values made those of another song's clip (its element: a version's, or the
 // result of a merge), as model/versions/internal/ApplySong.h makes the clip's other parts like the other's: those the clip
 // has that the other hasn't go, those both have (a note by its ID, a controller's value by its place among them) take the
-// other's values, and those it hasn't come, all in the other's order. In the song's undo history, or outside it while the
-// song is written outside it (Song::OutsideHistory). The clip alone: ApplySong makes its aliases like theirs in turn.
+// other's values, and those it hasn't come, all in the other's order: the other's value, set as one value of the clip's
+// alias group, so that the group's clips on other tracks take it too (a line put back, taken from a version or restored).
+// Nothing where the clip holds it already. In the song's undo history, or outside it while the song is written outside it
+// (Song::OutsideHistory).
 void makeClipNotesLike (Song&, ClipID, const juce::ValueTree& otherClip);
 
 // One value of a note of a clip set, or taken away (a void value: as if its element hadn't it), in the song's undo history,
@@ -149,6 +150,7 @@ bool setNoteValue (Song&, const NoteRef&, const juce::Identifier& property, cons
 
 // Takes notes out of one clip alone, not out of its aliases, outside the undo history: what reading a DAWproject back into
 // the song made of a version for it does (model/project/internal/DawProject.h), whose clips another DAW changed one by one.
+// A clip whose notes change so leaves its alias group (which holds one value), and the last one left of the group leaves it.
 void removeClipNotesAlone (Song&, ClipID, const std::vector<NoteID>&);
 
 // The piano roll's controller lanes (NoteValues.h: ControlLane), with the song's undo history. As notes are, only the
@@ -166,13 +168,12 @@ std::vector<ControlPoint> getControlValues (const Song&, const std::vector<ClipI
 // closer than getShortestControlGap() after the one before takes its place, and one that repeats the value before it (the
 // clip's, before the range) is left out, as a recording leaves it out. A clip doesn't grow for a value. Nothing for a note's
 // pressure, which is not drawn. A value already there as it would be put stays as it is, the others are removed and added:
-// values set as they are change nothing. One read of the clip's value, and one walk through each alias's elements as it is
-// written, which reads no note as the piano roll's does: a step of a drag.
+// values set as they are change nothing. One read of the clip's value and one change of its group's, which reads no note as
+// the piano roll's does: a step of a drag.
 void setControlValues (Song&, ClipID, const ControlLane&, BeatRange, const std::vector<ControlPoint>&);
 
-// Removes a lane's values that play from these clips from one song beat to another, both included; or all of them. Many
-// values removed (more than a step of a drag removes) are one change of each clip: it is filled as a copy without them and
-// put in its place, the same clip by its ID, as addControls() fills one; a few are removed in place.
+// Removes a lane's values that play from these clips from one song beat to another, both included; or all of them: one
+// change of each clip's group's value, however many go.
 void deleteControlValues (Song&, const std::vector<ClipID>&, const ControlLane&, BeatRange);
 void deleteAllControlValues (Song&, const std::vector<ClipID>&, const ControlLane&);
 

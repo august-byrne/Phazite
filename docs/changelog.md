@@ -10,6 +10,11 @@ The full text of every step, as it was written when it was built, is in the
 
 ## Stage 5. Wide: what a beat maker meets in the first week (from 2026-11-20)
 
+- **Known bug 234, a line put back and an alias group** (found in S5.20's review): Put Back of a track's line, Take from
+  This Version and a line restored from a version give the clips of an alias group on other tracks what they restore, in
+  the same undo step: a MIDI group's notes, and what an audio group shares (its file, tempo, pitch, direction and warp
+  markers), a track deleted since and put back included; so the group's clips hold the same, as a merge already gave
+  them. 2026-11-21.
 - **S5.19 The song's schema as data.** Every element and property a project file holds is described once in code
   (`src/model/base/internal/Schema.h`): its type, the elements it is on, its range or its words, its default and its
   kind. A saved name cannot exist without its description. The loader, the consistency check and the rules of what

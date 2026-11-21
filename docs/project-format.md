@@ -46,7 +46,10 @@ numbers in 15 significant digits, true and false as `1` and `0`, text without th
 
 A reader must take any XML 1.0 (other writers may indent differently) and must keep what it doesn't know: Phazite keeps
 an element or property it doesn't know through a load and a save (an element with all it holds, but not text between
-its tags). An element it does know, where `Schema.h` doesn't put it, it leaves out as it opens the file (section 7).
+its tags), but on a `NOTE` or a `CONTROL`: a clip's notes and controllers' values are values in Phazite (each with the
+properties this page names), so a property or an element it doesn't know on one of them isn't kept (an element of a
+type it doesn't know among a clip's children is). An element it does know, where `Schema.h` doesn't put it, it leaves
+out as it opens the file (section 7).
 
 ## 3. The song
 
@@ -90,6 +93,9 @@ the file.
 **MIDI channels.** A MIDI clip's `NOTE` and `CONTROL` (a controller event: a controller, the pitch wheel, pressure or a
 program change) each play on a MIDI channel, `channel`, from 1 to 16 as musicians count them; one without it is on
 channel 1, which Phazite never writes. A `CONTROL` of kind `programChange` plays: its `value` is the program, 0 to 127.
+Phazite writes a clip's `NOTE` elements, then its `CONTROL` elements, after whatever else the clip holds, each kind in
+its order (a note's place among the notes means nothing; the controllers' values keep theirs, which is the order they
+play in at one beat); a reader takes them in any order.
 
 **IDs.** Every track, clip, note (within its clip), device, container, chain, send, modulator, macro and section has an
 ID, a positive 64-bit number the song gives (`nextID` on `PHAZITE` is the next), never twice. What one element says of

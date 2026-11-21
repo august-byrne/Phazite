@@ -112,7 +112,7 @@ TEST_CASE ("Random songs: written as text, a song reads back and opens as the sa
         // Opened, as a project opens its song: nothing the model made changes as it opens.
         const auto opened = phazite::makeSong (read);
         REQUIRE (opened != nullptr);
-        const auto openedText = toText (opened->getState());
+        const auto openedText = toText (phazite::test::copyWholeSong (*opened));
 
         if (written != openedText)
         {

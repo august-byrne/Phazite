@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongValues.h"
+#include "Song.h"
 #include "internal/Schema.h"
+#include "internal/SongIndex.h"
 
 #include <algorithm>
-#include <functional>
 #include <map>
 #include <optional>
 
@@ -97,6 +98,426 @@ ClipNotes withControlsAdded (const ClipNotes& clip, const std::vector<ControlVal
 }
 
 //==============================================================================
+namespace
+{
+    std::uint64_t getClipIDOf (const juce::ValueTree& clip)
+    {
+        return (std::uint64_t) (juce::int64) clip[schema::clipID];
+    }
+
+    bool isMidiClip (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::CLIP) && element[schema::clipKind].toString() != schema::clipIsAudio;
+    }
+
+    // A clip's NOTE and CONTROL children: what its value takes the place of in the tree of a song that holds its values.
+    bool isEventElement (const juce::ValueTree& child)
+    {
+        return child.hasType (schema::NOTE) || child.hasType (schema::CONTROL);
+    }
+
+    // The clips an element added to the song or taken out of it holds: itself, if a clip; a track's, a folder's tracks', the
+    // track list's. Only tracks hold clips (Schema.h), so nothing else is looked into.
+    void collectClips (const juce::ValueTree& element, std::vector<juce::ValueTree>& clips)
+    {
+        if (element.hasType (schema::CLIP))
+        {
+            clips.push_back (element);
+            return;
+        }
+
+        if (element.hasType (schema::TRACK) || element.hasType (schema::TRACKS))
+            for (const auto& child : element)
+                collectClips (child, clips);
+    }
+
+    // Two entries of the area alike without a look inside: one clip's, the same value (ValueArea.h).
+    struct SameEntry
+    {
+        bool operator() (const std::pair<std::uint64_t, ClipNotes>& a, const std::pair<std::uint64_t, ClipNotes>& b) const noexcept
+        {
+            return a.first == b.first && a.second.isSameAs (b.second);
+        }
+    };
+} // namespace
+
+//==============================================================================
+// What the area's listeners are told: the clips whose values changed, found by comparing the two maps, by identity clip by
+// clip (immer's diff, which skips what the two share, as a change leaves most of the map shared).
+struct SongValues::Teller final : ValueArea<NotesByClip>::Listener
+{
+    juce::ListenerList<NotesListener> listeners;
+
+    void valueAreaChanged (const NotesByClip& before, const NotesByClip& after) override
+    {
+        if (listeners.isEmpty())
+            return;
+
+        std::vector<ClipID> changed;
+        const auto note = [&changed] (const std::pair<std::uint64_t, ClipNotes>& entry)
+        { changed.push_back (ClipID::fromRaw (entry.first)); };
+
+        before.clips.impl().template diff<SameEntry> (
+            after.clips.impl(),
+            immer::make_differ (note, note,
+                                [&changed] (const std::pair<std::uint64_t, ClipNotes>&, const std::pair<std::uint64_t, ClipNotes>& entry)
+                                { changed.push_back (ClipID::fromRaw (entry.first)); }));
+
+        if (changed.empty())
+            return;
+
+        std::sort (changed.begin(), changed.end());
+        listeners.call ([&changed] (NotesListener& listener) { listener.clipNotesChanged (changed); });
+    }
+};
+
+//==============================================================================
+// What keeps the area and the tree together for every change of the tree that isn't the notes' own (SongValues.h). It changes
+// the area and the tree through the song's undo manager from inside the tree's callbacks, which run inside the perform() of
+// the tree's own action: JUCE refuses that only while it undoes or redoes (when the keeper does nothing), and adds the inner
+// actions to the step before the outer one, so that Undo takes the tree's change back before the area's. JUCE workaround W62
+// (docs/juce-workarounds.md).
+struct SongValues::Keeper final : juce::ValueTree::Listener
+{
+    Keeper (SongValues& v, Song& s)
+        : values (v),
+          song (s),
+          state (s.getState())
+    {
+        state.addListener (this);
+    }
+
+    ~Keeper() override { state.removeListener (this); }
+
+    SongValues& values;
+    Song& song;
+    juce::ValueTree state;
+
+    // The clips taken out of the song, each element with its value as it went, by the clip's ID: given back if the same
+    // element comes back (a move), let go of once nothing else holds the element (the history let go of the step that could
+    // bring it back), or it is back in the song by an undo, which brought its value back itself.
+    struct Remembered
+    {
+        juce::ValueTree clip;
+        ClipNotes value;
+    };
+
+    std::multimap<std::uint64_t, Remembered> remembered;
+    size_t sweepAt = 64;
+
+    bool isUndoingOrRedoing() const { return song.getUndoManager().isPerformingUndoRedo(); }
+
+    std::multimap<std::uint64_t, Remembered>::iterator findRemembered (const juce::ValueTree& clip)
+    {
+        for (auto [found, end] = remembered.equal_range (getClipIDOf (clip)); found != end; ++found)
+            if (found->second.clip == clip)
+                return found;
+
+        return remembered.end();
+    }
+
+    void sweep()
+    {
+        if (remembered.size() < sweepAt)
+            return;
+
+        for (auto it = remembered.begin(); it != remembered.end();)
+        {
+            if (it->second.clip.getReferenceCount() <= 1 || it->second.clip.isAChildOf (state))
+                it = remembered.erase (it);
+            else
+                ++it;
+        }
+
+        sweepAt = std::max<size_t> (64, remembered.size() * 2);
+    }
+
+    // A clip's value given to it and to the clips of its alias group in the song: the group's own, where another of its clips
+    // holds one alike, so that the group holds ONE value.
+    void give (NotesByClip& next, const juce::ValueTree& clip, ClipNotes value)
+    {
+        const auto members = song.getIndex().findLinked (clip);
+
+        for (const auto& member : members)
+        {
+            if (member == clip)
+                continue;
+
+            if (const auto* held = next.find (ClipID::fromRaw (getClipIDOf (member))))
+            {
+                if (*held == value)
+                    value = *held;
+
+                break;
+            }
+        }
+
+        for (const auto& member : members)
+            if (isMidiClip (member))
+                next.clips = next.clips.set (getClipIDOf (member), value);
+    }
+
+    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
+    {
+        if (isUndoingOrRedoing())
+            return;
+
+        std::vector<juce::ValueTree> clips;
+        collectClips (child, clips);
+
+        if (clips.empty())
+            return;
+
+        auto next = values.notes.get();
+        std::vector<juce::ValueTree> taken;
+
+        for (const auto& clip : clips)
+        {
+            // The very element taken out (a move): its value back.
+            if (const auto found = findRemembered (clip); found != remembered.end())
+            {
+                next.clips = next.clips.set (getClipIDOf (clip), found->second.value);
+                remembered.erase (found);
+                continue;
+            }
+
+            auto hasEvents = false;
+
+            for (const auto& each : clip)
+            {
+                if (isEventElement (each))
+                {
+                    hasEvents = true;
+                    taken.push_back (each);
+                }
+            }
+
+            // Without them: the value a copy gave it first, or an empty one. An audio clip holds none.
+            if (! hasEvents && (! isMidiClip (clip) || next.find (ClipID::fromRaw (getClipIDOf (clip))) != nullptr))
+                continue;
+
+            give (next, clip, hasEvents ? readClipNotes (clip) : ClipNotes());
+        }
+
+        values.setAll (song, next);
+        auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+
+        for (auto& event : taken)
+            event.getParent().removeChild (event, undo);
+
+        sweep();
+    }
+
+    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int) override
+    {
+        if (isUndoingOrRedoing())
+            return;
+
+        std::vector<juce::ValueTree> clips;
+        collectClips (child, clips);
+
+        if (clips.empty())
+            return;
+
+        auto next = values.notes.get();
+
+        for (const auto& clip : clips)
+        {
+            const auto id = getClipIDOf (clip);
+
+            if (const auto* held = next.find (ClipID::fromRaw (id)))
+            {
+                if (const auto found = findRemembered (clip); found != remembered.end())
+                    found->second.value = *held;
+                else
+                    remembered.emplace (id, Remembered { clip, *held });
+
+                next.clips = next.clips.erase (id);
+            }
+        }
+
+        values.setAll (song, next);
+        sweep();
+    }
+
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
+    {
+        // Nothing in Phazite gives a clip of the song another ID (a clip is given its ID before it joins the song), which would
+        // leave its value under its old one: the check of the song's values finds that (tests/SongCheck.h).
+        if (! tree.hasType (schema::CLIP) || isUndoingOrRedoing())
+            return;
+
+        // A clip that joins an alias group (Clips.h: copyClips(), a version applied) takes the group's value; one that leaves
+        // it (Make Unique, the last of a group) keeps a copy of it, the value it holds.
+        if (property != schema::clipLink || tree[schema::clipLink].toString().isEmpty() || ! isMidiClip (tree))
+            return;
+
+        const auto id = ClipID::fromRaw (getClipIDOf (tree));
+
+        for (const auto& member : song.getIndex().findLinked (tree))
+        {
+            if (member == tree)
+                continue;
+
+            if (const auto* held = values.notes.get().find (ClipID::fromRaw (getClipIDOf (member))))
+            {
+                if (const auto* own = values.findClipNotes (id); own == nullptr || ! own->isSameAs (*held))
+                {
+                    auto next = values.notes.get();
+                    next.clips = next.clips.set (id.getRaw(), *held);
+                    values.setAll (song, next);
+                }
+
+                return;
+            }
+        }
+    }
+};
+
+//==============================================================================
+SongValues::SongValues (Song& song)
+    : notes (song.getUndoManager(), {}),
+      teller (std::make_unique<Teller>())
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // The area's own listener, which tells this one's (a value of the song's, not an element of its tree: what
+    // tools/check-architecture.sh's song-listeners counts by its name is no listener of the tree).
+    auto& area = notes;
+    area.addListener (teller.get());
+}
+
+SongValues::~SongValues()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    keeper = nullptr;
+    auto& area = notes;
+    area.removeListener (teller.get());
+}
+
+void SongValues::setAll (Song& song, NotesByClip next)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (song.isWritingOutsideHistory())
+        notes.setOutsideHistory (std::move (next));
+    else
+        notes.set (std::move (next));
+}
+
+void SongValues::setClipNotes (Song& song, ClipID clip, ClipNotes value)
+{
+    jassert (song.getValues() == this);
+    auto next = notes.get();
+    const auto clipState = song.getIndex().findClip (clip.getRaw());
+
+    if (! clipState.isValid())
+    {
+        next.clips = next.clips.set (clip.getRaw(), std::move (value)); // a clip not in the song yet: itself alone
+    }
+    else
+    {
+        jassert (isMidiClip (clipState));
+
+        for (const auto& member : song.getIndex().findLinked (clipState))
+            if (isMidiClip (member))
+                next.clips = next.clips.set (getClipIDOf (member), value);
+    }
+
+    setAll (song, std::move (next));
+}
+
+void SongValues::eraseClipNotes (Song& song, ClipID clip)
+{
+    if (notes.get().find (clip) == nullptr)
+        return;
+
+    auto next = notes.get();
+    next.clips = next.clips.erase (clip.getRaw());
+    setAll (song, std::move (next));
+}
+
+void SongValues::copyClipNotes (Song& song, ClipID from, ClipID to)
+{
+    if (const auto* value = notes.get().find (from))
+    {
+        jassert (! song.getIndex().findClip (to.getRaw()).isValid()); // a copy, not in the song yet
+        auto next = notes.get();
+        next.clips = next.clips.set (to.getRaw(), *value);
+        setAll (song, std::move (next));
+    }
+}
+
+void SongValues::addNotesListener (NotesListener* listener)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    teller->listeners.add (listener);
+}
+
+void SongValues::removeNotesListener (NotesListener* listener)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    teller->listeners.remove (listener);
+}
+
+bool SongValues::remembers (const juce::ValueTree& clip) const
+{
+    return keeper != nullptr && keeper->findRemembered (clip) != keeper->remembered.end();
+}
+
+void SongValues::adopt (Song& song)
+{
+    // Every clip's NOTE and CONTROL children into the area, outside the history, the clips of an alias group sharing the
+    // first's value (the loader made them hold the same: Project.cpp, makeConsistent()); then the keeper, from here on.
+    std::vector<juce::ValueTree> clips;
+    collectClips (song.getState().getChildWithName (schema::TRACKS), clips);
+    auto next = notes.get();
+    std::map<juce::String, ClipNotes> groups;
+
+    for (auto& clip : clips)
+    {
+        if (! isMidiClip (clip))
+            continue;
+
+        auto value = readClipNotes (clip);
+
+        if (const auto link = clip[schema::clipLink].toString(); link.isNotEmpty())
+        {
+            if (const auto found = groups.find (link); found != groups.end())
+            {
+                jassert (found->second == value); // the loader makes an alias group's clips hold the same
+                value = found->second;
+            }
+            else
+            {
+                groups.emplace (link, value);
+            }
+        }
+
+        next.clips = next.clips.set (getClipIDOf (clip), value);
+
+        for (int i = clip.getNumChildren(); --i >= 0;)
+            if (isEventElement (clip.getChild (i)))
+                clip.removeChild (i, nullptr);
+    }
+
+    notes.setOutsideHistory (std::move (next));
+    keeper = std::make_unique<Keeper> (*this, song);
+}
+
+void Song::holdValues()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (values == nullptr);
+
+    if (values != nullptr)
+        return;
+
+    values = std::make_unique<SongValues> (*this);
+    values->adopt (*this);
+}
+
+//==============================================================================
 int readChannel (const juce::ValueTree& element, const juce::Identifier& property)
 {
     return keepChannel ((int) element.getProperty (property, 1));
@@ -158,53 +579,6 @@ namespace
                                (int) control[schema::controlValue], readChannel (control, schema::controlChannel) };
     }
 
-    const juce::Identifier& getFlagName (int flag) noexcept
-    {
-        return flag == 0 ? schema::noteMute : flag == 1 ? schema::noteSlide : schema::notePortamento;
-    }
-
-    void writeFlag (juce::ValueTree& note, int flag, bool on, juce::UndoManager* undo)
-    {
-        if (on)
-            note.setProperty (getFlagName (flag), true, undo);
-        else
-            note.removeProperty (getFlagName (flag), undo);
-    }
-
-    // A note's element, read as `read`, given the values `next`: only the properties whose values differ are set (or, for a
-    // flag turned off or the first channel, removed), so that the others stay as the element holds them: a property that is
-    // absent stays absent while its value is the one it reads as, and one written as text (a file's) stays text, though JUCE
-    // would see the number it reads as a value of its own and set it again.
-    void writeNote (juce::ValueTree& note, const NoteValues& read, const NoteValues& next, juce::UndoManager* undo)
-    {
-        if (next.id != read.id)
-            note.setProperty (schema::noteID, (juce::int64) next.id.getRaw(), undo);
-
-        if (next.pitch != read.pitch)
-            note.setProperty (schema::notePitch, next.pitch, undo);
-
-        if (next.start != read.start)
-            note.setProperty (schema::noteStart, next.start.inBeats(), undo);
-
-        if (next.length != read.length)
-            note.setProperty (schema::noteLength, next.length.inBeats(), undo);
-
-        if (next.velocity != read.velocity)
-            note.setProperty (schema::noteVelocity, next.velocity, undo);
-
-        if (next.muted != read.muted)
-            writeFlag (note, 0, next.muted, undo);
-
-        if (next.slide != read.slide)
-            writeFlag (note, 1, next.slide, undo);
-
-        if (next.portamento != read.portamento)
-            writeFlag (note, 2, next.portamento, undo);
-
-        if (next.channel != read.channel)
-            writeChannel (note, schema::noteChannel, next.channel, undo);
-    }
-
     // A new note's element: its ID, pitch, start, length and velocity always, its flags while they are on and its channel if it
     // isn't the first, in that order.
     juce::ValueTree makeNote (const NoteValues& values)
@@ -216,39 +590,17 @@ namespace
         note.setProperty (schema::noteLength, values.length.inBeats(), nullptr);
         note.setProperty (schema::noteVelocity, values.velocity, nullptr);
 
-        for (const auto& [flag, on] : { std::pair { 0, values.muted }, std::pair { 1, values.slide }, std::pair { 2, values.portamento } })
-            if (on)
-                writeFlag (note, flag, true, nullptr);
+        if (values.muted)
+            note.setProperty (schema::noteMute, true, nullptr);
+
+        if (values.slide)
+            note.setProperty (schema::noteSlide, true, nullptr);
+
+        if (values.portamento)
+            note.setProperty (schema::notePortamento, true, nullptr);
 
         writeChannel (note, schema::noteChannel, values.channel, nullptr);
         return note;
-    }
-
-    // A controller's value's element, read as `read`, given the values `next`, as writeNote() gives a note's: only what differs.
-    // Its number is written only where its kind has one.
-    void writeControl (juce::ValueTree& control, const ControlValues& read, const ControlValues& next, juce::UndoManager* undo)
-    {
-        if (next.kind != read.kind)
-            control.setProperty (schema::controlKind, getSchemaKind (next.kind), undo);
-
-        if (! hasNumber (next.kind))
-        {
-            if (hasNumber (read.kind) || next.number != read.number)
-                control.removeProperty (schema::controlNumber, undo);
-        }
-        else if (next.number != read.number)
-        {
-            control.setProperty (schema::controlNumber, next.number, undo);
-        }
-
-        if (! juce::exactlyEqual (next.beat, read.beat))
-            control.setProperty (schema::controlBeat, next.beat, undo);
-
-        if (next.value != read.value)
-            control.setProperty (schema::controlValue, next.value, undo);
-
-        if (next.channel != read.channel)
-            writeChannel (control, schema::controlChannel, next.channel, undo);
     }
 
     // A new value's element: its kind, its number where its kind has one, its beat and value, and its channel if it isn't the
@@ -266,67 +618,6 @@ namespace
         writeChannel (control, schema::controlChannel, values.channel, nullptr);
         return control;
     }
-
-    // How many of a controller's value's properties another's would set.
-    int countDifferences (const ControlValues& a, const ControlValues& b)
-    {
-        return (a.kind != b.kind ? 1 : 0) + (a.number != b.number ? 1 : 0) + (juce::exactlyEqual (a.beat, b.beat) ? 0 : 1)
-               + (a.value != b.value ? 1 : 0) + (a.channel != b.channel ? 1 : 0);
-    }
-
-    // Of the notes of the next value that the clip held as it was read, those that keep their elements: as many as can, in
-    // the order of the value and of the clip both (the longest run of them whose places as read go up). The others are
-    // written anew, where the value puts them.
-    std::vector<bool> findNotesKept (const std::vector<int>& readPlaces)
-    {
-        // readPlaces: for each note of the next value, its place in the value read, or -1 for a note that is new.
-        std::vector<bool> kept (readPlaces.size(), false);
-        auto increasing = true;
-        auto last = -1;
-
-        for (const auto place : readPlaces)
-        {
-            if (place < 0)
-                continue;
-
-            increasing = increasing && place > last;
-            last = place;
-        }
-
-        if (increasing)
-        {
-            for (size_t i = 0; i < readPlaces.size(); ++i)
-                kept[i] = readPlaces[i] >= 0;
-
-            return kept;
-        }
-
-        // The longest increasing run, by patience: tails[k] is the note (by its index in the value) that ends the best run of
-        // k + 1 found so far.
-        std::vector<size_t> tails, before (readPlaces.size(), readPlaces.size());
-
-        for (size_t i = 0; i < readPlaces.size(); ++i)
-        {
-            if (readPlaces[i] < 0)
-                continue;
-
-            const auto at = std::lower_bound (tails.begin(), tails.end(), readPlaces[i],
-                                              [&readPlaces] (size_t tail, int place) { return readPlaces[tail] < place; });
-
-            if (at != tails.begin())
-                before[i] = *(at - 1);
-
-            if (at == tails.end())
-                tails.push_back (i);
-            else
-                *at = i;
-        }
-
-        for (auto i = tails.empty() ? readPlaces.size() : tails.back(); i < readPlaces.size(); i = before[i])
-            kept[i] = true;
-
-        return kept;
-    }
 } // namespace
 
 NoteValues readNoteValues (const juce::ValueTree& note)
@@ -342,14 +633,11 @@ NoteValues readNoteValues (const juce::ValueTree& note)
              readChannel (note, schema::noteChannel) };
 }
 
-ClipNotes readClipNotes (const juce::ValueTree& clipState, ClipPlaces& where)
+ClipNotes readClipNotes (const juce::ValueTree& clipState)
 {
     auto notes = immer::flex_vector<NoteValues>().transient();
     auto places = immer::map<std::uint64_t, std::uint32_t>().transient();
     auto controls = immer::flex_vector<ControlValues>().transient();
-    where.notes.clear();
-    where.controls.clear();
-    auto index = 0;
 
     for (const auto& child : clipState)
     {
@@ -358,185 +646,21 @@ ClipNotes readClipNotes (const juce::ValueTree& clipState, ClipPlaces& where)
             const auto note = readNoteValues (child);
             places.set (note.id.getRaw(), (std::uint32_t) notes.size());
             notes.push_back (note);
-            where.notes.push_back (index);
         }
         else if (child.hasType (schema::CONTROL))
         {
             if (const auto control = readControlValues (child))
-            {
                 controls.push_back (*control);
-                where.controls.push_back (index);
-            }
         }
-
-        ++index;
     }
 
     return { notes.persistent(), places.persistent(), controls.persistent() };
 }
 
-ClipNotes readClipNotes (const juce::ValueTree& clipState)
+void writeClipNotes (const ClipNotes& value, juce::ValueTree& clip)
 {
-    ClipPlaces places;
-    return readClipNotes (clipState, places);
-}
-
-void writeClipNotes (const ClipNotes& read, const ClipPlaces& where, const ClipNotes& next, juce::ValueTree& clip, juce::UndoManager* undo)
-{
-    jassert (where.notes.size() == read.notes.size() && where.controls.size() == read.controls.size());
-
-    std::vector<int> removed;                                      // children, by their indices as read
-    std::vector<std::pair<juce::ValueTree, NoteValues>> putBefore; // new notes that go before a note kept: its element, and the note
-    std::vector<NoteValues> notesAppended;
-    std::vector<ControlValues> controlsAppended;
-
-    // First what changes in place, while the children are where they were read: a note kept (by its ID, where the value's
-    // order and the clip's agree) is given its values, if they changed; the others are written anew where the value puts
-    // them, and a note of the clip's that is no longer kept removed.
-    if (read.notes.identity() != next.notes.identity())
-    {
-        if (read.places.identity() == next.places.identity() && read.notes.size() == next.notes.size())
-        {
-            size_t i = 0;
-            auto a = read.notes.begin();
-
-            for (auto b = next.notes.begin(); b != next.notes.end(); ++a, ++b, ++i)
-            {
-                if (! (*a == *b))
-                {
-                    auto element = clip.getChild (where.notes[i]);
-                    jassert (element.hasType (schema::NOTE));
-                    writeNote (element, *a, *b, undo);
-                }
-            }
-        }
-        else
-        {
-            std::vector<int> readPlaces;
-            readPlaces.reserve (next.notes.size());
-
-            immer::for_each (next.notes,
-                             [&] (const NoteValues& note)
-                             {
-                                 const auto* place = read.places.find (note.id.getRaw());
-                                 readPlaces.push_back (place != nullptr ? (int) *place : -1);
-                             });
-
-            const auto kept = findNotesKept (readPlaces);
-            std::vector<bool> keeps (read.notes.size(), false);
-            std::vector<NoteValues> waiting; // new notes that wait for the next note kept
-            size_t i = 0;
-
-            for (auto note = next.notes.begin(); note != next.notes.end(); ++note, ++i)
-            {
-                if (! kept[i])
-                {
-                    waiting.push_back (*note);
-                    continue;
-                }
-
-                const auto place = (size_t) readPlaces[i];
-                keeps[place] = true;
-                auto element = clip.getChild (where.notes[place]);
-                jassert (element.hasType (schema::NOTE));
-
-                if (const auto& wasRead = read.notes[place]; ! (wasRead == *note))
-                    writeNote (element, wasRead, *note, undo);
-
-                for (const auto& each : waiting)
-                    putBefore.emplace_back (element, each);
-
-                waiting.clear();
-            }
-
-            notesAppended = std::move (waiting);
-
-            for (size_t place = 0; place < keeps.size(); ++place)
-                if (! keeps[place])
-                    removed.push_back (where.notes[place]);
-        }
-    }
-
-    // The controllers' values, which have no IDs: in their places (each that differs given the other's properties, those
-    // past the shorter removed or added), or each that is the same kept, the others removed and those left added after them,
-    // whichever sets fewer properties and children. A value removed and another added (a step of a draw in a lane) is so;
-    // every value's beat changed (a tempo change that keeps the patterns' speed) is so in place.
-    if (read.controls.identity() != next.controls.identity())
-    {
-        const auto numRead = read.controls.size(), numNext = next.controls.size(), numBoth = std::min (numRead, numNext);
-        auto costInPlace = (int) (std::max (numRead, numNext) - numBoth);
-        auto b = next.controls.begin();
-        size_t i = 0;
-
-        for (auto a = read.controls.begin(); i < numBoth; ++a, ++b, ++i)
-            costInPlace += countDifferences (*a, *b);
-
-        std::vector<int> notMatched;
-        size_t matched = 0;
-        i = 0;
-
-        for (const auto& control : read.controls)
-        {
-            if (matched < numNext && next.controls[matched] == control)
-                ++matched;
-            else
-                notMatched.push_back (where.controls[i]);
-
-            ++i;
-        }
-
-        if (costInPlace < (int) (notMatched.size() + (numNext - matched)))
-        {
-            b = next.controls.begin();
-            i = 0;
-
-            for (auto a = read.controls.begin(); i < numBoth; ++a, ++b, ++i)
-            {
-                if (! (*a == *b))
-                {
-                    auto element = clip.getChild (where.controls[i]);
-                    jassert (element.hasType (schema::CONTROL));
-                    writeControl (element, *a, *b, undo);
-                }
-            }
-
-            for (i = numBoth; i < numRead; ++i)
-                removed.push_back (where.controls[i]);
-
-            for (i = numBoth; i < numNext; ++i)
-                controlsAppended.push_back (next.controls[i]);
-        }
-        else
-        {
-            removed.insert (removed.end(), notMatched.begin(), notMatched.end());
-
-            for (i = matched; i < numNext; ++i)
-                controlsAppended.push_back (next.controls[i]);
-        }
-    }
-
-    // Then the children taken out (from the last, so that the indices read stay right), and those that come, the notes
-    // before the values, after all the clip holds, as they always have.
-    std::sort (removed.begin(), removed.end(), std::greater<>());
-
-    for (const auto index : removed)
-        clip.removeChild (index, undo);
-
-    for (const auto& [element, note] : putBefore)
-        clip.addChild (makeNote (note), clip.indexOf (element), undo);
-
-    for (const auto& note : notesAppended)
-        clip.appendChild (makeNote (note), undo);
-
-    for (const auto& control : controlsAppended)
-        clip.appendChild (makeControl (control), undo);
-}
-
-void writeClipNotes (const ClipNotes& next, juce::ValueTree& clip, juce::UndoManager* undo)
-{
-    ClipPlaces where;
-    const auto read = readClipNotes (clip, where);
-    writeClipNotes (read, where, next, clip, undo);
+    immer::for_each (value.notes, [&clip] (const NoteValues& note) { clip.appendChild (makeNote (note), nullptr); });
+    immer::for_each (value.controls, [&clip] (const ControlValues& control) { clip.appendChild (makeControl (control), nullptr); });
 }
 
 bool setNoteProperty (NoteValues& note, const juce::Identifier& property, const juce::var& value)
@@ -563,88 +687,6 @@ bool setNoteProperty (NoteValues& note, const juce::Identifier& property, const 
         return false;
 
     return true;
-}
-
-namespace
-{
-    // A clip's events (its notes, and its controllers' values of a kind Phazite knows) in its order, each by what names it:
-    // a note by its ID, a value by its place among the values.
-    struct NamedEvent
-    {
-        bool note = false;
-        std::uint64_t name = 0;
-
-        bool operator== (const NamedEvent&) const = default;
-    };
-
-    std::vector<NamedEvent> getNamedEvents (const juce::ValueTree& clip)
-    {
-        std::vector<NamedEvent> events;
-        std::uint64_t controls = 0;
-
-        for (const auto& child : clip)
-        {
-            if (child.hasType (schema::NOTE))
-                events.push_back ({ true, readNoteValues (child).id.getRaw() });
-            else if (child.hasType (schema::CONTROL) && readKind (child).has_value())
-                events.push_back ({ false, controls++ });
-        }
-
-        return events;
-    }
-
-    bool isEvent (const juce::ValueTree& child)
-    {
-        return child.hasType (schema::NOTE) || (child.hasType (schema::CONTROL) && readKind (child).has_value());
-    }
-} // namespace
-
-void followOrderOf (juce::ValueTree& clip, const juce::ValueTree& other, juce::UndoManager* undo)
-{
-    const auto wanted = getNamedEvents (other);
-
-    if (getNamedEvents (clip) == wanted)
-        return;
-
-    std::map<std::uint64_t, juce::ValueTree> notes;
-    std::vector<juce::ValueTree> controls;
-
-    for (const auto& child : clip)
-    {
-        if (child.hasType (schema::NOTE))
-            notes.emplace (readNoteValues (child).id.getRaw(), child);
-        else if (isEvent (child))
-            controls.push_back (child);
-    }
-
-    // In the other's order, each moved to its place: from the first child on, past those that aren't events.
-    int place = 0;
-
-    for (const auto& event : wanted)
-    {
-        while (place < clip.getNumChildren() && ! isEvent (clip.getChild (place)))
-            ++place;
-
-        juce::ValueTree element;
-
-        if (event.note)
-        {
-            if (const auto found = notes.find (event.name); found != notes.end())
-                element = found->second;
-        }
-        else if (event.name < controls.size())
-        {
-            element = controls[(size_t) event.name];
-        }
-
-        if (! element.isValid())
-            continue;
-
-        if (const auto index = clip.indexOf (element); index != place)
-            clip.moveChild (index, place, undo);
-
-        ++place;
-    }
 }
 
 void giveClipEvents (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager* undo)

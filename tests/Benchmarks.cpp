@@ -3462,8 +3462,8 @@ TEST_CASE ("Benchmark: a clip of 5,000 notes edited in the piano roll, and what 
 TEST_CASE ("Benchmark: a clip's 5,000 notes read and changed through the model: its value whole or a note by its ID, one edit or many"
            * doctest::test_suite ("benchmark") * doctest::skip())
 {
-    // Roadmap step S5.20: what reading a clip's notes and changing them costs, by how a note is reached, while the clip's
-    // element still stores them and an edit reads the clip's value whole (model/notes/internal/Notes.h). Each way does the
+    // Roadmap step S5.20: what reading a clip's notes and changing them costs, by how a note is reached, the clip's notes a
+    // value the song holds beside its tree (model/base/internal/SongValues.h; model/notes/internal/Notes.h). Each way does the
     // same work on the same clip, in turns, so that what the machine does meanwhile falls on all of them alike.
     using phazite::test::at;
     using phazite::test::lasting;
@@ -3617,5 +3617,142 @@ TEST_CASE ("Benchmark: a clip's 5,000 notes read and changed through the model: 
     juce::String report;
     report << table ("Three values of each of 5,000 notes read", reads);
     report << table ("Two values of each of 5,000 notes changed, in the undo history", writes);
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: notes as values on a song of 100 tracks: a drag's step and its undo, a transpose, a delete, a note added, "
+           "an edit through aliases, a whole copy, and what a drag keeps"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Roadmap step S5.20: the notes as values beside the song's tree (model/base/internal/SongValues.h), each edit one change
+    // of its clip's value in the song's undo history. A song of 100 tracks, each with a clip of 16 notes, the first with one
+    // of 5,000, and a clip of 64 notes with seven aliases on other tracks. Each timing the median of its runs.
+    using phazite::test::at;
+    using phazite::test::lasting;
+
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 100);
+    const auto fill = [&song] (phazite::ClipID clip, int count, double start)
+    {
+        std::vector<phazite::NoteData> notes;
+
+        for (int i = 0; i < count; ++i)
+            notes.push_back ({ .clip = clip, .pitch = 48 + (i * 7) % 24, .start = at (start + i * 0.25), .length = lasting (0.2) });
+
+        phazite::setClipNotes (*song, clip, notes);
+    };
+
+    for (size_t t = 1; t < tracks.size(); ++t)
+        fill (phazite::insertMidiClip (*song, tracks[t], { at (0.0), at (4.0) }, nullptr), 16, 0.0);
+
+    constexpr int count = 5000;
+    const auto clip = phazite::insertMidiClip (*song, tracks[0], { at (0.0), at (count * 0.25) }, nullptr);
+    fill (clip, count, 0.0);
+    const auto linked = phazite::insertMidiClip (*song, tracks[1], { at (64.0), at (80.0) }, nullptr);
+    fill (linked, 64, 64.0);
+
+    for (int i = 0; i < 7; ++i)
+    {
+        const auto alias = phazite::copyClips (*song, { linked }, true).front();
+        phazite::moveClip (*song, alias, at (64.0), tracks[(size_t) i + 2]);
+    }
+
+    song->getUndoManager().clearUndoHistory();
+    const auto refs = getRefs (phazite::getClipNotes (*song, clip));
+    REQUIRE (refs.size() == (size_t) count);
+    const std::vector<phazite::NoteRef> dragged (refs.begin(), refs.begin() + 500);
+
+    const auto medianOf = [] (std::vector<double> times)
+    {
+        std::sort (times.begin(), times.end());
+        return times[times.size() / 2];
+    };
+
+    const auto stepped = [&song] (const juce::String& name, const std::function<void()>& edit)
+    {
+        return millisecondsOf (
+            [&]
+            {
+                const phazite::UndoStep step (*song, name);
+                edit();
+            });
+    };
+
+    constexpr int runs = 21;
+    std::vector<double> dragSteps, dragUndos, transposes, transposeUndos, deletes, deleteUndos, added, aliasEdits, copies;
+
+    for (int run = 0; run < runs; ++run)
+    {
+        // A drag of 500 notes: a step of it, as the piano roll places them at each move; then the drag undone whole.
+        {
+            phazite::Gesture drag (*song, "Move Notes");
+
+            for (int move = 1; move <= 5; ++move)
+            {
+                std::vector<phazite::NoteData> placed;
+
+                for (const auto& note : phazite::getNoteData (*song, dragged))
+                {
+                    auto moved = note;
+                    moved.start = note.start + lasting (0.01 * move);
+                    placed.push_back (moved);
+                }
+
+                dragSteps.push_back (millisecondsOf ([&] { phazite::placeNotes (*song, placed); }));
+            }
+
+            drag.commit();
+        }
+
+        dragUndos.push_back (millisecondsOf ([&] { phazite::undo (*song); }));
+
+        transposes.push_back (stepped ("Transpose", [&] { phazite::transposeNotes (*song, refs, run % 2 == 0 ? 1 : -1); }));
+        transposeUndos.push_back (millisecondsOf ([&] { phazite::undo (*song); }));
+        deletes.push_back (stepped ("Delete Notes", [&] { phazite::deleteNotes (*song, dragged); }));
+        deleteUndos.push_back (millisecondsOf ([&] { phazite::undo (*song); }));
+        added.push_back (stepped ("Add Note", [&] { phazite::addNote (*song, clip, 60, at (3.1), lasting (0.2), 100); }));
+        aliasEdits.push_back (stepped ("Add Note", [&] { phazite::addNote (*song, linked, 72, at (70.1), lasting (0.2), 100); }));
+        copies.push_back (millisecondsOf ([&] { juce::ignoreUnused (phazite::copyWholeSong (*song).getNumChildren()); }));
+        song->getUndoManager().clearUndoHistory();
+    }
+
+    // What a drag of 500 notes over 60 moves keeps in the history: the process's memory before it and after it is committed.
+    const auto before = phazite::test::getProcessMemoryBytes();
+
+    {
+        phazite::Gesture drag (*song, "Move Notes");
+
+        for (int move = 1; move <= 60; ++move)
+        {
+            std::vector<phazite::NoteData> placed;
+
+            for (const auto& note : phazite::getNoteData (*song, dragged))
+            {
+                auto moved = note;
+                moved.pitch = 30 + (note.pitch + move) % 60;
+                placed.push_back (moved);
+            }
+
+            phazite::placeNotes (*song, placed);
+        }
+
+        drag.commit();
+    }
+
+    const auto kept = phazite::test::getProcessMemoryBytes() - before;
+
+    juce::String report ("\n| Notes as values, a song of 100 tracks | Median |\n|---|---|\n");
+    report << "| A step of a drag of 500 notes of a clip of 5,000 (placeNotes() in a Gesture) | " << milliseconds (medianOf (dragSteps), 3)
+           << " |\n";
+    report << "| The drag undone | " << milliseconds (medianOf (dragUndos), 3) << " |\n";
+    report << "| 5,000 notes transposed | " << milliseconds (medianOf (transposes), 3) << " |\n";
+    report << "| ...and undone | " << milliseconds (medianOf (transposeUndos), 3) << " |\n";
+    report << "| 500 notes deleted | " << milliseconds (medianOf (deletes), 3) << " |\n";
+    report << "| ...and undone | " << milliseconds (medianOf (deleteUndos), 3) << " |\n";
+    report << "| A note added to the clip of 5,000 | " << milliseconds (medianOf (added), 3) << " |\n";
+    report << "| A note added through a clip with seven aliases | " << milliseconds (medianOf (aliasEdits), 3) << " |\n";
+    report << "| The song copied whole (copyWholeSong()) | " << milliseconds (medianOf (copies), 3) << " |\n";
+    report << "| What a drag of 500 notes over 60 moves keeps in the history (the process's memory) | "
+           << juce::String ((double) kept / 1024.0, 0) << " KB |\n";
     MESSAGE (report);
 }

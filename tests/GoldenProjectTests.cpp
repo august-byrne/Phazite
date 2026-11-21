@@ -984,10 +984,11 @@ void checkSwitchesReadBack (const juce::XmlElement& saved, const juce::File& pro
             const auto song =
                 phazite::makeSong (juce::ValueTree::fromXml (written), projectFile, phazite::Project::getCacheFolder (projectFile));
             REQUIRE (song != nullptr);
+            const auto whole = phazite::test::copyWholeSong (*song); // its notes as a save writes them
 
             for (const auto& place : paths)
             {
-                auto element = song->getState();
+                auto element = whole;
 
                 for (const auto index : place)
                     element = element.getChild (index);

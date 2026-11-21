@@ -219,11 +219,23 @@ SongPlayer::SongPlayer (Song& s, PluginInstances* p)
       songState (s.getState())
 {
     songState.addListener (this);
+
+    if (auto* values = song.getValues())
+        values->addNotesListener (this);
 }
 
 SongPlayer::~SongPlayer()
 {
+    if (auto* values = song.getValues())
+        values->removeNotesListener (this);
+
     songState.removeListener (this);
+}
+
+void SongPlayer::clipNotesChanged (const std::vector<ClipID>& clips)
+{
+    // Their tracks are found as the next compile starts (compile()): a listener of the values reads nothing of the song.
+    changes.noteClips.insert (changes.noteClips.end(), clips.begin(), clips.end());
 }
 
 namespace
@@ -462,6 +474,14 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // What changed since the plan before, taken whole as the compile starts: a change heard while it compiles is the next
     // plan's. And the parts a check looks at, in turn (shouldCheck()).
     compiling = std::exchange (changes, {});
+
+    // A clip whose notes changed: its track's notes, as a change in the clip's element marks them (markChange()). One that is
+    // gone isn't on a track any more: taking it off marked the track it was on.
+    for (const auto clip : compiling.noteClips)
+        if (const auto clipState = findClipState (song, clip); clipState.isValid())
+            compiling.notes.insert (getID (clipState.getParent(), schema::trackID));
+
+    compiling.noteClips.clear();
     ++plansCompiled;
     checkedParts = 0;
     checkEvery = std::max<std::uint64_t> (1, devices.size() / 64);

@@ -1875,6 +1875,9 @@ Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file, const 
     forgetMissingFrozenFiles (*song);
     forgetCurvesOfGoneDevices (*song);
     song->getState().removeProperty (schema::playStart, nullptr);
+
+    // Its clips' notes and controllers' values as values beside its tree, from here on (model/base/internal/SongValues.h).
+    song->holdValues();
     song->getUndoManager().clearUndoHistory();
     return song;
 }
@@ -2071,6 +2074,9 @@ Project::Project (Song::Ptr s, const juce::File& f)
     changesOutsideHistory = getOwnChangesOutsideHistory();
     songState.addListener (this);
 
+    if (auto* values = song->getValues())
+        values->addNotesListener (this);
+
     // While the song shows another (a version open: Song::setShowingOther()), its unsaved mark is held as it was as that
     // began, compared now: what the other changes is noted, and compared once it went (compareWithSavedState()), and neither
     // its changes nor its plug-ins' own changes meanwhile count as the project's (a save in the background finishes as saved).
@@ -2129,6 +2135,10 @@ Project::~Project()
 
     autosaveWriter = nullptr; // before the autosave goes
     songState.removeListener (this);
+
+    if (auto* values = song->getValues())
+        values->removeNotesListener (this);
+
     getAutosaveFile (file).deleteFile();
     purgeCache (*song);
 }
@@ -2299,7 +2309,7 @@ void Project::saveInBackground()
         // The saved copy once it is written (finishBackgroundSave()), and the song written whole from it, in a tree of the
         // writer's own.
         backgroundSave = copySong();
-        autosaveWriter->write (copyWhole (backgroundSave.tree, backgroundSave.values).createCopy(), file);
+        autosaveWriter->write (copyWhole (backgroundSave.tree, backgroundSave.values), file);
     }
 
     namesPending = false; // in what it writes; pending again if the write fails (finishBackgroundSave())
@@ -2701,6 +2711,7 @@ void Project::clearToCompare()
 {
     mayHaveChanged = comparingWhole = false;
     toCompare.clear();
+    notesToCompare.clear();
 }
 
 Project::SongCopy Project::copySong() const
@@ -2840,7 +2851,16 @@ void Project::compareWithSavedState()
     if (! mayHaveChanged || changedSinceSave)
         return;
 
-    const auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
+    auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
+
+    // The clips whose notes changed, each in the song now: its value against the saved one, the same value or one alike.
+    if (same && ! notesToCompare.empty())
+    {
+        const auto now = keepValues (*song);
+        same = std::all_of (notesToCompare.begin(), notesToCompare.end(), [this, &now] (ClipID clip)
+                            { return ! findClipState (*song, clip).isValid() || holdSameNotes (now, savedState.values, clip); });
+    }
+
     clearToCompare();
 
     if (! same)
@@ -2962,7 +2982,7 @@ void Project::writeVersionsNames()
             savedState.tree.removeProperty (*name, nullptr);
     }
 
-    namesWriter->write (copyWhole (savedState.tree, savedState.values).createCopy(), file);
+    namesWriter->write (copyWhole (savedState.tree, savedState.values), file);
     namesPending = false;
     namesWriting = true;
     startTimer (20);
@@ -3012,6 +3032,25 @@ void Project::timerCallback()
 bool Project::hasVersionsNamesWritten() const
 {
     return ! namesPending && ! namesWriting;
+}
+
+void Project::clipNotesChanged (const std::vector<ClipID>& clips)
+{
+    // As markChanged() marks an element of the song, a change in each clip: counted, and compared when asked.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+    notesToCompare.insert (notesToCompare.end(), clips.begin(), clips.end());
 }
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)

@@ -25,6 +25,10 @@
 //           with ".."; a full path of any computer's is one Phazite writes itself; nothing for a song without a file
 //   alias   the clips of an alias group (Schema.h: clipLink) hold the same notes and controllers' values (every property of
 //           each NOTE and CONTROL, in the same order), are of one kind, and are two at least
+//   values  of a song that holds its clips' notes as values beside its tree (model/base/internal/SongValues.h; the live song,
+//           not a copy): no clip in its tree holds a NOTE or a CONTROL element, every MIDI clip in its tree has a value and
+//           no value belongs to a clip that isn't in its tree, an audio clip has none, and the clips of an alias group hold
+//           ONE value (the same, not two alike)
 #pragma once
 
 #include "TestHelpers.h"
@@ -46,6 +50,12 @@ std::vector<std::string> findSongProblems (const Song&, const schema::Tables&);
 
 // The same, each problem a failed check.
 void checkSong (const Song&);
+
+// The problems of the rule values alone (above), which findSongProblems() finds too: for a song an edit, an undo or a redo
+// left, which holds what it keeps for an undo (the curves of devices gone), and so is checked whole only as it would open
+// (copyAsOpened()). None for a song that holds no values.
+std::vector<std::string> findValueProblems (const Song&);
+void checkValues (const Song&); // each a failed check
 
 // A copy of an edited song as a project opens it from its file: without what it keeps only while an undo could bring it back
 // (the curves and lanes of devices taken away: SongIDs.h, which the check takes for names of nothing) and where playback

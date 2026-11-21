@@ -4,7 +4,9 @@
 #include "GoldenFiles.h"
 #include "SongCheck.h"
 #include "TestHelpers.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/project/internal/Project.h"
 
 #include <algorithm>
@@ -137,31 +139,62 @@ std::vector<juce::String> findWrongValues (const schema::Range& range)
     return values;
 }
 
+// Whether two values a file or whole state holds are the same: as numbers where both are, else as text.
+bool isSameSaved (const juce::var& a, const juce::var& b)
+{
+    const auto x = phazite::readLoadedNumber (a), y = phazite::readLoadedNumber (b);
+    return x.has_value() && y.has_value() ? juce::exactlyEqual (*x, *y) : a.toString() == b.toString();
+}
+
 // A song of the representative project with one value changed, checked as it is and after the loader; and what the
-// loader made of it, or none if it took it out (or the element it was on).
+// loader made of it, or none if it took it out (or the element it was on). For a clip's note or controller's value, also
+// the song opened as a project opens it (makeSong()), which holds its clips' notes as values beside its tree.
 struct Changed
 {
-    juce::ValueTree element;
+    juce::ValueTree element, original;
     std::vector<std::string> problemsBefore;
-    phazite::Song::Ptr loaded;
+    phazite::Song::Ptr loaded, opened;
     juce::ValueTree loadedElement;
+    phazite::ClipID clip;
+    juce::Identifier changedProperty;
 
     Changed (const schema::Element& type, const juce::Identifier& property, const juce::var& value,
              const schema::Tables& tables = schema::getTables())
+        : changedProperty (property)
     {
         auto raw = readRepresentative();
         element = findFirst (raw, type);
         REQUIRE_MESSAGE (element.isValid(), "the representative project holds no " << type.toString());
+        original = element.createCopy();
         element.setProperty (property, value, nullptr);
 
         const phazite::Song rawSong { raw.createCopy() };
         problemsBefore = findSongProblems (rawSong, tables);
 
-        loaded = phazite::makeSong (raw);
-        REQUIRE (loaded != nullptr);
+        // A clip's note or controller's value: the loader's part alone (makeConsistent()), on a song that keeps everything in
+        // its tree, since a song made by makeSong() holds its clips' notes as values beside it (Song::holdValues()); and the
+        // song opened, whose values findOpened() reads back through whole state.
+        if (element.hasType (schema::NOTE) || element.hasType (schema::CONTROL))
+        {
+            clip = phazite::ClipID::fromRaw (phazite::readID (element.getParent()[schema::clipID]));
 
-        if (&tables != &schema::getTables())
+            if (&tables == &schema::getTables())
+            {
+                opened = phazite::makeSong (raw.createCopy());
+                REQUIRE (opened != nullptr);
+            }
+
+            loaded = new phazite::Song (raw);
             phazite::makeConsistent (*loaded, phazite::ReadAs::whole, tables);
+        }
+        else
+        {
+            loaded = phazite::makeSong (raw);
+            REQUIRE (loaded != nullptr);
+
+            if (&tables != &schema::getTables())
+                phazite::makeConsistent (*loaded, phazite::ReadAs::whole, tables);
+        }
 
         loadedElement = isInSong (element) ? element : juce::ValueTree();
     }
@@ -173,6 +206,42 @@ struct Changed
             return std::nullopt;
 
         return loadedElement[property];
+    }
+
+    // The opened song's element in its clip's whole state (WholeState.h), as it holds its values: a note by its ID, a
+    // controller's value by every property but the one changed; none if the loader took it out.
+    juce::ValueTree findOpened() const
+    {
+        REQUIRE (opened != nullptr);
+        const auto clipState = phazite::findClipState (*opened, clip);
+
+        if (! clipState.isValid())
+            return {};
+
+        for (const auto& child : phazite::copyWhole (*opened, clipState))
+        {
+            if (! child.hasType (original.getType()))
+                continue;
+
+            if (original.hasType (schema::NOTE))
+            {
+                if (isSameSaved (child[schema::noteID], original[schema::noteID]))
+                    return child;
+
+                continue;
+            }
+
+            auto same = true;
+
+            for (int i = 0; i < original.getNumProperties(); ++i)
+                if (const auto name = original.getPropertyName (i); name != changedProperty)
+                    same = same && isSameSaved (child[name], original[name]);
+
+            if (same)
+                return child;
+        }
+
+        return {};
     }
 };
 } // namespace
@@ -204,6 +273,27 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                     CHECK (juce::exactlyEqual (phazite::readLoadedNumber (*loaded).value_or (-1.0e300), *expected));
 
                 checkSong (*changed.loaded);
+
+                // A clip's note or controller's value as the opened song holds it, read back through whole state: the same,
+                // or none where the loader took it out (a value whole state leaves out is the description's default).
+                if (changed.opened != nullptr)
+                {
+                    INFO ("as the song opened holds it");
+                    const auto opened = changed.findOpened();
+
+                    if (expected.has_value())
+                    {
+                        REQUIRE (opened.isValid());
+                        const auto held = opened.hasProperty (*property) ? opened[*property] : property->getDefault();
+                        CHECK (juce::exactlyEqual (phazite::readLoadedNumber (held).value_or (-1.0e300), *expected));
+                    }
+                    else
+                    {
+                        CHECK ((! opened.isValid() || ! opened.hasProperty (*property)));
+                    }
+
+                    checkSong (*changed.opened);
+                }
             }
         }
     }

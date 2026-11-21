@@ -5,7 +5,7 @@
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
-#include "model/base/internal/WholeState.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -15,6 +15,7 @@
 #include "model/notes/internal/Notes.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace phazite
 {
@@ -892,8 +893,27 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         // own (its tracks, devices, sends, modulators and clips, its clips' notes as they are, in their alias groups), with
         // its own automation, right after the original. A frozen track's copy plays live: the frozen file is the original's.
         song.storeDeviceStates (track.getRaw());
-        auto copy = copyWhole (song, original); // its clips with their notes
+        auto copy = original.createCopy();
         const auto copied = giveNewIDs (song, copy);
+
+        // Each MIDI clip's copy given its clip's value (SongValues.h), shared until either is edited: the song's tree holds
+        // no notes (a song that keeps everything in its tree: the copy holds them).
+        if (auto* values = song.getValues())
+        {
+            const std::function<void (const juce::ValueTree&)> giveValues = [&] (const juce::ValueTree& state)
+            {
+                for (const auto& child : state)
+                {
+                    if (child.hasType (schema::TRACK))
+                        giveValues (child);
+                    else if (const auto found = copied.find (getClipID (child).getRaw());
+                             child.hasType (schema::CLIP) && found != copied.end())
+                        values->copyClipNotes (song, getClipID (child), ClipID::fromRaw (found->second));
+                }
+            };
+
+            giveValues (original);
+        }
 
         std::vector<juce::ValueTree> inside { copy };
         collectTrackStates (copy, inside);

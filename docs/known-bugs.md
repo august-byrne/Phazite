@@ -18,8 +18,7 @@ and 212 are new; and 214 is a fault of the compiler on CI, which waits for the o
 message thread (2026-11-20) and the reviews of its fixes left: the audit's other findings were fixed at once
 ([changelog](changelog.md)); these were found by reading the code and none was measured, and what the audit only
 suspects, or would make faster, is in the [backlog](backlog.md). 230 was found by reading JUCE while
-roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 234 is what
-the review of the merge's rule for alias groups found by reading (2026-11-21).
+roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -153,20 +152,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   own review. Also then: the merge's check that each ID is held once (`holdsEachIDOnce()` in `VersionHistory.cpp`)
   and the loader's (`SongPieces.cpp`) made one function, which looks at a channel's fader and VCA IDs and skips
   elements of kinds it doesn't know, as the loader's does.
-- **234. A line restored from a version can rejoin an alias group whose other clips changed since.** Restoring one
-  line (a track) reads its song in part, and the loader's rule that makes alias groups hold together
-  (`keepAliasGroups()` in `src/model/project/Project.cpp`) is skipped for a song read in part, since a group's other
-  clips may be in pieces that weren't read; nothing on the way in checks the groups again
-  (`removeBrokenReferences()` leaves links alone). So a restored clip that carries its old link holds its old notes
-  beside clips of the group that hold newer ones: an edit through one of them then reaches it only in part, and a
-  later merge gives it the group's notes over its own. Found by reading, while the merge's alias rule was reviewed
-  (2026-11-21), then shown: Put Back of one track's line, Take from This Version and a line restored each change
-  that track's clips of a group (their notes, and for audio clips what a group shares: the file, the tempo, the pitch,
-  the direction and the warp markers) and leave the group's clips on other tracks as they were (two cases of
-  `tests/VersionsGoingBackTests.cpp` fail until it is fixed), and the next opening of the project then makes the
-  clip a clip of its own. To fix (decided 2026-11-21, as a merge does): the group's other clips take the restored
-  notes, in the same undo step, since putting a line back is an edit of its clips' notes and an edit of a group's
-  notes reaches every clip of it. Fixed as the notes move (roadmap step S5.20), where a group holds one value.
 
 ## Devices and playback
 

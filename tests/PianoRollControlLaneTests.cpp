@@ -5,9 +5,13 @@
 #include "EditorScreens.h"
 #include "TestHelpers.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/SongValues.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -98,23 +102,64 @@ bool isSpacedAtLeastAGap (const Values& values)
     return true;
 }
 
-// The changes of the song its listeners hear, counted at its root, as the speed gates count them.
-struct Heard : juce::ValueTree::Listener
+// The changes of the song its listeners hear: each change of its tree, counted at its root, and each of its clips' values
+// (model/base/internal/SongValues.h), as the speed gates count them; and how many controllers' values each change of the
+// values took away or brought, clip by clip.
+struct Heard : juce::ValueTree::Listener,
+               phazite::ValueArea<phazite::NotesByClip>::Listener
 {
-    explicit Heard (juce::ValueTree song)
-        : root (std::move (song))
+    explicit Heard (phazite::Song& song)
+        : root (song.getState()),
+          values (*song.getValues())
     {
         root.addListener (this);
+        values.notes.addListener (this);
     }
 
-    ~Heard() override { root.removeListener (this); }
+    ~Heard() override
+    {
+        values.notes.removeListener (this);
+        root.removeListener (this);
+    }
 
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++changes; }
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++changes; }
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++changes; }
 
+    void valueAreaChanged (const phazite::NotesByClip& before, const phazite::NotesByClip& after) override
+    {
+        ++changes;
+
+        using Key = std::tuple<int, int, double, int, int>;
+        const auto count = [] (const phazite::ClipNotes* clip)
+        {
+            std::map<Key, int> held;
+
+            if (clip != nullptr)
+                for (const auto& control : clip->controls)
+                    ++held[{ (int) control.kind, control.number, control.beat, control.value, control.channel }];
+
+            return held;
+        };
+
+        for (const auto& [id, value] : after.clips)
+        {
+            if (const auto* old = before.find (phazite::ClipID::fromRaw (id)); old != nullptr && old->isSameAs (value))
+                continue;
+
+            auto gone = count (before.find (phazite::ClipID::fromRaw (id)));
+
+            for (const auto& [key, number] : count (&value))
+                gone[key] -= number;
+
+            for (const auto& [key, number] : gone)
+                valuesChanged += std::abs (number);
+        }
+    }
+
     juce::ValueTree root;
-    int changes = 0;
+    phazite::SongValues& values;
+    int changes = 0, valuesChanged = 0;
 };
 
 // A long take's 100,000 values in a clip on the second track, 800 beats long: the bend and the mod wheel by turns, 1/128 of a
@@ -475,7 +520,7 @@ TEST_CASE ("A step of a draw in a controller lane changes only the cells it drew
     LaneScreen screen;
     Mouse mouse (*screen.lane);
     auto& history = screen.getSong().getUndoManager();
-    Heard heard (screen.getSong().getState());
+    Heard heard (screen.getSong());
 
     // Off the grid (Alt), a cell is a pixel wide, or 1/64 of a beat where a pixel is less. Out to the right in steps of 4
     // pixels, the value going up and down, and back to the left on another line: at each report, the cells it passed, each
@@ -488,10 +533,10 @@ TEST_CASE ("A step of a draw in a controller lane changes only the cells it drew
 
     const auto report = [&] (juce::Point<int> to)
     {
-        const auto before = heard.changes;
+        const auto before = heard.valuesChanged;
         mouse.dragTo (to);
-        heardAtEach.push_back (heard.changes - before);
-        CHECK (heard.changes - before <= mostChanges);
+        heardAtEach.push_back (heard.valuesChanged - before);
+        CHECK (heard.valuesChanged - before <= mostChanges);
     };
 
     for (int i = 1; i <= 60; ++i)
@@ -665,8 +710,8 @@ TEST_CASE ("The Delete tool's drag across a long take's bend, with its mod wheel
     const auto middle = screen.lane->getHeight() / 2;
     mouse.press ({ 0, middle });
 
-    // Everything in one report: the clip filled as a copy without the bend and put in its place, not 50,000 removals.
-    Heard heard (screen.getSong().getState());
+    // Everything in one report: one change of the clip's value (SongValues.h), not 50,000 removals.
+    Heard heard (screen.getSong());
     mouse.dragTo ({ screen.lane->getWidth() - 1, middle });
     CHECK (heard.changes <= 4);
     mouse.release();

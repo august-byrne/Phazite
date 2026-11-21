@@ -72,6 +72,10 @@ PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
     plugins.setListener (this);
     player.readLive (host.getFileReader(), host.getEngine().getBlocksPlayed());
     song->addParameterListener (this);
+
+    if (auto* values = song->getValues())
+        values->addNotesListener (this);
+
     songState.addListener (this);
     getSessions().push_back (this);
     host.add (*this);
@@ -93,6 +97,10 @@ PlaybackSession::~PlaybackSession()
     cancelPendingUpdate();
     songState.removeListener (this);
     song->removeParameterListener (this);
+
+    if (auto* values = song->getValues())
+        values->removeNotesListener (this);
+
     plugins.setListener (nullptr);
     recorder = nullptr; // what it opened for the tracks closes
 

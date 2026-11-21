@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Where a song's tracks, clips and notes are, by their IDs (Schema.h: trackID, clipID, noteID), and which clips are linked
-// (clipLink): what the model's functions that take IDs find elements by, so that none looks through the song for each ID
-// (known bug 122: a drag of 500 notes in a clip of 5,000 looked through every track for each note several times, and through
-// the clip's notes for each). Each song keeps one (Song::getIndex()).
+// Where a song's tracks and clips are, by their IDs (Schema.h: trackID, clipID), and which clips are linked (clipLink): what
+// the model's functions that take IDs find elements by, so that none looks through the song for each ID (known bug 122: a
+// drag of 500 notes in a clip of 5,000 looked through every track for each note several times). Each song keeps one
+// (Song::getIndex()). A note is found in its clip's value by its ID (model/base/internal/SongValues.h: ClipNotes::find()),
+// which needs no index.
 //
-// The song's tree stays the only truth. The index is made from it as it is first asked (one walk through the tracks and their
-// clips; a clip's notes the first time one of them is asked for), kept exact by the tree's own notifications of what was
-// added, removed or moved (an edit, an undo, a redo, a merge or a Bring Back that applies a whole song), and made again from
-// the tree whenever a change is one it doesn't follow by itself (an ID that changes, a track that becomes a folder, two
-// elements with one ID, the track list replaced). An ID that two elements share is looked for through the song, as before,
-// which finds the first.
+// The song's tree stays the only truth of its tracks and clips. The index is made from it as it is first asked (one walk
+// through the tracks and their clips), kept exact by the tree's own notifications of what was added, removed or moved (an
+// edit, an undo, a redo, a merge or a Bring Back that applies a whole song), and made again from the tree whenever a change
+// is one it doesn't follow by itself (an ID that changes, a track that becomes a folder, two elements with one ID, the track
+// list replaced). An ID that two elements share is looked for through the song, as before, which finds the first.
 //
 // Why what it answers is the tree's, even while the tree is telling its listeners of a change. JUCE tells a change to the
 // listeners of the element that changed first, then to those of its parent and so on up, and on each element in the order
 // its handles were first given a listener. The index listens to the track list's element (TRACKS) from the moment its song
 // is made, and every other listener of a song listens to its root (the rule in model/base/Song.h, which
-// tools/check-architecture.sh counts: song-listeners), so the index hears of every change to the tracks, clips and notes
-// before anything else, and what another listener asks while it is told of the change finds the change already there. And
-// it doesn't take that on trust: each answer it gives is checked against the tree first, cheaply (an element still has the
-// ID asked for and is still where the index holds it: in the clip asked about, or on a track in the track list through
-// folders), and a miss is checked too (the track list, the tracks and the clip hold as many children as the index last saw);
-// either failing, the index is made again from the tree there and then, and answers from it.
+// tools/check-architecture.sh counts: song-listeners), so the index hears of every change to the tracks and clips before
+// anything else, and what another listener asks while it is told of the change finds the change already there. And it
+// doesn't take that on trust: each answer it gives is checked against the tree first, cheaply (an element still has the ID
+// asked for and is still where the index holds it: on a track in the track list through folders), and a miss is checked too
+// (the track list and the tracks hold as many children as the index last saw); either failing, the index is made again from
+// the tree there and then, and answers from it.
 //
 // While checking is on (as the tests run it: tests/TestMain.cpp), answers are compared with what a walk through the song
 // finds, and a difference is a JUCE assertion, which fails the test it fires in: every one in a small song, and a share in a
@@ -28,17 +28,16 @@
 // whole index with a walk too (isExact()).
 //
 // What it costs: about 100 bytes for each track and each clip, made as the song is first asked for one (a walk of the tracks
-// and their elements, as a single lookup made before); and about 60 bytes for each note of a clip whose notes were asked for,
-// made as the first is. Used by one thread, the one that made its song (for the live song, the message thread; a song that
-// background work makes for itself from a copy, that work's), as the song's tree is: a lookup may make the index, or a
-// part of it, and one from another thread is a JUCE assertion in Debug builds. Nothing of it is shared between songs but
-// the atomic switch of checking and the atomic count the speed gates read, so songs on two threads never meet.
+// and their elements, as a single lookup made before). Used by one thread, the one that made its song (for the live song,
+// the message thread; a song that background work makes for itself from a copy, that work's), as the song's tree is: a lookup
+// may make the index, or a part of it, and one from another thread is a JUCE assertion in Debug builds. Nothing of it is
+// shared between songs but the atomic switch of checking and the atomic count the speed gates read, so songs on two threads
+// never meet.
 #pragma once
 
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstdint>
-#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -51,12 +50,9 @@ public:
     ~SongIndex() override;
 
     // A track's element (a track, a folder or a return, in the track list or in a folder, as Tracks.h finds them: not the
-    // master's), a clip's (on such a track) and a note's (in a clip's element, which may be one outside the song, such as a
-    // copy: its notes are looked through), by an ID; invalid for none. A clip's notes' IDs are its own: its aliases' notes
-    // have the same IDs.
+    // master's) and a clip's (on such a track), by an ID; invalid for none.
     juce::ValueTree findTrack (std::uint64_t id) const;
     juce::ValueTree findClip (std::uint64_t id) const;
-    juce::ValueTree findNote (const juce::ValueTree& clipState, std::uint64_t id) const;
 
     // The tracks' elements in the song's order, each folder's before those in it (Tracks.h: getTrackStates()).
     std::vector<juce::ValueTree> getTracks() const;
@@ -75,7 +71,7 @@ public:
     // is in none. For a clip outside the song, those of the track list it is in, looked for.
     std::vector<juce::ValueTree> findLinked (const juce::ValueTree& clipState) const;
 
-    // Whether it holds exactly what a walk through the song finds now, every track, clip, note asked for and alias group:
+    // Whether it holds exactly what a walk through the song finds now, every track, clip and alias group:
     // for the tests.
     bool isExact() const;
 
@@ -104,9 +100,7 @@ private:
     {
         juce::ValueTree element;
         int count = 1;
-        int children = 0;               // as many as the index last saw
-        juce::String link;              // its alias group's, as the clip holds it (schema::clipLink), or none
-        std::unique_ptr<Entries> notes; // its notes by their IDs, once one was asked for
+        juce::String link; // its alias group's, as the clip holds it (schema::clipLink), or none
     };
 
     struct Group
@@ -155,7 +149,6 @@ private:
     void removeClip (const juce::ValueTree&) const;
     bool isIndexedTrack (const juce::ValueTree&) const;
     Clip* findIndexedClip (const juce::ValueTree&) const;
-    const Entries& getNotes (Clip&) const;
     void forget() const; // to be built again, from the song as it is then
     void seeChildren (const juce::ValueTree& parent) const;
 
@@ -172,7 +165,6 @@ private:
 
     juce::ValueTree findTrackIndexed (std::uint64_t id) const;
     juce::ValueTree findClipIndexed (std::uint64_t id) const;
-    juce::ValueTree findNoteIndexed (const juce::ValueTree& clipState, std::uint64_t id) const;
     std::vector<juce::ValueTree> findLinkedIndexed (const juce::ValueTree& clipState) const;
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;

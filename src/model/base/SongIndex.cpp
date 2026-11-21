@@ -50,8 +50,8 @@ namespace
 
     //==============================================================================
     // The walks the model made before it had an index, kept as what the index is checked against: the tracks through the
-    // track list and its folders (only a folder holds tracks); a clip on any of them; a note among a clip's children; and an
-    // alias group's clips, through every track of the list a clip is in.
+    // track list and its folders (only a folder holds tracks); a clip on any of them; and an alias group's clips, through
+    // every track of the list a clip is in.
     void collectTracks (const juce::ValueTree& parent, std::vector<juce::ValueTree>& found)
     {
         for (const auto& child : parent)
@@ -83,19 +83,6 @@ namespace
             if (isFolder (child))
                 if (auto found = walkToTrackIn (child, id); found.isValid())
                     return found;
-        }
-
-        return {};
-    }
-
-    juce::ValueTree walkToNote (const juce::ValueTree& clipState, std::uint64_t id)
-    {
-        for (const auto& child : clipState)
-        {
-            visit();
-
-            if (child.hasType (schema::NOTE) && getID (child) == id)
-                return child;
         }
 
         return {};
@@ -233,19 +220,6 @@ juce::ValueTree SongIndex::findClip (std::uint64_t id) const
     {
         const NotCounted notCounted;
         jassert (found == walkToClip (id)); // the index and the song differ
-    }
-
-    return found;
-}
-
-juce::ValueTree SongIndex::findNote (const juce::ValueTree& clipState, std::uint64_t id) const
-{
-    auto found = findNoteIndexed (clipState, id);
-
-    if (shouldCheck ((size_t) clipState.getNumChildren()))
-    {
-        const NotCounted notCounted;
-        jassert (found == walkToNote (clipState, id)); // the index and the song differ
     }
 
     return found;
@@ -417,33 +391,7 @@ bool SongIndex::isExact() const
         indexedTracks += (size_t) entry.count;
 
     for (const auto& [id, clip] : clips)
-    {
         indexedClips += (size_t) clip.count;
-
-        // The notes of a clip whose notes were asked for: each, and no others.
-        if (clip.notes != nullptr && clip.count == 1)
-        {
-            size_t numNotes = 0, indexedNotes = 0;
-
-            for (const auto& note : clip.element)
-            {
-                if (note.hasType (schema::NOTE))
-                {
-                    ++numNotes;
-
-                    if (findNoteIndexed (clip.element, getID (note)) != walkToNote (clip.element, getID (note)))
-                        return false;
-                }
-            }
-
-            if (clip.notes != nullptr)
-                for (const auto& [noteID, entry] : *clip.notes)
-                    indexedNotes += (size_t) entry.count;
-
-            if (numNotes != indexedNotes)
-                return false;
-        }
-    }
 
     for (const auto& [link, group] : groups)
         indexedLinked += group.clips.size();
@@ -536,7 +484,6 @@ void SongIndex::addClip (const juce::ValueTree& clipState) const
     {
         entry->second.element = clipState;
         entry->second.link = link;
-        entry->second.children = clipState.getNumChildren();
     }
     else if (entry->second.element == clipState)
     {
@@ -609,30 +556,6 @@ SongIndex::Clip* SongIndex::findIndexedClip (const juce::ValueTree& clipState) c
     return entry != clips.end() && entry->second.count == 1 && entry->second.element == clipState ? &entry->second : nullptr;
 }
 
-const SongIndex::Entries& SongIndex::getNotes (Clip& clip) const
-{
-    // Made again where the clip holds another count of children than it last saw (a change not heard yet).
-    if (clip.notes != nullptr && clip.element.getNumChildren() != clip.children)
-        clip.notes = nullptr;
-
-    if (clip.notes == nullptr)
-    {
-        clip.notes = std::make_unique<Entries>();
-        clip.children = clip.element.getNumChildren();
-
-        for (const auto& child : clip.element)
-        {
-            visit();
-
-            if (child.hasType (schema::NOTE))
-                if (auto [entry, added] = clip.notes->try_emplace (getID (child), Entry { child }); ! added)
-                    ++entry->second.count;
-        }
-    }
-
-    return *clip.notes;
-}
-
 void SongIndex::seeChildren (const juce::ValueTree& parent) const
 {
     if (parent == trackList)
@@ -643,11 +566,6 @@ void SongIndex::seeChildren (const juce::ValueTree& parent) const
     {
         if (const auto entry = tracks.find (getID (parent)); entry != tracks.end() && entry->second.element == parent)
             entry->second.children = parent.getNumChildren();
-    }
-    else if (parent.hasType (schema::CLIP))
-    {
-        if (auto* clip = findIndexedClip (parent))
-            clip->children = parent.getNumChildren();
     }
 }
 
@@ -783,36 +701,6 @@ juce::ValueTree SongIndex::findClipIndexed (std::uint64_t id) const
     return walkToClip (id);
 }
 
-juce::ValueTree SongIndex::findNoteIndexed (const juce::ValueTree& clipState, std::uint64_t id) const
-{
-    if (! clipState.isValid())
-        return {};
-
-    prepare();
-    auto* clip = findIndexedClip (clipState);
-
-    // A clip outside the song (a copy), or one whose ID another clip shares: its notes looked through.
-    if (clip == nullptr)
-        return walkToNote (clipState, id);
-
-    const auto& notes = getNotes (*clip); // made again first if the clip holds another count of children than it saw
-    visit();
-    const auto entry = notes.find (id);
-
-    if (entry == notes.end())
-        return {};
-
-    if (entry->second.count == 1)
-        if (const auto& note = entry->second.element; getID (note) == id && note.getParent() == clipState)
-            return note;
-
-    // Shared by two of its notes, or changed before the index heard of it: the clip's notes looked through.
-    if (entry->second.count == 1)
-        clip->notes = nullptr;
-
-    return walkToNote (clipState, id);
-}
-
 std::vector<juce::ValueTree> SongIndex::findLinkedIndexed (const juce::ValueTree& clipState) const
 {
     const auto link = clipState[schema::clipLink].toString();
@@ -876,9 +764,6 @@ void SongIndex::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Ide
     {
         if (tree.hasType (schema::TRACK) || tree.hasType (schema::CLIP))
             forget();
-        else if (tree.hasType (schema::NOTE))
-            if (auto* clip = findIndexedClip (tree.getParent()))
-                clip->notes = nullptr;
 
         return;
     }
@@ -934,14 +819,6 @@ void SongIndex::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& c
             addClip (child);
         }
     }
-    else if (child.hasType (schema::NOTE))
-    {
-        if (auto* clip = findIndexedClip (parent); clip != nullptr && clip->notes != nullptr)
-        {
-            if (auto [entry, added] = clip->notes->try_emplace (getID (child), Entry { child }); ! added && entry->second.element != child)
-                ++entry->second.count;
-        }
-    }
 
     seeChildren (parent);
 }
@@ -969,19 +846,6 @@ void SongIndex::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&
     {
         ++layout;
         removeClip (child);
-    }
-    else if (child.hasType (schema::NOTE))
-    {
-        if (auto* clip = findIndexedClip (parent); clip != nullptr && clip->notes != nullptr)
-        {
-            if (const auto entry = clip->notes->find (getID (child)); entry != clip->notes->end())
-            {
-                if (entry->second.count == 1 && entry->second.element == child)
-                    clip->notes->erase (entry);
-                else
-                    clip->notes = nullptr; // one of two with its ID: made again as it is next asked for
-            }
-        }
     }
 
     seeChildren (parent);

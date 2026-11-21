@@ -321,7 +321,7 @@ TEST_CASE ("The steps of a join over part of a MIDI clip, each checked: the note
 
         phazite::setClipNotes (model, joined, notes);
         CAPTURE (joinedState.toXmlString().toStdString());
-        CHECK (joinedState.getNumChildren() == 4);
+        CHECK (phazite::copyWhole (model, joinedState).getNumChildren() == 4); // whole: its notes beside the tree
         CHECK (phazite::getClipNotes (model, joined).size() == 4);
         CHECK (model.getIndex().isExact());
     }

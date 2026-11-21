@@ -26,7 +26,7 @@ between them, which compiles the song into what plays. The layers and where the 
 | Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
 | Browser previews on an engine of their own | Built | |
 | Every element of the song described once in code: its type, range, default and kind | Built | `src/model/base/internal/Schema.h`, `SchemaDescription.h`; `tests/SchemaTests.cpp` |
-| The song as an immutable value, one area at a time | Planned | Roadmap step S5.20 |
+| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: a clip's notes and controllers' values are values beside the tree (built); the other areas next |
 | Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
 | Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
 
@@ -48,8 +48,20 @@ sends, automation, modulators and macros, sections and the chord lane.
 - **Unsaved changes are found by comparing.** A value written again as another type notifies without changing
   anything, so the project keeps a copy of the song as opened or last saved and counts a change only when what
   counts differs from it.
-- **Aliases.** Each clip of an alias group holds the group's notes in its own element, so an edit changes every
-  clip of the group in the same undo step.
+- **Aliases.** The clips of an alias group hold ONE value of notes, the same under each clip's ID, so an edit through
+  any of them changes every clip of the group in the same undo step.
+- **Notes as values beside the tree.** A MIDI clip's notes and controllers' values are an immutable value
+  (`src/model/base/internal/SongValues.h`: `ClipNotes`), and the song holds them in an area of values by the clip's
+  ID (`ValueArea.h`), in its one undo history, rather than as elements of its tree: a clip of the song holds no NOTE
+  or CONTROL element. Every note edit is a function from one value to the next, set once for each alias group. A
+  keeper, a listener of the song's tree that hears before any other but the index, keeps the two together for every
+  change of the tree that isn't the notes' own: a clip that comes into the song with notes as elements (a paste, a
+  version, an import, a merge) has them read into its value; a clip taken out has its value remembered with its element,
+  and given back if the same element comes back (a move); a clip that joins an alias group takes the group's value.
+  Whatever needs the song whole (a save, a version, the clipboard, a comparison) asks for it (`WholeState.h`), and
+  gets each clip's NOTE elements, then its CONTROL elements, written back in. What hears the song's changes (what
+  plays it, the open project's views, the unsaved mark, the versions, frozen tracks) hears the values' changes too,
+  by clip, and reads them only once the step is whole.
 - **Time edits** make a section longer or shorter rather than cutting it in two.
 
 ### Time
@@ -328,8 +340,8 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
   deleted, only twice as fast, and its undo step larger), most of all in Undo, a merge and the copy a save takes
   ([decisions.md](decisions.md), "Engineering"). Every element is described once in code first (roadmap step S5.19),
   which the values, the loader and the merge are made from; then the song moves one area at a time behind the
-  model's functions (S5.20), the notes first, with one undo history for the tree's changes and the values' while
-  both are there, and the project file as it is.
+  model's functions (S5.20), the notes first (done: a clip's notes are values beside the tree), with one undo history
+  for the tree's changes and the values' while both are there, and the project file as it is.
 - **Beats are quarter notes everywhere,** and a time signature only sets the bar's length and the counted beat.
   Everything that keeps time then agrees, in every meter.
 - **Control points every 32 samples from the song's start,** so that what a song sounds like does not depend on
@@ -348,9 +360,9 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
 
 ## Not built
 
-- The song as an immutable value: Planned, before the beta (roadmap step S5.20). Today the song is a `ValueTree`,
-  every name of it described in `Schema.h` (S5.19, built); the notes alone are reached through typed views
-  (`src/model/notes/internal/NoteElements.h`), under which their storage can change.
+- The song as an immutable value: being built, before the beta (roadmap step S5.20). A clip's notes and
+  controllers' values are values beside the tree (built); the rest of the song is still a `ValueTree`, every name of it
+  described in `Schema.h` (S5.19), and moves one area at a time next.
 - Other stretch modes, such as slicing drums at their hits or re-pitching: Planned.
 - Tracks that aren't being edited pre-rendered in the background: Planned, after v1.
 - Audio Units and CLAP in the helper: Planned, after v1 ([plugin-hosting.md](plugin-hosting.md)).

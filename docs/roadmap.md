@@ -59,7 +59,9 @@ anyone can download. What the comparison left for later is under [After 1.0](#af
 Added on 2026-11-20 and 2026-11-21 (the owner's decisions, so that the model under Phazite is robust before the
 beta): the song's schema as data (S5.19) and the song as an immutable value (S5.20), which was weighed and left at
 first and taken once it was measured ([decisions.md](design/decisions.md), "Engineering"). S5.19 comes before S5.20,
-and both before the stage's other steps that add to the model, which then write through them.
+and both before the stage's other steps that add to the model, which then write through them. Of S5.20, the first area
+is built (2026-11-21): a clip's notes and its controllers' values are a value beside the song's tree, in the song's
+one undo history, with immer in `external/`; the clips come next.
 
 ### Stage 1. Safe: the bugs that lose work or sound
 

@@ -7,6 +7,7 @@
 // clips' notes are a value beside it, by their clips' IDs: as the song would be once the notes had moved and the clips not.
 //   phazite_tests.exe --test-case="Value area*"
 //   phazite_tests.exe --test-suite=benchmark --no-skip --test-case="*one history*"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UndoCheck.h"
@@ -574,6 +575,10 @@ TEST_CASE ("Value area: 1,500 changes, drags, trials, undos and redos drawn by l
 
             if (phazite::canUndo (*mixed.song) == done.empty() || phazite::canRedo (*mixed.song) == ahead.empty())
                 differences << "; Undo or Redo is offered wrongly";
+
+            // And the song's own notes' values (the clips' made and deleted here) kept with its tree (SongCheck.h: values).
+            for (const auto& problem : phazite::test::findValueProblems (*mixed.song))
+                differences << "; " << juce::String (problem);
 
             if (differences.isNotEmpty())
             {

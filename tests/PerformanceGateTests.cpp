@@ -1002,19 +1002,49 @@ TEST_CASE ("Performance gate: a step of a drag of notes looks at as many element
 TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no note, and changes as much whatever the notes in its clip")
 {
     // As the piano roll's lane draws a step (PianoRollControlLane.cpp: putCells()): the lane's values in a beat replaced by
-    // two. It removes and adds the lane's elements there alone, walking the clip's elements once to find them, rather than
-    // rebuilding the clip as a take's thousands of values do (Notes.h: addControls()) or reading its notes.
+    // two. It takes the lane's values there out of the clip's value and puts the new ones in, one change of the value
+    // (model/base/internal/SongValues.h), walking no element of the clip's and reading none of its notes.
     struct Counts
     {
         std::uint64_t notesRead = 0, visited = 0;
         int changes = 0;
     };
 
-    struct Heard : juce::ValueTree::Listener
+    // Each change of the tree, and each controller's value a change of the clips' values took away or brought.
+    struct Heard : juce::ValueTree::Listener,
+                   phazite::ValueArea<phazite::NotesByClip>::Listener
     {
         void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++changes; }
         void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++changes; }
         void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++changes; }
+
+        void valueAreaChanged (const phazite::NotesByClip& before, const phazite::NotesByClip& after) override
+        {
+            for (const auto& [id, value] : after.clips)
+            {
+                const auto* old = before.find (phazite::ClipID::fromRaw (id));
+
+                if (old != nullptr && old->isSameAs (value))
+                    continue;
+
+                // In the order each holds them: what isn't in the other, one by one (a lane's values are few and ordered).
+                std::vector<phazite::ControlValues> was, now;
+
+                if (old != nullptr)
+                    was.assign (old->controls.begin(), old->controls.end());
+
+                now.assign (value.controls.begin(), value.controls.end());
+
+                for (const auto& control : was)
+                    if (const auto found = std::find (now.begin(), now.end(), control); found != now.end())
+                        now.erase (found);
+                    else
+                        ++changes;
+
+                changes += (int) now.size();
+            }
+        }
+
         int changes = 0;
     };
 
@@ -1046,6 +1076,7 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
         Heard heard;
         auto root = song->getState();
         root.addListener (&heard);
+        song->getValues()->notes.addListener (&heard);
         const auto element = phazite::findClipState (*song, clip);
         const auto inTheBeat = [&]
         {
@@ -1061,9 +1092,10 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
         const Counts counts { phazite::countNotesRead() - notesBefore, phazite::SongIndex::countElementsVisited() - visitedBefore,
                               heard.changes };
         root.removeListener (&heard);
+        song->getValues()->notes.removeListener (&heard);
 
-        // The clip's own element changed in place, not a copy of it put in its place; and what was heard, each value of the
-        // lane's in the beat taken out and each drawn put in (none of them the same), nothing else.
+        // The clip's own element, not a copy of it put in its place; and what was heard, each value of the lane's in the beat
+        // taken out and each drawn put in (none of them the same), nothing else.
         CHECK (phazite::findClipState (*song, clip) == element);
         CHECK (counts.changes == (int) (removed + inTheBeat()));
         phazite::setSong (context, nullptr);
@@ -1075,9 +1107,10 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
                                             << many.changes << " changes, " << many.visited << " looked at");
     CHECK (few.notesRead == 0);
     CHECK (many.notesRead == 0);
-    CHECK (few.changes == 7);                    // five values of the pedal's in the beat, both its ends in it, and two drawn
-    CHECK (many.changes == few.changes);         // whatever else the clip holds
-    CHECK (many.visited - few.visited <= 19800); // one walk through the clip's elements, not one for each value or note
+    CHECK (few.changes == 7);                  // five values of the pedal's in the beat, both its ends in it, and two drawn
+    CHECK (many.changes == few.changes);       // whatever else the clip holds
+    CHECK (many.visited - few.visited <= 100); // no walk through the clip: its value is read, not its elements (3 and 3 looked
+                                               // at, 2026-11-21; one walk of its 20,000 elements before the notes were values)
 }
 
 TEST_CASE ("Performance gate: a step of a note's drag in the piano roll doesn't walk the controller values its clip holds")
@@ -1113,15 +1146,13 @@ TEST_CASE ("Performance gate: a step of a note's drag in the piano roll doesn't 
         return visited;
     };
 
-    // One walk through the clip's elements, which reads its notes, as before the lanes came (191 elements looked at and
-    // about 20,200 measured, 2026-11-20); the chooser's read at each step made it two (40,193).
+    // No walk through the clip's elements: its notes and values are its value, read whole (188 elements looked at with and
+    // without the values, 2026-11-21; one walk, about 20,200, before the notes were values beside the tree, and the
+    // chooser's read at each step made it two, 40,193).
     const auto none = visitedFor (0), many = visitedFor (20000);
     INFO ("Elements looked at by a step of a note's drag in a clip of no controller values: " << none << "; of 20,000: " << many);
 
-    // Since the notes' edits read a clip's value from the song's tree (roadmap step S5.20, first half), an edit walks the clip
-    // once more than the view; the limit goes back to 30,000 with the second half, where the value is the storage and a read
-    // walks nothing.
-    CHECK (many - none < 45000);
+    CHECK (many - none < 100);
 }
 
 TEST_CASE ("Performance gate: a drag or a paste of many notes looks through its clip's track once, not once for each note")
@@ -1495,7 +1526,8 @@ TEST_CASE ("Performance gate: the check for unsaved changes compares no element 
 
     CHECK (phazite::Project::countElementsCompared() == before);
 
-    // A note added and taken back (Undo): its clip compared, not the song.
+    // A note added and taken back (Undo): its clip's notes compared as values (WholeState.h: holdSameNotes()), and no element
+    // of the tree, nor the song.
     {
         const phazite::UndoStep step (song, "Add Note");
         REQUIRE (phazite::test::addMidiNote (song, built.clips[3], 72, at (2.5), lasting (0.25), 100).isValid());
@@ -1511,7 +1543,7 @@ TEST_CASE ("Performance gate: the check for unsaved changes compares no element 
 
     INFO ("Elements compared after a note added and taken back: " << noteAdded << ", of its clip's " << clip << " and the song's "
                                                                   << wholeSong);
-    CHECK (noteAdded > 0);
+    CHECK (noteAdded == 0); // the clip's elements compared before the notes were values beside the tree
     CHECK (noteAdded <= clip);
     CHECK (noteAdded * 8 < wholeSong);
 }

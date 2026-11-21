@@ -8,7 +8,11 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongValues.h"
+#include "model/base/internal/WholeState.h"
 #include "model/mixer/FreezeModel.h"
+
+#include <juce_events/juce_events.h>
 
 #include <functional>
 #include <map>
@@ -58,7 +62,9 @@ void purgeCache (Song&);
 // move them, their automation, and the song's tempos, as the file is in seconds. It compares that with a copy taken when
 // the track was frozen (or came back frozen, by undo), or the project opened, so that notifications that change nothing
 // leave it frozen, and so do changes of what plays after the file: the track's fader, its sends, its name.
-class FreezeKeeper : private juce::ValueTree::Listener
+class FreezeKeeper : private juce::ValueTree::Listener,
+                     private SongValues::NotesListener,
+                     private juce::AsyncUpdater
 {
 public:
     explicit FreezeKeeper (Song&);
@@ -70,16 +76,31 @@ public:
     // own, getFrozenFile(), whichever froze it), or as the project opened. Every other plays live.
     bool keepThrough (const std::function<bool()>& apply);
 
+    // What a frozen track's file holds, as the song held it then: a copy of its parts' elements (a clip's without its notes),
+    // and the song's values (model/base/internal/WholeState.h), its clips' notes among them.
+    struct Holds
+    {
+        juce::ValueTree parts;
+        ValuesKept values;
+    };
+
 private:
     Song& song;
-    juce::ValueTree state;                     // the song's
-    std::map<TrackID, juce::ValueTree> frozen; // what each frozen track's file holds
-    std::map<TrackID, juce::ValueTree> files;  // and each track's file, kept as it is unfrozen, as the file stays
+    juce::ValueTree state;            // the song's
+    std::map<TrackID, Holds> frozen;  // what each frozen track's file holds
+    std::map<TrackID, Holds> files;   // and each track's file, kept as it is unfrozen, as the file stays
+    std::vector<ClipID> notesChanged; // the clips whose notes changed, compared at the next turn of the message loop
     bool checking = false;
 
     void takeFrozenTracks();
     void compare (TrackID);
     void check (const juce::ValueTree& changed);
+    void compareNotesChanged();
+
+    // The notes of a frozen track's clip, heard as the song's values change: marked, and compared once the step is whole (a
+    // listener of the values reads nothing of the song as it is told: SongValues.h).
+    void clipNotesChanged (const std::vector<ClipID>&) override;
+    void handleAsyncUpdate() override { compareNotesChanged(); }
 
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override { check (parent); }

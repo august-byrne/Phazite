@@ -16,6 +16,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
 
@@ -52,6 +53,7 @@ struct VersionsAudioFound
 juce::String findVersionsAudioKey (VersionStore&);
 
 class VersionHistory : private juce::ValueTree::Listener,
+                       private SongValues::NotesListener,
                        private juce::Timer
 {
 public:
@@ -939,6 +941,12 @@ private:
     void markChanged (const juce::ValueTree&, const juce::Identifier& property);
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
     void markTrack (const juce::ValueTree& track, bool withTracksInIt);
+
+    // The clips whose notes changed (the song holds them beside its tree: SongValues.h), heard as the values change and their
+    // tracks marked (markTrack()) as the changes are next asked for: a listener of the values reads nothing of the song.
+    std::vector<ClipID> notesHeard;
+    void markNotesHeard();
+    void clipNotesChanged (const std::vector<ClipID>&) override;
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();

@@ -7,7 +7,6 @@
 #include "model/base/Numbers.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
@@ -195,9 +194,8 @@ namespace
     }
 
     //==============================================================================
-    // The song's notes: each clip's value (SongValues.h: ClipNotes), the same in each of its aliases. While the clips'
-    // elements still store them, a value is read from its clip's element and what differs written back (getClipNotesValue(),
-    // setClipNotesValue()); one note alone is found by the song's index, rather than by a walk through its clip.
+    // The song's notes: each clip's value (SongValues.h: ClipNotes), the same in each of its aliases, which the song holds
+    // beside its tree (getClipNotesValue(), setClipNotesValue()); one note alone is found in its clip's value by its ID.
 
     std::uint64_t notesRead = 0; // message thread
 
@@ -216,8 +214,8 @@ namespace
         if (! clipState.isValid())
             return std::nullopt;
 
-        if (const auto note = song.getIndex().findNote (clipState, id.getRaw()); note.isValid())
-            return readNoteValues (note);
+        if (const auto* note = getClipNotesValue (song, getClipID (clipState)).find (id))
+            return *note;
 
         return std::nullopt;
     }
@@ -229,31 +227,9 @@ namespace
         return group.isNotEmpty() ? group : "clip " + juce::String ((juce::int64) getClipID (clipState).getRaw());
     }
 
-    // The undo history a clip's notes are written in: the song's, or none while the song is written outside it.
-    juce::UndoManager* getHistory (Song& song)
-    {
-        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-    }
-
-    // A value written into each clip of a clip's group but one (the clip read, which its edit writes itself).
-    void writeAliases (Song& song, const juce::ValueTree& clipState, const ClipNotes& value, const juce::ValueTree& written)
-    {
-        auto* undo = getHistory (song);
-
-        for (auto alias : getAliasStates (song, clipState))
-        {
-            if (alias == written)
-                continue;
-
-            SongIndex::countVisited ((std::uint64_t) alias.getNumChildren()); // a walk of the clip's, for the speed gates
-            writeClipNotes (value, alias, undo);
-        }
-    }
-
-    // One edit's clips' notes: each alias group's value read once, from the first of its clips the edit names (with where its
-    // notes are among that clip's children, so that what changed is written back without a second walk), changed as a batch,
-    // and set once for the group as the edit ends (commit()). The clips' own elements (their places, their tracks' other
-    // clips) are read and changed in the song as the edit goes, as before; a clip grown to hold a note changes no child.
+    // One edit's clips' notes: each alias group's value taken once, from the first of its clips the edit names, changed as a
+    // batch, and set once for the group as the edit ends (commit()). The clips' own elements (their places, their tracks'
+    // other clips) are read and changed in the song as the edit goes.
     class NotesEdit
     {
     public:
@@ -264,8 +240,7 @@ namespace
 
         struct Group
         {
-            juce::ValueTree read; // the clip whose element the value was read from
-            ClipPlaces places;
+            ClipID read; // the clip the value was taken from
             ClipNotes before, after;
         };
 
@@ -281,9 +256,8 @@ namespace
                 return &found->second;
 
             Group group;
-            group.read = clipState;
-            SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren()); // a walk of the clip's, for the speed gates
-            group.before = readClipNotes (clipState, group.places);
+            group.read = getClipID (clipState);
+            group.before = getClipNotesValue (song, group.read);
             group.after = group.before;
             order.push_back (key);
             return &groups.emplace (key, std::move (group)).first->second;
@@ -291,22 +265,13 @@ namespace
 
         Group* find (ClipID clip) { return find (findMidiClipState (song, clip)); }
 
-        // Each group's value set, in the order the groups were first named: the clip read written from what was read, and
-        // each other clip of its group as setClipNotesValue() writes it. Once, as the edit ends.
+        // Each group's value set, in the order the groups were first named, as setClipNotesValue() sets it. Once, as the edit
+        // ends.
         void commit()
         {
-            auto* undo = getHistory (song);
-
             for (const auto& key : order)
-            {
-                auto& group = groups.at (key);
-
-                if (group.after.isSameAs (group.before))
-                    continue;
-
-                writeClipNotes (group.before, group.places, group.after, group.read, undo);
-                writeAliases (song, group.read, group.after, group.read);
-            }
+                if (const auto& group = groups.at (key); ! group.after.isSameAs (group.before))
+                    setClipNotesValue (song, group.read, group.after);
 
             groups.clear();
             order.clear();
@@ -496,17 +461,24 @@ std::uint64_t countNotesRead() noexcept
 
 ClipNotes getClipNotesValue (const Song& song, ClipID clip)
 {
-    const auto clipState = findMidiClipState (song, clip);
+    if (const auto* values = song.getValues())
+    {
+        const auto* value = values->findClipNotes (clip);
+        return value != nullptr ? *value : ClipNotes();
+    }
 
-    // Its readers count the walk where they counted it before the notes were a value (the speed gates compare them): the
-    // views' reads, not what plays the song, which compiles its notes off the edit's path.
+    // A song that keeps everything in its tree (one made to be read or checked: Song::getValues()): its clip's elements.
+    const auto clipState = findMidiClipState (song, clip);
     return clipState.isValid() ? readClipNotes (clipState) : ClipNotes();
 }
 
 void setClipNotesValue (Song& song, ClipID clip, const ClipNotes& value)
 {
-    if (const auto clipState = findMidiClipState (song, clip); clipState.isValid())
-        writeAliases (song, clipState, value, {});
+    auto* values = song.getValues();
+    jassert (values != nullptr); // a song made to be read or checked isn't edited
+
+    if (values != nullptr && findMidiClipState (song, clip).isValid())
+        values->setClipNotes (song, clip, value);
 }
 
 std::optional<NoteData> getNoteData (const Song& song, const NoteRef& ref)
@@ -534,7 +506,6 @@ std::vector<NoteData> getClipNotes (const Song& song, ClipID clip)
 {
     std::vector<NoteData> data;
     const auto clipState = findMidiClipState (song, clip);
-    SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren()); // a walk of the clip's, for the speed gates
     forEachNote (getClipNotesValue (song, clip), [&] (const NoteValues& note) { data.push_back (toNoteData (clipState, note)); });
     return data;
 }
@@ -601,7 +572,6 @@ std::vector<NoteData> getClipNotesPlayed (const Song& song, ClipID clip)
 {
     std::vector<NoteData> data;
     const auto clipState = findMidiClipState (song, clip);
-    SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren());
 
     forEachNote (getClipNotesValue (song, clip),
                  [&] (const NoteValues& values)
@@ -898,23 +868,6 @@ namespace
         return control.kind == kind && (! hasNumber (kind) || control.number == number) && control.channel == juce::jlimit (1, 16, channel);
     }
 
-    // A clip's group given a value as copies of its clips' elements, each put in its place, the same clip by its ID, in one
-    // removal and one insertion: what listens to the song hears a recording's thousands of values (a bend's sweep) as one
-    // change, and Undo takes them back with it. The original is never filled: the removal's undo brings it back as it was.
-    void setAsCopies (Song& song, const juce::ValueTree& clipState, const ClipNotes& value)
-    {
-        auto* undo = getHistory (song);
-
-        for (const auto& alias : getAliasStates (song, clipState))
-        {
-            auto filled = alias.createCopy();
-            writeClipNotes (value, filled, nullptr);
-            auto parent = alias.getParent();
-            const auto index = parent.indexOf (alias);
-            parent.removeChild (index, undo);
-            parent.addChild (filled, index, undo);
-        }
-    }
 } // namespace
 
 void addControl (Song& song, ClipID clip, BeatPosition beat, ControlKind kind, int number, int value, int channel)
@@ -944,7 +897,7 @@ void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& valu
     for (const auto& each : values)
         added.push_back (makeControlValues (each, contentStart));
 
-    setAsCopies (song, clipState, withControlsAdded (getClipNotesValue (song, clip), added));
+    setClipNotesValue (song, clip, withControlsAdded (getClipNotesValue (song, clip), added));
 }
 
 void removeControls (Song& song, ClipID clip, ControlKind kind, int number, int channel, BeatPosition from, BeatPosition to)
@@ -1062,18 +1015,12 @@ void scaleClipContent (Song& song, const std::vector<ClipID>& clips, double fact
 //==============================================================================
 void makeClipNotesLike (Song& song, ClipID clip, const juce::ValueTree& otherClip)
 {
-    auto clipState = findClipState (song, clip);
-
-    if (! clipState.isValid())
+    // The other's value, as one value of the clip's group: nothing where it holds that already.
+    if (! findMidiClipState (song, clip).isValid())
         return;
 
-    // Those it has that the other hasn't go, those both have (a note by its ID, a value by its place) take the other's values,
-    // and those it hasn't come; then each in the other's order of events, which the value doesn't hold.
-    auto* undo = getHistory (song);
-    ClipPlaces places;
-    const auto read = readClipNotes (clipState, places);
-    writeClipNotes (read, places, readClipNotes (otherClip), clipState, undo);
-    followOrderOf (clipState, otherClip, undo);
+    if (const auto other = readClipNotes (otherClip); ! (getClipNotesValue (song, clip) == other))
+        setClipNotesValue (song, clip, other);
 }
 
 bool setNoteValue (Song& song, const NoteRef& ref, const juce::Identifier& property, const juce::var& value)
@@ -1104,10 +1051,26 @@ void removeClipNotesAlone (Song& song, ClipID clip, const std::vector<NoteID>& n
         return;
 
     const std::set<NoteID> gone (notes.begin(), notes.end());
-    ClipPlaces places;
-    const auto read = readClipNotes (clipState, places);
-    writeClipNotes (read, places, withoutNotes (read, [&gone] (const NoteValues& note) { return gone.count (note.id) > 0; }), clipState,
-                    nullptr);
+    const auto read = getClipNotesValue (song, clip);
+    const auto next = withoutNotes (read, [&gone] (const NoteValues& note) { return gone.count (note.id) > 0; });
+
+    if (next.isSameAs (read))
+        return;
+
+    // Holding other notes than its group's, it leaves the group (and the last one left of it leaves it too, as
+    // removeClipState() leaves it): an alias group's clips hold one value.
+    const Song::OutsideHistory outside (song);
+
+    if (clipState.hasProperty (schema::clipLink))
+    {
+        const auto aliases = getAliasStates (song, clipState);
+        clipState.removeProperty (schema::clipLink, nullptr);
+
+        if (aliases.size() == 2)
+            juce::ValueTree (aliases[1]).removeProperty (schema::clipLink, nullptr);
+    }
+
+    setClipNotesValue (song, clip, next);
 }
 
 //==============================================================================
@@ -1177,15 +1140,8 @@ namespace
         return found;
     }
 
-    // Past this many values removed and added at once, a clip is filled as a copy without them and put in its place, as
-    // addControls() fills one: each removal in place shifts the clip's elements after it and is an undo action and a change
-    // its listeners hear, so that Delete All of a long take's bend removed a hundred thousand one by one. A draw's step
-    // removes and adds a few, in place, the clip's element staying the one it was.
-    constexpr size_t mostChangesInPlace = 256;
-
-    // Removes the clip's values at these places (in order) and adds these, as one change of each clip of its group where they
-    // are many (setAsCopies()), in place where they are few.
-    void changeLaneValues (Song& song, NotesEdit& edit, NotesEdit::Group& group, const std::vector<size_t>& removed,
+    // Removes the clip's values at these places (in order) and adds these, as one change of its group's value.
+    void changeLaneValues (NotesEdit& edit, NotesEdit::Group& group, const std::vector<size_t>& removed,
                            const std::vector<ControlValues>& added)
     {
         if (removed.empty() && added.empty())
@@ -1208,22 +1164,13 @@ namespace
                                     });
         }
 
-        next = withControlsAdded (next, added);
-
-        if (removed.size() + added.size() <= mostChangesInPlace || ! group.read.getParent().isValid())
-        {
-            group.after = next;
-            edit.commit();
-            return;
-        }
-
-        SongIndex::countVisited ((std::uint64_t) group.read.getNumChildren());
-        setAsCopies (song, group.read, next);
+        group.after = withControlsAdded (next, added);
+        edit.commit();
     }
 
     // Makes the lane's values at these places in a clip's value the values wanted (in time order, in song beats): those
     // already there as wanted stay where they are, and only the others go or come.
-    void putLaneValues (Song& song, NotesEdit& edit, NotesEdit::Group& group, const std::vector<size_t>& places,
+    void putLaneValues (NotesEdit& edit, NotesEdit::Group& group, const std::vector<size_t>& places,
                         const std::vector<ControlPoint>& wanted, const ControlLane& lane, double contentStart)
     {
         // What is there, by its beat as the clip holds it.
@@ -1258,7 +1205,7 @@ namespace
             if (! stays[i])
                 removed.push_back (places[i]);
 
-        changeLaneValues (song, edit, group, removed, added);
+        changeLaneValues (edit, group, removed, added);
     }
 } // namespace
 
@@ -1269,7 +1216,6 @@ std::vector<ControlLane> getControlLanes (const Song& song, const std::vector<Cl
     for (const auto clip : clips)
     {
         const auto part = getPlayedPart (findMidiClipState (song, clip));
-        SongIndex::countVisited ((std::uint64_t) findMidiClipState (song, clip).getNumChildren());
 
         forEachControl (getClipNotesValue (song, clip),
                         [&] (size_t, const ControlValues& control)
@@ -1289,7 +1235,6 @@ std::vector<ControlPoint> getControlValues (const Song& song, const std::vector<
     for (const auto clip : clips)
     {
         const auto part = getPlayedPart (findMidiClipState (song, clip));
-        SongIndex::countVisited ((std::uint64_t) findMidiClipState (song, clip).getNumChildren());
         const auto first = points.size();
 
         forEachControl (getClipNotesValue (song, clip),
@@ -1361,7 +1306,7 @@ void setControlValues (Song& song, ClipID clip, const ControlLane& lane, BeatRan
         wanted.push_back (each);
     }
 
-    putLaneValues (song, edit, group, found.places, wanted, lane, part.contentStart);
+    putLaneValues (edit, group, found.places, wanted, lane, part.contentStart);
 }
 
 void deleteControlValues (Song& song, const std::vector<ClipID>& clips, const ControlLane& lane, BeatRange range)
@@ -1378,7 +1323,7 @@ void deleteControlValues (Song& song, const std::vector<ClipID>& clips, const Co
 
         const auto part = getPlayedPart (clipState);
         changeLaneValues (
-            song, edit, *group,
+            edit, *group,
             findLaneValues (group->after, lane, part, std::max (range.getStart().inBeats(), part.start), range.getEnd().inBeats()).places,
             {});
     }

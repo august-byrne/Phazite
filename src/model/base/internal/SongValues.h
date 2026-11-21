@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's values: what the song is moving from its juce::ValueTree into immutable values held beside it (the immer
-// library; roadmap step S5.20, model/base/internal/ValueArea.h), one area at a time. The first area is a MIDI clip's notes and
-// its controllers' values (ClipNotes), as plain values in Phazite's own types, which the notes' code
+// The song's values: what the song moves from its juce::ValueTree into immutable values held beside it (the immer library;
+// roadmap step S5.20, model/base/internal/ValueArea.h), one area at a time. The first area is a MIDI clip's notes and its
+// controllers' values (ClipNotes), as plain values in Phazite's own types, which the notes' code
 // (model/notes/internal/Notes.h) computes each edit on, from one value to the next.
 //
-// While the clip's element still stores them (its schema::NOTE and schema::CONTROL children), the conversion below is the one
-// place that reads and writes those children by their names: an edit reads its clip's value from the element, computes the
-// next value, and writes what differs back, in the undo history as before. Once the value is the storage, the conversion is
-// what a file's clip is read into and a whole copy of the song is written from (WholeState.h).
+// The value is the storage: the song holds an area of them (SongValues, NotesByClip: each MIDI clip's value by its ID, one
+// value for the clips of an alias group) in its one undo history, and a clip of the song holds no NOTE or CONTROL element in
+// its tree. The conversion below is the one place that reads and writes those elements by their names: what a file's clip
+// (or any clip that comes into the song with them: a paste, a version, an import) is read into, and what a whole copy of the
+// song is written from (WholeState.h).
 //
 // immer is the model's alone (tools/check-architecture.sh: immer-outside-model): nothing outside src/model includes this.
 #pragma once
@@ -15,6 +16,7 @@
 #include "model/base/Beats.h"
 #include "model/base/ControlKinds.h"
 #include "model/base/IDs.h"
+#include "model/base/internal/ValueArea.h"
 
 #include <juce_core/juce_core.h>
 #include <juce_data_structures/juce_data_structures.h>
@@ -26,11 +28,14 @@
 #include <immer/map_transient.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
 
 namespace phazite
 {
+class Song;
+
 // A note as its clip holds it. Its start counts from its clip's content start, as every note's of the clip does: the song
 // beat is that start plus this (model/arrangement/internal/Clips.h: getContentStart()).
 struct NoteValues
@@ -207,6 +212,89 @@ ClipNotes withoutControls (const ClipNotes& clip, Gone&& gone)
 ClipNotes withControlsAdded (const ClipNotes&, const std::vector<ControlValues>&);
 
 //==============================================================================
+// Every MIDI clip's notes and values in a song, by the clip's ID: the clips of an alias group (Schema.h: clipLink) hold ONE
+// value, the same ClipNotes under each one's ID. An area of the song (ValueArea.h): the same map without a look inside.
+struct NotesByClip
+{
+    immer::map<std::uint64_t, ClipNotes> clips;
+
+    const ClipNotes* find (ClipID clip) const { return clips.find (clip.getRaw()); }
+    bool isSameAs (const NotesByClip& other) const noexcept { return clips.identity() == other.clips.identity(); }
+};
+
+// The song's values, which the song holds once its tree is consistent (Song::holdValues(), as model/project/internal/
+// Project.h's makeSong() makes a song): the notes' area, in the song's one undo history, and what keeps it and the tree
+// together. Message thread only, as the song's tree is: nothing on the audio thread reads it (what plays gets what the model
+// compiles of it), and what runs on another thread gets a copy (WholeState.h: copyWholeSong(), keepValues()).
+//
+// Who changes a clip's value: the notes' code (Notes.h: setClipNotesValue(), which is setClipNotes() below) and the clips'
+// code that copies a clip in the song (copyClipNotes()). Everything else that changes the tree is heard by the keeper, a
+// listener of the song's root, added before any other but the song's index's: a clip that comes into the song with NOTE or
+// CONTROL elements (a paste, a duplicate's copy, an import, a version applied, a merge, a track that holds clips) has them
+// read into its value and taken out of the tree; a clip taken out of the song has its value remembered with its element
+// (JUCE moves a clip by taking it out and putting it in again, the same element) and erased, and given back if the same
+// element comes back; one that comes without them, and isn't remembered, keeps the value a copy gave it, or an empty one;
+// a clip that joins an alias group (its clipLink set) takes the group's value. Each in the mode of the moment: in the
+// history's step in progress, or outside the history while the song is written outside it (Song::OutsideHistory). Nothing
+// while the history undoes or redoes a step: the area's own action moves it. What the keeper can't see: a clip added or
+// taken out with no undo manager outside an OutsideHistory scope is written into the step in progress (if any) as if it had
+// one; nothing in Phazite does that to a song that holds its values (the loader does it before: makeSong()).
+class SongValues final
+{
+public:
+    explicit SongValues (Song&);
+    ~SongValues();
+
+    ValueArea<NotesByClip> notes;
+
+    // A clip's value: none for a clip that isn't a MIDI clip of the song's.
+    const ClipNotes* findClipNotes (ClipID clip) const { return notes.get().find (clip); }
+
+    // Gives a clip and each clip of its alias group that is in the song this value (a clip not in the song yet: itself alone),
+    // in the song's undo history (the step in progress), or outside it while the song is written outside it
+    // (Song::isWritingOutsideHistory()). The one way to change a clip's value.
+    void setClipNotes (Song&, ClipID, ClipNotes);
+    void eraseClipNotes (Song&, ClipID);
+
+    // A copy of a clip (to, not in the song yet) given the clip's value: the same value, shared until one of them is edited.
+    // What the clips' code that copies a clip in the song does (model/arrangement/internal/Clips.h: copyClipState()), so that
+    // the copy, an alias or not, holds what the clip holds without a walk through its notes.
+    void copyClipNotes (Song&, ClipID from, ClipID to);
+
+    // The clips whose values changed, by a step, an undo, a redo or a write outside the history: compared by identity, clip by
+    // clip. A listener only marks them, and reads nothing else of the song while it is told (ValueArea.h): during an undo the
+    // rest of the step may not be back yet.
+    struct NotesListener
+    {
+        virtual ~NotesListener() = default;
+        virtual void clipNotesChanged (const std::vector<ClipID>& clips) = 0;
+    };
+
+    void addNotesListener (NotesListener*);
+    void removeNotesListener (NotesListener*);
+
+    // Whether the keeper remembers a clip's element with its value, taken out of the song (above): for the keeper's tests,
+    // which check that it lets go of what nothing can bring back (tests/SongValuesTests.cpp). Not for the check of the song's
+    // values (tests/SongCheck.h): a clip taken out leaves the area at once, a step still open or not, so no entry of the area
+    // belongs to a clip outside the tree, remembered or not.
+    bool remembers (const juce::ValueTree& clip) const;
+
+private:
+    friend class Song;
+
+    struct Teller;
+    struct Keeper;
+    std::unique_ptr<Teller> teller;
+    std::unique_ptr<Keeper> keeper;
+
+    void setAll (Song&, NotesByClip next); // in the history, or outside it, as the song is written now
+    void adopt (Song&);                    // Song::holdValues()
+
+    JUCE_DECLARE_NON_COPYABLE (SongValues)
+    JUCE_DECLARE_NON_MOVEABLE (SongValues)
+};
+
+//==============================================================================
 // The conversion between a clip's element and its value: the one place that reads and writes NOTE and CONTROL by name.
 
 // A MIDI channel as a note's or a controller's element holds it (schema::noteChannel, controlChannel), from 1 to 16: 1 where
@@ -214,54 +302,26 @@ ClipNotes withControlsAdded (const ClipNotes&, const std::vector<ControlValues>&
 int readChannel (const juce::ValueTree& element, const juce::Identifier& property);
 void writeChannel (juce::ValueTree& element, const juce::Identifier& property, int channel, juce::UndoManager*);
 
-// A clip's notes and controllers' values, read from its NOTE and CONTROL children, each kind in its order: each property as
-// the song has always read it (a property that is absent reads as 0, but the channel, 1, and the flags, off). A CONTROL of a
-// kind Phazite doesn't know, and every other child, is no part of the value, and stays in the element untouched.
+// A clip's notes and controllers' values, read from its NOTE and CONTROL children, each kind in its order, whatever the order
+// of the two kinds among each other: each property as the song has always read it (a property that is absent reads as 0,
+// but the channel, 1, and the flags, off). A property Phazite doesn't know on a NOTE or a CONTROL is no part of the value,
+// nor is a CONTROL of a kind Phazite doesn't know (which the loader takes out of a song: model/project/Project.cpp); any
+// other child of the clip stays in its element.
 ClipNotes readClipNotes (const juce::ValueTree& clipState);
 
 // One note's values, read from its NOTE element, as readClipNotes() reads it.
 NoteValues readNoteValues (const juce::ValueTree& noteState);
 
-// Makes a clip's NOTE and CONTROL children those of the value, changing only what differs: a note (by its ID) or a value that
-// is the same is left as it is, of one that changed only the properties whose values differ from those read are set (and
-// one a note or a value no longer has removed), the others left as the element holds them (one absent stays absent while
-// its value is the one it reads as, and one a file wrote as text stays text), a note that is gone is removed and a new one
-// appended, and so are the controllers' values (set in their places, or removed and appended, whichever changes less).
-// Through the undo manager given, or none (a clip filled before it joins the song). A new note's or value's element
-// written as the song has always written one: a note's ID, pitch, start, length and velocity always; its flags only while
-// they are on, and its channel only if it isn't the first; a value's number only where its kind has one.
-//
-// The order of the clip's children: the notes keep theirs among each other, and the values theirs, as long as the value's
-// order is the element's, and new notes and values go after all the clip holds, as they always have. But the order of
-// NOTE and CONTROL children among each other, which the value doesn't hold, can change with an edit while the element
-// stores them (roadmap step S5.20's first piece), and differ from where the edits put them before the notes were a value:
-// a note replaced by one with its own ID can stay where it was rather than go after all the clip holds, and a changed
-// controller's value may be written in place rather than removed and appended. That means nothing: notes are in no
-// particular order (each by its ID), and the values keep theirs among themselves, which is what plays. The next piece,
-// where the value is the storage, writes a clip's notes first, then its values (WholeState.h).
-void writeClipNotes (const ClipNotes&, juce::ValueTree& clip, juce::UndoManager*);
-
-// The same in two halves, for an edit that reads its clip once and writes back what it read without a second walk through the
-// clip's children: where each of the notes and the values read is among them (by its place in the value, its child's index),
-// and the write given the value read with it. Only for as long as the element's children are those it was read with.
-struct ClipPlaces
-{
-    std::vector<int> notes, controls;
-};
-
-ClipNotes readClipNotes (const juce::ValueTree& clipState, ClipPlaces&);
-void writeClipNotes (const ClipNotes& read, const ClipPlaces&, const ClipNotes& next, juce::ValueTree& clip, juce::UndoManager*);
+// Appends a clip's value to its element (a copy of the clip, outside any song: WholeState.h), its NOTE elements first, then
+// its CONTROL elements, each kind in its order, each written as the song has always written one: a note's ID, pitch, start,
+// length and velocity always, its flags only while they are on, and its channel only if it isn't the first; a value's kind,
+// its number only where its kind has one, its beat and value, and its channel only if it isn't the first.
+void writeClipNotes (const ClipNotes&, juce::ValueTree& clipCopy);
 
 // A note's values with one of its properties (by its name in the song: schema::notePitch, noteMute...) given a value as the
 // song would read it from the element, or taken away (a void value: as if the element hadn't it): a merge's clash on a note's
 // value, chosen. Whether the property is a note's.
 bool setNoteProperty (NoteValues&, const juce::Identifier& property, const juce::var& value);
-
-// Puts a clip's NOTE and CONTROL children in the order the other's are in (a note by its ID, a controller's value by its
-// place among the values of the kinds Phazite knows), where its own events were, each moved as little as it can: what made
-// a clip's notes and values those of another song's (Notes.h: makeClipNotesLike()) keeps of the other's order of events,
-// which the value doesn't hold. Nothing when they are in that order already.
-void followOrderOf (juce::ValueTree& clip, const juce::ValueTree& other, juce::UndoManager*);
 
 // Gives a clip (to) another's notes and controllers' values (from's, its alias group's keeper), in the same order and with
 // the same IDs, where its own were: an alias group's clips hold the same (Schema.h: clipLink). Only what differs is written.

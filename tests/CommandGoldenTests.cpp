@@ -28,6 +28,7 @@
 #include "devices/synth/Synth.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Sections.h"
@@ -1172,6 +1173,8 @@ TEST_CASE ("Every command of the whole window that changes the song, run once th
     const auto tone = phazite::test::writeSound (screen.temp.folder.getChildFile ("Tone.wav"), 2.0);
     const auto audio = phazite::importFile (song, tracks[1], tone, beats (0.0));
     REQUIRE (phazite::hasAudioClips (song, { audio }));
+    phazite::renderMissingClipAudio (song); // as inside each check below
+    dispatchPendingMessages();
     song.getUndoManager().clearUndoHistory();
     dispatchPendingMessages();
 
@@ -1196,6 +1199,12 @@ TEST_CASE ("Every command of the whole window that changes the song, run once th
                      [&]
                      {
                          change();
+                         dispatchPendingMessages();
+
+                         // The renders of the audio clip made at once, as an export makes those that are missing, so that
+                         // what plays of it is the same for every plan the check compiles: made in the background, one
+                         // that ends between two of the check's plans made them differ (seen in a full run of the tests).
+                         phazite::renderMissingClipAudio (song);
                          dispatchPendingMessages();
                      });
         const auto undoableAfter = phazite::test::writeSong (song, phazite::test::SongPart::undoable);

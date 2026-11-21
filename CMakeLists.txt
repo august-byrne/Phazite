@@ -1372,8 +1372,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/GuideTests.cpp
         tests/HostedDevice.h
         tests/IconTests.cpp
-        tests/ImmerHardPartsBenchmarks.cpp
-        tests/ImmerSpikeBenchmarks.cpp
         tests/ImportTests.cpp
         tests/InconsistentProjectTests.cpp
         tests/InspectorTests.cpp

@@ -107,7 +107,10 @@ public:
         undoManager.perform (action); // which deletes it if it can't perform it, and ~Replacement() forgets it
     }
 
-    // The area's value outside the history: for a song being read from its file or made.
+    // The area's value outside the history: for a song being read from its file or made. A value set outside the history while
+    // the history holds steps of the area is taken back whole by an Undo of any of them (each puts back the whole value it
+    // held), so what writes outside the history does so only where the history starts again or is held. So what is on purpose
+    // no undo step (view state, mute and solo) lives in a value of its own, never in an area's undoable value.
     void setOutsideHistory (Value next)
     {
         JUCE_ASSERT_MESSAGE_THREAD

@@ -6,6 +6,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/SongValues.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
@@ -626,7 +627,90 @@ std::vector<std::string> findSongProblems (const Song& song, const schema::Table
     checker.checkValues (state);
     checker.checkAliases();
     checker.checkAudioAliases();
+
+    for (auto& problem : findValueProblems (song))
+        checker.problems.push_back (std::move (problem));
+
     return checker.problems;
+}
+
+std::vector<std::string> findValueProblems (const Song& song)
+{
+    std::vector<std::string> problems;
+    const auto* values = song.getValues();
+
+    if (values == nullptr)
+        return problems;
+
+    const auto& notes = values->notes.get();
+    std::set<std::uint64_t> inTree;
+    std::map<juce::String, std::pair<std::uint64_t, ClipNotes>> groups; // each alias group's first clip and its value
+
+    const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+    {
+        for (const auto& child : element)
+        {
+            if (child.hasType (schema::TRACK))
+            {
+                visit (child);
+                continue;
+            }
+
+            if (! child.hasType (schema::CLIP))
+                continue;
+
+            const auto id = (std::uint64_t) (juce::int64) child[schema::clipID];
+            const auto clipText = "values: clip " + std::to_string (id);
+            inTree.insert (id);
+
+            for (const auto& event : child)
+                if (event.hasType (schema::NOTE) || event.hasType (schema::CONTROL))
+                    problems.push_back (clipText + " holds a " + event.getType().toString().toStdString() + " element in the song's tree");
+
+            const auto* value = notes.find (ClipID::fromRaw (id));
+
+            if (child[schema::clipKind].toString() == schema::clipIsAudio)
+            {
+                if (value != nullptr)
+                    problems.push_back (clipText + ", an audio clip, has a value of notes");
+
+                continue;
+            }
+
+            if (value == nullptr)
+            {
+                problems.push_back (clipText + ", a MIDI clip, has no value of notes");
+                continue;
+            }
+
+            if (const auto link = child[schema::clipLink].toString(); link.isNotEmpty())
+            {
+                if (const auto found = groups.find (link); found == groups.end())
+                    groups.emplace (link, std::pair { id, *value });
+                else if (! found->second.second.isSameAs (*value))
+                    problems.push_back (clipText + " of alias group " + link.toStdString() + " holds "
+                                        + (found->second.second == *value ? "a value alike" : "another value") + ", not clip "
+                                        + std::to_string (found->second.first) + "'s");
+            }
+        }
+    };
+
+    visit (song.getState().getChildWithName (schema::TRACKS));
+
+    for (const auto& [id, value] : notes.clips)
+        if (inTree.count (id) == 0)
+            problems.push_back ("values: a value of notes for clip " + std::to_string (id) + ", which isn't in the song's tree");
+
+    return problems;
+}
+
+void checkValues (const Song& song)
+{
+    for (const auto& problem : findValueProblems (song))
+    {
+        INFO (problem);
+        CHECK (false);
+    }
 }
 
 void checkSong (const Song& song)

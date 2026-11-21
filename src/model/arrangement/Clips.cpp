@@ -6,7 +6,7 @@
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
-#include "model/base/internal/WholeState.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
@@ -333,9 +333,16 @@ std::vector<juce::ValueTree> getAliasStates (const Song& song, const juce::Value
 
 juce::ValueTree copyClipState (Song& song, const juce::ValueTree& clipState)
 {
-    // A clip of the song whole, with its notes; one outside it (what the clipboard kept, a copy) is whole already.
-    auto copy = clipState.isAChildOf (song.getState()) ? copyWhole (song, clipState) : clipState.createCopy();
-    copy.setProperty (schema::clipID, (juce::int64) song.makeID(), nullptr);
+    // A clip of the song gives its copy its value (SongValues.h), shared until either is edited, rather than a walk through
+    // its notes; one outside it (what the clipboard kept, a copy) holds its notes already, which the song takes in as the
+    // copy joins it.
+    auto copy = clipState.createCopy();
+    const auto id = ClipID::fromRaw (song.makeID());
+    copy.setProperty (schema::clipID, (juce::int64) id.getRaw(), nullptr);
+
+    if (auto* values = song.getValues(); values != nullptr && clipState.isAChildOf (song.getState()))
+        values->copyClipNotes (song, getClipID (clipState), id);
+
     return copy;
 }
 

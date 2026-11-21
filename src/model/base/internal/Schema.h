@@ -969,7 +969,9 @@ inline const Property<bool> clipMute { "mute", on (CLIP), byDefault (false), Kin
 // removed and what it holds kept; and a group left with one clip loses its link.
 inline const Property<std::int64_t> clipLink { "link", on (CLIP), Form::songID, Kind::song };
 
-// Child of a MIDI CLIP: a note, in no particular order.
+// Child of a MIDI CLIP: a note, in no particular order; written before the clip's CONTROL elements. A clip's notes and
+// controllers' values are values beside the song's tree while it is open (model/base/internal/SongValues.h), so the song
+// keeps no property or element Phazite doesn't know on a NOTE or a CONTROL, as it keeps one elsewhere.
 // (NOTE, with the elements above.)
 
 // On NOTE. int64, 1 or more: its ID (NoteID, model/base/IDs.h), which no other note of its clip has, so that selections,

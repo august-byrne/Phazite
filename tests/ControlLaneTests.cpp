@@ -8,6 +8,7 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/NotesModel.h"
@@ -362,12 +363,13 @@ TEST_CASE ("Values set as they are change nothing: no undo action, no unsaved ch
     CHECK (wholeClip().isEquivalentTo (before)); // its elements in their order
     CHECK_FALSE (song.song.getProject().hasUnsavedChanges());
 
-    // One value changed among them: that one alone goes and comes, the others staying where they are.
+    // One value changed among them: that one alone goes and comes, the others staying where they are, in one change of the
+    // clip's value (SongValues.h), one action.
     {
         phazite::UndoStep step (song.getSong(), "Draw Sustain Pedal");
         phazite::setControlValues (song.song.context, song.clip, pedal, between (0.5, 3.0),
                                    LaneSong::points ({ { 1.0, 127 }, { 2.0, 10 } }));
-        CHECK (history.getNumActionsInCurrentTransaction() == 2);
+        CHECK (history.getNumActionsInCurrentTransaction() == 1);
     }
 
     CHECK (song.valuesOf (pedal) == Values { { 1.0, 127 }, { 2.0, 10 } });
@@ -417,15 +419,31 @@ TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one chan
         int changes = 0;
     } heard;
 
+    // The changes of the notes' area, each as the clips it names.
+    struct HeardValues : phazite::SongValues::NotesListener
+    {
+        void clipNotesChanged (const std::vector<phazite::ClipID>& clips) override { changes.push_back (clips); }
+        std::vector<std::vector<phazite::ClipID>> changes;
+    } heardValues;
+
+    auto* values = song.getSong().getValues();
+    REQUIRE (values != nullptr);
     phazite::test::UndoCheck undo (song.song.context);
     auto root = song.getSong().getState();
     root.addListener (&heard);
+    values->addNotesListener (&heardValues);
     undo.check ("Delete All Pitch Bend", [&] { phazite::deleteAllControlValues (song.song.context, { take }, bend); });
+    values->removeNotesListener (&heardValues);
     root.removeListener (&heard);
 
-    // The clip filled as a copy without them, put in its place (one removal, one insertion), not 50,000 removals; and the
-    // check's undo and redo of it the same.
-    CHECK (heard.changes <= 6);
+    // One change of the clip's value (SongValues.h), which the tree doesn't hear, not 50,000 removals; and the check's undo
+    // and redo of it one change each.
+    CHECK (heard.changes == 0);
+    REQUIRE (heardValues.changes.size() == 3); // the edit, its Undo and its Redo
+
+    for (const auto& clips : heardValues.changes)
+        CHECK (clips == std::vector { take });
+
     CHECK (song.valuesOf (bend, take).empty());
     CHECK (allButTheBend() == kept);
     CHECK (phazite::getClipRange (song.getSong(), take) == between (16.0, 816.0)); // the same clip, by its ID

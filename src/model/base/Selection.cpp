@@ -2,6 +2,7 @@
 #include "internal/Selection.h"
 #include "internal/Schema.h"
 #include "internal/SongIndex.h"
+#include "internal/SongValues.h"
 
 #include <algorithm>
 #include <functional>
@@ -72,8 +73,19 @@ namespace
 
 bool hasNote (const Song& song, const NoteRef& ref)
 {
-    const auto& index = song.getIndex();
-    return index.findNote (index.findClip (ref.clip.getRaw()), ref.note.getRaw()).isValid();
+    // In its clip's value (SongValues.h), which a clip that isn't the song's has none of.
+    if (const auto* values = song.getValues())
+    {
+        const auto* clip = values->findClipNotes (ref.clip);
+        return clip != nullptr && clip->find (ref.note) != nullptr;
+    }
+
+    // A song that keeps everything in its tree: among its clip's elements.
+    for (const auto& child : song.getIndex().findClip (ref.clip.getRaw()))
+        if (child.hasType (schema::NOTE) && readNoteValues (child).id == ref.note)
+            return true;
+
+    return false;
 }
 
 void Selection::countPointComparisons (std::uint64_t count) noexcept

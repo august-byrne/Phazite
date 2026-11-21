@@ -14,6 +14,7 @@
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongValues.h"
 #include "model/plugins/internal/PluginInstances.h"
 
 #include <cstdint>
@@ -33,6 +34,7 @@ class Take;
 
 class PlaybackSession : private juce::ValueTree::Listener,
                         private Song::ParameterListener,
+                        private SongValues::NotesListener,
                         private PluginInstances::Listener,
                         private juce::AsyncUpdater,
                         private juce::Timer // which stops playback at the song's end
@@ -207,6 +209,9 @@ private:
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent, {}); }
     void handleAsyncUpdate() override { update(); }
+
+    // A clip's notes changed (SongValues.h): a new plan, as a change in its element made one. What plays it hears it itself.
+    void clipNotesChanged (const std::vector<ClipID>&) override { triggerAsyncUpdate(); }
 
     // A value set by hand (a plug-in's, by a control or in its window, plays at once), and one a program the song set set (a
     // plug-in's, which plays at once too); a plug-in's own window's gestures; and its latency, which needs a new plan.

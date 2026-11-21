@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/ApplySong.h"
 #include "internal/SongDiff.h"
+#include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
@@ -108,6 +110,27 @@ namespace
         return element.hasType (schema::CLIP) && (child.hasType (schema::NOTE) || child.hasType (schema::CONTROL));
     }
 
+    // What the audio clips of an alias group share (AudioClips.h: shareTheSound(): file, tempo, pitch, direction, warp markers),
+    // given by each audio clip of a group in an element made like the other song's, or added from it, to every clip of its
+    // group in the song, as an edit through one of them gives it: those on other tracks too, which one track's line leaves as
+    // they were. A clip's notes reach its group through the notes' code (Notes.h: makeClipNotesLike(), and the song's keeper
+    // for a clip added, SongValues.h).
+    void giveSharedSounds (Song& song, const juce::ValueTree& element, juce::UndoManager* undo)
+    {
+        if (! element.hasType (schema::CLIP))
+        {
+            for (const auto& child : element)
+                giveSharedSounds (song, child, undo);
+
+            return;
+        }
+
+        if (isAudioState (element) && element[schema::clipLink].toString().isNotEmpty())
+            for (auto alias : getAliasStates (song, element))
+                if (alias != element)
+                    giveSharedSound (element, alias, undo);
+    }
+
     // Whether makeLike() places a child among the element's: taken, a track only withTracks, never a clip's event.
     bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, bool withTracks, Taken taken)
     {
@@ -200,7 +223,9 @@ namespace
             }
             else if (! isStandIn (child.tree))
             {
-                live.addChild (copyWithoutStandIns (child.tree), place, undo);
+                auto added = copyWithoutStandIns (child.tree);
+                live.addChild (added, place, undo);
+                giveSharedSounds (song, added, undo);
             }
             else
             {
@@ -215,6 +240,7 @@ namespace
             const auto id = readID (live[schema::clipID]);
             jassert (song.getIndex().findClip (id) == live); // the song's one clip of its ID
             makeClipNotesLike (song, ClipID::fromRaw (id), other);
+            giveSharedSounds (song, live, undo);
         }
     }
 
@@ -590,6 +616,7 @@ namespace
             }
 
             parent.addChild (copy, index, undo);
+            giveSharedSounds (song, copy, undo);
         }
 
         makeCurvesLike (song, state, undo, devices, other);

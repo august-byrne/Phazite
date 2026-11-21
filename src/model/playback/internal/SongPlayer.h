@@ -11,6 +11,7 @@
 #include "engine/core/Plan.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongValues.h"
 #include "model/devices/ParameterRef.h"
 
 #include <atomic>
@@ -30,7 +31,8 @@ class PluginInstances;
 struct ClipTempo;
 struct PlayedClip;
 
-class SongPlayer : private juce::ValueTree::Listener
+class SongPlayer : private juce::ValueTree::Listener,
+                   private SongValues::NotesListener
 {
 public:
     // A song's, with its plug-ins' instances (those of its session: none play without).
@@ -240,6 +242,7 @@ private:
     struct Changes
     {
         std::set<std::int64_t> notes, channels;
+        std::vector<ClipID> noteClips; // the clips whose notes changed (SongValues.h), their tracks found as a compile starts
         // The devices whose sounds changed (SOUNDS), which a kept node loads again: sounds that came whole or otherwise
         // changed under it (an undo, a song applied); those set by hand (a property of SOUNDS itself); and of those, the ones
         // its session has loaded at once (takeValue()), which aren't loaded again. Two kinds apart, and what was loaded, so
@@ -268,6 +271,7 @@ private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override;
+    void clipNotesChanged (const std::vector<ClipID>&) override;
 
     // Whether a part kept from the plan before is checked against the song now (setChecking()): all of them while the
     // player plays few devices, a share otherwise, one part in every so many, its phase moving on with each plan.

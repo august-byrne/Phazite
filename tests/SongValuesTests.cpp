@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A MIDI clip's notes and controllers' values as a value (model/base/internal/SongValues.h: ClipNotes), and the conversion
-// between the value and the clip's element, the one place that reads and writes NOTE and CONTROL by name: a clip read into
-// a value and written back is the clip it was; a changed value changes only what differs; the helpers that change a value in
-// batches keep where each note is by its ID; what isn't a note or a value of a kind Phazite knows stays as it is.
+// A MIDI clip's notes and controllers' values as a value (model/base/internal/SongValues.h: ClipNotes), which the song holds
+// beside its tree: the conversion between the value and a clip's element (the one place that reads and writes NOTE and
+// CONTROL by name), and the keeper, which keeps the song's values and its tree together for every change of the tree that
+// isn't the notes' own: a clip that comes into the song with NOTE and CONTROL elements has them read into its value and taken
+// out of the tree; a clip taken out has its value remembered and given back if the same element comes back (a move); a clip
+// that joins an alias group takes the group's one value. Each rule through the tree and through the model's functions, with
+// its Undo and Redo (UndoCheck.h), the song's values checked after each (SongCheck.h: values).
+//   phazite_tests.exe --test-case="Song values*"
 #include "GoldenFiles.h"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -15,11 +21,15 @@
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 
+#include <functional>
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace
 {
 namespace schema = phazite::schema;
+using phazite::ClipID;
 using phazite::ClipNotes;
 using phazite::ControlKind;
 using phazite::ControlValues;
@@ -39,6 +49,14 @@ struct Heard final : juce::ValueTree::Listener
     int properties = 0, added = 0, removed = 0, moved = 0;
 };
 
+// What the song's values tell of the clips whose values changed.
+struct Told final : phazite::SongValues::NotesListener
+{
+    void clipNotesChanged (const std::vector<ClipID>& clips) override { told.push_back (clips); }
+
+    std::vector<std::vector<ClipID>> told;
+};
+
 NoteValues makeNote (std::uint64_t id, int pitch, double start)
 {
     return { .id = NoteID::fromRaw (id), .pitch = pitch, .start = phazite::BeatPosition::fromBeats (start) };
@@ -49,18 +67,19 @@ ControlValues makeControl (double beat, int value)
     return { .kind = ControlKind::controller, .number = 64, .beat = beat, .value = value };
 }
 
-// A clip's element with three notes and three controllers' values, interleaved as a recording can leave them.
+// A clip's element with three notes and three controllers' values, interleaved as an older build's recording left them.
 juce::ValueTree makeClipElement()
 {
     juce::ValueTree clip (schema::CLIP);
     clip.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
-    phazite::writeClipNotes (phazite::makeClipNotes ({ makeNote (1, 60, 0.0) }, { makeControl (0.0, 127) }), clip, nullptr);
-    phazite::writeClipNotes (
-        phazite::makeClipNotes ({ makeNote (1, 60, 0.0), makeNote (2, 62, 1.0) }, { makeControl (0.0, 127), makeControl (0.5, 0) }), clip,
-        nullptr);
-    phazite::writeClipNotes (phazite::makeClipNotes ({ makeNote (1, 60, 0.0), makeNote (2, 62, 1.0), makeNote (3, 64, 2.0) },
-                                                     { makeControl (0.0, 127), makeControl (0.5, 0), makeControl (1.5, 127) }),
-                             clip, nullptr);
+    const auto value = phazite::makeClipNotes ({ makeNote (1, 60, 0.0), makeNote (2, 62, 1.0), makeNote (3, 64, 2.0) },
+                                               { makeControl (0.0, 127), makeControl (0.5, 0), makeControl (1.5, 127) });
+    juce::ValueTree written (schema::CLIP);
+    phazite::writeClipNotes (value, written);
+
+    for (const auto index : { 0, 3, 1, 4, 2, 5 })
+        clip.appendChild (written.getChild (index).createCopy(), nullptr);
+
     return clip;
 }
 
@@ -73,6 +92,15 @@ std::vector<juce::String> getChildTypes (const juce::ValueTree& clip)
                          + (child.hasProperty (schema::noteID) ? child[schema::noteID].toString() : juce::String()));
 
     return types;
+}
+
+bool holdsEvents (const juce::ValueTree& clip)
+{
+    for (const auto& child : clip)
+        if (child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
+            return true;
+
+    return false;
 }
 
 // The clips of each golden project that hold notes or values, each whole (WholeState.h), with its project open.
@@ -93,20 +121,71 @@ struct GoldenClips
             REQUIRE_MESSAGE (project != nullptr, error.toStdString());
 
             for (const auto& clip : phazite::getClipStates (project->getSong()))
-                if (phazite::isMidiState (clip) && clip.getNumChildren() > 0)
-                    clips.push_back (phazite::copyWhole (project->getSong(), clip));
+            {
+                CHECK_FALSE (holdsEvents (clip)); // the song's own tree holds none
+
+                if (const auto whole = phazite::copyWhole (project->getSong(), clip);
+                    phazite::isMidiState (clip) && whole.getNumChildren() > 0)
+                    clips.push_back (whole);
+            }
 
             projects.push_back (std::move (project));
         }
     }
 };
+
+// A song of three tracks, the first with a clip of notes and values, with every change checked for an exact undo.
+struct Kept
+{
+    Kept()
+    {
+        tracks = phazite::ensureTracks (*song, 3);
+        clip = phazite::insertMidiClip (*song, tracks[0], { phazite::test::at (0.0), phazite::test::at (8.0) }, nullptr);
+        REQUIRE (clip.isValid());
+        phazite::addNote (*song, clip, 60, phazite::test::at (1.0), phazite::test::lasting (1.0), 100);
+        phazite::addNote (*song, clip, 64, phazite::test::at (2.0), phazite::test::lasting (1.0), 90);
+        phazite::addControl (*song, clip, phazite::test::at (0.5), ControlKind::controller, 64, 127);
+        song->getUndoManager().clearUndoHistory();
+        song->getValues()->addNotesListener (&told);
+    }
+
+    ~Kept() { song->getValues()->removeNotesListener (&told); }
+
+    const ClipNotes* find (ClipID id) const { return song->getValues()->findClipNotes (id); }
+    ClipNotes get (ClipID id) const { return phazite::getClipNotesValue (*song, id); }
+    juce::ValueTree element (ClipID id) const { return phazite::findClipState (*song, id); }
+
+    // A step of the test's own, named, checked exact, and the song's values with its tree after it, its Undo and its Redo.
+    void step (const juce::String& name, const std::function<void()>& change)
+    {
+        check.check (name,
+                     [&]
+                     {
+                         const phazite::UndoStep undoStep (*song, name);
+                         change();
+                     });
+
+        phazite::test::checkValues (*song);
+        phazite::undo (*song);
+        phazite::test::checkValues (*song);
+        phazite::redo (*song);
+        phazite::test::checkValues (*song);
+    }
+
+    phazite::Song::Ptr song = phazite::createSong();
+    std::vector<phazite::TrackID> tracks;
+    ClipID clip;
+    Told told;
+    phazite::test::UndoCheck check { *song };
+};
 } // namespace
 
-TEST_CASE ("Song values: every clip of the golden projects, read into a value and written into an emptied copy, is the clip it was")
+//==============================================================================
+TEST_CASE ("Song values: every clip of the golden projects, read into a value and written into an emptied copy, holds its notes "
+           "first, then its values, each kind in its order")
 {
     GoldenClips golden;
     REQUIRE (golden.clips.size() >= 4);
-    auto interleaved = 0;
 
     for (const auto& clip : golden.clips)
     {
@@ -114,37 +193,32 @@ TEST_CASE ("Song values: every clip of the golden projects, read into a value an
         CHECK (value.holdsItsPlaces());
         CHECK ((int) (value.notes.size() + value.controls.size()) == clip.getNumChildren());
 
-        // Emptied, then given its value: its notes and its values each in their order, after what else it holds.
+        // Emptied, then given its value: its notes, then its values, each kind in its order, as whole state writes them.
         auto written = clip.createCopy();
-        phazite::writeClipNotes ({}, written, nullptr);
-        REQUIRE (written.getNumChildren() == 0);
-        phazite::writeClipNotes (value, written, nullptr);
+        written.removeAllChildren (nullptr);
+        phazite::writeClipNotes (value, written);
         CHECK (phazite::readClipNotes (written) == value);
-
-        // And in the clip's order of notes and values among each other, which the value doesn't hold.
-        if (! written.isEquivalentTo (clip))
-            ++interleaved;
-
-        phazite::followOrderOf (written, clip, nullptr);
         CHECK_MESSAGE (written.isEquivalentTo (clip), clip.toXmlString().toStdString());
-        CHECK (getChildTypes (written) == getChildTypes (clip));
-
-        // Written into the clip itself, its value changes nothing at all, its children where they were.
-        auto same = clip.createCopy();
-        Heard heard;
-        same.addListener (&heard);
-        phazite::writeClipNotes (value, same, nullptr);
-        same.removeListener (&heard);
-        CHECK (heard.count() == 0);
-        CHECK (same.isEquivalentTo (clip));
     }
-
-    CHECK (interleaved > 0); // the representative project's controller clip, its values before its notes
 }
 
-TEST_CASE ("Song values: a clip's notes read into a value and written back are the clip's element as it was")
+TEST_CASE ("Song values: a clip's notes, in any order among its values, read into a value and written back are the same notes "
+           "and values")
 {
-    // Every value a note can have, on 200 notes made by the model.
+    const auto clip = makeClipElement();
+    REQUIRE (getChildTypes (clip) == std::vector<juce::String> { "NOTE1", "CONTROL", "NOTE2", "CONTROL", "NOTE3", "CONTROL" });
+    const auto value = phazite::readClipNotes (clip);
+    CHECK (value.notes.size() == 3);
+    CHECK (value.controls.size() == 3);
+
+    juce::ValueTree written (schema::CLIP);
+    phazite::writeClipNotes (value, written);
+    CHECK (getChildTypes (written) == std::vector<juce::String> { "NOTE1", "NOTE2", "NOTE3", "CONTROL", "CONTROL", "CONTROL" });
+    CHECK (phazite::readClipNotes (written) == value);
+}
+
+TEST_CASE ("Song values: a clip's notes made by the model, every value a note can have, written whole and read back")
+{
     auto song = phazite::createSong();
     const auto track = phazite::ensureTracks (*song, 1).front();
     const auto clip = phazite::insertMidiClip (*song, track, { phazite::test::at (0.0), phazite::test::at (64.0) }, nullptr);
@@ -165,127 +239,18 @@ TEST_CASE ("Song values: a clip's notes read into a value and written back are t
     }
 
     phazite::setClipNotes (*song, clip, made);
+    CHECK_FALSE (holdsEvents (phazite::findClipState (*song, clip)));
     const auto whole = phazite::copyWhole (*song, phazite::findClipState (*song, clip));
     const auto value = phazite::getClipNotesValue (*song, clip);
     REQUIRE (value.notes.size() == 200);
+    CHECK (whole.getNumChildren() == 200);
     CHECK (value == phazite::readClipNotes (whole));
+    CHECK (phazite::readClipNotes (whole).isSameAs (value) == false); // read anew: alike, not the same
 
-    auto written = whole.createCopy();
-    phazite::writeClipNotes ({}, written, nullptr);
-    REQUIRE_FALSE (written.isEquivalentTo (whole));
-    phazite::writeClipNotes (value, written, nullptr);
-    CHECK (written.isEquivalentTo (whole));
-}
-
-TEST_CASE ("Song values: a changed value writes only what differs, each change once")
-{
-    auto clip = makeClipElement();
-    const auto before = getChildTypes (clip);
-    REQUIRE (before == std::vector<juce::String> { "NOTE1", "CONTROL", "NOTE2", "CONTROL", "NOTE3", "CONTROL" });
-    const auto value = phazite::readClipNotes (clip);
-
-    const auto heardFor = [&clip] (const ClipNotes& next)
-    {
-        auto copy = clip.createCopy();
-        Heard heard;
-        copy.addListener (&heard);
-        phazite::writeClipNotes (next, copy, nullptr);
-        copy.removeListener (&heard);
-        CHECK (phazite::readClipNotes (copy) == next);
-        return std::pair { heard, getChildTypes (copy) };
-    };
-
-    // A note's velocity: one property.
-    {
-        const auto [heard, types] =
-            heardFor (phazite::withNotesChanged (value, { NoteID::fromRaw (2) }, [] (NoteValues& note) { note.velocity = 80; }));
-        CHECK (heard.properties == 1);
-        CHECK (heard.count() == 1);
-        CHECK (types == before);
-    }
-
-    // A note's flag turned on: one property; and its channel: one more.
-    {
-        const auto [heard, types] = heardFor (phazite::withNotesChanged (value, { NoteID::fromRaw (3) },
-                                                                         [] (NoteValues& note)
-                                                                         {
-                                                                             note.muted = true;
-                                                                             note.channel = 4;
-                                                                         }));
-        CHECK (heard.properties == 2);
-        CHECK (heard.count() == 2);
-        CHECK (types == before);
-    }
-
-    // A note taken out: one removal, the others where they were.
-    {
-        const auto [heard, types] =
-            heardFor (phazite::withoutNotes (value, [] (const NoteValues& note) { return note.id == NoteID::fromRaw (2); }));
-        CHECK (heard.removed == 1);
-        CHECK (heard.count() == 1);
-        CHECK (types == std::vector<juce::String> { "NOTE1", "CONTROL", "CONTROL", "NOTE3", "CONTROL" });
-    }
-
-    // A note added: after all the clip holds, as a note added always went.
-    {
-        const auto [heard, types] = heardFor (phazite::withNoteAdded (value, makeNote (9, 70, 3.0)));
-        CHECK (heard.added == 1);
-        CHECK (heard.count() == 1);
-        CHECK (types == std::vector<juce::String> { "NOTE1", "CONTROL", "NOTE2", "CONTROL", "NOTE3", "CONTROL", "NOTE9" });
-    }
-
-    // A note taken out and put back with its ID after the others (a replaced note, as replaceNotes() makes it): taken out
-    // and added, after all the clip holds.
-    {
-        auto next = phazite::withoutNotes (value, [] (const NoteValues& note) { return note.id == NoteID::fromRaw (1); });
-        next = phazite::withNoteAdded (next, makeNote (1, 61, 0.25));
-        const auto [heard, types] = heardFor (next);
-        CHECK (heard.removed == 1);
-        CHECK (heard.added == 1);
-        CHECK (heard.count() == 2);
-        CHECK (types == std::vector<juce::String> { "CONTROL", "NOTE2", "CONTROL", "NOTE3", "CONTROL", "NOTE1" });
-    }
-
-    // A controller's value changed: one property, in its place.
-    {
-        const auto [heard, types] = heardFor (phazite::withEachChanged (
-            value, [] (NoteValues&) {},
-            [] (ControlValues& control)
-            {
-                if (juce::exactlyEqual (control.beat, 0.5))
-                    control.value = 100;
-            }));
-        CHECK (heard.properties == 1);
-        CHECK (heard.count() == 1);
-        CHECK (types == before);
-    }
-
-    // One taken out and another added (a step of a draw in a lane): one removal and one addition, the others where they were.
-    {
-        auto next = phazite::withoutControls (value, [] (size_t place, const ControlValues&) { return place == 1; });
-        next = phazite::withControlsAdded (next, { makeControl (3.0, 64) });
-        const auto [heard, types] = heardFor (next);
-        CHECK (heard.removed == 1);
-        CHECK (heard.added == 1);
-        CHECK (heard.count() == 2);
-        CHECK (types == std::vector<juce::String> { "NOTE1", "CONTROL", "NOTE2", "NOTE3", "CONTROL", "CONTROL" });
-    }
-
-    // Every value's beat changed (a tempo change that keeps the patterns' speed): each in its place, one property each.
-    {
-        const auto [heard, types] =
-            heardFor (phazite::withEachChanged (value, [] (NoteValues&) {}, [] (ControlValues& control) { control.beat += 0.125; }));
-        CHECK (heard.properties == 3);
-        CHECK (heard.count() == 3);
-        CHECK (types == before);
-    }
-
-    // Nothing changed: nothing heard.
-    {
-        const auto [heard, types] = heardFor (value);
-        CHECK (heard.count() == 0);
-        CHECK (types == before);
-    }
+    // Kept with a copy of the tree, then written into it: the same.
+    const auto kept = phazite::keepValues (*song);
+    CHECK (phazite::copyWhole (song->getState().createCopy(), kept).isEquivalentTo (phazite::copyWholeSong (*song)));
+    CHECK (phazite::holdSameNotes (kept, phazite::keepValues (*song), clip));
 }
 
 TEST_CASE ("Song values: the helpers that change a value in batches keep where each note is by its ID")
@@ -332,7 +297,7 @@ TEST_CASE ("Song values: the helpers that change a value in batches keep where e
 
     // A value read from a clip's element keeps them too.
     juce::ValueTree clip (schema::CLIP);
-    phazite::writeClipNotes (value, clip, nullptr);
+    phazite::writeClipNotes (value, clip);
     CHECK (phazite::readClipNotes (clip).holdsItsPlaces());
     CHECK (phazite::readClipNotes (clip) == value);
 }
@@ -362,107 +327,6 @@ TEST_CASE ("Song values: the same value, and an equal one")
     CHECK (ClipNotes().isSameAs (ClipNotes()));
 }
 
-TEST_CASE ("Song values: a clip's other children, and a value of a kind Phazite doesn't know, stay where they are")
-{
-    auto clip = makeClipElement();
-    clip.addChild (juce::ValueTree ("SOMETHING", { { "a", 1 } }), 1, nullptr);
-    clip.addChild (juce::ValueTree (schema::CONTROL, { { schema::controlKind, "theremin" }, { schema::controlBeat, 0.75 } }), 4, nullptr);
-    const auto before = clip.createCopy();
-
-    const auto value = phazite::readClipNotes (clip);
-    CHECK (value.notes.size() == 3);
-    CHECK (value.controls.size() == 3);
-
-    auto next = phazite::withNotesChanged (value, { NoteID::fromRaw (1) }, [] (NoteValues& note) { note.pitch = 30; });
-    next = phazite::withoutNotes (next, [] (const NoteValues& note) { return note.id == NoteID::fromRaw (2); });
-    next = phazite::withoutControls (next, [] (size_t place, const ControlValues&) { return place == 0; });
-    next = phazite::withNoteAdded (next, makeNote (5, 72, 3.0));
-    phazite::writeClipNotes (next, clip, nullptr);
-
-    CHECK (phazite::readClipNotes (clip) == next);
-    CHECK (clip.getChild (1).isEquivalentTo (before.getChild (1)));
-    REQUIRE (clip.getChildWithProperty (schema::controlKind, "theremin").isValid());
-    CHECK (clip.getChildWithProperty (schema::controlKind, "theremin").isEquivalentTo (before.getChild (4)));
-    CHECK (clip.getChildWithName ("SOMETHING").isEquivalentTo (before.getChild (1)));
-
-    // Taken away whole, the clip keeps them still.
-    phazite::writeClipNotes ({}, clip, nullptr);
-    CHECK (clip.getNumChildren() == 2);
-    CHECK (clip.getChild (0).hasType ("SOMETHING"));
-    CHECK (clip.getChild (1)[schema::controlKind].toString() == "theremin");
-}
-
-TEST_CASE ("Song values: a note of a project opened from its file, changed through the model, changes in that property alone, the "
-           "others as the file wrote them")
-{
-    // A file's properties are text, which JUCE sees as values of their own beside the numbers they read as ("4" is not 4.0):
-    // a write of every property of a note that changed set its start and its length again as numbers, three changes where
-    // one was made. The representative project's drum clip (8), its first note (9), as the file wrote it.
-    phazite::test::TemporaryFolder temporary;
-    const auto file = temporary.folder.getChildFile ("Representative.phazite");
-    REQUIRE (phazite::test::getGoldenFolder().getChildFile ("projects/representative.xml").copyFileTo (file));
-    juce::String error;
-    const auto project = phazite::Project::open (file, false, error);
-    REQUIRE_MESSAGE (project != nullptr, error.toStdString());
-    auto& song = project->getSong();
-    const phazite::NoteRef note { phazite::ClipID::fromRaw (8), NoteID::fromRaw (9) };
-
-    const auto noteElement = [&song, &note]
-    {
-        for (const auto& child : phazite::copyWhole (song, phazite::findClipState (song, note.clip)))
-            if (child.hasType (schema::NOTE) && phazite::readNoteValues (child).id == note.note)
-                return child;
-
-        return juce::ValueTree();
-    };
-
-    const auto before = noteElement();
-    REQUIRE (before.isValid());
-    REQUIRE (before[schema::noteStart].isString());
-    REQUIRE ((int) before[schema::notePitch] == 36);
-
-    struct Changed final : juce::ValueTree::Listener
-    {
-        void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
-        {
-            changes.push_back (tree.getType().toString() + "." + property.toString());
-        }
-
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { changes.push_back ("added"); }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { changes.push_back ("removed"); }
-
-        std::vector<juce::String> changes;
-    } heard;
-
-    auto root = song.getState();
-    root.addListener (&heard);
-
-    {
-        const phazite::UndoStep step (song, "Transpose Note");
-        phazite::transposeNotes (song, { note }, 2);
-    }
-
-    root.removeListener (&heard);
-    CHECK (heard.changes == std::vector<juce::String> { "NOTE.pitch" });
-
-    const auto after = noteElement();
-    REQUIRE (after.isValid());
-    CHECK ((int) after[schema::notePitch] == 38);
-    CHECK (after.getNumProperties() == before.getNumProperties());
-
-    for (const auto& property :
-         std::vector<juce::Identifier> { schema::noteID, schema::noteStart, schema::noteLength, schema::noteVelocity })
-    {
-        INFO (property.toString());
-        CHECK (after[property].isString() == before[property].isString());
-        CHECK (after[property].toString() == before[property].toString());
-    }
-
-    for (const auto& property :
-         std::vector<juce::Identifier> { schema::noteMute, schema::noteSlide, schema::notePortamento, schema::noteChannel })
-        CHECK_FALSE (after.hasProperty (property));
-}
-
 TEST_CASE ("Song values: a property a note's element hasn't reads as it always has")
 {
     juce::ValueTree note (schema::NOTE);
@@ -488,4 +352,255 @@ TEST_CASE ("Song values: a property a note's element hasn't reads as it always h
     CHECK (chosen.muted);
     CHECK (chosen.channel == 1);
     CHECK_FALSE (phazite::setNoteProperty (chosen, schema::clipName, "x"));
+}
+
+//==============================================================================
+TEST_CASE ("Song values: a song opened holds its clips' notes beside its tree, the clips of an alias group one value, and a note "
+           "edit changes nothing in the tree")
+{
+    phazite::test::TemporaryFolder temporary;
+    const auto file = temporary.folder.getChildFile ("Representative.phazite");
+    REQUIRE (phazite::test::getGoldenFolder().getChildFile ("projects/representative.xml").copyFileTo (file));
+    juce::String error;
+    const auto project = phazite::Project::open (file, false, error);
+    REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+    auto& song = project->getSong();
+    phazite::test::checkValues (song);
+
+    // The representative project's drum clip (8), its first note (9).
+    const phazite::NoteRef note { ClipID::fromRaw (8), NoteID::fromRaw (9) };
+    REQUIRE (phazite::getNoteData (song, note).has_value());
+    CHECK (phazite::getNoteData (song, note)->pitch == 36);
+
+    Heard heard;
+    auto root = song.getState();
+    root.addListener (&heard);
+
+    {
+        const phazite::UndoStep step (song, "Transpose Note");
+        phazite::transposeNotes (song, { note }, 2);
+    }
+
+    root.removeListener (&heard);
+    CHECK (heard.count() == 0);
+    CHECK (phazite::getNoteData (song, note)->pitch == 38);
+    CHECK (project->hasUnsavedChanges());
+
+    // Written whole, the note holds what it did but its pitch.
+    for (const auto& child : phazite::copyWhole (song, phazite::findClipState (song, note.clip)))
+        if (child.hasType (schema::NOTE) && phazite::readNoteValues (child).id == note.note)
+            CHECK ((int) child[schema::notePitch] == 38);
+
+    phazite::undo (song);
+    CHECK (phazite::getNoteData (song, note)->pitch == 36);
+    CHECK_FALSE (project->checkUnsavedChanges()); // compared whole: as saved again
+}
+
+TEST_CASE ("Song values: a clip added with NOTE and CONTROL elements has them read into its value and taken out of the tree, in "
+           "the step, and Undo and Redo take both back and forth")
+{
+    Kept k;
+    auto element = juce::ValueTree (schema::CLIP);
+    const auto id = ClipID::fromRaw (k.song->makeID());
+    element.setProperty (schema::clipID, (juce::int64) id.getRaw(), nullptr);
+    element.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
+    element.setProperty (schema::clipStart, 16.0, nullptr);
+    element.setProperty (schema::clipLength, 4.0, nullptr);
+    element.appendChild (juce::ValueTree ("SOMETHING", { { "a", 1 } }), nullptr);
+
+    for (const auto& child : makeClipElement())
+        element.appendChild (child.createCopy(), nullptr);
+
+    const auto expected = phazite::readClipNotes (element);
+
+    // Through the tree, as a paste or a version puts a clip in.
+    k.step ("Add Clip", [&] { k.element (k.clip).getParent().appendChild (element, &k.song->getUndoManager()); });
+    REQUIRE (k.find (id) != nullptr);
+    CHECK (*k.find (id) == expected);
+    CHECK_FALSE (holdsEvents (k.element (id)));
+    CHECK (k.element (id).getChildWithName ("SOMETHING").isValid()); // what isn't a note or a value stays
+    CHECK (phazite::getNoteData (*k.song, { id, NoteID::fromRaw (2) })->pitch == 62);
+
+    phazite::undo (*k.song);
+    CHECK (k.find (id) == nullptr);
+    phazite::redo (*k.song);
+    CHECK (*k.find (id) == expected);
+
+    // Through the model: a track duplicated holds its clips' values, each shared with its original until it is edited.
+    std::vector<phazite::TrackID> copies;
+    k.step ("Duplicate Track", [&] { copies = phazite::duplicateTracks (*k.song, { k.tracks[0] }, nullptr); });
+    REQUIRE (copies.size() == 1);
+    const auto copiedClips = phazite::getClips (*k.song, copies.front());
+    REQUIRE (copiedClips.size() == 2);
+
+    for (const auto copied : copiedClips)
+        CHECK (k.find (copied)->isSameAs (
+            *k.find (phazite::getClipRange (*k.song, copied).getStart() < phazite::test::at (8.0) ? k.clip : id)));
+
+    k.check.walkBackAndForth();
+}
+
+TEST_CASE ("Song values: a clip moved between tracks, or with its track into a folder, keeps its value; one deleted has it back "
+           "with Undo")
+{
+    Kept k;
+    const auto value = k.get (k.clip);
+    REQUIRE (value.notes.size() == 2);
+
+    // Taken out and put in again, the same element.
+    k.step ("Move Clip", [&] { phazite::moveClip (*k.song, k.clip, phazite::test::at (2.0), k.tracks[1]); });
+    CHECK (phazite::getClipTrack (*k.song, k.clip) == k.tracks[1]);
+    CHECK (k.find (k.clip)->isSameAs (value));
+
+    phazite::TrackID folder;
+    k.step ("Group Into Folder", [&] { folder = phazite::groupIntoFolder (*k.song, { k.tracks[1] }, nullptr); });
+    REQUIRE (folder.isValid());
+    CHECK (k.find (k.clip)->isSameAs (value));
+
+    k.step ("Delete Clip", [&] { phazite::deleteClips (*k.song, { k.clip }, false); });
+    CHECK (k.find (k.clip) == nullptr);
+    CHECK_FALSE (phazite::hasNote (*k.song, { k.clip, value.notes[0].id }));
+
+    phazite::undo (*k.song);
+    CHECK (k.find (k.clip)->isSameAs (value));
+    phazite::redo (*k.song);
+
+    k.check.walkBackAndForth();
+}
+
+TEST_CASE ("Song values: a clip's copies share its value, an alias joins its group's one value, and one made unique keeps its "
+           "own")
+{
+    Kept k;
+    std::vector<ClipID> aliases, copies, halves;
+    k.step ("Duplicate as Alias", [&] { aliases = phazite::copyClips (*k.song, { k.clip }, true); });
+    REQUIRE (aliases.size() == 1);
+    CHECK (k.find (aliases[0])->isSameAs (*k.find (k.clip)));
+
+    k.step ("Duplicate", [&] { copies = phazite::copyClips (*k.song, { k.clip }, false); });
+    REQUIRE (copies.size() == 1);
+    CHECK (k.find (copies[0])->isSameAs (*k.find (k.clip))); // shared until either is edited
+
+    // An edit through the alias reaches the clip, not the copy.
+    k.step ("Add Note", [&] { phazite::addNote (*k.song, aliases[0], 72, phazite::test::at (4.0), phazite::test::lasting (1.0), 100); });
+    CHECK (k.find (aliases[0])->isSameAs (*k.find (k.clip)));
+    CHECK (k.find (k.clip)->notes.size() == 3);
+    CHECK (k.find (copies[0])->notes.size() == 2);
+
+    // A split's right half stays in the group, and shares its value.
+    k.step ("Split", [&] { halves = phazite::splitClips (*k.song, { k.clip }, phazite::test::at (3.0)); });
+    REQUIRE (halves.size() == 1);
+    CHECK (k.find (halves[0])->isSameAs (*k.find (k.clip)));
+
+    // A clip joined to a group through the tree takes the group's value.
+    k.step ("Link",
+            [&] { k.element (copies[0]).setProperty (schema::clipLink, k.element (k.clip)[schema::clipLink], &k.song->getUndoManager()); });
+    CHECK (k.find (copies[0])->isSameAs (*k.find (k.clip)));
+
+    // Made unique, each keeps the value it held, and an edit of one is its own.
+    k.step ("Make Unique", [&] { phazite::makeClipsUnique (*k.song, { aliases[0] }); });
+    k.step ("Delete Note", [&] { phazite::deleteNotes (*k.song, { { aliases[0], k.find (aliases[0])->notes[0].id } }); });
+    CHECK (k.find (aliases[0])->notes.size() == 2);
+    CHECK (k.find (k.clip)->notes.size() == 3);
+
+    k.check.walkBackAndForth();
+}
+
+TEST_CASE ("Song values: what is written outside the history is no undo step, and a clip taken out is remembered only while "
+           "something can bring it back")
+{
+    Kept k;
+    const auto value = k.get (k.clip);
+    auto element = k.element (k.clip);
+
+    {
+        const phazite::Song::OutsideHistory outside (*k.song);
+        element.getParent().removeChild (element, nullptr);
+    }
+
+    CHECK_FALSE (k.song->getUndoManager().canUndo());
+    CHECK (k.find (k.clip) == nullptr);
+    CHECK (k.song->getValues()->remembers (element)); // held here
+
+    // The same element put back: its value back.
+    {
+        const phazite::Song::OutsideHistory outside (*k.song);
+        k.song->getState().getChildWithName (schema::TRACKS).getChild (1).appendChild (element, nullptr);
+    }
+
+    CHECK_FALSE (k.song->getUndoManager().canUndo());
+    CHECK (k.find (k.clip)->isSameAs (value));
+    CHECK_FALSE (k.song->getValues()->remembers (element));
+    phazite::test::checkValues (*k.song);
+
+    // Deleted in a step, then the history cleared: what could bring it back is gone, and so is what was remembered, as the
+    // next changes look.
+    // While its step is still open, the clip's value is out of the area already, the keeper remembering it: the check of
+    // the song's values, which allows no value of a clip outside the tree, holds there too.
+    k.step ("Delete Clip",
+            [&]
+            {
+                phazite::deleteClips (*k.song, { k.clip }, false);
+                CHECK (k.find (k.clip) == nullptr);
+                CHECK (k.song->getValues()->remembers (element));
+                phazite::test::checkValues (*k.song);
+            });
+    element = {};
+    k.song->getUndoManager().clearUndoHistory();
+
+    for (int i = 0; i < 70; ++i)
+    {
+        const auto made =
+            phazite::insertMidiClip (*k.song, k.tracks[2], { phazite::test::at (i * 4.0), phazite::test::at (i * 4.0 + 2.0) }, nullptr);
+        phazite::deleteClips (*k.song, { made }, false);
+    }
+
+    k.song->getUndoManager().clearUndoHistory();
+    const auto last = phazite::insertMidiClip (*k.song, k.tracks[2], { phazite::test::at (400.0), phazite::test::at (402.0) }, nullptr);
+    CHECK (k.find (last) != nullptr);
+    phazite::test::checkValues (*k.song);
+}
+
+TEST_CASE ("Song values: its listeners are told the clips whose values changed, by a step, an undo and a redo alike")
+{
+    Kept k;
+    k.told.told.clear();
+
+    {
+        const phazite::UndoStep step (*k.song, "Add Note");
+        phazite::addNote (*k.song, k.clip, 72, phazite::test::at (4.0), phazite::test::lasting (1.0), 100);
+    }
+
+    REQUIRE (k.told.told.size() == 1);
+    CHECK (k.told.told[0] == std::vector<ClipID> { k.clip });
+
+    phazite::undo (*k.song);
+    phazite::redo (*k.song);
+    REQUIRE (k.told.told.size() == 3);
+    CHECK (k.told.told[1] == std::vector<ClipID> { k.clip });
+    CHECK (k.told.told[2] == std::vector<ClipID> { k.clip });
+
+    // A change of the tree alone tells nothing.
+    {
+        const phazite::UndoStep step (*k.song, "Rename");
+        phazite::renameTrack (*k.song, k.tracks[0], "Lead");
+    }
+
+    CHECK (k.told.told.size() == 3);
+}
+
+TEST_CASE ("Song values: a song that keeps everything in its tree is read from it, and copied whole as it is")
+{
+    auto made = phazite::createSong();
+    const auto track = phazite::ensureTracks (*made, 1).front();
+    const auto clip = phazite::insertMidiClip (*made, track, { phazite::test::at (0.0), phazite::test::at (4.0) }, nullptr);
+    phazite::addNote (*made, clip, 60, phazite::test::at (1.0), phazite::test::lasting (1.0), 100);
+
+    // As the versions' checks make one on another thread, from a copy: no values held.
+    phazite::Song song (phazite::copyWholeSong (*made));
+    CHECK (song.getValues() == nullptr);
+    CHECK (phazite::getClipNotesValue (song, clip).notes.size() == 1);
+    CHECK (phazite::getClipNotes (song, clip).size() == 1);
+    CHECK (phazite::copyWholeSong (song).isEquivalentTo (phazite::copyWholeSong (*made)));
+    CHECK (phazite::test::findValueProblems (song).empty());
 }

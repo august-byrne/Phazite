@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's index (model/base/internal/SongIndex.h), which the model's functions that take IDs find tracks, clips and notes
-// by: it finds what a walk through the song finds after every kind of change, their undos and redos, the whole song made like
-// another (a merge, Bring Back, a branch switch), a track list put in the place of the song's, IDs changed in place or shared,
-// and a paste of thousands of notes; and what listens to the song finds a change in it as it is told of it. Every lookup the
-// tests make is compared with a walk too (TestMain.cpp turns that on), and UndoCheck.h compares the whole index at each step.
+// The song's index (model/base/internal/SongIndex.h), which the model's functions that take IDs find tracks and clips by
+// (a note is found in its clip's value: model/base/internal/SongValues.h): it finds what a walk through the song finds
+// after every kind of change, their undos and redos, the whole song made like another (a merge, Bring Back, a branch
+// switch), a track list put in the place of the song's, IDs changed in place or shared, and a paste of thousands of notes;
+// and what listens to the song finds a change in it as it is told of it. Every lookup the tests make is compared with a walk
+// too (TestMain.cpp turns that on), and UndoCheck.h compares the whole index at each step.
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UndoCheck.h"
@@ -28,11 +29,11 @@ using phazite::test::lasting;
 
 namespace
 {
-// A note's element, as the song's index finds it: while the clips' elements store their notes, the index serves them (roadmap
-// step S5.20's first piece).
-juce::ValueTree findNoteElement (const phazite::Song& song, const phazite::NoteRef& ref)
+// Whether a note is found in its clip by its ID: in the clip's value (SongValues.h), or among the clip's elements in a song that
+// keeps everything in its tree (one made from a tree here, as background work makes one).
+bool findsNote (const phazite::Song& song, const phazite::NoteRef& ref)
 {
-    return song.getIndex().findNote (phazite::findClipState (song, ref.clip), ref.note.getRaw());
+    return phazite::hasNote (song, ref);
 }
 
 bool isExact (const phazite::Song& song)
@@ -50,7 +51,7 @@ phazite::ClipID addClipOfNotes (phazite::Song& song, phazite::TrackID track, dou
         phazite::test::addMidiNote (song, clip, 48 + i % 24, at (i * 0.25), lasting (0.25));
 
     for (const auto& note : phazite::getClipNotes (song, clip))
-        REQUIRE (findNoteElement (song, note.getRef()).isValid());
+        REQUIRE (findsNote (song, note.getRef()));
 
     return clip;
 }
@@ -67,7 +68,7 @@ void findEverything (const phazite::Song& song)
             CHECK (phazite::findClipState (song, phazite::getClipID (clipState)) == clipState);
 
             for (const auto& note : phazite::getClipNotes (song, phazite::getClipID (clipState)))
-                CHECK (findNoteElement (song, note.getRef()).isValid());
+                CHECK (findsNote (song, note.getRef()));
         }
     }
 }
@@ -201,18 +202,12 @@ TEST_CASE ("The song's index follows a track list put in the place of the song's
     CHECK (isExact (*song));
     CHECK (phazite::findClipState (*song, clip).isAChildOf (state.getChildWithName (phazite::schema::TRACKS)));
 
-    // A clip's ID changed in place: found by its new one only; a note's too.
+    // A clip's ID changed in place, as no edit changes one: found by its new one only.
     auto clipState = phazite::findClipState (*song, clip);
     const auto renumbered = phazite::ClipID::fromRaw (song->makeID());
     clipState.setProperty (phazite::schema::clipID, (juce::int64) renumbered.getRaw(), nullptr);
     CHECK_FALSE (phazite::findClipState (*song, clip).isValid());
     CHECK (phazite::findClipState (*song, renumbered) == clipState);
-    const auto note = phazite::getClipNotes (*song, renumbered).front();
-    const auto noteState = findNoteElement (*song, note.getRef());
-    const auto newNoteID = phazite::NoteID::fromRaw (song->makeID());
-    findNoteElement (*song, note.getRef()).setProperty (phazite::schema::noteID, (juce::int64) newNoteID.getRaw(), nullptr);
-    CHECK_FALSE (findNoteElement (*song, note.getRef()).isValid());
-    CHECK (findNoteElement (*song, { renumbered, newNoteID }) == noteState);
     CHECK (isExact (*song));
 
     // Two clips with one ID, as no edit makes them: the first a walk meets, as before.
@@ -238,8 +233,8 @@ TEST_CASE ("The song's index follows a track list put in the place of the song's
 
 namespace
 {
-// Asks the song's index about each change it is told of, as it is told: what was added is found, what was removed isn't,
-// and a note told of its own change is found where it is (in its clip, or nowhere once it is taken out).
+// Asks the song's index about each change of a track or a clip it is told of, as it is told: what was added is found, what
+// was removed isn't.
 struct Asker final : juce::ValueTree::Listener
 {
     explicit Asker (const phazite::Song* s = nullptr)
@@ -247,44 +242,34 @@ struct Asker final : juce::ValueTree::Listener
     {
     }
 
-    juce::ValueTree find (const juce::ValueTree& element, phazite::ClipID clip) const
+    juce::ValueTree find (const juce::ValueTree& element) const
     {
         if (element.hasType (phazite::schema::TRACK))
             return phazite::findTrackState (*song, phazite::getTrackID (element));
 
-        if (element.hasType (phazite::schema::CLIP))
-            return phazite::findClipState (*song, phazite::getClipID (element));
+        return phazite::findClipState (*song, phazite::getClipID (element));
+    }
 
-        const auto note = phazite::NoteID::fromRaw ((std::uint64_t) (juce::int64) element[phazite::schema::noteID]);
-        return findNoteElement (*song, { clip, note });
+    static bool isAsked (const juce::ValueTree& element)
+    {
+        return element.hasType (phazite::schema::TRACK) || element.hasType (phazite::schema::CLIP);
     }
 
     void ask (bool answer) { (answer ? right : wrong)++; }
 
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
+    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
     {
-        ask (find (child, phazite::getClipID (parent)) == child);
+        if (isAsked (child))
+            ask (find (child) == child);
     }
 
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
+    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int) override
     {
-        ask (! find (child, phazite::getClipID (parent)).isValid());
-    }
-
-    void valueTreeParentChanged (juce::ValueTree& tree) override
-    {
-        if (tree.hasType (phazite::schema::NOTE))
-            ask (find (tree, noteClip) == (tree.getParent().isValid() ? tree : juce::ValueTree()));
-    }
-
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override
-    {
-        if (tree.hasType (phazite::schema::NOTE))
-            ask (find (tree, noteClip) == tree);
+        if (isAsked (child))
+            ask (! find (child).isValid());
     }
 
     const phazite::Song* song; // set once the song is made
-    phazite::ClipID noteClip;  // the clip of the note whose changes it hears
     int right = 0, wrong = 0;
 };
 } // namespace
@@ -317,32 +302,21 @@ TEST_CASE ("What listens to the song, on any of its elements, finds a change in 
     list.appendChild (track, nullptr);
     state.appendChild (list, nullptr);
 
-    // On the track list before the song, and its index, are made; then on the song's root, a track, a clip and a note.
-    Asker onList, onRoot, onTrack, onClip, onNote;
-    juce::ValueTree listHandle = list, rootHandle = state, trackHandle = track, clipHandle = clip, noteHandle = clip.getChild (0);
+    // On the track list before the song, and its index, are made; then on the song's root and a track.
+    Asker onList, onRoot, onTrack;
+    juce::ValueTree listHandle = list, rootHandle = state, trackHandle = track;
     listHandle.addListener (&onList);
     const phazite::Song::Ptr song = new phazite::Song (state);
-    onList.song = song.get();
 
-    for (auto* asker : { &onRoot, &onTrack, &onClip, &onNote })
+    for (auto* asker : { &onList, &onRoot, &onTrack })
         asker->song = song.get();
-
-    for (auto* asker : { &onList, &onRoot, &onTrack, &onClip, &onNote })
-        asker->noteClip = phazite::getClipID (clip); // the clip of the note whose changes they hear
 
     rootHandle.addListener (&onRoot);
     trackHandle.addListener (&onTrack);
-    clipHandle.addListener (&onClip);
-    noteHandle.addListener (&onNote);
-
-    // Every note asked for, so that the index holds them before the changes.
-    for (const auto& note : phazite::getClipNotes (*song, phazite::getClipID (clip)))
-        REQUIRE (findNoteElement (*song, note.getRef()).isValid());
 
     auto* undo = &song->getUndoManager();
-    noteHandle.setProperty (phazite::schema::notePitch, 72, undo); // the note told of its own change
-    clip.appendChild (makeNote (65), undo);                        // a note added, and one taken out
-    clip.removeChild (noteHandle, undo);
+    clip.appendChild (makeNote (65), undo); // a note added, and one taken out: no track or clip of the index's changes
+    clip.removeChild (clip.getChild (0), undo);
     auto otherClip = clip.createCopy();
     otherClip.setProperty (phazite::schema::clipID, id(), nullptr);
     track.appendChild (otherClip, undo); // a clip added and taken out
@@ -354,7 +328,7 @@ TEST_CASE ("What listens to the song, on any of its elements, finds a change in 
     song->getUndoManager().undo(); // and all of it back, then again, as Undo and Redo make it
     song->getUndoManager().redo();
 
-    for (auto* asker : { &onList, &onRoot, &onTrack, &onClip, &onNote })
+    for (auto* asker : { &onList, &onRoot, &onTrack })
     {
         CHECK (asker->right > 0);
         CHECK (asker->wrong == 0);
@@ -363,8 +337,6 @@ TEST_CASE ("What listens to the song, on any of its elements, finds a change in 
     listHandle.removeListener (&onList);
     rootHandle.removeListener (&onRoot);
     trackHandle.removeListener (&onTrack);
-    clipHandle.removeListener (&onClip);
-    noteHandle.removeListener (&onNote);
     CHECK (isExact (*song));
 }
 
@@ -512,7 +484,7 @@ TEST_CASE ("The song's index holds what the song does after each of a few hundre
 
                         for (const auto& clip : clipsOf())
                             for (const auto& note : phazite::getClipNotes (*song, clip))
-                                CHECK (findNoteElement (*song, note.getRef()).isValid());
+                                CHECK (findsNote (*song, note.getRef()));
 
                         phazite::deleteTracks (*song, { folder }, nullptr);
                     }
@@ -621,17 +593,15 @@ bool lookAndChange (phazite::Song& song, int rounds)
 
         for (const auto& note : clipState)
             right =
-                right
-                && findNoteElement (song, { clip, phazite::NoteID::fromRaw ((std::uint64_t) (juce::int64) note[phazite::schema::noteID]) })
-                       == note;
+                right && findsNote (song, { clip, phazite::NoteID::fromRaw ((std::uint64_t) (juce::int64) note[phazite::schema::noteID]) });
 
         juce::ValueTree added (phazite::schema::NOTE);
         const auto addedID = phazite::NoteID::fromRaw ((std::uint64_t) 1000000 + (std::uint64_t) round);
         added.setProperty (phazite::schema::noteID, (juce::int64) addedID.getRaw(), nullptr);
         clipState.appendChild (added, &song.getUndoManager());
-        right = right && findNoteElement (song, { clip, addedID }) == added;
+        right = right && findsNote (song, { clip, addedID });
         clipState.removeChild (added, &song.getUndoManager());
-        right = right && ! findNoteElement (song, { clip, addedID }).isValid();
+        right = right && ! findsNote (song, { clip, addedID });
     }
 
     return right && song.getIndex().isExact();

@@ -19,6 +19,7 @@
 #include "model/versions/internal/VersionHistory.h"
 
 #include <functional>
+#include <optional>
 
 namespace
 {
@@ -294,6 +295,36 @@ TEST_CASE ("Save Version names the version by what changed in the song as it is,
     REQUIRE (phazite::discardAllChanges (s.context));
     CHECK (phazite::getChannelVolume (*phazite::findSong (s.context), bass) == doctest::Approx (-6.0f));
     CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+}
+
+TEST_CASE ("A note edited and a version saved at once leave no changes since the version, without another ask")
+{
+    // The clips whose notes were heard to change are marked as the baseline moves to the version saved (VersionHistory.cpp:
+    // baselineChanged()), not left for the next ask, which kept the history saying it may have changes and hadn't worked
+    // them out.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto clip = s.addMidiClip (bass, 0.0, 4.0);
+    s.addNote (clip, 36, 0.0, 1.0);
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+    auto& song = *phazite::findSong (s.context);
+
+    {
+        const phazite::UndoStep step (song, "Set Velocity");
+        phazite::setNoteVelocities (song, { phazite::getClipNotes (song, clip).front().getRef() }, 40);
+    }
+
+    phazite::setVersionDraft (s.context, "Quieter", {});
+    std::optional<juce::Result> result;
+    REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+    REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }, versionHistoryTimeout));
+    REQUIRE (result->wasOk());
+    REQUIRE (phazite::getLastVersion (s.context)->name == "Quieter");
+
+    CHECK (phazite::areChangesWorkedOut (s.context)); // asks nothing
+    CHECK_FALSE (phazite::mayHaveChangesSinceLastVersion (s.context));
+    CHECK (phazite::countChanges (s.context) == 0);
 }
 
 TEST_CASE ("Compare with the Song lists what differs from another version, worked out in the background as the song changes")

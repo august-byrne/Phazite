@@ -39,6 +39,7 @@
 #include "model/transport/internal/Playback.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <optional>
@@ -1219,7 +1220,10 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
 
         CHECK (answer());
 
-        // A note deleted, the other edited to look like it, the delete undone: the other is changed.
+        // A note deleted, the other edited outside the history to look like it, the delete undone: the clip holds its notes
+        // as before the step, the outside edit gone with the delete, and the song is as saved. A clip's notes are one value,
+        // which an Undo puts back whole, and nothing in Phazite writes notes outside the history where a step of theirs can
+        // still be undone.
         startSaved();
         auto notes = phazite::getClipNotes (song, clip);
         REQUIRE (notes.size() == 2);
@@ -1238,7 +1242,22 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
         }
 
         phazite::undo (song);
-        CHECK (answer());
+
+        {
+            const auto undone = phazite::getClipNotes (song, clip);
+            REQUIRE (undone.size() == notes.size());
+
+            for (std::size_t i = 0; i < notes.size(); ++i)
+            {
+                CHECK (undone[i].id == notes[i].id);
+                CHECK (undone[i].pitch == notes[i].pitch);
+                CHECK (undone[i].start == notes[i].start);
+                CHECK (undone[i].length == notes[i].length);
+                CHECK (undone[i].velocity == notes[i].velocity);
+            }
+        }
+
+        CHECK_FALSE (answer());
 
         // A note deleted, undone, redone and undone again: as saved.
         startSaved();
