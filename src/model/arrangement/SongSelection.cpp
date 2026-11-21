@@ -158,7 +158,7 @@ std::vector<ClipID> SongSelection::getNoteClips() const
     auto* song = impl->manager.getSong();
 
     for (const auto id : impl->manager.getNoteClips())
-        if (song != nullptr && isMidiState (findClipState (*song, id)))
+        if (song != nullptr && isMidiClip (*song, id))
             ids.push_back (id);
 
     return ids;

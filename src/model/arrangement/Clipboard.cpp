@@ -64,12 +64,12 @@ namespace
 
         for (const auto clip : clips)
         {
-            const auto clipState = findClipState (song, clip);
-            const auto beats = getClipRange (song, clipState);
+            const auto value = getClipValue (song, clip);
+            const auto beats = value.has_value() ? getLiveClipRange (song, *value) : BeatRange();
             span = span.has_value() ? span->getUnionWith (beats) : beats;
 
-            if (const auto index = indexOf (tracks, getTrackID (clipState.getParent())); index >= 0)
-                clipboard.clips.push_back ({ copyWhole (song, clipState), beats, index - first }); // with its notes
+            if (const auto index = value.has_value() ? indexOf (tracks, value->track) : -1; index >= 0)
+                clipboard.clips.push_back ({ copyWhole (song, findClipState (song, clip)), beats, index - first }); // with its notes
         }
 
         if (range.has_value())
@@ -163,7 +163,7 @@ namespace
 
         if (auto* song = findSong (context))
             for (const auto id : context.getSongSelection().getNoteClips())
-                if (isMidiState (findClipState (*song, id)))
+                if (isMidiClip (*song, id))
                     clips.push_back (id);
 
         return clips;

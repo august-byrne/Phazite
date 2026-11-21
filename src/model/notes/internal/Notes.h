@@ -58,6 +58,7 @@ bool canPlayNoteAt (const Song&, ClipID, BeatPosition start);
 // The latest a note of a clip can start and still play: the shortest note before where the clip can grow to, the start of
 // the next clip on its track. None while nothing keeps the clip from growing to hold the note.
 std::optional<BeatPosition> getLatestNoteStart (const Song&, ClipID);
+std::optional<BeatPosition> getLatestNoteStart (const Song&, const ClipValue&); // of a MIDI clip of the song's, as read now
 
 //==============================================================================
 // The selected notes still there that play (getClipNotesPlayed()), of the clips the piano roll shows (Selection:

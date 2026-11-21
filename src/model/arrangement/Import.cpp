@@ -614,7 +614,7 @@ ClipID addImportedFile (Song& song, TrackID track, const ImportedFile& imported,
             const auto changes = std::any_of (tempos.begin(), tempos.end(), [&tempos] (const TempoChange& tempo)
                                               { return std::abs (tempo.bpm - tempos.front().bpm) >= 0.005; });
 
-            if (changes && getClipStates (song).empty() && ! hasTempoChanges (song))
+            if (changes && getAllClips (song).empty() && ! hasTempoChanges (song))
                 takeTempoChanges (song, tempos, start);
 
             const auto bars = getBars (song);

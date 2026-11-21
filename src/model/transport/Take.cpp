@@ -1106,18 +1106,17 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
         if (recorded[part].isValid())
             return recorded[part];
 
-        const auto clips = getClipStates (findTrackState (song, midiTrack));
+        const auto clips = getClipValues (song, midiTrack);
 
-        for (const auto& clipState : clips)
-            if (isMidiState (clipState) && getClipRange (clipState).getStart() <= beat && getClipRange (clipState).getEnd() > beat)
-                return getClipID (clipState);
+        for (const auto& clip : clips)
+            if (clip.isMidi() && getClipRange (clip).getStart() <= beat && getClipRange (clip).getEnd() > beat)
+                return clip.id;
 
         const auto& range = ranges[part];
 
         if (! note)
         {
-            if (std::any_of (clips.begin(), clips.end(),
-                             [&range] (const auto& clipState) { return getClipRange (clipState).overlaps (range); }))
+            if (std::any_of (clips.begin(), clips.end(), [&range] (const ClipValue& clip) { return getClipRange (clip).overlaps (range); }))
                 return {};
 
             recorded[part] = insertMidiClip (song, midiTrack, range, nullptr);
@@ -1127,9 +1126,9 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
 
         auto from = std::min (range.getStart(), beat), to = range.getEnd(); // quantized, a note can start before what was recorded
 
-        for (const auto& clipState : clips)
+        for (const auto& clip : clips)
         {
-            if (const auto around = getClipRange (clipState); around.getEnd() <= beat)
+            if (const auto around = getClipRange (clip); around.getEnd() <= beat)
                 from = std::max (from, around.getEnd());
             else if (around.getStart() > beat)
                 to = std::min (to, around.getStart());
@@ -1226,7 +1225,8 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
 
         if (const auto& first = reach[p].first; first.has_value())
         {
-            const auto clipStart = getClipRange (findClipState (song, first->second)).getStart();
+            const auto firstClip = getClipValue (song, first->second);
+            const auto clipStart = firstClip.has_value() ? firstClip->start : BeatPosition();
             const auto beat = std::min (first->first, std::max (ranges[p].getStart(), clipStart));
 
             for (const auto& control : parts[p].carried)
@@ -1246,7 +1246,8 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
 
         if (const auto& last = reach[p].last; last.has_value())
         {
-            const auto clipEnd = getClipRange (findClipState (song, last->second)).getEnd();
+            const auto lastClip = getClipValue (song, last->second);
+            const auto clipEnd = lastClip.has_value() ? getClipRange (*lastClip).getEnd() : BeatPosition();
             const auto beat =
                 std::max (last->first, BeatPosition::fromBeats (std::min (ranges[p].getEnd(), clipEnd).inBeats() - releaseBeforeEnd));
             Seam seam { parts[p].to, last->second, {}, {} };

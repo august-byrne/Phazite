@@ -85,7 +85,7 @@ namespace
         if (hasPadsOnOwnTracks (*song, track))
             return getTrackName (*song, track) + " has pads on tracks of their own: bring them back to it first.";
 
-        if (getClipStates (state).empty())
+        if (! hasClips (*song, track))
             return getTrackName (*song, track) + " has nothing to " + verb + ": it has no clips.";
 
         return {};
@@ -223,8 +223,8 @@ namespace
                 if (const auto fed = getTracksFedBy (song, id); std::find (fed.begin(), fed.end(), track) == fed.end())
                     continue;
 
-            for (const auto& clip : getClipStates (other))
-                end = std::max (end, getClipRange (song, clip).getEnd());
+            for (const auto& clip : getClipValues (song, getTrackID (other)))
+                end = std::max (end, getLiveClipRange (song, clip).getEnd());
         }
 
         return end;

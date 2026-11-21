@@ -76,11 +76,6 @@ double playedSecondsOf (const phazite::Song& song, phazite::ClipID clip)
     return position.end - position.start;
 }
 
-bool isAudioClip (const phazite::Song& song, phazite::ClipID clip)
-{
-    return phazite::isAudioState (phazite::findClipState (song, clip));
-}
-
 // A loop of drum hits, one a beat, each noise falling away over 30 ms, its tempo in its name: what Rubber Band keeps on its
 // beat when it stretches it to twice as long, where it puts writeClicks()'s 2 ms clicks up to 8 ms early, at one tempo as
 // along tempo changes.

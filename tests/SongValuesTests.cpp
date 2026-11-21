@@ -11,7 +11,9 @@
 #include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UndoCheck.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -20,7 +22,10 @@
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/AudioRecorder.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -587,6 +592,486 @@ TEST_CASE ("Song values: its listeners are told the clips whose values changed, 
     }
 
     CHECK (k.told.told.size() == 3);
+}
+
+//==============================================================================
+// A clip as a value (SongValues.h: ClipValue), which the song doesn't hold yet: the conversion between it and a CLIP element.
+namespace
+{
+// Every clip of the golden projects that hold clips, as the song holds each once it is open (its loader's checks made), with
+// its project open.
+struct GoldenClipElements
+{
+    phazite::test::TemporaryFolder temporary;
+    std::vector<std::unique_ptr<phazite::Project>> projects;
+    std::vector<juce::ValueTree> clips;
+
+    GoldenClipElements()
+    {
+        for (const auto* name : { "projects/representative.xml", "commands/script.xml" })
+        {
+            const auto file = temporary.folder.getChildFile (juce::String (projects.size()) + ".phazite");
+            REQUIRE (phazite::test::getGoldenFolder().getChildFile (name).copyFileTo (file));
+            juce::String error;
+            auto project = phazite::Project::open (file, false, error);
+            REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+
+            for (const auto& clip : phazite::getClipStates (project->getSong()))
+                clips.push_back (clip);
+
+            projects.push_back (std::move (project));
+        }
+    }
+};
+
+// The properties one element holds and the other hasn't, or holds otherwise, by name: "name" for one only the first holds.
+std::vector<juce::String> getDifferences (const juce::ValueTree& first, const juce::ValueTree& second)
+{
+    std::vector<juce::String> differences;
+
+    for (int i = 0; i < first.getNumProperties(); ++i)
+        if (const auto name = first.getPropertyName (i); ! second.hasProperty (name) || ! (second[name] == first[name]))
+            differences.push_back (name.toString());
+
+    for (int i = 0; i < second.getNumProperties(); ++i)
+        if (const auto name = second.getPropertyName (i); ! first.hasProperty (name))
+            differences.push_back (name.toString() + " (written)");
+
+    return differences;
+}
+
+// A copy of an element without its properties and its WARP children.
+juce::ValueTree emptied (const juce::ValueTree& clip)
+{
+    auto copy = clip.createCopy();
+    copy.removeAllProperties (nullptr);
+
+    for (int i = copy.getNumChildren(); --i >= 0;)
+        if (copy.getChild (i).hasType (schema::WARP))
+            copy.removeChild (i, nullptr);
+
+    return copy;
+}
+
+phazite::ClipValue makeClip (std::uint64_t id, std::uint64_t track, std::uint64_t link = 0)
+{
+    phazite::ClipValue clip;
+    clip.id = ClipID::fromRaw (id);
+    clip.track = phazite::TrackID::fromRaw (track);
+    clip.link = link;
+    return clip;
+}
+
+std::vector<std::uint64_t> getList (const immer::map<std::uint64_t, immer::flex_vector<ClipID>>& lists, std::uint64_t key)
+{
+    std::vector<std::uint64_t> ids;
+
+    if (const auto* list = lists.find (key))
+        for (const auto& id : *list)
+            ids.push_back (id.getRaw());
+
+    return ids;
+}
+} // namespace
+
+TEST_CASE ("Song values: every clip of the golden projects, read into a value and written into an emptied copy, is the clip")
+{
+    GoldenClipElements golden;
+    REQUIRE (golden.clips.size() >= 10);
+    auto audio = 0, warped = 0, faded = 0, shaped = 0, linked = 0, taken = 0;
+
+    for (const auto& clip : golden.clips)
+    {
+        const auto value = phazite::readClipValue (clip);
+        CHECK (value.id == phazite::getClipID (clip));
+        CHECK (value.track == phazite::getTrackID (clip.getParent()));
+        CHECK (value.isAudio() == phazite::isAudioState (clip));
+        audio += value.isAudio() ? 1 : 0;
+        warped += value.sound.warps.empty() ? 0 : 1;
+        faded += value.fadeIn.seconds > 0.0 ? 1 : 0;
+        shaped += value.fadeIn.sCurve ? 1 : 0;
+        linked += value.link != 0 ? 1 : 0;
+        taken += value.takes > 0 ? 1 : 0;
+
+        auto written = emptied (clip);
+        phazite::writeClipElement (value, written, nullptr);
+
+        // Read back, the same value (but its track: the copy is on none).
+        auto again = phazite::readClipValue (written);
+        again.track = value.track;
+        CHECK (again == value);
+
+        // The same element, property for property: written as the clips' code writes it.
+        const auto differences = getDifferences (clip, written);
+        CHECK_MESSAGE (differences.empty(), (juce::StringArray (differences.data(), (int) differences.size()).joinIntoString (", ")
+                                             + " differ in " + clip.toXmlString())
+                                                .toStdString());
+        CHECK_MESSAGE (written.isEquivalentTo (clip), clip.toXmlString().toStdString());
+    }
+
+    // What the projects hold: every kind of clip and of what a clip holds.
+    CHECK (audio >= 4);
+    CHECK (warped >= 1);
+    CHECK (faded >= 2);
+    CHECK (shaped >= 1);
+    CHECK (linked >= 2);
+    CHECK (taken >= 2);
+}
+
+TEST_CASE ("Song values: a clip as each of the clips' makers and edits writes it, read into a value and written into an empty "
+           "element, is the clip, property for property")
+{
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto audioTrack = s.addTrack ("Audio");
+
+    // Written into an element without an ID, as a new clip is; a maker's own clip in its maker's order too.
+    const auto writtenAsMade = [&song] (phazite::ClipID clip, bool inOrder)
+    {
+        const auto made = phazite::findClipState (song, clip);
+        REQUIRE (made.isValid());
+        juce::ValueTree written (schema::CLIP);
+        phazite::writeClipElement (phazite::readClipValue (made), written, nullptr);
+        const auto differences = getDifferences (made, written);
+        CHECK_MESSAGE (differences.empty(), (juce::StringArray (differences.data(), (int) differences.size()).joinIntoString (", ")
+                                             + " differ in " + made.toXmlString())
+                                                .toStdString());
+        CHECK_MESSAGE (written.isEquivalentTo (made), (made.toXmlString() + written.toXmlString()).toStdString());
+
+        if (inOrder)
+            for (int i = 0; i < made.getNumProperties(); ++i)
+                CHECK (written.getPropertyName (i) == made.getPropertyName (i));
+    };
+
+    // A MIDI clip inserted, with a name and without one (called after its track).
+    writtenAsMade (phazite::insertMidiClip (song, s.firstTrack, { phazite::test::at (2.0), phazite::test::at (6.0) }, nullptr, "Bass"),
+                   true);
+    writtenAsMade (phazite::insertMidiClip (song, s.firstTrack, { phazite::test::at (8.0), phazite::test::at (8.001) }, nullptr), true);
+
+    // An audio clip imported.
+    const auto imported =
+        s.addAudioClip (audioTrack, phazite::test::writeSound (s.getSoundsFolder().getChildFile ("Imported.wav"), 2.0), 4.0);
+    writtenAsMade (imported, true);
+
+    // An audio clip recorded round a loop three times, the last time playing, as the recorder makes it (it follows the
+    // song's tempo, its tempo held steady); then given fades of both shapes, a pitch, a gain and warp markers, reversed
+    // and playing its first take.
+    const auto second = (std::int64_t) 48000; // the song's samples, at the take's rate, from 4 seconds (beat 8) round 1 second
+    phazite::TakePlace take;
+    take.sampleRate = (double) second;
+    take.frames = 3 * second;
+    take.firstFrame = take.start = 4 * second;
+    take.stop = 7 * second;
+    take.loop = phazite::TakeLoop { 4 * second, 5 * second };
+    const auto file = phazite::test::writeSound (s.getSoundsFolder().getChildFile ("Take.wav"), 3.0);
+    REQUIRE (phazite::placeTake (song, audioTrack, file, take).size() == 1);
+    const auto recorded = phazite::getClips (song, audioTrack).back();
+    REQUIRE (phazite::getClipTakeCount (song, recorded) == 3);
+    REQUIRE (phazite::getClipTempo (song, recorded) > 0.0);
+    writtenAsMade (recorded, true);
+
+    phazite::setClipFade (song, recorded, true, 0.1);
+    phazite::setClipFade (song, recorded, false, 0.2);
+    phazite::setFadeCurve (song, recorded, true, { phazite::FadeShape::sCurve, 0.0f });
+    phazite::setFadeCurve (song, recorded, false, { phazite::FadeShape::curve, -0.5f });
+    phazite::setClipPitch (song, recorded, 3.0f);
+    phazite::setClipGain (song, recorded, -4.5f);
+    CHECK (phazite::addWarpMarker (song, recorded, 2.25));
+    CHECK (phazite::addWarpMarker (song, recorded, 2.5));
+    phazite::setClipReversed (song, recorded, true);
+    phazite::playTake (song, recorded, 1);
+
+    const auto edited = phazite::readClipValue (phazite::findClipState (song, recorded));
+    CHECK (edited.fadeIn.sCurve);
+    CHECK (juce::exactlyEqual (edited.fadeOut.bend, -0.5f));
+    CHECK (edited.sound.reversed);
+    CHECK (edited.sound.warps.size() == 2);
+    CHECK (edited.take == 1);
+    CHECK (juce::exactlyEqual (edited.gain, -4.5f));
+    writtenAsMade (recorded, false);
+}
+
+TEST_CASE ("Song values: a clip's value written into its element changes only what differs, and leaves what isn't the value's")
+{
+    juce::ValueTree track (schema::TRACK);
+    track.setProperty (schema::trackID, 5, nullptr);
+    juce::ValueTree clip (schema::CLIP);
+    track.appendChild (clip, nullptr);
+
+    auto value = makeClip (7, 5);
+    value.kind = phazite::ClipValue::Kind::audio;
+    value.length = {}; // an audio clip's element holds none, which reads as 0
+    value.name = "Loop";
+    value.start = phazite::test::at (4.0);
+    value.sound.file = "Audio/Loop.wav";
+    value.sound.tempo = 120.0;
+    value.sound.warps = { { 0.5, 0.5 }, { 1.0, 1.25 } };
+    value.fileEnd = 2.0;
+    value.fadeOut = { 0.25, true, -0.5f };
+    phazite::writeClipElement (value, clip, nullptr);
+    clip.setProperty ("unknown", 1, nullptr);
+    clip.appendChild (juce::ValueTree ("SOMETHING"), nullptr);
+    CHECK (phazite::readClipValue (clip) == value);
+    CHECK_FALSE (clip.hasProperty (schema::clipLength)); // an audio clip's length follows from its part
+    CHECK_FALSE (clip.hasProperty (schema::clipFadeIn)); // at its default
+
+    Heard heard;
+    track.addListener (&heard);
+    const auto forget = [&heard] { heard.properties = heard.added = heard.removed = heard.moved = 0; };
+    const auto writeAndCount = [&] (const phazite::ClipValue& next)
+    {
+        forget();
+        phazite::writeClipElement (next, clip, nullptr);
+        CHECK (phazite::readClipValue (clip) == next);
+        return heard.count();
+    };
+
+    CHECK (writeAndCount (value) == 0);
+
+    auto gained = value;
+    gained.gain = 3.0f;
+    CHECK (writeAndCount (gained) == 1);
+
+    auto moved = gained;
+    moved.sound.warps = moved.sound.warps.set (1, { 1.0, 1.5 });
+    CHECK (writeAndCount (moved) == 1);
+
+    auto unwarped = moved;
+    unwarped.sound.warps = {};
+    unwarped.sound.tempo = 0.0;
+    CHECK (writeAndCount (unwarped) == 3); // the tempo and both markers
+
+    // Its name taken away, as Rename takes it away when a clip is named as its track; then none written, and an empty one
+    // held, as an audio clip is made with, stays.
+    auto unnamed = unwarped;
+    unnamed.name = {};
+    CHECK (writeAndCount (unnamed) == 1);
+    CHECK_FALSE (clip.hasProperty (schema::clipName));
+    CHECK (writeAndCount (unnamed) == 0);
+    CHECK_FALSE (clip.hasProperty (schema::clipName));
+    clip.setProperty (schema::clipName, juce::String(), nullptr);
+    CHECK (writeAndCount (unnamed) == 0);
+    CHECK (clip.hasProperty (schema::clipName));
+
+    // A start before the song's kept at its start, as setClipPlace() and setAudioPart() keep it; a part within its file.
+    auto early = unnamed;
+    early.start = phazite::BeatPosition::fromBeats (-2.0);
+    early.fileStart = -1.0;
+    early.fileEnd = -2.0;
+    phazite::writeClipElement (early, clip, nullptr);
+    CHECK (juce::exactlyEqual ((double) clip[schema::clipStart], 0.0));
+    CHECK (juce::exactlyEqual ((double) clip[schema::clipFileStart], 0.0));
+    CHECK (juce::exactlyEqual ((double) clip[schema::clipFileEnd], 0.0));
+
+    // A MIDI clip of it: a MIDI clip's length comes, at least as long as the clips' code keeps a clip, and what only an audio
+    // clip holds stays as it is (the clips' code never writes it on a MIDI clip); and back, the MIDI clip's length stays.
+    auto midi = unwarped;
+    midi.kind = phazite::ClipValue::Kind::midi;
+    midi.length = phazite::test::lasting (1.0e-4);
+    midi.offset = phazite::test::lasting (1.0);
+    phazite::writeClipElement (midi, clip, nullptr);
+    CHECK (juce::exactlyEqual ((double) clip[schema::clipLength], phazite::shortestClipBeats));
+    CHECK (juce::exactlyEqual ((double) clip[schema::clipOffset], 1.0));
+    CHECK (clip[schema::clipFile].toString() == juce::String ("Audio/Loop.wav"));
+    CHECK (juce::exactlyEqual ((double) clip[schema::clipGain], 3.0));
+    CHECK (clip.hasProperty (schema::clipFadeOut));
+
+    phazite::writeClipElement (unwarped, clip, nullptr);
+    CHECK (juce::exactlyEqual ((double) clip[schema::clipLength], phazite::shortestClipBeats));
+    CHECK (phazite::readClipValue (clip).length == phazite::BeatDuration()); // an audio clip's value has no length
+
+    // A value's length is none of an audio clip's value, whatever it holds.
+    auto longer = unwarped;
+    longer.length = phazite::test::lasting (8.0);
+    CHECK (longer == unwarped);
+    longer.kind = phazite::ClipValue::Kind::midi;
+    auto shorter = longer;
+    shorter.length = phazite::test::lasting (2.0);
+    CHECK_FALSE (shorter == longer);
+
+    // What isn't a clip's value stays.
+    CHECK ((int) clip["unknown"] == 1);
+    CHECK (clip.getChildWithName ("SOMETHING").isValid());
+    track.removeListener (&heard);
+}
+
+TEST_CASE ("Song values: a property of a clip read as its element would hold it, and one a clip's element hasn't reads as it "
+           "always has")
+{
+    juce::ValueTree clip (schema::CLIP);
+    clip.setProperty (schema::clipID, 3, nullptr);
+    clip.setProperty (schema::clipKind, schema::clipIsAudio, nullptr);
+    clip.setProperty (schema::clipFadeInBend, 4.0, nullptr); // beyond its range: kept within it, as the clips' code reads it
+    const auto value = phazite::readClipValue (clip);
+    CHECK (value.isAudio());
+    CHECK (value.length == phazite::BeatDuration()); // absent: 0
+    CHECK (value.take == 1);
+    CHECK (juce::exactlyEqual (value.fadeIn.bend, 1.0f));
+    CHECK_FALSE (value.track.isValid());
+
+    auto chosen = value;
+    CHECK (phazite::setClipProperty (chosen, schema::clipGain, 6));
+    CHECK (phazite::setClipProperty (chosen, schema::clipMute, true));
+    CHECK (phazite::setClipProperty (chosen, schema::clipTake, juce::var()));
+    CHECK (phazite::setClipProperty (chosen, schema::clipFadeOutShape, schema::fadeIsSCurve));
+    CHECK (juce::exactlyEqual (chosen.gain, 6.0f));
+    CHECK (chosen.muted);
+    CHECK (chosen.take == 1);
+    CHECK (chosen.fadeOut.sCurve);
+    CHECK_FALSE (phazite::setClipProperty (chosen, schema::noteVelocity, 60)); // a note's
+    CHECK_FALSE (phazite::setClipProperty (chosen, "unknown", 1));
+}
+
+TEST_CASE ("Song values: every clip of a song by its ID, its track's list and its group's, kept together by the helpers")
+{
+    using phazite::SongClips;
+    SongClips clips;
+    CHECK (phazite::holdsItsLists (clips));
+
+    // Three on track 1, one at a place among them; one on track 2.
+    clips = phazite::withClip (clips, makeClip (10, 1));
+    clips = phazite::withClip (clips, makeClip (11, 1));
+    clips = phazite::withClip (clips, makeClip (12, 1), 1);
+    clips = phazite::withClip (clips, makeClip (20, 2));
+    CHECK (phazite::holdsItsLists (clips));
+    CHECK (getList (clips.tracks, 1) == std::vector<std::uint64_t> { 10u, 12u, 11u });
+    CHECK (getList (clips.tracks, 2) == std::vector<std::uint64_t> { 20u });
+    REQUIRE (clips.find (ClipID::fromRaw (12)) != nullptr);
+    CHECK (clips.find (ClipID::fromRaw (13)) == nullptr);
+
+    // Changed in place: it keeps its place; moved to another track: the end of that one's list, the old one's without it.
+    auto renamed = *clips.find (ClipID::fromRaw (12));
+    renamed.name = "Renamed";
+    const auto before = clips;
+    clips = phazite::withClip (clips, renamed);
+    CHECK_FALSE (clips.isSameAs (before));
+    CHECK (clips.tracks.identity() == before.tracks.identity());
+    CHECK (getList (clips.tracks, 1) == std::vector<std::uint64_t> { 10u, 12u, 11u });
+
+    auto moved = renamed;
+    moved.track = phazite::TrackID::fromRaw (2);
+    clips = phazite::withClip (clips, moved);
+    CHECK (phazite::holdsItsLists (clips));
+    CHECK (getList (clips.tracks, 1) == std::vector<std::uint64_t> { 10u, 11u });
+    CHECK (getList (clips.tracks, 2) == std::vector<std::uint64_t> { 20u, 12u });
+
+    // A clip's link set or changed: it leaves its group's list (if in one) for the end of the new group's.
+    const auto linkTo = [&clips] (std::uint64_t id, std::uint64_t link)
+    {
+        auto linked = *clips.find (ClipID::fromRaw (id));
+        linked.link = link;
+        clips = phazite::withClip (clips, linked);
+    };
+
+    for (const auto id : { 10u, 20u, 12u })
+        linkTo (id, 99u);
+
+    linkTo (11u, 98u);
+    CHECK (phazite::holdsItsLists (clips));
+    CHECK (phazite::hasGroupsOfOne (clips)); // 98, of 11 alone, so far
+    CHECK (getList (clips.groups, 99) == std::vector<std::uint64_t> { 10u, 20u, 12u });
+
+    linkTo (12u, 98u); // from one group to another
+    CHECK (phazite::holdsItsLists (clips));
+    CHECK_FALSE (phazite::hasGroupsOfOne (clips));
+    CHECK (getList (clips.groups, 99) == std::vector<std::uint64_t> { 10u, 20u });
+    CHECK (getList (clips.groups, 98) == std::vector<std::uint64_t> { 11u, 12u });
+    CHECK (clips.tracks.identity() == phazite::withClip (clips, *clips.find (ClipID::fromRaw (12))).tracks.identity());
+
+    // One made unique leaves a group of one, which the helpers keep (it is the caller's to dissolve, as the model's
+    // removeClipState() does): the last one unlinked, no group is left.
+    linkTo (20u, 0u);
+    CHECK (phazite::holdsItsLists (clips));
+    CHECK (phazite::hasGroupsOfOne (clips));
+    CHECK (getList (clips.groups, 99) == std::vector<std::uint64_t> { 10u });
+    linkTo (10u, 0u);
+    CHECK (clips.groups.find (99u) == nullptr);
+    CHECK_FALSE (phazite::hasGroupsOfOne (clips));
+
+    // The next-to-last one of a group deleted: the same, the last one then unlinked by the caller.
+    clips = phazite::withoutClip (clips, ClipID::fromRaw (12));
+    CHECK (phazite::holdsItsLists (clips));
+    CHECK (phazite::hasGroupsOfOne (clips));
+    CHECK (getList (clips.groups, 98) == std::vector<std::uint64_t> { 11u });
+    CHECK (getList (clips.tracks, 2) == std::vector<std::uint64_t> { 20u });
+    CHECK (clips.find (ClipID::fromRaw (12)) == nullptr);
+    CHECK (phazite::withoutClip (clips, ClipID::fromRaw (12)).isSameAs (clips)); // gone already
+    linkTo (11u, 0u);
+    CHECK (clips.groups.empty());
+    CHECK_FALSE (phazite::hasGroupsOfOne (clips));
+
+    clips = phazite::withoutClip (clips, ClipID::fromRaw (20));
+    CHECK (clips.tracks.find (2u) == nullptr); // a track without clips has no list
+    CHECK (phazite::holdsItsLists (clips));
+
+    // A track's clips in another order; and an order of other clips than the track's refused, the clips as they were.
+    clips = phazite::withClip (clips, makeClip (13, 1));
+    clips = phazite::withTrackOrder (clips, phazite::TrackID::fromRaw (1),
+                                     { ClipID::fromRaw (13), ClipID::fromRaw (11), ClipID::fromRaw (10) });
+    CHECK (getList (clips.tracks, 1) == std::vector<std::uint64_t> { 13u, 11u, 10u });
+    CHECK (phazite::holdsItsLists (clips));
+
+    {
+        const phazite::test::ExpectedAssertion refused ("SongValues.cpp");
+        const auto track = phazite::TrackID::fromRaw (1);
+        CHECK (phazite::withTrackOrder (clips, track, { ClipID::fromRaw (13), ClipID::fromRaw (10) }).isSameAs (clips));
+        CHECK (phazite::withTrackOrder (clips, track,
+                                        { ClipID::fromRaw (13), ClipID::fromRaw (11), ClipID::fromRaw (10), ClipID::fromRaw (14) })
+                   .isSameAs (clips));
+        CHECK (
+            phazite::withTrackOrder (clips, track, { ClipID::fromRaw (13), ClipID::fromRaw (13), ClipID::fromRaw (10) }).isSameAs (clips));
+#if JUCE_DEBUG
+        CHECK (refused.getCount() == 3);
+#endif
+    }
+
+    // A clip moved into another track at a place among its clips: there, and out of its old track's list.
+    clips = phazite::withClip (clips, makeClip (21u, 2u));
+    clips = phazite::withClip (clips, makeClip (22u, 2u));
+    auto placed = *clips.find (ClipID::fromRaw (11));
+    placed.track = phazite::TrackID::fromRaw (2);
+    clips = phazite::withClip (clips, placed, 1);
+    CHECK (phazite::holdsItsLists (clips));
+    CHECK (getList (clips.tracks, 1) == std::vector<std::uint64_t> { 13u, 10u });
+    CHECK (getList (clips.tracks, 2) == std::vector<std::uint64_t> { 21u, 11u, 22u });
+
+    // The three disagreeing: a clip on a track whose list hasn't it, a list holding a clip twice, a group's list one of another.
+    auto broken = clips;
+    broken.clips = broken.clips.set (30u, makeClip (30, 1));
+    CHECK_FALSE (phazite::holdsItsLists (broken));
+    broken = clips;
+    broken.tracks = broken.tracks.set (1u, broken.tracks[1u].push_back (ClipID::fromRaw (10)));
+    CHECK_FALSE (phazite::holdsItsLists (broken));
+    broken = clips;
+    broken.groups = broken.groups.set (98u, { ClipID::fromRaw (10) });
+    CHECK_FALSE (phazite::holdsItsLists (broken));
+}
+
+TEST_CASE ("Song values: the song's clips as an area of the song's, changed in a step and taken back and forth whole")
+{
+    auto song = phazite::createSong();
+    phazite::ValueArea<phazite::SongClips> area (song->getUndoManager(), {});
+    const auto start = area.get();
+
+    {
+        const phazite::UndoStep step (*song, "Add Clips");
+        area.set (phazite::withClip (area.get(), makeClip (1, 7, 5)));
+        area.set (phazite::withClip (area.get(), makeClip (2, 7, 5)));
+    }
+
+    const auto added = area.get();
+    CHECK (area.countActions() == 1);
+    CHECK (phazite::holdsItsLists (added));
+    CHECK (getList (added.groups, 5) == std::vector<std::uint64_t> { 1u, 2u });
+
+    phazite::undo (*song);
+    CHECK (area.get().isSameAs (start));
+    phazite::redo (*song);
+    CHECK (area.get().isSameAs (added));
+
+    // The same value set again is no change.
+    area.set (added);
+    CHECK (area.countActions() == 1);
 }
 
 TEST_CASE ("Song values: a song that keeps everything in its tree is read from it, and copied whole as it is")

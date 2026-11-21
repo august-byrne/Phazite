@@ -160,21 +160,21 @@ namespace
         void paint (juce::Graphics& g, juce::Rectangle<int> area, int width) override
         {
             // The clip's width spans its beats.
-            if (const auto clipState = findClip(); clipState.isValid())
+            if (isShown())
             {
-                const auto beats = getClipRange (*findSong (context), clipState);
-                draw (clipState, g, area, [&beats, width] (int x)
+                const auto beats = getClipRange (*findSong (context), clipID);
+                draw (g, area, [&beats, width] (int x)
                       { return beats.getStart() + BeatDuration::fromBeats (beats.getLength().inBeats() * x / std::max (1, width)); });
             }
         }
 
         void paintSpan (juce::Graphics& g, juce::Rectangle<int> area, BeatRange span) override
         {
-            if (const auto clipState = findClip(); clipState.isValid())
+            if (isShown())
             {
                 const auto start = span.getStart();
                 const auto length = span.getLength().inBeats();
-                draw (clipState, g, area, [start, length, &area] (int x)
+                draw (g, area, [start, length, &area] (int x)
                       { return start + BeatDuration::fromBeats (length * (x - area.getX()) / std::max (1, area.getWidth())); });
             }
         }
@@ -300,12 +300,11 @@ namespace
                 loaded();
         }
 
-        // The clip's element, if it is an audio clip of the open project's song.
-        juce::ValueTree findClip() const
+        // Whether the clip is an audio clip of the open project's song.
+        bool isShown() const
         {
             auto* song = findSong (context);
-            const auto clipState = song != nullptr ? findClipState (*song, clipID) : juce::ValueTree();
-            return isAudioState (clipState) ? clipState : juce::ValueTree();
+            return song != nullptr && isAudioClip (*song, clipID);
         }
 
         // Draws the file over the part of an area that it has audio for, given the song beat at each x: over all of the area,
@@ -317,14 +316,13 @@ namespace
         // it paints afresh at each frame (one that the view's edge cuts) blinked fainter about one frame in four (the owner,
         // 2026-11-09). JUCE's software renderer draws the mask the same every time, and moving it moves it whole.
         // JUCE workaround W13 (docs/juce-workarounds.md).
-        void draw (const juce::ValueTree& clipState, juce::Graphics& g, juce::Rectangle<int> area,
-                   const std::function<BeatPosition (int)>& beatAt)
+        void draw (juce::Graphics& g, juce::Rectangle<int> area, const std::function<BeatPosition (int)>& beatAt)
         {
             if (! area.intersects (g.getClipBounds()))
                 return;
 
             const auto& song = *findSong (context);
-            showFileOf (song, clipState);
+            showFileOf (song);
             const auto stretches = findStretches (song, area, beatAt);
 
             if (stretches.empty())
@@ -360,7 +358,7 @@ namespace
                     if (const auto beat = marker.beat.inBeats(); beat > left && beat < right)
                         edges.push_back (xAt (beat));
 
-                if (const auto clipState = findClip(); clipState.isValid() && ! followsTempoChanges (song, clipState))
+                if (isShown() && ! followsTempoChanges (song, clipID))
                     addTempoEdges (getTempoChanges (song), left, right, xAt, edges);
             }
 
@@ -467,9 +465,9 @@ namespace
         // be ready yet: the waveform shows the file unstretched, as Ableton Live shows a sample, and all of it.
         // Shown again once the file is known to be written again in its place (its identity on the disk as last asked:
         // model/engine/AudioFiles.h), which a paint never asks: a clip whose file isn't there would ask at every paint.
-        void showFileOf (const Song& song, const juce::ValueTree& clipState)
+        void showFileOf (const Song& song)
         {
-            const auto file = getClipFile (song, clipState);
+            const auto file = getClipFile (song, clipID);
             const auto identity = findKnownFileIdentity (file);
 
             if (thumbnail != nullptr && file == shownFile && (identity.isEmpty() || identity == shownIdentity))

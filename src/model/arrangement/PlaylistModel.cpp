@@ -69,40 +69,40 @@ namespace
         return row;
     }
 
-    ClipInfo makeInfo (const Song& song, const juce::ValueTree& clipState)
+    ClipInfo makeInfo (const Song& song, const ClipValue& clip)
     {
         ClipInfo info;
-        info.id = getClipID (clipState);
-        info.track = getTrackID (clipState.getParent());
-        info.kind = isAudioState (clipState) ? ClipType::audio : ClipType::midi;
-        info.name = getClipName (song, clipState);
+        info.id = clip.id;
+        info.track = clip.track;
+        info.kind = clip.isAudio() ? ClipType::audio : ClipType::midi;
+        info.name = getClipName (song, clip);
         const auto trackName = getTrackName (song, info.track);
         info.namedAfterTrack = info.name == trackName;
         info.namedLikeTrack = areNamesAlike (info.name, trackName);
-        info.range = getClipRange (song, clipState);
-        info.muted = clipState[schema::clipMute];
-        info.linked = clipState.hasProperty (schema::clipLink);
+        info.range = getLiveClipRange (song, clip);
+        info.muted = clip.muted;
+        info.linked = clip.link != 0;
 
-        if (isAudioState (clipState))
+        if (clip.isAudio())
         {
             // Its fades as they play, as parts of its length.
-            const auto position = getPlayedPosition (song, clipState);
+            const auto position = getPlayedPosition (song, clip.id);
 
             if (const auto length = position.end - position.start; length > 0.0)
             {
-                const auto [fadeIn, fadeOut] = getFittedFades (song, clipState);
+                const auto [fadeIn, fadeOut] = getFittedFades (song, clip.id);
                 info.fadeIn = fadeIn / length;
                 info.fadeOut = fadeOut / length;
             }
 
-            info.fadeInCurve = getClipFadeCurve (clipState, true);
-            info.fadeOutCurve = getClipFadeCurve (clipState, false);
-            info.followsTempo = getClipTempo (song, info.id) > 0.0;
+            info.fadeInCurve = getFadeCurve (clip.fadeIn);
+            info.fadeOutCurve = getFadeCurve (clip.fadeOut);
+            info.followsTempo = clip.sound.tempo > 0.0;
 
-            if (const auto takes = getClipTakeCount (song, info.id); takes > 1)
+            if (clip.takes > 1)
             {
-                info.takes = takes;
-                info.take = getClipTake (song, info.id);
+                info.takes = clip.takes;
+                info.take = clip.take;
             }
         }
 
@@ -287,8 +287,8 @@ std::vector<ClipInfo> getClips (const ProjectContext& context, TrackID id)
     auto* song = findSong (context);
 
     if (song != nullptr && holdsClips (*song, id))
-        for (const auto& clipState : getClipStates (findTrackState (*song, id)))
-            clips.push_back (makeInfo (*song, clipState));
+        for (const auto& clip : getClipValues (*song, id))
+            clips.push_back (makeInfo (*song, clip));
 
     // From the earliest, whatever order the track's element holds them in.
     std::stable_sort (clips.begin(), clips.end(),
@@ -299,22 +299,16 @@ std::vector<ClipInfo> getClips (const ProjectContext& context, TrackID id)
 std::optional<ClipInfo> getClip (const ProjectContext& context, ClipID id)
 {
     if (auto* song = findSong (context))
-        if (const auto clipState = findClipState (*song, id); clipState.isValid())
-            return makeInfo (*song, clipState);
+        if (const auto clip = getClipValue (*song, id))
+            return makeInfo (*song, *clip);
 
     return {};
 }
 
 std::vector<ClipID> getLinkedClips (const ProjectContext& context, ClipID id)
 {
-    std::vector<ClipID> linked;
-
-    if (auto* song = findSong (context))
-        if (const auto clipState = findClipState (*song, id); clipState.isValid())
-            for (const auto& alias : getAliasStates (*song, clipState))
-                linked.push_back (getClipID (alias));
-
-    return linked;
+    auto* song = findSong (context);
+    return song != nullptr ? getAliasClips (*song, id) : std::vector<ClipID>();
 }
 
 juce::String whyClipsCantGo (const ProjectContext& context, TrackID id, const std::vector<ClipID>& clips,
@@ -338,9 +332,8 @@ juce::String whyClipsCantGo (const ProjectContext& context, TrackID id, const st
 
     for (const auto clip : clips)
     {
-        const auto clipState = findClipState (*song, clip);
-        anyMidi = anyMidi || isMidiState (clipState);
-        anyAudio = anyAudio || (clipState.isValid() && ! isMidiState (clipState));
+        anyMidi = anyMidi || isMidiClip (*song, clip);
+        anyAudio = anyAudio || isAudioClip (*song, clip);
     }
 
     if (anyMidi && anyAudio)
@@ -462,14 +455,13 @@ std::vector<NoteShape> getNoteShapes (const ProjectContext& context, ClipID id)
 {
     std::vector<NoteShape> shapes;
     auto* song = findSong (context);
-    const auto clipState = song != nullptr ? findClipState (*song, id) : juce::ValueTree();
+    const auto clip = song != nullptr ? getClipValue (*song, id) : std::nullopt;
 
-    if (! isMidiState (clipState))
+    if (! clip.has_value() || ! clip->isMidi())
         return shapes;
 
     // The notes are in the clip's content, which can start before the clip does.
-    const auto contentOffset = -getClipOffset (clipState).inBeats();
-    SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren()); // a walk of the clip's, for the speed gates
+    const auto contentOffset = -clip->offset.inBeats();
 
     forEachNote (getClipNotesValue (*song, id),
                  [&] (const NoteValues& note)
@@ -509,13 +501,12 @@ void trimClipEnd (ProjectContext& context, ClipID id, BeatPosition end)
 void fadeClipTo (ProjectContext& context, ClipID id, bool fadeIn, BeatPosition at)
 {
     auto* song = findSong (context);
-    const auto clipState = song != nullptr ? findClipState (*song, id) : juce::ValueTree();
 
-    if (! isAudioState (clipState))
+    if (song == nullptr || ! isAudioClip (*song, id))
         return;
 
     const auto time = toSeconds (*song, at);
-    const auto position = getPlayedPosition (*song, clipState);
+    const auto position = getPlayedPosition (*song, id);
     setClipFade (*song, id, fadeIn, fadeIn ? time - position.start : position.end - time);
 }
 
@@ -528,7 +519,7 @@ void setFadeCurve (ProjectContext& context, ClipID id, bool fadeIn, FadeCurve cu
 double getSlipOffset (const ProjectContext& context, ClipID id)
 {
     auto* song = findSong (context);
-    return song != nullptr && findClipState (*song, id).isValid() ? getClipStartOffset (*song, id) : 0.0;
+    return song != nullptr && getClipTrack (*song, id).isValid() ? getClipStartOffset (*song, id) : 0.0;
 }
 
 void slipClip (ProjectContext& context, ClipID id, double startOffset, BeatPosition from, BeatPosition to)
@@ -614,12 +605,12 @@ std::vector<CrossfadeSpot> getCrossfadeSpots (const ProjectContext& context, Tra
 
     std::vector<Placed> audio;
 
-    for (const auto& clipState : getClipStates (findTrackState (*song, trackID)))
+    for (const auto& clip : getClipValues (*song, trackID))
     {
-        if (isAudioState (clipState))
+        if (clip.isAudio())
         {
-            const auto position = getPlayedPosition (*song, clipState);
-            audio.push_back ({ getClipID (clipState), position, toBeats (*song, position.start), toBeats (*song, position.end) });
+            const auto position = getPlayedPosition (*song, clip.id);
+            audio.push_back ({ clip.id, position, toBeats (*song, position.start), toBeats (*song, position.end) });
         }
     }
 
@@ -644,7 +635,7 @@ void setCrossfade (ProjectContext& context, const CrossfadeSpot& spot, BeatPosit
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! isAudioState (findClipState (*song, spot.first)) || ! isAudioState (findClipState (*song, spot.second)))
+    if (song == nullptr || ! isAudioClip (*song, spot.first) || ! isAudioClip (*song, spot.second))
         return;
 
     // As long as twice the distance from the boundary to the pointer: the boundary stays in the middle.

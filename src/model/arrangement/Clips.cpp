@@ -21,7 +21,7 @@ namespace phazite
 {
 namespace
 {
-    const auto minimumClipLength = BeatDuration::fromBeats (1.0 / 64.0);
+    const auto minimumClipLength = BeatDuration::fromBeats (shortestClipBeats);
 
     // Positions this close count as the same: rounding between beats and seconds leaves differences this small.
     const auto tinyBeats = BeatDuration::fromBeats (1.0e-6);
@@ -218,7 +218,148 @@ namespace
 
         return part;
     }
+
+    // Whether a clip's value is the one the song holds now.
+    [[maybe_unused]] bool isLiveClip (const Song& song, const ClipValue& clip)
+    {
+        const auto live = getClipValue (song, clip.id);
+        return live.has_value() && *live == clip;
+    }
+
+    // A clip's place, read from its element without the rest of its value: as readClipValue() reads those properties.
+    ClipPlacement readClipPlacement (const juce::ValueTree& clipState)
+    {
+        const auto audio = isAudioState (clipState);
+        const auto range = getClipRange (clipState);
+        return { getClipID (clipState), audio ? ClipValue::Kind::audio : ClipValue::Kind::midi, range.getStart(),
+                 audio ? BeatDuration() : range.getLength(), getClipOffset (clipState) };
+    }
 } // namespace
+
+//==============================================================================
+std::optional<ClipValue> getClipValue (const Song& song, ClipID clip)
+{
+    if (const auto clipState = findClipState (song, clip); clipState.isValid())
+        return readClipValue (clipState);
+
+    return std::nullopt;
+}
+
+std::vector<ClipValue> getClipValues (const Song& song, TrackID track)
+{
+    std::vector<ClipValue> values;
+
+    for (const auto& clipState : getClipStates (findTrackState (song, track)))
+        values.push_back (readClipValue (clipState));
+
+    return values;
+}
+
+std::vector<ClipValue> getClipValues (const Song& song)
+{
+    std::vector<ClipValue> values;
+
+    for (const auto& clipState : getClipStates (song))
+        values.push_back (readClipValue (clipState));
+
+    return values;
+}
+
+std::vector<ClipID> getAllClips (const Song& song)
+{
+    std::vector<ClipID> clips;
+
+    for (const auto& clipState : getClipStates (song))
+        clips.push_back (getClipID (clipState));
+
+    return clips;
+}
+
+bool hasClips (const Song& song, TrackID track)
+{
+    return ! getClipStates (findTrackState (song, track)).empty();
+}
+
+bool hasClips (const Song& song, TrackID track, ClipValue::Kind kind)
+{
+    const auto clips = getClipStates (findTrackState (song, track));
+    return std::any_of (clips.begin(), clips.end(),
+                        [kind] (const juce::ValueTree& clipState) { return isAudioState (clipState) == (kind == ClipValue::Kind::audio); });
+}
+
+bool isMidiClip (const Song& song, ClipID clip)
+{
+    return isMidiState (findClipState (song, clip));
+}
+
+BeatPosition getContentStart (const ClipValue& clip)
+{
+    return clip.start - clip.offset;
+}
+
+BeatPosition getContentStart (const Song& song, ClipID clip)
+{
+    return getContentStart (findClipState (song, clip));
+}
+
+BeatRange getClipRange (const ClipValue& clip)
+{
+    return { clip.start, clip.start + (clip.isAudio() ? BeatDuration() : clip.length) };
+}
+
+BeatRange getLiveClipRange (const Song& song, const ClipValue& clip)
+{
+    // An audio clip's as it plays in the song now, by its element (the clips' code computes it there for now), which is
+    // right only for the value the song holds.
+    jassert (isLiveClip (song, clip));
+    return clip.isAudio() ? getAudioClipRange (song, findClipState (song, clip.id)) : getClipRange (clip);
+}
+
+std::vector<ClipPlacement> getClipPlacements (const Song& song, TrackID track)
+{
+    std::vector<ClipPlacement> places;
+
+    for (const auto& clipState : getClipStates (findTrackState (song, track)))
+        places.push_back (readClipPlacement (clipState));
+
+    return places;
+}
+
+std::vector<ClipPlacement> getClipPlacements (const Song& song)
+{
+    std::vector<ClipPlacement> places;
+
+    for (const auto& clipState : getClipStates (song))
+        places.push_back (readClipPlacement (clipState));
+
+    return places;
+}
+
+BeatRange getClipRange (const Song& song, const ClipPlacement& clip)
+{
+    return clip.isAudio() ? getClipRange (song, clip.id) : BeatRange (clip.start, clip.start + clip.length);
+}
+
+std::vector<ClipID> getAliasClips (const Song& song, ClipID clip)
+{
+    std::vector<ClipID> clips;
+
+    if (const auto clipState = findClipState (song, clip); clipState.isValid())
+        for (const auto& alias : getAliasStates (song, clipState))
+            clips.push_back (getClipID (alias));
+
+    return clips;
+}
+
+juce::String getClipName (const Song& song, ClipID clip)
+{
+    return getClipName (song, findClipState (song, clip));
+}
+
+juce::String getClipName (const Song& song, const ClipValue& clip)
+{
+    return clip.name.isNotEmpty() ? clip.name : getTrackName (song, clip.track);
+}
 
 //==============================================================================
 juce::ValueTree findClipState (const Song& song, ClipID id)

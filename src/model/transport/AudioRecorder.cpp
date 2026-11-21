@@ -285,19 +285,20 @@ std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, con
         const auto clipStart = std::max (from, in - half), clipEnd = std::min (to, out + half);
         clearClipsIn (song, track, BeatRange (beatsOf (clipStart + crossfadeSeconds), beatsOf (clipEnd - crossfadeSeconds)));
 
-        for (const auto& clipState : getClipStates (findTrackState (song, track)))
+        for (const auto& clip : getClipValues (song, track))
         {
-            if (! isAudioState (clipState))
+            if (! clip.isAudio())
                 continue;
 
-            // Cut where the new clip's fades meet it, in beats, as both were placed.
-            const auto range = getClipRange (clipState);
+            // Cut where the new clip's fades meet it, in beats, as both were placed: where it plays its audio to, which an
+            // audio clip's value alone doesn't say (it has no length of its own).
+            const auto range = getClipRange (song, clip.id);
 
             if (std::abs ((range.getEnd() - beatsOf (clipStart + crossfadeSeconds)).inBeats()) < 1.0e-6)
-                setClipFade (song, getClipID (clipState), false, crossfadeSeconds);
+                setClipFade (song, clip.id, false, crossfadeSeconds);
 
             if (std::abs ((range.getStart() - beatsOf (clipEnd - crossfadeSeconds)).inBeats()) < 1.0e-6)
-                setClipFade (song, getClipID (clipState), true, crossfadeSeconds);
+                setClipFade (song, clip.id, true, crossfadeSeconds);
         }
 
         if (const auto clip = place (clipStart, clipEnd, clipStart - seconds (take.firstFrame)); clip.isValid())

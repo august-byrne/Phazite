@@ -134,8 +134,7 @@ namespace
 
     bool holdsAudioClips (const Song& song, TrackID track)
     {
-        const auto clips = getClipStates (findTrackState (song, track));
-        return std::any_of (clips.begin(), clips.end(), isAudioState);
+        return hasClips (song, track, ClipValue::Kind::audio);
     }
 
     // Whether a track can hold an instrument: a track of the playlist's that is neither a folder nor a return.
@@ -318,8 +317,7 @@ bool needsInstrument (const Song& song, TrackID track)
     if (! canHoldInstrument (state) || getInstrument (song, track).isValid())
         return false;
 
-    const auto clips = getClipStates (state);
-    return std::any_of (clips.begin(), clips.end(), isMidiState);
+    return hasClips (song, track, ClipValue::Kind::midi);
 }
 
 juce::String getDeviceName (const Song& song, DeviceID id)
@@ -458,7 +456,7 @@ void forgetWhatNamesTheGone (Song& song)
         if (! state.hasProperty (schema::trackPad) || ids.contains (readID (state[schema::trackPadDevice])))
             continue;
 
-        if (getClipStates (state).empty())
+        if (! hasClips (song, getTrackID (state)))
         {
             padTracks.push_back (getTrackID (state));
             continue;

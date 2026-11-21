@@ -14,6 +14,7 @@
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongValues.h"
 #include "model/transport/TempoValues.h"
 
 #include <functional>
@@ -27,6 +28,9 @@ namespace phazite
 // The song's audio clips' elements.
 bool isAudioState (const juce::ValueTree& clipState);
 
+// Whether a clip is an audio clip of the song's.
+bool isAudioClip (const Song&, ClipID);
+
 // The part of its file a clip plays, in seconds of the file as it was recorded, from < to whichever way it plays.
 struct FilePart
 {
@@ -34,6 +38,10 @@ struct FilePart
 };
 
 FilePart getFilePart (const juce::ValueTree& clipState);
+FilePart getFilePart (const ClipValue&);
+
+// A fade of an audio clip's value as the playlist shows it (PlaylistValues.h).
+FadeCurve getFadeCurve (const ClipFade&);
 
 // A new audio clip's element, with an ID of the song's, on no track yet: playing a part of a file from a beat.
 juce::ValueTree makeAudioClipState (Song&, const juce::String& name, const juce::File&, BeatPosition start, FilePart);
@@ -106,7 +114,15 @@ void setClipFadeCurve (Song&, juce::ValueTree clipState, bool fadeIn, FadeCurve)
 engine::FadeCurve toEngineFade (FadeCurve);
 
 //==============================================================================
-// The same by the clip's ID.
+// The same by the clip's ID: of an audio clip of the song's, and for any other clip, or one that isn't there, nothing (an
+// invalid file, 0, no fades, a curve).
+
+juce::File getClipFile (const Song&, ClipID);
+double getClipFileLength (const Song&, ClipID);
+bool followsTempoChanges (const Song&, ClipID);
+juce::File getPlayedFile (const Song&, ClipID);
+PlayedPosition getPlayedPosition (const Song&, ClipID);
+std::pair<double, double> getFittedFades (const Song&, ClipID);
 
 // How the clip plays its file, at the song's tempo where it starts: stretched to that from the clip's own tempo while it
 // follows the song's, pitched, backwards. Unchanged for a clip that plays its file as it is, or one that isn't there.
@@ -133,6 +149,7 @@ struct SecondsRange
 };
 
 SecondsRange getAudioFileRange (const Song&, const juce::ValueTree& clipState);
+SecondsRange getAudioFileRange (const Song&, ClipID); // nothing for a clip that isn't an audio clip of the song's
 
 // The time, in seconds, in the clip's file (getClipFile()) that plays at a song beat as the clip plays it, or would play
 // there if the clip reached it: a time outside the file before and after it. It goes down as the beats go up while the

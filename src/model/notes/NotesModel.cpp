@@ -20,12 +20,15 @@ namespace phazite
 {
 namespace
 {
-    // A MIDI clip's element in the open project's song, or invalid.
-    juce::ValueTree findMidiClip (const ProjectContext& context, ClipID id)
+    // A MIDI clip of the open project's song, or none.
+    std::optional<ClipValue> findMidiClip (const ProjectContext& context, ClipID id)
     {
         auto* song = findSong (context);
-        const auto clipState = song != nullptr ? findClipState (*song, id) : juce::ValueTree();
-        return isMidiState (clipState) ? clipState : juce::ValueTree();
+
+        if (auto value = song != nullptr ? getClipValue (*song, id) : std::nullopt; value.has_value() && value->isMidi())
+            return value;
+
+        return std::nullopt;
     }
 
     // A track of the open project's that can hold notes, in clips (Schema.h: trackKind): a track, not a folder, a return or
@@ -36,18 +39,17 @@ namespace
         return state.hasType (schema::TRACK) && ! isFolderState (state) && ! isReturnState (state);
     }
 
-    NoteClip makeNoteClip (const Song& song, const juce::ValueTree& clipState)
+    NoteClip makeNoteClip (const Song& song, const ClipValue& clip)
     {
-        const auto track = getTrackID (clipState.getParent());
         const auto tracks = getTrackIDs (song);
-        const auto row = (int) (std::find (tracks.begin(), tracks.end(), track) - tracks.begin());
-        return { getClipID (clipState),
-                 track,
-                 getClipName (song, clipState),
-                 getClipRange (clipState),
-                 getContentStart (clipState),
-                 getTrackColour (song, track, row),
-                 getLatestNoteStart (song, getClipID (clipState)) };
+        const auto row = (int) (std::find (tracks.begin(), tracks.end(), clip.track) - tracks.begin());
+        return { clip.id,
+                 clip.track,
+                 getClipName (song, clip),
+                 getClipRange (clip),
+                 getContentStart (clip),
+                 getTrackColour (song, clip.track, row),
+                 getLatestNoteStart (song, clip) };
     }
 } // namespace
 
@@ -57,16 +59,16 @@ std::vector<NoteClip> getNoteClips (const ProjectContext& context, const std::ve
     std::vector<NoteClip> clips;
 
     for (const auto id : ids)
-        if (const auto clipState = findMidiClip (context, id); clipState.isValid())
-            clips.push_back (makeNoteClip (*findSong (context), clipState));
+        if (const auto clip = findMidiClip (context, id))
+            clips.push_back (makeNoteClip (*findSong (context), *clip));
 
     return clips;
 }
 
 std::optional<NoteClip> getNoteClip (const ProjectContext& context, ClipID id)
 {
-    if (const auto clipState = findMidiClip (context, id); clipState.isValid())
-        return makeNoteClip (*findSong (context), clipState);
+    if (const auto clip = findMidiClip (context, id))
+        return makeNoteClip (*findSong (context), *clip);
 
     return {};
 }
@@ -93,19 +95,19 @@ std::optional<ClipID> getMidiClipNearest (const ProjectContext& context, TrackID
     std::optional<ClipID> nearest;
     auto nearestDistance = std::numeric_limits<double>::max();
 
-    for (const auto& clipState : getClipStates (findTrackState (*song, id)))
+    for (const auto& clip : getClipValues (*song, id))
     {
-        if (! isMidiState (clipState))
+        if (! clip.isMidi())
             continue;
 
-        const auto range = getClipRange (clipState);
+        const auto range = getClipRange (clip);
         const auto distance = range.contains (beat)
                                   ? 0.0
                                   : std::min (std::abs ((range.getStart() - beat).inBeats()), std::abs ((range.getEnd() - beat).inBeats()));
 
         if (distance < nearestDistance)
         {
-            nearest = getClipID (clipState);
+            nearest = clip.id;
             nearestDistance = distance;
         }
     }
@@ -169,9 +171,9 @@ std::vector<NoteData> getNotesOfOtherTracks (const ProjectContext& context, cons
         if (std::find (shown.begin(), shown.end(), track) != shown.end())
             continue;
 
-        for (const auto& clipState : getClipStates (findTrackState (*song, track)))
-            if (isMidiState (clipState) && getClipRange (clipState).overlaps (range))
-                for (const auto& note : getClipNotesPlayed (*song, getClipID (clipState)))
+        for (const auto& clip : getClipValues (*song, track))
+            if (clip.isMidi() && getClipRange (clip).overlaps (range))
+                for (const auto& note : getClipNotesPlayed (*song, clip.id))
                     notes.push_back (note);
     }
 
@@ -385,8 +387,8 @@ ClipEnds getClipEnds (const ProjectContext& context, const std::vector<ClipID>& 
     ClipEnds ends;
 
     for (const auto clip : clips)
-        if (const auto clipState = findMidiClip (context, clip); clipState.isValid())
-            ends.emplace_back (clip, getClipRange (clipState).getEnd());
+        if (const auto value = findMidiClip (context, clip))
+            ends.emplace_back (clip, getClipRange (*value).getEnd());
 
     return ends;
 }
@@ -400,13 +402,13 @@ void restoreClipEnds (ProjectContext& context, const ClipEnds& ends)
 
     for (const auto& [clip, end] : ends)
     {
-        const auto clipState = findMidiClip (context, clip);
+        const auto value = findMidiClip (context, clip);
 
-        if (! clipState.isValid())
+        if (! value.has_value())
             continue;
 
-        if (const auto range = getClipRange (clipState); range.getEnd() > end && end > range.getStart())
-            setClipPlace (*song, clipState, range.getStart(), end - range.getStart(), getClipOffset (clipState));
+        if (const auto range = getClipRange (*value); range.getEnd() > end && end > range.getStart())
+            setClipPlace (*song, findClipState (*song, clip), range.getStart(), end - range.getStart(), value->offset);
     }
 }
 
@@ -609,7 +611,7 @@ TrackID auditionNotes (ProjectContext& context, ClipID id, const std::vector<int
     auto* song = findSong (context);
     const auto track = song != nullptr ? getClipTrack (*song, id) : TrackID();
 
-    if (! track.isValid() || ! findMidiClip (context, id).isValid() || ! hasInstrument (*song, track))
+    if (! track.isValid() || ! isMidiClip (*song, id) || ! hasInstrument (*song, track))
         return {};
 
     // Into the track, as live MIDI goes, through Phazite's engine while it plays the project.

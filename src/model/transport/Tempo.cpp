@@ -62,26 +62,24 @@ namespace
             if (doPatternsFollowTempo (song) || juce::approximatelyEqual (scale, 1.0))
                 return;
 
-            std::vector<juce::ValueTree> clips;
+            std::vector<ClipValue> clips;
             std::vector<ClipID> ids;
 
-            for (const auto& clipState : getClipStates (song))
+            for (const auto& clip : getClipValues (song))
             {
-                if (! isAudioState (clipState))
+                if (clip.isMidi())
                 {
-                    clips.push_back (clipState);
-                    ids.push_back (getClipID (clipState));
+                    clips.push_back (clip);
+                    ids.push_back (clip.id);
                 }
             }
 
             // Their notes, each alias group's once (Notes.h); then each clip's own length and offset.
             scaleClipContent (song, ids, scale);
 
-            for (auto& clipState : clips)
-            {
-                const auto range = getClipRange (clipState);
-                setClipPlace (song, clipState, range.getStart(), range.getLength() * scale, getClipOffset (clipState) * scale);
-            }
+            for (const auto& clip : clips)
+                setClipPlace (song, findClipState (song, clip.id), clip.start, getClipRange (clip).getLength() * scale,
+                              clip.offset * scale);
         }
 
     private:
@@ -512,13 +510,14 @@ TempoStretch getTempoStretch (const Song& song)
     TempoStretch stretch;
     stretch.patternsFollow = doPatternsFollowTempo (song);
 
-    for (const auto& clipState : getClipStates (song))
+    // Each clip's kind alone, and an audio clip's tempo: four times a second while the tempo's panel shows.
+    for (const auto& clip : getClipPlacements (song))
     {
-        if (isAudioState (clipState))
+        if (clip.isAudio())
         {
             ++stretch.samples;
 
-            if ((double) clipState.getProperty (schema::clipTempo, 0.0) > 0.0)
+            if (getClipTempo (song, clip.id) > 0.0)
                 ++stretch.samplesFollowing;
         }
         else

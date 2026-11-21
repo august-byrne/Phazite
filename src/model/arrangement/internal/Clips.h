@@ -9,6 +9,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/SongValues.h"
 
 #include <optional>
 #include <vector>
@@ -16,7 +17,68 @@
 namespace phazite
 {
 //==============================================================================
-// The song's clips' elements.
+// The song's clips by their IDs, as plain values (model/base/internal/SongValues.h: ClipValue): how what reads a clip
+// outside the clips' own code reads it, whatever stores it (the song's tree for now, read with readClipValue()).
+
+// A clip's value: none for a clip that isn't the song's (gone).
+std::optional<ClipValue> getClipValue (const Song&, ClipID);
+
+// A track's clips' values, in the order the track holds them (none for a track that isn't there, or holds no clips); and
+// every clip's of the song, track by track.
+std::vector<ClipValue> getClipValues (const Song&, TrackID);
+std::vector<ClipValue> getClipValues (const Song&);
+
+// Every clip of the song, track by track, each track's in its order.
+std::vector<ClipID> getAllClips (const Song&);
+
+// Whether a track holds any clip; any clip of a kind.
+bool hasClips (const Song&, TrackID);
+bool hasClips (const Song&, TrackID, ClipValue::Kind);
+
+// Whether a clip is a MIDI clip of the song's (an audio clip's: AudioClips.h, isAudioClip()).
+bool isMidiClip (const Song&, ClipID);
+
+// Where a MIDI clip's notes count from: its start, less its offset.
+BeatPosition getContentStart (const ClipValue&);
+BeatPosition getContentStart (const Song&, ClipID);
+
+// Where a clip is: a MIDI clip's as its value holds it (an audio clip's start alone: its length follows from its part).
+BeatRange getClipRange (const ClipValue&);
+
+// Where a clip of the song is, given its value as the song holds it now (else an assertion in Debug): a MIDI clip's from the
+// value, an audio clip's read from the live clip by its ID, for as long as the part of its file it plays takes at the tempo
+// there (which a value alone can't say yet: AudioClips.cpp works it out from the clip's element). For a value that isn't the
+// song's (changed, or a copy's), getClipRange (const ClipValue&) is a MIDI clip's.
+BeatRange getLiveClipRange (const Song&, const ClipValue&);
+
+// Where a clip is on its track, without the rest of its value: its ID, its kind, its start, and a MIDI clip's length and
+// offset (an audio clip's length is 0, as its value's is), for what walks many clips often. A track's clips', in its order,
+// and every clip's of the song, track by track; and where one is in the song, an audio clip's read from it by its ID.
+struct ClipPlacement
+{
+    ClipID id;
+    ClipValue::Kind kind = ClipValue::Kind::midi;
+    BeatPosition start;
+    BeatDuration length, offset;
+
+    bool isAudio() const noexcept { return kind == ClipValue::Kind::audio; }
+};
+
+std::vector<ClipPlacement> getClipPlacements (const Song&, TrackID);
+std::vector<ClipPlacement> getClipPlacements (const Song&);
+BeatRange getClipRange (const Song&, const ClipPlacement&);
+
+// The clips of a clip's alias group (Schema.h: clipLink), the clip itself first, then the others in the song's order; only
+// the clip if it is in none, and none for a clip that isn't the song's.
+std::vector<ClipID> getAliasClips (const Song&, ClipID);
+
+// A clip's name: its own, or else its track's, whatever the track is called now.
+juce::String getClipName (const Song&, ClipID);
+juce::String getClipName (const Song&, const ClipValue&);
+
+//==============================================================================
+// The song's clips' elements, which the clips' own code reads and writes, and what writes a clip outside it still writes
+// (roadmap step S5.20 moves those writes into the clips' code).
 
 // A clip's element: invalid for a clip that isn't the song's (gone).
 juce::ValueTree findClipState (const Song&, ClipID);

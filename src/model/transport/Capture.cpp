@@ -245,9 +245,9 @@ namespace
         {
             moved = false;
 
-            for (const auto& clipState : getClipStates (findTrackState (song, track)))
+            for (const auto& clip : getClipValues (song, track))
             {
-                const auto range = getClipRange (song, clipState);
+                const auto range = getLiveClipRange (song, clip);
                 const auto end = range.getEnd().inBeats();
 
                 if (range.getStart().inBeats() < bar + length && end > bar)

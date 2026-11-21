@@ -1081,6 +1081,47 @@ TEST_CASE ("While recording round a looped range, the input shows this time roun
     }
 }
 
+TEST_CASE ("A take punched in over an audio clip cross-fades with it: what was there fades out as the take fades in, and in as "
+           "it fades out")
+{
+    // Placed as the recorder places a take as it stops (placeTake()), without the audio device that records one.
+    auto song = phazite::createSong();
+    const auto track = phazite::getTrackIDs (*song).front();
+    const phazite::test::TemporaryFolder temporary;
+    const auto earlier = phazite::test::addAudioClip (
+        *song, track, "Earlier", phazite::test::writeSound (temporary.folder.getChildFile ("Earlier.wav"), 4.0), 0.0, 4.0);
+
+    // Recorded from the song's start for 4 seconds, punched in from 1 to 2.
+    const auto second = (std::int64_t) 48000;
+    phazite::TakePlace take;
+    take.sampleRate = (double) second;
+    take.frames = take.stop = 4 * second;
+    take.punch = juce::Range<std::int64_t> (second, 2 * second);
+    const auto file = phazite::test::writeSound (temporary.folder.getChildFile ("Take.wav"), 4.0);
+    REQUIRE (phazite::placeTake (*song, track, file, take).size() == 1);
+
+    // The earlier clip cut in two round the take, and the take, which reaches half a crossfade past each edge of the range.
+    const auto clips = phazite::getClips (*song, track);
+    REQUIRE (clips.size() == 3);
+    const auto valueOf = [&song] (phazite::ClipID clip) { return *phazite::getClipValue (*song, clip); };
+    const auto before = valueOf (earlier), after = valueOf (clips[1]), taken = valueOf (clips[2]);
+    REQUIRE (taken.sound.file.contains ("Take"));
+    const auto seconds = [&song] (phazite::BeatPosition beat) { return phazite::toSeconds (*song, beat); };
+    const auto crossfade = 0.01;
+
+    CHECK (seconds (phazite::getClipRange (*song, earlier).getEnd()) == doctest::Approx (1.0 + crossfade / 2.0));
+    CHECK (before.fadeOut.seconds == doctest::Approx (crossfade)); // under the take's fade-in, not cut off at full level
+    CHECK (juce::exactlyEqual (before.fadeIn.seconds, 0.0));
+
+    CHECK (seconds (taken.start) == doctest::Approx (1.0 - crossfade / 2.0));
+    CHECK (taken.fadeIn.seconds == doctest::Approx (crossfade));
+    CHECK (taken.fadeOut.seconds == doctest::Approx (crossfade));
+
+    CHECK (seconds (after.start) == doctest::Approx (2.0 - crossfade / 2.0));
+    CHECK (after.fadeIn.seconds == doctest::Approx (crossfade));
+    CHECK (juce::exactlyEqual (after.fadeOut.seconds, 0.0));
+}
+
 TEST_CASE ("An input recorded on a new track adds a track called Audio after the selected one, armed with it, as one undo step")
 {
     TestSong song;

@@ -40,19 +40,16 @@ namespace
         std::map<juce::File, Recipe> needed;
         std::set<juce::String> asked;
 
-        for (const auto& clipState : getClipStates (song))
+        for (const auto clip : getAudioClips (song))
         {
-            if (! isAudioState (clipState))
-                continue;
-
-            if (const auto settings = getClipStretch (song, clipState); ! stretch::isUnchanged (settings))
+            if (const auto settings = getClipStretch (song, clip); ! stretch::isUnchanged (settings))
             {
-                const auto source = getClipFile (song, clipState);
+                const auto source = getClipFile (song, clip);
 
                 if (askSources && asked.insert (source.getFullPathName()).second)
                     askFileIdentity (source);
 
-                needed.emplace (getPlayedFile (song, clipState), Recipe { source, settings });
+                needed.emplace (getPlayedFile (song, clip), Recipe { source, settings });
             }
         }
 
@@ -341,7 +338,7 @@ void ClipRenders::findFailedClips()
 
     if (! failed.empty())
         for (const auto clip : getAudioClips (song))
-            if (isRendered (song, clip) && hasFailed (getPlayedFile (song, findClipState (song, clip))))
+            if (isRendered (song, clip) && hasFailed (getPlayedFile (song, clip)))
                 clips.push_back (clip);
 
     failedClips = std::move (clips);

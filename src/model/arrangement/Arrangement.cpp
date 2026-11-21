@@ -15,17 +15,6 @@ namespace
     // Positions this close count as the same: rounding between beats and seconds leaves differences this small.
     const auto tinyBeats = BeatDuration::fromBeats (1.0e-6);
 
-    // Every clip of the song, track by track.
-    std::vector<ClipID> getAllClips (const Song& song)
-    {
-        std::vector<ClipID> clips;
-
-        for (const auto& clipState : getClipStates (song))
-            clips.push_back (getClipID (clipState));
-
-        return clips;
-    }
-
     void splitContentAt (Song& song, BeatPosition beat)
     {
         splitClips (song, getAllClips (song), beat);
@@ -34,8 +23,8 @@ namespace
     // Moves a clip of the song later on its track (earlier if negative), playing what it did.
     void moveLater (Song& song, ClipID clip, BeatDuration beats)
     {
-        if (auto clipState = findClipState (song, clip); clipState.isValid())
-            moveClipState (song, clipState, getClipRange (clipState).getStart() + beats);
+        if (const auto value = getClipValue (song, clip))
+            moveClipState (song, findClipState (song, clip), value->start + beats);
     }
 } // namespace
 
@@ -50,7 +39,7 @@ void insertTime (Song& song, BeatPosition at, BeatDuration length)
     splitContentAt (song, at);
 
     for (const auto clip : getAllClips (song))
-        if (getClipRange (findClipState (song, clip)).getStart() >= at - tinyBeats)
+        if (const auto value = getClipValue (song, clip); value.has_value() && value->start >= at - tinyBeats)
             moveLater (song, clip, length);
 
     insertAutomationTime (song, at, length);
@@ -123,9 +112,9 @@ void moveTime (Song& song, BeatRange range, BeatPosition destination)
 
     std::vector<ClipMove> moves;
 
-    for (const auto& clipState : getClipStates (song))
-        if (const auto beat = getClipRange (clipState).getStart(); isInChanged (beat))
-            moves.push_back ({ getClipID (clipState), getTrackID (clipState.getParent()), newPosition (beat) });
+    for (const auto& clip : getClipValues (song))
+        if (isInChanged (clip.start))
+            moves.push_back ({ clip.id, clip.track, newPosition (clip.start) });
 
     // Automation keeps its shape where the edges are; the points in the stretch are put back where their beats go.
     addAutomationEdges (song, { start, end, destination });
@@ -166,10 +155,10 @@ void copyTime (Song& song, BeatRange range, BeatPosition destination, bool asAli
 
     std::vector<Source> sources;
 
-    for (const auto& clipState : getClipStates (song))
-        if (const auto clipRange = getClipRange (song, clipState);
+    for (const auto& clip : getClipValues (song))
+        if (const auto clipRange = getLiveClipRange (song, clip);
             clipRange.getStart() >= start - tinyBeats && clipRange.getEnd() <= end + tinyBeats)
-            sources.push_back ({ getClipID (clipState), getTrackID (clipState.getParent()), clipRange.getStart() - start });
+            sources.push_back ({ clip.id, clip.track, clipRange.getStart() - start });
 
     addAutomationEdges (song, { start, end, destination });
     auto points = getAutomationPointsIn (song, range);

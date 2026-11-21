@@ -499,6 +499,62 @@ engine::FadeCurve toEngineFade (FadeCurve curve)
 }
 
 //==============================================================================
+bool isAudioClip (const Song& song, ClipID clip)
+{
+    return findAudioState (song, clip).isValid();
+}
+
+FilePart getFilePart (const ClipValue& clip)
+{
+    return { clip.fileStart, clip.fileEnd };
+}
+
+FadeCurve getFadeCurve (const ClipFade& fade)
+{
+    return { fade.sCurve ? FadeShape::sCurve : FadeShape::curve, juce::jlimit (-1.0f, 1.0f, fade.bend) };
+}
+
+juce::File getClipFile (const Song& song, ClipID clip)
+{
+    const auto clipState = findAudioState (song, clip);
+    return clipState.isValid() ? getClipFile (song, clipState) : juce::File();
+}
+
+double getClipFileLength (const Song& song, ClipID clip)
+{
+    const auto clipState = findAudioState (song, clip);
+    return clipState.isValid() ? getClipFileLength (song, clipState) : 0.0;
+}
+
+bool followsTempoChanges (const Song& song, ClipID clip)
+{
+    return followsTempoChanges (song, findAudioState (song, clip));
+}
+
+juce::File getPlayedFile (const Song& song, ClipID clip)
+{
+    const auto clipState = findAudioState (song, clip);
+    return clipState.isValid() ? getPlayedFile (song, clipState) : juce::File();
+}
+
+PlayedPosition getPlayedPosition (const Song& song, ClipID clip)
+{
+    const auto clipState = findAudioState (song, clip);
+    return clipState.isValid() ? getPlayedPosition (song, clipState) : PlayedPosition();
+}
+
+std::pair<double, double> getFittedFades (const Song& song, ClipID clip)
+{
+    const auto clipState = findAudioState (song, clip);
+    return clipState.isValid() ? getFittedFades (song, clipState) : std::pair<double, double>();
+}
+
+SecondsRange getAudioFileRange (const Song& song, ClipID clip)
+{
+    const auto clipState = findAudioState (song, clip);
+    return clipState.isValid() ? getAudioFileRange (song, clipState) : SecondsRange();
+}
+
 stretch::Settings getClipStretch (const Song& song, ClipID clip)
 {
     if (const auto clipState = findAudioState (song, clip); clipState.isValid())

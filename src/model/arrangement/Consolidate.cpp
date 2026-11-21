@@ -22,27 +22,27 @@ namespace
     }
 
     // The clips of a track that play in a range: not muted, and overlapping it.
-    std::vector<juce::ValueTree> getPlayingIn (const Song& song, TrackID track, BeatRange range)
+    std::vector<ClipValue> getPlayingIn (const Song& song, TrackID track, BeatRange range)
     {
-        std::vector<juce::ValueTree> playing;
+        std::vector<ClipValue> playing;
 
-        for (const auto& clipState : getClipStates (findTrackState (song, track)))
-            if (! (bool) clipState[schema::clipMute] && overlaps (getClipRange (song, clipState), range))
-                playing.push_back (clipState);
+        for (const auto& clip : getClipValues (song, track))
+            if (! clip.muted && overlaps (getLiveClipRange (song, clip), range))
+                playing.push_back (clip);
 
         return playing;
     }
 
     // The name every one of the clips is given, or none.
-    juce::String getSharedName (const std::vector<juce::ValueTree>& clips)
+    juce::String getSharedName (const std::vector<ClipValue>& clips)
     {
         if (clips.empty())
             return {};
 
-        const auto name = clips.front()[schema::clipName].toString();
+        const auto& name = clips.front().name;
 
-        for (const auto& clipState : clips)
-            if (clipState[schema::clipName].toString() != name)
+        for (const auto& clip : clips)
+            if (clip.name != name)
                 return {};
 
         return name;
@@ -85,8 +85,8 @@ std::vector<ConsolidatePart> getConsolidateParts (const Song& song, const Select
 
         ConsolidatePart part { track, found->second };
 
-        for (const auto& clipState : getPlayingIn (song, track, part.range))
-            (isAudioState (clipState) ? part.audio : part.midi) = true;
+        for (const auto& clip : getPlayingIn (song, track, part.range))
+            (clip.isAudio() ? part.audio : part.midi) = true;
 
         if (part.audio || part.midi)
             parts.push_back (part);
@@ -99,25 +99,25 @@ std::vector<ClipID> consolidatePart (Song& song, const ConsolidatePart& part, co
 {
     std::vector<ClipID> made;
     const auto playing = getPlayingIn (song, part.track, part.range);
-    std::vector<juce::ValueTree> midiClips, audioClips;
+    std::vector<ClipValue> midiClips, audioClips;
 
-    for (const auto& clipState : playing)
-        (isAudioState (clipState) ? audioClips : midiClips).push_back (clipState);
+    for (const auto& clip : playing)
+        (clip.isAudio() ? audioClips : midiClips).push_back (clip);
 
     // What the MIDI clips play in the range, before they go: each note as it plays, cut at its clip's and the range's edges,
     // and the controller events (a sustain pedal, the pitch wheel) there, counted from the range's start.
     std::vector<NoteData> notes;
     std::vector<ControlValue> controls; // at their song beats, where the joined clip plays them
 
-    for (const auto& clipState : midiClips)
+    for (const auto& clip : midiClips)
     {
-        const auto clipRange = getClipRange (song, clipState);
+        const auto clipRange = getLiveClipRange (song, clip);
         // The range's own function, not a BeatRange made of std::max() and std::min() of what two getters return: the
         // MSVC of CI's Windows release build made that one empty (its end the range's start), and the joined clip lost
         // its notes there and nowhere else (known bug 204).
         const auto played = clipRange.getIntersectionWith (part.range);
 
-        for (auto note : getClipNotes (song, getClipID (clipState)))
+        for (auto note : getClipNotes (song, clip.id))
         {
             const auto from = std::max (note.start, played.getStart()), to = std::min (note.getEnd(), played.getEnd());
 
@@ -130,14 +130,14 @@ std::vector<ClipID> consolidatePart (Song& song, const ConsolidatePart& part, co
             notes.push_back (note);
         }
 
-        for (const auto& control : getClipControls (song, getClipID (clipState)))
+        for (const auto& control : getClipControls (song, clip.id))
             if (control.beat >= played.getStart() && control.beat < played.getEnd())
                 controls.push_back (control);
     }
 
     const auto midiName = getSharedName (midiClips), audioName = getSharedName (audioClips);
-    const auto allFollow = std::all_of (audioClips.begin(), audioClips.end(), [&song] (const juce::ValueTree& clipState)
-                                        { return getClipTempo (song, getClipID (clipState)) > 0.0; });
+    const auto allFollow =
+        std::all_of (audioClips.begin(), audioClips.end(), [] (const ClipValue& clip) { return clip.sound.tempo > 0.0; });
 
     // Everything there goes, and the joined clips take its place.
     clearClipsIn (song, part.track, part.range);

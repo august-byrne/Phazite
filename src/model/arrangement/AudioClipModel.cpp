@@ -23,12 +23,22 @@ namespace phazite
 {
 namespace
 {
-    // An audio clip's element in the open project's song, or invalid.
-    juce::ValueTree findAudioClip (const ProjectContext& context, ClipID id)
+    // An audio clip of the open project's song, or none.
+    std::optional<ClipValue> findAudioClip (const ProjectContext& context, ClipID id)
     {
         auto* song = findSong (context);
-        const auto clipState = song != nullptr ? findClipState (*song, id) : juce::ValueTree();
-        return isAudioState (clipState) ? clipState : juce::ValueTree();
+
+        if (auto clip = song != nullptr ? getClipValue (*song, id) : std::nullopt; clip.has_value() && clip->isAudio())
+            return clip;
+
+        return std::nullopt;
+    }
+
+    // Whether a clip is an audio clip of the open project's song.
+    bool isAudio (const ProjectContext& context, ClipID id)
+    {
+        auto* song = findSong (context);
+        return song != nullptr && isAudioClip (*song, id);
     }
 
     // A track that can hold clips of either kind (not a folder or the master), or invalid.
@@ -39,17 +49,11 @@ namespace
         return state.hasType (schema::TRACK) && ! isFolderState (state) ? state : juce::ValueTree();
     }
 
-    bool holdsAudio (const juce::ValueTree& trackState)
-    {
-        const auto clips = getClipStates (trackState);
-        return std::any_of (clips.begin(), clips.end(), isAudioState);
-    }
-
     // A change to an audio clip, as an undo step of its own with that name.
     template <typename Change>
     void changeClip (ProjectContext& context, ClipID id, const juce::String& name, Change&& change)
     {
-        if (findAudioClip (context, id).isValid())
+        if (isAudio (context, id))
         {
             auto& song = *findSong (context);
             const UndoStep step (song, name);
@@ -74,12 +78,11 @@ namespace
 
         for (const auto clip : clips)
         {
-            const auto clipState = findAudioClip (context, clip);
+            const auto value = findAudioClip (context, clip);
 
-            if (clipState.isValid()
-                && std::none_of (taken.begin(), taken.end(), [clip] (const ClipTaken& each) { return each.id == clip; }))
-                taken.push_back ({ clip, getClipFile (*findSong (context), clipState), getFilePart (clipState),
-                                   getClipGain (*findSong (context), clip), getClipFileLength (*findSong (context), clipState) });
+            if (value.has_value() && std::none_of (taken.begin(), taken.end(), [clip] (const ClipTaken& each) { return each.id == clip; }))
+                taken.push_back ({ clip, getClipFile (*findSong (context), clip), getFilePart (*value), value->gain,
+                                   getClipFileLength (*findSong (context), clip) });
         }
 
         return taken;
@@ -92,16 +95,16 @@ namespace
         return std::all_of (clips.begin(), clips.end(),
                             [&context, asIt] (const ClipTaken& taken)
                             {
-                                const auto clipState = findAudioClip (context, taken.id);
+                                const auto value = findAudioClip (context, taken.id);
 
-                                if (! clipState.isValid() || getClipFile (*findSong (context), clipState) != taken.file)
+                                if (! value.has_value() || getClipFile (*findSong (context), taken.id) != taken.file)
                                     return false;
 
-                                const auto part = getFilePart (clipState);
+                                const auto part = getFilePart (*value);
                                 return ! asIt
                                        || (juce::exactlyEqual (part.start, taken.part.start)
                                            && juce::exactlyEqual (part.end, taken.part.end)
-                                           && juce::exactlyEqual (getClipGain (*findSong (context), taken.id), taken.gain));
+                                           && juce::exactlyEqual (value->gain, taken.gain));
                             });
     }
 
@@ -258,10 +261,9 @@ namespace
 
 std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID id)
 {
-    const auto clipState = findAudioClip (context, id);
     const auto shown = getClip (context, id);
 
-    if (! clipState.isValid() || ! shown.has_value())
+    if (! isAudio (context, id) || ! shown.has_value())
         return {};
 
     const auto& song = *findSong (context);
@@ -269,14 +271,14 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
     info.clip = *shown;
 
     // The file as it was recorded, not the render that plays it stretched, pitched or reversed.
-    const auto original = getClipFile (song, clipState);
+    const auto original = getClipFile (song, id);
     const auto file = getAudioFileInfo (original);
     info.fileName = original.getFileName();
     info.sampleRate = file.sampleRate;
     info.channels = file.numChannels;
     info.seconds = file.getSeconds();
 
-    const auto audio = getAudioFileRange (song, clipState);
+    const auto audio = getAudioFileRange (song, id);
     info.content = { toBeats (song, audio.start), toBeats (song, audio.end) };
 
     info.gain = getClipGain (song, id);
@@ -290,7 +292,7 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
     {
         info.state = AudioState::missing;
     }
-    else if (const auto played = getPlayedFile (song, clipState); isRendered (song, id) && ! getAudioFileInfo (played).isValid())
+    else if (const auto played = getPlayedFile (song, id); isRendered (song, id) && ! getAudioFileInfo (played).isValid())
     {
         const auto* renders = getClipRenders (context);
         info.state = renders != nullptr && renders->hasFailed (played) ? AudioState::failed : AudioState::preparing;
@@ -301,28 +303,26 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
 
 std::optional<ClipID> getAudioClipNearest (const ProjectContext& context, TrackID id, BeatPosition beat)
 {
-    const auto track = findTrack (context, id);
-
-    if (! track.isValid())
+    if (! findTrack (context, id).isValid())
         return {};
 
     const auto& song = *findSong (context);
     std::optional<ClipID> nearest;
     auto nearestDistance = std::numeric_limits<double>::max();
 
-    for (const auto& clipState : getClipStates (track))
+    for (const auto& clip : getClipValues (song, id))
     {
-        if (! isAudioState (clipState))
+        if (! clip.isAudio())
             continue;
 
-        const auto range = getClipRange (song, clipState);
+        const auto range = getLiveClipRange (song, clip);
         const auto distance = range.contains (beat)
                                   ? 0.0
                                   : std::min (std::abs ((range.getStart() - beat).inBeats()), std::abs ((range.getEnd() - beat).inBeats()));
 
         if (distance < nearestDistance)
         {
-            nearest = getClipID (clipState);
+            nearest = clip.id;
             nearestDistance = distance;
         }
     }
@@ -350,8 +350,8 @@ std::optional<ClipType> getClipTypeToEdit (const ProjectContext& context)
         return type;
 
     if (const auto tracks = selection.getTracks(); ! tracks.empty())
-        if (const auto track = findTrack (context, tracks.front()); track.isValid())
-            return holdsAudio (track) ? ClipType::audio : ClipType::midi;
+        if (findTrack (context, tracks.front()).isValid())
+            return hasClips (*findSong (context), tracks.front(), ClipValue::Kind::audio) ? ClipType::audio : ClipType::midi;
 
     return {};
 }
@@ -431,21 +431,20 @@ void setClipTempo (ProjectContext& context, ClipID id, double bpm)
 //==============================================================================
 std::vector<WarpMarker> getWarpMarkers (const ProjectContext& context, ClipID id)
 {
-    return findAudioClip (context, id).isValid() ? getWarpMarkers (*findSong (context), id) : std::vector<WarpMarker>();
+    return isAudio (context, id) ? getWarpMarkers (*findSong (context), id) : std::vector<WarpMarker>();
 }
 
 double getAudioTimeAt (const ProjectContext& context, ClipID id, BeatPosition beat)
 {
-    return findAudioClip (context, id).isValid() ? getFileTimeAt (*findSong (context), id, beat) : 0.0;
+    return isAudio (context, id) ? getFileTimeAt (*findSong (context), id, beat) : 0.0;
 }
 
 bool addWarpMarker (ProjectContext& context, ClipID id, double time)
 {
-    const auto clipState = findAudioClip (context, id);
     auto* song = findSong (context);
 
     // None where it can't be, so that no empty step is left.
-    if (! clipState.isValid() || time < 0.0 || time > getClipFileLength (*song, clipState))
+    if (! isAudio (context, id) || time < 0.0 || time > getClipFileLength (*song, id))
         return false;
 
     for (const auto& marker : getWarpMarkers (*song, id))
@@ -475,13 +474,11 @@ void removeWarpMarkers (ProjectContext& context, ClipID id)
 
 std::optional<std::vector<WarpMarker>> getTransients (const ProjectContext& context, ClipID id)
 {
-    const auto clipState = findAudioClip (context, id);
-
-    if (! clipState.isValid())
+    if (! isAudio (context, id))
         return std::vector<WarpMarker>();
 
     const auto& song = *findSong (context);
-    const auto hits = getTransientFinder (context).find (getClipFile (song, clipState));
+    const auto hits = getTransientFinder (context).find (getClipFile (song, id));
 
     if (! hits.has_value())
         return std::nullopt;
@@ -533,7 +530,7 @@ std::map<ClipID, double> getClipsBeingRendered (const ProjectContext& context)
 
     for (const auto clip : getAudioClips (*song))
         if (isRendered (*song, clip))
-            if (const auto progress = renders->getProgressOf (getPlayedFile (*song, findClipState (*song, clip))))
+            if (const auto progress = renders->getProgressOf (getPlayedFile (*song, clip)))
                 clips[clip] = *progress;
 
     return clips;
