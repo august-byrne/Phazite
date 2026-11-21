@@ -332,16 +332,26 @@ TEST_CASE ("Song values: the same value, and an equal one")
     CHECK (ClipNotes().isSameAs (ClipNotes()));
 }
 
-TEST_CASE ("Song values: a property a note's element hasn't reads as it always has")
+TEST_CASE ("Song values: a property a note's element hasn't reads as what its description gives for a value that is no number")
 {
+    // A value always holds each: a pitch of 60, a start at the clip's own, a length of a beat, a velocity of 100
+    // (model/base/internal/Schema.h), where the element read as 0 while the tree held the notes.
     juce::ValueTree note (schema::NOTE);
     note.setProperty (schema::noteID, 7, nullptr);
     const auto values = phazite::readNoteValues (note);
     CHECK (values.id == NoteID::fromRaw (7));
-    CHECK (values.pitch == 0);
+    CHECK (values.pitch == 60);
     CHECK (values.start == phazite::BeatPosition());
-    CHECK (values.length == phazite::BeatDuration());
-    CHECK (values.velocity == 0);
+    CHECK (values.length == phazite::BeatDuration::fromBeats (1.0));
+    CHECK (values.velocity == 100);
+
+    // And one outside its range within it.
+    note.setProperty (schema::noteVelocity, 0, nullptr);
+    note.setProperty (schema::notePitch, 200, nullptr);
+    CHECK (phazite::readNoteValues (note).velocity == 1);
+    CHECK (phazite::readNoteValues (note).pitch == 127);
+    note.removeProperty (schema::noteVelocity, nullptr);
+    note.removeProperty (schema::notePitch, nullptr);
     CHECK_FALSE (values.muted);
     CHECK (values.channel == 1);
 
@@ -353,6 +363,8 @@ TEST_CASE ("Song values: a property a note's element hasn't reads as it always h
     CHECK (phazite::setNoteProperty (chosen, schema::notePitch, 64));
     CHECK (phazite::setNoteProperty (chosen, schema::noteMute, true));
     CHECK (phazite::setNoteProperty (chosen, schema::noteChannel, juce::var()));
+    CHECK (phazite::setNoteProperty (chosen, schema::noteVelocity, juce::var()));
+    CHECK (chosen.velocity == 100);
     CHECK (chosen.pitch == 64);
     CHECK (chosen.muted);
     CHECK (chosen.channel == 1);

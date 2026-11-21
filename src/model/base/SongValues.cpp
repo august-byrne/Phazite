@@ -620,13 +620,36 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    // A number of a note's element as its value holds it: the property's own, kept within what its description gives
+    // (model/base/internal/Schema.h), and where the element has none, what the description gives for one that is no number
+    // (a velocity of 100, a pitch of 60, a length of a beat). In the tree a note without a velocity stayed without one; a
+    // value always has one, which the loader left to this (a file from others: tests/FuzzTests.cpp found one).
+    double readDescribed (const juce::var& held, const schema::PropertyDescription& property)
+    {
+        const auto& range = property.getRange();
+
+        if (held.isVoid())
+            return range.has_value() ? range->fallback.value_or (0.0) : 0.0;
+
+        const auto number = (double) held;
+        return range.has_value() ? juce::jlimit (range->low, range->high, number) : number;
+    }
+
+    double readDescribed (const juce::ValueTree& element, const schema::PropertyDescription& property)
+    {
+        return readDescribed (element[property], property);
+    }
+} // namespace
+
 NoteValues readNoteValues (const juce::ValueTree& note)
 {
     return { NoteID::fromRaw ((std::uint64_t) std::max<juce::int64> (0, (juce::int64) note[schema::noteID])),
-             (int) note[schema::notePitch],
-             BeatPosition::fromBeats ((double) note[schema::noteStart]),
-             BeatDuration::fromBeats ((double) note[schema::noteLength]),
-             (int) note[schema::noteVelocity],
+             (int) readDescribed (note, schema::notePitch),
+             BeatPosition::fromBeats (readDescribed (note, schema::noteStart)),
+             BeatDuration::fromBeats (readDescribed (note, schema::noteLength)),
+             (int) readDescribed (note, schema::noteVelocity),
              (bool) note[schema::noteMute],
              (bool) note[schema::noteSlide],
              (bool) note[schema::notePortamento],
@@ -668,13 +691,13 @@ bool setNoteProperty (NoteValues& note, const juce::Identifier& property, const 
     if (property == schema::noteID)
         note.id = NoteID::fromRaw ((std::uint64_t) std::max<juce::int64> (0, (juce::int64) value));
     else if (property == schema::notePitch)
-        note.pitch = (int) value;
+        note.pitch = (int) readDescribed (value, schema::notePitch);
     else if (property == schema::noteStart)
-        note.start = BeatPosition::fromBeats ((double) value);
+        note.start = BeatPosition::fromBeats (readDescribed (value, schema::noteStart));
     else if (property == schema::noteLength)
-        note.length = BeatDuration::fromBeats ((double) value);
+        note.length = BeatDuration::fromBeats (readDescribed (value, schema::noteLength));
     else if (property == schema::noteVelocity)
-        note.velocity = (int) value;
+        note.velocity = (int) readDescribed (value, schema::noteVelocity);
     else if (property == schema::noteMute)
         note.muted = (bool) value;
     else if (property == schema::noteSlide)

@@ -199,6 +199,39 @@ TEST_CASE ("A note's and a controller's MIDI channel open within 1 to 16, one in
     CHECK ((int) channels[3] == 9);
 }
 
+TEST_CASE ("A note that lacks a pitch, a start, a length or a velocity opens with the one its description gives")
+{
+    // A file from others can hold a note without a property Phazite always writes. In the tree such a note stayed
+    // without it, and read as 0; a clip's notes are a value now (model/base/internal/SongValues.h), which always holds
+    // each, so the note opens with what the description gives for a value that is no number: a velocity of 100, a
+    // pitch of 60, a length of a beat, a start at its clip's own. CI's fuzzer found a velocity of 0 written back.
+    for (const auto* missing : { "pitch", "start", "length", "velocity" })
+    {
+        CAPTURE (missing);
+        Edited edited;
+        const auto project = edited.open (
+            [missing] (juce::XmlElement& song)
+            {
+                auto* clip = Edited::findTrack (song, "Lead")->getChildByName ("CLIP");
+                REQUIRE (clip != nullptr);
+                auto* note = clip->getChildByName ("NOTE");
+                REQUIRE (note != nullptr);
+                REQUIRE (note->hasAttribute (missing));
+                note->removeAttribute (missing);
+            });
+        REQUIRE (project != nullptr);
+        checkSong (project->getSong());
+
+        const auto notes = findAll (phazite::test::copyWholeSong (project->getSong()), schema::NOTE);
+        REQUIRE_FALSE (notes.empty());
+        const auto& note = notes[0];
+        const juce::String name (missing);
+        const auto expected = name == "pitch" ? 60.0 : name == "start" ? 0.0 : name == "length" ? 1.0 : 100.0;
+        REQUIRE (note.hasProperty (juce::Identifier (name)));
+        CHECK ((double) note[juce::Identifier (name)] == doctest::Approx (expected));
+    }
+}
+
 TEST_CASE ("A clip where no track holds clips, and a note outside a MIDI clip, are left out")
 {
     Edited edited;
