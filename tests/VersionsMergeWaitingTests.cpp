@@ -1920,7 +1920,7 @@ TEST_CASE ("A note's conflict in an alias group is listed once, and each choice 
 
     checkHoldsTogether (38);
 
-    for (const auto [value, pitch] : { std::pair { 2, 41 }, std::pair { 0, 36 }, std::pair { 1, 38 }, std::pair { 2, 41 } })
+    for (const auto& [value, pitch] : { std::pair { 2, 41 }, std::pair { 0, 36 }, std::pair { 1, 38 }, std::pair { 2, 41 } })
     {
         INFO ("chosen " << value);
         REQUIRE (phazite::chooseClash (s.context, 0, value));

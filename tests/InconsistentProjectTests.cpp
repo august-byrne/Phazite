@@ -1771,7 +1771,7 @@ TEST_CASE ("An alias group that holds together opens as it was written, with its
     REQUIRE (project != nullptr);
     auto& song = project->getSong();
 
-    for (const std::uint64_t id : { 800001, 800002, 800003 })
+    for (const auto id : { std::uint64_t { 800001 }, std::uint64_t { 800002 }, std::uint64_t { 800003 } })
     {
         INFO ("clip " << id);
         CHECK (getLink (song, id) == "800010");

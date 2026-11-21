@@ -308,7 +308,7 @@ private:
     void apply (Kind made) { kind = made; }
     void apply (const ParameterNames&) { byParameters = true; }
 
-    void apply (const Uncounted& made)
+    void apply ([[maybe_unused]] const Uncounted& made)
     {
         jassert (made.list.empty()); // an element is uncounted as a whole, wherever it goes
         counted = false;
