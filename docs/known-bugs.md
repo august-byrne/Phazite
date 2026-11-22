@@ -19,7 +19,7 @@ message thread (2026-11-20) and the reviews of its fixes left: the audit's other
 ([changelog](changelog.md)); these were found by reading the code and none was measured, and what the audit only
 suspects, or would make faster, is in the [backlog](backlog.md). 230 was found by reading JUCE while
 roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 235 was found by reading while
-the clips' writers were reviewed (2026-11-21), as 237 was, and 236 is a test that failed once on CI that day. 238 was
+the clips' writers were reviewed (2026-11-21), as 237 was. 238 was
 found by reading while the automation's curves were made values (2026-11-22), and waits for the owner. 239 was found by
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
@@ -309,14 +309,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   run the test on Linux with the plug-in's status and error said at each step (`TestSong::describePlugin()` shows
   how), and which of the two helpers the failed load was sent to (`getHelper()`'s second try in
   `src/model/plugins/PluginHost.cpp`).
-- **236. `LockFreeTests`, the transport's race: on CI's Windows release build it once found no block held.** The case
-  that races the window's reads of the playhead against the audio thread's blocks (`tests/LockFreeTests.cpp`, "the
-  race held places": `CHECK (heldBlocks > 0)`) failed with 0 on 2026-11-21 (the run of 1ef4d615), and passed on
-  the runs before and after and on every local run. The check says that the race really met the state it is for;
-  on a runner where the two threads never overlap in it, it is 0 and nothing was raced. To fix: the race runs
-  until it has held a block or a count of rounds has passed (as its asks were spread over the blocks in e53425de),
-  never a fixed number of reads that a slow start can use up.
-
 ## The build
 
 - **214. The compiler of CI's Windows jobs (MSVC 19.52) gets some sums of beats wrong in optimized builds**

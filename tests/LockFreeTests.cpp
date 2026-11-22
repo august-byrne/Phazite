@@ -647,8 +647,8 @@ TEST_CASE (
     const auto isAsked = [] (double beat)
     { return beat >= 0.0 && beat <= 1002.0 * spacing && beat - spacing * std::floor (beat / spacing) <= reach; };
 
-    std::atomic<int> started { 0 }, blocksPlayed { 0 };
-    std::atomic<bool> audioDone { false };
+    std::atomic<int> started { 0 }, blocksPlayed { 0 }, groupsAsked { 0 };
+    std::atomic<bool> audioDone { false }, askerDone { false };
     const auto startTogether = [&started]
     {
         ++started;
@@ -670,8 +670,12 @@ TEST_CASE (
             for (int i = 0; i < asks; ++i)
             {
                 if (i % asksPerBlock == asksPerBlock - 1)
+                {
+                    groupsAsked.fetch_add (1);
+
                     for (const auto seen = blocksPlayed.load(); blocksPlayed.load() == seen && ! audioDone.load();)
                         std::this_thread::yield();
+                }
 
                 switch (random.nextInt (4))
                 {
@@ -692,9 +696,15 @@ TEST_CASE (
 
             player.locate (1000.0 * spacing);
             player.play();
+            askerDone = true;
         });
 
-    // The audio thread's: its blocks, and after each whether what plays holds a place, and where the playhead is then.
+    // The audio thread's: its blocks, and after each whether what plays holds a place, and where the playhead is then. While
+    // the asks last it plays no further ahead of them than a few blocks for each group of asks (and a few to begin with):
+    // on a machine that gave the asking thread no turn, it had played every block before the first ask, and the race held
+    // no place (CI's Windows release build, twice). The asks still land wherever in a block they land.
+    static constexpr int blocksPerGroup = 3, blocksAhead = 16;
+    static_assert (blocksPerGroup * (asks / asksPerBlock) + blocksAhead < blocks); // every ask is over before the blocks are
     const auto isReturnBeat = [] (double beat)
     { return juce::exactlyEqual (beat - 2.0 * spacing * std::floor (beat / (2.0 * spacing)), spacing); };
     int heldBlocks = 0, heldElsewhere = 0;
@@ -707,6 +717,9 @@ TEST_CASE (
 
             for (int i = 0; i < blocks; ++i)
             {
+                while (i >= blocksPerGroup * groupsAsked.load() + blocksAhead && ! askerDone.load())
+                    std::this_thread::yield();
+
                 player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
                 blocksPlayed.fetch_add (1);
 
