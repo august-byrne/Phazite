@@ -4,6 +4,7 @@
 // drift among them), how it fits a shorter Devices view and a narrower one (its pages' More tab), its filter's dot and an envelope as a note plays, and its pitch
 // knob taking a value typed.
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -36,7 +37,7 @@ struct Screen
     Screen()
     {
         auto& s = getSong();
-        synth = phazite::setInstrument (s, song.firstTrack, phazite::makeOwnDeviceState (s, Synth::typeID));
+        synth = phazite::test::setOwnInstrument (s, song.firstTrack, Synth::typeID);
         REQUIRE (synth.isValid());
         phazite::getSession (song.context)->update();
         s.getUndoManager().clearUndoHistory();

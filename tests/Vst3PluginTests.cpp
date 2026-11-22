@@ -6,6 +6,7 @@
 // (.vstpreset), its programs, its mono buses, how JUCE's host hands it notes and controllers, and its latency.
 #include "DspProbe.h"
 #include "EnginePlayback.h"
+#include "TestDeviceValues.h"
 #include "TestSong.h"
 #include "engine/nodes/DeviceRunner.h"
 #include "model/automation/AutomationModel.h"
@@ -391,7 +392,7 @@ TEST_CASE ("A VST3 effect's state goes into the song as a .vstpreset and back, i
     song.saveWithPluginStates();
     const auto getStored = [&song, effect]
     {
-        const auto bytes = phazite::readBytes (phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginState].toString());
+        const auto bytes = phazite::readBytes (phazite::test::copyDevice (getSong (song), effect)[phazite::schema::pluginState].toString());
         REQUIRE (bytes.has_value());
         return *bytes;
     };
@@ -402,7 +403,7 @@ TEST_CASE ("A VST3 effect's state goes into the song as a .vstpreset and back, i
     CHECK (preset->classID.length() == 32);
     CHECK (preset->classID == phazite::sandbox::readVst3ClassID (stored));
     CHECK (readTrim (stored) == doctest::Approx (0.25f));
-    CHECK (phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginProgram] == juce::var (1));
+    CHECK (phazite::test::copyDevice (getSong (song), effect)[phazite::schema::pluginProgram] == juce::var (1));
 
     // Opened again, in a new helper: on its program, with its settings.
     playback = nullptr;
@@ -612,7 +613,7 @@ TEST_CASE ("A program change sets a VST3's program as the song's own: played fro
     phazite::addControl (s, clip, phazite::BeatPosition::fromBeats (4.0), phazite::ControlKind::programChange, 0, 1, 1);
     song.saveWithPluginStates();
     REQUIRE_FALSE (song.getProject().hasUnsavedChanges());
-    const auto storedProgram = phazite::findDeviceState (s, synth)[phazite::schema::pluginProgram];
+    const auto storedProgram = phazite::test::copyDevice (s, synth)[phazite::schema::pluginProgram];
     const auto stepsBefore = s.getUndoManager().getUndoDescriptions().size();
 
     EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
@@ -640,7 +641,7 @@ TEST_CASE ("A program change sets a VST3's program as the song's own: played fro
     CHECK_FALSE (song.getProject().hasUnsavedChanges());
     CHECK (s.getUndoManager().getUndoDescriptions().size() == stepsBefore);
     CHECK (phazite::getLastTouchedParameter (song.context) != level);
-    CHECK (phazite::findDeviceState (s, synth)[phazite::schema::pluginProgram] == storedProgram);
+    CHECK (phazite::test::copyDevice (s, synth)[phazite::schema::pluginProgram] == storedProgram);
 
     // A jump back to before the program change: the second program plays on, nothing being chased there.
     phazite::movePlayhead (s, phazite::BeatPosition::fromBeats (1.0));
@@ -663,7 +664,7 @@ TEST_CASE ("A program change sets a VST3's program as the song's own: played fro
     playback.play (0.1);
     REQUIRE (onProgram (1));
     song.saveWithPluginStates();
-    CHECK ((int) phazite::findDeviceState (s, synth)[phazite::schema::pluginProgram] == 1);
+    CHECK ((int) phazite::test::copyDevice (s, synth)[phazite::schema::pluginProgram] == 1);
 }
 
 TEST_CASE ("A VST3's program is chased where playback jumps: the one before there, where it differs from the one sent last")

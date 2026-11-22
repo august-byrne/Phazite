@@ -3,6 +3,7 @@
 // (src/ui/devices/): a control for each parameter but the mix (the header's), what their pictures show, and the drags on
 // them, each one undo step. Motion's editor is in MotionTests.cpp.
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/age/Age.h"
@@ -48,7 +49,7 @@ struct Song
     explicit Song (const char* typeID)
     {
         phazite::setSong (context, song.get());
-        device = phazite::insertDeviceState (*song, phazite::getTrackIDs (*song)[0], phazite::makeOwnDeviceState (*song, typeID));
+        device = phazite::test::addOwnDevice (*song, phazite::getTrackIDs (*song)[0], typeID);
         REQUIRE (device.isValid());
         phazite::getSession (context)->update();
         song->getUndoManager().clearUndoHistory();

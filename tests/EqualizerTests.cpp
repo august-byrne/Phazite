@@ -5,6 +5,7 @@
 // placement without a click; its dynamic bands, how far and how fast they move and what they hear; and all of it in blocks of
 // any size.
 #include "DspProbe.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/Filters.h"
@@ -610,7 +611,7 @@ TEST_CASE ("The EQ is one of the engine's devices")
 
     // A song holds one by its type, named after it, with its parameters at their defaults.
     auto song = phazite::createSong();
-    const auto id = phazite::insertDeviceState (*song, phazite::getTrackIDs (*song)[0], phazite::makeOwnDeviceState (*song, Eq::typeID));
+    const auto id = phazite::test::addOwnDevice (*song, phazite::getTrackIDs (*song)[0], Eq::typeID);
     REQUIRE (id.isValid());
     CHECK (phazite::getDeviceName (*song, id) == juce::String ("EQ"));
     CHECK (phazite::getValueSetByHand (*song, phazite::ParameterRef { id, "band1Frequency" }) == doctest::Approx (30.0f));

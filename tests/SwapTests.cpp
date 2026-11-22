@@ -2,6 +2,7 @@
 // Swap (docs/design.md, section 11; model/devices/SwapModel.h): a drum pad's sound and a device's preset tried in place in
 // the song, then kept as one undo step or put back; and the undo convention's Trial under it, which keeps what it tried as
 // soon as anything else changes the song.
+#include "TestDeviceValues.h"
 #include "TestSong.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
@@ -376,7 +377,7 @@ TEST_CASE ("A kit's preset tried by Swap copies nothing; kept, or kept by anothe
 
     const auto padFile = [&model, drums]
     {
-        return phazite::findDeviceState (model, drums)
+        return phazite::test::copyDevice (model, drums)
             .getChildWithName (phazite::schema::SOUNDS)[phazite::schema::getPadSoundFile (0)]
             .toString();
     };

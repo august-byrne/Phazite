@@ -3,6 +3,7 @@
 // oscillator plays, kept in the project and changed as undo steps; sound files copied into the project and read as Serum
 // writes them; and presets that carry them to another project.
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/wavetable/FactoryWavetables.h"
@@ -37,7 +38,7 @@ struct Song
         auto& song = getSong();
         track = phazite::ensureTracks (song, 1)[0];
         setSong (context, &song);
-        synth = phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, Synth::typeID));
+        synth = phazite::test::setOwnInstrument (song, track, Synth::typeID);
         REQUIRE (synth.isValid());
         REQUIRE (phazite::isSynth (song, synth));
         phazite::test::dispatchPendingMessages();
@@ -62,7 +63,7 @@ struct Song
     // What an oscillator's file is, as the synth's SOUNDS in the song keep it.
     juce::var getSound (const juce::Identifier& property) const
     {
-        return phazite::findDeviceState (getSong(), synth).getChildWithName (phazite::schema::SOUNDS)[property];
+        return phazite::test::copyDevice (getSong(), synth).getChildWithName (phazite::schema::SOUNDS)[property];
     }
 
     std::unique_ptr<phazite::Project> project;
@@ -219,9 +220,7 @@ TEST_CASE ("A sound file becomes a wavetable oscillator's table, the project pla
     CHECK_FALSE (s.getUndoManager().canUndo());
 
     // A file that isn't there any more: the oscillator plays its factory table.
-    phazite::findDeviceState (s, song.synth)
-        .getOrCreateChildWithName (phazite::schema::SOUNDS, nullptr)
-        .setProperty (phazite::schema::getOscillatorWavetableFile (0), "Audio/Gone.wav", nullptr);
+    phazite::test::writeDeviceSoundByHand (s, song.synth, phazite::schema::getOscillatorWavetableFile (0), "Audio/Gone.wav");
     CHECK (song.getPlayedTable (0) == juce::String ("Basic Shapes"));
 }
 
@@ -278,7 +277,7 @@ TEST_CASE ("A preset of the synth brings its sound file into the project that lo
     // It takes the track's instrument's place, playing its own copy of the file.
     const auto loaded = phazite::getInstrument (s, second.track);
     REQUIRE (phazite::isSynth (s, loaded));
-    const auto loadedSounds = phazite::findDeviceState (s, loaded).getChildWithName (phazite::schema::SOUNDS);
+    const auto loadedSounds = phazite::test::copyDevice (s, loaded).getChildWithName (phazite::schema::SOUNDS);
     CHECK (loadedSounds[phazite::schema::getOscillatorWavetableFile (0)].toString() == juce::String ("Audio/Buzz.wav"));
     CHECK (second.project->getAudioFolder().getChildFile ("Buzz.wav").existsAsFile());
     phazite::getSession (second.context)->update();

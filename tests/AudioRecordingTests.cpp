@@ -6,6 +6,7 @@
 #include "EnginePlayback.h"
 #include "RealTimePlayback.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -107,7 +108,7 @@ TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is on
 
     // A track with an instrument plays what is played on MIDI instead.
     phazite::setTrackInput (context, track, "1");
-    REQUIRE (phazite::setInstrument (*song, track, phazite::makeOwnDeviceState (*song, "phaziteSynth")).isValid());
+    phazite::test::setOwnInstrument (*song, track, "phaziteSynth");
     CHECK_FALSE (phazite::canRecordAudio (context, track));
     phazite::setArmed (context, track, true);
     CHECK_FALSE (phazite::isArmed (context, track));

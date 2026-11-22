@@ -2,6 +2,7 @@
 // What devices' and modulators' editors show under the pointer of what a drag there moves (src/ui/devices/GraphDot.h; the
 // owner, 2026-11-10: "it should be obvious that you are able to do this gesture"): the pointer says how the drag moves, the
 // handle a press takes lights up, and the hint bar (the description) says what it does.
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -43,10 +44,8 @@ using phazite::ui::GraphTint::dotRadius;
 phazite::DeviceID addDeviceID (phazite::test::TestSong& song, std::string_view typeID, bool isInstrument = false)
 {
     auto& s = *phazite::findSong (song.context);
-    const auto state = phazite::makeOwnDeviceState (s, typeID);
-    const auto id =
-        isInstrument ? phazite::setInstrument (s, song.firstTrack, state) : phazite::insertDeviceState (s, song.firstTrack, state);
-    REQUIRE (id.isValid());
+    const auto id = isInstrument ? phazite::test::setOwnInstrument (s, song.firstTrack, typeID)
+                                 : phazite::test::addOwnDevice (s, song.firstTrack, typeID);
     phazite::getSession (song.context)->update();
     return id;
 }

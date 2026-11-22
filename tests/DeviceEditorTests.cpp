@@ -4,6 +4,7 @@
 // (src/ui/devices/DeviceLayout.h), and the curves their graphs draw (src/ui/devices/DeviceGraph.h).
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -44,7 +45,7 @@ using phazite::devices::Equalizer;
 // A device of a type at the end of a song's first track's devices (in place of its instrument, for an instrument).
 phazite::DeviceID addDevice (phazite::Song& song, const char* type)
 {
-    const auto id = phazite::insertDeviceState (song, phazite::getTrackIDs (song)[0], phazite::makeOwnDeviceState (song, type));
+    const auto id = phazite::test::addOwnDevice (song, phazite::getTrackIDs (song)[0], type);
     REQUIRE (id.isValid());
     return id;
 }

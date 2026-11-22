@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The EQ's editor (src/ui/devices/EqEditor.h), and the spectrum its analyzer shows (src/devices/core/Spectrum.h).
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -31,7 +32,7 @@ using Eq = phazite::devices::Equalizer;
 phazite::DeviceID addEq (phazite::test::TestSong& song)
 {
     auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::insertDeviceState (s, song.firstTrack, phazite::makeOwnDeviceState (s, Eq::typeID));
+    const auto id = phazite::test::addOwnDevice (s, song.firstTrack, Eq::typeID);
     REQUIRE (id.isValid());
     phazite::getSession (song.context)->update();
     return id;

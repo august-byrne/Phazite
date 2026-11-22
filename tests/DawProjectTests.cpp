@@ -4,6 +4,7 @@
 // zip, from the song as it is and from an old version.
 #include "SongCheck.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "app/ProjectSession.h"
@@ -357,8 +358,7 @@ TEST_CASE ("A DAWproject holds a plug-in's automation: the parameters its curves
     description.pluginFormatName = "VST3";
     description.manufacturerName = "Elsewhere";
     description.fileOrIdentifier = "C:/Plug-ins/Delay.vst3";
-    const auto plugin =
-        phazite::insertDeviceState (model, song.bass, phazite::makeDeviceState (model, phazite::makeDeviceType (description)));
+    const auto plugin = phazite::test::addPluginDevice (model, song.bass, description);
     REQUIRE (plugin.isValid());
     const phazite::ParameterRef feedback { plugin, "7" };
     phazite::addPoint (model, feedback, { phazite::BeatPosition::fromBeats (0.0), 0.25f, 0.0f });

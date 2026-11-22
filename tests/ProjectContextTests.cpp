@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The open project as commands and panels find it (src/model/project/ProjectContext.h).
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
@@ -180,13 +181,13 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
 
     // A track renamed and a device put on it at once: one notification of both.
     phazite::setTrackName (*song, track, "Bass");
-    REQUIRE (phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Reverb::typeID)).isValid());
+    phazite::test::addOwnDevice (*song, track, phazite::devices::Reverb::typeID);
     phazite::test::dispatchPendingMessages();
     CHECK (view.heard.size() == 1);
     CHECK (hear() == "tracks devices");
 
     // Devices and tracks that change places.
-    const auto delay = phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Delay::typeID));
+    const auto delay = phazite::test::addOwnDevice (*song, track, phazite::devices::Delay::typeID);
     REQUIRE (delay.isValid());
     CHECK (hear() == "devices");
     phazite::moveDevice (*song, delay, 0);
@@ -248,8 +249,7 @@ TEST_CASE ("Views hear modulators and macros added, removed and modulating as th
 
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 2);
-    const auto delay = phazite::insertDeviceState (*song, tracks[0], phazite::makeOwnDeviceState (*song, phazite::devices::Delay::typeID));
-    REQUIRE (delay.isValid());
+    const auto delay = phazite::test::addOwnDevice (*song, tracks[0], phazite::devices::Delay::typeID);
     phazite::ProjectContext context (phazite::test::getEngineContext());
     setSong (context, song.get());
     View view;
@@ -384,7 +384,7 @@ TEST_CASE ("Views hear where the changes of clips and devices were: the clips, t
     CHECK (changes.deviceChannels.named == sorted ({ tracks[1], reverb }));
 
     // An effect added: its track alone.
-    REQUIRE (phazite::insertDeviceState (*song, tracks[2], phazite::makeOwnDeviceState (*song, phazite::devices::Delay::typeID)).isValid());
+    phazite::test::addOwnDevice (*song, tracks[2], phazite::devices::Delay::typeID);
     changes = take();
     CHECK_FALSE (changes.deviceChannels.any);
     CHECK (changes.deviceChannels.named == Tracks { tracks[2] });

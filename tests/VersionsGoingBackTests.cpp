@@ -6,6 +6,7 @@
 #include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -725,7 +726,7 @@ TEST_CASE ("Every example song, changed through the model and brought back, save
             phazite::setChannelVolume (song, tracks[0], -9.0f);
             phazite::setTrackName (song, tracks[0], "Renamed");
             phazite::setTempo (song, 133.0);
-            phazite::insertDeviceState (song, tracks[0], phazite::makeOwnDeviceState (song, phazite::devices::Equalizer::typeID));
+            phazite::test::addOwnDevice (song, tracks[0], phazite::devices::Equalizer::typeID);
             phazite::insertTrack (song, tracks[1], nullptr);
 
             for (const auto track : tracks)
@@ -1840,7 +1841,7 @@ TEST_CASE ("A clip a track's line sends home goes among its home track's clips w
             if (layout == Layout::withDevice)
             {
                 const phazite::UndoStep step (*song, "Add Device");
-                device = phazite::insertDeviceState (*song, home, phazite::makeOwnDeviceState (*song, phazite::devices::Equalizer::typeID));
+                device = phazite::test::addOwnDevice (*song, home, phazite::devices::Equalizer::typeID);
                 REQUIRE (device.isValid());
             }
 
@@ -1856,7 +1857,7 @@ TEST_CASE ("A clip a track's line sends home goes among its home track's clips w
             }
 
             if (layout == Layout::withDevice)
-                REQUIRE (phazite::findTrackState (*song, home).indexOf (phazite::findDeviceState (*song, device)) >= 0);
+                REQUIRE (phazite::getDevices (*song, home) == std::vector { device });
 
             const auto version = phazite::test::copyWholeSong (*song);
 
@@ -2184,7 +2185,7 @@ TEST_CASE ("A version's sections, chord lane and MIDI links take the places the 
     // every other element (ApplySong.cpp: placePlaceholdersLike()).
     const auto base = phazite::createSong();
     const auto track = phazite::ensureTracks (*base, 1).front();
-    const auto synth = phazite::insertDeviceState (*base, track, phazite::makeOwnDeviceState (*base, phazite::devices::Synth::typeID));
+    const auto synth = phazite::test::addOwnDevice (*base, track, phazite::devices::Synth::typeID);
     base->getUndoManager().clearUndoHistory();
 
     const auto makeFromBase = [&base] { return phazite::makeSong (phazite::test::copyWholeSong (*base)); };
@@ -2260,7 +2261,7 @@ TEST_CASE ("A version's AUTOMATION takes the place the version gives it among th
     // again, it moves nothing.
     const auto base = phazite::createSong();
     const auto track = phazite::ensureTracks (*base, 1).front();
-    const auto synth = phazite::insertDeviceState (*base, track, phazite::makeOwnDeviceState (*base, phazite::devices::Synth::typeID));
+    const auto synth = phazite::test::addOwnDevice (*base, track, phazite::devices::Synth::typeID);
     base->getUndoManager().clearUndoHistory();
     const phazite::ParameterRef cutoff { synth, "cutoff" };
 

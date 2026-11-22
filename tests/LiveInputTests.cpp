@@ -2,6 +2,7 @@
 #include "EnginePlayback.h"
 #include "HostedDevice.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "devices/dynamics/Limiter.h"
@@ -57,14 +58,14 @@ bool isNear (int samples, int expected)
 
 void addInstrument (phazite::Song& song, phazite::TrackID track)
 {
-    REQUIRE (phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, phazite::devices::Synth::typeID)).isValid());
+    phazite::test::setOwnInstrument (song, track, phazite::devices::Synth::typeID);
 }
 
 // One of Phazite's own devices after a channel's devices (the master's with getMasterID()), with values set by hand.
 phazite::DeviceID addDevice (phazite::Song& song, phazite::TrackID channel, const char* typeID,
                              const std::vector<std::pair<juce::String, float>>& values = {})
 {
-    const auto id = phazite::insertDeviceState (song, channel, phazite::makeOwnDeviceState (song, typeID, values));
+    const auto id = phazite::test::addOwnDevice (song, channel, typeID, values);
     REQUIRE (id.isValid());
     return id;
 }

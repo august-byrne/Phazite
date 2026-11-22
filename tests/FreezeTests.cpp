@@ -6,6 +6,7 @@
 #include "PerformanceCounts.h"
 #include "SongCheck.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
@@ -66,8 +67,7 @@ struct Song
         clip = phazite::test::addAudioClip (song, bass, "Sine", sound, 0.0, 1.5);
         REQUIRE (clip.isValid());
 
-        stereo = phazite::insertDeviceState (song, bass,
-                                             phazite::makeOwnDeviceState (song, phazite::devices::Stereo::typeID, { { "gain", 6.0f } }));
+        stereo = phazite::test::addOwnDevice (song, bass, phazite::devices::Stereo::typeID, { { "gain", 6.0f } });
         REQUIRE (stereo.isValid());
         phazite::setChannelVolume (song, bass, -6.0f);
 
@@ -840,8 +840,7 @@ TEST_CASE ("Freezing stops before a device that listens to a sidechain; a send b
     const auto kick = phazite::insertPlainTrack (model, TrackID());
     REQUIRE (kick.isValid());
 
-    const auto compressor =
-        phazite::insertDeviceState (model, song.bass, phazite::makeOwnDeviceState (model, phazite::devices::Compressor::typeID));
+    const auto compressor = phazite::test::addOwnDevice (model, song.bass, phazite::devices::Compressor::typeID);
     REQUIRE (compressor.isValid());
     phazite::setSidechainSource (model, compressor, kick);
     CHECK (phazite::getFrozenDevices (model, song.bass) == std::vector { song.stereo });

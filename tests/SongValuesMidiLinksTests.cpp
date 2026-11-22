@@ -11,6 +11,7 @@
 //   phazite_tests.exe --test-case="Song values' MIDI links*"
 #include "SongCheck.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -186,7 +187,7 @@ struct SynthSong
     SynthSong()
     {
         track = phazite::ensureTracks (*song, 1).front();
-        synth = phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID));
+        synth = phazite::test::addOwnDevice (*song, track, phazite::devices::Synth::typeID);
         song->getUndoManager().clearUndoHistory();
     }
 

@@ -4,6 +4,7 @@
 // sounds dropped on pads.
 #include "GoldenFiles.h"
 #include "HostedDevice.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -51,7 +52,7 @@ float playNext (DrumSampler& sampler)
 phazite::DeviceID addSampler (phazite::test::TestSong& song)
 {
     auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::setInstrument (s, song.firstTrack, phazite::makeOwnDeviceState (s, DrumSampler::typeID));
+    const auto id = phazite::test::setOwnInstrument (s, song.firstTrack, DrumSampler::typeID);
     REQUIRE (id.isValid());
     phazite::getSession (song.context)->update();
     return id;

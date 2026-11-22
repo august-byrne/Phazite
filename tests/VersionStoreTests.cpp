@@ -2,6 +2,7 @@
 // The versions' store (docs/design/versions.md): a song in pieces and back, the packs they go in, and the branches, the current
 // one and the audio files' hashes beside them.
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -43,8 +44,8 @@ struct PiecesSong
     {
         phazite::setTrackName (*song, tracks[0], "Bass");
         phazite::setChannelVolume (*song, tracks[0], -6.0f);
-        REQUIRE (phazite::setInstrument (*song, tracks[0], phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID)).isValid());
-        eq = phazite::insertDeviceState (*song, tracks[0], phazite::makeOwnDeviceState (*song, phazite::devices::Equalizer::typeID));
+        phazite::test::setOwnInstrument (*song, tracks[0], phazite::devices::Synth::typeID);
+        eq = phazite::test::addOwnDevice (*song, tracks[0], phazite::devices::Equalizer::typeID);
 
         longClip = addMidiClip (*song, tracks[0], { at (0.0), at (64.0) }, "Long");
         shortClip = addMidiClip (*song, tracks[1], { at (0.0), at (4.0) }, "Short");
@@ -60,13 +61,9 @@ struct PiecesSong
         for (int i = 0; i < 3000; ++i)
             state.append (&i, 1);
 
-        juce::ValueTree device (schema::DEVICE);
-        device.setProperty (schema::deviceID, (juce::int64) song->makeID(), nullptr);
-        device.setProperty (schema::deviceType, schema::deviceIsPlugin, nullptr);
-        device.setProperty (schema::pluginName, "Test Synth", nullptr);
-        device.setProperty (schema::pluginState, phazite::writeBytes (state), nullptr);
-        plugin = phazite::insertDeviceState (*song, tracks[2], device);
-        REQUIRE (plugin.isValid());
+        juce::PluginDescription testSynth;
+        testSynth.name = "Test Synth";
+        plugin = phazite::test::addPluginDevice (*song, tracks[2], testSynth, state);
     }
 
     // The long clip in a copy of the song whole.
@@ -184,7 +181,7 @@ TEST_CASE ("The same song always makes the same pieces, whatever order its prope
 TEST_CASE ("A plug-in's state is a piece of its own, in its bytes")
 {
     PiecesSong made;
-    const auto device = phazite::findDeviceState (*made.song, made.plugin);
+    const auto device = phazite::test::copyDevice (*made.song, made.plugin);
     const auto read = phazite::readBytes (device[schema::pluginState].toString());
     REQUIRE (read.has_value());
     const auto& state = *read;

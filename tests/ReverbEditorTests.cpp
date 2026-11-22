@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The reverb's editor (src/ui/devices/ReverbEditor.h).
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -24,7 +25,7 @@ TEST_CASE ("The reverb's map, hidden while a loud sound comes in and shown again
 {
     phazite::test::TestSong song;
     auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::insertDeviceState (s, song.firstTrack, phazite::makeOwnDeviceState (s, Reverb::typeID));
+    const auto id = phazite::test::addOwnDevice (s, song.firstTrack, Reverb::typeID);
     REQUIRE (id.isValid());
     phazite::getSession (song.context)->update();
     const auto device = phazite::makeDeviceHandle (s, id);
@@ -52,7 +53,7 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
 {
     phazite::test::TestSong song;
     auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::insertDeviceState (s, song.firstTrack, phazite::makeOwnDeviceState (s, Reverb::typeID));
+    const auto id = phazite::test::addOwnDevice (s, song.firstTrack, Reverb::typeID);
     REQUIRE (id.isValid());
     phazite::getSession (song.context)->update();
     const auto valueOf = [&s, id] (const char* parameter)
@@ -149,7 +150,7 @@ TEST_CASE ("Finding 1: a value changed costs the reverb's map its decays once, h
     // paint, each hundreds to tens of thousands of line updates. Now it works out its 43 once a change, and paints from them.
     phazite::test::TestSong song;
     auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::insertDeviceState (s, song.firstTrack, phazite::makeOwnDeviceState (s, Reverb::typeID));
+    const auto id = phazite::test::addOwnDevice (s, song.firstTrack, Reverb::typeID);
     REQUIRE (id.isValid());
     phazite::getSession (song.context)->update();
     phazite::ui::ReverbEditor editor (phazite::makeDeviceHandle (s, id));

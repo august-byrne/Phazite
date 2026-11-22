@@ -350,7 +350,7 @@ namespace
 
                     if (! describeParameter (song, parameter).has_value()
                         && findDevice (state, parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin
-                        && ! (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter))
+                        && ! (getChainContainer (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter))
                         add ("names", tree, "a curve of a parameter the song hasn't: " + parameter.parameter);
                 }
 

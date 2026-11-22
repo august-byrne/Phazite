@@ -8,6 +8,7 @@
 #include "EnginePlayback.h"
 #include "SandboxedPlugins.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestKeyboardLayouts.h"
 #include "TestSong.h"
 #include "app/AppCommands.h"
@@ -34,6 +35,7 @@
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixHandle.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/internal/Notes.h"
@@ -696,7 +698,7 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
     // The project opened again: the plug-in in a new helper, the old one gone, with its program and its settings.
     playback = nullptr;
     song.reopen();
-    CHECK (phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginProgram] == juce::var (1));
+    CHECK (phazite::test::copyDevice (getSong (song), effect)[phazite::schema::pluginProgram] == juce::var (1));
     instance = &getSandboxed (song, effect);
     CHECK (instance->getCurrentProgram() == 1);
 
@@ -1287,7 +1289,7 @@ TEST_CASE ("A plug-in opened from its project keeps the settings the project hol
     // Saved and opened again: the plug-in opens from the settings the project holds, its Gain at half.
     song.reopen();
     const auto getStored = [&song, effect]
-    { return phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginState].toString(); };
+    { return phazite::test::copyDevice (getSong (song), effect)[phazite::schema::pluginState].toString(); };
     const auto stored = getStored();
     REQUIRE (stored.isNotEmpty());
     auto& instance = getSandboxed (song, effect);
@@ -2146,8 +2148,7 @@ TEST_CASE ("A plug-in added, or brought back by an undo, loads in the background
     // A state the song gives it meanwhile (as a preset loaded into it does): its Level at a quarter.
     juce::MemoryOutputStream given;
     given.writeFloat (0.25f);
-    phazite::findDeviceState (opened, slow)
-        .setProperty (phazite::schema::pluginState, phazite::writeBytes (given.getMemoryBlock()), nullptr);
+    phazite::test::storePluginState (opened, slow, given.getMemoryBlock());
 
     // Open: it comes in with it, and the one the undo abandoned never comes in.
     gate.open();
@@ -2246,8 +2247,7 @@ TEST_CASE ("A crashed plug-in reloads in the background: nothing waits for its h
     REQUIRE (phazite::getPluginStatus (opened, slow) == Status::loading);
     juce::MemoryOutputStream preset;
     preset.writeFloat (0.2f);
-    phazite::findDeviceState (opened, slow)
-        .setProperty (phazite::schema::pluginState, phazite::writeBytes (preset.getMemoryBlock()), &opened.getUndoManager());
+    phazite::test::setPluginStateInStep (opened, slow, preset.getMemoryBlock());
     gate.open();
     REQUIRE (phazite::test::dispatchMessagesUntil ([withPreset] { return withPreset->has_value(); }, longWait));
     REQUIRE_FALSE (withPreset->value().has_value());
@@ -2275,8 +2275,7 @@ TEST_CASE ("A crashed plug-in reloads in the background: nothing waits for its h
     REQUIRE (phazite::getPluginStatus (opened, slow) == Status::loading);
     {
         const phazite::UndoStep step (opened, "Load Preset");
-        phazite::findDeviceState (opened, slow)
-            .setProperty (phazite::schema::pluginState, phazite::writeBytes (writeLevel (0.4f)), &opened.getUndoManager());
+        phazite::test::setPluginStateInStep (opened, slow, writeLevel (0.4f));
     }
     phazite::undo (opened);
     gate.open();
@@ -2622,7 +2621,7 @@ TEST_CASE ("What isn't a number, and texts of any length, from a plug-in never g
     instance.setParameterValue (wild, std::numeric_limits<float>::infinity());
     CHECK (phazite::describeUndo (&getSong (song)) == lastStep);
     CHECK (instance.getParameterValue (wild) == 0.0f);
-    CHECK_FALSE (phazite::findDeviceState (getSong (song), crash).getChildWithProperty (phazite::schema::valueParameter, "23").isValid());
+    CHECK_FALSE (phazite::test::copyDevice (getSong (song), crash).getChildWithProperty (phazite::schema::valueParameter, "23").isValid());
 }
 
 TEST_CASE ("A helper that floods Phazite with what it tells keeps a value for each parameter until the window takes them")
@@ -2803,8 +2802,7 @@ TEST_CASE ("A plug-in's slot in the mixer says it loads while it does; a click a
     CHECK (phazite::isDeviceWindowOpening (song.context, slow));
     juce::MemoryOutputStream preset;
     preset.writeFloat (0.6f);
-    phazite::findDeviceState (opened, slow)
-        .setProperty (phazite::schema::pluginState, phazite::writeBytes (preset.getMemoryBlock()), &opened.getUndoManager());
+    phazite::test::setPluginStateInStep (opened, slow, preset.getMemoryBlock());
 
     // In: its slot shows its name, the preset plays, and its window opens.
     gate.open();
@@ -2897,8 +2895,7 @@ TEST_CASE ("A render of a song no session plays opens its plug-ins in the backgr
     auto old = phazite::createSong();
     const auto track = phazite::ensureTracks (*old, 1).front();
     REQUIRE (phazite::test::addMidiClip (*old, track, { phazite::test::at (0.0), phazite::test::at (4.0) }).isValid());
-    phazite::insertDeviceState (
-        *old, track, phazite::makeDeviceState (*old, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (Kind::slow))));
+    phazite::test::addPluginDevice (*old, track, phazite::test::TestPlugins::getDescription (Kind::slow));
     REQUIRE (phazite::findSession (*old) == nullptr);
 
     SlowGate gate;
@@ -3173,7 +3170,7 @@ TEST_CASE ("Auto Save asks a plug-in whose window was open for its state, though
     timer.setAutoSave (true);
     song.setVolume (song.firstTrack, -6.0f);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, longWait));
-    const auto stored = phazite::readBytes (phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginState].toString());
+    const auto stored = phazite::readBytes (phazite::test::copyDevice (getSong (song), effect)[phazite::schema::pluginState].toString());
     REQUIRE (stored.has_value());
     CHECK (juce::MemoryInputStream (*stored, false).readFloat() == doctest::Approx (0.3f));
 }
@@ -3364,7 +3361,7 @@ TEST_CASE ("An answer that comes after the song gave a plug-in a state is older 
     auto* session = phazite::getSession (song.context);
     REQUIRE (session != nullptr);
     session->getPlugins().store (slow);
-    const auto stored = phazite::readBytes (phazite::findDeviceState (getSong (song), slow)[phazite::schema::pluginState].toString());
+    const auto stored = phazite::readBytes (phazite::test::copyDevice (getSong (song), slow)[phazite::schema::pluginState].toString());
     REQUIRE (stored.has_value());
     CHECK (*stored == given.getMemoryBlock());
 }
@@ -3414,7 +3411,7 @@ TEST_CASE ("A store that isn't a save waits for no plug-in: what it gave last is
     CHECK (turnMessageLoop (10));
     CHECK (readLevel (device[phazite::schema::pluginState]) == doctest::Approx (0.25f));
     phazite::undo (getSong (song));
-    CHECK (readLevel (phazite::findDeviceState (getSong (song), slow)[phazite::schema::pluginState]) == doctest::Approx (0.25f));
+    CHECK (readLevel (phazite::test::copyDevice (getSong (song), slow)[phazite::schema::pluginState]) == doctest::Approx (0.25f));
     song.waitForPlugins(); // brought back, it loads in the background
     auto& back = getSandboxed (song, slow);
     CHECK (back.getParameterValue (back.findParameter ("60")) == doctest::Approx (0.25f));
@@ -3465,7 +3462,7 @@ void turnInItsWindow (phazite::SandboxedInstance& instance, float level)
 // The Level the slow stand-in's element in the song holds.
 float getStoredLevel (const phazite::Song& song, phazite::DeviceID device)
 {
-    return readLevel (phazite::findDeviceState (song, device)[phazite::schema::pluginState]);
+    return readLevel (phazite::test::copyDevice (song, device)[phazite::schema::pluginState]);
 }
 } // namespace
 
@@ -3640,9 +3637,8 @@ TEST_CASE ("Save As straight after a change in a plug-in's window holds it; whil
         auto made = phazite::Project::create (temp.folder, "Slow", error);
         REQUIRE (made != nullptr);
         auto& song = made->getSong();
-        slow = phazite::insertDeviceState (
-            song, phazite::getTrackIDs (song).front(),
-            phazite::makeDeviceState (song, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (Kind::slow))));
+        slow = phazite::test::addPluginDevice (song, phazite::getTrackIDs (song).front(),
+                                               phazite::test::TestPlugins::getDescription (Kind::slow));
         REQUIRE (made->save().wasOk());
         file = made->getFile();
     }
@@ -4229,9 +4225,8 @@ TEST_CASE ("A close and a save that wait on a slow plug-in each go on once, for 
         auto made = phazite::Project::create (temp.folder, "Slow", error);
         REQUIRE (made != nullptr);
         auto& song = made->getSong();
-        slow = phazite::insertDeviceState (
-            song, phazite::getTrackIDs (song).front(),
-            phazite::makeDeviceState (song, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (Kind::slow))));
+        slow = phazite::test::addPluginDevice (song, phazite::getTrackIDs (song).front(),
+                                               phazite::test::TestPlugins::getDescription (Kind::slow));
         REQUIRE (made->save().wasOk());
         file = made->getFile();
     }
@@ -4316,9 +4311,8 @@ TEST_CASE ("The computer's session ending asks the save question at once, a clos
         auto made = phazite::Project::create (temp.folder, "Slow", error);
         REQUIRE (made != nullptr);
         auto& song = made->getSong();
-        slow = phazite::insertDeviceState (
-            song, phazite::getTrackIDs (song).front(),
-            phazite::makeDeviceState (song, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (Kind::slow))));
+        slow = phazite::test::addPluginDevice (song, phazite::getTrackIDs (song).front(),
+                                               phazite::test::TestPlugins::getDescription (Kind::slow));
         REQUIRE (made->save().wasOk());
         file = made->getFile();
     }
@@ -4402,9 +4396,7 @@ struct SlowSession
             REQUIRE (made != nullptr);
             auto& song = made->getSong();
             track = phazite::getTrackIDs (song).front();
-            slow = phazite::insertDeviceState (
-                song, track,
-                phazite::makeDeviceState (song, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (Kind::slow))));
+            slow = phazite::test::addPluginDevice (song, track, phazite::test::TestPlugins::getDescription (Kind::slow));
             REQUIRE (made->save().wasOk());
             file = made->getFile();
         }
@@ -4654,19 +4646,14 @@ TEST_CASE ("A preset loaded or a chain duplicated or a version saved straight af
     }
 
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getChains (song.context, container).size() == 2; }, longWait));
+    // The track's devices are the container alone (no copy of the plug-in beside it), and its chains' are the two plug-ins.
+    REQUIRE (phazite::getDevices (opened, track) == std::vector { container });
     std::vector<float> levels;
-    std::function<void (const juce::ValueTree&)> find = [&] (const juce::ValueTree& tree)
-    {
-        for (const auto& child : tree)
-        {
-            if (phazite::isPluginState (child))
-                levels.push_back (readLevel (child[phazite::schema::pluginState]));
 
-            find (child);
-        }
-    };
+    for (const auto& chain : phazite::getChains (opened, container))
+        for (const auto& device : phazite::getChainDevices (opened, chain))
+            levels.push_back (readLevel (phazite::test::copyDevice (opened, device)[phazite::schema::pluginState]));
 
-    find (phazite::findTrackState (opened, track));
     REQUIRE (levels.size() == 2);
     CHECK (levels[0] == doctest::Approx (0.375f));
     CHECK (levels[1] == doctest::Approx (0.375f));

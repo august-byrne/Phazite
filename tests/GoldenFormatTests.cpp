@@ -6,6 +6,7 @@
 // they hold, as tools/read-versions.pl lists them (song.txt), which CI checks that reader against.
 #include "GoldenFiles.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestSong.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
@@ -91,8 +92,7 @@ phazite::Song::Ptr makeVectorSong()
     phazite::setTrackName (*song, tracks[1], "Effects");
     phazite::setChannelVolume (*song, tracks[0], -6.0f);
 
-    const auto synth = phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID);
-    REQUIRE (phazite::setInstrument (*song, tracks[0], synth).isValid());
+    phazite::test::setOwnInstrument (*song, tracks[0], phazite::devices::Synth::typeID);
 
     const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (32.0) }, "Arpeggio");
 
@@ -109,8 +109,7 @@ phazite::Song::Ptr makeVectorSong()
     device.setProperty (schema::deviceType, schema::deviceIsPlugin, nullptr);
     device.setProperty (schema::pluginName, "Test Effect", nullptr);
     device.setProperty (schema::pluginState, phazite::writeBytes (state), nullptr);
-    REQUIRE (phazite::insertDeviceState (*song, tracks[1], device).isValid());
-    return song;
+    return phazite::makeSong (phazite::test::copyWholeSongWithDevice (*song, tracks[1], device)); // as a file holds it
 }
 
 // A pack's pieces as tools/read-versions.pl lists them: a line each, in the order of their names, with its name, its size

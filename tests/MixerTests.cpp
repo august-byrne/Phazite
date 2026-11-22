@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "devices/delay/Delay.h"
@@ -48,10 +49,10 @@ struct Mix
     ~Mix() { setSong (context, nullptr); }
 
     // One of Phazite's own devices, new, put on a channel at a place among its devices (-1: after them), in no undo step of
-    // its own; none if the channel can't hold it.
+    // its own; REQUIRE'd held (no test here adds one a channel can't hold).
     phazite::DeviceID add (phazite::TrackID channel, const char* type, int index = -1)
     {
-        return phazite::insertDeviceState (*song, channel, phazite::makeOwnDeviceState (*song, type), index);
+        return phazite::test::addOwnDevice (*song, channel, type, {}, index);
     }
 
     // What Phazite's engine plays of a channel (a track's by its ID, the master's by none) and of a device, once the song's
@@ -134,7 +135,7 @@ TEST_CASE ("A track's instrument plays its notes, and its effects come after it"
     CHECK (phazite::needsInstrument (song, mix.a));
     CHECK (phazite::getEffects (song, mix.a) == std::vector { reverb });
 
-    const auto synth = phazite::setInstrument (song, mix.a, phazite::makeOwnDeviceState (song, Synth::typeID));
+    const auto synth = phazite::test::setOwnInstrument (song, mix.a, Synth::typeID);
     REQUIRE (synth.isValid());
     CHECK (phazite::getInstrument (song, mix.a) == synth);
     CHECK (phazite::hasInstrument (song, mix.a));
@@ -142,10 +143,10 @@ TEST_CASE ("A track's instrument plays its notes, and its effects come after it"
     CHECK (phazite::getEffects (song, mix.a) == std::vector { reverb });
 
     // Another instrument takes the first one's place; an effect isn't one.
-    const auto other = phazite::setInstrument (song, mix.a, phazite::makeOwnDeviceState (song, Synth::typeID));
+    const auto other = phazite::test::setOwnInstrument (song, mix.a, Synth::typeID);
     REQUIRE (other.isValid());
     CHECK (phazite::getDevices (song, mix.a) == std::vector { other, reverb });
-    CHECK_FALSE (phazite::setInstrument (song, mix.a, phazite::makeOwnDeviceState (song, Delay::typeID)).isValid());
+    CHECK_FALSE (phazite::chooseInstrument (song, mix.a, phazite::test::findOwnDeviceType (Delay::typeID)).isValid());
     CHECK (phazite::getInstrument (song, mix.a) == other);
 }
 
@@ -370,13 +371,13 @@ TEST_CASE ("A return with an effect comes in one step, named after the effect, w
     const auto mixIndex = phazite::devices::findParameter (Reverb::info, phazite::devices::mixParameterID);
     REQUIRE (mixIndex >= 0);
     REQUIRE (Reverb::info.parameters[(size_t) mixIndex].defaultValue == doctest::Approx (0.25f));
-    const auto reverb = phazite::makeOwnDeviceState (song, Reverb::typeID);
-    const auto reverbReturn = phazite::addReturnWithEffect (song, mix.a, reverb);
-    REQUIRE (reverbReturn.isValid());
+    const auto reverbReturn = phazite::test::addReturnWithOwnEffect (song, mix.a, Reverb::typeID);
     CHECK (phazite::getTrackName (song, reverbReturn) == juce::String ("Reverb"));
     CHECK (phazite::isReturnTrack (song, reverbReturn));
-    CHECK (phazite::getEffects (song, reverbReturn) == std::vector { phazite::getDeviceID (reverb) });
-    CHECK (phazite::getMix (song, phazite::getDeviceID (reverb)) == doctest::Approx (1.0f));
+    const auto returned = phazite::getEffects (song, reverbReturn);
+    REQUIRE (returned.size() == 1);
+    CHECK (phazite::test::copyDevice (song, returned[0])[schema::deviceType].toString() == juce::String (Reverb::typeID));
+    CHECK (phazite::getMix (song, returned[0]) == doctest::Approx (1.0f));
 
     const auto sends = phazite::getSends (song, mix.a);
     REQUIRE (sends.size() == 1);
@@ -384,8 +385,7 @@ TEST_CASE ("A return with an effect comes in one step, named after the effect, w
     CHECK_FALSE (phazite::isPreFader (song, sends[0]));
 
     // Another one gets a name of its own. A plug-in plays only its effect there too, whatever mix it came with.
-    const auto second = phazite::addReturnWithEffect (song, mix.b, phazite::makeOwnDeviceState (song, Reverb::typeID));
-    REQUIRE (second.isValid());
+    const auto second = phazite::test::addReturnWithOwnEffect (song, mix.b, Reverb::typeID);
     CHECK (phazite::getTrackName (song, second) == juce::String ("Reverb 2"));
 
     auto plugin = phazite::makeDeviceState (song, phazite::makeDeviceType (phazite::test::TestPlugin::getDescription()));
@@ -396,7 +396,7 @@ TEST_CASE ("A return with an effect comes in one step, named after the effect, w
     CHECK (phazite::getMix (song, phazite::getDeviceID (plugin)) == doctest::Approx (1.0f));
 
     // Instruments don't go on returns.
-    CHECK_FALSE (phazite::addReturnWithEffect (song, mix.a, phazite::makeOwnDeviceState (song, Synth::typeID)).isValid());
+    CHECK_FALSE (phazite::addReturnWith (song, mix.a, phazite::test::findOwnDeviceType (Synth::typeID)).isValid());
 }
 
 TEST_CASE ("A plug-in's mix is the song's, which what plays it plays, and its key controls are its own parameters")
@@ -421,7 +421,7 @@ TEST_CASE ("A plug-in's mix is the song's, which what plays it plays, and its ke
 
     phazite::setMix (song, plugin, 0.25f);
     CHECK (phazite::getMix (song, plugin) == doctest::Approx (0.25f));
-    CHECK ((float) phazite::findDeviceState (song, plugin)[schema::deviceMix] == doctest::Approx (0.25f));
+    CHECK ((float) phazite::test::copyDevice (song, plugin)[schema::deviceMix] == doctest::Approx (0.25f));
     CHECK (playedMix() == doctest::Approx (0.25f));
 
     // Its key controls are the plug-in's own parameters, by its own IDs.
@@ -429,7 +429,7 @@ TEST_CASE ("A plug-in's mix is the song's, which what plays it plays, and its ke
            == juce::StringArray { phazite::test::TestPlugin::gainID, phazite::test::TestPlugin::toneID });
 
     // An instrument has no mix.
-    const auto synth = phazite::setInstrument (song, mix.a, phazite::makeOwnDeviceState (song, Synth::typeID));
+    const auto synth = phazite::test::setOwnInstrument (song, mix.a, Synth::typeID);
     REQUIRE (synth.isValid());
     CHECK_FALSE (phazite::hasMix (song, synth));
     CHECK (phazite::getMix (song, synth) == doctest::Approx (1.0f));

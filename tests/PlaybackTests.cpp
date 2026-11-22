@@ -2,6 +2,7 @@
 #include "HostedDevice.h"
 #include "PlanCheck.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
@@ -432,7 +433,7 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
         if (drive > 0.0f)
             values.push_back ({ "drive", drive });
 
-        REQUIRE (phazite::setInstrument (*song, track, phazite::makeOwnDeviceState (*song, type, values)).isValid());
+        phazite::test::setOwnInstrument (*song, track, type, values);
 
         const auto clip = phazite::test::addMidiClip (*song, track, { beats (0.0), beats (8.0) }, "Note");
         phazite::test::addMidiNote (*song, clip, note, beats (0.0), phazite::BeatDuration::fromBeats (length), 110);
@@ -512,8 +513,7 @@ struct TwoSynths
 
         for (const auto track : tracks)
         {
-            synths.push_back (
-                phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID)));
+            synths.push_back (phazite::test::addOwnDevice (*song, track, phazite::devices::Synth::typeID));
             const auto clip = phazite::test::addMidiClip (*song, track, { beats (0.0), beats (8.0) });
             phazite::test::addMidiNote (*song, clip, track == tracks[0] ? 60 : 67, phazite::test::at (0.0), phazite::test::lasting (4.0));
         }

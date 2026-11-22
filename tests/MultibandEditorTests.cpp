@@ -5,6 +5,7 @@
 // curve (src/ui/devices/DynamicsCurve.h, the compressor's too), its line and its area lit up to the level heard, its points,
 // tension handles and menus, each one undo step; and the Sidechain part, its key's track named in Monitor.
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Multiband.h"
@@ -39,8 +40,7 @@ struct Song
     Song()
     {
         phazite::setSong (context, song.get());
-        multiband =
-            phazite::insertDeviceState (*song, phazite::getTrackIDs (*song)[0], phazite::makeOwnDeviceState (*song, Multiband::typeID));
+        multiband = phazite::test::addOwnDevice (*song, phazite::getTrackIDs (*song)[0], Multiband::typeID);
         REQUIRE (multiband.isValid());
         phazite::getSession (context)->update();
         song->getUndoManager().clearUndoHistory();

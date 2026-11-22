@@ -2,6 +2,7 @@
 // What plug-ins keep of their own, stored into the song outside the undo history (model/plugins/internal/PluginInstances.h):
 // their settings, their programs and the values set by hand of their parameters that automation moves, as saves,
 // duplicates, containers and presets store them.
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -35,9 +36,9 @@ float getStoredGain (const juce::String& base64)
 // The first plug-in on a track, not in a container.
 phazite::DeviceID findStandIn (const phazite::Song& song, phazite::TrackID track)
 {
-    for (const auto& state : phazite::getDeviceStates (phazite::findTrackState (song, track)))
-        if (phazite::isPluginState (state))
-            return phazite::getDeviceID (state);
+    for (const auto& device : phazite::getDevices (song, track))
+        if (phazite::test::getDeviceTypeOf (song, device) == schema::deviceIsPlugin)
+            return device;
 
     return {};
 }
@@ -60,7 +61,7 @@ struct Devices
 
     phazite::Song& getSong() const { return *phazite::findSong (song.context); }
     phazite::PluginInstances& getPlugins() const { return phazite::getSession (song.context)->getPlugins(); }
-    juce::ValueTree findState (phazite::DeviceID id) const { return phazite::findDeviceState (getSong(), id); }
+    juce::ValueTree findState (phazite::DeviceID id) const { return phazite::test::copyDevice (getSong(), id); }
 
     TestPlugin testPlugin; // known while the song is
     phazite::test::TestSong song;
@@ -129,7 +130,7 @@ TEST_CASE ("A plug-in on the master keeps its instance as the song changes, and 
     CHECK (TestPlugin::getGain (open, plugin) == doctest::Approx (0.25f));
 
     REQUIRE (song.getProject().save().wasOk());
-    CHECK (getStoredGain (phazite::findDeviceState (open, plugin)[schema::pluginState].toString()) == doctest::Approx (0.25f));
+    CHECK (getStoredGain (phazite::test::copyDevice (open, plugin)[schema::pluginState].toString()) == doctest::Approx (0.25f));
 }
 
 TEST_CASE ("Storing a plug-in's, or a track's plug-ins' states, writes them into the song without an undo step")

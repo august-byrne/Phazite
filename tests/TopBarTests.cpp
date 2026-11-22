@@ -2,6 +2,7 @@
 // The top bar (src/ui/shell/TopBar.h), driven with the mouse: its tempo field and time signature show the open
 // project's, and change them.
 #include "EnginePlayback.h"
+#include "TestDeviceValues.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
@@ -427,8 +428,7 @@ TEST_CASE ("While recording, a drag of the playhead's place takes the playhead o
     const auto countIn = phazite::isCountInOn (audio);
     phazite::setCountInOn (audio, false);
     const juce::ScopeGuard countInBack { [&audio, countIn] { phazite::setCountInOn (audio, countIn); } }; // the app's setting
-    REQUIRE (
-        phazite::setInstrument (song, phazite::getTrackIDs (song).front(), phazite::makeOwnDeviceState (song, "phaziteSynth")).isValid());
+    phazite::test::setOwnInstrument (song, phazite::getTrackIDs (song).front(), "phaziteSynth");
     phazite::routeLiveMidiInput (song);
     playback.play (0.01);
     phazite::startRecording (song);

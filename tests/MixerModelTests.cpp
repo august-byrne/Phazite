@@ -2,6 +2,7 @@
 // The mixer as the UI reaches it, by IDs and plain values (src/model/mixer/MixerModel.h).
 #include "EnginePlayback.h"
 #include "HostedDevice.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -236,24 +237,22 @@ TEST_CASE ("A channel's devices are the song's, in order and on or off, which wh
     phazite::addEffect (context, a, tracks.find ("phaziteCompressor"));
     phazite::addEffect (context, {}, tracks.find ("phaziteLimiter"));
 
-    // The song's: a track's element holds its devices in order, the instrument first, by their IDs and types; the master's
-    // element its own.
-    const auto typesIn = [] (const juce::ValueTree& chain)
+    // The song's: a track holds its devices in order, the instrument first, by their IDs and types; the master its own.
+    const auto typesIn = [&song] (phazite::TrackID channel)
     {
         juce::StringArray types;
 
-        for (const auto& state : phazite::getDeviceStates (chain))
-            types.add (state[schema::deviceType].toString());
+        for (const auto& device : phazite::getDevices (song, channel))
+            types.add (phazite::test::copyDevice (song, device)[schema::deviceType].toString());
 
         return types.joinIntoString (" ");
     };
 
-    const auto chain = phazite::findTrackState (song, a);
-    CHECK (typesIn (chain) == "phaziteSynth phaziteEq phaziteCompressor");
-    CHECK (typesIn (phazite::findChainState (song, {})) == "phaziteLimiter");
+    CHECK (typesIn (a) == "phaziteSynth phaziteEq phaziteCompressor");
+    CHECK (typesIn ({}) == "phaziteLimiter");
     const auto effects = phazite::getEffects (context, a);
     REQUIRE (effects.size() == 2);
-    CHECK (phazite::getDeviceID (phazite::getDeviceStates (chain)[1]) == effects[0].id);
+    CHECK (phazite::getDevices (song, a)[1] == effects[0].id);
 
     // What plays each device: on or off as the song has it, and none for a device the song hasn't any more.
     const auto isPlayedOn = [&tracks] (phazite::DeviceID device)
@@ -267,24 +266,24 @@ TEST_CASE ("A channel's devices are the song's, in order and on or off, which wh
     const auto eq = effects[0].id, compressor = effects[1].id;
     CHECK (isPlayedOn (eq));
     phazite::setDeviceOn (context, eq, false);
-    CHECK ((bool) phazite::findDeviceState (song, eq)[schema::deviceOff]);
+    CHECK ((bool) phazite::test::copyDevice (song, eq)[schema::deviceOff]);
     CHECK_FALSE (isPlayedOn (eq));
     phazite::moveEffect (context, eq, 1);
-    CHECK (typesIn (chain) == "phaziteSynth phaziteCompressor phaziteEq");
+    CHECK (typesIn (a) == "phaziteSynth phaziteCompressor phaziteEq");
     phazite::removeDevice (context, compressor);
-    CHECK (typesIn (chain) == "phaziteSynth phaziteEq");
+    CHECK (typesIn (a) == "phaziteSynth phaziteEq");
     CHECK (tracks.findPlayedDevice (compressor) == nullptr);
 
     phazite::undo (song);
-    CHECK (typesIn (chain) == "phaziteSynth phaziteCompressor phaziteEq");
+    CHECK (typesIn (a) == "phaziteSynth phaziteCompressor phaziteEq");
     CHECK (isPlayedOn (compressor));
     phazite::undo (song);
     phazite::undo (song);
-    CHECK (typesIn (chain) == "phaziteSynth phaziteEq phaziteCompressor");
-    CHECK_FALSE (phazite::findDeviceState (song, eq).hasProperty (schema::deviceOff));
+    CHECK (typesIn (a) == "phaziteSynth phaziteEq phaziteCompressor");
+    CHECK_FALSE (phazite::test::copyDevice (song, eq).hasProperty (schema::deviceOff));
     CHECK (isPlayedOn (eq));
     phazite::redo (song);
-    CHECK ((bool) phazite::findDeviceState (song, eq)[schema::deviceOff]);
+    CHECK ((bool) phazite::test::copyDevice (song, eq)[schema::deviceOff]);
     CHECK_FALSE (isPlayedOn (eq));
 }
 
@@ -331,7 +330,7 @@ TEST_CASE ("The values set by hand of Phazite's own devices are the song's, whic
     REQUIRE (index >= 0);
 
     // A value set by hand goes into the song, and what plays the device plays it; an undo takes both back.
-    const auto values = [&song, synth] { return phazite::findDeviceState (song, synth).getChildWithName (schema::VALUES); };
+    const auto values = [&song, synth] { return phazite::test::copyDevice (song, synth).getChildWithName (schema::VALUES); };
     const auto played = [&tracks, synth, index]
     {
         auto* device = tracks.findPlayedDevice (synth);
@@ -363,7 +362,7 @@ TEST_CASE ("A plug-in is the song's: which it is, its mix, and its settings as t
     const auto effects = phazite::getEffects (context, tracks.a);
     REQUIRE (effects.size() == 1);
     const auto id = effects[0].id;
-    const auto element = phazite::findDeviceState (song, id);
+    const auto element = [&song, id] { return phazite::test::copyDevice (song, id); };
 
     // (It loads in the background, as a plug-in added does: waited for, until what plays the song plays it.)
     REQUIRE (phazite::test::dispatchMessagesUntil (
@@ -375,12 +374,12 @@ TEST_CASE ("A plug-in is the song's: which it is, its mix, and its settings as t
         }));
 
     // Which plug-in it is, as scanning found it.
-    CHECK (element[schema::deviceType].toString() == "plugin");
-    CHECK (element[schema::pluginFormat].toString() == "Test");
-    CHECK (element[schema::pluginName].toString() == "Test Effect");
-    CHECK (element[schema::pluginMaker].toString() == "Phazite Tests");
-    CHECK (element[schema::pluginIdentifier].toString() == "PhaziteTestEffect");
-    CHECK ((int) element[schema::pluginUid] == TestPlugin::getDescription().uniqueId);
+    CHECK (element()[schema::deviceType].toString() == "plugin");
+    CHECK (element()[schema::pluginFormat].toString() == "Test");
+    CHECK (element()[schema::pluginName].toString() == "Test Effect");
+    CHECK (element()[schema::pluginMaker].toString() == "Phazite Tests");
+    CHECK (element()[schema::pluginIdentifier].toString() == "PhaziteTestEffect");
+    CHECK ((int) element()[schema::pluginUid] == TestPlugin::getDescription().uniqueId);
 
     // Its mix is the song's, which what plays it plays; an undo takes it back.
     const auto playedMix = [&tracks, id]
@@ -394,26 +393,26 @@ TEST_CASE ("A plug-in is the song's: which it is, its mix, and its settings as t
 
     auto mix = phazite::getMix (context, id);
     mix.setValue (0.25f);
-    CHECK ((float) element[schema::deviceMix] == doctest::Approx (0.25f));
+    CHECK ((float) element()[schema::deviceMix] == doctest::Approx (0.25f));
     CHECK (playedMix() == doctest::Approx (0.25f));
     phazite::undo (song);
-    CHECK_FALSE (element.hasProperty (schema::deviceMix));
+    CHECK_FALSE (element().hasProperty (schema::deviceMix));
     CHECK (playedMix() == doctest::Approx (1.0f));
     phazite::redo (song);
 
     // Its settings, as its window sets them, go into the song as the project stores them.
     TestPlugin::setGain (song, id, 0.3f);
     song.storeDeviceStates();
-    const auto stored = element[schema::pluginState].toString();
+    const auto stored = element()[schema::pluginState].toString();
     CHECK (stored.isNotEmpty());
 
     // Taken away, it keeps in the song what it held then and plays no more; an undo makes it again from the song, with
     // those settings and its mix.
     TestPlugin::setGain (song, id, 0.6f);
     phazite::removeDevice (context, id);
-    CHECK (element[schema::pluginState].toString() != stored);
     CHECK (tracks.findPlayedDevice (id) == nullptr);
     phazite::undo (song);
+    CHECK (element()[schema::pluginState].toString() != stored); // what it held as it went
     CHECK (TestPlugin::getGain (song, id) == doctest::Approx (0.6f));
     CHECK (playedMix() == doctest::Approx (0.25f));
 }
@@ -426,7 +425,7 @@ TEST_CASE ("A channel's volume and pan are the song's, which its fader plays; th
     auto& song = *tracks.song;
     const auto a = tracks.a;
     const auto track = phazite::findTrackState (song, a);
-    const auto master = phazite::findChainState (song, {});
+    const auto master = phazite::findTrackState (song, phazite::getMasterID (song));
     const auto played = [&tracks] (phazite::TrackID channel)
     {
         auto* fader = tracks.findPlayedChannel (channel);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll, driven with the mouse and the selection as the user would.
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/PlaylistModel.h"
@@ -395,8 +396,7 @@ TEST_CASE ("On a track without an instrument, the piano roll asks for one, since
     REQUIRE (button != nullptr);
     CHECK (button->getButtonText() == juce::String ("Choose instrument"));
 
-    const auto synth =
-        phazite::setInstrument (screen.song, screen.tracks[0], phazite::makeOwnDeviceState (screen.song, phazite::devices::Synth::typeID));
+    const auto synth = phazite::test::setOwnInstrument (screen.song, screen.tracks[0], phazite::devices::Synth::typeID);
     REQUIRE (synth.isValid());
     phazite::test::dispatchPendingMessages();
     CHECK (button->getButtonText() == phazite::getDeviceName (screen.song, synth));

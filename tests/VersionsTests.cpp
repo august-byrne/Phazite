@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A project's versions (docs/design/versions.md): saving them, reading them back as the project opens, and the changes since the
 // last one, by track, in Phazite's own words.
+#include "TestDeviceValues.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -210,7 +211,7 @@ TEST_CASE ("A knob turned and set back to its default, or a modulator's, is no c
     dispatchPendingMessages();
     REQUIRE_FALSE (s.getProject().hasUnsavedChanges());
     auto& song = *phazite::findSong (s.context);
-    const auto values = [&song, compressor] { return phazite::findDeviceState (song, compressor).getChildWithName (schema::VALUES); };
+    const auto values = [&song, compressor] { return phazite::test::copyDevice (song, compressor).getChildWithName (schema::VALUES); };
     REQUIRE (values().getNumProperties() == 1);
 
     s.setParameter (compressor, "inputGain", 6.0f);
@@ -405,7 +406,7 @@ TEST_CASE ("A plug-in's knob set to its default by Phazite's controls keeps no v
     dispatchPendingMessages();
     REQUIRE_FALSE (s.getProject().hasUnsavedChanges());
     const auto hasValue = [&song, plugin]
-    { return phazite::findDeviceState (song, plugin).getChildWithProperty (schema::valueParameter, TestPlugin::gainID).isValid(); };
+    { return phazite::test::copyDevice (song, plugin).getChildWithProperty (schema::valueParameter, TestPlugin::gainID).isValid(); };
     const auto played = [&song, plugin]
     {
         auto* instance = phazite::findPluginInstance (song, plugin);
@@ -460,13 +461,11 @@ TEST_CASE ("A plug-in still loading as a version is kept shows a knob turned aft
     juce::MemoryOutputStream state;
     state.writeFloat (0.25f); // its Gain
     state.writeFloat (0.5f);  // its Tone
-    auto device = phazite::makeDeviceState (song, phazite::makeDeviceType (TestPlugin::getDescription()));
-    device.setProperty (schema::pluginState, phazite::writeBytes (state.getMemoryBlock()), nullptr);
     phazite::DeviceID plugin;
 
     {
         const phazite::UndoStep step (song, "Add the stand-in");
-        plugin = phazite::insertDeviceState (song, s.firstTrack, device);
+        plugin = phazite::test::addPluginDevice (song, s.firstTrack, TestPlugin::getDescription(), state.getMemoryBlock());
     }
 
     phazite::findPluginInstance (song, plugin); // its load begun
@@ -750,8 +749,7 @@ TEST_CASE ("A plug-in's stored settings that differ count as a change only after
     CHECK (describeChanges (s.context).isEmpty());
 
     // Other bytes stored with nothing said, as a plug-in that writes a time into its state leaves them at each save.
-    phazite::findDeviceState (song, device)
-        .setProperty (schema::pluginState, phazite::writeBytes (juce::MemoryBlock ("other", 5)), nullptr);
+    phazite::test::storePluginState (song, device, juce::MemoryBlock ("other", 5));
     dispatchPendingMessages();
     CHECK (describeChanges (s.context).isEmpty());
 
@@ -780,7 +778,7 @@ TEST_CASE ("A plug-in's update shows in the changes, by the version that made it
     s.waitForPlugins();
     keepVersion (s.context, "First");
     s.saveWithPluginStates();
-    const auto then = phazite::findDeviceState (song, device)[schema::pluginVersion].toString();
+    const auto then = phazite::test::copyDevice (song, device)[schema::pluginVersion].toString();
     CHECK (then == phazite::test::TestPlugin::getDescription().version);
     CHECK (then == "1.0");
     CHECK (describeChanges (s.context).isEmpty());
@@ -814,7 +812,7 @@ TEST_CASE ("A plug-in's update shows in the changes, by the version that made it
     const auto listed = describeChanges (s.context);
     INFO (
         "listed: \"" << listed.toStdString() << "\"; stored version: "
-                     << phazite::findDeviceState (*phazite::findSong (s.context), device)[schema::pluginVersion].toString().toStdString());
+                     << phazite::test::copyDevice (*phazite::findSong (s.context), device)[schema::pluginVersion].toString().toStdString());
     CHECK (listed.contains (updated));
 }
 

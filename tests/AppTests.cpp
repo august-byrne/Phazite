@@ -4,6 +4,7 @@
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "HeldFile.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -2052,7 +2053,7 @@ TEST_CASE ("Closing a project while it records stops recording first, as Stop do
 
     auto& song = session.getProject()->getSong();
     const auto track = phazite::getTrackIDs (song).front();
-    REQUIRE (phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, "phaziteSynth")).isValid());
+    phazite::test::setOwnInstrument (song, track, "phaziteSynth");
     phazite::routeLiveMidiInput (song);
     auto& audio = phazite::getAudioIO (engine);
     const auto countIn = audio.isCountInOn();
@@ -2097,7 +2098,7 @@ TEST_CASE ("Save As while recording stops recording first and keeps the take, wh
 
     auto& song = session.getProject()->getSong();
     const auto track = phazite::getTrackIDs (song).front();
-    REQUIRE (phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, "phaziteSynth")).isValid());
+    phazite::test::setOwnInstrument (song, track, "phaziteSynth");
     phazite::routeLiveMidiInput (song);
     auto& audio = phazite::getAudioIO (engine);
     const auto countIn = audio.isCountInOn();

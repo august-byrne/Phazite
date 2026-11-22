@@ -13,6 +13,7 @@
 #include "EnginePlayback.h"
 #include "SongCheck.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UndoCheck.h"
@@ -419,7 +420,7 @@ TEST_CASE ("Song values' curves: what takes the curves along tells them, and wha
         CHECK (each.told.curves == 0);
 
     phazite::undo (song); // the EQ back
-    REQUIRE (phazite::findDeviceState (song, eq).isValid());
+    REQUIRE (phazite::test::hasDevice (song, eq));
 
     // A track duplicated with its fader's and its devices' curves: the copies' curves, under their new IDs.
     const auto duplicated = w.hearEach ("Duplicate Track", [&] { phazite::duplicateTracks (song, { track }, nullptr); });
@@ -587,10 +588,10 @@ TEST_CASE ("Song values' curves: a version with other curves applied both ways i
 
     apply ("Bring Back", before);
     CHECK (phazite::getCurveKeys (song) == std::vector { volume, eqParameter, otherVolume });
-    CHECK (phazite::findDeviceState (song, eq).isValid());
+    CHECK (phazite::test::hasDevice (song, eq));
     apply ("Bring Back Again", after);
     CHECK (phazite::getCurveKeys (song) == std::vector { eqParameter, volume, pan });
-    CHECK_FALSE (phazite::findDeviceState (song, eq).isValid());
+    CHECK_FALSE (phazite::test::hasDevice (song, eq));
     apply ("Without Automation", without);
     CHECK (phazite::getCurveKeys (song).empty());
     CHECK (song.getState().getChildWithName (phazite::schema::AUTOMATION).isValid());

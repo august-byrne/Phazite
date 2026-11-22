@@ -3,6 +3,7 @@
 #include "HeldFile.h"
 #include "PlanCheck.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -875,7 +876,7 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
             CAPTURE (name);
             REQUIRE (tracks.contains (name));
             CHECK_FALSE (phazite::getClips (song, tracks[name]).empty());
-            const auto instrument = phazite::findDeviceState (song, phazite::getInstrument (song, tracks[name]));
+            const auto instrument = phazite::test::copyDevice (song, phazite::getInstrument (song, tracks[name]));
             CHECK (instrument[phazite::schema::deviceType].toString() == juce::String (instrumentType));
         }
     }
@@ -933,7 +934,7 @@ TEST_CASE ("A project forgets, as it opens, the automation of devices it hasn't 
     auto project = createProject (temp.folder, "Automated");
     auto& song = project->getSong();
     const auto track = getFirstTrack (song);
-    const auto eq = phazite::insertDeviceState (song, track, phazite::makeOwnDeviceState (song, phazite::devices::Equalizer::typeID));
+    const auto eq = phazite::test::addOwnDevice (song, track, phazite::devices::Equalizer::typeID);
     REQUIRE (eq.isValid());
     const phazite::ParameterRef gainRef { eq, "output" };
     const phazite::ParameterRef volumeRef { phazite::getFader (song, track), phazite::getVolumeParameterID (song, track) };
@@ -1739,11 +1740,10 @@ TEST_CASE ("A plug-in's state that Save a Copy As or an autosave stores, which t
     auto project = createProject (temp.folder, "Stored");
     auto& song = project->getSong();
     const auto track = getFirstTrack (song);
-    const auto synth = phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, phazite::devices::Synth::typeID));
+    const auto synth = phazite::test::setOwnInstrument (song, track, phazite::devices::Synth::typeID);
     REQUIRE (synth.isValid());
     juce::String pluginState ("A");
-    song.setDeviceStateStore ([&song, synth, &pluginState] (std::uint64_t)
-                              { phazite::findDeviceState (song, synth).setProperty (phazite::schema::pluginState, pluginState, nullptr); });
+    song.setDeviceStateStore ([&song, synth, &pluginState] (std::uint64_t) { phazite::test::storePluginState (song, synth, pluginState); });
     phazite::test::dispatchPendingMessages();
     REQUIRE (project->save().wasOk());
     REQUIRE_FALSE (project->hasUnsavedChanges());
@@ -2137,10 +2137,9 @@ TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a sav
         {
             const auto& info = *own[d];
             INFO (std::string (info.typeID));
-            const auto device = phazite::makeOwnDeviceState (song, info.typeID);
-            const auto id = info.kind == phazite::devices::DeviceKind::instrument ? phazite::setInstrument (song, tracks[d], device)
-                                                                                  : phazite::insertDeviceState (song, tracks[d], device);
-            REQUIRE (id.isValid());
+            const auto id = info.kind == phazite::devices::DeviceKind::instrument
+                                ? phazite::test::setOwnInstrument (song, tracks[d], info.typeID)
+                                : phazite::test::addOwnDevice (song, tracks[d], info.typeID);
             auto& values = setTo[id];
 
             // Each one away from its default, to the other end of its range: the filters' types to Sample & Hold.
@@ -2164,7 +2163,7 @@ TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a sav
 
     for (const auto& [id, values] : setTo)
     {
-        const auto state = phazite::findDeviceState (song, id);
+        const auto state = phazite::test::copyDevice (song, id);
         const auto* info = phazite::findOwnDevice (state[phazite::schema::deviceType].toString().toStdString());
         REQUIRE (info != nullptr);
         INFO (std::string (info->typeID));

@@ -2,6 +2,7 @@
 // The Project view in the left panel (src/ui/project/ProjectView.h), in the whole window as the app builds it: its icon between
 // the browser's and source control's, the song's notes typed into it, and the song's audio files and plug-ins listed in it.
 #include "AppScreen.h"
+#include "TestDeviceValues.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "devices/synth/Synth.h"
@@ -520,7 +521,7 @@ TEST_CASE ("MIDI learn the whole way: a control's MIDI Learn, a knob moved, the 
 
     {
         const phazite::UndoStep step (song, "Add Device");
-        synth = phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, phazite::devices::Synth::typeID));
+        synth = phazite::test::setOwnInstrument (song, track, phazite::devices::Synth::typeID);
     }
 
     juce::Slider cutoffKnob;

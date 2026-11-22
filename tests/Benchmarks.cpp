@@ -16,6 +16,7 @@
 #include "ProcessMemory.h"
 #include "SandboxedPlugins.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -119,7 +120,7 @@ double millisecondsOf (const std::function<void()>& f)
 // One of Phazite's devices at the end of a channel's devices (an instrument in place of a track's instrument); its ID.
 phazite::DeviceID addDevice (phazite::Song& song, phazite::TrackID channel, const char* typeID)
 {
-    const auto id = phazite::insertDeviceState (song, channel, phazite::makeOwnDeviceState (song, typeID));
+    const auto id = phazite::test::addOwnDevice (song, channel, typeID);
     REQUIRE (id.isValid());
     return id;
 }

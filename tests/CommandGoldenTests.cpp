@@ -814,13 +814,8 @@ TEST_SUITE ("golden")
         s.setup ("add two reverbs to One, and select them",
                  [&s, one]
                  {
-                     using phazite::test::makeBuiltInDevice;
-                     const auto first =
-                         phazite::insertDeviceState (s.song, one, makeBuiltInDevice (s.song, phazite::devices::Reverb::typeID));
-                     const auto second =
-                         phazite::insertDeviceState (s.song, one, makeBuiltInDevice (s.song, phazite::devices::Reverb::typeID));
-                     REQUIRE (first.isValid());
-                     REQUIRE (second.isValid());
+                     const auto first = phazite::test::addBuiltInDevice (s.song, one, phazite::devices::Reverb::typeID);
+                     const auto second = phazite::test::addBuiltInDevice (s.song, one, phazite::devices::Reverb::typeID);
                      s.selection.selectOnly (first);
                      s.selection.addToSelection (second);
                  });
@@ -941,9 +936,7 @@ TEST_SUITE ("golden")
                          const auto keys = phazite::addTrackAtEnd (s.song, false, nullptr);
                          REQUIRE (keys.isValid());
                          phazite::setTrackName (s.song, keys, "Keys");
-                         REQUIRE (phazite::setInstrument (s.song, keys,
-                                                          phazite::test::makeBuiltInDevice (s.song, phazite::devices::Synth::typeID))
-                                      .isValid());
+                         phazite::test::setBuiltInInstrument (s.song, keys, phazite::devices::Synth::typeID);
                          s.selection.selectOnly (keys);
                          phazite::routeLiveMidiInput (s.song);
                          REQUIRE (phazite::getLiveMidiTrack (s.song) == keys);
@@ -1167,7 +1160,7 @@ TEST_CASE ("Every command of the whole window that changes the song, run once th
     auto& selection = getSelection (context);
 
     const auto tracks = phazite::ensureTracks (song, 2);
-    REQUIRE (phazite::setInstrument (song, tracks[0], phazite::test::makeBuiltInDevice (song, phazite::devices::Synth::typeID)).isValid());
+    phazite::test::setBuiltInInstrument (song, tracks[0], phazite::devices::Synth::typeID);
     const auto clip = phazite::insertMidiClip (song, tracks[0], { beats (4.3), beats (8.3) }, nullptr);
     REQUIRE (clip.isValid());
 

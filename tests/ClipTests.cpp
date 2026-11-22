@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/synth/Synth.h"
@@ -758,7 +759,7 @@ TEST_CASE ("Draw places a copy of the clip used last, or a bar-long MIDI clip on
     phazite::deleteClips (e.song, { source }, false);
     CHECK_FALSE (phazite::placeClip (e.song, e.tracks[0], beats (4.0), source).isValid());
 
-    REQUIRE (phazite::setInstrument (e.song, e.tracks[0], phazite::makeOwnDeviceState (e.song, phazite::devices::Synth::typeID)).isValid());
+    phazite::test::setOwnInstrument (e.song, e.tracks[0], phazite::devices::Synth::typeID);
     const auto empty = phazite::placeClip (e.song, e.tracks[0], beats (4.0), source);
     REQUIRE (empty.isValid());
     REQUIRE (phazite::isMidiClip (e.song, empty));

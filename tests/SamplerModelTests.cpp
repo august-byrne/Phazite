@@ -6,6 +6,7 @@
 // its slices written as notes into a clip that plays the loop in time; presets that carry its sound; and a float file's
 // samples that aren't numbers read as silence, as a wavetable's are; and a file that says its rate is beyond any sound's,
 // which is none.
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "devices/sampler/FactorySamples.h"
@@ -52,7 +53,7 @@ struct Screen
 
     juce::var getSound (const juce::Identifier& property) const
     {
-        return phazite::findDeviceState (getSong(), sampler).getChildWithName (phazite::schema::SOUNDS)[property];
+        return phazite::test::copyDevice (getSong(), sampler).getChildWithName (phazite::schema::SOUNDS)[property];
     }
 
     // What Phazite's engine plays.
@@ -346,7 +347,7 @@ TEST_CASE ("A sampler's preset carries its sound file to another project, and it
     auto& song = screen.getSong();
     REQUIRE (phazite::setSampleFile (song, screen.sampler, writeTone (screen.temp.folder.getChildFile ("Vox.wav"), 330.0, 0.5)));
 
-    auto state = phazite::findDeviceState (song, screen.sampler).createCopy();
+    auto state = phazite::test::copyDevice (song, screen.sampler);
     phazite::writeDeviceFilePaths (song, state);
     const auto path = state.getChildWithName (phazite::schema::SOUNDS)[phazite::schema::samplerSampleFile].toString();
     CHECK (juce::File::isAbsolutePath (path));

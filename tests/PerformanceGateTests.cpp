@@ -15,6 +15,7 @@
 #include "EnginePlayback.h"
 #include "PerformanceCounts.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -338,7 +339,7 @@ TEST_CASE ("Performance gate: a change no device reads leaves the next edit's pl
           [&] { phazite::rememberWindowPosition (song, phazite::getEffects (s.context, track)[0].id, { 10, 20 }); } },
         { "the plug-ins' states stored, as a save stores them", [&] { song.storeDeviceStates(); } },
         { "a plug-in's state written, as a store writes it",
-          [&] { phazite::findDeviceState (song, device).setProperty (phazite::schema::pluginState, "c3RhdGU=", nullptr); } },
+          [&] { phazite::test::storePluginState (song, device, juce::String ("c3RhdGU=")); } },
     };
 
     for (const auto& change : changes)
@@ -577,7 +578,7 @@ TEST_CASE ("Performance gate: the mixer makes strips for what is in view, howeve
         auto song = phazite::createSong();
 
         for (const auto track : phazite::ensureTracks (*song, numTracks))
-            REQUIRE (phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, dev::Equalizer::typeID)).isValid());
+            phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
 
         phazite::ProjectContext context { phazite::test::getEngineContext() };
         setSong (context, song.get());
@@ -665,10 +666,7 @@ TEST_CASE ("Performance gate: a device changed on one channel among many brings 
 
     SUBCASE ("an effect added")
     {
-        onlyThese (
-            [&]
-            { REQUIRE (phazite::insertDeviceState (*song, tracks[2], phazite::makeOwnDeviceState (*song, dev::Delay::typeID)).isValid()); },
-            { tracks[2] });
+        onlyThese ([&] { phazite::test::addOwnDevice (*song, tracks[2], dev::Delay::typeID); }, { tracks[2] });
     }
 
     std::vector<phazite::TrackID> everyChannel (tracks.begin(), tracks.end());

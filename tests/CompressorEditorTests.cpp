@@ -6,6 +6,7 @@
 // each page whole in the default dock.
 #include "GoldenFiles.h"
 #include "PerformanceCounts.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
@@ -47,7 +48,7 @@ struct Song
         phazite::setTrackName (*song, tracks[0], "Kick");
         phazite::setTrackName (*song, tracks[1], "Bass");
         phazite::setTrackName (*song, tracks[2], "Keys");
-        compressor = phazite::insertDeviceState (*song, tracks[1], phazite::makeOwnDeviceState (*song, Compressor::typeID));
+        compressor = phazite::test::addOwnDevice (*song, tracks[1], Compressor::typeID);
         REQUIRE (compressor.isValid());
         phazite::getSession (context)->update();
         song->getUndoManager().clearUndoHistory();

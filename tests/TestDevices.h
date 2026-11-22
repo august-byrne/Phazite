@@ -5,6 +5,7 @@
 // of any latency, an effect that plays its sidechain, and one that takes a share of the time.
 #pragma once
 
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "devices/core/Clock.h"
 #include "devices/core/DeviceInfo.h"
@@ -69,6 +70,34 @@ struct TestGain final : devices::Processor
     int lastNumChannels = 0;
     int processed = 0;               // stretches
     std::array<double, 64> beats {}; // where the song was as each stretch began, the last 64 (by processed, round)
+};
+
+// Test Gain with a sidechain, which it takes and never hears: a sidechain set on it through the model
+// (model/mixer/internal/Sidechain.h: setSidechainSource()) changes nothing of its own sound, but what the song plays around
+// it (the key's wait). 64 samples of latency and a 1.5 s tail, as Test Gain.
+struct TestKeyedGain final : devices::Processor
+{
+    static constexpr const char* typeID = "phaziteTestKeyedGain";
+    static constexpr devices::DeviceInfo info { .typeID = typeID,
+                                                .name = "Test Keyed Gain",
+                                                .kind = devices::DeviceKind::effect,
+                                                .parameters = testGainParameters,
+                                                .hasSidechain = true };
+
+    void prepare (double, int) override {}
+    void reset() override {}
+
+    void process (const devices::ProcessContext& block) override
+    {
+        const auto gain = juce::Decibels::decibelsToGain (block.parameters[0]) * (block.parameters[1] > 0.5f ? -1.0f : 1.0f);
+
+        for (int channel = 0; channel < block.numChannels; ++channel)
+            for (int i = 0; i < block.numSamples; ++i)
+                block.channels[channel][i] *= gain;
+    }
+
+    int getLatencySamples() const override { return 64; }
+    double getTailSeconds() const override { return 1.5; }
 };
 
 inline constexpr devices::ParameterInfo testToneParameters[] = {
@@ -324,6 +353,7 @@ inline void registerTestDevices()
     {
         const auto add = [] (const devices::DeviceInfo& info, DeviceFactory make) { registerDeviceType (info, make); };
         add (TestGain::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestGain>(); });
+        add (TestKeyedGain::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestKeyedGain>(); });
         add (TestTone::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestTone>(); });
         add (TestFrequency::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestFrequency>(); });
         add (TestDelay::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestDelay>(); });
@@ -340,8 +370,6 @@ inline void registerTestDevices()
 inline DeviceID addTestDevice (Song& song, TrackID track, const char* type)
 {
     registerTestDevices();
-    const auto id = insertDeviceState (song, track, makeOwnDeviceState (song, type));
-    REQUIRE (id.isValid());
-    return id;
+    return addOwnDevice (song, track, type);
 }
 } // namespace phazite::test

@@ -2,6 +2,7 @@
 // The mixer, as it lays out in the window (the inspector: InspectorTests.cpp).
 #include "EnginePlayback.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
@@ -98,8 +99,8 @@ TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks 
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return buttonsIn ("Instrument") == juce::StringArray { "Choose instrument" }; }));
 
     // The instrument has its own slot, and effects go in theirs.
-    const auto synth = phazite::setInstrument (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID));
-    const auto reverb = phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Reverb::typeID));
+    const auto synth = phazite::test::setOwnInstrument (*song, track, phazite::devices::Synth::typeID);
+    const auto reverb = phazite::test::addOwnDevice (*song, track, phazite::devices::Reverb::typeID);
     REQUIRE (synth.isValid());
     REQUIRE (reverb.isValid());
     const auto synthName = phazite::getDeviceName (*song, synth);
@@ -120,7 +121,7 @@ TEST_CASE ("A strip lists its devices a line each, with no knobs, over a fader a
     const auto busy = phazite::ensureTracks (*song, 2)[0];
 
     for (int i = 0; i < 6; ++i)
-        REQUIRE (phazite::insertDeviceState (*song, busy, phazite::makeOwnDeviceState (*song, phazite::devices::Reverb::typeID)).isValid());
+        phazite::test::addOwnDevice (*song, busy, phazite::devices::Reverb::typeID);
 
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setSong (context, song.get());
@@ -167,12 +168,11 @@ TEST_CASE ("A strip's effects have their switches in one column, whatever their 
     const auto track = phazite::ensureTracks (*song, 1)[0];
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setSong (context, song.get());
-    REQUIRE (phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Equalizer::typeID)).isValid());
+    phazite::test::addOwnDevice (*song, track, phazite::devices::Equalizer::typeID);
     const auto container = phazite::addContainer (context, track);
     REQUIRE (container.isValid());
     phazite::renameContainer (context, container, "A container with a name far longer than its slot");
-    REQUIRE (
-        phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Compressor::typeID)).isValid());
+    phazite::test::addOwnDevice (*song, track, phazite::devices::Compressor::typeID);
 
     // Played by Phazite's engine, which the devices' readings come from.
     phazite::test::EnginePlayback playback;
@@ -215,8 +215,8 @@ TEST_CASE ("A device's Replace opens what can take its place as a submenu, as Au
     const auto track = phazite::ensureTracks (*song, 1)[0];
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setSong (context, song.get());
-    REQUIRE (phazite::setInstrument (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID)).isValid());
-    REQUIRE (phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Reverb::typeID)).isValid());
+    phazite::test::setOwnInstrument (*song, track, phazite::devices::Synth::typeID);
+    phazite::test::addOwnDevice (*song, track, phazite::devices::Reverb::typeID);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::ChannelStrip strip { commands, context };

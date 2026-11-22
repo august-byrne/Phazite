@@ -5,6 +5,7 @@
 // CI's slowest builds (linux-asan ran the two together past 600 s).
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "devices/age/Age.h"
@@ -221,7 +222,7 @@ TEST_CASE ("Duck Under pumps under every factory kit's kick at 120 BPM, and no k
     // What one click on Duck Under sets a compressor to under a drum sampler's track, as the song holds it.
     const auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 2);
-    REQUIRE (phazite::setInstrument (*song, tracks[0], phazite::makeOwnDeviceState (*song, devices::DrumSampler::typeID)).isValid());
+    phazite::test::setOwnInstrument (*song, tracks[0], devices::DrumSampler::typeID);
     const auto ducker = phazite::duckUnder (*song, tracks[1], tracks[0]);
     REQUIRE (ducker.isValid());
     std::vector<float> duck;

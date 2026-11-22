@@ -3,6 +3,7 @@
 #include "AppScreen.h"
 #include "EnginePlayback.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/Outlines.h"
@@ -2295,7 +2296,7 @@ TEST_CASE ("A track without an instrument has an arm switch: with an input, a cl
 
     // A track with an instrument records what is played on MIDI: its switch is lit on the track live MIDI plays, as Ableton
     // Live arms the selected MIDI track by itself, and a click sends live MIDI there, or stops it recording there.
-    phazite::setInstrument (screen.getSong(), screen.tracks[1], phazite::makeOwnDeviceState (screen.getSong(), "phaziteSynth"));
+    phazite::test::setOwnInstrument (screen.getSong(), screen.tracks[1], "phaziteSynth");
     phazite::test::dispatchPendingMessages();
     auto* midiArm = findArm (1);
     REQUIRE (midiArm != nullptr);

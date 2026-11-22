@@ -6,6 +6,7 @@
 // Preset does (step 2.12) and a device's Presets menu does.
 #include "EnginePlayback.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
@@ -104,7 +105,7 @@ juce::File writeKitPreset (const juce::File& folder)
 // What a drum sampler's first pad plays, as the song names it.
 juce::String getPadFile (const phazite::Song& song, DeviceID drums)
 {
-    return phazite::findDeviceState (song, drums)
+    return phazite::test::copyDevice (song, drums)
         .getChildWithName (phazite::schema::SOUNDS)[phazite::schema::getPadSoundFile (0)]
         .toString();
 }
@@ -354,8 +355,7 @@ TEST_CASE ("A plug-in's presets go in its folder among the plug-ins', apart from
     description.manufacturerName = "Elsewhere";
     description.fileOrIdentifier = "C:/Plug-ins/Reverb.vst3";
     const auto pluginType = phazite::makeDeviceType (description);
-    const auto plugin = phazite::insertDeviceState (song.getSong(), track, phazite::makeDeviceState (song.getSong(), pluginType));
-    REQUIRE (plugin.isValid());
+    const auto plugin = phazite::test::addPluginDevice (song.getSong(), track, pluginType.description);
 
     // A device in the song and its type in the device lists (as the browser's rows list them) have the same folder.
     CHECK (phazite::getPresetFolderName (context, reverb) == juce::String ("Reverb"));
@@ -637,7 +637,7 @@ TEST_CASE ("A drum sampler's preset brings its sounds into the project that take
     phazite::test::waitForAudioWork (context); // its sound copied in, in the background, then the kit added (known bug 183)
     const auto drums = phazite::getInstrument (context, second.track (0));
     REQUIRE (drums.has_value());
-    const auto device = phazite::findDeviceState (second.getSong(), drums->id);
+    const auto device = phazite::test::copyDevice (second.getSong(), drums->id);
     REQUIRE (device.isValid());
     CHECK (device.getChildWithName (phazite::schema::SOUNDS)[phazite::schema::getPadSoundFile (0)].toString()
            == juce::String ("Audio/Boom.wav"));

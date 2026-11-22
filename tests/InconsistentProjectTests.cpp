@@ -5,6 +5,7 @@
 #include "GoldenFiles.h"
 #include "SongCheck.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UndoCheck.h"
@@ -633,7 +634,7 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
 
         const auto findDucker = [] (const phazite::Song& s)
         {
-            const auto devices = findAll (s.getState(), schema::DEVICE);
+            const auto devices = findAll (phazite::test::copyWholeSong (s), schema::DEVICE);
             const auto found = std::find_if (devices.begin(), devices.end(),
                                              [] (const juce::ValueTree& device) { return device.hasProperty (schema::deviceSidechain); });
             return found != devices.end() ? phazite::readID ((*found)[schema::deviceSidechain]) : 0;
@@ -654,9 +655,7 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
         phazite::showLane (song, track, volume);
         REQUIRE (phazite::addPoint (song, volume, { at (1.0), 0.5f }) >= 0);
         phazite::moveTracksAfter (song, { findNamed (song, "Lead") }, track);
-        REQUIRE (phazite::insertDeviceState (song, findNamed (song, "Audio"),
-                                             phazite::makeOwnDeviceState (song, phazite::devices::Compressor::typeID))
-                     .isValid());
+        phazite::test::addOwnDevice (song, findNamed (song, "Audio"), phazite::devices::Compressor::typeID);
         REQUIRE (project->save().wasOk());
 
         // Opened again, twice: all of it there, and each save the same as the one made before it opened.
@@ -835,7 +834,7 @@ TEST_CASE ("A name of no item, past the IDs a song counts on from, is left out a
     auto& song = project->getSong();
     CHECK (phazite::readID (findNamedTrack (song, "Drums")[schema::trackID]) == phazite::schema::maxCountedID);
 
-    for (const auto& device : findAll (song.getState(), schema::DEVICE))
+    for (const auto& device : findAll (phazite::test::copyWholeSong (song), schema::DEVICE))
         CHECK_FALSE (device.hasProperty (schema::deviceSidechain));
 }
 
@@ -936,7 +935,7 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
         CHECK (findAll (added, schema::LANE).size() == 1);
         const phazite::ParameterRef volumeAgain { phazite::getFader (again, addedID), phazite::getVolumeParameterID (again, addedID) };
         CHECK (phazite::getPoints (again, volumeAgain).size() == 1);
-        const auto devices = findAll (again.getState(), schema::DEVICE);
+        const auto devices = findAll (phazite::test::copyWholeSong (again), schema::DEVICE);
         CHECK (std::any_of (devices.begin(), devices.end(), [&drums] (const juce::ValueTree& device)
                             { return phazite::readID (device[schema::deviceSidechain]) == phazite::readID (drums[schema::trackID]); }));
 
@@ -1074,8 +1073,10 @@ TEST_CASE ("IDs given anew as the song opens are counted on from past what a nam
         });
     REQUIRE (project != nullptr);
     auto& song = project->getSong();
-    const auto synth = findNamedTrack (song, "Lead").getChildWithName (schema::DEVICE);
-    REQUIRE (synth.isValid());
+    const auto lead = phazite::TrackID::fromRaw (phazite::readID (findNamedTrack (song, "Lead")[schema::trackID]));
+    REQUIRE_FALSE (phazite::getDevices (song, lead).empty());
+    const auto synth = phazite::test::copyDevice (song, phazite::getDevices (song, lead).front());
+    REQUIRE (synth.hasType (schema::DEVICE));
 
     for (const auto& curve : phazite::getCurveKeys (song))
         CHECK (curve.device.getRaw() != phazite::readID (synth[schema::deviceID]));
@@ -1162,7 +1163,7 @@ TEST_CASE ("A device of a type Phazite hasn't is left out, with what names it")
             device->setAttribute ("type", "someoneElsesSynth");
         });
     REQUIRE (project != nullptr);
-    CHECK_FALSE (phazite::findDeviceState (project->getSong(), edited.synth).isValid());
+    CHECK_FALSE (phazite::test::hasDevice (project->getSong(), edited.synth));
 }
 
 TEST_CASE ("A tempo of zero opens at the slowest tempo, one that is no number at 120 BPM, and a time signature of 0/3 at a real one")
@@ -1702,7 +1703,8 @@ TEST_CASE (
     files.sort (false);
     INFO (files.joinIntoString (", "));
     CHECK (files == juce::StringArray { "Audio/Hat.wav", "Audio/Snare.wav", "C:/Users/someone/Music/Kick.wav" });
-    CHECK (findAll (project->getSong().getState(), schema::SOUNDS).front()["pad36SoundFile"].toString() == "/home/someone/Clap.wav");
+    CHECK (findAll (phazite::test::copyWholeSong (project->getSong()), schema::SOUNDS).front()["pad36SoundFile"].toString()
+           == "/home/someone/Clap.wav");
 }
 
 TEST_CASE ("A curve, a lane and a sidechain of what the song hasn't are left out, and a point's value comes within its parameter's range")
@@ -1913,7 +1915,7 @@ TEST_CASE ("A device on a drum sampler's track listening to one of its own pads'
         });
     REQUIRE (project != nullptr);
     CHECK_FALSE (phazite::getSidechainSource (project->getSong(), glue).isValid());
-    const auto devices = findAll (project->getSong().getState(), schema::DEVICE);
+    const auto devices = findAll (phazite::test::copyWholeSong (project->getSong()), schema::DEVICE);
     CHECK (std::any_of (devices.begin(), devices.end(),
                         [] (const juce::ValueTree& device) { return device.hasProperty (schema::deviceSidechain); }));
 }

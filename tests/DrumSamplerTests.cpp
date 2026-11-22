@@ -8,6 +8,7 @@
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -792,7 +793,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
 
     REQUIRE (phazite::setPadSound (s, id, 36, sample));
     CHECK (phazite::describeUndo (&s) == juce::String ("Undo Put My Kick on Pad 36"));
-    const auto sounds = phazite::findDeviceState (s, id).getChildWithName (phazite::schema::SOUNDS);
+    const auto sounds = phazite::test::copyDevice (s, id).getChildWithName (phazite::schema::SOUNDS);
     CHECK (sounds[phazite::schema::getPadSoundFile (36)].toString() == juce::String ("Audio/My Kick.wav"));
     CHECK (phazite::schema::getPadSoundFile (36).toString() == juce::String ("pad36SoundFile"));
     CHECK (song.getProject().getFolder().getChildFile ("Audio/My Kick.wav").existsAsFile());
@@ -822,7 +823,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
     // On the snare's second layer, beside its own: saved by its layer's name, played, and taken off again.
     REQUIRE (phazite::setPadSound (s, id, 38, sample, 1));
     CHECK (phazite::describeUndo (&s) == juce::String ("Undo Put My Kick on Pad 38's Layer 2"));
-    CHECK (phazite::findDeviceState (s, id).getChildWithName (phazite::schema::SOUNDS)[phazite::schema::getPadSoundFile (38, 1)]
+    CHECK (phazite::test::copyDevice (s, id).getChildWithName (phazite::schema::SOUNDS)[phazite::schema::getPadSoundFile (38, 1)]
            == juce::var ("Audio/My Kick.wav"));
     CHECK (phazite::schema::getPadSoundFile (38, 1).toString() == juce::String ("pad38SoundFile2"));
     CHECK (phazite::getPadName (s, id, 38) == juce::String ("Snare"));
@@ -924,7 +925,7 @@ TEST_CASE ("A pad's file and a wavetable's are read once while anything holds wh
     const auto drums = song.setInstrument (song.firstTrack, DrumSampler::typeID);
     auto& s = *phazite::findSong (song.context);
     REQUIRE (phazite::setPadSound (s, drums, 36, sample));
-    const auto sounds = phazite::findDeviceState (s, drums).getChildWithName (phazite::schema::SOUNDS);
+    const auto sounds = phazite::test::copyDevice (s, drums).getChildWithName (phazite::schema::SOUNDS);
 
     DrumSampler first, second;
     phazite::loadPadSound (first, s, sounds, 36);
@@ -958,7 +959,7 @@ TEST_CASE ("A drum pad on a track of its own plays there, leaving its sampler's 
     const auto tracks = phazite::ensureTracks (model, 2);
     const auto drums = tracks[0], bass = tracks[1];
     phazite::setTrackName (model, drums, "Drums");
-    const auto sampler = phazite::setInstrument (model, drums, phazite::makeOwnDeviceState (model, DrumSampler::typeID));
+    const auto sampler = phazite::test::setOwnInstrument (model, drums, DrumSampler::typeID);
     REQUIRE (sampler.isValid());
     using phazite::test::at, phazite::test::lasting;
     const auto clip = phazite::test::addMidiClip (model, drums, { at (0.0), at (4.0) }, "Beat");

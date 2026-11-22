@@ -3,6 +3,7 @@
 // them; their view (src/ui/devices/DynamicsCurve.h), which draws what they play and is worked by the mouse on it; and the
 // dynamics history (src/ui/devices/LevelHistoryView.h) with the compressor's trail of readings (devices/core/LevelTrail.h),
 // which draws a ramp as a line, not as stairs.
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/dsp/Math.h"
@@ -94,7 +95,7 @@ struct Song
     {
         phazite::setSong (context, song.get());
         const auto tracks = phazite::ensureTracks (*song, 1);
-        compressor = phazite::insertDeviceState (*song, tracks[0], phazite::makeOwnDeviceState (*song, Compressor::typeID));
+        compressor = phazite::test::addOwnDevice (*song, tracks[0], Compressor::typeID);
         REQUIRE (compressor.isValid());
         phazite::getSession (context)->update();
     }

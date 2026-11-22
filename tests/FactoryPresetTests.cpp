@@ -7,6 +7,7 @@
 // peaking above -1 dBFS.
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UndoCheck.h"
@@ -600,7 +601,7 @@ TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the s
     CHECK (sampler->getPadSound (36) == devices::getFactoryDrum (devices::findFactoryDrum ("808 Kick")).get());
 
     // The song keeps them by their names, and a project's file is the song.
-    const auto sounds = phazite::findDeviceState (*phazite::findSong (song.context), drums).getChildWithName (phazite::schema::SOUNDS);
+    const auto sounds = phazite::test::copyDevice (*phazite::findSong (song.context), drums).getChildWithName (phazite::schema::SOUNDS);
     CHECK (sounds[phazite::schema::getPadSound (36)].toString() == juce::String ("808 Kick"));
 
     // A file put on a pad plays instead, until Reset brings the kit's sound back.

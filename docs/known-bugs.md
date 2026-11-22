@@ -24,7 +24,8 @@ found by reading while the automation's curves were made values (2026-11-22), an
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
 the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
-onto another's beat does.
+onto another's beat does. 243 was found by the design of the devices' values (the same step, 2026-11-22) and
+confirmed by a test, which waits for the fix.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -226,6 +227,22 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `src/model/arrangement/ClipRenders.cpp`), and JUCE's `moveFileTo()` deletes the target before it moves. A compile in
   that instant finds no file. To fix: replace the file in one step (`writeWholeFile()`'s way, or a move that replaces),
   and an export that leaves to the background threads the renders they are already making.
+- **243. A folder ungrouped loses what its bus's plug-ins changed in their windows since the last store, which its Undo
+  doesn't bring back** (found by the design of S5.20's devices, confirmed by a test, 2026-11-22). `ungroupFolder()`
+  (`src/model/arrangement/Tracks.cpp`), which Ungroup (`ungroupFolders()`, its command's step) calls, removes the folder
+  and the devices on its bus without `Song::storeDeviceStates()` first, as every other removal of a device does (Delete
+  Track, `deleteTracks()`; a device removed, `removeDevice()`; a preset loaded): so the song holds a plug-in's settings as
+  of the last store (a save, an autosave, a version kept), the session lets its instance go at its next update
+  (`PluginInstances::sync()`), and the Undo makes it again from those older settings, losing every change made in its own
+  window since. The other ways a folder loses its devices store first or hold none: Delete Track on a folder stores the
+  folder and its tracks (`PluginInstances::storeTrack()`; checked by the same test with `deleteTracks()`, which passes),
+  and `makePlainFolder()` (`src/model/mixer/Buses.cpp`) is reached only with no devices left (`removeDevice()`, which
+  stored them, and `setMixedAsBus()` with none). Ungroup is the one path. To fix: in `ungroupFolder()`, before anything
+  is removed, `song.storeDeviceStates (folder.getRaw())`. The test, left out until then (`tests/DeviceStatesTests.cpp`):
+  the stand-in plug-in (`TestPlugin`) on a folder made a bus around the first track, its gain set to a quarter in its
+  window, the song's devices stored, then its gain set to three quarters; the folder ungrouped in one step, the session
+  updated (`getSession (context)->update()`: the plug-in has no instance any more); Undo, and the plug-ins waited for
+  (`TestSong::waitForPlugins()`): its gain should be three quarters. Today it is a quarter.
 
 ## Notes and clips
 

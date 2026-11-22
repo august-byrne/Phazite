@@ -3,6 +3,7 @@
 // Ableton Live's: the selected clips on each track, or what lies in a time range selected across tracks, joined into one
 // clip, a MIDI clip of the notes as they play, an audio file rendered before the track's devices, as one undo step.
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
@@ -167,9 +168,7 @@ TEST_CASE ("Consolidate renders a track's audio clips before its devices into on
     const auto loud = phazite::test::addAudioClip (model, song.bass, "Sine", sound, 0.0, 1.5);
     const auto quiet = phazite::test::addAudioClip (model, song.bass, "Sine", sound, 2.0, 1.5);
     phazite::setClipGain (model, quiet, -6.0f);
-    REQUIRE (phazite::insertDeviceState (model, song.bass,
-                                         phazite::makeOwnDeviceState (model, phazite::devices::Stereo::typeID, { { "gain", 6.0f } }))
-                 .isValid());
+    phazite::test::addOwnDevice (model, song.bass, phazite::devices::Stereo::typeID, { { "gain", 6.0f } });
     model.getUndoManager().clearUndoHistory();
 
     auto& selection = getSelection (song.context);

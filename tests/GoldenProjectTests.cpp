@@ -477,8 +477,6 @@ void freeze (phazite::ProjectContext& context, phazite::TrackID track)
 // take). The whole window's tests show and paint it too (RepresentativeSong.h).
 void addRepresentativeContent (phazite::Project& project, phazite::ProjectContext& context, const juce::File& scratch)
 {
-    using phazite::test::makeBuiltInDevice;
-
     auto& song = project.getSong();
     phazite::setTempo (song, 120.0);
     phazite::setTimeSignature (song, { 4, 4 });
@@ -525,9 +523,8 @@ void addRepresentativeContent (phazite::Project& project, phazite::ProjectContex
     const auto keys = phazite::insertTrack (song, drums, nullptr);
     REQUIRE (keys.isValid());
     phazite::setTrackName (song, keys, "Keys");
-    REQUIRE (phazite::setInstrument (song, keys, makeBuiltInDevice (song, phazite::devices::Synth::typeID)).isValid());
-    const auto reverb = phazite::insertDeviceState (song, keys, makeBuiltInDevice (song, phazite::devices::Reverb::typeID));
-    REQUIRE (reverb.isValid());
+    phazite::test::setBuiltInInstrument (song, keys, phazite::devices::Synth::typeID);
+    const auto reverb = phazite::test::addBuiltInDevice (song, keys, phazite::devices::Reverb::typeID);
     phazite::setMix (song, reverb, 0.25f);
     phazite::setTrackKey (song, keys, phazite::Key { 2, phazite::Scale::minor });
 
@@ -579,11 +576,9 @@ void addRepresentativeContent (phazite::Project& project, phazite::ProjectContex
     phazite::setChannelVolume (song, bus, -3.0f);
 
     // Returns: a reverb return that Tone sends to after its fader and Keys before its fader; and a reverb on the master.
-    const auto reverbReturn = phazite::addReturnWithEffect (song, tone, makeBuiltInDevice (song, phazite::devices::Reverb::typeID));
-    REQUIRE (reverbReturn.isValid());
+    const auto reverbReturn = phazite::test::addReturnWithBuiltInEffect (song, tone, phazite::devices::Reverb::typeID);
     REQUIRE (phazite::addSend (song, keys, reverbReturn, true).isValid());
-    REQUIRE (phazite::insertDeviceState (song, phazite::getMasterID (song), makeBuiltInDevice (song, phazite::devices::Reverb::typeID))
-                 .isValid());
+    phazite::test::addBuiltInDevice (song, phazite::getMasterID (song), phazite::devices::Reverb::typeID);
 
     // View settings: the playlist's grid and the piano roll's, and a range looped on purpose.
     phazite::saveGridSettings (song, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 1 });

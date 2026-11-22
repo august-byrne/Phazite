@@ -6,6 +6,7 @@
 #include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "devices/drums/DrumSampler.h"
@@ -200,8 +201,7 @@ TEST_CASE ("Values set back to their defaults, one on each side, leave a device 
     // The song keeps no value at its default, nor values without any (model/devices/internal/Parameters.h:
     // keepValueSetByHand()), and a merge leaves none either.
     Sides sides;
-    const auto device = phazite::insertDeviceState (*sides.base, sides.tracks[1],
-                                                    phazite::makeOwnDeviceState (*sides.base, phazite::devices::Synth::typeID));
+    const auto device = phazite::test::addOwnDevice (*sides.base, sides.tracks[1], phazite::devices::Synth::typeID);
     const auto defaultOf = [] (std::string_view parameter)
     {
         for (const auto& info : phazite::devices::Synth::info.parameters)
@@ -218,12 +218,12 @@ TEST_CASE ("Values set back to their defaults, one on each side, leave a device 
     sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
     phazite::setValueSetByHand (*sides.ours, { device, "cutoff" }, defaultOf ("cutoff"));
     phazite::setValueSetByHand (*sides.theirs, { device, "resonance" }, defaultOf ("resonance"));
-    REQUIRE (phazite::findDeviceState (*sides.ours, device).getChildWithName (schema::VALUES).getNumProperties() == 1);
+    REQUIRE (phazite::test::copyDevice (*sides.ours, device).getChildWithName (schema::VALUES).getNumProperties() == 1);
 
     auto merged = sides.merge();
     CHECK (merged.clashes.empty());
     const auto song = phazite::makeSong (merged.song.createCopy());
-    const auto state = phazite::findDeviceState (*song, device);
+    const auto state = phazite::test::copyDevice (*song, device);
     REQUIRE (state.isValid());
     CHECK_FALSE (state.getChildWithName (schema::VALUES).isValid());
 }
@@ -238,8 +238,8 @@ TEST_CASE ("What both sides added gets IDs of its own: tracks, devices, clips an
     REQUIRE (ourTrack == theirTrack);
     phazite::setTrackName (*sides.ours, ourTrack, "Keys");
     phazite::setTrackName (*sides.theirs, theirTrack, "Strings");
-    phazite::insertDeviceState (*sides.ours, ourTrack, phazite::makeOwnDeviceState (*sides.ours, phazite::devices::Synth::typeID));
-    phazite::insertDeviceState (*sides.theirs, theirTrack, phazite::makeOwnDeviceState (*sides.theirs, phazite::devices::Synth::typeID));
+    phazite::test::addOwnDevice (*sides.ours, ourTrack, phazite::devices::Synth::typeID);
+    phazite::test::addOwnDevice (*sides.theirs, theirTrack, phazite::devices::Synth::typeID);
     addMidiNote (*sides.ours, sides.clip, 43, at (3.0), lasting (1.0));
     addMidiNote (*sides.theirs, sides.clip, 48, at (4.0), lasting (1.0));
 
@@ -286,10 +286,8 @@ TEST_CASE ("A macro the other side added and linked to a MIDI controller keeps i
 TEST_CASE ("A merge keeps one link of each MIDI controller and one of each parameter, each link whole")
 {
     Sides sides;
-    const auto synthA = phazite::insertDeviceState (*sides.base, sides.tracks[0],
-                                                    phazite::makeOwnDeviceState (*sides.base, phazite::devices::Synth::typeID));
-    const auto synthB = phazite::insertDeviceState (*sides.base, sides.tracks[1],
-                                                    phazite::makeOwnDeviceState (*sides.base, phazite::devices::Synth::typeID));
+    const auto synthA = phazite::test::addOwnDevice (*sides.base, sides.tracks[0], phazite::devices::Synth::typeID);
+    const auto synthB = phazite::test::addOwnDevice (*sides.base, sides.tracks[1], phazite::devices::Synth::typeID);
     const phazite::ParameterRef cutoffA { synthA, "cutoff" }, resonanceA { synthA, "resonance" }, cutoffB { synthB, "cutoff" };
     phazite::linkMidiController (*sides.base, { 1, 1 }, cutoffA);
     sides.ours = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
@@ -351,7 +349,7 @@ TEST_CASE ("The other side's device order is taken where this side kept the base
     Sides sides;
 
     const auto addEq = [] (phazite::Song& song, phazite::TrackID track)
-    { return phazite::insertDeviceState (song, track, phazite::makeOwnDeviceState (song, phazite::devices::Equalizer::typeID)); };
+    { return phazite::test::addOwnDevice (song, track, phazite::devices::Equalizer::typeID); };
 
     const auto first = addEq (*sides.base, sides.tracks[0]);
     const auto second = addEq (*sides.base, sides.tracks[0]);
@@ -359,9 +357,8 @@ TEST_CASE ("The other side's device order is taken where this side kept the base
     sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
 
     // Theirs: the two the other way round, and a third after the first.
-    auto chain = phazite::findChainState (*sides.theirs, sides.tracks[0]);
-    const auto firstState = phazite::findDeviceState (*sides.theirs, first);
-    chain.moveChild (chain.indexOf (firstState), chain.getNumChildren() - 1, nullptr);
+    phazite::moveDevice (*sides.theirs, first, (int) phazite::getDevices (*sides.theirs, sides.tracks[0]).size() - 1);
+    REQUIRE (phazite::getDevices (*sides.theirs, sides.tracks[0]) == std::vector { second, first });
     const auto third = addEq (*sides.theirs, sides.tracks[0]);
 
     const auto merged = sides.merge();
@@ -857,10 +854,8 @@ TEST_CASE ("A drum sampler a merge gives a new ID keeps its pads' tracks, which 
 
     // Each side adds a device, both counting on from the same place: one ID for this side's synth and the other side's drum
     // sampler, whose pad 36 the other side gave a track of its own.
-    const auto synth =
-        phazite::setInstrument (*sides.ours, sides.tracks[0], phazite::makeOwnDeviceState (*sides.ours, phazite::devices::Synth::typeID));
-    const auto drums = phazite::setInstrument (*sides.theirs, sides.tracks[1],
-                                               phazite::makeOwnDeviceState (*sides.theirs, phazite::devices::DrumSampler::typeID));
+    const auto synth = phazite::test::setOwnInstrument (*sides.ours, sides.tracks[0], phazite::devices::Synth::typeID);
+    const auto drums = phazite::test::setOwnInstrument (*sides.theirs, sides.tracks[1], phazite::devices::DrumSampler::typeID);
     REQUIRE (synth.isValid());
     REQUIRE (drums.isValid());
     REQUIRE (synth.getRaw() == drums.getRaw());
@@ -1141,8 +1136,7 @@ TEST_CASE ("A device grouped into a container on one side and changed on the oth
 {
     const auto makeSides = [] (Sides& sides)
     {
-        const auto eq = phazite::insertDeviceState (*sides.base, sides.tracks[0],
-                                                    phazite::makeOwnDeviceState (*sides.base, phazite::devices::Equalizer::typeID));
+        const auto eq = phazite::test::addOwnDevice (*sides.base, sides.tracks[0], phazite::devices::Equalizer::typeID);
         sides.ours = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
         sides.theirs = phazite::makeSong (phazite::test::copyWholeSong (*sides.base));
         return eq;

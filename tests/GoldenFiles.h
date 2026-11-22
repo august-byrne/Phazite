@@ -132,6 +132,10 @@ void checkNoUserName (const juce::String& what, const juce::XmlElement& save);
 
 //==============================================================================
 // One of the built-in devices that the device list offers (phazite::getDeviceTypes()), by its type, such as
-// phazite::devices::Reverb::typeID, made as the browser makes it: its element, for a track (insertDeviceState()).
-juce::ValueTree makeBuiltInDevice (Song&, const char* typeID);
+// phazite::devices::Reverb::typeID, made as the browser makes it (TestDeviceValues.h): put on a channel after its devices, as
+// a track's instrument in place of the one it had, or on a new return track with a send to it from a track, in the
+// caller's step. Its ID, or the return's, REQUIRE'd valid.
+DeviceID addBuiltInDevice (Song&, TrackID channel, const char* typeID);
+DeviceID setBuiltInInstrument (Song&, TrackID, const char* typeID);
+TrackID addReturnWithBuiltInEffect (Song&, TrackID sender, const char* typeID);
 } // namespace phazite::test

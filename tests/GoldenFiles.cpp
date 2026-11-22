@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
 
@@ -617,15 +618,21 @@ void checkNoUserName (const juce::String& what, const juce::XmlElement& save)
 }
 
 //==============================================================================
-juce::ValueTree makeBuiltInDevice (Song& song, const char* typeID)
+DeviceID addBuiltInDevice (Song& song, TrackID channel, const char* typeID)
 {
-    juce::ValueTree device;
+    findOwnDeviceType (typeID); // offered, as the browser offers it
+    return addOwnDevice (song, channel, typeID);
+}
 
-    for (const auto& type : phazite::getDeviceTypes (getPluginHost (getEngineContext())))
-        if (! device.isValid() && type.description.fileOrIdentifier == typeID)
-            device = phazite::makeDeviceState (song, type);
+DeviceID setBuiltInInstrument (Song& song, TrackID track, const char* typeID)
+{
+    findOwnDeviceType (typeID); // offered, as the browser offers it
+    return setOwnInstrument (song, track, typeID);
+}
 
-    REQUIRE (device.isValid());
-    return device;
+TrackID addReturnWithBuiltInEffect (Song& song, TrackID sender, const char* typeID)
+{
+    findOwnDeviceType (typeID); // offered, as the browser offers it
+    return addReturnWithOwnEffect (song, sender, typeID);
 }
 } // namespace phazite::test

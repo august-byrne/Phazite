@@ -8,6 +8,7 @@
 // is off in the product (StoreSweep.h: sweepLetsGo): every test but one turns it on (SweepLetsGo); that one checks that the
 // product's sweep lets go of nothing.
 #include "HeldFile.h"
+#include "TestDeviceValues.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -29,6 +30,14 @@ namespace
 {
 using namespace phazite::test;
 namespace schema = phazite::schema;
+
+// A plug-in Phazite knows by its name alone, which no helper loads: a device whose state is bytes the store keeps.
+juce::PluginDescription testSynth()
+{
+    juce::PluginDescription description;
+    description.name = "Test Synth";
+    return description;
+}
 
 // A store of a project's versions on a computer, its clock at a time the test moves, its first sweep noted as it begins
 // (a first sweep leaves nothing out), and songs that differ by a volume, each written whole as a version or as a song kept
@@ -261,10 +270,7 @@ TEST_CASE ("A plug-in's state that no version or kept song holds goes; one a ver
     // States of random bytes, as real plug-ins write them, which are no text: the sweep only asks whether the store holds
     // them, and raises no assertion (tests/TestMain.cpp fails any).
     Store s;
-    const auto plugin = phazite::insertDeviceState (*s.song, s.track,
-                                                    juce::ValueTree (schema::DEVICE, { { schema::deviceID, (juce::int64) s.song->makeID() },
-                                                                                       { schema::deviceType, schema::deviceIsPlugin },
-                                                                                       { schema::pluginName, "Test Synth" } }));
+    const auto plugin = phazite::test::addPluginDevice (*s.song, s.track, testSynth());
     REQUIRE (plugin.isValid());
     juce::Random random (42);
 
@@ -275,7 +281,7 @@ TEST_CASE ("A plug-in's state that no version or kept song holds goes; one a ver
         for (size_t i = 0; i < state.getSize(); ++i)
             state[i] = (char) random.nextInt (256);
 
-        phazite::findDeviceState (*s.song, plugin).setProperty (schema::pluginState, phazite::writeBytes (state), nullptr);
+        phazite::test::storePluginState (*s.song, plugin, state);
     };
 
     setState();
@@ -1072,17 +1078,14 @@ TEST_CASE ("Under the real threshold, a few kilobytes nothing names wait, and me
     CHECK (s.holds (small)); // too little to rewrite packs for
 
     // A version with a plug-in state of 5 MiB that doesn't compress, named by nothing: it and the small one go together.
-    const auto plugin = phazite::insertDeviceState (*s.song, s.track,
-                                                    juce::ValueTree (schema::DEVICE, { { schema::deviceID, (juce::int64) s.song->makeID() },
-                                                                                       { schema::deviceType, schema::deviceIsPlugin },
-                                                                                       { schema::pluginName, "Test Synth" } }));
+    const auto plugin = phazite::test::addPluginDevice (*s.song, s.track, testSynth());
     juce::MemoryBlock state (5 * 1024 * 1024);
     juce::Random random (7);
 
     for (size_t i = 0; i < state.getSize(); ++i)
         state[i] = (char) random.nextInt (256);
 
-    phazite::findDeviceState (*s.song, plugin).setProperty (schema::pluginState, phazite::writeBytes (state), nullptr);
+    phazite::test::storePluginState (*s.song, plugin, state);
     const auto big = s.saveVersion (-3.0f);
     sweepWeeks (5);
     CHECK_FALSE (s.holds (big));

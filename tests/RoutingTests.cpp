@@ -2,6 +2,7 @@
 // Mixer depth (roadmap step 2.9; src/model/mixer/MixerModel.h): a send knob for every return, which its first turn makes;
 // where a channel's sound goes, the master or a bus; a device's sidechain by its ID, as its menu picks it; each channel's
 // CPU load; what links the channels; and a strip's send knobs and output button.
+#include "TestDeviceValues.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -54,8 +55,7 @@ struct Mix
 
     phazite::DeviceID addCompressor (phazite::TrackID track)
     {
-        const auto added =
-            phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Compressor::typeID));
+        const auto added = phazite::test::addOwnDevice (*song, track, phazite::devices::Compressor::typeID);
         REQUIRE (added.isValid());
         return added;
     }

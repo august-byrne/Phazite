@@ -6,6 +6,7 @@
 #include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
@@ -959,7 +960,7 @@ TEST_CASE (
     CHECK (phazite::getSends (n.s.context, n.drums).size() == 1);
     CHECK (n.hasCurve());
     CHECK (n.isModulated());
-    CHECK (phazite::findDeviceState (n.song(), n.eq).isValid());
+    CHECK (phazite::test::hasDevice (n.song(), n.eq));
     checkSong (n.song());
 }
 
@@ -979,7 +980,7 @@ TEST_CASE (
     phazite::undo (n.song()); // the restore: the curve back
     CHECK (n.hasCurve());
     phazite::undo (n.song()); // the EQ's removal: the EQ back, with its curve
-    CHECK (phazite::findDeviceState (n.song(), n.eq).isValid());
+    CHECK (phazite::test::hasDevice (n.song(), n.eq));
     CHECK (n.hasCurve());
 }
 
@@ -1053,7 +1054,7 @@ TEST_CASE ("A line restored from a damaged commit takes away the curves it broug
     phazite::undo (n.song());
     CHECK (hasMakeupCurve());
     phazite::undo (n.song());
-    CHECK (phazite::findDeviceState (n.song(), compressor).isValid());
+    CHECK (phazite::test::hasDevice (n.song(), compressor));
     CHECK (phazite::getPoints (n.song(), makeup).size() == 1);
     checkSong (n.song());
 }
@@ -1290,7 +1291,7 @@ struct Lines
         return found;
     }
 
-    juce::String typeOf (phazite::DeviceID device) const { return phazite::findDeviceState (song, device)[schema::deviceType].toString(); }
+    juce::String typeOf (phazite::DeviceID device) const { return phazite::test::copyDevice (song, device)[schema::deviceType].toString(); }
 
     // The curves that name a device.
     int countCurves (phazite::DeviceID device) const
@@ -1873,7 +1874,7 @@ TEST_CASE ("A line merged back, whose merge gave its item a new ID and took that
     l.merge (noPad);
 
     CHECK (l.named ("Pad").empty());
-    CHECK_FALSE (phazite::findDeviceState (l.song, eq).isValid());
+    CHECK_FALSE (phazite::test::hasDevice (l.song, eq));
     const auto leads = l.named ("Lead");
     REQUIRE (leads.size() == 1);
     CHECK (leads[0] != pad);

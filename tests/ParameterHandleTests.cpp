@@ -2,6 +2,7 @@
 // A parameter as controls use it (src/model/devices/ParameterHandle.h): its value, range and default, and its changes
 // as named undo steps that the model, not the control, begins.
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -23,8 +24,7 @@ namespace
 // A reverb at the end of the song's first track; its ID.
 phazite::DeviceID addReverb (phazite::Song& song)
 {
-    const auto reverb = phazite::insertDeviceState (song, phazite::getTrackIDs (song)[0],
-                                                    phazite::makeOwnDeviceState (song, phazite::devices::Reverb::typeID));
+    const auto reverb = phazite::test::addOwnDevice (song, phazite::getTrackIDs (song)[0], phazite::devices::Reverb::typeID);
     REQUIRE (reverb.isValid());
     return reverb;
 }

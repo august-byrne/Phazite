@@ -4,6 +4,7 @@
 // only, its devices reached by the mixer's functions, a duplicated track's containers with devices and macros of their
 // own, and the commands that group and ungroup the selected devices.
 #include "EnginePlayback.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -293,37 +294,30 @@ TEST_CASE ("A container is the song's, with its name, mix, devices and macros")
     const auto effects = tracks.effectsOf (tracks.a);
     const auto eq = effects[0], reverb = effects[2];
     const auto container = groupEqAndReverb (tracks);
-    const auto element = phazite::findDeviceState (song, container);
+    const auto element = [&song, container] { return phazite::test::copyDevice (song, container); };
 
-    // The song's container, in the EQ's place, with its name and its one chain, which holds its devices' elements in their
-    // order.
-    REQUIRE (element.hasType (schema::CONTAINER));
-    REQUIRE (phazite::getChainStates (element).size() == 1);
-    CHECK (phazite::getChainStates (element)[0][schema::chainName].toString() == juce::String ("Chain 1"));
-    CHECK (element[schema::containerName].toString() == juce::String ("Container"));
-    CHECK (phazite::getDeviceStates (phazite::findTrackState (song, tracks.a)).size() == 3); // the synth, the container, the compressor
-    const auto devicesIn = [&element]
-    {
-        std::vector<DeviceID> ids;
-
-        for (const auto& state : phazite::getDeviceStates (element))
-            ids.push_back (phazite::getDeviceID (state));
-
-        return ids;
-    };
+    // The song's container, in the EQ's place, with its name and its one chain, which holds its devices in their order.
+    REQUIRE (element().hasType (schema::CONTAINER));
+    const auto chains = phazite::getChains (song, container);
+    REQUIRE (chains.size() == 1);
+    CHECK (element().getChildWithName (schema::CHAIN)[schema::chainID] == juce::var ((juce::int64) chains[0].getRaw()));
+    CHECK (element().getChildWithName (schema::CHAIN)[schema::chainName].toString() == juce::String ("Chain 1"));
+    CHECK (element()[schema::containerName].toString() == juce::String ("Container"));
+    CHECK (phazite::getDevices (song, tracks.a).size() == 3); // the synth, the container, the compressor
+    const auto devicesIn = [&song, &chains] { return phazite::getChainDevices (song, chains[0]); };
 
     CHECK (devicesIn() == std::vector<DeviceID> { eq, reverb });
 
     // Its name, its mix, and its devices' switches and values are the song's.
     phazite::renameContainer (context, container, "Space");
-    CHECK (element[schema::containerName].toString() == juce::String ("Space"));
+    CHECK (element()[schema::containerName].toString() == juce::String ("Space"));
     phazite::getMix (context, container).setValue (0.5f);
-    CHECK ((float) element[schema::deviceMix] == doctest::Approx (0.5f));
+    CHECK ((float) element()[schema::deviceMix] == doctest::Approx (0.5f));
     phazite::setDeviceOn (context, reverb, false);
-    CHECK ((bool) phazite::findDeviceState (song, reverb)[schema::deviceOff]);
+    CHECK ((bool) phazite::test::copyDevice (song, reverb)[schema::deviceOff]);
     CHECK_FALSE (phazite::getContainerDevices (context, container)[1].isOn);
     phazite::getParameter (context, { eq, "band4Gain" }).setValue (6.0f);
-    CHECK ((float) phazite::findDeviceState (song, eq).getChildWithName (schema::VALUES)["band4Gain"] == doctest::Approx (6.0f));
+    CHECK ((float) phazite::test::copyDevice (song, eq).getChildWithName (schema::VALUES)["band4Gain"] == doctest::Approx (6.0f));
     CHECK (phazite::getValueSetByHand (song, ParameterRef { eq, "band4Gain" }) == doctest::Approx (6.0f));
 
     // Moved in the song; an undo puts it back.

@@ -6,6 +6,7 @@
 // engine plays of all that; and the presets that keep it.
 #include "EnginePlayback.h"
 #include "SongCheck.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestSong.h"
 #include "UndoCheck.h"
@@ -95,7 +96,7 @@ DeviceID addToChain (TestSong& song, DeviceID chain, const char* type)
 {
     phazite::test::registerTestDevices();
     auto& model = *phazite::findSong (song.context);
-    const auto id = phazite::insertIntoChain (model, chain, phazite::makeOwnDeviceState (model, type));
+    const auto id = phazite::test::addOwnDeviceToChain (model, chain, type);
     REQUIRE (id.isValid());
     return id;
 }
@@ -178,7 +179,7 @@ TEST_CASE ("A container's chains are added, copied, moved, renamed and removed a
     // Removed with its devices; then the one left alone is heard, neither muted nor soloed; the last can't go.
     phazite::removeChain (context, copy);
     CHECK (tone.describeUndo() == juce::String ("Undo Remove Chain"));
-    CHECK_FALSE (phazite::findDeviceState (tone.model(), copiedReverb).isValid());
+    CHECK_FALSE (phazite::test::hasDevice (tone.model(), copiedReverb));
     phazite::removeChain (context, second);
     chains = phazite::getChains (context, container);
     REQUIRE (chains.size() == 1);

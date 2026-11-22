@@ -2,6 +2,7 @@
 // The limiter's editor (src/ui/devices/LimiterEditor.h), the meters it shows (ui::ValueMeter), and the history it shares with the
 // compressor (src/ui/devices/LevelHistoryView.h): its ceiling's line to drag, and its beats and bars.
 #include "GoldenFiles.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -71,7 +72,7 @@ TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the c
 {
     phazite::test::TestSong song;
     auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::insertDeviceState (s, phazite::getMasterID (s), phazite::makeOwnDeviceState (s, Limiter::typeID));
+    const auto id = phazite::test::addOwnDevice (s, phazite::getMasterID (s), Limiter::typeID);
     REQUIRE (id.isValid());
     phazite::getSession (song.context)->update();
     const auto ceiling = [&s, id] { return phazite::getValueSetByHand (s, phazite::ParameterRef { id, "ceiling" }); };
@@ -161,7 +162,7 @@ TEST_CASE ("The limiter's history shows a short hit between two ticks at its dep
 {
     phazite::test::TestSong song;
     auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::insertDeviceState (s, phazite::getMasterID (s), phazite::makeOwnDeviceState (s, Limiter::typeID));
+    const auto id = phazite::test::addOwnDevice (s, phazite::getMasterID (s), Limiter::typeID);
     REQUIRE (id.isValid());
     phazite::getSession (song.context)->update();
     const auto device = phazite::makeDeviceHandle (s, id);
@@ -199,7 +200,7 @@ TEST_CASE (
     // The owner (2026-11-10): "it should be obvious that you are able to do this gesture".
     phazite::test::TestSong song;
     auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::insertDeviceState (s, phazite::getMasterID (s), phazite::makeOwnDeviceState (s, Limiter::typeID));
+    const auto id = phazite::test::addOwnDevice (s, phazite::getMasterID (s), Limiter::typeID);
     REQUIRE (id.isValid());
     phazite::getSession (song.context)->update();
     const auto ceiling = [&s, id] { return phazite::getValueSetByHand (s, phazite::ParameterRef { id, "ceiling" }); };

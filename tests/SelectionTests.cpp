@@ -2,6 +2,7 @@
 // What the selection commands do (src/model/arrangement/internal/Selection.h), called directly: each acts on the first kind of
 // thing selected, in the order notes, time range, sections, clips, tracks.
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
@@ -347,7 +348,7 @@ TEST_CASE ("Phazite's selection holds items by their IDs: one kind at a time, an
     CHECK (selection.getTracks() == std::vector { s.b, s.a });
     CHECK (selection.getNumObjectsSelected() == 4);
 
-    const auto device = phazite::insertDeviceState (s.song, s.b, phazite::makeOwnDeviceState (s.song, "phaziteEq"));
+    const auto device = phazite::test::addOwnDevice (s.song, s.b, "phaziteEq");
     REQUIRE (device.isValid());
     selection.addToSelection (device);
     CHECK (selection.getDevices() == std::vector { device });

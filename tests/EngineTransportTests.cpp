@@ -5,6 +5,7 @@
 // plans a stalled block still plays. Each was a bug the quality audit found (known bugs 79, 80, 82, 81, 37, 77 and 83).
 #include "HostedDevice.h"
 #include "TestAudioDevice.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -869,7 +870,7 @@ TEST_CASE ("A render takes the project's plug-ins only once a block that stalls 
     phazite::test::TestSong song;
     phazite::test::HostedDevice device;
     auto& songItself = song.getProject().getSong();
-    REQUIRE (phazite::insertDeviceState (songItself, song.firstTrack, phazite::makeOwnDeviceState (songItself, Staller::typeID)).isValid());
+    phazite::test::addOwnDevice (songItself, song.firstTrack, Staller::typeID);
     phazite::test::dispatchPendingMessages();
     auto* session = phazite::findSession (songItself);
     REQUIRE (session != nullptr);

@@ -2,6 +2,7 @@
 // A plug-in's parameters through its updates: the song refers to each by the plug-in's own ID for it (a VST3's number),
 // which an update keeps wherever it moves the parameter in the plug-in's list. A project saved with one version of the
 // stand-in plug-in, opened with another.
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -66,7 +67,7 @@ TEST_CASE ("A song refers to a plug-in's parameters by the plug-in's own IDs, wh
     Saved saved;
 
     // What refers to Gain names it by the plug-in's "1": its value set by hand and its automation.
-    const auto element = phazite::findDeviceState (saved.getSong(), saved.plugin);
+    const auto element = phazite::test::copyDevice (saved.getSong(), saved.plugin);
     CHECK (element.getChildWithName (schema::VALUE)[schema::valueParameter].toString() == juce::String (TestPlugin::gainID));
     const auto curves = phazite::getCurveKeys (saved.getSong());
     CHECK (std::find (curves.begin(), curves.end(), saved.gain) != curves.end());

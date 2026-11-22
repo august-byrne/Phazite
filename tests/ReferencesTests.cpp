@@ -8,6 +8,7 @@
 #include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -306,10 +307,10 @@ TEST_CASE ("What names a modulator, a macro or a send stays while it does, when 
     UndoCheck undo (song);
     const auto eq = s.addEffect (other, phazite::devices::Equalizer::typeID);
     undo.check ("Remove EQ", [&] { phazite::removeDevice (song, eq); });
-    CHECK_FALSE (phazite::findDeviceState (song, eq).isValid());
+    CHECK_FALSE (phazite::test::hasDevice (song, eq));
     keepsThem();
     undo.stepBackOrForth ("Undo", [&] { phazite::undo (song); });
-    REQUIRE (phazite::findDeviceState (song, eq).isValid());
+    REQUIRE (phazite::test::hasDevice (song, eq));
     keepsThem();
     undo.stepBackOrForth ("Redo", [&] { phazite::redo (song); });
     keepsThem();
@@ -326,7 +327,7 @@ TEST_CASE ("What names a modulator, a macro or a send stays while it does, when 
                                        phazite::removeBrokenReferences (song);
                                    });
                        });
-    CHECK_FALSE (phazite::findDeviceState (song, again).isValid());
+    CHECK_FALSE (phazite::test::hasDevice (song, again));
     keepsThem();
     checkIDs (song);
     undo.walkBackAndForth();

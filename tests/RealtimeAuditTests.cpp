@@ -14,6 +14,7 @@
 #include "SandboxedPlugins.h"
 #include "TestAudioDevice.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -2963,8 +2964,7 @@ TEST_SUITE ("realtime-audit")
         TestSong song;
         addTone (song, song.firstTrack);
         auto& played = getSong (song);
-        REQUIRE (
-            phazite::insertDeviceState (played, song.firstTrack, phazite::makeOwnDeviceState (played, AssertingEffect::typeID)).isValid());
+        phazite::test::addOwnDevice (played, song.firstTrack, AssertingEffect::typeID);
 
         const phazite::test::ExpectedAssertion onPurpose ("RealtimeAuditTests.cpp"); // the jassertfalse above, and only it
         AssertingEffect::blocksToAssertion = 60;                                     // after the warm-up's blocks (none)

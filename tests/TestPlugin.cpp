@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestPlugin.h"
+#include "TestDeviceValues.h"
 #include "UiTestHelpers.h"
 #include "host/TestPlugins.h"
 #include "model/engine/internal/EngineContext.h"
@@ -71,7 +72,7 @@ juce::PluginDescription TestPlugin::getDescription()
 
 DeviceID TestPlugin::add (Song& song, TrackID track)
 {
-    const auto id = insertDeviceState (song, track, makeDeviceState (song, makeDeviceType (getDescription())));
+    const auto id = phazite::test::addPluginDevice (song, track, getDescription());
     REQUIRE (id.isValid());
 
     // It loads in the background, as a plug-in added does (model/plugins/internal/PluginInstances.h): waited for here.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RandomEdits.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
 #include "devices/dynamics/Compressor.h"
@@ -484,7 +485,7 @@ void RandomEdits::edit()
         {
             const auto effects = getOwnOfKind (devices::DeviceKind::effect);
             const auto* info = pick (effects);
-            insertDeviceState (song, track, makeOwnDeviceState (song, info->typeID));
+            phazite::test::tryAddOwnDevice (song, track, info->typeID);
             break;
         }
 
@@ -493,7 +494,7 @@ void RandomEdits::edit()
             {
                 const auto instruments = getOwnOfKind (devices::DeviceKind::instrument);
                 const auto* info = pick (instruments);
-                setInstrument (song, pick (plain), makeOwnDeviceState (song, info->typeID));
+                phazite::test::trySetOwnInstrument (song, pick (plain), info->typeID);
             }
             break;
 
@@ -505,7 +506,7 @@ void RandomEdits::edit()
                 break;
 
             const auto device = pick (devices);
-            const auto* info = findOwnDevice (findDeviceState (song, device)[schema::deviceType].toString().toStdString());
+            const auto* info = findOwnDevice (phazite::test::copyDevice (song, device)[schema::deviceType].toString().toStdString());
 
             if (info == nullptr || info->parameters.empty())
                 break;
@@ -613,7 +614,8 @@ void RandomEdits::edit()
             {
                 const auto device = pick (devices);
 
-                if (const auto* info = findOwnDevice (findDeviceState (song, device)[schema::deviceType].toString().toStdString());
+                if (const auto* info =
+                        findOwnDevice (phazite::test::copyDevice (song, device)[schema::deviceType].toString().toStdString());
                     info != nullptr && ! info->parameters.empty())
                 {
                     const auto& p = info->parameters[(size_t) draw ((int) info->parameters.size())];
@@ -643,7 +645,7 @@ void RandomEdits::edit()
                 break;
 
             const auto device = pick (devices);
-            const auto* info = findOwnDevice (findDeviceState (song, device)[schema::deviceType].toString().toStdString());
+            const auto* info = findOwnDevice (phazite::test::copyDevice (song, device)[schema::deviceType].toString().toStdString());
 
             if (info == nullptr || info->parameters.empty())
                 break;
@@ -665,7 +667,7 @@ void RandomEdits::edit()
                 const auto* info = pick (effects);
 
                 if (const auto chains = getChains (song, container); ! chains.empty())
-                    insertIntoChain (song, chains.front(), makeOwnDeviceState (song, info->typeID));
+                    phazite::test::tryAddOwnDeviceToChain (song, chains.front(), info->typeID);
 
                 if (random.nextBool())
                     addChain (song, container);
@@ -724,8 +726,8 @@ void RandomEdits::edit()
                 const auto on = pick (plain);
                 auto drums = getInstrument (song, on);
 
-                if (findDeviceState (song, drums)[schema::deviceType].toString() != devices::DrumSampler::typeID)
-                    drums = setInstrument (song, on, makeOwnDeviceState (song, devices::DrumSampler::typeID));
+                if (phazite::test::copyDevice (song, drums)[schema::deviceType].toString() != devices::DrumSampler::typeID)
+                    drums = phazite::test::trySetOwnInstrument (song, on, devices::DrumSampler::typeID);
 
                 const auto pad = 36 + draw (4);
 
@@ -796,7 +798,7 @@ void RandomEdits::edit()
             const auto chain = pick (chains);
             const auto device = pick (devices);
 
-            if (findDeviceState (song, device).hasType (schema::DEVICE) && device != getInstrument (song, track))
+            if (phazite::test::copyDevice (song, device).hasType (schema::DEVICE) && device != getInstrument (song, track))
                 moveToChain (song, device, chain);
             else if (const auto inside = getChainDevices (song, chain); inside.size() > 1)
                 moveInChain (song, pick (inside), draw ((int) inside.size()));
@@ -808,7 +810,8 @@ void RandomEdits::edit()
             {
                 const auto device = pick (devices);
 
-                if (const auto* info = findOwnDevice (findDeviceState (song, device)[schema::deviceType].toString().toStdString()))
+                if (const auto* info =
+                        findOwnDevice (phazite::test::copyDevice (song, device)[schema::deviceType].toString().toStdString()))
                 {
                     const auto presets = getFactoryPresetsFolder()
                                              .getChildFile (juce::String (info->name.data(), info->name.size()))
@@ -987,7 +990,7 @@ void RandomEdits::edit()
         case 43: // a sidechain taken away
             for (const auto device : getAllDevices (song))
             {
-                if ((juce::int64) findDeviceState (song, device)[schema::deviceSidechain] != 0)
+                if ((juce::int64) phazite::test::copyDevice (song, device)[schema::deviceSidechain] != 0)
                 {
                     setSidechainSource (song, device, {});
                     break;

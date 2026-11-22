@@ -2,6 +2,7 @@
 // The browser and the plug-in picker, driven as the user would: places and folders, previews, search, favorites, and
 // putting items into the song with Enter, a drop or the picker (roadmap step 1.5).
 #include "SoundPackTestHelpers.h"
+#include "TestDeviceValues.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -1924,8 +1925,7 @@ TEST_CASE ("A plug-in named as one of Phazite's devices saves its presets apart,
     description.pluginFormatName = "VST3";
     description.manufacturerName = "Elsewhere";
     description.fileOrIdentifier = "C:/Plug-ins/Reverb.vst3";
-    const auto plugin =
-        phazite::insertDeviceState (s, song.firstTrack, phazite::makeDeviceState (s, phazite::makeDeviceType (description)));
+    const auto plugin = phazite::test::addPluginDevice (s, song.firstTrack, description);
     REQUIRE (plugin.isValid());
 
     // Each saved where its Save Preset... saves it: the plug-in's among the plug-ins'.

@@ -6,6 +6,7 @@
 #include "EnginePlayback.h"
 #include "RenderHarness.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -65,8 +66,7 @@ struct Song
     // Adds Phazite's compressor at the end of a track's chain.
     DeviceID addCompressor (TrackID track)
     {
-        const auto id =
-            phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Compressor::typeID));
+        const auto id = phazite::test::addOwnDevice (*song, track, phazite::devices::Compressor::typeID);
         REQUIRE (id.isValid());
         return id;
     }
@@ -139,7 +139,7 @@ TEST_CASE ("Picking a sidechain's source is one undo step, and deleting the sour
     }
 
     CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
-    CHECK_FALSE (phazite::findDeviceState (model, ducker).hasProperty (schema::deviceSidechain));
+    CHECK_FALSE (phazite::test::copyDevice (model, ducker).hasProperty (schema::deviceSidechain));
 
     phazite::undo (model);
     const auto restored = phazite::getSidechainSource (model, ducker);
@@ -156,8 +156,8 @@ TEST_CASE ("A device's sidechain is the song's, by the track's ID, which a song 
     phazite::setSidechainSource (model, compressor, song.kick);
 
     // The track it listens to, by its ID (Schema.h: deviceSidechain).
-    const auto element = phazite::findDeviceState (model, compressor);
-    CHECK ((juce::int64) element[schema::deviceSidechain] == (juce::int64) song.kick.getRaw());
+    const auto element = [&model, compressor] { return phazite::test::copyDevice (model, compressor); };
+    CHECK ((juce::int64) element()[schema::deviceSidechain] == (juce::int64) song.kick.getRaw());
 
     // Made again from the song's state alone, it listens to the kick.
     {
@@ -168,7 +168,7 @@ TEST_CASE ("A device's sidechain is the song's, by the track's ID, which a song 
 
     // Turned off, the song's goes.
     phazite::setSidechainSource (model, compressor, TrackID());
-    CHECK_FALSE (element.hasProperty (schema::deviceSidechain));
+    CHECK_FALSE (element().hasProperty (schema::deviceSidechain));
     CHECK_FALSE (phazite::getSidechainSource (model, compressor).isValid());
 }
 
@@ -226,7 +226,7 @@ TEST_CASE ("A bus can be a sidechain's key, but not for a device on a track in i
     // passing through them again, in the same step, and it is offered greyed, saying why.
     phazite::setMixedAsBus (model, drums, false);
     CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
-    CHECK_FALSE (phazite::findDeviceState (model, ducker).hasProperty (schema::deviceSidechain));
+    CHECK_FALSE (phazite::test::copyDevice (model, ducker).hasProperty (schema::deviceSidechain));
     CHECK (phazite::getSidechainSources (model, ducker) == std::vector<TrackID> { song.kick, song.keys });
 
     const auto choices = phazite::describeSidechainChoices (model, ducker);
@@ -270,7 +270,7 @@ TEST_CASE ("A change that would make a sidechain a loop turns it off in the same
     }
 
     CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
-    CHECK_FALSE (phazite::findDeviceState (model, ducker).hasProperty (phazite::schema::deviceSidechain));
+    CHECK_FALSE (phazite::test::copyDevice (model, ducker).hasProperty (phazite::schema::deviceSidechain));
     phazite::undo (model);
     CHECK (phazite::getSidechainSource (model, ducker) == drums);
 
@@ -417,8 +417,7 @@ TEST_CASE ("Phazite's compressor ducks under the key chosen for it, set up to du
 
     // A source that plays a drum sampler: only its kick's body, from 60 to 150 Hz, so that the kick ducks the keys, its long boom
     // doesn't hold them down, and the snare, clap and hats don't.
-    REQUIRE (
-        phazite::setInstrument (model, song.kick, phazite::makeOwnDeviceState (model, phazite::devices::DrumSampler::typeID)).isValid());
+    phazite::test::setOwnInstrument (model, song.kick, phazite::devices::DrumSampler::typeID);
     const auto onKeys = song.addCompressor (song.keys);
     phazite::setSidechainSource (model, onKeys, song.kick);
     CHECK (valueOf (onKeys, "keyLowCut") == doctest::Approx (60.0f));
@@ -496,8 +495,7 @@ TEST_CASE ("Phazite's vocoder plays the track its sidechain listens to as its ca
     // The track picked by the vocoder's carrier (its editor's picker) is heard at once, whatever carrier it had: no second step.
     Song song;
     auto& model = *song.song;
-    const auto vocoder =
-        phazite::insertDeviceState (model, song.bass, phazite::makeOwnDeviceState (model, phazite::devices::Vocoder::typeID));
+    const auto vocoder = phazite::test::addOwnDevice (model, song.bass, phazite::devices::Vocoder::typeID);
     REQUIRE (vocoder.isValid());
     const auto carrier = [&model, vocoder]
     { return juce::roundToInt (phazite::getValueSetByHand (model, phazite::ParameterRef { vocoder, "carrier" })); };
@@ -525,7 +523,7 @@ TEST_CASE ("Phazite's multiband, as it was made, starts ducking its lows when it
     auto& model = *song.song;
     const auto valueOf = [&model] (DeviceID device, const char* id)
     { return phazite::getValueSetByHand (model, phazite::ParameterRef { device, id }); };
-    const auto multiband = phazite::insertDeviceState (model, song.bass, phazite::makeOwnDeviceState (model, Multiband::typeID));
+    const auto multiband = phazite::test::addOwnDevice (model, song.bass, Multiband::typeID);
     REQUIRE (multiband.isValid());
     model.getUndoManager().clearUndoHistory();
     phazite::setSidechainSource (model, multiband, song.kick);
@@ -884,8 +882,7 @@ TEST_CASE ("A drum pad on a track of its own in a bus that is a key feeds the ke
     Song song;
     auto& model = *song.song;
     using phazite::test::at, phazite::test::lasting;
-    const auto sampler =
-        phazite::setInstrument (model, song.keys, phazite::makeOwnDeviceState (model, phazite::devices::DrumSampler::typeID));
+    const auto sampler = phazite::test::setOwnInstrument (model, song.keys, phazite::devices::DrumSampler::typeID);
     REQUIRE (sampler.isValid());
     const auto clip = phazite::test::addMidiClip (model, song.keys, { at (0.0), at (4.0) }, "Beat");
     REQUIRE (clip.isValid());
@@ -1158,8 +1155,8 @@ TEST_CASE ("A key's EQ switched to Linear while the song plays realigns it with 
 
 TEST_CASE ("A device in a container's chain that waits for its key keeps the container's chains lined up")
 {
-    // The model offers no sidechain to a device in a container yet (docs/guide/mixer.md); the plan takes one all the same, set
-    // here in the song's state. Keys plays a note at beat 1 (Test Tone) into a container of two chains: the first Test
+    // The model offers no sidechain to a device in a container yet (docs/guide/mixer.md); the plan takes one all the same,
+    // written here into the song's file. Keys plays a note at beat 1 (Test Tone) into a container of two chains: the first Test
     // Sidechain, which plays its key in place of what comes in, the kick, whose note at beat 1 comes 1,000 samples late (Test
     // Latency) and is muted; the second empty, passing what comes in. The first waits 1,000 samples for its key, and the
     // second is lined up with it: rendered, both sound from beat 1's sample together, and not the keys first.
@@ -1181,12 +1178,18 @@ TEST_CASE ("A device in a container's chain that waits for its key keeps the con
     const auto chains = phazite::getChains (model, container);
     REQUIRE (chains.size() == 2);
     phazite::test::registerTestDevices();
-    const auto listener = phazite::insertIntoChain (model, chains[0], phazite::makeOwnDeviceState (model, TestSidechain::typeID));
-    REQUIRE (listener.isValid());
-    phazite::findDeviceState (model, listener).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+    const auto listener = phazite::test::addOwnDeviceToChain (model, chains[0], TestSidechain::typeID);
+
+    // Its sidechain written into the song's file, as another program could write it, and the song opened from it.
+    song.openSong (phazite::test::copyWholeSongWithDeviceEdited (
+        model, listener,
+        [kick] (juce::ValueTree& device) { device.setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr); }));
+    auto& opened = *phazite::findSong (song.context);
+    REQUIRE (phazite::getChainDevices (opened, chains[0]) == std::vector { listener });
+    REQUIRE ((juce::int64) phazite::test::copyDevice (opened, listener)[phazite::schema::deviceSidechain] == (juce::int64) kick.getRaw());
 
     phazite::test::dispatchPendingMessages();
-    const auto audio = phazite::renderWithOwnEngine (model, 48000, 48000.0, 256);
+    const auto audio = phazite::renderWithOwnEngine (opened, 48000, 48000.0, 256);
     const auto beat1 = 24000;
     const auto both = audio.getSample (0, beat1 + 2000);
     CHECK (std::abs (audio.getSample (0, beat1 - 1)) < 1.0e-6f);
@@ -1198,7 +1201,7 @@ TEST_CASE ("A device in a container's chain that waits for its key keeps the con
 TEST_CASE ("An instrument whose sidechain comes later than its strip plays as before, its key lined up where it can be")
 {
     // An instrument takes notes, which aren't held back: its sound isn't made to wait for its key, which comes as late as it
-    // comes. Test Tone on Keys with a sidechain (set in the song's state: a test instrument has none to offer) on a kick
+    // comes. Test Tone on Keys with a sidechain (written into the song's file: a test instrument has none to offer) on a kick
     // 1,000 samples late; Keys' note at beat 1 sounds at beat 1, rendered, and its strip doesn't wait.
     phazite::test::TestSong song;
     auto& model = *phazite::findSong (song.context);
@@ -1211,7 +1214,11 @@ TEST_CASE ("An instrument whose sidechain comes later than its strip plays as be
     const auto keys = song.addTrack ("Keys");
     const auto instrument = phazite::test::addTestDevice (model, keys, TestTone::typeID);
     song.addNote (song.addMidiClip (keys, 0.0, 4.0), 60, 1.0, 0.25);
-    phazite::findDeviceState (model, instrument).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+    song.openSong (phazite::test::copyWholeSongWithDeviceEdited (
+        model, instrument,
+        [kick] (juce::ValueTree& device) { device.setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr); }));
+    auto& opened = *phazite::findSong (song.context);
+    REQUIRE (phazite::getInstrument (opened, keys) == instrument);
     phazite::test::dispatchPendingMessages();
 
     const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
@@ -1224,7 +1231,7 @@ TEST_CASE ("An instrument whose sidechain comes later than its strip plays as be
     CHECK (strip->devices.front().inputDelay == nullptr);
     CHECK (strip->latency == 0);
 
-    const auto audio = phazite::renderWithOwnEngine (model, 48000, 48000.0, 256);
+    const auto audio = phazite::renderWithOwnEngine (opened, 48000, 48000.0, 256);
     CHECK (std::abs (audio.getSample (0, 24000 - 1)) < 1.0e-6f);
     CHECK (audio.getSample (0, 24000) > 0.1f);
 }
@@ -1281,7 +1288,7 @@ TEST_CASE ("A sidechain set and taken away while the song plays leaves the devic
     const auto bass = song.addTrack ("Bass");
     const auto source = phazite::test::addTestDevice (model, bass, phazite::test::TestFrequency::typeID);
     song.setParameter (source, "frequency", 10000.0f);
-    const auto gain = phazite::test::addTestDevice (model, bass, TestGain::typeID);
+    const auto gain = phazite::test::addTestDevice (model, bass, phazite::test::TestKeyedGain::typeID);
     phazite::test::dispatchPendingMessages();
 
     EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
@@ -1290,7 +1297,8 @@ TEST_CASE ("A sidechain set and taken away while the song plays leaves the devic
     const auto level = std::abs (before.getSample (0, before.getNumSamples() - 1));
     REQUIRE (level > 0.1f);
 
-    phazite::findDeviceState (model, gain).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+    phazite::setSidechainSource (model, gain, kick);
+    REQUIRE (phazite::getSidechainSource (model, gain) == kick);
     const auto keyed = playback.play (0.5);
     const auto setting = measureSteadiness (before, keyed, level);
     CAPTURE (setting.largestStep);
@@ -1298,7 +1306,7 @@ TEST_CASE ("A sidechain set and taken away while the song plays leaves the devic
     CHECK (setting.under == 0);
     CHECK (setting.largestStep < 0.01f * level);
 
-    phazite::findDeviceState (model, gain).removeProperty (phazite::schema::deviceSidechain, nullptr);
+    phazite::setSidechainSource (model, gain, {});
     const auto unkeyed = playback.play (0.5);
     const auto taking = measureSteadiness (keyed, unkeyed, level);
     CAPTURE (taking.largestStep);
@@ -1325,7 +1333,7 @@ TEST_CASE ("A late sidechain set while the song plays realigns without a step, i
     const auto bass = song.addTrack ("Bass");
     const auto source = phazite::test::addTestDevice (model, bass, phazite::test::TestFrequency::typeID);
     song.setParameter (source, "frequency", 10000.0f);
-    const auto gain = phazite::test::addTestDevice (model, bass, TestGain::typeID);
+    const auto gain = phazite::test::addTestDevice (model, bass, phazite::test::TestKeyedGain::typeID);
     phazite::test::dispatchPendingMessages();
 
     EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
@@ -1334,7 +1342,8 @@ TEST_CASE ("A late sidechain set while the song plays realigns without a step, i
     const auto level = std::abs (before.getSample (0, before.getNumSamples() - 1));
     REQUIRE (level > 0.1f);
 
-    phazite::findDeviceState (model, gain).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+    phazite::setSidechainSource (model, gain, kick);
+    REQUIRE (phazite::getSidechainSource (model, gain) == kick);
     const auto keyed = playback.play (0.5);
     const auto setting = measureSteadiness (before, keyed, level);
     CAPTURE (setting.largestStep);
@@ -1368,8 +1377,9 @@ TEST_CASE ("A wait that goes with its key's track or its sidechain realigns the 
         const auto bass = song.addTrack ("Bass");
         const auto source = phazite::test::addTestDevice (model, bass, phazite::test::TestFrequency::typeID);
         song.setParameter (source, "frequency", 10000.0f);
-        const auto gain = phazite::test::addTestDevice (model, bass, TestGain::typeID);
-        phazite::findDeviceState (model, gain).setProperty (phazite::schema::deviceSidechain, (juce::int64) kick.getRaw(), nullptr);
+        const auto gain = phazite::test::addTestDevice (model, bass, phazite::test::TestKeyedGain::typeID);
+        phazite::setSidechainSource (model, gain, kick);
+        REQUIRE (phazite::getSidechainSource (model, gain) == kick);
         phazite::test::dispatchPendingMessages();
 
         EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
@@ -1382,7 +1392,7 @@ TEST_CASE ("A wait that goes with its key's track or its sidechain realigns the 
         if (deletesKey)
             phazite::deleteTracks (model, { kick }, nullptr);
         else
-            phazite::findDeviceState (model, gain).removeProperty (phazite::schema::deviceSidechain, nullptr);
+            phazite::setSidechainSource (model, gain, {});
 
         const auto after = playback.play (0.5);
         const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();

@@ -1549,6 +1549,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestAudioDevice.cpp
         tests/TestAudioDevice.h
         tests/TestClips.h
+        tests/TestDeviceValues.cpp
+        tests/TestDeviceValues.h
         tests/TestDevices.h
         tests/TestKeyboardLayouts.h
         tests/TestPlugin.cpp

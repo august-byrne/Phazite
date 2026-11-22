@@ -4,6 +4,7 @@
 // each engine's, and of the one meaning of Mix); a change of mode faded without a click, the same in blocks of any size;
 // its tail; and its editor's tabs, each mode's page and picture, their dots and wheels, and the default dock.
 #include "MotionTestHelpers.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/dsp/NoteValues.h"
@@ -138,7 +139,7 @@ struct Song
     Song()
     {
         phazite::setSong (context, song.get());
-        device = phazite::insertDeviceState (*song, phazite::getTrackIDs (*song)[0], phazite::makeOwnDeviceState (*song, Motion::typeID));
+        device = phazite::test::addOwnDevice (*song, phazite::getTrackIDs (*song)[0], Motion::typeID);
         REQUIRE (device.isValid());
         phazite::getSession (context)->update();
         song->getUndoManager().clearUndoHistory();
