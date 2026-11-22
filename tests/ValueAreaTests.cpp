@@ -105,15 +105,7 @@ struct MixedSong
 
     Snapshot take() const { return { phazite::test::writeSong (*song, phazite::test::SongPart::undoable), notes.get() }; }
 
-    std::vector<phazite::ClipID> getClips() const
-    {
-        std::vector<phazite::ClipID> clips;
-
-        for (const auto& clip : phazite::getClipStates (*song))
-            clips.push_back (phazite::getClipID (clip));
-
-        return clips;
-    }
+    std::vector<phazite::ClipID> getClips() const { return phazite::getAllClips (*song); }
 
     // Whether the two halves name the same clips: each clip of the tree has its notes, and no notes are a clip's that is gone.
     bool halvesAgree() const
@@ -179,10 +171,11 @@ struct MixedSong
         }
         else
         {
-            const auto clipState = phazite::findClipState (*song, clip);
-            const auto range = phazite::getClipRange (clipState);
-            phazite::setClipPlace (*song, clipState, range.getStart(), range.getLength() + phazite::BeatDuration::fromBeats (4.0),
-                                   phazite::getClipOffset (clipState));
+            const auto value = phazite::getClipValue (*song, clip);
+            REQUIRE (value.has_value());
+            const auto range = phazite::getClipRange (*value);
+            phazite::setClipPlace (*song, clip, range.getStart(), range.getLength() + phazite::BeatDuration::fromBeats (4.0),
+                                   value->offset);
         }
     }
 

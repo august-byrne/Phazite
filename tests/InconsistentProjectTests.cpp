@@ -245,7 +245,8 @@ TEST_CASE ("A clip where no track holds clips, and a note outside a MIDI clip, a
             Edited::findTrack (song, "Drums")->addChildElement (new juce::XmlElement (*clip->getChildByName ("NOTE")));
         });
     REQUIRE (project != nullptr);
-    CHECK (findAll (project->getSong().getState(), schema::CLIP).size() == 2); // the MIDI clip and the audio clip, each once
+    CHECK (findAll (phazite::test::copyWholeSong (project->getSong()), schema::CLIP).size()
+           == 2); // the MIDI clip and the audio clip, each once
     CHECK (findAll (phazite::test::copyWholeSong (project->getSong()), schema::NOTE).size() == 1);
 }
 
@@ -264,7 +265,8 @@ TEST_CASE ("A clip on a return or a folder is left out, as only a track holds cl
             folder->addChildElement (new juce::XmlElement (*clip));
         });
     REQUIRE (project != nullptr);
-    const auto clips = findAll (project->getSong().getState(), schema::CLIP);
+    const auto whole = phazite::test::copyWholeSong (project->getSong()); // kept: the clips' parents are its elements
+    const auto clips = findAll (whole, schema::CLIP);
     REQUIRE (clips.size() == 1); // the lead's MIDI clip alone
     CHECK (clips.front().getParent()[schema::trackName].toString() == juce::String ("Lead"));
 }
@@ -486,13 +488,14 @@ TEST_CASE ("Aliased clips whose notes' IDs are given anew as the song opens stil
         });
     REQUIRE (project != nullptr);
     auto& song = project->getSong();
-    const auto clips = findAll (findNamedTrack (song, "Lead"), schema::CLIP);
+    const auto clips =
+        phazite::getClipValues (song, phazite::TrackID::fromRaw (phazite::readID (findNamedTrack (song, "Lead")[schema::trackID])));
     REQUIRE (clips.size() == 2);
-    CHECK (clips[0][schema::clipLink].toString() == clips[1][schema::clipLink].toString());
-    CHECK (phazite::readID (clips[0][schema::clipLink]) < phazite::schema::maxCountedID); // given anew, from below 2^61
+    CHECK (clips[0].link == clips[1].link);
+    CHECK (clips[0].link < phazite::schema::maxCountedID); // given anew, from below 2^61
 
-    const auto first = phazite::ClipID::fromRaw (phazite::readID (clips[0][schema::clipID]));
-    const auto second = phazite::ClipID::fromRaw (phazite::readID (clips[1][schema::clipID]));
+    const auto first = clips[0].id;
+    const auto second = clips[1].id;
     const auto notes = phazite::getClipNotes (song, first);
     REQUIRE (notes.size() == 1);
     REQUIRE (phazite::getClipNotes (song, second).size() == 1);
@@ -969,7 +972,7 @@ TEST_CASE (
     REQUIRE (project != nullptr);
     juce::StringArray files;
 
-    for (const auto& clip : findAll (project->getSong().getState(), schema::CLIP))
+    for (const auto& clip : findAll (phazite::test::copyWholeSong (project->getSong()), schema::CLIP))
         if (clip[schema::clipKind].toString() == schema::clipIsAudio)
             files.add (clip[schema::clipFile].toString());
 
@@ -1126,7 +1129,7 @@ TEST_CASE ("A number with an exponent of ten digits or more opens as one past ev
             lead->setAttribute ("volume", juce::String ("1e") + juce::String::charToString ((juce::juce_wchar) 0x0669));
         });
     REQUIRE (project != nullptr);
-    const auto tracks = findAll (project->getSong().getState(), schema::TRACK);
+    const auto tracks = findAll (phazite::test::copyWholeSong (project->getSong()), schema::TRACK); // whole: with its clips
     const auto lead = std::find_if (tracks.begin(), tracks.end(),
                                     [] (const juce::ValueTree& track) { return track[schema::trackName].toString() == "1e12345678901"; });
     REQUIRE (lead != tracks.end());
@@ -1409,14 +1412,23 @@ TEST_CASE ("A DAWproject whose files share their compressed bytes unpacks no mor
 
 namespace
 {
-// A track's audio clip's file, as the song keeps it.
-juce::ValueTree findAudioClip (phazite::Song& song, phazite::TrackID track)
+// A track's audio clip, as the song keeps it (its file by its path: Schema.h, clipFile); one of no clip's, without a file,
+// for a track without one.
+phazite::ClipValue findAudioClip (const phazite::Song& song, phazite::TrackID track)
 {
-    for (const auto clip : phazite::getClips (song, track))
-        if (const auto state = phazite::findClipState (song, clip); state[schema::clipKind].toString() == schema::clipIsAudio)
-            return state;
+    for (const auto& clip : phazite::getClipValues (song, track))
+        if (clip.isAudio())
+            return clip;
 
     return {};
+}
+
+// A track's audio clip given another path for its file, in the song's history.
+void setAudioClipFile (phazite::Song& song, phazite::TrackID track, const juce::String& path)
+{
+    auto clip = findAudioClip (song, track);
+    clip.sound.file = path;
+    phazite::setClip (song, clip);
 }
 } // namespace
 
@@ -1425,9 +1437,9 @@ TEST_CASE ("A sound file's name with a ':' in it, which Linux allows, opens as i
     TestSong s;
     const auto track = s.addTrack ("Loop");
     s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Loop.wav"), 0.25), 0.0);
-    findAudioClip (*phazite::findSong (s.context), track).setProperty (schema::clipFile, "Audio/Loop 1:2.wav", nullptr);
+    setAudioClipFile (*phazite::findSong (s.context), track, "Audio/Loop 1:2.wav");
     s.reopen();
-    CHECK (findAudioClip (*phazite::findSong (s.context), track)[schema::clipFile].toString() == "Audio/Loop 1:2.wav");
+    CHECK (findAudioClip (*phazite::findSong (s.context), track).sound.file == "Audio/Loop 1:2.wav");
 }
 
 TEST_CASE ("A full path Phazite keeps where it couldn't copy a sound in opens as it was saved, its name whatever it is")
@@ -1437,12 +1449,12 @@ TEST_CASE ("A full path Phazite keeps where it couldn't copy a sound in opens as
     const auto track = s.addTrack ("Loop");
     s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Loop.wav"), 0.25), 0.0);
     const auto outside = writeSound (s.getSoundsFolder().getChildFile ("Kick #1, @home; take.wav"), 0.25).getFullPathName();
-    findAudioClip (*phazite::findSong (s.context), track).setProperty (schema::clipFile, outside, nullptr);
+    setAudioClipFile (*phazite::findSong (s.context), track, outside);
     s.reopen();
     auto& song = *phazite::findSong (s.context);
     const auto clip = findAudioClip (song, track);
-    CHECK (clip[schema::clipFile].toString() == outside);
-    CHECK (phazite::findProjectFile (song, clip[schema::clipFile].toString()).existsAsFile());
+    CHECK (clip.sound.file == outside);
+    CHECK (phazite::findProjectFile (song, clip.sound.file).existsAsFile());
 }
 
 TEST_CASE ("A file on a network share is looked for in the Audio folder by its own name, whatever it holds")
@@ -1456,7 +1468,7 @@ TEST_CASE ("A file on a network share is looked for in the Audio folder by its o
                 ->setAttribute ("file", "\\\\fuzz.invalid\\share\\Kick #1, @home; take.wav");
         });
     REQUIRE (project != nullptr);
-    CHECK (findAudioClip (project->getSong(), edited.audio)[schema::clipFile].toString() == "Audio/Kick #1, @home; take.wav");
+    CHECK (findAudioClip (project->getSong(), edited.audio).sound.file == "Audio/Kick #1, @home; take.wav");
 }
 
 TEST_CASE ("Notes a tempo change made shorter than the shortest a note is drawn open as long as they were saved")
@@ -1470,13 +1482,13 @@ TEST_CASE ("Notes a tempo change made shorter than the shortest a note is drawn 
     phazite::togglePatternsFollowTempo (song);
     REQUIRE_FALSE (phazite::doPatternsFollowTempo (song));
     s.setTempo (60.0);
-    const auto note = phazite::copyWhole (song, phazite::findClipState (song, clip)).getChildWithName (schema::NOTE);
+    const auto note = phazite::copyWholeClip (song, clip).getChildWithName (schema::NOTE);
     const auto length = (double) note[schema::noteLength];
     REQUIRE (length < 1.0 / 64.0);
 
     s.reopen();
     const auto& reopenedSong = *phazite::findSong (s.context);
-    const auto reopened = phazite::copyWhole (reopenedSong, phazite::findClipState (reopenedSong, clip)).getChildWithName (schema::NOTE);
+    const auto reopened = phazite::copyWholeClip (reopenedSong, clip).getChildWithName (schema::NOTE);
     CHECK ((double) reopened[schema::noteLength] == doctest::Approx (length));
 }
 
@@ -1670,8 +1682,7 @@ std::vector<juce::XmlElement*> getEvents (juce::XmlElement& clip)
 // A clip of the song, whole (model/base/internal/WholeState.h): its notes as a save writes them.
 juce::ValueTree findClipByID (const phazite::Song& song, std::uint64_t id)
 {
-    const auto clip = phazite::findClipState (song, phazite::ClipID::fromRaw (id));
-    return clip.isValid() ? phazite::copyWhole (song, clip) : juce::ValueTree();
+    return phazite::copyWholeClip (song, phazite::ClipID::fromRaw (id));
 }
 
 juce::String getLink (const phazite::Song& song, std::uint64_t id)
@@ -2126,7 +2137,7 @@ TEST_CASE ("An audio clip of an alias group that plays another file than the gro
         const std::uint64_t odd = differing == 0 ? 800101 : 800103;
         CHECK (getLink (song, odd).isEmpty());
         CHECK (findClipByID (song, odd)[schema::clipFile].toString() == "Audio/Other.wav");
-        CHECK (phazite::getClipFile (song, findClipByID (song, odd)).existsAsFile());
+        CHECK (phazite::getClipFile (song, phazite::ClipID::fromRaw (odd)).existsAsFile());
         CHECK (describeSoundOf (song, odd) == "tempo 120.0, pitch 2.0, forwards, markers 0.000:0.000 0.125:0.150");
 
         if (differing == 0)

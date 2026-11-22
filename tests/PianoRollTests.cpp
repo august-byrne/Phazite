@@ -333,7 +333,7 @@ TEST_CASE ("Selecting a track shows its clip nearest the playhead, or lets the f
     const auto clips = phazite::getClips (screen.song, second);
     REQUIRE (clips.size() == 1);
     const auto started = clips.front();
-    REQUIRE (phazite::isMidiState (phazite::findClipState (screen.song, started)));
+    REQUIRE (phazite::isMidiClip (screen.song, started));
     CHECK (phazite::getClipRange (screen.song, started).getStart().inBeats() == doctest::Approx (12.0));
     CHECK (screen.notesOf (started).size() == 1);
     CHECK (screen.pianoRoll.getClips() == std::vector { started });

@@ -368,8 +368,8 @@ TEST_CASE ("Selected notes' MIDI channel shows as a range, moves by a step for e
     undo.check ("channel 1 typed", [&] { type (findField (screen, "Channel"), "1"); });
     CHECK (noteOf (c4).channel == 1);
     CHECK (noteOf (e4).channel == 1);
-    const auto saved = phazite::copyWhole (*screen.song, phazite::findClipState (*screen.song, c4.clip))
-                           .getChildWithProperty (phazite::schema::noteID, (juce::int64) c4.note.getRaw());
+    const auto saved =
+        phazite::copyWholeClip (*screen.song, c4.clip).getChildWithProperty (phazite::schema::noteID, (juce::int64) c4.note.getRaw());
     REQUIRE (saved.isValid());
     CHECK_FALSE (saved.hasProperty (phazite::schema::noteChannel));
     undo.walkBackAndForth();

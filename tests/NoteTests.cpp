@@ -112,7 +112,7 @@ TEST_CASE ("Notes are placed in song beats, and their clip grows to hold them")
     phazite::NoteRef note;
     step (check, n.song, "Add Note", [&] { note = n.add (60, 5.0, 1.0); });
     CHECK (n.startOf (note) == doctest::Approx (5.0));
-    const auto inClip = (n.get (note).start - phazite::getContentStart (phazite::findClipState (n.song, n.clip))).inBeats();
+    const auto inClip = (n.get (note).start - phazite::getContentStart (n.song, n.clip)).inBeats();
     CHECK (inClip == doctest::Approx (1.0)); // in the clip, from its content's start
 
     // A note can't start before its clip, and one past its end makes it grow to the end of that bar.
@@ -1492,7 +1492,7 @@ namespace
 std::vector<std::string> describeNotes (const phazite::Song& song, phazite::ClipID clip, bool withIDs = true)
 {
     std::vector<std::string> notes;
-    const auto contentStart = phazite::getContentStart (phazite::findClipState (song, clip));
+    const auto contentStart = phazite::getContentStart (song, clip);
 
     for (const auto& note : phazite::getClipNotes (song, clip))
         notes.push_back ((withIDs ? juce::String ((juce::int64) note.id.getRaw()) + " " : juce::String()).toStdString()
@@ -1507,7 +1507,7 @@ std::vector<std::string> describeNotes (const phazite::Song& song, phazite::Clip
 std::vector<std::string> describeControls (const phazite::Song& song, phazite::ClipID clip)
 {
     std::vector<std::string> controls;
-    const auto contentStart = phazite::getContentStart (phazite::findClipState (song, clip));
+    const auto contentStart = phazite::getContentStart (song, clip);
 
     for (const auto& control : phazite::getClipControls (song, clip))
         controls.push_back (std::to_string (control.number) + " "
@@ -1581,7 +1581,7 @@ TEST_CASE ("A clip's notes made like another song's clip's: those it hasn't come
     const auto kept = n.add (60, 5.0, 1.0);
     const auto gone = n.add (62, 6.0, 1.0);
     phazite::addControl (n.song, n.clip, beats (6.5), phazite::ControlKind::controller, 64, 127);
-    const auto then = phazite::copyWhole (n.song, phazite::findClipState (n.song, n.clip)); // as another song holds it
+    const auto then = phazite::copyWholeClip (n.song, n.clip); // as another song holds it
     const auto notesThen = describeNotes (n.song, n.clip);
     const auto controlsThen = describeControls (n.song, n.clip);
 
@@ -1613,7 +1613,7 @@ TEST_CASE ("A clip's notes made like another song's clip's: those it hasn't come
             return events;
         };
 
-        return eventsOf (phazite::copyWhole (n.song, phazite::findClipState (n.song, n.clip))).isEquivalentTo (eventsOf (then));
+        return eventsOf (phazite::copyWholeClip (n.song, n.clip)).isEquivalentTo (eventsOf (then));
     };
 
     // In the song's undo history: as they were, in the other's order.

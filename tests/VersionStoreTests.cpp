@@ -887,13 +887,17 @@ TEST_CASE ("A piece names what it holds, so a song with one that can't be read j
 
     // The song changed since, both clips renamed: made like what was read, the long clip goes back, and the one that
     // couldn't be read stays as it is now. No stand-in is left in the song.
-    auto* undo = &made.song->getUndoManager();
-    phazite::findClipState (*made.song, made.longClip).setProperty (schema::clipName, "Changed", undo);
-    phazite::findClipState (*made.song, made.shortClip).setProperty (schema::clipName, "Changed", undo);
+    for (const auto clip : { made.longClip, made.shortClip })
+    {
+        auto renamed = *phazite::getClipValue (*made.song, clip);
+        renamed.name = "Changed";
+        phazite::setClip (*made.song, renamed);
+    }
+
     phazite::makeSongLike (*made.song, joined);
 
-    CHECK (phazite::findClipState (*made.song, made.longClip)[schema::clipName].toString() == "Long");
-    CHECK (phazite::findClipState (*made.song, made.shortClip)[schema::clipName].toString() == "Changed");
+    CHECK (phazite::getClipValue (*made.song, made.longClip)->name == "Long");
+    CHECK (phazite::getClipValue (*made.song, made.shortClip)->name == "Changed");
     CHECK_FALSE (
         phazite::writeElement (phazite::test::copyWholeSong (*made.song)).toString().contains (schema::versions::missing.toString()));
 }

@@ -76,7 +76,8 @@ struct Song
     // A clip's name, where it ends, and how many clips a track has.
     juce::String getClipName (phazite::ClipID clip) const
     {
-        return phazite::findClipState (getSong(), clip)[phazite::schema::clipName].toString();
+        const auto value = phazite::getClipValue (getSong(), clip);
+        return value.has_value() ? value->name : juce::String();
     }
 
     double getClipEnd (phazite::ClipID clip) const { return phazite::getClipRange (getSong(), clip).getEnd().inBeats(); }

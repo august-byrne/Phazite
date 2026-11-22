@@ -154,7 +154,7 @@ TEST_CASE ("A copy of a clip keeps its notes' IDs, an alias, a duplicate and the
     phazite::moveNote (song, { clip, phazite::NoteID::fromRaw (ids[0]) }, beats (0.5), 72);
     phazite::test::dispatchPendingMessages();
     const auto alias = aliases.front();
-    REQUIRE (phazite::isMidiState (phazite::findClipState (song, alias)));
+    REQUIRE (phazite::isMidiClip (song, alias));
     std::vector<std::uint64_t> aliasIDs = idsOf (song, alias), originalIDs = idsOf (song, clip);
     std::sort (aliasIDs.begin(), aliasIDs.end());
     std::sort (originalIDs.begin(), originalIDs.end());
@@ -164,7 +164,7 @@ TEST_CASE ("A copy of a clip keeps its notes' IDs, an alias, a duplicate and the
     const auto halves = phazite::splitClips (song, { clip }, beats (2.0));
     REQUIRE (halves.size() == 1);
     const auto right = halves.front();
-    REQUIRE (phazite::isMidiState (phazite::findClipState (song, right)));
+    REQUIRE (phazite::isMidiClip (song, right));
     CHECK (allDifferent (idsOf (song, clip)));
     CHECK (phazite::hasNote (song, { right, phazite::NoteID::fromRaw (ids[3]) }));
 }
@@ -202,9 +202,9 @@ TEST_CASE ("Notes' IDs are saved with the project and the same when it opens aga
 
     const auto clipOf = [] (phazite::Project& p)
     {
-        for (const auto& clipState : phazite::getClipStates (p.getSong()))
-            if (phazite::isMidiState (clipState))
-                return phazite::getClipID (clipState);
+        for (const auto& clip : phazite::getClipPlacements (p.getSong()))
+            if (! clip.isAudio())
+                return clip.id;
 
         return phazite::ClipID();
     };

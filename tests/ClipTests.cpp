@@ -58,16 +58,20 @@ struct ClipEdit
     // Where a clip is in beats; and an audio clip's place in the song's seconds, its fades and their shapes.
     phazite::BeatRange rangeOf (phazite::ClipID clip) const { return phazite::getClipRange (song, clip); }
 
-    phazite::PlayedPosition playedOf (phazite::ClipID clip) const
-    {
-        return phazite::getPlayedPosition (song, phazite::findClipState (song, clip));
-    }
+    phazite::PlayedPosition playedOf (phazite::ClipID clip) const { return phazite::getPlayedPosition (song, clip); }
 
-    double fadeOf (phazite::ClipID clip, bool fadeIn) const { return phazite::getClipFade (phazite::findClipState (song, clip), fadeIn); }
+    double fadeOf (phazite::ClipID clip, bool fadeIn) const
+    {
+        const auto value = phazite::getClipValue (song, clip);
+        REQUIRE (value.has_value());
+        return (fadeIn ? value->fadeIn : value->fadeOut).seconds;
+    }
 
     phazite::FadeCurve fadeCurveOf (phazite::ClipID clip, bool fadeIn) const
     {
-        return phazite::getClipFadeCurve (phazite::findClipState (song, clip), fadeIn);
+        const auto value = phazite::getClipValue (song, clip);
+        REQUIRE (value.has_value());
+        return phazite::getFadeCurve (fadeIn ? value->fadeIn : value->fadeOut);
     }
 
     phazite::Song::Ptr songPtr = phazite::createSong(); // 120 BPM: a beat is 0.5 s
@@ -128,18 +132,17 @@ TEST_CASE ("A new MIDI clip is called after its track, whatever the track is cal
 
     const auto clip = phazite::insertMidiClip (e.song, e.tracks[0], { beats (4.0), beats (8.0) }, &e.selection);
     REQUIRE (clip.isValid());
-    const auto clipState = phazite::findClipState (e.song, clip);
-    CHECK_FALSE (clipState.hasProperty (phazite::schema::clipName)); // no name of its own
-    CHECK (phazite::getClipName (e.song, clipState) == juce::String ("Bass"));
+    CHECK (phazite::getClipValue (e.song, clip)->name.isEmpty()); // no name of its own
+    CHECK (phazite::getClipName (e.song, clip) == juce::String ("Bass"));
     CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (4.0));
     CHECK (e.rangeOf (clip).getEnd().inBeats() == doctest::Approx (8.0));
     CHECK (phazite::getSelectedClips (e.selection) == std::vector { clip });
 
     // Its track renamed, or moved where it is called "Track 2" by its place, it goes on being called after it.
     phazite::setTrackName (e.song, e.tracks[0], "Sub Bass");
-    CHECK (phazite::getClipName (e.song, clipState) == juce::String ("Sub Bass"));
+    CHECK (phazite::getClipName (e.song, clip) == juce::String ("Sub Bass"));
     const auto unnamed = phazite::insertMidiClip (e.song, e.tracks[1], { beats (0.0), beats (4.0) }, nullptr);
-    CHECK (phazite::getClipName (e.song, phazite::findClipState (e.song, unnamed)) == phazite::getTrackName (e.song, e.tracks[1]));
+    CHECK (phazite::getClipName (e.song, unnamed) == phazite::getTrackName (e.song, e.tracks[1]));
 }
 
 TEST_CASE ("Renaming a clip names its aliases too, as one undo step; an empty name, or its track's, takes its own away")
@@ -151,9 +154,8 @@ TEST_CASE ("Renaming a clip names its aliases too, as one undo step; an empty na
     const auto aliases = phazite::copyClips (e.song, { clip }, true);
     REQUIRE (aliases.size() == 1);
     const auto other = e.addClip (1, 0.0, 4.0);
-    const auto nameOf = [&e] (phazite::ClipID id) { return phazite::getClipName (e.song, phazite::findClipState (e.song, id)); };
-    const auto hasOwnName = [&e] (phazite::ClipID id)
-    { return phazite::findClipState (e.song, id).hasProperty (phazite::schema::clipName); };
+    const auto nameOf = [&e] (phazite::ClipID id) { return phazite::getClipName (e.song, id); };
+    const auto hasOwnName = [&e] (phazite::ClipID id) { return phazite::getClipValue (e.song, id)->name.isNotEmpty(); };
     e.song.getUndoManager().clearUndoHistory();
 
     phazite::renameClips (e.song, { clip }, "  Verse chords ");
@@ -268,7 +270,7 @@ TEST_CASE ("Trimming a clip leaves its content in place")
     ClipEdit e;
     const auto clip = e.addClip (0, 4.0, 4.0);
     phazite::test::addMidiNote (e.song, clip, 60, beats (0.0), lasting (1.0), 100);
-    const auto contentStart = [&e, clip] { return phazite::getContentStart (phazite::findClipState (e.song, clip)).inBeats(); };
+    const auto contentStart = [&e, clip] { return phazite::getContentStart (e.song, clip).inBeats(); };
 
     phazite::trimClipStart (e.song, clip, beats (5.0));
     CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (5.0));
@@ -301,8 +303,7 @@ TEST_CASE ("Copies of a clip are separate, and aliases stay linked")
     const auto aliases = phazite::copyClips (e.song, { original }, true);
     REQUIRE (aliases.size() == 1);
     CHECK (phazite::hasAliases (e.song, { original }));
-    CHECK ((juce::int64) phazite::findClipState (e.song, aliases[0])[phazite::schema::clipLink]
-           == (juce::int64) phazite::findClipState (e.song, original)[phazite::schema::clipLink]);
+    CHECK (phazite::getClipValue (e.song, aliases[0])->link == phazite::getClipValue (e.song, original)->link);
 
     // A copy of an alias is a separate clip again.
     const auto copyOfAlias = phazite::copyClips (e.song, { aliases[0] }, false);
@@ -549,7 +550,7 @@ TEST_CASE ("Duplicate copies a time range right after it, and the range moves to
             copy = clip;
 
     REQUIRE (copy.isValid());
-    REQUIRE (phazite::isMidiState (phazite::findClipState (e.song, copy)));
+    REQUIRE (phazite::isMidiClip (e.song, copy));
     CHECK_FALSE (phazite::hasAliases (e.song, { copy }));
     const auto copiedNotes = phazite::getClipNotes (e.song, copy);
     REQUIRE (copiedNotes.size() == 1);
@@ -716,7 +717,9 @@ TEST_CASE ("Aliases, audio clips and fade shapes")
     CHECK (phazite::hasFadeShape (e.song, both, phazite::convexFade));
     CHECK_FALSE (phazite::hasFadeShape (e.song, both, phazite::linearFade));
 
-    phazite::findClipState (e.song, audio).removeProperty (phazite::schema::clipFadeOutBend, nullptr); // in and out differ: out is straight
+    auto straightOut = *phazite::getClipValue (e.song, audio); // in and out differ: out is straight
+    straightOut.fadeOut.bend = 0.0f;
+    phazite::setClip (e.song, straightOut);
     CHECK_FALSE (phazite::hasFadeShape (e.song, both, phazite::convexFade));
 }
 
@@ -758,7 +761,7 @@ TEST_CASE ("Draw places a copy of the clip used last, or a bar-long MIDI clip on
     REQUIRE (phazite::setInstrument (e.song, e.tracks[0], phazite::makeOwnDeviceState (e.song, phazite::devices::Synth::typeID)).isValid());
     const auto empty = phazite::placeClip (e.song, e.tracks[0], beats (4.0), source);
     REQUIRE (empty.isValid());
-    REQUIRE (phazite::isMidiState (phazite::findClipState (e.song, empty)));
+    REQUIRE (phazite::isMidiClip (e.song, empty));
     CHECK (phazite::getClipNotes (e.song, empty).empty());
     CHECK (e.rangeOf (empty).getStart().inBeats() == doctest::Approx (4.0));
     CHECK (e.rangeOf (empty).getLength().inBeats() == doctest::Approx (4.0)); // a bar of 4/4
@@ -831,7 +834,7 @@ TEST_CASE ("Where linked clips play, an editor showing one of them sees its note
     REQUIRE (aliases.size() == 2);
     // One alias later in the song, whole; one that plays only beats 2 to 4 of the notes (a snippet), from beat 16.
     const auto place = [&e] (phazite::ClipID clip, double start, double length, double offset)
-    { phazite::setClipPlace (e.song, phazite::findClipState (e.song, clip), beats (start), lasting (length), lasting (offset)); };
+    { phazite::setClipPlace (e.song, clip, beats (start), lasting (length), lasting (offset)); };
 
     place (aliases[0], 8.0, 4.0, 0.0);
     place (aliases[1], 16.0, 2.0, 2.0);

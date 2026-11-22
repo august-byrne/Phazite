@@ -114,7 +114,7 @@ TEST_CASE ("Copied clips paste at the playhead on the selected track, as copies,
     const auto pasted = song.clipsOf (1);
     REQUIRE (pasted.size() == 1);
     const auto copy = pasted.front();
-    REQUIRE (phazite::isMidiState (phazite::findClipState (song.getSong(), copy)));
+    REQUIRE (phazite::isMidiClip (song.getSong(), copy));
     CHECK (song.rangeOf (copy).getStart().inBeats() == doctest::Approx (8.0));
     CHECK (song.rangeOf (copy).getEnd().inBeats() == doctest::Approx (12.0));
     CHECK (phazite::getClipNotes (song.getSong(), copy).size() == 2);
@@ -354,7 +354,7 @@ TEST_CASE ("Pasted clips go to the next track below that holds their kind, or to
     const auto audioTrack = phazite::insertTrack (document, song.tracks[1], nullptr);
     const auto audio =
         phazite::importFile (document, audioTrack, phazite::test::writeSound (temp.folder.getChildFile ("Loop.wav"), 1.0), at (0.0));
-    REQUIRE (phazite::isAudioState (phazite::findClipState (document, audio)));
+    REQUIRE (phazite::isAudioClip (document, audio));
     phazite::insertMidiClip (document, song.tracks[1], { at (0.0), at (2.0) }, nullptr); // notes there too
     document.getUndoManager().clearUndoHistory();
     auto& selection = getSelection (song.context);
@@ -371,7 +371,7 @@ TEST_CASE ("Pasted clips go to the next track below that holds their kind, or to
     const auto after = phazite::getTrackIDs (document);
     REQUIRE (after.size() == before.size() + 1);
     REQUIRE (phazite::getClips (document, after.back()).size() == 1);
-    CHECK (phazite::isMidiState (phazite::findClipState (document, phazite::getClips (document, after.back())[0])));
+    CHECK (phazite::isMidiClip (document, phazite::getClips (document, after.back())[0]));
 
     // The audio, with the first track selected, which holds notes: onto the audio track below it.
     selection.selectOnly (audio);
@@ -444,9 +444,8 @@ TEST_CASE ("An audio clip pastes with its file and the part of it it plays")
 
     const auto pasted = song.clipsOf (1);
     REQUIRE (pasted.size() == 1);
-    const auto pastedState = phazite::findClipState (song.getSong(), pasted.front());
-    REQUIRE (phazite::isAudioState (pastedState));
-    CHECK (phazite::getClipFile (song.getSong(), pastedState) == file);
+    REQUIRE (phazite::isAudioClip (song.getSong(), pasted.front()));
+    CHECK (phazite::getClipFile (song.getSong(), pasted.front()) == file);
     CHECK (song.rangeOf (pasted.front()).getStart().inBeats() == doctest::Approx (20.0));
     CHECK (song.rangeOf (pasted.front()).getLength().inBeats() == doctest::Approx (song.rangeOf (take).getLength().inBeats()));
     CHECK (phazite::getFileTimeAt (song.getSong(), pasted.front(), at (21.0))

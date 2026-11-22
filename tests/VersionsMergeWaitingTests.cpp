@@ -2133,7 +2133,7 @@ TEST_CASE ("An audio alias group whose file one branch located anew while the ot
         const auto clip = s.addAudioClip (loop, writeSound (s.getSoundsFolder().getChildFile ("Loop.wav"), 2.0), 0.0);
         s.copyClip (clip, 8.0, true);
         const auto pathOf = [&s] (phazite::ClipID id)
-        { return phazite::findClipState (*phazite::findSong (s.context), id)[schema::clipFile].toString(); };
+        { return phazite::getClipValue (*phazite::findSong (s.context), id).value().sound.file; };
         const auto played = pathOf (clip);
         REQUIRE (played.isNotEmpty());
         keepVersion (s.context, "First");
@@ -2177,7 +2177,7 @@ TEST_CASE ("An audio alias group whose file one branch located anew while the ot
             {
                 INFO ("clip " << id.getRaw());
                 CHECK (pathOf (id) == located);
-                CHECK (phazite::getClipFile (song, phazite::findClipState (song, id)).existsAsFile());
+                CHECK (phazite::getClipFile (song, id).existsAsFile());
             }
 
             checkSong (song);

@@ -122,7 +122,7 @@ TEST_CASE ("A dropped file is read in the background, and its clip and its one u
     REQUIRE (clips.size() == 1);
     CHECK (added == clips);
     CHECK (phazite::getClipRange (song, clips[0]).getStart().inBeats() == doctest::Approx (4.0));
-    CHECK (phazite::getClipFile (song, phazite::findClipState (song, clips[0])) == audioFolder.getChildFile ("Take.wav"));
+    CHECK (phazite::getClipFile (song, clips[0]) == audioFolder.getChildFile ("Take.wav"));
     CHECK (phazite::describeUndo (&song) == juce::String ("Undo Add File"));
     CHECK (audioFolder.findChildFiles (juce::File::findFiles, false).size() == 1);
 
@@ -483,7 +483,7 @@ TEST_CASE ("A copy's name is kept for it as it is chosen, the next job reads aft
     work.setOnReadStep (nullptr);
     const auto clips = phazite::getClips (song, s.firstTrack);
     REQUIRE (clips.size() == 1);
-    CHECK (phazite::getClipFile (song, phazite::findClipState (song, clips[0])) == audioFolder.getChildFile ("Take.wav"));
+    CHECK (phazite::getClipFile (song, clips[0]) == audioFolder.getChildFile ("Take.wav"));
     CHECK (audioFolder.getChildFile ("Take.wav").getSize() == take.getSize());
     CHECK (padCopy.getSize() == padSound.getSize()); // as it was written
 
@@ -511,7 +511,7 @@ TEST_CASE ("A copy's name is kept for it as it is chosen, the next job reads aft
     CHECK (toldAtSecondsStart.load() == 1); // the first's refusal came before the second began to read
     const auto keptClips = phazite::getClips (song, kept);
     REQUIRE (keptClips.size() == 1);
-    CHECK (phazite::getClipFile (song, phazite::findClipState (song, keptClips[0])).existsAsFile());
+    CHECK (phazite::getClipFile (song, keptClips[0]).existsAsFile());
 
     // A copy a refused import wrote that the song names meanwhile (taken as its own by a sound copied in at once) stays.
     const auto beat = s.addTrack ("Beat");
@@ -529,7 +529,7 @@ TEST_CASE ("A copy's name is kept for it as it is chosen, the next job reads aft
     phazite::test::waitForAudioWork (s.context);
     const auto beatClips = phazite::getClips (song, beat);
     REQUIRE (beatClips.size() == 1);
-    CHECK (phazite::getClipFile (song, phazite::findClipState (song, beatClips[0])).existsAsFile());
+    CHECK (phazite::getClipFile (song, beatClips[0]).existsAsFile());
 }
 
 TEST_CASE ("A read stuck in the system is given up: Cancel lets go of input at once, another project opens at once, and what it "
@@ -857,7 +857,7 @@ TEST_CASE ("A copy a given-up read made is no other job's to take: the next impo
 
     const auto clips = phazite::getClips (song, s.firstTrack);
     REQUIRE (clips.size() == 1);
-    const auto file = phazite::getClipFile (song, phazite::findClipState (song, clips[0]));
+    const auto file = phazite::getClipFile (song, clips[0]);
     CHECK (file != copied);
     CHECK (file.existsAsFile());
     work.setHost (nullptr);

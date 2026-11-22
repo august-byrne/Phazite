@@ -1538,7 +1538,7 @@ TEST_CASE ("Performance gate: the check for unsaved changes compares no element 
     before = phazite::Project::countElementsCompared();
     CHECK_FALSE (project.hasUnsavedChanges());
     const auto noteAdded = phazite::Project::countElementsCompared() - before;
-    const auto clip = countElements (phazite::copyWhole (song, phazite::findClipState (song, built.clips[3])));
+    const auto clip = countElements (phazite::copyWholeClip (song, built.clips[3]));
     const auto wholeSong = countElements (phazite::test::copyWholeSong (song));
 
     INFO ("Elements compared after a note added and taken back: " << noteAdded << ", of its clip's " << clip << " and the song's "

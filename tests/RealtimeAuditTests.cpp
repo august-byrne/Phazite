@@ -2299,14 +2299,14 @@ TEST_SUITE ("realtime-audit")
         song.setTempo (100.0);
         auto& played = getSong (song);
         const auto clip = phazite::importFile (played, song.firstTrack, loop, phazite::BeatPosition());
-        REQUIRE (phazite::isAudioState (phazite::findClipState (played, clip)));
+        REQUIRE (phazite::isAudioClip (played, clip));
         REQUIRE (phazite::getClipTempo (played, clip) == doctest::Approx (120.0));
 
         // Phazite renders the stretched loop to a file in the background, and its engine plays that, so the audio thread
         // only reads a file; until it is ready, the clip is silent.
         song.waitForClipRenders();
         REQUIRE (phazite::isRendered (played, clip));
-        REQUIRE (phazite::getAudioFileInfo (phazite::getPlayedFile (played, phazite::findClipState (played, clip))).isValid());
+        REQUIRE (phazite::getAudioFileInfo (phazite::getPlayedFile (played, clip)).isValid());
 
         const auto m = playAndMeasure (song);
         report ("A loop at 120 BPM stretched to 100 BPM, from its render", m);
@@ -2327,7 +2327,7 @@ TEST_SUITE ("realtime-audit")
         phazite::setClipReversed (played, clip, true);
         song.waitForClipRenders();
         REQUIRE (phazite::isRendered (played, clip));
-        REQUIRE (phazite::getAudioFileInfo (phazite::getPlayedFile (played, phazite::findClipState (played, clip))).isValid());
+        REQUIRE (phazite::getAudioFileInfo (phazite::getPlayedFile (played, clip)).isValid());
 
         const auto m = playAndMeasure (song);
         report ("An audio clip turned up 6 dB, pitched up 3 semitones and reversed, from its render", m);

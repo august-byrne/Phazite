@@ -14,6 +14,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
@@ -1177,6 +1178,13 @@ TEST_CASE ("A device grouped into a container on one side and changed on the oth
 
 namespace
 {
+// A clip's alias group (Schema.h: clipLink) as text, as a file writes it (so a link left at 0 is text, and shows): empty for
+// none, and for a clip that isn't the song's.
+juce::String getLinkText (const phazite::Song& song, phazite::ClipID clip)
+{
+    return phazite::copyWholeClip (song, clip)[phazite::schema::clipLink].toString();
+}
+
 // Sides whose base holds an alias group: the Bass's clip X (from beat 0, notes n at 0 and m at 2) and its alias Y on the
 // Drums, from beat 8. Edits are made through either, as the piano roll makes them.
 struct AliasSides : Sides
@@ -1189,7 +1197,7 @@ struct AliasSides : Sides
         REQUIRE (aliases.size() == 1);
         alias = aliases.front();
         phazite::moveClip (*base, alias, at (8.0), tracks[1]);
-        REQUIRE (phazite::findClipState (*base, alias)[schema::clipLink] == phazite::findClipState (*base, clip)[schema::clipLink]);
+        REQUIRE (getLinkText (*base, alias) == getLinkText (*base, clip));
         ours = phazite::makeSong (phazite::test::copyWholeSong (*base));
         theirs = phazite::makeSong (phazite::test::copyWholeSong (*base));
     }
@@ -1213,7 +1221,7 @@ struct AliasSides : Sides
 
         for (const auto track : tracks)
             for (const auto id : phazite::getClips (*ours, track))
-                groups[phazite::findClipState (*ours, id)[schema::clipLink].toString()].push_back (id);
+                groups[getLinkText (*ours, id)].push_back (id);
 
         return groups;
     }
@@ -1327,8 +1335,8 @@ TEST_CASE ("Merged edits of the notes of a clip that has an alias reach both, an
 
             const auto merged = sides.mergeIntoOurs();
             CHECK (merged.clashes.empty());
-            CHECK_FALSE (phazite::findClipState (*sides.ours, sides.clip).hasProperty (schema::clipLink));
-            CHECK_FALSE (phazite::findClipState (*sides.ours, sides.alias).hasProperty (schema::clipLink));
+            CHECK_FALSE (getLinkText (*sides.ours, sides.clip).isNotEmpty());
+            CHECK_FALSE (getLinkText (*sides.ours, sides.alias).isNotEmpty());
             CHECK (sides.noteIn (sides.clip, sides.n).value().velocity == 70);
             CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 70); // the change made to it, while it was an alias
             checkSong (*sides.ours);
@@ -1376,14 +1384,14 @@ TEST_CASE ("An alias deleted on one side and changed on the other comes back int
         INFO ((deletedHere ? "deleted here" : "deleted there"));
         AliasSides sides;
         phazite::deleteClips (deletedHere ? *sides.ours : *sides.theirs, { sides.alias }, false);
-        REQUIRE_FALSE (phazite::findClipState (deletedHere ? *sides.ours : *sides.theirs, sides.clip).hasProperty (schema::clipLink));
+        REQUIRE_FALSE (getLinkText (deletedHere ? *sides.ours : *sides.theirs, sides.clip).isNotEmpty());
         phazite::setNoteVelocities (deletedHere ? *sides.theirs : *sides.ours, { { sides.alias, sides.n } }, 70);
 
         const auto merged = sides.mergeIntoOurs();
         CHECK (merged.clashes.empty());
-        REQUIRE (phazite::findClipState (*sides.ours, sides.alias).isValid()); // kept: changed on one side
-        CHECK_FALSE (phazite::findClipState (*sides.ours, sides.alias).hasProperty (schema::clipLink));
-        CHECK_FALSE (phazite::findClipState (*sides.ours, sides.clip).hasProperty (schema::clipLink));
+        REQUIRE (phazite::getClipValue (*sides.ours, sides.alias).has_value()); // kept: changed on one side
+        CHECK_FALSE (getLinkText (*sides.ours, sides.alias).isNotEmpty());
+        CHECK_FALSE (getLinkText (*sides.ours, sides.clip).isNotEmpty());
         CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 70);
         CHECK (sides.noteIn (sides.clip, sides.n).value().velocity == 70); // changed while it was Y's alias
         sides.checkGroupsHoldTogether();
@@ -1409,7 +1417,7 @@ TEST_CASE ("An alias added on one side and the original clip deleted on the othe
 
         const auto merged = sides.mergeIntoOurs();
         CHECK (merged.clashes.empty());
-        CHECK_FALSE (phazite::findClipState (*sides.ours, sides.alias).hasProperty (schema::clipLink));
+        CHECK_FALSE (getLinkText (*sides.ours, sides.alias).isNotEmpty());
         CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 70);
 
         for (const auto& [link, clips] : sides.getGroups())
@@ -1433,15 +1441,15 @@ TEST_CASE ("A clip made unique and changed on one side while the other changes i
         auto& unique = uniqueHere ? *sides.ours : *sides.theirs;
         auto& group = uniqueHere ? *sides.theirs : *sides.ours;
         phazite::makeClipsUnique (unique, { sides.alias });
-        REQUIRE_FALSE (phazite::findClipState (unique, sides.alias).hasProperty (schema::clipLink));
-        REQUIRE (phazite::findClipState (unique, sides.clip).hasProperty (schema::clipLink)); // X and W still a group
+        REQUIRE_FALSE (getLinkText (unique, sides.alias).isNotEmpty());
+        REQUIRE (getLinkText (unique, sides.clip).isNotEmpty()); // X and W still a group
         phazite::setNoteVelocities (unique, { { sides.alias, sides.n } }, 30);
         phazite::transposeNotes (group, { { third, sides.m } }, 3);
 
         const auto merged = sides.mergeIntoOurs();
         CHECK (merged.clashes.empty());
-        CHECK_FALSE (phazite::findClipState (*sides.ours, sides.alias).hasProperty (schema::clipLink));
-        CHECK (phazite::findClipState (*sides.ours, sides.clip).hasProperty (schema::clipLink));
+        CHECK_FALSE (getLinkText (*sides.ours, sides.alias).isNotEmpty());
+        CHECK (getLinkText (*sides.ours, sides.clip).isNotEmpty());
         CHECK (describeClipNotes (*sides.ours, sides.clip) == describeClipNotes (*sides.ours, third));
         CHECK (sides.noteIn (sides.clip, sides.m).value().pitch == 43);
         CHECK (sides.noteIn (sides.clip, sides.n).value().velocity == 100);
@@ -1494,7 +1502,7 @@ TEST_CASE ("Notes both sides added to a group under one ID: the other side's giv
 
     const auto merged = sides.mergeIntoOurs();
     CHECK (merged.clashes.empty());
-    const auto link = phazite::findClipState (*sides.ours, sides.clip)[schema::clipLink].toString();
+    const auto link = getLinkText (*sides.ours, sides.clip);
     std::optional<phazite::RenumberedID> given;
 
     for (const auto& id : merged.renumbered)
@@ -1551,9 +1559,9 @@ TEST_CASE ("A clip copied as an alias on one side and its notes changed on the o
         const auto merged = sides.mergeIntoOurs();
         INFO (describeMerge (merged));
         CHECK (merged.clashes.empty());
-        const auto link = phazite::findClipState (*sides.ours, sides.clip)[schema::clipLink].toString();
+        const auto link = getLinkText (*sides.ours, sides.clip);
         CHECK (link.isNotEmpty());
-        CHECK (phazite::findClipState (*sides.ours, z)[schema::clipLink].toString() == link);
+        CHECK (getLinkText (*sides.ours, z) == link);
 
         for (const auto id : { sides.clip, z })
         {
@@ -1584,11 +1592,11 @@ TEST_CASE ("Every clip of a group deleted on one side and the group changed thro
         const auto merged = sides.mergeIntoOurs();
         INFO (describeMerge (merged));
         CHECK (merged.clashes.empty());
-        REQUIRE (phazite::findClipState (*sides.ours, sides.clip).isValid());
-        REQUIRE (phazite::findClipState (*sides.ours, sides.alias).isValid());
-        const auto link = phazite::findClipState (*sides.ours, sides.clip)[schema::clipLink].toString();
+        REQUIRE (phazite::getClipValue (*sides.ours, sides.clip).has_value());
+        REQUIRE (phazite::getClipValue (*sides.ours, sides.alias).has_value());
+        const auto link = getLinkText (*sides.ours, sides.clip);
         CHECK (link.isNotEmpty());
-        CHECK (phazite::findClipState (*sides.ours, sides.alias)[schema::clipLink].toString() == link);
+        CHECK (getLinkText (*sides.ours, sides.alias) == link);
         CHECK (sides.holdTheSameNotes());
         CHECK (sides.noteIn (sides.clip, sides.n).value().velocity == 70);
         CHECK (sides.noteIn (sides.alias, sides.n).value().velocity == 70);
@@ -1622,9 +1630,9 @@ TEST_CASE ("A clip both sides copied as the same alias: the copy is the group's 
     REQUIRE (merged.clashes.size() == 1);
     CHECK (merged.clashes[0].property == schema::clipLink);
     CHECK (merged.clashes[0].path[merged.clashes[0].path.size() - 1] == "CLIP:" + juce::String ((juce::int64) sides.clip.getRaw()));
-    const auto link = phazite::findClipState (*sides.ours, copies[0])[schema::clipLink].toString();
+    const auto link = getLinkText (*sides.ours, copies[0]);
     CHECK (link.isNotEmpty());
-    CHECK (phazite::findClipState (*sides.ours, sides.clip)[schema::clipLink].toString() == link);
+    CHECK (getLinkText (*sides.ours, sides.clip) == link);
     CHECK (describeClipNotes (*sides.ours, sides.clip) == describeClipNotes (*sides.ours, copies[0]));
     checkSong (*sides.ours);
 }
@@ -1658,10 +1666,9 @@ struct AudioSides : Sides
     {
         juce::StringArray markers;
 
-        for (const auto& child : phazite::findClipState (song, clip))
-            if (child.hasType (schema::WARP))
-                markers.add (juce::String ((double) child[schema::warpTime], 4) + ":"
-                             + juce::String ((double) child[schema::warpPlaysAt], 4));
+        if (const auto value = phazite::getClipValue (song, clip))
+            for (const auto& warp : value->sound.warps)
+                markers.add (juce::String (warp.time, 4) + ":" + juce::String (warp.playsAt, 4));
 
         return "tempo " + juce::String (phazite::getClipTempo (song, clip), 2) + ", pitch "
                + juce::String ((double) phazite::getClipPitch (song, clip), 2)
@@ -1674,7 +1681,7 @@ struct AudioSides : Sides
         std::map<juce::String, std::vector<phazite::ClipID>> groups;
 
         for (const auto id : phazite::getClips (*ours, tracks[1]))
-            groups[phazite::findClipState (*ours, id)[schema::clipLink].toString()].push_back (id);
+            groups[getLinkText (*ours, id)].push_back (id);
 
         return groups;
     }

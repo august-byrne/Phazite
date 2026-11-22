@@ -77,9 +77,9 @@ std::map<phazite::ClipID, juce::String> describeAllNotes (const phazite::Song& s
 {
     std::map<phazite::ClipID, juce::String> notes;
 
-    for (const auto& clip : phazite::getClipStates (song))
-        if (phazite::isMidiState (clip))
-            notes[phazite::getClipID (clip)] = describeClipNotes (song, phazite::getClipID (clip));
+    for (const auto& clip : phazite::getClipPlacements (song))
+        if (! clip.isAudio())
+            notes[clip.id] = describeClipNotes (song, clip.id);
 
     return notes;
 }

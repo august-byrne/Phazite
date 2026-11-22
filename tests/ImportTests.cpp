@@ -94,16 +94,17 @@ TEST_CASE ("Imported audio is copied into the project once, and keeps working af
 
     const auto clip = phazite::importFile (song, track, kick, beats (4.0));
     REQUIRE (clip.isValid());
-    const auto clipState = phazite::findClipState (song, clip);
-    REQUIRE (phazite::isAudioState (clipState));
-    CHECK (clipState[phazite::schema::clipName].toString() == juce::String ("Kick"));
+    const auto value = phazite::getClipValue (song, clip);
+    REQUIRE (value.has_value());
+    REQUIRE (value->isAudio());
+    CHECK (value->name == juce::String ("Kick"));
     CHECK (phazite::getClipRange (song, clip).getStart().inBeats() == doctest::Approx (4.0));
-    const auto played = phazite::getPlayedPosition (song, clipState);
+    const auto played = phazite::getPlayedPosition (song, clip);
     CHECK (played.end - played.start == doctest::Approx (0.5));
-    CHECK (phazite::getClipFile (song, clipState) == project->getAudioFolder().getChildFile ("Kick.wav"));
+    CHECK (phazite::getClipFile (song, clip) == project->getAudioFolder().getChildFile ("Kick.wav"));
 
     // The project stores where the audio is relative to itself, so it can move.
-    CHECK_FALSE (juce::File::isAbsolutePath (clipState[phazite::schema::clipFile].toString()));
+    CHECK_FALSE (juce::File::isAbsolutePath (value->sound.file));
 
     // The same file again uses the same copy; another file of that name gets a name of its own.
     CHECK (phazite::copyIntoProject (song, kick) == project->getAudioFolder().getChildFile ("Kick.wav"));
@@ -126,9 +127,8 @@ TEST_CASE ("Imported audio is copied into the project once, and keeps working af
     const auto& reopenedSong = reopened->getSong();
     const auto clips = phazite::getClips (reopenedSong, phazite::getTrackIDs (reopenedSong).front());
     REQUIRE (clips.size() == 1);
-    const auto reopenedClip = phazite::findClipState (reopenedSong, clips.front());
-    REQUIRE (phazite::isAudioState (reopenedClip));
-    CHECK (phazite::getClipFile (reopenedSong, reopenedClip).existsAsFile());
+    REQUIRE (phazite::isAudioClip (reopenedSong, clips.front()));
+    CHECK (phazite::getClipFile (reopenedSong, clips.front()).existsAsFile());
 }
 
 TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
@@ -143,7 +143,7 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
 
     const auto clip = phazite::importFile (song, track, midiFile, beats (8.0));
     REQUIRE (clip.isValid());
-    REQUIRE (phazite::isMidiState (phazite::findClipState (song, clip)));
+    REQUIRE (phazite::isMidiClip (song, clip));
     CHECK (phazite::getClipRange (song, clip).getStart().inBeats() == doctest::Approx (8.0));
     CHECK (phazite::getClipNotes (song, clip).size() == 1);
 
@@ -168,7 +168,7 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
 
     const auto bass = phazite::importFile (song, track, temp.folder.getChildFile ("Bass.mid"), beats (16.0));
     REQUIRE (bass.isValid());
-    const auto clipState = phazite::copyWhole (song, phazite::findClipState (song, bass)); // whole, as a save writes it
+    const auto clipState = phazite::copyWholeClip (song, bass); // whole, as a save writes it
     CHECK (clipState[phazite::schema::clipName].toString() == juce::String ("Bassline"));
     CHECK ((double) clipState[phazite::schema::clipStart] == doctest::Approx (16.0));
     CHECK ((double) clipState[phazite::schema::clipLength] == doctest::Approx (8.0)); // the note ends in the second bar
@@ -219,8 +219,8 @@ TEST_CASE ("A MIDI file's notes and controllers on two channels keep their chann
     CHECK (notes[1].velocity == 80);
     CHECK (notes[1].length.inBeats() == doctest::Approx (1.0));
 
-    const auto clipState = phazite::copyWhole (song, phazite::findClipState (song, clip)); // whole, as a save writes it
-    std::vector<std::pair<juce::String, int>> controls;                                    // kind and channel
+    const auto clipState = phazite::copyWholeClip (song, clip); // whole, as a save writes it
+    std::vector<std::pair<juce::String, int>> controls;         // kind and channel
 
     for (const auto& child : clipState)
         if (child.hasType (phazite::schema::CONTROL))
@@ -318,7 +318,7 @@ TEST_CASE ("Dropped files go on the track that suits them, or on new tracks belo
         beats (4.0));
     REQUIRE (added.size() == 2);
     CHECK (phazite::getClipTrack (song, added[0]) == target);
-    CHECK (phazite::isMidiState (phazite::findClipState (song, added[1])));
+    CHECK (phazite::isMidiClip (song, added[1]));
     CHECK (phazite::getClipRange (song, added[1]).getStart().inBeats() == doctest::Approx (4.0));
 
     const auto midiTrack = phazite::getClipTrack (song, added[1]);

@@ -347,7 +347,7 @@ TEST_CASE ("Values set as they are change nothing: no undo action, no unsaved ch
     auto& history = song.getSong().getUndoManager();
     history.clearUndoHistory();
     REQUIRE_FALSE (song.song.getProject().hasUnsavedChanges());
-    const auto wholeClip = [&song] { return phazite::copyWhole (song.getSong(), phazite::findClipState (song.getSong(), song.clip)); };
+    const auto wholeClip = [&song] { return phazite::copyWholeClip (song.getSong(), song.clip); };
     const auto before = wholeClip();
 
     // A click on the value there, and a draw over a range with the values it holds (a repeat among them, left out as ever).
@@ -399,7 +399,7 @@ TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one chan
     {
         std::vector<juce::String> held;
 
-        for (const auto& child : phazite::copyWhole (song.getSong(), phazite::findClipState (song.getSong(), take)))
+        for (const auto& child : phazite::copyWholeClip (song.getSong(), take))
             if (! (child.hasType (phazite::schema::CONTROL)
                    && child[phazite::schema::controlKind].toString() == phazite::schema::controlIsPitchWheel))
                 held.push_back (child.toXmlString());

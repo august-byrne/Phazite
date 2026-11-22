@@ -10,6 +10,7 @@
 #include "devices/stereo/Stereo.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
@@ -428,10 +429,9 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK (getSelection (song.context).isSelected (bounced));
     const auto clips = phazite::getClips (model, bounced);
     REQUIRE (clips.size() == 1);
-    const auto clipState = phazite::findClipState (model, clips[0]);
-    REQUIRE (phazite::isAudioState (clipState));
-    CHECK (phazite::getClipRange (model, clipState).getStart() == phazite::BeatPosition());
-    const auto file = phazite::getClipFile (model, clipState);
+    REQUIRE (phazite::isAudioClip (model, clips[0]));
+    CHECK (phazite::getClipRange (model, clips[0]).getStart() == phazite::BeatPosition());
+    const auto file = phazite::getClipFile (model, clips[0]);
     CHECK (file.getParentDirectory() == song.project->getAudioFolder());
     CHECK (file.getFileName() == "Bass (Bounce).wav");
 
@@ -556,7 +556,7 @@ TEST_CASE ("Bounce in Place goes through where its frozen copy can't be made, an
     REQUIRE (tracks.size() == 3);
     const auto clips = phazite::getClips (model, tracks[1]);
     REQUIRE (clips.size() == 1);
-    const auto file = phazite::getClipFile (model, phazite::findClipState (model, clips[0]));
+    const auto file = phazite::getClipFile (model, clips[0]);
     CHECK (file.existsAsFile());
     CHECK (getLevel (file, 0.1, 1.4) > 0.05);
     CHECK (phazite::isTrackMuted (model, song.bass, false));

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The alias rule: the clips of an alias group hold the same notes and controller values (src/model/notes/internal/Notes.h:
-// "Each is made to the note in each of its clip's aliases too"; src/model/arrangement/internal/Clips.h: getAliasStates()).
+// "Each is made to the note in each of its clip's aliases too"; src/model/arrangement/internal/Clips.h: getAliasClips()).
 // Every note edit of Notes.h made through a member that isn't the group's first, each one undo step, exact, made once
 // (not once for each member), every member the same after it, its Undo and its Redo; a note named through two members in
 // one call edited once, whichever is named first; and notes pasted, duplicated and replaced in a member. All through the
@@ -1310,12 +1310,12 @@ namespace
 // any clip of a group reaches each.
 void editThroughEachLinkedClip (phazite::Song& song, phazite::test::UndoCheck& check)
 {
-    for (const auto& clipState : phazite::getClipStates (song))
+    for (const auto& value : phazite::getClipValues (song))
     {
-        if (! clipState.hasProperty (phazite::schema::clipLink))
+        if (value.link == 0)
             continue;
 
-        const auto clip = phazite::getClipID (clipState);
+        const auto clip = value.id;
         const auto played = phazite::getClipNotesPlayed (song, clip);
 
         if (played.empty())

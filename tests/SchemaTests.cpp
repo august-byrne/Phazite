@@ -213,12 +213,12 @@ struct Changed
     juce::ValueTree findOpened() const
     {
         REQUIRE (opened != nullptr);
-        const auto clipState = phazite::findClipState (*opened, clip);
+        const auto clipState = phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid())
             return {};
 
-        for (const auto& child : phazite::copyWhole (*opened, clipState))
+        for (const auto& child : clipState)
         {
             if (! child.hasType (original.getType()))
                 continue;

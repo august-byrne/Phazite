@@ -2140,7 +2140,7 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
     const auto id =
         phazite::importFile (screen.getSong(), screen.tracks[0], phazite::test::writeClicks (temp.folder.getChildFile ("Loop"), 16, 120.0),
                              beats (0.0)); // long enough to see it under way
-    REQUIRE (phazite::isAudioState (phazite::findClipState (screen.getSong(), id)));
+    REQUIRE (phazite::isAudioClip (screen.getSong(), id));
     phazite::test::dispatchPendingMessages();
     juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
 
@@ -2181,7 +2181,7 @@ TEST_CASE (
 
     const auto source = phazite::test::writeClicks (temp.folder.getChildFile ("Loop"), 8, 120.0);
     const auto id = phazite::importFile (screen.getSong(), screen.tracks[0], source, beats (0.0));
-    REQUIRE (phazite::isAudioState (phazite::findClipState (screen.getSong(), id)));
+    REQUIRE (phazite::isAudioClip (screen.getSong(), id));
     phazite::test::dispatchPendingMessages();
     juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
 
@@ -2891,9 +2891,8 @@ TEST_CASE ("A sound file dropped on a track's row in the playlist becomes a clip
     const auto clips = phazite::getClips (context, tracks[1]);
     REQUIRE (clips.size() == 1);
     CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
-    const auto clipState = phazite::findClipState (song, clips[0].id);
-    REQUIRE (phazite::isAudioState (clipState));
-    CHECK (phazite::getClipFile (song, clipState).getFileNameWithoutExtension().startsWith ("Dropped"));
+    REQUIRE (phazite::isAudioClip (song, clips[0].id));
+    CHECK (phazite::getClipFile (song, clips[0].id).getFileNameWithoutExtension().startsWith ("Dropped"));
     CHECK (getSelection (context).isSelected (clips[0].id));
     REQUIRE (phazite::canUndo (song));
     phazite::undo (song);

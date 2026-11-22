@@ -2076,7 +2076,7 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     const auto notes = phazite::getClipNotes (song, firstClip);
     REQUIRE_FALSE (notes.empty());
     const auto note = notes.front();
-    const auto contentStart = phazite::getContentStart (phazite::findClipState (song, firstClip));
+    const auto contentStart = phazite::getContentStart (song, firstClip);
     double moving = 0.0;
 
     for (int step = 1; step <= 10; ++step)

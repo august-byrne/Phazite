@@ -1292,7 +1292,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     const auto withLoop = phazite::getClips (*song, track);
     REQUIRE (withLoop.size() == 2);
     const auto loopID = withLoop[0] == kickClips[0] ? withLoop[1] : withLoop[0];
-    CHECK (phazite::isAudioState (phazite::findClipState (*song, loopID)));
+    CHECK (phazite::isAudioClip (*song, loopID));
     CHECK (phazite::getClipTempo (*song, loopID) == doctest::Approx (120.0)); // it follows the song's tempo, from its own
     CHECK (startOf (loopID) == doctest::Approx (16.0));
     CHECK (phazite::getClipRange (*song, loopID).getLength().inBeats() == doctest::Approx (8.0));

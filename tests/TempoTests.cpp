@@ -67,12 +67,12 @@ std::pair<double, int> findLoudestMillisecond (const float* samples, int from, i
 // What an audio clip plays, its file or Phazite's render of it; and how long it lasts, in the song's seconds.
 juce::File playedFileOf (const phazite::Song& song, phazite::ClipID clip)
 {
-    return phazite::getPlayedFile (song, phazite::findClipState (song, clip));
+    return phazite::getPlayedFile (song, clip);
 }
 
 double playedSecondsOf (const phazite::Song& song, phazite::ClipID clip)
 {
-    const auto position = phazite::getPlayedPosition (song, phazite::findClipState (song, clip));
+    const auto position = phazite::getPlayedPosition (song, clip);
     return position.end - position.start;
 }
 
@@ -209,7 +209,7 @@ TEST_CASE ("A tempo change stretches the samples that follow it, which Phazite r
     CHECK (phazite::getClipRange (song, loop).getLength().inBeats() == doctest::Approx (8.0));
     CHECK (phazite::getClipStretch (song, loop).timeRatio == doctest::Approx (1.2));
     REQUIRE (phazite::isRendered (song, loop));
-    CHECK (phazite::getClipFile (song, phazite::findClipState (song, loop)).getFileName() == juce::String ("Clicks 120 BPM.wav"));
+    CHECK (phazite::getClipFile (song, loop).getFileName() == juce::String ("Clicks 120 BPM.wav"));
     const auto render = playedFileOf (song, loop);
     CHECK (render.getFileName().startsWith (phazite::renderFilePrefix));
     CHECK_FALSE (phazite::getAudioFileInfo (render).isValid()); // until it is rendered: silent
@@ -424,8 +424,7 @@ TEST_CASE ("Patterns follow the tempo, their notes on their beats, unless the so
         REQUIRE (data.has_value());
         return *data;
     };
-    const auto noteBeat = [&song, &note, clip] (int i)
-    { return (note (i).start - phazite::getContentStart (phazite::findClipState (song, clip))).inBeats(); };
+    const auto noteBeat = [&song, &note, clip] (int i) { return (note (i).start - phazite::getContentStart (song, clip)).inBeats(); };
 
     // Following, they play twice as slowly at half the tempo.
     CHECK (phazite::doPatternsFollowTempo (song));
@@ -604,7 +603,7 @@ TEST_CASE ("A loop that follows the tempo plays along the song's tempo changes, 
         phazite::importFile (song, phazite::getTrackIDs (song)[0], writeHits (temp.folder, 8, 120.0), phazite::BeatPosition());
     REQUIRE (isAudioClip (song, loop));
     CHECK (phazite::getClipTempo (song, loop) == doctest::Approx (120.0));
-    CHECK_FALSE (phazite::followsTempoChanges (song, phazite::findClipState (song, loop)));
+    CHECK_FALSE (phazite::followsTempoChanges (song, loop));
 
     // A ramp from 120 down to 100 BPM over its first four beats (a ritardando), 100 held, and a step down to 90 at beat 6.
     // (StretchTests.cpp holds a ramp that doubles a stretch, with hits close together; on its own after silence, a hit
@@ -613,13 +612,12 @@ TEST_CASE ("A loop that follows the tempo plays along the song's tempo changes, 
         song,
         { { phazite::BeatPosition(), 120.0, phazite::tempoRamp }, { phazite::test::at (4.0), 100.0 }, { phazite::test::at (6.0), 90.0 } },
         phazite::BeatPosition());
-    const auto clipState = phazite::findClipState (song, loop);
-    REQUIRE (phazite::followsTempoChanges (song, clipState));
+    REQUIRE (phazite::followsTempoChanges (song, loop));
 
     // It keeps its eight beats, which last as long as the tempo says (the ramp's four 12 ln 1.2 seconds), and each of its
     // file's seconds is two of its beats.
     CHECK (phazite::getClipRange (song, loop).getLength().inBeats() == doctest::Approx (8.0));
-    const auto position = phazite::getPlayedPosition (song, clipState);
+    const auto position = phazite::getPlayedPosition (song, loop);
     const auto end = phazite::toSeconds (song, phazite::test::at (8.0));
     CHECK (end == doctest::Approx (12.0 * std::log (1.2) + 2.0 * 0.6 + 2.0 * 60.0 / 90.0));
     CHECK (position.start == doctest::Approx (0.0));
@@ -628,7 +626,7 @@ TEST_CASE ("A loop that follows the tempo plays along the song's tempo changes, 
     CHECK (phazite::getFileTimeAt (song, loop, phazite::test::at (4.0)) == doctest::Approx (2.0));
     CHECK (phazite::getFileTimeAt (song, loop, phazite::test::at (7.0)) == doctest::Approx (3.5));
 
-    const auto settings = phazite::getClipStretch (song, clipState);
+    const auto settings = phazite::getClipStretch (song, loop);
     REQUIRE (settings.timeMap.size() >= 8);
     CHECK (settings.timeMap.back().first == doctest::Approx (4.0));
     CHECK (settings.timeMap.back().second == doctest::Approx (end));
@@ -637,10 +635,10 @@ TEST_CASE ("A loop that follows the tempo plays along the song's tempo changes, 
 
     // Trimmed, it plays the file from its beat, and back.
     phazite::trimClipStart (song, loop, phazite::test::at (2.0));
-    CHECK (phazite::getFilePart (phazite::findClipState (song, loop)).start == doctest::Approx (1.0));
+    CHECK (phazite::getFilePart (*phazite::getClipValue (song, loop)).start == doctest::Approx (1.0));
     CHECK (phazite::getClipRange (song, loop).getEnd().inBeats() == doctest::Approx (8.0));
     phazite::trimClipStart (song, loop, phazite::BeatPosition());
-    CHECK (phazite::getFilePart (phazite::findClipState (song, loop)).start == doctest::Approx (0.0));
+    CHECK (phazite::getFilePart (*phazite::getClipValue (song, loop)).start == doctest::Approx (0.0));
 
     // Rendered through Phazite's engine, as an export plays it: each hit where its beat is, give or take what Rubber Band
     // moves an attack by, as at one tempo. Each is found by its first 10 ms, the lag that matches them best within 10 ms of
@@ -649,8 +647,7 @@ TEST_CASE ("A loop that follows the tempo plays along the song's tempo changes, 
     constexpr double rate = 44100.0;
     const auto audio = phazite::renderWithOwnEngine (song, (int) std::lround ((end + 0.2) * rate), rate, 512);
     const auto* out = audio.getReadPointer (0);
-    const std::unique_ptr<juce::AudioFormatReader> reader (
-        phazite::getAudioFormats().createReaderFor (phazite::getClipFile (song, phazite::findClipState (song, loop))));
+    const std::unique_ptr<juce::AudioFormatReader> reader (phazite::getAudioFormats().createReaderFor (phazite::getClipFile (song, loop)));
     REQUIRE (reader != nullptr);
     juce::AudioBuffer<float> hits (1, (int) reader->lengthInSamples);
     reader->read (&hits, 0, hits.getNumSamples(), 0, true, false);
@@ -684,7 +681,7 @@ TEST_CASE ("A loop that follows the tempo plays along the song's tempo changes, 
 
     // Back to one tempo, it plays at one ratio again.
     phazite::removeTempoChanges (song);
-    CHECK_FALSE (phazite::followsTempoChanges (song, phazite::findClipState (song, loop)));
+    CHECK_FALSE (phazite::followsTempoChanges (song, loop));
     CHECK (phazite::getClipStretch (song, loop).timeMap.empty());
     CHECK_FALSE (phazite::isRendered (song, loop));
 }
@@ -759,7 +756,7 @@ TEST_CASE ("A loop that follows the tempo plays at its own speed in 6/8 and 2/2:
 
         // A warp marker where its audio plays moves nothing: it plays straight on at its own speed, four seconds long.
         REQUIRE (phazite::addWarpMarker (song, loop, 1.0));
-        REQUIRE (phazite::followsTempoChanges (song, phazite::findClipState (song, loop)));
+        REQUIRE (phazite::followsTempoChanges (song, loop));
         CHECK (playedSecondsOf (song, loop) == doctest::Approx (4.0));
         CHECK (phazite::getClipRange (song, loop).getLength().inBeats() == doctest::Approx (8.0));
         checkHits ([] (int hit) { return hit * 0.5; });
@@ -776,7 +773,7 @@ TEST_CASE ("A loop that follows the tempo plays at its own speed in 6/8 and 2/2:
         // which puts a hit stretched to twice as long after silence 5 to 8 ms early.)
         phazite::removeWarpMarkers (song, loop);
         phazite::addTempoChange (song, phazite::test::at (2.0), 90.0);
-        REQUIRE (phazite::followsTempoChanges (song, phazite::findClipState (song, loop)));
+        REQUIRE (phazite::followsTempoChanges (song, loop));
         CHECK (playedSecondsOf (song, loop) == doctest::Approx (5.0));
         CHECK (phazite::getClipRange (song, loop).getLength().inBeats() == doctest::Approx (8.0));
         checkHits ([] (int hit) { return hit <= 2 ? hit * 0.5 : 1.0 + (hit - 2) * 2.0 / 3.0; });

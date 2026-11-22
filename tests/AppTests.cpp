@@ -749,8 +749,8 @@ TEST_CASE ("An untitled song's recordings survive a crash before its first autos
     const auto& song = session.getProject()->getSong();
     juce::Array<juce::File> played;
 
-    for (const auto& clip : phazite::getClipStates (song))
-        if (phazite::isAudioState (clip))
+    for (const auto& clip : phazite::getClipValues (song))
+        if (clip.isAudio())
             played.add (phazite::getClipFile (song, clip));
 
     CHECK (played == juce::Array<juce::File> { take });
@@ -2075,7 +2075,7 @@ TEST_CASE ("Closing a project while it records stops recording first, as Stop do
     CHECK (asked <= 1); // asked, or saved by Auto Save
 
     // Its note in a clip of the track, in the file saved.
-    const auto clips = phazite::getClipStates (phazite::findTrackState (song, track));
+    const auto clips = phazite::getClips (song, track);
     REQUIRE (clips.size() == 1);
     CHECK (file.loadFileAsString().contains ("<NOTE"));
 }
@@ -2120,7 +2120,7 @@ TEST_CASE ("Save As while recording stops recording first and keeps the take, wh
     CHECK (copy.loadFileAsString().contains ("<NOTE"));
     auto& copied = session.getProject()->getSong();
     CHECK_FALSE (phazite::isRecording (copied));
-    CHECK (phazite::getClipStates (phazite::findTrackState (copied, track)).size() == 1);
+    CHECK (phazite::getClips (copied, track).size() == 1);
 }
 TEST_CASE ("The window's hold while a branch's song is read lets play and stop through, and a quit cancels the read")
 {

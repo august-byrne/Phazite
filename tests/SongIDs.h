@@ -122,8 +122,9 @@ inline void checkIDs (const juce::ValueTree& song)
 // A song's own, and that the next ID it gives is one nothing in it has.
 inline void checkIDs (const Song& song)
 {
-    checkIDs (phazite::test::copyWholeSong (song));
+    const auto whole = phazite::test::copyWholeSong (song);
+    checkIDs (whole);
     INFO ("the song's count of IDs is behind what it holds");
-    CHECK (findNextID (song.getState()) == (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0));
+    CHECK (findNextID (whole) == (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0));
 }
 } // namespace phazite::test

@@ -4,7 +4,7 @@
 // edit of them made through a clip of the group that isn't its first (and Locate Audio File, by the file's path) writes into
 // each, after it, its Undo and its Redo, each through an UndoCheck; and every edit of what a clip keeps of its own (its gain,
 // fades, mute, place, the part of its file it plays, its take) changes that clip alone. All through the model's functions
-// and commands, by IDs and values (but a recording's takes, below). The song's check
+// and commands, by IDs and values (a recording's takes set up through Clips.h's setClip(), below). The song's check
 // (SongCheck.h) states the same of every song; the loader and a merge keep it (InconsistentProjectTests.cpp,
 // VersionsMergeTests.cpp).
 #include "SongCheck.h"
@@ -18,6 +18,7 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/internal/ProjectContext.h"
@@ -59,10 +60,11 @@ juce::File writeHitsAt (const juce::File& file, const std::vector<double>& times
     return file;
 }
 
-// A clip's element as text: every property but its ID, sorted, and its warp markers in their order.
+// A clip's element as text, as the song would save it (WholeState.h: copyWholeClip()): every property but its ID, sorted, and
+// its warp markers in their order.
 juce::String describeClip (const phazite::Song& song, ClipID clip)
 {
-    const auto state = phazite::findClipState (song, clip);
+    const auto state = phazite::copyWholeClip (song, clip);
     REQUIRE (state.isValid());
     juce::StringArray properties;
 
@@ -85,13 +87,14 @@ juce::String describeClip (const phazite::Song& song, ClipID clip)
 juce::String describeShared (const phazite::Song& song, ClipID clip)
 {
     juce::StringArray markers;
+    const auto value = phazite::getClipValue (song, clip);
+    REQUIRE (value.has_value());
 
-    for (const auto& child : phazite::findClipState (song, clip))
-        if (child.hasType (schema::WARP))
-            markers.add (juce::String ((double) child[schema::warpTime], 6) + ":" + juce::String ((double) child[schema::warpPlaysAt], 6));
+    for (const auto& warp : value->sound.warps)
+        markers.add (juce::String (warp.time, 6) + ":" + juce::String (warp.playsAt, 6));
 
-    return "file " + phazite::getClipFile (song, phazite::findClipState (song, clip)).getFileName() + ", tempo "
-           + juce::String (phazite::getClipTempo (song, clip), 6) + ", pitch " + juce::String (phazite::getClipPitch (song, clip), 4)
+    return "file " + phazite::getClipFile (song, clip).getFileName() + ", tempo " + juce::String (phazite::getClipTempo (song, clip), 6)
+           + ", pitch " + juce::String (phazite::getClipPitch (song, clip), 4)
            + (phazite::isClipReversed (song, clip) ? ", backwards" : ", forwards") + ", markers " + markers.joinIntoString (" ");
 }
 
@@ -121,24 +124,25 @@ struct AudioAliases
 
         REQUIRE (sorted (phazite::getLinkedClips (song.context, clip)) == sorted (members));
         REQUIRE (phazite::getClipTrack (getSong(), onOther) == other);
-        REQUIRE (phazite::getFilePart (phazite::findClipState (getSong(), snippet)).start == doctest::Approx (0.25));
+        REQUIRE (phazite::getFilePart (*phazite::getClipValue (getSong(), snippet)).start == doctest::Approx (0.25));
         REQUIRE (shareTheSound());
         getSong().getUndoManager().clearUndoHistory();
     }
 
     phazite::Song& getSong() const { return *phazite::findSong (song.context); }
 
-    // Whether every member shares what the first has, as the model reads it and as the loader compares the elements.
+    // Whether every member shares what the first has, as the model reads it and as the loader compares the elements (each
+    // clip whole, as the song would save it: WholeState.h, copyWholeClip()).
     bool shareTheSound() const
     {
         const auto& target = getSong();
-        const auto first = phazite::findClipState (target, members.front());
+        const auto first = phazite::copyWholeClip (target, members.front());
 
         return std::all_of (members.begin(), members.end(),
                             [&] (ClipID member)
                             {
                                 return describeShared (target, member) == describeShared (target, members.front())
-                                       && phazite::shareTheSound (first, phazite::findClipState (target, member));
+                                       && phazite::shareTheSound (first, phazite::copyWholeClip (target, member));
                             });
     }
 
@@ -310,7 +314,7 @@ TEST_CASE ("Every edit of what the audio clips of an alias group share, made thr
     CHECK (phazite::getClipTempo (song, a.snippet) <= 0.0); // undone again, in every clip
 
     // Locate Audio File, by the path every clip of the group plays: the project's copy of the file found in its place in each.
-    const auto played = phazite::findClipState (song, a.clip)[schema::clipFile].toString();
+    const auto played = phazite::getClipValue (song, a.clip)->sound.file;
     const auto found =
         writeHitsAt (a.song.getSoundsFolder().getChildFile ("Found").getChildFile ("Hits found.wav"), { 0.0, 0.53, 0.97, 1.54 }, 2.0);
     a.checkShared (
@@ -322,10 +326,9 @@ TEST_CASE ("Every edit of what the audio clips of an alias group share, made thr
         },
         [&] (ClipID member)
         {
-            const auto state = phazite::findClipState (song, member);
-            CHECK (state[schema::clipFile].toString() != played);
-            CHECK (phazite::getClipFile (song, state).getFileName() == juce::String ("Hits found.wav"));
-            CHECK (phazite::getClipFile (song, state).existsAsFile());
+            CHECK (phazite::getClipValue (song, member)->sound.file != played);
+            CHECK (phazite::getClipFile (song, member).getFileName() == juce::String ("Hits found.wav"));
+            CHECK (phazite::getClipFile (song, member).existsAsFile());
         },
         true);
 
@@ -460,11 +463,14 @@ TEST_CASE ("Choosing another take of an audio clip of an alias group changes tha
 
     {
         const phazite::UndoStep step (song, "Record");
-        auto clipState = phazite::findClipState (song, clip);
-        clipState.setProperty (schema::clipTakes, 3, &song.getUndoManager());
-        clipState.setProperty (schema::clipTake, 3, &song.getUndoManager());
-        clipState.setProperty (schema::clipTakeLength, 1.0, &song.getUndoManager());
-        phazite::setAudioPart (song, clipState, at (0.0), { 2.0, 3.0 });
+        auto value = *phazite::getClipValue (song, clip);
+        value.takes = 3;
+        value.take = 3;
+        value.takeLength = 1.0;
+        value.start = at (0.0);
+        value.fileStart = 2.0;
+        value.fileEnd = 3.0;
+        phazite::setClip (song, value);
     }
 
     const auto alias = test.copyClip (clip, 8.0, true);
@@ -480,12 +486,12 @@ TEST_CASE ("Choosing another take of an audio clip of an alias group changes tha
 
     // The alias plays the first take, the first second of the file; the clip it was copied from plays the last still.
     CHECK (phazite::getClipTakes (test.context, alias).playing == 1);
-    CHECK (phazite::getFilePart (phazite::findClipState (song, alias)).start == doctest::Approx (0.0));
+    CHECK (phazite::getFilePart (*phazite::getClipValue (song, alias)).start == doctest::Approx (0.0));
     CHECK (phazite::getClipTakes (test.context, clip).playing == 3);
     CHECK (describeClip (song, clip) == clipBefore);
     const auto aliasAfter = describeClip (song, alias);
     CHECK (aliasAfter != aliasBefore);
-    CHECK (phazite::shareTheSound (phazite::findClipState (song, clip), phazite::findClipState (song, alias)));
+    CHECK (phazite::shareTheSound (phazite::copyWholeClip (song, clip), phazite::copyWholeClip (song, alias)));
 
     check.stepBackOrForth ("Undo Choose Take", [&song] { phazite::undo (song); });
     CHECK (describeClip (song, alias) == aliasBefore);

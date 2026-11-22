@@ -579,9 +579,8 @@ TEST_CASE ("A song holding two curves of one parameter, the first without points
     REQUIRE (comparePlans (kept, *two.song).isEmpty());
 
     // An edit elsewhere: the curves are kept.
-    phazite::test::addMidiNote (*two.song,
-                                phazite::getClipID (phazite::getClipStates (phazite::findTrackState (*two.song, two.tracks[1]))[0]), 72,
-                                phazite::test::at (4.0), phazite::test::lasting (1.0));
+    phazite::test::addMidiNote (*two.song, phazite::getClips (*two.song, two.tracks[1])[0], 72, phazite::test::at (4.0),
+                                phazite::test::lasting (1.0));
     const auto differences = comparePlans (kept, *two.song);
     CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
 }

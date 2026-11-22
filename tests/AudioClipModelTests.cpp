@@ -224,7 +224,7 @@ TEST_CASE ("A clip that follows the tempo keeps its start and its audio, and its
 
     // The time in the file that plays at a beat, which the waveforms draw: a second in where the clip starts.
     const auto& model = *song.song;
-    REQUIRE (phazite::isAudioState (phazite::findClipState (model, song.audio)));
+    REQUIRE (phazite::isAudioClip (model, song.audio));
     CHECK (phazite::getFileTimeAt (model, song.audio, beat (2.0)) == doctest::Approx (1.0));
     CHECK (phazite::getFileTimeAt (model, song.audio, beat (0.0)) == doctest::Approx (0.0)); // trimmed off
 
@@ -474,7 +474,7 @@ TEST_CASE ("A slip keeps the part a clip plays inside its file, as long as it wa
     song.song->getUndoManager().clearUndoHistory();
     phazite::test::UndoCheck undo (*song.song);
 
-    const auto part = [&song] { return phazite::getFilePart (phazite::findClipState (*song.song, song.audio)); };
+    const auto part = [&song] { return phazite::getFilePart (*phazite::getClipValue (*song.song, song.audio)); };
     const auto slip = [&song, &context] (double beats)
     {
         const phazite::UndoStep step (*song.song, "Slip Clip");
@@ -515,13 +515,15 @@ TEST_CASE ("A clip that plays more than its whole file can't slip: the part it p
     // (part.start below 0).
     Song song;
     auto& context = song.context;
-    auto clipState = phazite::findClipState (*song.song, song.audio);
-    const auto fileLength = phazite::getClipFileLength (*song.song, clipState);
+    auto clip = *phazite::getClipValue (*song.song, song.audio);
+    const auto fileLength = phazite::getClipFileLength (*song.song, song.audio);
     REQUIRE (fileLength == doctest::Approx (4.0));
-    phazite::setAudioPart (*song.song, clipState, phazite::getClipRange (clipState).getStart(), { 0.0, fileLength + 1.0 });
+    clip.fileStart = 0.0;
+    clip.fileEnd = fileLength + 1.0;
+    phazite::setClip (*song.song, clip);
     song.song->getUndoManager().clearUndoHistory();
 
-    const auto part = [&song] { return phazite::getFilePart (phazite::findClipState (*song.song, song.audio)); };
+    const auto part = [&song] { return phazite::getFilePart (*phazite::getClipValue (*song.song, song.audio)); };
     const auto slip = [&song, &context] (double beats)
     {
         const phazite::UndoStep step (*song.song, "Slip Clip");

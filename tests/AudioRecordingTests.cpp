@@ -435,7 +435,7 @@ TEST_CASE ("A write that fails while a control is held keeps the take, a Record 
     auto& song = *phazite::findSong (context);
     const auto clips = phazite::getClips (context, track);
     REQUIRE (clips.size() == 1);
-    const auto file = phazite::getClipFile (song, phazite::findClipState (song, clips[0].id));
+    const auto file = phazite::getClipFile (song, clips[0].id);
     CHECK (file.existsAsFile());
     CHECK (context.getUndoManager()->getUndoDescription() == juce::String ("Record"));
 
@@ -521,14 +521,14 @@ TEST_CASE ("A write that fails during a take, as on a full drive, stops recordin
     auto& song = *phazite::findSong (context);
     const auto clips = phazite::getClips (context, track);
     REQUIRE (clips.size() == 1);
-    const auto clipState = phazite::findClipState (song, clips[0].id);
-    const std::unique_ptr<juce::AudioFormatReader> reader (
-        phazite::getAudioFormats().createReaderFor (phazite::getClipFile (song, clipState)));
+    const auto clip = phazite::getClipValue (song, clips[0].id);
+    REQUIRE (clip.has_value());
+    const std::unique_ptr<juce::AudioFormatReader> reader (phazite::getAudioFormats().createReaderFor (phazite::getClipFile (song, *clip)));
     REQUIRE (reader != nullptr);
     const auto fileSeconds = (double) reader->lengthInSamples / reader->sampleRate;
     CHECK (fileSeconds > 0.5);
     CHECK (fileSeconds < 2.0);
-    CHECK (phazite::getFilePart (clipState).end <= fileSeconds + 1.0 / reader->sampleRate);
+    CHECK (phazite::getFilePart (*clip).end <= fileSeconds + 1.0 / reader->sampleRate);
     CHECK (clips[0].range.getEnd().inBeats() <= 2.0 * fileSeconds + 1.0e-6);
 }
 
@@ -651,7 +651,7 @@ TEST_CASE ("Recorded from before a looped range, a take keeps its first time rou
     constexpr auto firstFrame = 256.0 / 48000.0; // in seconds: the file's first frame came in a block after recording started
 
     // Where in its file a clip starts playing, in seconds.
-    const auto playedFrom = [&song] (phazite::ClipID clip) { return phazite::getFilePart (phazite::findClipState (song, clip)).start; };
+    const auto playedFrom = [&song] (phazite::ClipID clip) { return phazite::getFilePart (*phazite::getClipValue (song, clip)).start; };
 
     // The clicks of the song rendered, each on its beat, from the first to the last given.
     const auto checkClicks = [&studio] (double seconds, int firstBeat, int lastBeat)
@@ -1290,10 +1290,10 @@ TEST_CASE ("A session that goes with a take still waiting for a drag places it, 
         volume.setValue (0.3f);
         studio.playback.play (0.5);
         REQUIRE (phazite::test::dispatchMessagesUntil ([&studio] { return ! studio.isRecording(); }));
-        CHECK (phazite::getClipStates (phazite::findTrackState (*song, track)).empty()); // waiting for the drag
+        CHECK (phazite::getClips (*song, track).empty()); // waiting for the drag
 
         setSong (context, nullptr); // the session goes
-        CHECK (phazite::getClipStates (phazite::findTrackState (*song, track)).size() == 1);
+        CHECK (phazite::getClips (*song, track).size() == 1);
         CHECK (problems.isEmpty());
         volume.cancelGesture();
     }

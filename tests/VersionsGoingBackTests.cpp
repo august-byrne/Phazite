@@ -19,6 +19,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
@@ -724,7 +725,7 @@ TEST_CASE ("Every example song, changed through the model and brought back, save
             {
                 if (const auto clips = phazite::getClips (song, track); ! clips.empty())
                 {
-                    if (phazite::findClipState (song, clips.front())[schema::clipKind].toString() == schema::clipIsMidi)
+                    if (phazite::isMidiClip (song, clips.front()))
                         phazite::addNote (song, clips.front(), 64, phazite::BeatPosition::fromBeats (0.5),
                                           phazite::BeatDuration::fromBeats (0.25), 90);
 
@@ -813,8 +814,8 @@ TEST_CASE ("A track brought back from a commit whose clip can't be read comes ba
         const auto bass = phazite::findTrackState (*song, tracks[0]);
         REQUIRE (bass.isValid());
         CHECK (bass[schema::trackName].toString() == "Bass");
-        CHECK (phazite::getClipStates (bass).empty()); // what the clip held stays as it is now: not there
-        CHECK_FALSE (holdsStandIn (song->getState()));
+        CHECK (phazite::getClips (*song, tracks[0]).empty());              // what the clip held stays as it is now: not there
+        CHECK_FALSE (holdsStandIn (phazite::test::copyWholeSong (*song))); // whole: its clips too
         checkIDs (*song);
     };
 
@@ -989,12 +990,12 @@ TEST_CASE ("Every way of going back a track's line gives the audio clips of an a
     {
         return [&song, &members, pitch, markers]
         {
-            const auto firstState = phazite::findClipState (song, members.front());
+            const auto firstState = phazite::copyWholeClip (song, members.front()); // each whole, as the loader compares them
 
             for (const auto member : members)
             {
                 INFO ("clip " << member.getRaw());
-                CHECK (phazite::shareTheSound (firstState, phazite::findClipState (song, member)));
+                CHECK (phazite::shareTheSound (firstState, phazite::copyWholeClip (song, member)));
                 CHECK (phazite::getClipPitch (song, member) == doctest::Approx (pitch));
                 CHECK (phazite::getWarpMarkers (song, member).size() == markers);
             }

@@ -25,6 +25,7 @@
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
@@ -727,8 +728,8 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     // Audio imported into it (the project's own copy, by its path relative to the project), unsaved and autosaved.
     const auto kick = phazite::test::writeSound (temp.folder.getChildFile ("Samples").getChildFile ("Kick.wav"), 0.5);
     const auto clip = phazite::importFile (song, track, kick, beats (0.0));
-    REQUIRE (phazite::isAudioState (phazite::findClipState (song, clip)));
-    REQUIRE (phazite::getClipFile (song, phazite::findClipState (song, clip)).isAChildOf (project->getAudioFolder()));
+    REQUIRE (phazite::isAudioClip (song, clip));
+    REQUIRE (phazite::getClipFile (song, clip).isAChildOf (project->getAudioFolder()));
     REQUIRE (song.getUndoManager().canUndo());
     REQUIRE (project->autosave().wasOk());
     REQUIRE (phazite::Project::getAutosaveFile (oldFile).existsAsFile());
@@ -760,7 +761,7 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
 
     // The clip plays the new folder's copy of its audio. The old folder stays, for its owner to delete once the project
     // has closed, without the autosave, whose changes are saved now.
-    const auto clipFile = phazite::getClipFile (song, phazite::findClipState (song, clip));
+    const auto clipFile = phazite::getClipFile (song, clip);
     CHECK (clipFile == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
     CHECK (clipFile.existsAsFile());
     CHECK (oldFile.existsAsFile());
@@ -775,9 +776,8 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     CHECK (reopenedSong.getState()[phazite::schema::outline].toString() == juce::String ("pop"));
     const auto clips = phazite::getClips (reopenedSong, getFirstTrack (reopenedSong));
     REQUIRE (clips.size() == 1);
-    const auto reopenedClip = phazite::findClipState (reopenedSong, clips.front());
-    REQUIRE (phazite::isAudioState (reopenedClip));
-    CHECK (phazite::getClipFile (reopenedSong, reopenedClip) == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
+    REQUIRE (phazite::isAudioClip (reopenedSong, clips.front()));
+    CHECK (phazite::getClipFile (reopenedSong, clips.front()) == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
 }
 
 TEST_CASE ("A plan after a first save plays the audio of the project's new folder, its file asked about again")
@@ -1091,7 +1091,7 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
         std::vector<std::pair<phazite::ClipID, juce::ValueTree>> saved;
 
         for (const auto clip : phazite::getClips (song, trackID))
-            saved.emplace_back (clip, phazite::copyWhole (song, phazite::findClipState (song, clip)));
+            saved.emplace_back (clip, phazite::copyWholeClip (song, clip));
 
         gone = phazite::getClipNotes (song, clipID).front().getRef();
         phazite::setNoteVelocities (song, { gone }, 2);

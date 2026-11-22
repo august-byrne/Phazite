@@ -364,15 +364,7 @@ TEST_CASE ("The song's index holds what the song does after each of a few hundre
 
         return found;
     };
-    const auto clipsOf = [&song]
-    {
-        std::vector<phazite::ClipID> found;
-
-        for (const auto& state : phazite::getClipStates (*song))
-            found.push_back (phazite::getClipID (state));
-
-        return found;
-    };
+    const auto clipsOf = [&song] { return phazite::getAllClips (*song); };
     const auto at4 = [&random] { return at (random.nextInt (32) * 1.0); };
 
     for (int step = 0; step < 400; ++step)
@@ -422,8 +414,7 @@ TEST_CASE ("The song's index holds what the song does after each of a few hundre
                             clip.isValid())
                             for (int n = 0; n < 4; ++n)
                                 phazite::addNote (*song, clip, 48 + random.nextInt (24),
-                                                  phazite::getContentStart (phazite::findClipState (*song, clip))
-                                                      + phazite::test::lasting (n),
+                                                  phazite::getContentStart (*song, clip) + phazite::test::lasting (n),
                                                   phazite::test::lasting (0.5), 100);
                     break;
                 case 7:
@@ -437,10 +428,11 @@ TEST_CASE ("The song's index holds what the song does after each of a few hundre
 
                         if (random.nextBool() && clips.size() > 1)
                         {
-                            auto clipState = phazite::findClipState (*song, pick (clips));
-                            const auto linked = phazite::findClipState (*song, aliases.empty() ? pick (clips) : aliases.front());
-                            if (linked.hasProperty (phazite::schema::clipLink) && clipState != linked && phazite::isMidiState (clipState))
-                                clipState.setProperty (phazite::schema::clipLink, linked[phazite::schema::clipLink], history);
+                            const auto clip = pick (clips);
+                            const auto linked = aliases.empty() ? pick (clips) : aliases.front();
+                            const auto link = phazite::getClipValue (*song, linked).value().link;
+                            if (link != 0 && clip != linked && phazite::isMidiClip (*song, clip))
+                                phazite::setClipLink (*song, clip, link);
                         }
                     }
                     break;
@@ -458,7 +450,7 @@ TEST_CASE ("The song's index holds what the song does after each of a few hundre
                     break;
                 case 11:
                     if (! clips.empty())
-                        if (const auto clip = pick (clips); phazite::isMidiState (phazite::findClipState (*song, clip)))
+                        if (const auto clip = pick (clips); phazite::isMidiClip (*song, clip))
                             phazite::addNote (*song, clip, 60, phazite::getClipRange (*song, clip).getStart(),
                                               phazite::test::lasting (0.25), 90);
                     break;

@@ -2431,7 +2431,7 @@ TEST_CASE ("A clip's source written again in its place has a render of its own m
     const auto renderOf = [&song, clip]
     {
         const auto& played = *phazite::findSong (song.context);
-        return phazite::getPlayedFile (played, phazite::findClipState (played, clip));
+        return phazite::getPlayedFile (played, clip);
     };
 
     // Reversed: its render made, and played (a sine is the same backwards).
@@ -2485,7 +2485,7 @@ TEST_CASE ("A clip's source written again in its place has a render of its own m
     const auto renderOf = [&song, clip]
     {
         const auto& played = *phazite::findSong (song.context);
-        return phazite::getPlayedFile (played, phazite::findClipState (played, clip));
+        return phazite::getPlayedFile (played, clip);
     };
 
     phazite::setClipReversed (song.context, clip, true);

@@ -83,7 +83,7 @@ namespace
 
         for (const auto track : getTrackIDs (song))
             for (const auto clip : getClips (song, track))
-                if (! midiOnly || findClipState (song, clip)[schema::clipKind].toString() == schema::clipIsMidi)
+                if (! midiOnly || isMidiClip (song, clip))
                     found.push_back (clip);
 
         return found;
@@ -132,7 +132,7 @@ ClipID RandomEdits::pickMidiClip (bool withNotes)
 
         all.push_back (clip);
 
-        if (findClipState (song, clip).hasProperty (schema::clipLink))
+        if (getClipValue (song, clip)->link != 0)
             linked.push_back (clip);
     }
 
@@ -560,7 +560,7 @@ void RandomEdits::edit()
                     const auto fade = random.nextDouble() * 0.1;
                     setClipGain (song, clip, gain);
                     setClipPitch (song, clip, pitch);
-                    setClipFade (song, findClipState (song, clip), true, fade);
+                    setClipFade (song, clip, true, fade); // at most 0.1 s of a clip of 0.5 s: as set
                 }
             }
             break;
@@ -903,7 +903,7 @@ void RandomEdits::edit()
             if (const auto clips = getAllClips (song, false); ! clips.empty())
             {
                 const auto clip = pick (clips);
-                const auto range = getClipRange (findClipState (song, clip));
+                const auto range = getClipRange (*getClipValue (song, clip)); // an audio clip's start alone, as its value's
                 const auto which = draw (3);
                 const auto along = random.nextDouble();
 
@@ -921,7 +921,7 @@ void RandomEdits::edit()
             std::vector<ClipID> audio;
 
             for (const auto clip : getAllClips (song, false))
-                if (isAudioState (findClipState (song, clip)))
+                if (isAudioClip (song, clip))
                     audio.push_back (clip);
 
             if (audio.empty())

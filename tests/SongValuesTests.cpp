@@ -125,12 +125,11 @@ struct GoldenClips
             auto project = phazite::Project::open (file, false, error);
             REQUIRE_MESSAGE (project != nullptr, error.toStdString());
 
-            for (const auto& clip : phazite::getClipStates (project->getSong()))
+            for (const auto& clip : phazite::getClipPlacements (project->getSong()))
             {
-                CHECK_FALSE (holdsEvents (clip)); // the song's own tree holds none
+                CHECK_FALSE (holdsEvents (phazite::findClipState (project->getSong(), clip.id))); // the song's own tree holds none
 
-                if (const auto whole = phazite::copyWhole (project->getSong(), clip);
-                    phazite::isMidiState (clip) && whole.getNumChildren() > 0)
+                if (const auto whole = phazite::copyWholeClip (project->getSong(), clip.id); ! clip.isAudio() && whole.getNumChildren() > 0)
                     clips.push_back (whole);
             }
 
@@ -245,7 +244,7 @@ TEST_CASE ("Song values: a clip's notes made by the model, every value a note ca
 
     phazite::setClipNotes (*song, clip, made);
     CHECK_FALSE (holdsEvents (phazite::findClipState (*song, clip)));
-    const auto whole = phazite::copyWhole (*song, phazite::findClipState (*song, clip));
+    const auto whole = phazite::copyWholeClip (*song, clip);
     const auto value = phazite::getClipNotesValue (*song, clip);
     REQUIRE (value.notes.size() == 200);
     CHECK (whole.getNumChildren() == 200);
@@ -404,7 +403,7 @@ TEST_CASE ("Song values: a song opened holds its clips' notes beside its tree, t
     CHECK (project->hasUnsavedChanges());
 
     // Written whole, the note holds what it did but its pitch.
-    for (const auto& child : phazite::copyWhole (song, phazite::findClipState (song, note.clip)))
+    for (const auto& child : phazite::copyWholeClip (song, note.clip))
         if (child.hasType (schema::NOTE) && phazite::readNoteValues (child).id == note.note)
             CHECK ((int) child[schema::notePitch] == 38);
 
@@ -509,9 +508,8 @@ TEST_CASE ("Song values: a clip's copies share its value, an alias joins its gro
     REQUIRE (halves.size() == 1);
     CHECK (k.find (halves[0])->isSameAs (*k.find (k.clip)));
 
-    // A clip joined to a group through the tree takes the group's value.
-    k.step ("Link",
-            [&] { k.element (copies[0]).setProperty (schema::clipLink, k.element (k.clip)[schema::clipLink], &k.song->getUndoManager()); });
+    // A clip joined to a group (Clips.h: setClipLink(), which writes its link where the song keeps it) takes the group's value.
+    k.step ("Link", [&] { phazite::setClipLink (*k.song, copies[0], phazite::getClipValue (*k.song, k.clip).value().link); });
     CHECK (k.find (copies[0])->isSameAs (*k.find (k.clip)));
 
     // Made unique, each keeps the value it held, and an edit of one is its own.
@@ -610,13 +608,13 @@ TEST_CASE ("Song values: its listeners are told the clips whose values changed, 
 // A clip as a value (SongValues.h: ClipValue), which the song doesn't hold yet: the conversion between it and a CLIP element.
 namespace
 {
-// Every clip of the golden projects that hold clips, as the song holds each once it is open (its loader's checks made), with
-// its project open.
+// Every clip of the golden projects that hold clips, as the song holds each once it is open (its loader's checks made), whole
+// (WholeState.h), with its project open.
 struct GoldenClipElements
 {
     phazite::test::TemporaryFolder temporary;
     std::vector<std::unique_ptr<phazite::Project>> projects;
-    std::vector<juce::ValueTree> clips;
+    std::vector<juce::ValueTree> wholes, clips; // each song whole, and its clips in it
 
     GoldenClipElements()
     {
@@ -628,8 +626,20 @@ struct GoldenClipElements
             auto project = phazite::Project::open (file, false, error);
             REQUIRE_MESSAGE (project != nullptr, error.toStdString());
 
-            for (const auto& clip : phazite::getClipStates (project->getSong()))
-                clips.push_back (clip);
+            // Each clip as the song would save it (WholeState.h), in its track's copy.
+            const std::function<void (const juce::ValueTree&)> collect = [&] (const juce::ValueTree& element)
+            {
+                for (const auto& child : element)
+                {
+                    if (child.hasType (schema::CLIP))
+                        clips.push_back (child);
+                    else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+                        collect (child);
+                }
+            };
+
+            wholes.push_back (phazite::test::copyWholeSong (project->getSong())); // kept: the clips' tracks are its elements
+            collect (wholes.back());
 
             projects.push_back (std::move (project));
         }
@@ -695,9 +705,9 @@ TEST_CASE ("Song values: every clip of the golden projects, read into a value an
     for (const auto& clip : golden.clips)
     {
         const auto value = phazite::readClipValue (clip);
-        CHECK (value.id == phazite::getClipID (clip));
+        CHECK (value.id == ClipID::fromRaw (phazite::readID (clip[schema::clipID])));
         CHECK (value.track == phazite::getTrackID (clip.getParent()));
-        CHECK (value.isAudio() == phazite::isAudioState (clip));
+        CHECK (value.isAudio() == (clip[schema::clipKind].toString() == schema::clipIsAudio));
         audio += value.isAudio() ? 1 : 0;
         warped += value.sound.warps.empty() ? 0 : 1;
         faded += value.fadeIn.seconds > 0.0 ? 1 : 0;
@@ -740,7 +750,7 @@ TEST_CASE ("Song values: a clip as each of the clips' makers and edits writes it
     // Written into an element without an ID, as a new clip is; a maker's own clip in its maker's order too.
     const auto writtenAsMade = [&song] (phazite::ClipID clip, bool inOrder)
     {
-        const auto made = phazite::findClipState (song, clip);
+        const auto made = phazite::copyWholeClip (song, clip); // as the song would save it
         REQUIRE (made.isValid());
         juce::ValueTree written (schema::CLIP);
         phazite::writeClipElement (phazite::readClipValue (made), written, nullptr);
@@ -793,7 +803,7 @@ TEST_CASE ("Song values: a clip as each of the clips' makers and edits writes it
     phazite::setClipReversed (song, recorded, true);
     phazite::playTake (song, recorded, 1);
 
-    const auto edited = phazite::readClipValue (phazite::findClipState (song, recorded));
+    const auto edited = phazite::getClipValue (song, recorded).value();
     CHECK (edited.fadeIn.sCurve);
     CHECK (juce::exactlyEqual (edited.fadeOut.bend, -0.5f));
     CHECK (edited.sound.reversed);

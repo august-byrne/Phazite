@@ -7,12 +7,14 @@
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/stereo/Stereo.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Consolidate.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Freeze.h"
@@ -183,12 +185,11 @@ TEST_CASE ("Consolidate renders a track's audio clips before its devices into on
     // One audio clip from the first's start to the last's end, named as they were, its file in the project's Audio folder.
     const auto clips = phazite::getClips (model, song.bass);
     REQUIRE (clips.size() == 1);
-    const auto clipState = phazite::findClipState (model, clips[0]);
-    REQUIRE (phazite::isAudioState (clipState));
-    CHECK (phazite::getClipRange (model, clipState).getStart() == at (0.0));
-    CHECK (phazite::getClipRange (model, clipState).getEnd().inBeats() == doctest::Approx (7.0).epsilon (0.001));
-    CHECK (phazite::getClipName (model, clipState) == "Sine");
-    const auto file = phazite::getClipFile (model, clipState);
+    REQUIRE (phazite::isAudioClip (model, clips[0]));
+    CHECK (phazite::getClipRange (model, clips[0]).getStart() == at (0.0));
+    CHECK (phazite::getClipRange (model, clips[0]).getEnd().inBeats() == doctest::Approx (7.0).epsilon (0.001));
+    CHECK (phazite::getClipName (model, clips[0]) == "Sine");
+    const auto file = phazite::getClipFile (model, clips[0]);
     CHECK (file.getParentDirectory() == song.project->getAudioFolder());
     CHECK (file.getFileName() == "Bass (Consolidated).wav");
 
@@ -242,8 +243,8 @@ TEST_CASE ("With a time range selected across tracks, Consolidate joins what lie
         std::sort (joined.begin(), joined.end(), [] (const auto& a, const auto& b) { return a.start < b.start; });
 
         // What a failure says (known bug 204: twice in CI's release builds the joined clip held no notes, never here): the
-        // notes of the parts before and after, and the joined clip's children as the song holds them.
-        const auto joinedState = phazite::findClipState (model, clips[1]);
+        // notes of the parts before and after, and the joined clip's children as the song holds them, whole.
+        const auto joinedState = phazite::copyWholeClip (model, clips[1]);
         CAPTURE (phazite::getClipNotes (model, clips[0]).size());
         CAPTURE (phazite::getClipNotes (model, clips[2]).size());
         CAPTURE (joinedState.isValid());
@@ -313,19 +314,19 @@ TEST_CASE ("The steps of a join over part of a MIDI clip, each checked: the note
         REQUIRE (joined.isValid());
         CHECK (phazite::getClips (model, song.keys).size() == 3);
         CHECK (model.getIndex().isExact());
-        const auto joinedState = phazite::findClipState (model, joined);
-        REQUIRE (joinedState.isValid());
-        CHECK (joinedState.getParent() == phazite::findTrackState (model, song.keys));
-        const auto aliases = phazite::getAliasStates (model, joinedState);
+        REQUIRE (phazite::getClipValue (model, joined).has_value());
+        CHECK (phazite::getClipTrack (model, joined) == song.keys);
+        const auto aliases = phazite::getAliasClips (model, joined);
         REQUIRE (aliases.size() == 1);
-        CHECK (aliases.front() == joinedState);
+        CHECK (aliases.front() == joined);
 
         for (auto& note : notes)
             note.clip = joined;
 
         phazite::setClipNotes (model, joined, notes);
+        const auto joinedState = phazite::copyWholeClip (model, joined); // whole: its notes beside the tree
         CAPTURE (joinedState.toXmlString().toStdString());
-        CHECK (phazite::copyWhole (model, joinedState).getNumChildren() == 4); // whole: its notes beside the tree
+        CHECK (joinedState.getNumChildren() == 4);
         CHECK (phazite::getClipNotes (model, joined).size() == 4);
         CHECK (model.getIndex().isExact());
     }
@@ -340,7 +341,7 @@ TEST_CASE ("The steps of a join over part of a MIDI clip, each checked: the note
     part.midi = true;
     const auto made = phazite::consolidatePart (model, part, {});
     REQUIRE (made.size() == 1);
-    CAPTURE (phazite::findClipState (model, made.front()).toXmlString().toStdString());
+    CAPTURE (phazite::copyWholeClip (model, made.front()).toXmlString().toStdString());
     CHECK (phazite::getClipNotes (model, made.front()).size() == 4);
 }
 

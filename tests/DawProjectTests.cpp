@@ -363,11 +363,15 @@ TEST_CASE ("A DAWproject's audio clip plays its part of the file, and one whose 
 
     {
         const phazite::UndoStep step (s, "Trim");
-        phazite::setAudioPart (s, phazite::findClipState (s, nothing), phazite::BeatPosition::fromBeats (8.0), { 0.0, 0.0 });
+        auto value = *phazite::getClipValue (s, nothing);
+        value.start = phazite::BeatPosition::fromBeats (8.0);
+        value.fileStart = 0.0;
+        value.fileEnd = 0.0;
+        phazite::setClip (s, value);
     }
 
-    REQUIRE (phazite::findClipState (s, nothing).hasProperty (phazite::schema::clipFileEnd));
-    REQUIRE (phazite::getFilePart (phazite::findClipState (s, nothing)).end == 0.0);
+    REQUIRE (phazite::copyWholeClip (s, nothing).hasProperty (phazite::schema::clipFileEnd)); // saved, as 0
+    REQUIRE (phazite::getFilePart (*phazite::getClipValue (s, nothing)).end == 0.0);
 
     auto content = song.describe();
     const auto* lanes = find (*content.project, "Lanes", "track", id ("t", drums));
@@ -504,7 +508,7 @@ std::vector<int> getPitches (const phazite::Song& song, phazite::ClipID clip)
 {
     std::vector<int> pitches;
 
-    for (const auto& note : phazite::copyWhole (song, phazite::findClipState (song, clip)))
+    for (const auto& note : phazite::copyWholeClip (song, clip))
         if (note.hasType (phazite::schema::NOTE))
             pitches.push_back ((int) note[phazite::schema::notePitch]);
 
@@ -553,12 +557,12 @@ TEST_CASE ("A DAWproject opens as a new song: its tracks with their notes, audio
     CHECK (phazite::findTrackState (imported, tracks["Lead"])[phazite::schema::trackMute]); // muted, beside its bounce
 
     // Bass's notes; Drums' audio, copied out into the song's Audio folder.
-    const auto riff = phazite::findTrackState (imported, tracks["Bass"]).getChildWithName (phazite::schema::CLIP);
-    REQUIRE (riff.isValid());
-    CHECK (getPitches (imported, phazite::getClipID (riff)) == std::vector<int> { 36, 43 });
-    const auto loop = phazite::findTrackState (imported, tracks["Drums"]).getChildWithName (phazite::schema::CLIP);
-    REQUIRE (loop.isValid());
-    CHECK ((double) loop[phazite::schema::clipStart] == doctest::Approx (8.0));
+    const auto riff = phazite::getClipValues (imported, tracks["Bass"]);
+    REQUIRE_FALSE (riff.empty());
+    CHECK (getPitches (imported, riff.front().id) == std::vector<int> { 36, 43 });
+    const auto loop = phazite::getClipValues (imported, tracks["Drums"]);
+    REQUIRE_FALSE (loop.empty());
+    CHECK (loop.front().start.inBeats() == doctest::Approx (8.0));
     CHECK (imported.getFile().getSiblingFile ("Audio").getChildFile ("Loop.wav").existsAsFile());
 
     // The tempo, the time signature, the section; and what it couldn't take, said.
@@ -1062,8 +1066,7 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     const auto first = keepVersion (s.context, "First");
     const auto keptNote = [&s, riff] (int pitch)
     {
-        for (const auto& note :
-             phazite::copyWhole (*phazite::findSong (s.context), phazite::findClipState (*phazite::findSong (s.context), riff)))
+        for (const auto& note : phazite::copyWholeClip (*phazite::findSong (s.context), riff))
             if (note.hasType (phazite::schema::NOTE) && (int) note[phazite::schema::notePitch] == pitch)
                 return note.createCopy();
 
@@ -1371,17 +1374,6 @@ juce::StringArray getAudioFiles (const phazite::Song& song)
     return names;
 }
 
-std::vector<juce::ValueTree> getClipStates (const phazite::Song& song, phazite::TrackID track)
-{
-    std::vector<juce::ValueTree> clips;
-
-    for (const auto& child : phazite::findTrackState (song, track))
-        if (child.hasType (phazite::schema::CLIP))
-            clips.push_back (child);
-
-    return clips;
-}
-
 phazite::TrackID findTrack (const phazite::Song& song, const juce::String& name)
 {
     for (const auto track : phazite::getTrackIDs (song))
@@ -1413,20 +1405,20 @@ TEST_CASE ("A DAWproject shaped as Bitwig Studio writes one: notes, an audio cli
     REQUIRE (bass.isValid());
     REQUIRE (drumloop.isValid());
     CHECK (phazite::getTempo (song) == doctest::Approx (149.0));
-    const auto notes = getClipStates (song, bass);
+    const auto notes = phazite::getClipValues (song, bass);
     REQUIRE (notes.size() == 1);
-    CHECK (getPitches (song, phazite::getClipID (notes[0])) == std::vector<int> { 53, 65 });
+    CHECK (getPitches (song, notes[0].id) == std::vector<int> { 53, 65 });
 
     // The loop twice, from one copy of its file, each clip at its own place and following the tempo at the loop's own, 170.
-    const auto clips = getClipStates (song, drumloop);
+    const auto clips = phazite::getClipValues (song, drumloop);
     REQUIRE (clips.size() == 2);
     CHECK (getAudioFiles (song) == juce::StringArray ("Drumfunk3 170bpm.wav"));
 
     for (size_t i = 0; i < clips.size(); ++i)
     {
         CAPTURE (i);
-        CHECK ((double) clips[i][phazite::schema::clipStart] == doctest::Approx (8.0 * (double) i));
-        CHECK (phazite::getClipTempo (song, phazite::getClipID (clips[i])) == doctest::Approx (170.0).epsilon (0.001));
+        CHECK (clips[i].start.inBeats() == doctest::Approx (8.0 * (double) i));
+        CHECK (phazite::getClipTempo (song, clips[i].id) == doctest::Approx (170.0).epsilon (0.001));
         CHECK (phazite::getClipFile (song, clips[i]).getFileName() == "Drumfunk3 170bpm.wav");
     }
 
@@ -1458,7 +1450,7 @@ TEST_CASE ("A DAWproject shaped as Studio One writes one: one copy of a recordin
 
     const auto vocals = findTrack (song, "Vocals");
     REQUIRE (vocals.isValid());
-    const auto clips = getClipStates (song, vocals);
+    const auto clips = phazite::getClipValues (song, vocals);
     REQUIRE (clips.size() == 3);
     CHECK (getAudioFiles (song) == juce::StringArray ("Vox.wav"));
 

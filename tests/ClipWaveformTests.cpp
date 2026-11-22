@@ -150,7 +150,7 @@ TEST_CASE ("A clip's waveform shows its file anew once an ask of the disk finds 
         context, { phazite::test::writeSound (temp.folder.getChildFile ("Tone.wav"), 1.0, 220.0, 0.9f).getFullPathName() }, track,
         phazite::BeatPosition());
     REQUIRE (clips.size() == 1);
-    const auto file = phazite::getClipFile (song, phazite::findClipState (song, clips[0]));
+    const auto file = phazite::getClipFile (song, clips[0]);
     phazite::askFileIdentity (file);
 
     auto loads = 0;
@@ -180,7 +180,7 @@ TEST_CASE ("A clip's waveform shows its file anew once an ask of the disk finds 
         phazite::importFiles (context, { phazite::test::writeSound (temp.folder.getChildFile ("Gone.wav"), 1.0).getFullPathName() }, track,
                               phazite::BeatPosition::fromBeats (4.0));
     REQUIRE (goneClips.size() == 1);
-    const auto gone = phazite::getClipFile (song, phazite::findClipState (song, goneClips[0]));
+    const auto gone = phazite::getClipFile (song, goneClips[0]);
     REQUIRE (gone.deleteFile());
     phazite::askFileIdentity (gone);
     auto missing = phazite::getClipWaveformMaker() (context, goneClips[0], {});
@@ -221,7 +221,7 @@ TEST_CASE ("A clip's waveform opens its file in the background, never in a paint
     // Their files asked about as a plan asks, so that what is known of them doesn't change while they show (a file found
     // otherwise than it was known is opened again).
     for (const auto clip : clips)
-        phazite::askFileIdentity (phazite::getClipFile (song, phazite::findClipState (song, clip)));
+        phazite::askFileIdentity (phazite::getClipFile (song, clip));
 
     // Each open waits until the test lets it go, as a drive that is slow to wake. Where a reader is made, the thread is
     // counted (countWaveformFiles()).
@@ -309,7 +309,7 @@ TEST_CASE ("A clip's waveform lets its file go once its levels are read, and one
     REQUIRE (clips.size() == 14);
 
     // The first file known on the disk, as a plan asks; the second not.
-    phazite::askFileIdentity (phazite::getClipFile (song, phazite::findClipState (song, clips[0])));
+    phazite::askFileIdentity (phazite::getClipFile (song, clips[0]));
     const auto before = phazite::countWaveformFiles();
     const auto opened = [&before] { return phazite::countWaveformFiles().opens - before.opens; };
     const auto readersAlive = [] { return phazite::countWaveformFiles().readersAlive; };
@@ -375,7 +375,7 @@ TEST_CASE ("A clip that doesn't follow the tempo draws its sound where it plays 
     REQUIRE (clips.size() == 1);
     phazite::setClipFollowsTempo (song, clips[0], false);
     phazite::addTempoChange (song, phazite::BeatPosition::fromBeats (1.0), 60.0);
-    REQUIRE_FALSE (phazite::followsTempoChanges (song, phazite::findClipState (song, clips[0])));
+    REQUIRE_FALSE (phazite::followsTempoChanges (song, clips[0]));
 
     // Painted as the playlist paints a clip, over all of it.
     constexpr int width = 400, height = 40;
