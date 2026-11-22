@@ -58,7 +58,12 @@ std::string findDifference (const juce::String& a, const juce::String& b)
 // devices taken away, which the song keeps for an undo. Nothing else names what is gone.
 void leaveOutWhatNamesNothing (phazite::Song& song)
 {
-    phazite::forgetCurvesOfGoneDevices (song);
+    // The curves, through automation's functions outside the history, as the song holds its values (Automation.h).
+    {
+        const phazite::Song::OutsideHistory outside (song);
+        phazite::forgetCurvesOfGoneDevices (song, [] (const phazite::ParameterRef&) { return true; });
+    }
+
     std::set<std::uint64_t> items;
     findIDProblems (song.getState(), &items);
 

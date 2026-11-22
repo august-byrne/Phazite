@@ -27,11 +27,8 @@ namespace
         const auto now = getVolume (song, folder);
         const auto device = juce::String ((juce::int64) now.device.getRaw());
 
-        if (auto curve = findCurveState (song, was); curve.isValid())
-        {
-            curve.setProperty (schema::curveDevice, device, undo);
-            curve.setProperty (schema::curveParameter, now.parameter, undo);
-        }
+        // Its curve, in its place among the song's (Automation.h).
+        renameCurve (song, was, now);
 
         for (const auto& modulator : getModulatorStates (song))
         {

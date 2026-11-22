@@ -160,7 +160,7 @@ namespace
 
     void forgetCurvesBroughtIn (Song& song, const std::vector<ParameterRef>& before)
     {
-        forgetCurvesOfGoneDevices (song, &song.getUndoManager(), [&before] (const ParameterRef& parameter)
+        forgetCurvesOfGoneDevices (song, [&before] (const ParameterRef& parameter)
                                    { return std::find (before.begin(), before.end(), parameter) == before.end(); });
     }
 
@@ -2128,7 +2128,8 @@ namespace
     };
 
     // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
-    // this order: the tempo map (a path into the song's TEMPOMAP), the chord lane (a path into the song's CHORDLANE), a note (a
+    // this order: the tempo map (a path into the song's TEMPOMAP), the chord lane (a path into the song's CHORDLANE), a curve
+    // (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a
     // note's property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path
     // through a clip, refused). What the first whose path it is did with it; none of them (notTheArea) for a clash in the
     // song's tree.
@@ -2142,6 +2143,9 @@ namespace
 
         if (const auto choice = chooseMidiLinkClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice; // a path into the song's MIDILINKS
+
+        if (const auto choice = chooseCurveClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice;
 
         if (const auto choice = chooseNoteClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;

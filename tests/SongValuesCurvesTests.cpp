@@ -5,15 +5,21 @@
 // after, compared as values (independent of what tells it), and nothing of another area; another area's change tells it
 // nothing; and what listens to the song's root hears each change once: the project's count of changes and the versions'
 // count of the song's changes go up by what the listener was told, and by nothing else, where the tree told nothing but the
-// curves.
+// curves. And the versions give the song another song's curves by their parameters, through automation's functions
+// (model/versions/ApplySong.cpp: makeCurvesLike(); Automation.h: setCurveValue(), eraseCurve(), setCurveOrder(),
+// eraseAutomation()): the whole song's, each one exact undo step, in the version's order, and a line's, its devices' alone;
+// a song made as it was copied writes nothing of its curves; and a merge's clash on a curve is chosen either way.
 //   phazite_tests.exe --test-case="Song values' curves*"
 #include "EnginePlayback.h"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "UndoCheck.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
@@ -29,11 +35,15 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/internal/ApplySong.h"
+#include "model/versions/internal/AreaClashes.h"
+#include "model/versions/internal/SongMerge.h"
 #include "model/versions/internal/VersionHistory.h"
 
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <initializer_list>
+#include <optional>
 #include <vector>
 
 namespace
@@ -219,14 +229,13 @@ int toldForTheTree (const Watched::Heard& heard)
     return heard.curves + heard.automationWithCurves;
 }
 
-// What a change and its Undo and Redo told, each against the parameters whose curves differ: exactly those, but where a
-// parameter that names no curve before nor after may be told too (alsoGone: a curve given another parameter in two writes,
-// its device and then its parameter, passes through one, on the tree; renameCurve() of roadmap step S5.20's next piece
-// gives it its new parameter in one); a parameter told whose curve is there and the same before and after fails it, so
-// does one told with no curve where alsoGone is not set; once as often as the tree changed under the curves; nothing of
-// another area unless othersToo; and, where the tree told nothing else, the project's and the versions' counts up by what
-// the listener was told.
-void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& heard, bool othersToo = false, bool alsoGone = false)
+// What a change and its Undo and Redo told, each against the parameters whose curves differ: exactly those, a parameter told
+// whose curve is there and the same before and after, or that names no curve before nor after (a curve given another
+// parameter in two writes of the tree, its device and then its parameter, passed through one), failing it; once as often
+// as the tree changed under the curves, but once for both writes of each curve given another parameter (renamed:
+// SongValues.h, renameCurve(), which tells the parameter it had and the one it has at once); nothing of another area unless
+// othersToo; and, where the tree told nothing else, the project's and the versions' counts up by what the listener was told.
+void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& heard, bool othersToo = false, int renamed = 0)
 {
     INFO (name.toStdString());
     const std::array<const char*, 3> moments { "the step", "its Undo", "its Redo" };
@@ -236,16 +245,10 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
     {
         INFO (moments[i]);
         const auto& each = heard[i];
-        auto told = each.told.parameters;
-
-        if (alsoGone)
-            std::erase_if (told, [&each] (const phazite::ParameterRef& parameter)
-                           { return each.before.find (parameter) == nullptr && each.after.find (parameter) == nullptr; });
-
-        CHECK_MESSAGE (describe (told) == describe (each.differing), "told " << describe (each.told.parameters).joinIntoString (", ")
-                                                                             << "; differing "
+        const auto& told = each.told.parameters;
+        CHECK_MESSAGE (describe (told) == describe (each.differing), "told " << describe (told).joinIntoString (", ") << "; differing "
                                                                              << describe (each.differing).joinIntoString (", "));
-        CHECK (each.told.curves == toldForTheTree (each));
+        CHECK (each.told.curves == toldForTheTree (each) - renamed);
 
         if (! othersToo)
         {
@@ -281,6 +284,33 @@ phazite::ParameterRef findDeviceParameter (const phazite::Song& song, phazite::T
             return parameter;
 
     return {};
+}
+
+// Points given to a parameter's curve, in a step of their own.
+void putPoints (phazite::Song& song, const phazite::ParameterRef& parameter, std::initializer_list<phazite::AutomationPoint> points)
+{
+    const phazite::UndoStep step (song, "Points");
+
+    for (const auto& point : points)
+        phazite::addPoint (song, parameter, point);
+}
+
+// A song's AUTOMATION as text (none for a song without one), from a whole copy of it or a version's song.
+juce::String writeAutomation (const juce::ValueTree& song)
+{
+    const auto automation = song.getChildWithName (phazite::schema::AUTOMATION);
+    return automation.isValid() ? automation.toXmlString() : juce::String ("none");
+}
+
+// A parameter's curve in a whole copy of a song or a version's song, as the song reads one; none for one without.
+std::optional<phazite::CurveValue> findCurveIn (const juce::ValueTree& song, const phazite::ParameterRef& parameter)
+{
+    const auto curves = phazite::readCurvesValue (song.getChildWithName (phazite::schema::AUTOMATION));
+
+    if (const auto* curve = curves.find (parameter))
+        return *curve;
+
+    return std::nullopt;
 }
 } // namespace
 
@@ -354,13 +384,25 @@ TEST_CASE ("Song values' curves: what takes the curves along tells them, and wha
     checkHeard ("Duplicate Track", duplicated, true);
     CHECK (duplicated.front().differing.size() == 3); // the copy's pan, volume and EQ's
 
-    // A folder's volume curve given to the fader that takes its place, each way: the parameter it had and the one it has.
+    // A folder's volume curve given to the fader that takes its place, each way: the parameter it had and the one it has, at
+    // once, in one call (no parameter in between), its Undo and its Redo too; in its place among the song's curves.
     const auto bus = w.s.addBus ("Bus", { track });
     phazite::addAutomationPoint (w.s.context, w.s.getVolumeParameter (bus), { at (1.0), 0.6f });
     const auto toPlain = w.hearEach ("Make Plain Folder", [&] { phazite::makePlainFolder (song, bus); });
-    checkHeard ("Make Plain Folder", toPlain, true, true);
+    checkHeard ("Make Plain Folder", toPlain, true, 1);
     CHECK (toPlain.front().differing.size() == 2);
-    checkHeard ("Make Bus", w.hearEach ("Make Bus", [&] { phazite::makeBus (song, bus); }), true, true);
+
+    for (const auto& each : toPlain)
+    {
+        CHECK (each.told.curves == 1);
+        CHECK (each.before.order.size() == each.after.order.size());
+    }
+
+    const auto toBus = w.hearEach ("Make Bus", [&] { phazite::makeBus (song, bus); });
+    checkHeard ("Make Bus", toBus, true, 1);
+
+    for (const auto& each : toBus)
+        CHECK (each.told.curves == 1);
 
     // A version with other curves applied, each way, in a step and outside the history.
     const auto before = phazite::test::copyWholeSong (song);
@@ -450,4 +492,316 @@ TEST_CASE ("Song values' curves: another area's change tells nothing of the curv
     check ("Change Tempo", [&] { phazite::setTempo (song, 100.0); });
     check ("Add Effect", [&] { w.s.addEffect (track, phazite::devices::Equalizer::typeID); });
     check ("Add Track", [&] { CHECK (phazite::insertTrack (song, track, nullptr).isValid()); });
+}
+
+TEST_CASE ("Song values' curves: a version with other curves applied both ways is one exact undo step each, its curves the "
+           "version's, in its order")
+{
+    // A curve added since, one taken out, one's points changed and made again (last in the order since), one of a device the
+    // version has and the song hasn't: each made the version's by the curves pass, which leaves the passes over elements
+    // nothing of the curves (ApplySong.cpp: makeCurvesLike()); and a version without automation, whose AUTOMATION the pass
+    // over the song's elements takes out with its curves (Automation.h: eraseAutomation()).
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.firstTrack;
+    const auto other = s.addTrack ("Other");
+    const auto eq = s.addEffect (track, phazite::devices::Equalizer::typeID);
+    const auto eqParameter = findDeviceParameter (song, track, eq);
+    REQUIRE (eqParameter.isValid());
+    const auto volume = s.getVolumeParameter (track), pan = s.getPanParameter (track), otherVolume = s.getVolumeParameter (other);
+    putPoints (song, volume, { { at (0.0), 0.5f }, { at (4.0), 0.8f, 0.3f } });
+    putPoints (song, eqParameter, { { at (0.0), 0.3f }, { at (8.0), 0.6f } });
+    putPoints (song, otherVolume, { { at (2.0), 0.4f } });
+    const auto before = phazite::test::copyWholeSong (song);
+    auto without = before.createCopy();
+    without.removeChild (without.getChildWithName (phazite::schema::AUTOMATION), nullptr);
+
+    {
+        const phazite::UndoStep step (song, "Other Curves");
+        phazite::deletePoints (song, volume, allIndices (song, volume));
+        phazite::addPoint (song, volume, { at (1.0), 0.25f });
+        phazite::addPoint (song, volume, { at (6.0), 0.75f });
+        phazite::addPoint (song, pan, { at (2.0), 0.6f });
+        phazite::deletePoints (song, otherVolume, allIndices (song, otherVolume));
+        phazite::removeDevice (song, eq); // its curve kept, for an undo to bring it back
+    }
+
+    const auto after = phazite::test::copyWholeSong (song);
+    REQUIRE (phazite::getCurveKeys (song) == std::vector { eqParameter, volume, pan });
+    phazite::test::UndoCheck undo (song);
+
+    const auto apply = [&] (const juce::String& name, const juce::ValueTree& version)
+    {
+        INFO (name.toStdString());
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (song, name);
+                        phazite::makeSongLike (song, version);
+                        phazite::removeBrokenReferences (song);
+                    });
+        CHECK (writeAutomation (phazite::test::copyWholeSong (song)) == writeAutomation (version));
+    };
+
+    apply ("Bring Back", before);
+    CHECK (phazite::getCurveKeys (song) == std::vector { volume, eqParameter, otherVolume });
+    CHECK (phazite::findDeviceState (song, eq).isValid());
+    apply ("Bring Back Again", after);
+    CHECK (phazite::getCurveKeys (song) == std::vector { eqParameter, volume, pan });
+    CHECK_FALSE (phazite::findDeviceState (song, eq).isValid());
+    apply ("Without Automation", without);
+    CHECK_FALSE (song.getState().getChildWithName (phazite::schema::AUTOMATION).isValid());
+    apply ("Automation Again", before);
+    apply ("The Same", before); // nothing differs: no step
+    CHECK (undo.getNumSteps() == 4);
+    undo.walkBackAndForth();
+
+    // Outside the history, as a switch to another branch makes the song another's (makeSongTheSame()).
+    for (const auto& version : { after, without, before })
+    {
+        phazite::makeSongTheSame (song, version);
+        CHECK (writeAutomation (phazite::test::copyWholeSong (song)) == writeAutomation (version));
+    }
+}
+
+TEST_CASE ("Song values' curves: a version without automation applied takes the song's AUTOMATION out with its curves in one "
+           "action, before the song's elements are put in the version's order")
+{
+    // ApplySong.cpp: makeLike(), isSongAutomation(); Automation.h: eraseAutomation(). Three curves, and an element of the
+    // song's after its AUTOMATION (its SECTIONS, added later), which keeps its place: the step is one action, not one for
+    // each curve, nor a move of what comes after; what hears the curves change is told the three at once.
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.firstTrack;
+    const auto other = s.addTrack ("Other");
+    const auto volume = s.getVolumeParameter (track), pan = s.getPanParameter (track), otherVolume = s.getVolumeParameter (other);
+    putPoints (song, volume, { { at (0.0), 0.5f }, { at (4.0), 0.8f } });
+    putPoints (song, pan, { { at (2.0), 0.3f } });
+    putPoints (song, otherVolume, { { at (1.0), 0.4f } });
+
+    {
+        const phazite::UndoStep step (song, "Add Section");
+        phazite::addSectionAt (song, at (0.0), nullptr);
+    }
+
+    const auto state = song.getState();
+    const auto automationAt = state.indexOf (state.getChildWithName (phazite::schema::AUTOMATION));
+    REQUIRE (automationAt >= 0);
+    REQUIRE (automationAt < state.indexOf (state.getChildWithName (phazite::schema::SECTIONS)));
+
+    auto version = phazite::test::copyWholeSong (song);
+    version.removeChild (version.getChildWithName (phazite::schema::AUTOMATION), nullptr);
+
+    const auto typesOf = [] (const juce::ValueTree& root)
+    {
+        juce::StringArray types;
+
+        for (const auto& child : root)
+            types.add (child.getType().toString());
+
+        return types;
+    };
+
+    phazite::test::UndoCheck undo (song);
+    Told told;
+    song.getValues()->addListener (&told);
+    auto actions = 0;
+    undo.check ("Without Automation",
+                [&]
+                {
+                    const phazite::UndoStep step (song, "Without Automation");
+                    phazite::makeSongLike (song, version);
+                    actions = song.getUndoManager().getNumActionsInCurrentTransaction();
+                });
+    song.getValues()->removeListener (&told);
+
+    CHECK (actions == 1);
+    CHECK_FALSE (state.getChildWithName (phazite::schema::AUTOMATION).isValid());
+    CHECK (typesOf (state) == typesOf (version));
+    CHECK (describe (told.parameters) == describe (std::vector { volume, pan, otherVolume }));
+    CHECK (told.curves == 3); // the step, its Undo, its Redo: each the three at once
+    undo.walkBackAndForth();
+    phazite::test::checkSong (song);
+}
+
+TEST_CASE ("Song values' curves: a track's line made a version's, and put back, takes its devices' curves and no other track's")
+{
+    // makeTrackLike() (ApplySong.cpp): the curves of what either song has on the track made the version's, by their
+    // parameters, a curve the song hasn't added after the others; another track's left as they are.
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.firstTrack;
+    const auto other = s.addTrack ("Other");
+    const auto eq = s.addEffect (track, phazite::devices::Equalizer::typeID);
+    const auto eqParameter = findDeviceParameter (song, track, eq);
+    REQUIRE (eqParameter.isValid());
+    const auto volume = s.getVolumeParameter (track), pan = s.getPanParameter (track), otherVolume = s.getVolumeParameter (other);
+    putPoints (song, volume, { { at (0.0), 0.5f }, { at (4.0), 0.8f } });
+    putPoints (song, eqParameter, { { at (0.0), 0.3f } });
+    putPoints (song, otherVolume, { { at (2.0), 0.4f } });
+    const auto before = phazite::test::copyWholeSong (song);
+
+    {
+        const phazite::UndoStep step (song, "Other Curves");
+        phazite::movePoints (song, volume, { 1 }, lasting (1.0), -0.2f);
+        phazite::deletePoints (song, eqParameter, { 0 });
+        phazite::addPoint (song, pan, { at (2.0), 0.6f });
+        phazite::movePoints (song, otherVolume, { 0 }, lasting (2.0), 0.1f);
+    }
+
+    const auto otherCurve = phazite::getCurveValue (song, otherVolume);
+    REQUIRE (otherCurve.has_value());
+    phazite::test::UndoCheck undo (song);
+
+    const auto isTheVersions = [&]
+    {
+        for (const auto& parameter : { volume, eqParameter, pan })
+        {
+            INFO (phazite::getCurveKeyText (parameter).toStdString());
+            CHECK (phazite::getCurveValue (song, parameter) == findCurveIn (before, parameter));
+        }
+
+        CHECK (phazite::getCurveValue (song, otherVolume) == otherCurve);
+    };
+
+    const auto restore = [&] (const juce::String& name)
+    {
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (song, name);
+                        CHECK (phazite::makeTrackLike (song, track, before));
+                        phazite::removeBrokenReferences (song);
+                    });
+    };
+
+    restore ("Restore the Track");
+    isTheVersions();
+    CHECK (phazite::getCurveKeys (song) == std::vector { volume, otherVolume, eqParameter });
+
+    // Deleted, its curves kept (for an undo to bring it back) and one of them changed since; put back from the version.
+    undo.check ("Delete the Track",
+                [&]
+                {
+                    const phazite::UndoStep step (song, "Delete the Track");
+                    phazite::deleteTracks (song, { track }, nullptr);
+                    phazite::addPoint (song, volume, { at (12.0), 0.1f });
+                });
+    REQUIRE_FALSE (phazite::findTrackState (song, track).isValid());
+    restore ("Put Back the Track");
+    REQUIRE (phazite::findTrackState (song, track).isValid());
+    isTheVersions();
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (song);
+}
+
+TEST_CASE ("Song values' curves: the song made as it was copied after an automation edit undone writes nothing of its curves")
+{
+    // makeSongAsCopied() (a version open put back): every change of a curve is an undo step, so the curves are the copy's
+    // already, and the curves pass writes nothing (asserted in Debug builds as it ends).
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto volume = s.getVolumeParameter (s.firstTrack), pan = s.getPanParameter (s.firstTrack);
+    putPoints (song, volume, { { at (0.0), 0.5f }, { at (4.0), 0.8f } });
+    putPoints (song, pan, { { at (2.0), 0.3f } });
+    const auto copy = phazite::test::copyWholeSong (song);
+
+    {
+        const phazite::UndoStep step (song, "Edit");
+        phazite::movePoints (song, volume, { 1 }, lasting (1.0), -0.2f);
+        phazite::deletePoints (song, pan, { 0 });
+    }
+
+    phazite::undo (song);
+    TreeHeard tree { song.getState() };
+    phazite::makeSongAsCopied (song, copy);
+    CHECK (tree.curves == 0);
+    CHECK (tree.automationWithCurves == 0);
+    CHECK (writeAutomation (phazite::test::copyWholeSong (song)) == writeAutomation (copy));
+}
+
+TEST_CASE ("Song values' curves: a merge's clash on a curve is chosen each way through automation's functions by its parameter")
+{
+    // A curve merges whole: both sides changed it, so the merge reports one clash on the whole CURVE, whose choice the
+    // curves' chooser makes (Automation.cpp: chooseCurveClash()), in the choice's step, its points by their places.
+    const auto base = phazite::createSong();
+    const auto track = phazite::ensureTracks (*base, 1).front();
+    const phazite::ParameterRef volume { phazite::getFader (*base, track), phazite::getVolumeParameterID (*base, track) };
+    REQUIRE (volume.isValid());
+    putPoints (*base, volume, { { at (0.0), 0.5f }, { at (4.0), 0.5f } });
+
+    const auto ours = phazite::makeSong (phazite::test::copyWholeSong (*base));
+    const auto theirs = phazite::makeSong (phazite::test::copyWholeSong (*base));
+    REQUIRE (ours != nullptr);
+    REQUIRE (theirs != nullptr);
+
+    {
+        const phazite::UndoStep step (*ours, "Move Point");
+        phazite::movePoints (*ours, volume, { 1 }, lasting (0.0), 0.2f);
+    }
+
+    {
+        const phazite::UndoStep step (*theirs, "Add Point");
+        phazite::addPoint (*theirs, volume, { at (8.0), 0.1f });
+    }
+
+    const std::optional<phazite::CurveValue> curves[] = { phazite::getCurveValue (*base, volume), phazite::getCurveValue (*ours, volume),
+                                                          phazite::getCurveValue (*theirs, volume) };
+    const phazite::MergeSides sides { phazite::test::copyWholeSong (*base), phazite::test::copyWholeSong (*ours),
+                                      phazite::test::copyWholeSong (*theirs) };
+    const auto merged = phazite::mergeSongs (sides.base, sides.before, sides.theirs, [&ours] { return ours->makeID(); });
+    const phazite::MergeClash* clash = nullptr;
+
+    for (const auto& each : merged.clashes)
+        if (each.path.size() >= 2 && each.path[0].startsWith (phazite::schema::AUTOMATION.toString() + ":"))
+            clash = &each;
+
+    REQUIRE (clash != nullptr);
+    CHECK (clash->path.size() == 2);
+
+    {
+        const phazite::UndoStep step (*ours, "Merge");
+        phazite::makeSongLike (*ours, merged.song);
+    }
+
+    phazite::test::UndoCheck undo (*ours);
+
+    for (const auto value : { 2, 0, 1 })
+    {
+        INFO ("value " << value);
+        undo.check ("Choose",
+                    [&]
+                    {
+                        const phazite::UndoStep step (*ours, "Choose");
+                        CHECK (phazite::chooseCurveClash (*ours, *clash, value, sides) == phazite::AreaChoice::chosen);
+                    });
+        CHECK (phazite::getCurveValue (*ours, volume) == curves[value]);
+        phazite::test::checkSong (*ours);
+    }
+
+    // A clash elsewhere is none of the curves'; one of a curve's property, or of something in it, which a merge never makes,
+    // refused.
+    auto elsewhere = *clash;
+    elsewhere.path = { phazite::schema::CHORDLANE.toString() + ":" + phazite::schema::CHORDLANE.toString() };
+    CHECK (phazite::chooseCurveClash (*ours, elsewhere, 0, sides) == phazite::AreaChoice::notTheArea);
+    auto ofProperty = *clash;
+    ofProperty.property = phazite::schema::curveParameter;
+    CHECK (phazite::chooseCurveClash (*ours, ofProperty, 0, sides) == phazite::AreaChoice::refused);
+    auto inside = *clash;
+    inside.path.add (phazite::schema::POINT.toString() + ":");
+    CHECK (phazite::chooseCurveClash (*ours, inside, 0, sides) == phazite::AreaChoice::refused);
+
+    // The side chosen without the curve: none.
+    auto none = *clash;
+    none.theirsElement = {};
+    undo.check ("Choose None",
+                [&]
+                {
+                    const phazite::UndoStep step (*ours, "Choose None");
+                    CHECK (phazite::chooseCurveClash (*ours, none, 2, sides) == phazite::AreaChoice::chosen);
+                });
+    CHECK_FALSE (phazite::getCurveValue (*ours, volume).has_value());
+    undo.walkBackAndForth();
+    phazite::test::checkSong (*ours);
 }

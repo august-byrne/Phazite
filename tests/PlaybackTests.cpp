@@ -552,39 +552,6 @@ TEST_CASE ("Two tracks whose IDs are swapped in place play as a whole compile of
     CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
 }
 
-TEST_CASE ("A song holding two curves of one parameter, the first without points, plays the second, kept or read afresh")
-{
-    // Known bug 124's review: a file from others can hold two curves for one parameter (loading keeps both); a plan that
-    // kept the first as empty skipped the second too, which a whole read plays.
-    TwoSynths two;
-    auto automation = two.song->getState().getOrCreateChildWithName (phazite::schema::AUTOMATION, nullptr);
-
-    for (const auto withPoints : { false, true })
-    {
-        juce::ValueTree curve (phazite::schema::CURVE);
-        curve.setProperty (phazite::schema::curveDevice, juce::String ((juce::int64) two.synths[0].getRaw()), nullptr);
-        curve.setProperty (phazite::schema::curveParameter, "cutoff", nullptr);
-
-        if (withPoints)
-            for (const auto beat : { 0.0, 8.0 })
-                curve.appendChild (
-                    juce::ValueTree (phazite::schema::POINT, { { phazite::schema::pointBeat, beat },
-                                                               { phazite::schema::pointValue, 0.2 + 0.05 * beat } }), // along the travel
-                    nullptr);
-
-        automation.appendChild (curve, nullptr);
-    }
-
-    phazite::SongPlayer kept (*two.song);
-    REQUIRE (comparePlans (kept, *two.song).isEmpty());
-
-    // An edit elsewhere: the curves are kept.
-    phazite::test::addMidiNote (*two.song, phazite::getClips (*two.song, two.tracks[1])[0], 72, phazite::test::at (4.0),
-                                phazite::test::lasting (1.0));
-    const auto differences = comparePlans (kept, *two.song);
-    CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
-}
-
 TEST_CASE ("A tempo change places every kept audio clip again, where the new tempo plays it, without asking about its file")
 {
     // Known bug 124's review: a player keeps each track's audio from plan to plan, placed in seconds; a tempo change moves

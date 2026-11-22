@@ -190,6 +190,26 @@ CurveValue readCurveValue (const juce::ValueTree& curve)
     return { points.persistent() };
 }
 
+CurveValue readHeldCurve (const juce::ValueTree& curve)
+{
+    auto points = immer::flex_vector<PointValue>().transient();
+
+    for (const auto& child : curve)
+    {
+        if (! child.hasType (schema::POINT))
+            continue;
+
+        // A value that is no finite number: no point (the loader takes one out as the song opens).
+        if (const auto value = readValueNumber (child[schema::pointValue]); ! value.has_value() || ! std::isfinite (*value))
+            continue;
+
+        points.push_back ({ BeatPosition::fromBeats (readDescribed (child, schema::pointBeat)),
+                            toFloat (readDescribed (child, schema::pointValue)), toFloat (readDescribed (child, schema::pointCurve)) });
+    }
+
+    return { points.persistent() };
+}
+
 std::uint64_t countCurvePointsRead() noexcept
 {
     return pointsRead.load (std::memory_order_relaxed);

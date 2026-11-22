@@ -9,6 +9,7 @@
 #include "TestHelpers.h"
 #include "engine/automation/Curve.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/Song.h"
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/project/internal/Project.h"
@@ -424,6 +425,31 @@ TEST_CASE ("Curve values: damaged curves read as automation's code read them, an
     }
 }
 
+TEST_CASE ("Curve values: a curve read as the song holds one has each number within its range, without a point whose value is "
+           "no number")
+{
+    // What enters the song's curves from another song reads them so (CurveValues.h: readHeldCurve()): a version's curves
+    // applied, a merge's choice of a curve.
+    using phazite::BeatPosition;
+    using phazite::PointValue;
+
+    // A beat before the song at 0, a value of 12 at 1, a bend of 3 at 1; a point without a value, and one whose value is no
+    // number, left out; a beat that is absent at 0, a value below 0 at 0; a child that is no point left out; the element's
+    // order kept.
+    const auto held = phazite::readHeldCurve (parse (
+        R"(<CURVE device="14" parameter="volume"><POINT beat="-4" value="12" curve="3"/><POINT beat="8"/><POINT value="0.5" curve="-0.25"/><POINT beat="2" value="loud"/><SHAPE/><POINT beat="1" value="-1"/></CURVE>)"));
+    REQUIRE (held.points.size() == 3);
+    CHECK (held.points[0] == PointValue { BeatPosition::fromBeats (0.0), 1.0f, 1.0f });
+    CHECK (held.points[1] == PointValue { BeatPosition::fromBeats (0.0), 0.5f, -0.25f });
+    CHECK (held.points[2] == PointValue { BeatPosition::fromBeats (1.0), 0.0f, 0.0f });
+
+    // A curve within its ranges reads the same both ways.
+    const auto within =
+        parse (R"(<CURVE device="14" parameter="volume"><POINT beat="0" value="0.2"/><POINT beat="4.5" value="0.8" curve="0.5"/></CURVE>)");
+    CHECK (phazite::readHeldCurve (within) == phazite::readCurveValue (within));
+    CHECK (phazite::readHeldCurve (within).points.size() == 2);
+}
+
 TEST_CASE ("Curve values: the song's curves keep the order they were made in through their helpers, and compare by identity and "
            "by what they hold")
 {
@@ -491,18 +517,22 @@ TEST_CASE ("Curve values: the song's curves keep the order they were made in thr
     CHECK (phazite::readCurveKeyText (schema::getElementKey (element)) == a);
 }
 
-TEST_CASE ("Curve values: what plays a parameter whose song holds two curves of it is the last with points, as before")
+TEST_CASE ("Curve values: a tree not made consistent that holds two curves of one parameter lists it once, its first curve, and "
+           "plays the last with points")
 {
-    // Should the song's tree hold two curves of one parameter (a file from others, before it is made consistent), Phazite's
-    // engine played the last with points (SongPlayer.cpp: readCurves()); getCurveValue() gives the first, which the
-    // automation's edits change, as findCurveState() finds it.
-    const auto songPtr = phazite::createSong();
-    auto& song = *songPtr;
-    auto automation = song.getState().getOrCreateChildWithName (schema::AUTOMATION, nullptr);
+    // Only a tree the loader hasn't made consistent holds two curves of one parameter (the loader keeps the first:
+    // makeConsistent()), so this is a song made of such a tree alone, which holds no values, not a song opened. Its readers
+    // (Automation.h) list the parameter once and give its first curve (getCurveKeys(), getCurveValue()), and play the last of
+    // its curves with points (getPlayedCurves()), as Phazite's engine always played them; the switch of roadmap step S5.20,
+    // whose area holds one curve for a parameter, takes both rules away.
+    auto state = phazite::test::copyWholeSong (*phazite::createSong());
+    auto automation = state.getOrCreateChildWithName (schema::AUTOMATION, nullptr);
     automation.appendChild (parse (R"(<CURVE device="5" parameter="cutoff"/>)"), nullptr);
     automation.appendChild (parse (R"(<CURVE device="5" parameter="cutoff"><POINT beat="0" value="0.25"/></CURVE>)"), nullptr);
     automation.appendChild (parse (R"(<CURVE device="5" parameter="cutoff"><POINT beat="2" value="0.75"/></CURVE>)"), nullptr);
     automation.appendChild (parse (R"(<CURVE device="5" parameter="cutoff"/>)"), nullptr);
+    const phazite::Song song (state);
+    REQUIRE (song.getValues() == nullptr);
 
     const ParameterRef cutoff { phazite::DeviceID::fromRaw (5), "cutoff" };
     CHECK (phazite::getCurveKeys (song) == std::vector { cutoff });

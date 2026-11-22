@@ -1021,6 +1021,10 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     CHECK (phazite::getPoints (model, newPan).empty());
     CHECK (phazite::getSends (model, song.bass).empty());
 
+    // The copies after the song's other curves, in the originals' order (Automation.h: copyCurves(), through setCurveValue()); the
+    // moved send's own kept, as a removed send's is, for an undo to bring it back.
+    CHECK (phazite::getCurveKeys (model) == std::vector { volume, level, gain, newVolume, newLevel });
+
     // The modulators that moved the fader and the send, copied onto the new track with those modulations alone; the
     // original's macro modulated the send alone, which has gone, and modulates nothing now.
     const auto modulators = phazite::getModulators (model, bounced);
@@ -1043,6 +1047,7 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     CHECK (phazite::getTrackIDs (model).size() == 2);
     CHECK (phazite::getPoints (model, newVolume).empty());
     CHECK (phazite::getPoints (model, newLevel).empty());
+    CHECK (phazite::getCurveKeys (model) == std::vector { volume, level, gain });
     CHECK (phazite::getSends (model, song.bass) == std::vector { send });
     CHECK (samePoints (phazite::getPoints (model, level), levelPoints));
     CHECK (phazite::getModulations (model, macro).size() == 1);

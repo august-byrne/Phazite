@@ -1143,8 +1143,8 @@ TEST_CASE (
     // versions' pieces, asked a plug-in's curve's range of its instance, through the playback sessions the message thread
     // makes and destroys (findSession()). Now a plug-in's curve is kept within 0 to 1 from its element alone. A fixed count
     // of joins on another thread, while the message thread opens and closes songs, each with a session of its own.
-    auto song = phazite::createSong();
-    auto state = song->getState();
+    // A whole copy of a new song, given a plug-in and a curve of it outside any song.
+    auto state = phazite::test::copyWholeSong (*phazite::createSong());
     auto track = phazite::getTrackElements (state).front();
     track.appendChild (juce::ValueTree (phazite::schema::DEVICE, { { phazite::schema::deviceID, 900 },
                                                                    { phazite::schema::deviceType, phazite::schema::deviceIsPlugin } }),

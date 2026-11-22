@@ -281,6 +281,14 @@ public:
     // them in, is its tree's to say, which the MIDI links' code adds, and takes away, in the same step. In MidiLinksArea.cpp.
     void setMidiLinks (Song&, MidiLinksValue);
 
+    // Gives the song's curve of one parameter to another, in its place among the song's curves (a folder's fader's curve
+    // given to the fader that takes its place: model/automation/internal/Automation.h, renameCurve()), in the song's undo
+    // history (the step in progress), or outside it while the song is written outside it; the listener told the parameter it
+    // had and the one it has in one call (Listener::curvesChanged()), in its Undo and its Redo too. Nothing for a parameter
+    // without a curve, for the same parameter, or for one that has a curve already (asserted). While the song's tree holds
+    // the curves, an action of its own that writes the curve's element's device and parameter at once. In CurvesArea.cpp.
+    void renameCurve (Song&, const ParameterRef& from, const ParameterRef& to);
+
     // The tempo map as Phazite's engine plays it (engine/core/TempoMap.h), made of the tempo map's value at a sample rate,
     // kept for the tempo map's code (model/transport/Tempo.cpp: getTempoMap()), so that it is made once for each change of
     // the value and each sample rate asked, not at every call (each conversion of a beat to seconds, each audio clip read):
@@ -426,6 +434,8 @@ private:
     void setWithoutStep (Song&, NotesByClip next);
 
     void adopt (Song&); // Song::holdValues()
+
+    CurvesKeeper* findCurvesKeeper() noexcept; // the keeper's curves' part, none before the keeper (renameCurve())
 
     JUCE_DECLARE_NON_COPYABLE (SongValues)
     JUCE_DECLARE_NON_MOVEABLE (SongValues)

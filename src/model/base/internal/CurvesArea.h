@@ -25,9 +25,11 @@ class Song;
 // notifications under them (isHeardAsCurves()), whatever the history does (an undo's and a redo's, a write's outside the
 // history), the values' listeners told the parameters of the curves it changed (Listener::curvesChanged()), as they are
 // now and as they were: a POINT's or a CURVE's property, a child added to a CURVE, taken out of it or moved in it, that
-// curve's; a CURVE added to the song's AUTOMATION or taken out, its own; a CURVE's own parameter changed (its device or its
-// parameter: model/mixer/Buses.cpp gives a folder's curve to the fader that takes its place so), the one it had and the one
-// it has; and the song's AUTOMATION added or taken out, each of its curves'. The song's AUTOMATION itself is the tree's: its
+// curve's; a CURVE added to the song's AUTOMATION or taken out, its own; a CURVE given another parameter, the one it had and
+// the one it has, once: SongValues::renameCurve() writes its device and its parameter in an action of its own and tells both
+// (rename(), below), which a curve renamed in two writes of the tree would pass through a parameter in between (a CURVE's
+// device or parameter changed any other way tells the one it had and the one it has at each write); and the song's
+// AUTOMATION added or taken out, each of its curves'. The song's AUTOMATION itself is the tree's: its
 // own properties, a child of it that is no CURVE, and its children in another order tell nothing here. Nothing of the
 // song's values is read, nor anything of the song's tree but the curves' elements' parameters.
 struct SongValues::CurvesKeeper
@@ -52,6 +54,14 @@ struct SongValues::CurvesKeeper
     void remember (const juce::ValueTree& curve);
     ParameterRef forget (const juce::ValueTree& curve); // the parameter it had
     void tell (std::vector<ParameterRef> parameters) const;
+
+    // A curve of the song's given another parameter (SongValues::renameCurve()), its device and its parameter written
+    // without the history, and the parameter it had and the one it has told at once: the two writes' notifications are left
+    // alone (renaming), so that no parameter in between them, which no curve has, is told. The action that does it in the
+    // song's history, both ways (its Undo gives the curve the parameter it had, told so too).
+    void rename (juce::ValueTree curve, const ParameterRef& to);
+    juce::ValueTree renaming;
+    struct Renamed;
 
     JUCE_DECLARE_NON_COPYABLE (CurvesKeeper)
 };

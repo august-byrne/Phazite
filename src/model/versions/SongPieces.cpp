@@ -545,6 +545,18 @@ juce::ValueTree joinSong (const juce::String& name, const ReadPiece& read, Plugi
     return tree;
 }
 
+bool holdsStandIn (const juce::ValueTree& element)
+{
+    if (element.hasProperty (schema::versions::missing))
+        return true;
+
+    for (const auto& child : element)
+        if (holdsStandIn (child))
+            return true;
+
+    return false;
+}
+
 std::vector<PieceReference> findReferences (const juce::MemoryBlock& piece)
 {
     // A piece whose bytes are no UTF-8 text (a plug-in's state) names nothing, as one whose text is no XML.

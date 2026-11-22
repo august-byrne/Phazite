@@ -79,6 +79,10 @@ struct MissingPiece
 juce::ValueTree joinSong (const juce::String& name, const ReadPiece&, PluginParameterValues* parameters = nullptr,
                           std::vector<MissingPiece>* missing = nullptr, const juce::File& projectFolder = {}, bool* idsGivenAnew = nullptr);
 
+// Whether an element joined so, or anything in it, is such a stand-in: what a merge's choice of a whole element refuses
+// (model/versions/internal/AreaClashes.h: the chord lane's and a curve's choosers).
+bool holdsStandIn (const juce::ValueTree& element);
+
 // The pieces a piece names, in its order: its elements that are pieces of their own ("TRACK:12"), its runs ("_run"), its
 // bytes ("_bytes:state") and its plug-in's parameters ("_parameters"). Nothing for what isn't a piece.
 struct PieceReference

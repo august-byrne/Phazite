@@ -10,6 +10,7 @@
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/versions/internal/AreaClashes.h"
+#include "model/versions/internal/SongPieces.h"
 
 #include <algorithm>
 #include <cmath>
@@ -55,20 +56,6 @@ namespace
         }
 
         return took ? MidiLinksValue { kept.persistent() } : value;
-    }
-
-    // Whether an element of another song's, or anything in it, stands in for what that song's version couldn't read
-    // (Schema.h: schema::versions::missing).
-    bool holdsStandIn (const juce::ValueTree& element)
-    {
-        if (element.hasProperty (schema::versions::missing))
-            return true;
-
-        for (const auto& child : element)
-            if (holdsStandIn (child))
-                return true;
-
-        return false;
     }
 
     // How a merge names a link in its clash's path (SongMerge.cpp: keyOf()): its type and its key, its controller.

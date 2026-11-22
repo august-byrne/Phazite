@@ -6,6 +6,7 @@
 #include "model/base/internal/SongValues.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/internal/AreaClashes.h"
+#include "model/versions/internal/SongPieces.h"
 
 #include <algorithm>
 #include <cmath>
@@ -266,20 +267,6 @@ namespace
 
         setRange (chord, { start, range.getEnd() });
         return true;
-    }
-
-    // Whether an element of another song's, or anything in it, stands in for what that song's version couldn't read
-    // (Schema.h: schema::versions::missing).
-    bool holdsStandIn (const juce::ValueTree& element)
-    {
-        if (element.hasProperty (schema::versions::missing))
-            return true;
-
-        for (const auto& child : element)
-            if (holdsStandIn (child))
-                return true;
-
-        return false;
     }
 } // namespace
 

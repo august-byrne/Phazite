@@ -144,6 +144,11 @@ std::vector<TrackID> SongValues::getRemembered() const
     return keeper != nullptr ? keeper->clips.getRemembered() : std::vector<TrackID>();
 }
 
+SongValues::CurvesKeeper* SongValues::findCurvesKeeper() noexcept
+{
+    return keeper != nullptr ? &keeper->curves : nullptr;
+}
+
 void SongValues::adopt (Song& song)
 {
     // What the tree the loader made consistent holds of each area, into the area, outside the history, and out of the tree:

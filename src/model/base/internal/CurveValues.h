@@ -103,6 +103,13 @@ ParameterRef readCurveParameter (const juce::ValueTree& curve);
 // know is no part of it, nor a child (the loader takes such a child out as the song opens).
 CurveValue readCurveValue (const juce::ValueTree& curve);
 
+// The same as the song holds a curve (Schema.h's descriptions: SongText.h, readDescribed()): each point's beat within 0 and
+// the longest song (0 where it has none), its value within 0 and 1, its bend within -1 and 1 (0 where it has none), in the
+// element's order; a point without a value that is a finite number left out. What enters the song's curves from another
+// song reads a curve so: a version's (model/versions/ApplySong.cpp: makeCurvesLike()) and a merge's choice
+// (model/automation/internal/Automation.h: chooseCurveClash()).
+CurveValue readHeldCurve (const juce::ValueTree& curve);
+
 // How many points were read into curves' values (readCurveValue()) since Phazite started, on any thread: for the test that
 // an edit of several points of a curve reads the curve once, however many they are (tests/PerformanceGateTests.cpp).
 // Allocations can't tell it: immer takes its nodes from lists of freed ones.

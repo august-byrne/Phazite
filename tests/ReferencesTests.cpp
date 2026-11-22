@@ -23,6 +23,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/commands/internal/Undo.h"
@@ -96,22 +97,17 @@ float positionAt (const phazite::Song& song, const ParameterRef& parameter, doub
     return phazite::engine::Curve (std::move (points)).getPositionAt (beat);
 }
 
-// A curve as a file holds it, with points (beat, value, bend), put into the song as it opens: for a plug-in that isn't
-// loaded, whose parameters no control reaches.
+// A curve with points (beat, value, bend), as a file holds one, given to the song whole (Automation.h: setCurveValue()), in a step
+// of its own: for a plug-in that isn't loaded, whose parameters no control reaches.
 void putCurve (phazite::Song& song, const ParameterRef& parameter, std::initializer_list<phazite::AutomationPoint> points)
 {
-    auto automation = song.getState().getOrCreateChildWithName (schema::AUTOMATION, nullptr);
-    juce::ValueTree curve (schema::CURVE);
-    curve.setProperty (schema::curveDevice, juce::String ((juce::int64) parameter.device.getRaw()), nullptr);
-    curve.setProperty (schema::curveParameter, parameter.parameter, nullptr);
+    phazite::CurveValue curve;
 
     for (const auto& point : points)
-        curve.appendChild (juce::ValueTree (schema::POINT, { { schema::pointBeat, point.beat.inBeats() },
-                                                             { schema::pointValue, point.position },
-                                                             { schema::pointCurve, point.curve } }),
-                           nullptr);
+        curve.points = curve.points.push_back ({ point.beat, point.position, point.curve });
 
-    automation.appendChild (curve, nullptr);
+    const phazite::UndoStep step (song, "Put Curve");
+    phazite::setCurveValue (song, parameter, curve);
 }
 
 void change (phazite::Song& song, const juce::String& name, const std::function<void()>& edit)

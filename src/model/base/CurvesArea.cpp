@@ -117,9 +117,84 @@ void SongValues::CurvesKeeper::tell (std::vector<ParameterRef> parameters) const
         values.listeners.call ([&once] (SongValues::Listener& listener) { listener.curvesChanged (once); });
 }
 
+void SongValues::CurvesKeeper::rename (juce::ValueTree curve, const ParameterRef& to)
+{
+    const auto was = forget (curve);
+    renaming = curve;
+    curve.setProperty (schema::curveDevice, juce::String ((juce::int64) to.device.getRaw()), nullptr);
+    curve.setProperty (schema::curveParameter, to.parameter, nullptr);
+    renaming = {};
+    remember (curve);
+    tell ({ was, to });
+}
+
+// The action of a curve given another parameter, in the song's history: the keeper's rename(), each way, or, in a song whose
+// keeper isn't there (none listens for it), the two writes alone.
+struct SongValues::CurvesKeeper::Renamed final : juce::UndoableAction
+{
+    Renamed (Song& s, const juce::ValueTree& c, const ParameterRef& f, const ParameterRef& t)
+        : song (s),
+          curve (c),
+          from (f),
+          to (t)
+    {
+    }
+
+    bool perform() override
+    {
+        give (to);
+        return true;
+    }
+
+    bool undo() override
+    {
+        give (from);
+        return true;
+    }
+
+    void give (const ParameterRef& parameter)
+    {
+        auto* held = song.getValues();
+
+        if (auto* part = held != nullptr ? held->findCurvesKeeper() : nullptr)
+            return part->rename (curve, parameter);
+
+        curve.setProperty (schema::curveDevice, juce::String ((juce::int64) parameter.device.getRaw()), nullptr);
+        curve.setProperty (schema::curveParameter, parameter.parameter, nullptr);
+    }
+
+    Song& song;
+    juce::ValueTree curve;
+    const ParameterRef from, to;
+
+    JUCE_DECLARE_NON_COPYABLE (Renamed)
+};
+
+void SongValues::renameCurve (Song& song, const ParameterRef& from, const ParameterRef& to)
+{
+    const auto automation = song.getState().getChildWithName (schema::AUTOMATION);
+    const auto curve = findCurveElement (automation, from);
+
+    if (from == to || ! curve.isValid())
+        return;
+
+    // A curve's new parameter has none of its own (as SongCurves' withCurveRenamed() asks).
+    const auto taken = findCurveElement (automation, to).isValid();
+    jassert (! taken);
+
+    if (taken)
+        return;
+
+    if (song.isWritingOutsideHistory())
+        CurvesKeeper::Renamed (song, curve, from, to).perform();
+    else
+        song.getUndoManager().perform (new CurvesKeeper::Renamed (song, curve, from, to)); // the undo manager owns it
+}
+
 void SongValues::CurvesKeeper::propertyChanged (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (! isHeardAsCurves (tree))
+    // A curve given another parameter by rename(), which tells it once.
+    if (tree == renaming || ! isHeardAsCurves (tree))
         return;
 
     // A curve given another parameter: the one it had (as it was last told) and the one it has.
