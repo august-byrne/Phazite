@@ -139,8 +139,7 @@ void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal);
 //
 // Create, open and destroy Projects on the message thread.
 class Project : private juce::ValueTree::Listener,
-                private SongValues::NotesListener,
-                private SongValues::ClipsListener,
+                private SongValues::Listener,
                 private juce::AsyncUpdater,
                 private juce::Timer
 {
@@ -375,15 +374,21 @@ private:
     std::vector<ClipID> notesToCompare;
     void clipNotesChanged (const std::vector<ClipID>&) override;
 
-    // What the clips' listener told (SongValues.h: ClipsListener), compared with savedState when asked: each clip changed in
-    // place (a property, a warp marker), with the track it was told on, against the saved copy's clip of its ID
-    // (holdSameClip()); and each track a clip was added to, taken out of or moved on, and each whose clips came in another
-    // order, whole (holdSameTrackClips()). Bounded as toCompare is: past mostToCompare clips, the track each was on, whole. A
-    // clip gone compares as its track does; a track gone as what it was taken out of, which notified.
+    // What the values' listener told of the clips (SongValues.h: Listener::clipsChanged()), compared with savedState when
+    // asked: each clip changed in place (a property, a warp marker), with the track it was told on, against the saved copy's
+    // clip of its ID (holdSameClip()); and each track a clip was added to, taken out of or moved on, and each whose clips came
+    // in another order, whole (holdSameTrackClips()). Bounded as toCompare is: past mostToCompare clips, the track each was
+    // on, whole. A clip gone compares as its track does; a track gone as what it was taken out of, which notified.
     std::map<ClipID, TrackID> clipsToCompare;
     std::set<TrackID> tracksToCompare;
     bool comparingClipsWhole = false; // past mostToCompare: each one's track whole
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
+
+    // The tempo map changed (SongValues.h: Listener::tempoMapChanged(); the tree's callbacks below leave its elements alone,
+    // isHeardAsTempoMap()): compared with savedState's when asked, as one value (WholeState.h: holdSameTempoMap()), so that
+    // a tempo changed and changed back is saved again.
+    bool tempoToCompare = false;
+    void tempoMapChanged() override;
 
     // Whether a clip of the song is as savedState holds it, all it holds (its properties, its track, its warp markers, its
     // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's
@@ -450,7 +455,8 @@ private:
     // What isn't a change (Schema.h: schema::isUncountedProperty() and isUncountedElement(): view state, how the song plays,
     // its next ID) is left out of notifications and of the comparison with savedState alike. A plug-in's own change (its
     // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()). Each
-    // element with what its song kept beside its tree (a track's clips and their notes: holdSameTrackClips()).
+    // element with what its song kept beside its tree (a track's clips and their notes: holdSameTrackClips()). The tempo map
+    // as one value, as compareWithSavedState() compares it (holdSameTempoMap()), not its elements in their order.
     static bool holdTheSameProject (const juce::ValueTree&, const ValuesKept&, const juce::ValueTree&, const ValuesKept&);
 
 public:
@@ -467,12 +473,20 @@ public:
     bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), keepValues (*song), savedState.tree, savedState.values); }
 
 private:
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
+    {
+        if (! isHeardAsTempoMap (tree))
+            markChanged (tree, property);
+    }
 
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markChildChanged (parent, child); }
 
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { markChanged (parent); }
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
+    {
+        if (! isHeardAsTempoMap (parent))
+            markChanged (parent);
+    }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Project)
 };

@@ -19,7 +19,9 @@ message thread (2026-11-20) and the reviews of its fixes left: the audit's other
 ([changelog](changelog.md)); these were found by reading the code and none was measured, and what the audit only
 suspects, or would make faster, is in the [backlog](backlog.md). 230 was found by reading JUCE while
 roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 235 was found by reading while
-the clips' writers were reviewed (2026-11-21), as 237 was, and 236 is a test that failed once on CI that day.
+the clips' writers were reviewed (2026-11-21), as 237 was, and 236 is a test that failed once on CI that day. 239 was
+found by the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is to be fixed with the tempo map's
+switch.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -162,6 +164,18 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Found by reading (2026-11-21); needs both clashes on one clip. To fix: a choice that would move another property
   of the clip that has a clash of its own sets both clashes' choices to what the song then holds (or to none), with a
   test in `tests/VersionsMergeWaitingTests.cpp`.
+- **239. A merge's clash on a property of an element both lines added, chosen as "what was before", takes the property
+  away and leaves the element.** For a tempo: both lines add a tempo change at one beat, with different BPMs; Take What
+  Was Before on the clash leaves a tempo change at that beat without a bpm, which reads and plays as 120 BPM and is
+  saved so. Why: the merge keys a TEMPO by its beat, so the two are one element; the clash is on its `bpm`, with no
+  value before (the line they parted from had no such element), and `chooseClash()`
+  (`src/model/versions/VersionsModel.cpp`) removes a property whose chosen value is none. Any keyed element both lines
+  added with a clashing property is likely the same (a time signature, a chord, a section's property). Found by the
+  review of roadmap step S5.20's tempo map listener (2026-11-22). To fix: where the parting had no element at the
+  clash's path, what was before removes the element: the merge reports such a clash as one on the whole element, or
+  `chooseClash()` is told that the parting held none; for the tempo map through its value once it is one (roadmap step
+  S5.20). `tests/VersionsMergeWaitingTests.cpp` pins today's result (the case of a conflict on a tempo's bpm, ramp and a
+  tempo both branches added, "chosen each way"), which the fix changes.
 
 ## Devices and playback
 

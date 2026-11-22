@@ -74,10 +74,7 @@ PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
     song->addParameterListener (this);
 
     if (auto* values = song->getValues())
-    {
-        values->addNotesListener (this);
-        values->addClipsListener (this);
-    }
+        values->addListener (this);
 
     songState.addListener (this);
     getSessions().push_back (this);
@@ -102,10 +99,7 @@ PlaybackSession::~PlaybackSession()
     song->removeParameterListener (this);
 
     if (auto* values = song->getValues())
-    {
-        values->removeNotesListener (this);
-        values->removeClipsListener (this);
-    }
+        values->removeListener (this);
 
     plugins.setListener (nullptr);
     recorder = nullptr; // what it opened for the tracks closes
@@ -129,6 +123,9 @@ AudioIO& PlaybackSession::getAudioIO() const noexcept
 
 void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
+    if (isHeardAsTempoMap (parent, child))
+        return; // tempoMapChanged()
+
     // The MIDI links, which no plan holds: what the MIDI tap takes.
     if (isInMidiLinks (parent) || child.hasType (schema::MIDILINKS))
     {
@@ -144,6 +141,9 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    if (isHeardAsTempoMap (tree))
+        return; // tempoMapChanged()
+
     if (isInMidiLinks (tree))
     {
         midiLinksChanged = true;

@@ -225,11 +225,17 @@ namespace
 } // namespace
 
 //==============================================================================
-// What the notes' listeners are told: the clips whose notes changed, found by comparing the two maps, by identity clip by
-// clip (immer's diff, which skips what the two share, as a change leaves most of the map shared).
+// What the values' listeners are told of the notes (Listener::clipNotesChanged()): the clips whose notes changed, found by
+// comparing the two maps, by identity clip by clip (immer's diff, which skips what the two share, as a change leaves most of
+// the map shared).
 struct SongValues::NotesTeller final : ValueArea<NotesByClip>::Listener
 {
-    juce::ListenerList<NotesListener> listeners;
+    explicit NotesTeller (juce::ListenerList<SongValues::Listener>& l)
+        : listeners (l)
+    {
+    }
+
+    juce::ListenerList<SongValues::Listener>& listeners;
 
     void valueAreaChanged (const NotesByClip& before, const NotesByClip& after) override
     {
@@ -250,17 +256,22 @@ struct SongValues::NotesTeller final : ValueArea<NotesByClip>::Listener
             return;
 
         std::sort (changed.begin(), changed.end());
-        listeners.call ([&changed] (NotesListener& listener) { listener.clipNotesChanged (changed); });
+        listeners.call ([&changed] (SongValues::Listener& listener) { listener.clipNotesChanged (changed); });
     }
 };
 
 //==============================================================================
-// What the clips' listeners are told (ClipsListener): each clip whose value differs between the two (immer's diff, which
-// skips what the two share), with its track before and after; and each track whose list holds the same clips in another
-// order, from the lists that differ by identity.
+// What the values' listeners are told of the clips (Listener::clipsChanged()): each clip whose value differs between the two
+// (immer's diff, which skips what the two share), with its track before and after; and each track whose list holds the same
+// clips in another order, from the lists that differ by identity.
 struct SongValues::ClipsTeller final : ValueArea<SongClips>::Listener
 {
-    mutable juce::ListenerList<ClipsListener> listeners;
+    explicit ClipsTeller (juce::ListenerList<SongValues::Listener>& l)
+        : listeners (l)
+    {
+    }
+
+    juce::ListenerList<SongValues::Listener>& listeners;
 
     void valueAreaChanged (const SongClips& before, const SongClips& after) override
     {
@@ -307,7 +318,7 @@ struct SongValues::ClipsTeller final : ValueArea<SongClips>::Listener
 
         std::sort (changed.begin(), changed.end(), [] (const ClipChange& a, const ClipChange& b) { return a.id < b.id; });
         std::sort (reordered.begin(), reordered.end());
-        listeners.call ([&changed, &reordered] (ClipsListener& listener) { listener.clipsChanged (changed, reordered); });
+        listeners.call ([&changed, &reordered] (SongValues::Listener& listener) { listener.clipsChanged (changed, reordered); });
     }
 };
 
@@ -377,8 +388,33 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
         return false;
     }
 
+    //==============================================================================
+    // The tempo map, while the tree holds it: what the values' listeners are told (Listener::tempoMapChanged()), for each
+    // notification under its TEMPOMAP element (isHeardAsTempoMap()), whatever the history does (an undo's and a redo's too).
+    // Nothing of the song is read: the listeners only mark.
+    void tellTempoMap() const
+    {
+        values.listeners.call ([] (SongValues::Listener& listener) { listener.tempoMapChanged(); });
+    }
+
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override
+    {
+        if (isHeardAsTempoMap (tree))
+            tellTempoMap();
+    }
+
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
+    {
+        if (isHeardAsTempoMap (parent))
+            tellTempoMap();
+    }
+
+    //==============================================================================
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
+        if (isHeardAsTempoMap (parent, child))
+            return tellTempoMap(); // nothing of a clip in it
+
         if (isUndoingOrRedoing())
             return;
 
@@ -452,6 +488,9 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
 
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
+        if (isHeardAsTempoMap (parent, child))
+            return tellTempoMap();
+
         if (isUndoingOrRedoing() || ! isInTrackList (parent, child))
             return;
 
@@ -505,8 +544,8 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
 SongValues::SongValues (Song& song)
     : clips (song.getUndoManager(), {}),
       notes (song.getUndoManager(), {}),
-      notesTeller (std::make_unique<NotesTeller>()),
-      clipsTeller (std::make_unique<ClipsTeller>())
+      notesTeller (std::make_unique<NotesTeller> (listeners)),
+      clipsTeller (std::make_unique<ClipsTeller> (listeners))
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -682,28 +721,30 @@ void SongValues::setClipNotes (Song& song, ClipID clip, ClipNotes value)
         setAll (song, std::move (next));
 }
 
-void SongValues::addNotesListener (NotesListener* listener)
+void SongValues::addListener (Listener* listener) const
 {
     JUCE_ASSERT_MESSAGE_THREAD
-    notesTeller->listeners.add (listener);
+    listeners.add (listener);
 }
 
-void SongValues::removeNotesListener (NotesListener* listener)
+void SongValues::removeListener (Listener* listener) const
 {
     JUCE_ASSERT_MESSAGE_THREAD
-    notesTeller->listeners.remove (listener);
+    listeners.remove (listener);
 }
 
-void SongValues::addClipsListener (ClipsListener* listener) const
+bool isHeardAsTempoMap (const juce::ValueTree& element)
 {
-    JUCE_ASSERT_MESSAGE_THREAD
-    clipsTeller->listeners.add (listener);
+    for (auto each = element; each.isValid(); each = each.getParent())
+        if (each.hasType (schema::TEMPOMAP))
+            return each.getParent().hasType (schema::PHAZITE);
+
+    return false;
 }
 
-void SongValues::removeClipsListener (ClipsListener* listener) const
+bool isHeardAsTempoMap (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    JUCE_ASSERT_MESSAGE_THREAD
-    clipsTeller->listeners.remove (listener);
+    return (child.hasType (schema::TEMPOMAP) && parent.hasType (schema::PHAZITE)) || isHeardAsTempoMap (parent);
 }
 
 bool SongValues::remembers (const juce::ValueTree& track) const

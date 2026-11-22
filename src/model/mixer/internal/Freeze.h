@@ -9,6 +9,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/mixer/FreezeModel.h"
 
@@ -65,17 +66,16 @@ void purgeCache (Song&);
 // leave it frozen, and so do changes of what plays after the file: the track's fader, its sends, its name.
 //
 // Every change is compared at the next turn of the message loop, or as the song is stored or a plan of it compiled, whichever
-// comes first (Song::PendingWriter): a change the song's tree tells (a frozen device's value, its automation, the tempo), as
-// a tree's callback reads none of the song's clips (model/base/internal/SongValues.h: during an undo the tree is back before
-// the clips are); and the clips and their notes, heard from the song's values (ClipsListener, NotesListener). A frozen track
+// comes first (Song::PendingWriter): a change the song's tree tells (a frozen device's value, its automation), as a tree's
+// callback reads none of the song's clips (model/base/internal/SongValues.h: during an undo the tree is back before the clips
+// are); and the clips, their notes and the tempo map, heard from the song's values (SongValues::Listener). A frozen track
 // whose clip changed plays live from then, and no save, version or plan takes it frozen meanwhile. A track frozen keeps a
 // copy of what it holds as it is frozen, which freezeFromFile() has this take at once (Song::writePending()), and else the
 // later moment takes; one that came back frozen (by an undo or a redo, or moved: JUCE takes a track out and puts it in
 // again) is compared with what its file was kept with as it was frozen, if this saw it frozen before. None of its tree
 // callbacks reads the song's clips or their notes (SongValues.h).
 class FreezeKeeper : private juce::ValueTree::Listener,
-                     private SongValues::NotesListener,
-                     private SongValues::ClipsListener,
+                     private SongValues::Listener,
                      private Song::PendingWriter,
                      private juce::AsyncUpdater
 {
@@ -89,12 +89,14 @@ public:
     // own, getFrozenFile(), whichever froze it), or as the project opened. Every other plays live.
     bool keepThrough (const std::function<bool()>& apply);
 
-    // What a frozen track's file holds, as the song held it then: a copy of its parts' elements, and the song's values
-    // (model/base/internal/WholeState.h), its clips and their notes among them.
+    // What a frozen track's file holds, as the song held it then: a copy of its parts' elements, the song's values
+    // (model/base/internal/WholeState.h), its clips and their notes among them, and the song's tempos (TempoMapValue.h), which
+    // put its notes and clips where they are in seconds (its time signatures put nothing there).
     struct Holds
     {
         juce::ValueTree parts;
         ValuesKept values;
+        immer::flex_vector<TempoEntry> tempos;
     };
 
 private:
@@ -124,17 +126,33 @@ private:
     void compareMarked(); // what waits: the clips', and what the tree told during an undo or a redo
     void forgetMarked();
 
-    // The notes of a frozen track's clip, and its clips, heard as the song's values change: marked, and compared once the
-    // step is whole (a listener of the values reads nothing of the song as it is told: SongValues.h).
+    // The notes of a frozen track's clip, its clips, and the tempo map (every frozen track's), heard as the song's values
+    // change: marked, and compared once the step is whole (a listener of the values reads nothing of the song as it is told:
+    // SongValues.h). The tree's callbacks leave the tempo map alone (isHeardAsTempoMap()).
     void clipNotesChanged (const std::vector<ClipID>&) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
+    void tempoMapChanged() override;
     void handleAsyncUpdate() override { compareMarked(); }
     void writePending() override; // what is marked compared now, but during an undo or a redo (Song.h)
 
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override { check (parent, true); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&, int) override { check (parent, false); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { check (parent, false); }
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
+    {
+        if (! isHeardAsTempoMap (parent, child))
+            check (parent, true);
+    }
+
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
+    {
+        if (! isHeardAsTempoMap (parent, child))
+            check (parent, false);
+    }
+
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
+    {
+        if (! isHeardAsTempoMap (parent))
+            check (parent, false);
+    }
 
     JUCE_DECLARE_NON_COPYABLE (FreezeKeeper)
 };

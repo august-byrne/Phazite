@@ -127,8 +127,9 @@ namespace
     }
 
     // What a frozen track's file holds, as the song's tree has it: its frozen devices, its modulators and macros, which can
-    // move them, the frozen devices' automation (of the devices in its frozen containers too), and the song's tempos, which
-    // put its notes and clips where they are in seconds. Its clips, with their notes, are the song's values' (Holds::values).
+    // move them, and the frozen devices' automation (of the devices in its frozen containers too). Its clips, with their
+    // notes, are the song's values' (Holds::values), and the song's tempos, which put its notes and clips where they are in
+    // seconds, its tempo map's (Holds::tempos).
     std::vector<juce::ValueTree> getWhatTheFreezeHolds (const Song& song, TrackID track)
     {
         std::vector<juce::ValueTree> parts;
@@ -157,10 +158,6 @@ namespace
             if (devices.contains (DeviceID::fromRaw ((std::uint64_t) (juce::int64) curve[schema::curveDevice])))
                 parts.push_back (curve);
 
-        for (const auto& tempo : song.getState().getChildWithName (schema::TEMPOMAP))
-            if (tempo.hasType (schema::TEMPO))
-                parts.push_back (tempo);
-
         return parts;
     }
 
@@ -171,7 +168,7 @@ namespace
         for (const auto& part : getWhatTheFreezeHolds (song, track))
             copy.appendChild (part.createCopy(), nullptr);
 
-        return { copy, keepValues (song) };
+        return { copy, keepValues (song), getTempoMapValue (song).tempos };
     }
 
     bool holdsWhatWasFrozen (const Song& song, TrackID track, const FreezeKeeper::Holds& frozen)
@@ -182,10 +179,15 @@ namespace
             return false;
 
         // Each as it is in the song, against its copy as copyWhatTheFreezeHolds() made it: in place, since this runs at every
-        // change in a frozen track (a fader dragged); and its clips with their notes as values, the same values or ones alike.
+        // change in a frozen track (a fader dragged); its clips with their notes as values, the same values or ones alike; and
+        // the song's tempos, the same value or one alike (a tempo changed and changed back compares as the same).
         for (int i = 0; i < (int) parts.size(); ++i)
             if (! isSameSound (parts[(size_t) i], frozen.parts.getChild (i)))
                 return false;
+
+        if (const auto tempos = getTempoMapValue (song).tempos;
+            tempos.identity() != frozen.tempos.identity() && ! (tempos == frozen.tempos))
+            return false;
 
         return holdSameTrackClips (keepValues (song), frozen.values, track);
     }
@@ -374,10 +376,7 @@ FreezeKeeper::FreezeKeeper (Song& s)
     state.addListener (this);
 
     if (auto* values = song.getValues())
-    {
-        values->addNotesListener (this);
-        values->addClipsListener (this);
-    }
+        values->addListener (this);
 
     song.addPendingWriter (this);
 }
@@ -388,10 +387,7 @@ FreezeKeeper::~FreezeKeeper()
     song.removePendingWriter (this);
 
     if (auto* values = song.getValues())
-    {
-        values->removeNotesListener (this);
-        values->removeClipsListener (this);
-    }
+        values->removeListener (this);
 
     state.removeListener (this);
 }
@@ -432,6 +428,17 @@ void FreezeKeeper::clipsChanged (const std::vector<SongValues::ClipChange>& clip
 
     if (! clipTracks.empty())
         triggerAsyncUpdate();
+}
+
+void FreezeKeeper::tempoMapChanged()
+{
+    // Any frozen track's file holds the song's tempos: every one compared at the later moment (as check() takes a change),
+    // but what this changes itself (unfreezing) and what keepThrough() compares as it applies.
+    if (checking)
+        return;
+
+    waiting.all = true;
+    triggerAsyncUpdate();
 }
 
 void FreezeKeeper::compareMarked()
@@ -593,8 +600,8 @@ void FreezeKeeper::compare (TrackID track)
 void FreezeKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     // How tracks show and where windows were change nothing that plays; nor does the song's count of IDs, which every new
-    // ID moves, or how it plays and its grid, on its root.
-    if (tree == state && schema::isUncountedProperty (tree, property))
+    // ID moves, or how it plays and its grid, on its root. The tempo map's: tempoMapChanged().
+    if ((tree == state && schema::isUncountedProperty (tree, property)) || isHeardAsTempoMap (tree))
         return;
 
     if (! schema::isTrackViewProperty (property) && ! isIgnoredProperty (property))
@@ -641,8 +648,8 @@ void FreezeKeeper::check (const juce::ValueTree& changed, bool cameIn)
         curve.isValid() && ! isFrozenDevice (song, DeviceID::fromRaw ((std::uint64_t) (juce::int64) curve[schema::curveDevice])))
         return;
 
-    // The song's automation or its tempos, which any frozen track's file may hold.
-    if (changed == state || findEnclosing (changed, schema::AUTOMATION).isValid() || findEnclosing (changed, schema::TEMPOMAP).isValid())
+    // The song's automation, which any frozen track's file may hold (its tempos: tempoMapChanged()).
+    if (changed == state || findEnclosing (changed, schema::AUTOMATION).isValid())
         waiting.all = true;
 }
 

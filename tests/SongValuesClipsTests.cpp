@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What hears the song's clips change hears it from one place, by IDs (model/base/internal/SongValues.h: ClipsListener),
-// which the song's clips' area tells at each change of its value. For each kind of change made through the model's
-// functions, the calls it tells, folded per undo step (each clip's track before the step and after it, and the tracks whose
-// clips came in another order), are what the clips' values say changed; its Undo tells the mirror of it, its Redo the same.
+// What hears the song's clips change hears it from one place, by IDs (model/base/internal/SongValues.h:
+// Listener::clipsChanged()), which the song's clips' area tells at each change of its value. For each kind of change made
+// through the model's functions, the calls it tells, folded per undo step (each clip's track before the step and after it,
+// and the tracks whose clips came in another order), are what the clips' values say changed; its Undo tells the mirror of
+// it, its Redo the same.
 //   phazite_tests.exe --test-case="Song values' clips*"
 #include "TestClips.h"
 #include "TestHelpers.h"
@@ -31,7 +32,7 @@ using phazite::TrackID;
 using phazite::test::at;
 
 // Every call the clips' listener heard, in order.
-struct Told final : phazite::SongValues::ClipsListener
+struct Told final : phazite::SongValues::Listener
 {
     struct Call
     {
@@ -160,8 +161,8 @@ Folded findChanged (const Clips& before, const Clips& after)
 // A song in a project of its own, its clips' listener recording what it tells.
 struct Watched
 {
-    Watched() { song.getValues()->addClipsListener (&told); }
-    ~Watched() { song.getValues()->removeClipsListener (&told); }
+    Watched() { song.getValues()->addListener (&told); }
+    ~Watched() { song.getValues()->removeListener (&told); }
 
     // A change as one undo step (the change's own, joined), what it told folded and compared with what the values say it
     // changed (something), then its Undo (the mirror) and its Redo (the same). Returns the step's calls.

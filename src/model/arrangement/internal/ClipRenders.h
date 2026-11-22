@@ -88,7 +88,7 @@ void purgeClipRenders (const Song&);
 // checkFailedAgain()), or the clip needs another render (other settings, or another cache folder) or needs it again after
 // no clip did: its clips stay silent and say so (hasFailed(), getFailedClips()).
 class ClipRenders : private juce::ValueTree::Listener,
-                    private SongValues::ClipsListener,
+                    private SongValues::Listener,
                     private FileIdentityListener,
                     private juce::Timer,
                     private juce::AsyncUpdater
@@ -187,10 +187,10 @@ private:
     void handleAsyncUpdate() override;
     void fileIdentityChanged (const juce::File&) override; // a source may be written again: another render to make
 
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override; // SongValues.h
+    void tempoMapChanged() override;                                                                      // SongValues.h
 
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };

@@ -53,4 +53,12 @@ juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const ValuesKept&);
 bool holdSameNotes (const ValuesKept&, const ValuesKept&, ClipID);
 bool holdSameClip (const ValuesKept&, const ValuesKept&, ClipID);
 bool holdSameTrackClips (const ValuesKept&, const ValuesKept&, TrackID);
+
+// Whether two songs, each a tree with its kept values (the song's own and its kept values now, a copy and those kept with it),
+// hold the same tempo map, as one value (TempoMapValue.h: the same tempos and time signatures, each kind by beat): so that a
+// tempo changed and changed back compares as the same, whatever order the elements of a file came in. While the song's tree
+// holds its tempo map (roadmap step S5.20: the tempo map's switch is to come) the trees' TEMPOMAP elements are read; a tree
+// with one and a tree without hold different maps. Both of Project's comparisons with the saved copy compare the tempo map
+// with it (the quick one, and the whole song's: holdTheSameProject()), so that the two agree. Any thread.
+bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
 } // namespace phazite

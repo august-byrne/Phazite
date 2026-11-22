@@ -2216,3 +2216,109 @@ TEST_CASE ("An audio alias group whose file one branch located anew while the ot
         checkGroup();
     }
 }
+
+namespace
+{
+// The index of a waiting merge's conflict in the tempo map, on a tempo at a beat (the last step of its path, "TEMPO:8...") and a
+// property of it, or -1.
+int findTempoClash (const phazite::ProjectContext& context, double beat, const juce::Identifier& property)
+{
+    const auto& clashes = phazite::getVersionHistory (context)->getMerging()->clashes;
+    const auto step = schema::TEMPO.toString() + ":" + juce::String (beat, 6);
+
+    for (size_t i = 0; i < clashes.size(); ++i)
+        if (! clashes[i].path.isEmpty() && clashes[i].path[clashes[i].path.size() - 1] == step && clashes[i].property == property)
+            return (int) i;
+
+    return -1;
+}
+} // namespace
+
+TEST_CASE ("A conflict on a tempo's bpm and on a tempo's ramp, and on a tempo both branches added at one beat, is chosen each way, "
+           "each choice one exact undo step")
+{
+    // A tempo change at beat 8 committed on main; idea-2 sets it to 150 BPM, makes the first tempo ramp to it and adds one at
+    // 90 BPM at beat 16; main sets it to 130 BPM, bends the first's ramp and adds one at 100 BPM at beat 16. Three conflicts in
+    // the song's own line, whose choices go into the tempo map, each Undo and Redo exact. (A tempo's beat is no conflict of its
+    // own: the beat is the tempo's key in a merge, so a tempo moved is one taken away and one added.)
+    TestSong s;
+    phazite::addTempoChange (*phazite::findSong (s.context), at (8.0), 140.0);
+    keepVersion (s.context, "First");
+
+    const auto change = [&s] (double bpm, float curve, double added)
+    {
+        auto& song = *phazite::findSong (s.context);
+        const phazite::UndoStep step (song, "Tempo");
+        REQUIRE (phazite::moveTempoChange (song, 1, at (8.0), bpm) == 1);
+        phazite::setTempoCurve (song, 0, curve);
+        REQUIRE (phazite::addTempoChange (song, at (16.0), added) == 2);
+    };
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+    change (150.0, phazite::tempoRamp, 90.0);
+    const auto theirs = keepVersion (s.context, "There");
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    change (130.0, 0.4f, 100.0);
+    keepVersion (s.context, "Here");
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+    phazite::finishMerge (s.context);
+    REQUIRE (phazite::isMerging (s.context));
+    const auto onBpm = findTempoClash (s.context, 8.0, schema::bpm);
+    const auto onCurve = findTempoClash (s.context, 0.0, schema::tempoCurve);
+    const auto onAdded = findTempoClash (s.context, 16.0, schema::bpm);
+    INFO ("conflicts: " << phazite::getClashes (s.context).size());
+    REQUIRE (onBpm >= 0);
+    REQUIRE (onCurve >= 0);
+    REQUIRE (onAdded >= 0);
+
+    auto& song = *phazite::findSong (s.context);
+    const auto tempos = [&song] { return phazite::getTempoChanges (song); };
+    REQUIRE (tempos().size() == 3);
+    CHECK (tempos()[1].bpm == doctest::Approx (130.0));
+    CHECK (tempos()[0].curve == doctest::Approx (0.4f));
+    CHECK (tempos()[2].bpm == doctest::Approx (100.0));
+
+    UndoCheck undo (s.context);
+
+    // Each choice: the tempo at 8's bpm, the first's line to it (what was before had none: a step), the tempo at 16's bpm.
+    for (const auto& [value, bpm, curve, added] : { std::tuple<int, double, float, double> { 2, 150.0, phazite::tempoRamp, 90.0 },
+                                                    std::tuple<int, double, float, double> { 0, 140.0, phazite::tempoJump, -1.0 },
+                                                    std::tuple<int, double, float, double> { 1, 130.0, 0.4f, 100.0 } })
+    {
+        INFO ("chosen " << value);
+        undo.check (phazite::getClashChoiceName (value) + ": the tempo",
+                    [&s, onBpm, chosen = value] { REQUIRE (phazite::chooseClash (s.context, onBpm, chosen)); });
+        undo.check (phazite::getClashChoiceName (value) + ": the ramp",
+                    [&s, onCurve, chosen = value] { REQUIRE (phazite::chooseClash (s.context, onCurve, chosen)); });
+        undo.check (phazite::getClashChoiceName (value) + ": the tempo added",
+                    [&s, onAdded, chosen = value] { REQUIRE (phazite::chooseClash (s.context, onAdded, chosen)); });
+
+        const auto now = tempos();
+        REQUIRE (now.size() >= 2);
+        CHECK (now[1].beat.inBeats() == doctest::Approx (8.0));
+        CHECK (now[1].bpm == doctest::Approx (bpm));
+        CHECK (now[0].curve == doctest::Approx (curve));
+
+        if (added > 0.0)
+        {
+            REQUIRE (now.size() == 3);
+            CHECK (now[2].beat.inBeats() == doctest::Approx (16.0));
+            CHECK (now[2].bpm == doctest::Approx (added));
+        }
+        else
+        {
+            // What was before had no tempo there, and the conflict is on its bpm alone: the tempo stays, without one, and
+            // reads as the description's fallback (Schema.h: bpm), as its element would. This pins today's result, which is
+            // known bug 239 (docs/known-bugs.md): what was before should take the tempo away; its fix changes this.
+            REQUIRE (now.size() == 3);
+            CHECK (now[2].beat.inBeats() == doctest::Approx (16.0));
+            CHECK (now[2].bpm == doctest::Approx (120.0));
+        }
+
+        checkSong (song);
+    }
+
+    undo.walkBackAndForth();
+}

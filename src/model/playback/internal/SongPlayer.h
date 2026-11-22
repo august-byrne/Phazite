@@ -32,8 +32,7 @@ struct ClipTempo;
 struct PlayedClip;
 
 class SongPlayer : private juce::ValueTree::Listener,
-                   private SongValues::NotesListener,
-                   private SongValues::ClipsListener
+                   private SongValues::Listener
 {
 public:
     // A song's, with its plug-ins' instances (those of its session: none play without).
@@ -274,6 +273,7 @@ private:
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex) override;
     void clipNotesChanged (const std::vector<ClipID>&) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
+    void tempoMapChanged() override { changes.tempo = true; } // every track's audio, which plays in seconds
 
     // Whether a part kept from the plan before is checked against the song now (setChecking()): all of them while the
     // player plays few devices, a share otherwise, one part in every so many, its phase moving on with each plan.

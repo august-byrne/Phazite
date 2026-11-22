@@ -229,7 +229,7 @@ ClipRenders::ClipRenders (const Song& s)
     state.addListener (this);
 
     if (const auto* values = song.getValues())
-        values->addClipsListener (this);
+        values->addListener (this);
 
     addFileIdentityListener (*this);
     update();
@@ -238,7 +238,7 @@ ClipRenders::ClipRenders (const Song& s)
 ClipRenders::~ClipRenders()
 {
     if (const auto* values = song.getValues())
-        values->removeClipsListener (this);
+        values->removeListener (this);
 
     state.removeListener (this);
     removeFileIdentityListener (*this);
@@ -463,22 +463,24 @@ void ClipRenders::handleAsyncUpdate()
         framesMade = framesAll = 0;
 }
 
-void ClipRenders::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
+void ClipRenders::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
-    // The tempo the clips follow. A clip's sound: clipsChanged().
-    if (tree.hasType (schema::TEMPO))
+    // Whatever was added but the tempo map's (a clip: clipsChanged(); a tempo change: tempoMapChanged()).
+    if (! isHeardAsTempoMap (parent, child))
         rendersMayChange();
 }
 
-void ClipRenders::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&)
+void ClipRenders::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
 {
-    rendersMayChange(); // a tempo change added, say (a clip: clipsChanged())
+    // Whatever was taken out but the tempo map's (a clip's last warp marker: clipsChanged(); a tempo change: tempoMapChanged()).
+    if (! isHeardAsTempoMap (parent, child))
+        rendersMayChange();
 }
 
-void ClipRenders::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
+void ClipRenders::tempoMapChanged()
 {
-    // A tempo change taken away: the clips under it play at another speed now, from a render of their own. (A clip's last
-    // warp marker: clipsChanged().)
+    // The tempo the clips follow: a tempo changed, added or taken away, and the clips under it play at another speed now, from
+    // a render of their own.
     rendersMayChange();
 }
 

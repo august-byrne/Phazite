@@ -27,6 +27,7 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/DevicesView.h"
 #include "ui/playlist/ClipComponent.h"
@@ -259,8 +260,8 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
 TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when its clip moves, a clip is added to it or an undo "
            "puts one back, and stays frozen through an undo and a redo of something else")
 {
-    // The clips are heard from the song's values (SongValues.h: ClipsListener), compared once the step is whole: during an
-    // undo, the rest of the step may not be back yet.
+    // The clips are heard from the song's values (SongValues.h: Listener::clipsChanged()), compared once the step is whole:
+    // during an undo, the rest of the step may not be back yet.
     Song song;
     auto& model = song.getSong();
     const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
@@ -325,6 +326,47 @@ TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when i
     phazite::undo (model);
     const auto clips = phazite::getClips (model, song.bass);
     CHECK (std::find (clips.begin(), clips.end(), song.clip) != clips.end());
+    unfreezes();
+}
+
+TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when the song's tempo changes, by an undo too, and stays "
+           "frozen when it changes and changes back within one turn, or its time signature changes")
+{
+    // The tempo map is heard from the song's values (SongValues.h: Listener::tempoMapChanged()), every frozen track compared
+    // at the next turn with the tempos its file was made with (Freeze.h: FreezeKeeper::Holds::tempos), as values: the file is
+    // in seconds, which the tempos put its notes and clips at, and the time signatures put nothing anywhere.
+    Song song;
+    auto& model = song.getSong();
+    const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
+    const auto unfreezes = [&isFrozen]
+    {
+        CHECK (isFrozen()); // not within the edit
+        CHECK (phazite::test::dispatchMessagesUntil ([&isFrozen] { return ! isFrozen(); }));
+    };
+
+    // Changed and changed back in one turn: still frozen; and a time signature: still frozen.
+    song.freeze();
+    phazite::setTempo (model, 100.0);
+    phazite::setTempo (model, 120.0);
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+    phazite::setTimeSignature (model, { 3, 4 });
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+
+    // Changed: unfrozen.
+    phazite::setTempo (model, 100.0);
+    unfreezes();
+
+    // A tempo change added along the song: unfrozen.
+    song.freeze();
+    CHECK (phazite::addTempoChange (model, phazite::test::at (2.0), 90.0) == 1);
+    unfreezes();
+
+    // An undo of a tempo change made before the freeze: unfrozen.
+    song.freeze();
+    phazite::undo (model);
+    CHECK_FALSE (phazite::hasTempoChanges (model));
     unfreezes();
 }
 

@@ -57,7 +57,7 @@ struct Heard final : juce::ValueTree::Listener
 };
 
 // What the song's values tell of the clips whose values changed.
-struct Told final : phazite::SongValues::NotesListener
+struct Told final : phazite::SongValues::Listener
 {
     void clipNotesChanged (const std::vector<ClipID>& clips) override { told.push_back (clips); }
 
@@ -99,15 +99,6 @@ std::vector<juce::String> getChildTypes (const juce::ValueTree& clip)
                          + (child.hasProperty (schema::noteID) ? child[schema::noteID].toString() : juce::String()));
 
     return types;
-}
-
-bool holdsEvents (const juce::ValueTree& clip)
-{
-    for (const auto& child : clip)
-        if (child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
-            return true;
-
-    return false;
 }
 
 // The clips of each golden project that hold notes or values, each whole (WholeState.h), with its project open; and no CLIP
@@ -154,10 +145,10 @@ struct Kept
         phazite::addNote (*song, clip, 64, phazite::test::at (2.0), phazite::test::lasting (1.0), 90);
         phazite::addControl (*song, clip, phazite::test::at (0.5), ControlKind::controller, 64, 127);
         song->getUndoManager().clearUndoHistory();
-        song->getValues()->addNotesListener (&told);
+        song->getValues()->addListener (&told);
     }
 
-    ~Kept() { song->getValues()->removeNotesListener (&told); }
+    ~Kept() { song->getValues()->removeListener (&told); }
 
     const ClipNotes* find (ClipID id) const { return song->getValues()->findClipNotes (id); }
     ClipNotes get (ClipID id) const { return phazite::getClipNotesValue (*song, id); }

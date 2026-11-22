@@ -53,8 +53,7 @@ struct VersionsAudioFound
 juce::String findVersionsAudioKey (VersionStore&);
 
 class VersionHistory : private juce::ValueTree::Listener,
-                       private SongValues::NotesListener,
-                       private SongValues::ClipsListener,
+                       private SongValues::Listener,
                        private juce::Timer
 {
 public:
@@ -951,6 +950,9 @@ private:
 
     // The clips that changed (SongValues.h): their tracks' lines, before and after, marked by their IDs as they are told.
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
+
+    // The tempo map (SongValues.h), which the tree's callbacks below leave alone (isHeardAsTempoMap()): the song's own line.
+    void tempoMapChanged() override;
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();
@@ -977,12 +979,18 @@ private:
 
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
+        if (isHeardAsTempoMap (parent, child))
+            return; // tempoMapChanged()
+
         ++songChanges;
         markChildChanged (parent, child);
     }
 
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
+        if (isHeardAsTempoMap (parent, child))
+            return; // tempoMapChanged()
+
         ++songChanges;
         markChildChanged (parent, child);
     }

@@ -2,6 +2,7 @@
 // The tempo lane in the playlist (src/ui/playlist/TempoLane.h) and its header, driven as the user would: the mouse on the
 // lane, and the items of the menus it and the time bar show.
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
@@ -199,6 +200,52 @@ TEST_CASE ("The tempo lane: a point drags, a line ramps and bends, a click adds 
     CHECK_FALSE (deleteFirst->isEnabled);
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.lane->getPointPosition (1)), { "Delete Tempo Change" }));
     CHECK_FALSE (phazite::hasTempoChanges (*screen.song));
+}
+
+TEST_CASE ("The tempo lane's drags, clicks and menu items are each one exact undo step, and the walk back and forth gives each song "
+           "again")
+{
+    // The lane's gestures through the undo check (UndoCheck.h), which also compiles a plan after each change, its Undo and its
+    // Redo, and compares what the plan kept with the song: a tempo change the plan's compiler wasn't told of shows there.
+    TempoScreen screen;
+    phazite::addTempoChange (*screen.song, beat (8.0), 140.0);
+    screen.song->getUndoManager().clearUndoHistory();
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.lane->isVisible());
+    phazite::test::Mouse mouse (*screen.lane);
+    phazite::test::UndoCheck undo (screen.context);
+
+    const auto drag = [&mouse] (juce::Point<int> from, juce::Point<int> by)
+    {
+        mouse.press (from);
+        mouse.dragTo (from + by);
+        mouse.release();
+        mouse.pause();
+    };
+
+    undo.check ("Move Tempo Change", [&] { drag (screen.point (1), { screen.xOf (4.0) - screen.xOf (0.0), -9 }); });
+    CHECK (screen.tempos()[1].beat == beat (12.0));
+    undo.check ("Change the First Tempo", [&] { drag (screen.point (0), { 0, 5 }); });
+    CHECK (screen.tempos()[0].bpm < 120.0);
+
+    const juce::Point<float> onLine ((float) screen.xOf (6.0), screen.lane->getPointPosition (0).y);
+    undo.check ("Ramp to the Next Tempo", [&] { REQUIRE (runMenuItem (screen.lane->getMenuAt (onLine), { "Ramp to the Next Tempo" })); });
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.tempos()[0].curve == doctest::Approx (phazite::tempoRamp));
+
+    const auto handle = screen.lane->getHandle (0);
+    REQUIRE (handle.has_value());
+    undo.check ("Bend Tempo Ramp", [&] { drag (handle->roundToInt(), { 0, -10 }); });
+    CHECK (screen.tempos()[0].curve < -0.1f);
+
+    undo.check ("Add Tempo Change", [&] { mouse.click ({ screen.xOf (20.0), 1 }); });
+    REQUIRE (screen.tempos().size() == 3);
+    phazite::test::dispatchPendingMessages();
+    undo.check ("Delete Tempo Change", [&] { mouse.doubleClick (screen.point (2)); });
+    CHECK (screen.tempos().size() == 2);
+    phazite::test::dispatchPendingMessages();
+
+    undo.walkBackAndForth();
 }
 
 TEST_CASE ("A tempo change's menu types its tempo in a field over its point, as one step")

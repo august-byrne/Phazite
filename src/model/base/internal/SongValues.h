@@ -377,10 +377,12 @@ bool hasGroupsOfOne (const SongClips&);
 // listeners handle by handle in the order of the handles' addresses, so there is no order among them: the keeper may hear a
 // change after the listener that reads, which then finds a track moved (JUCE moves one by taking it out and putting it in
 // again) without its clips; and during an undo the tree is back before the clips are. What reads the clips does it at its
-// listener's later moment: a plan's next compile, the next turn of the message loop (Song::PendingWriter), or as the clips'
-// listener (ClipsListener) is told. What the keeper can't see: a track added or taken out with no undo manager outside an
-// OutsideHistory scope is written into the step in progress (if any) as if it had one; nothing in Phazite does that to a
-// song that holds its values (the loader does it before: makeSong()).
+// listener's later moment: a plan's next compile, the next turn of the message loop (Song::PendingWriter), or as the values'
+// listener (Listener) is told. The keeper is also what tells the values' listeners of the tempo map, from the tree's
+// notifications under its TEMPOMAP element, while the tree holds it (Listener::tempoMapChanged()). What the keeper can't
+// see: a track added or taken out with no undo manager outside an OutsideHistory scope is written into the step in
+// progress (if any) as if it had one; nothing in Phazite does that to a song that holds its values (the loader does it
+// before: makeSong()).
 class SongValues final
 {
 public:
@@ -419,18 +421,6 @@ public:
     // where they hold one value, else this one without a step of its own (a group holds one value).
     void setClipNotes (Song&, ClipID, ClipNotes);
 
-    // The clips whose values changed, by a step, an undo, a redo or a write outside the history: compared by identity, clip by
-    // clip. A listener only marks them, and reads nothing else of the song while it is told (ValueArea.h): during an undo the
-    // rest of the step may not be back yet.
-    struct NotesListener
-    {
-        virtual ~NotesListener() = default;
-        virtual void clipNotesChanged (const std::vector<ClipID>& clips) = 0;
-    };
-
-    void addNotesListener (NotesListener*);
-    void removeNotesListener (NotesListener*);
-
     // A clip that changed, with the track it was on before and the one it is on after: none before for a clip added, none
     // after for one taken out (erased), the same track twice for a change in place.
     struct ClipChange
@@ -439,23 +429,43 @@ public:
         TrackID before, after;
     };
 
-    // What hears the song's clips change, from one place, by their IDs: the clips' area tells, in one call for each change of
-    // its value (each of a step's changes, an undo's or a redo's whole step, a write outside the history), each clip added,
-    // taken out, moved to another track or changed in place (any of its properties, its warp markers), found by comparing the
-    // two values by identity clip by clip, and each track that holds the same clips in another order. A track added or taken
-    // out tells each of its clips (those of the tracks in it too) as added or taken out, in one call. A clip's notes and
-    // controllers' values are no part of it: NotesListener's. A listener only marks what changed (the clips, the tracks), and
-    // reads nothing of the song while it is told: during an undo the rest of the step may not be back yet (ValueArea.h). It
-    // does its work later (a plan's next compile, the next turn of the message loop), however many calls came before.
-    // Listening changes nothing of the values: a song held const may be listened to.
-    struct ClipsListener
+    // What hears the song's values change, from one place: one listener for every area, a function for each, which does
+    // nothing unless a listener overrides it, so that an area added changes only the listeners that care. Each registers
+    // once (addListener()). A listener only marks what changed, and reads nothing of the song while it is told: during an
+    // undo the rest of the step may not be back yet (ValueArea.h). It does its work later (a plan's next compile, the next
+    // turn of the message loop), however many calls came before. Listening changes nothing of the values: a song held const
+    // may be listened to.
+    struct Listener
     {
-        virtual ~ClipsListener() = default;
-        virtual void clipsChanged (const std::vector<ClipChange>& clips, const std::vector<TrackID>& reordered) = 0;
+        virtual ~Listener() = default;
+
+        // The clips whose notes and controllers' values changed, by a step, an undo, a redo or a write outside the history:
+        // compared by identity, clip by clip.
+        virtual void clipNotesChanged (const std::vector<ClipID>& clips) { juce::ignoreUnused (clips); }
+
+        // The song's clips, by their IDs: the clips' area tells, in one call for each change of its value (each of a step's
+        // changes, an undo's or a redo's whole step, a write outside the history), each clip added, taken out, moved to another
+        // track or changed in place (any of its properties, its warp markers), found by comparing the two values by identity
+        // clip by clip, and each track that holds the same clips in another order. A track added or taken out tells each of
+        // its clips (those of the tracks in it too) as added or taken out, in one call. A clip's notes and controllers' values
+        // are no part of it: clipNotesChanged()'s.
+        virtual void clipsChanged (const std::vector<ClipChange>& clips, const std::vector<TrackID>& reordered)
+        {
+            juce::ignoreUnused (clips, reordered);
+        }
+
+        // The song's tempo map (TempoMapValue.h): its tempos or its time signatures, any of them. While the song's tree holds
+        // the map, the keeper tells it for each of the tree's notifications under its TEMPOMAP element (a property of an
+        // element in it, a child added to it, taken out of it or moved in it; the TEMPOMAP itself added to the song or taken
+        // out), a step's, an undo's, a redo's and a write's outside the history alike, in the order they come, and what
+        // listens to the song's root hears none of those from the tree (isHeardAsTempoMap(), below), so that nothing hears a
+        // change twice. Once the song holds the map as a value (roadmap step S5.20, the tempo map's switch) the area tells it,
+        // once for each change of its value.
+        virtual void tempoMapChanged() {}
     };
 
-    void addClipsListener (ClipsListener*) const;
-    void removeClipsListener (ClipsListener*) const;
+    void addListener (Listener*) const;
+    void removeListener (Listener*) const;
 
     // How many CLIP elements the keeper took into the areas from the song's tree since the song held its values (the safety
     // net, above): what the versions, which give a track its clips through the clips' functions, check they never leave to it
@@ -472,6 +482,7 @@ private:
     struct NotesTeller;
     struct ClipsTeller;
     struct Keeper;
+    mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers and the keeper (addListener())
     std::unique_ptr<NotesTeller> notesTeller;
     std::unique_ptr<ClipsTeller> clipsTeller;
     std::unique_ptr<Keeper> keeper;
@@ -489,6 +500,14 @@ private:
     JUCE_DECLARE_NON_COPYABLE (SongValues)
     JUCE_DECLARE_NON_MOVEABLE (SongValues)
 };
+
+// Whether what the song's tree tells of an element (a property changed, a child added, taken out or moved in it) is the
+// tempo map's, which a listener of the song's root hears from the values' listener alone (SongValues::Listener::
+// tempoMapChanged()) and leaves alone in its tree callbacks: the song's TEMPOMAP element (the child of its PHAZITE element),
+// or an element in it. And whether a child added to an element or taken out of it is: the TEMPOMAP itself, added to the
+// song or taken out, or a child of an element that is. A child moved is the tempo map's where the element it moved in is.
+bool isHeardAsTempoMap (const juce::ValueTree& element);
+bool isHeardAsTempoMap (const juce::ValueTree& parent, const juce::ValueTree& child);
 
 //==============================================================================
 // The conversion between a clip's element and its value: the one place that reads and writes NOTE and CONTROL by name.

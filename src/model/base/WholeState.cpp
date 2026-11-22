@@ -2,6 +2,7 @@
 #include "internal/WholeState.h"
 #include "Song.h"
 #include "internal/Schema.h"
+#include "internal/TempoMapValue.h"
 
 namespace phazite
 {
@@ -113,5 +114,17 @@ bool holdSameTrackClips (const ValuesKept& a, const ValuesKept& b, TrackID track
             return false;
 
     return true;
+}
+
+bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&)
+{
+    // The trees hold the maps still: each read into its value. (The tempo map's switch compares the values kept.)
+    const auto map = song.getChildWithName (schema::TEMPOMAP);
+    const auto other = otherSong.getChildWithName (schema::TEMPOMAP);
+
+    if (map.isValid() != other.isValid())
+        return false;
+
+    return readTempoMapValue (map) == readTempoMapValue (other);
 }
 } // namespace phazite

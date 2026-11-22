@@ -2076,10 +2076,7 @@ Project::Project (Song::Ptr s, const juce::File& f)
     songState.addListener (this);
 
     if (auto* values = song->getValues())
-    {
-        values->addNotesListener (this);
-        values->addClipsListener (this);
-    }
+        values->addListener (this);
 
     // While the song shows another (a version open: Song::setShowingOther()), its unsaved mark is held as it was as that
     // began, compared now: what the other changes is noted, and compared once it went (compareWithSavedState()), and neither
@@ -2141,10 +2138,7 @@ Project::~Project()
     songState.removeListener (this);
 
     if (auto* values = song->getValues())
-    {
-        values->removeNotesListener (this);
-        values->removeClipsListener (this);
-    }
+        values->removeListener (this);
 
     getAutosaveFile (file).deleteFile();
     purgeCache (*song);
@@ -2716,7 +2710,7 @@ void Project::backUpProjectFile()
 
 void Project::clearToCompare()
 {
-    mayHaveChanged = comparingWhole = comparingClipsWhole = false;
+    mayHaveChanged = comparingWhole = comparingClipsWhole = tempoToCompare = false;
     toCompare.clear();
     notesToCompare.clear();
     clipsToCompare.clear();
@@ -2883,6 +2877,13 @@ void Project::compareWithSavedState()
                             [this, &now] (TrackID track) { return holdSameTrackClips (track, now); })
                && std::all_of (clipsToCompare.begin(), clipsToCompare.end(),
                                [this, &now] (const auto& entry) { return holdSameClip (entry.first, now); });
+    }
+
+    // The tempo map, against the saved copy's, as one value.
+    if (same && tempoToCompare)
+    {
+        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+        same = holdSameTempoMap (song->getState(), keepValues (*song), savedState.tree, savedState.values);
     }
 
     clearToCompare();
@@ -3080,8 +3081,27 @@ void Project::clipNotesChanged (const std::vector<ClipID>& clips)
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    if (! schema::isUncountedElement (parent, child))
+    if (! schema::isUncountedElement (parent, child) && ! isHeardAsTempoMap (parent, child))
         markChanged (parent);
+}
+
+void Project::tempoMapChanged()
+{
+    // As markChanged() marks an element of the song: counted, and compared when asked.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+    tempoToCompare = true;
 }
 
 void Project::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>& reordered)
@@ -3199,13 +3219,23 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const ValuesKept& aV
         && ! phazite::holdSameTrackClips (aValues, bValues, TrackID::fromRaw ((std::uint64_t) (juce::int64) a[schema::trackID])))
         return false;
 
+    // The tempo map as one value, as the quick comparison compares it (compareWithSavedState()), so that the two agree: its
+    // elements' order, and what reads as its default, are no difference. Its element is left out of the elements below.
+    const auto hasTempoMap = [] (const juce::ValueTree& element) { return element.getChildWithName (schema::TEMPOMAP).isValid(); };
+
+    if ((hasTempoMap (a) || hasTempoMap (b)) && ! phazite::holdSameTempoMap (a, aValues, b, bValues))
+        return false;
+
+    const auto isSkipped = [] (const juce::ValueTree& parent, const juce::ValueTree& child)
+    { return schema::isUncountedElement (parent, child) || child.hasType (schema::TEMPOMAP); };
+
     // The counted elements, in the same order, holding the same.
     for (int i = 0, j = 0;; ++i, ++j)
     {
-        while (i < a.getNumChildren() && schema::isUncountedElement (a, a.getChild (i)))
+        while (i < a.getNumChildren() && isSkipped (a, a.getChild (i)))
             ++i;
 
-        while (j < b.getNumChildren() && schema::isUncountedElement (b, b.getChild (j)))
+        while (j < b.getNumChildren() && isSkipped (b, b.getChild (j)))
             ++j;
 
         if (i == a.getNumChildren() || j == b.getNumChildren())

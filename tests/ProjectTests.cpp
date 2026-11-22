@@ -38,6 +38,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -990,15 +991,15 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 
     // Notifications that change nothing; and a clip set to the value it holds, which tells nobody (its area's value is the
     // same).
-    struct Told final : phazite::SongValues::ClipsListener
+    struct Told final : phazite::SongValues::Listener
     {
         int calls = 0;
         void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<phazite::TrackID>&) override { ++calls; }
     } told;
 
-    song.getValues()->addClipsListener (&told);
+    song.getValues()->addListener (&told);
     phazite::setClip (song, *clipValue);
-    song.getValues()->removeClipsListener (&told);
+    song.getValues()->removeListener (&told);
     CHECK (told.calls == 0);
     trackState.sendPropertyChangeMessage (phazite::schema::trackName);
     CHECK_FALSE (project->hasUnsavedChanges());
@@ -1152,9 +1153,9 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 TEST_CASE ("A clip changed, added, moved to another track or deleted through the model is an unsaved change, which its Undo "
            "takes back")
 {
-    // The clips are heard from the song's values (SongValues.h: ClipsListener), compared with the saved copy clip by clip and
-    // by each track's clips, as the whole song's comparison says. A project found unsaved stays so until it is saved: so each
-    // change is undone before anything asks (as saved), then redone (unsaved), undone and saved again.
+    // The clips are heard from the song's values (SongValues.h: Listener::clipsChanged()), compared with the saved copy clip by
+    // clip and by each track's clips, as the whole song's comparison says. A project found unsaved stays so until it is
+    // saved: so each change is undone before anything asks (as saved), then redone (unsaved), undone and saved again.
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Clips");
     auto& song = project->getSong();
@@ -1212,6 +1213,93 @@ TEST_CASE ("A clip changed, added, moved to another track or deleted through the
 
     phazite::toggleClipsMuted (song, many);
     phazite::toggleClipsMuted (song, std::vector<phazite::ClipID> (many.begin() + 1, many.end()));
+    CHECK_FALSE (project->isWholeAsSaved());
+    CHECK (project->hasUnsavedChanges());
+}
+
+TEST_CASE ("A tempo map edited through the model is an unsaved change, which its Undo takes back, and one changed back is saved "
+           "again")
+{
+    // The tempo map is heard from the song's values (SongValues.h: Listener::tempoMapChanged()), compared with the saved
+    // copy's as one value (WholeState.h: holdSameTempoMap()), as the whole song's comparison says. A project found unsaved
+    // stays so until it is saved: so each change is undone before anything asks (as saved), then redone (unsaved), undone and
+    // saved again.
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Tempo");
+    auto& song = project->getSong();
+    phazite::addTempoChange (song, beats (8.0), 140.0);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    const auto check = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        INFO (name.toStdString());
+
+        {
+            const phazite::UndoStep step (song, name);
+            change();
+        }
+
+        CHECK_FALSE (project->isWholeAsSaved());
+        phazite::undo (song);
+        CHECK (project->isWholeAsSaved());
+        CHECK_FALSE (project->hasUnsavedChanges());
+        phazite::redo (song);
+        CHECK (project->hasUnsavedChanges());
+        phazite::undo (song);
+        REQUIRE (project->save().wasOk());
+        REQUIRE_FALSE (project->hasUnsavedChanges());
+    };
+
+    check ("Change Tempo", [&] { phazite::setTempo (song, 100.0); });
+    check ("Change Time Signature", [&] { phazite::setTimeSignature (song, { 6, 8 }); });
+    check ("Add Tempo Change", [&] { phazite::addTempoChange (song, beats (16.0), 90.0); });
+    check ("Move Tempo Change", [&] { phazite::moveTempoChange (song, 1, beats (12.0), 150.0); });
+    check ("Change Tempo Ramp", [&] { phazite::setTempoCurve (song, 0, phazite::tempoRamp); });
+    check ("Delete Tempo Change", [&] { phazite::deleteTempoChange (song, 1); });
+
+    // Changed and changed back before anything asked: as saved. A tempo's, a time signature's, a ramp's; and a tempo change
+    // deleted and added again where it was, at its tempo, which the map holds as it did.
+    const auto changedBack = [&] (const juce::String& name, const std::function<void()>& change, const std::function<void()>& back)
+    {
+        INFO (name.toStdString());
+        change();
+        back();
+        CHECK (project->isWholeAsSaved());
+        CHECK_FALSE (project->hasUnsavedChanges());
+    };
+
+    changedBack ("the tempo", [&] { phazite::setTempo (song, 100.0); }, [&] { phazite::setTempo (song, 120.0); });
+    changedBack (
+        "the time signature", [&] { phazite::setTimeSignature (song, { 6, 8 }); }, [&] { phazite::setTimeSignature (song, { 4, 4 }); });
+    changedBack (
+        "the ramp", [&] { phazite::setTempoCurve (song, 0, phazite::tempoRamp); },
+        [&] { phazite::setTempoCurve (song, 0, phazite::tempoJump); });
+    changedBack (
+        "a tempo change deleted and added again", [&] { phazite::deleteTempoChange (song, 1); },
+        [&] { phazite::addTempoChange (song, beats (8.0), 140.0); });
+
+    // The same with a tempo change after it, which its element then comes after: the map holds what it did. With two
+    // tempo changes and with three, the one at beat 8 the second of the song's tempos each time.
+    for (const auto after : { 1, 2 })
+    {
+        INFO (after << " after it");
+
+        for (int i = 1; i <= after; ++i)
+            phazite::addTempoChange (song, beats (8.0 + 8.0 * i), 90.0 + i);
+
+        phazite::test::dispatchPendingMessages();
+        REQUIRE (project->save().wasOk());
+        REQUIRE_FALSE (project->hasUnsavedChanges());
+
+        changedBack (
+            "a tempo change deleted and added again before others", [&] { phazite::deleteTempoChange (song, 1); },
+            [&] { phazite::addTempoChange (song, beats (8.0), 140.0); });
+    }
+
+    // Changed and not back: unsaved, as the whole song's comparison says.
+    phazite::setTempo (song, 133.0);
     CHECK_FALSE (project->isWholeAsSaved());
     CHECK (project->hasUnsavedChanges());
 }
@@ -1396,6 +1484,26 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
 
         phazite::moveTracksAfter (song, { tracks[1] }, tracks[0]);
         CHECK (answer());
+
+        // Tempo changes at beats 8 and 16 (and 24) saved, the one at 8 deleted and added again where it was, at its tempo,
+        // which puts its element after the others: the tempo map holds what it did, which both comparisons compare as one
+        // value. Taken away after, so that the next round starts with the song's one tempo.
+        for (const auto count : { 2, 3 })
+        {
+            INFO (count << " tempo changes");
+
+            for (int i = 1; i <= count; ++i)
+                phazite::addTempoChange (song, beats (8.0 * i), 130.0 + i);
+
+            REQUIRE (phazite::getTempoChanges (song).size() == (size_t) count + 1);
+            startSaved();
+            phazite::deleteTempoChange (song, 1);
+            notifyElsewhere (many);
+            phazite::addTempoChange (song, beats (8.0), 131.0);
+            CHECK_FALSE (answer());
+
+            phazite::removeTempoChanges (song);
+        }
     }
 }
 

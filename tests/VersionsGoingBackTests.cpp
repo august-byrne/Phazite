@@ -1469,7 +1469,7 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
     // Undo and Redo exact.
     TreeChanges heard (*song);
 
-    struct ClipsTold final : phazite::SongValues::ClipsListener
+    struct ClipsTold final : phazite::SongValues::Listener
     {
         std::vector<phazite::ClipID> changed;
         std::vector<phazite::TrackID> reordered;
@@ -1487,7 +1487,7 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
         }
     } told;
 
-    song->getValues()->addClipsListener (&told);
+    song->getValues()->addListener (&told);
 
     const auto apply = [&] (const juce::ValueTree& version, const juce::String& what)
     {
@@ -1537,7 +1537,7 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
     CHECK (told.changed == std::vector { clips[1] });
     CHECK (told.reordered.empty());
     CHECK (phazite::getClipValue (*song, clips[1])->name == "Q2");
-    song->getValues()->removeClipsListener (&told);
+    song->getValues()->removeListener (&told);
 }
 
 TEST_CASE ("A version's alias groups, a member moved, one taken away and one added since, come back whole, MIDI and audio, their "
@@ -1732,6 +1732,78 @@ TEST_CASE ("A song made as it was copied, after a step that changed its clips wa
     phazite::setTrackMuted (*song, tracks[0], true);
 
     // The clip pass writes nothing here (its assertion: ApplySong.cpp, makeSongAsCopied()); the song is the copy, whole.
+    phazite::makeSongAsCopied (*song, copy);
+    CHECK (phazite::writeElement (phazite::test::copyWholeSong (*song)).toString() == phazite::writeElement (copy).toString());
+    checkWhole (*song);
+}
+
+TEST_CASE ("A version with another tempo map goes back and forth whole, as one exact undo step each way, and outside the history")
+{
+    // Its tempos moved, added, ramped, bent and taken away, its first tempo and its time signature changed: the song's own line,
+    // which the tempo map is in, made the version's each way (ApplySong.cpp), compared whole with it.
+    auto song = phazite::createSong();
+    const auto tempos = [&song] { return phazite::getTempoChanges (*song); };
+
+    {
+        const phazite::UndoStep step (*song, "Tempos");
+        phazite::addTempoChange (*song, at (8.0), 140.0);
+        phazite::setTempoCurve (*song, 0, phazite::tempoRamp);
+    }
+
+    const auto atFirst = phazite::test::copyWholeSong (*song);
+
+    {
+        const phazite::UndoStep step (*song, "Other Tempos");
+        phazite::setTempo (*song, 100.0);
+        phazite::moveTempoChange (*song, 1, at (12.0), 150.0);
+        phazite::addTempoChange (*song, at (20.0), 90.0);
+        phazite::setTempoCurve (*song, 1, 0.4f);
+        phazite::setTimeSignature (*song, { 6, 8 });
+    }
+
+    const auto atSecond = phazite::test::copyWholeSong (*song);
+    phazite::removeTempoChanges (*song);
+    const auto atOne = phazite::test::copyWholeSong (*song);
+    REQUIRE (tempos().size() == 1);
+
+    UndoCheck undo (*song);
+    bringBackChecked (*song, undo, atFirst, "The first tempos, from one");
+    REQUIRE (tempos().size() == 2);
+    CHECK (tempos()[1].bpm == doctest::Approx (140.0));
+    bringBackChecked (*song, undo, atSecond, "The other tempos");
+    REQUIRE (tempos().size() == 3);
+    CHECK (tempos()[0].bpm == doctest::Approx (100.0));
+    CHECK (tempos()[1].beat.inBeats() == doctest::Approx (12.0));
+    CHECK (tempos()[1].curve == doctest::Approx (0.4f));
+    CHECK (phazite::getTimeSignature (*song) == phazite::TimeSignature { 6, 8 });
+    bringBackChecked (*song, undo, atFirst, "The first tempos again");
+    bringBackChecked (*song, undo, atOne, "One tempo");
+    undo.walkBackAndForth();
+
+    // Another branch's song, outside the history, each way.
+    phazite::makeSongTheSame (*song, atSecond);
+    checkSongIs (*song, atSecond);
+    phazite::makeSongTheSame (*song, atFirst);
+    checkSongIs (*song, atFirst);
+}
+
+TEST_CASE ("A song made as it was copied, after a step that changed its tempo map was undone, is the copy")
+{
+    auto song = phazite::createSong();
+    phazite::addTempoChange (*song, at (8.0), 140.0);
+    const auto copy = phazite::test::copyWholeSong (*song);
+
+    {
+        const phazite::UndoStep step (*song, "Tempo");
+        phazite::setTempo (*song, 100.0);
+        phazite::moveTempoChange (*song, 1, at (12.0), 150.0);
+        phazite::addTempoChange (*song, at (20.0), 90.0);
+        phazite::setTimeSignature (*song, { 6, 8 });
+    }
+
+    phazite::undo (*song);
+
+    // Nothing to write (ApplySong.cpp, makeSongAsCopied()); the song is the copy, whole.
     phazite::makeSongAsCopied (*song, copy);
     CHECK (phazite::writeElement (phazite::test::copyWholeSong (*song)).toString() == phazite::writeElement (copy).toString());
     checkWhole (*song);

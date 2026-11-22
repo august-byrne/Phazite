@@ -420,7 +420,7 @@ TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one chan
     } heard;
 
     // The changes of the notes' area, each as the clips it names.
-    struct HeardValues : phazite::SongValues::NotesListener
+    struct HeardValues : phazite::SongValues::Listener
     {
         void clipNotesChanged (const std::vector<phazite::ClipID>& clips) override { changes.push_back (clips); }
         std::vector<std::vector<phazite::ClipID>> changes;
@@ -431,9 +431,9 @@ TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one chan
     phazite::test::UndoCheck undo (song.song.context);
     auto root = song.getSong().getState();
     root.addListener (&heard);
-    values->addNotesListener (&heardValues);
+    values->addListener (&heardValues);
     undo.check ("Delete All Pitch Bend", [&] { phazite::deleteAllControlValues (song.song.context, { take }, bend); });
-    values->removeNotesListener (&heardValues);
+    values->removeListener (&heardValues);
     root.removeListener (&heard);
 
     // One change of the clip's value (SongValues.h), which the tree doesn't hear, not 50,000 removals; and the check's undo

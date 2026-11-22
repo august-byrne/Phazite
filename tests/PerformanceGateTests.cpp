@@ -1552,10 +1552,10 @@ TEST_CASE ("Performance gate: the check for unsaved changes compares no element 
 TEST_CASE ("Performance gate: the check for unsaved changes after a clip's property was set compares that clip alone, as much "
            "for a clip of a track of 256 clips as of 2")
 {
-    // The clips are heard from the song's values (model/base/internal/SongValues.h: ClipsListener), each compared with the
-    // saved copy's values (WholeState.h: holdSameClip()), the clip found by its ID in each: no element of either tree, and
-    // nothing of its track's other clips. Before the clips were values, finding the saved clip scanned the saved track's
-    // children (2026-11-21: 257 elements looked at for a clip of the track of 256 clips here, at every edit).
+    // The clips are heard from the song's values (model/base/internal/SongValues.h: Listener::clipsChanged()), each compared
+    // with the saved copy's values (WholeState.h: holdSameClip()), the clip found by its ID in each: no element of either
+    // tree, and nothing of its track's other clips. Before the clips were values, finding the saved clip scanned the saved
+    // track's children (2026-11-21: 257 elements looked at for a clip of the track of 256 clips here, at every edit).
     phazite::test::TestSong s;
     auto& song = getSong (s);
     auto& project = s.getProject();

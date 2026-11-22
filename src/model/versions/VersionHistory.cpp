@@ -822,10 +822,7 @@ VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
     state.addListener (this);
 
     if (auto* values = song.getValues())
-    {
-        values->addNotesListener (this);
-        values->addClipsListener (this);
-    }
+        values->addListener (this);
 
     open();
     startTimer (tickMilliseconds);
@@ -843,10 +840,7 @@ VersionHistory::~VersionHistory()
     stopTimer();
     backgroundBounce = nullptr; // cancelled, before what it renders goes
     if (auto* values = song.getValues())
-    {
-        values->removeNotesListener (this);
-        values->removeClipsListener (this);
-    }
+        values->removeListener (this);
 
     state.removeListener (this);
 
@@ -3150,6 +3144,14 @@ void VersionHistory::clipsChanged (const std::vector<SongValues::ClipChange>& cl
     changesMayDiffer();
 }
 
+void VersionHistory::tempoMapChanged()
+{
+    // A change of the song as its tree's are, in its tempo map: the song's own line (as markChanged() marks it).
+    ++songChanges;
+    edited();
+    markSongOwn();
+}
+
 void VersionHistory::markNotesHeard()
 {
     // A clip gone since was taken off its track, which marked it.
@@ -3181,6 +3183,9 @@ void VersionHistory::markOrder()
 
 void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    if (isHeardAsTempoMap (tree))
+        return; // tempoMapChanged()
+
     ++songChanges;
 
     if (tree.hasType (schema::MERGING)) // a conflict switched
@@ -3210,6 +3215,9 @@ void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce
 
 void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex)
 {
+    if (isHeardAsTempoMap (parent))
+        return; // tempoMapChanged()
+
     ++songChanges;
 
     // Tracks in another order: the song's line, and their numbers.

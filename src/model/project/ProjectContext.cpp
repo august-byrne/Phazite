@@ -41,8 +41,7 @@ namespace
     // Listens to the open song and tells the context's listeners which groups changed, once per turn of the message loop. A
     // plug-in whose helper went, or that was reloaded, changes what its device shows (model/plugins/internal/PluginHost.h).
     struct SongWatcher : private juce::ValueTree::Listener,
-                         private SongValues::NotesListener,
-                         private SongValues::ClipsListener,
+                         private SongValues::Listener,
                          private juce::ChangeListener,
                          private juce::AsyncUpdater
     {
@@ -62,13 +61,8 @@ namespace
         void setSong (Song* newSong)
         {
             if (song != nullptr)
-            {
                 if (auto* values = song->getValues())
-                {
-                    values->removeNotesListener (this);
-                    values->removeClipsListener (this);
-                }
-            }
+                    values->removeListener (this);
 
             state.removeListener (this);
             cancelPendingUpdate();
@@ -80,13 +74,8 @@ namespace
             state.addListener (this);
 
             if (song != nullptr)
-            {
                 if (auto* values = song->getValues())
-                {
-                    values->addNotesListener (this);
-                    values->addClipsListener (this);
-                }
-            }
+                    values->addListener (this);
         }
 
         int getVersion() const noexcept { return version; }
@@ -127,6 +116,9 @@ namespace
 
             add (pending.clips);
         }
+
+        // The tempo map (SongValues.h): its group. Its tree callbacks below leave its elements alone (isHeardAsTempoMap()).
+        void tempoMapChanged() override { add (pending.tempo); }
 
         // Each clip whose notes changed named, on its track, as the song holds it now (a listener of the values reads nothing
         // of the song as it is told: this is later); one gone since was named as it was taken off its track.
@@ -237,9 +229,6 @@ namespace
                     return add (pending.devices);
                 }
 
-                if (element.hasType (schema::TEMPOMAP))
-                    return add (pending.tempo);
-
                 if (isTrackElement (element))
                     return add (pending.tracks);
             }
@@ -327,6 +316,9 @@ namespace
 
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
+            if (isHeardAsTempoMap (tree))
+                return; // tempoMapChanged()
+
             // A device's value that turns what its sidechain hears on or off (a compressor's mode) changes what the mixer
             // shows of it.
             if (switchesSidechain (tree, property))
@@ -372,11 +364,11 @@ namespace
                 mark (tree);
         }
 
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
+        void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
         {
             // A device's first value set by hand, as its other values, is no change that views show; nor its last one set back
-            // to its default, which takes its VALUES away (keepValueSetByHand()).
-            if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE))
+            // to its default, which takes its VALUES away (keepValueSetByHand()). The tempo map's: tempoMapChanged().
+            if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE) || isHeardAsTempoMap (parent, child))
                 return;
 
             if ((child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
@@ -387,12 +379,13 @@ namespace
         }
         void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
         {
-            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE))
+            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE) && ! isHeardAsTempoMap (parent, child))
                 markRemoved (parent, child);
         }
         void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override
         {
-            markMoved (parent, oldIndex, newIndex);
+            if (! isHeardAsTempoMap (parent))
+                markMoved (parent, oldIndex, newIndex);
         }
     };
 
