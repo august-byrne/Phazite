@@ -943,9 +943,11 @@ private:
     void markTrack (const juce::ValueTree& track, bool withTracksInIt);
 
     // The clips whose notes changed (the song holds them beside its tree: SongValues.h), heard as the values change and their
-    // tracks marked (markTrack()) as the changes are next asked for: a listener of the values reads nothing of the song.
+    // tracks marked (markTrack()) as the changes are next asked for: a listener of the values reads nothing of the song. With
+    // them the master's line, where a modulator of its changed (masterHeard). And whether any waits.
     std::vector<ClipID> notesHeard;
-    void markNotesHeard();
+    void markHeard();
+    bool isHeardWaiting() const noexcept { return ! notesHeard.empty() || masterHeard; }
     void clipNotesChanged (const std::vector<ClipID>&) override;
 
     // The clips that changed (SongValues.h): their tracks' lines, before and after, marked by their IDs as they are told.
@@ -968,6 +970,13 @@ private:
     // The sections (SongValues.h), what is in whose SECTIONS the tree's callbacks below leave alone (isHeardAsKept()): the
     // song's own line, as a change of its element was. The element's own coming and going they mark as any element's.
     void sectionsChanged (const std::vector<SectionID>&) override;
+
+    // The modulators and macros (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): the lines of
+    // the channels each was on and is on, and of those whose modulators came in another order, by their tracks' IDs (a
+    // container's macros' too: their channel's), as a change under one marked its channel's line; the master's by its own
+    // ID, which it reads as the changes are next asked for (markHeard()), not as it is told.
+    void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
+    bool masterHeard = false; // the master's line, to mark by its ID (markHeard())
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();

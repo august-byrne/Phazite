@@ -6,12 +6,15 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/midi/internal/MidiLinks.h"
+#include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -353,6 +356,43 @@ TEST_CASE ("A curve's edits, its points all taken out and its curve given to ano
     phazite::undo (song);
     checkChangesAreWhole (s.context, "Undo of the clear");
     CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+}
+
+TEST_CASE ("A change of the master's modulator, or of a macro of a container on the master, names the master's line alone, as the "
+           "whole songs compared do")
+{
+    // The modulators are heard from the song's values (SongValues.h: Listener::modulationChanged()), by their places: the
+    // master's by its line (VersionHistory.cpp: markHeard()), a container's macro by its container's channel.
+    TestSong s;
+    s.addTrack ("Bass");
+    auto& song = *phazite::findSong (s.context);
+    const auto master = phazite::getMasterID (song);
+    const auto lfo = s.addModulator (master, phazite::ModulatorType::lfo);
+    const auto container = phazite::addContainer (s.context, master);
+    REQUIRE (container.isValid());
+    const auto macros = phazite::getContainerMacros (song, container);
+    REQUIRE (macros.size() == 8);
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    const auto edit = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        {
+            const phazite::UndoStep step (song, name);
+            change();
+        }
+
+        checkChangesAreWhole (s.context, name);
+        const auto lines = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
+        REQUIRE (lines.size() == 1);
+        CHECK (lines.front().isMaster);
+        phazite::undo (song);
+        checkChangesAreWhole (s.context, "Undo of " + name);
+        CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+    };
+
+    edit ("the master's LFO's rate", [&] { s.setModulatorParameter (lfo, "rate", 2.0f); });
+    edit ("a macro of the master's container turned", [&] { s.setMacroValue (macros[3], 0.5f); });
 }
 
 TEST_CASE ("The changes follow an edit once worked out in the background, the listeners told as they come in")

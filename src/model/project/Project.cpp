@@ -10,6 +10,7 @@
 #include "model/base/Json.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/ModulationArea.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
@@ -2705,6 +2706,9 @@ void Project::clearToCompare()
     chordLaneToCompare = false;
     midiLinksToCompare = false;
     sectionsToCompare = false;
+    comparingModulationWhole = false;
+    modulatorsToCompare.clear();
+    modulatorOwnersToCompare.clear();
     toCompare.clear();
     notesToCompare.clear();
     clipsToCompare.clear();
@@ -2857,8 +2861,8 @@ void Project::compareWithSavedState()
     auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
-    // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links), each
-    // asked only while all before it compare.
+    // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the
+    // sections, modulation), each asked only while all before it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
@@ -2866,6 +2870,7 @@ void Project::compareWithSavedState()
     same = same && areCurvesAsSaved();
     same = same && areMidiLinksAsSaved();
     same = same && areSectionsAsSaved();
+    same = same && areModulatorsAsSaved();
 
     clearToCompare();
 
@@ -3314,6 +3319,108 @@ bool Project::areSectionsAsSaved() const
     // The sections, against the saved copy's, as one value, and whether each has a SECTIONS.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
     return holdSameSections (song->getState(), keepValues (*song), savedState.tree, savedState.values);
+}
+
+void Project::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators, const std::vector<ModulatorPlace>& reordered)
+{
+    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare of them, the tracks
+    // and the master whole.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+
+    if (comparingModulationWhole)
+        return;
+
+    const auto addOwner = [this] (const ModulatorPlace& owner)
+    {
+        if (std::find (modulatorOwnersToCompare.begin(), modulatorOwnersToCompare.end(), owner) == modulatorOwnersToCompare.end())
+            modulatorOwnersToCompare.push_back (owner);
+    };
+
+    // One added, taken out or come to another place: its owners' order too, before and after, so that one taken out and put
+    // back at another place before the comparison compares by where it is among its owner's others.
+    for (const auto& modulator : modulators)
+    {
+        if (std::find (modulatorsToCompare.begin(), modulatorsToCompare.end(), modulator.id) == modulatorsToCompare.end())
+            modulatorsToCompare.push_back (modulator.id);
+
+        if (modulator.has (SongValues::ModulationChange::made))
+        {
+            if (modulator.wasThere)
+                addOwner (modulator.before);
+
+            if (modulator.isThere)
+                addOwner (modulator.after);
+        }
+    }
+
+    for (const auto& owner : reordered)
+        addOwner (owner);
+
+    if (modulatorsToCompare.size() + modulatorOwnersToCompare.size() > mostToCompare)
+    {
+        comparingModulationWhole = true;
+        modulatorsToCompare.clear();
+        modulatorOwnersToCompare.clear();
+    }
+}
+
+bool Project::areModulatorsAsSaved() const
+{
+    if (! comparingModulationWhole && modulatorsToCompare.empty() && modulatorOwnersToCompare.empty())
+        return true;
+
+    // While the trees hold modulation, by element: past mostToCompare, the tracks and the master whole (holdTheSameProject(),
+    // which holds the modulators); else each owner's order, then each modulator against the saved copy's of its ID, its place
+    // and its element, one compared each (a modulator gone from both is the same).
+    const auto state = song->getState();
+    const auto now = keepValues (*song);
+
+    if (comparingModulationWhole)
+    {
+        for (const auto* type : { &schema::TRACKS, &schema::MASTER })
+        {
+            const auto element = state.getChildWithName (*type), saved = savedState.tree.getChildWithName (*type);
+
+            if (element.isValid() != saved.isValid()
+                || (element.isValid() && ! holdTheSameProject (element, now, saved, savedState.values)))
+                return false;
+        }
+
+        return true;
+    }
+
+    for (const auto& owner : modulatorOwnersToCompare)
+    {
+        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+
+        if (readOwnerOrder (state, owner) != readOwnerOrder (savedState.tree, owner))
+            return false;
+    }
+
+    return std::all_of (modulatorsToCompare.begin(), modulatorsToCompare.end(),
+                        [this, &state, &now] (ModulatorID id)
+                        {
+                            const auto element = findModulatorElement (state, id);
+                            const auto saved = findModulatorElement (savedState.tree, id);
+
+                            if (! element.isValid() || ! saved.isValid())
+                                return element.isValid() == saved.isValid();
+
+                            return readModulatorPlace (element) == readModulatorPlace (saved)
+                                   && holdTheSameProject (element, now, saved, savedState.values);
+                        });
 }
 
 bool Project::holdSameClip (ClipID clip, const ValuesKept& now) const

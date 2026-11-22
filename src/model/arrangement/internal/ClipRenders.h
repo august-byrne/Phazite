@@ -205,6 +205,11 @@ private:
     // Not the curves (SongValues.h: curvesChanged()): no render holds automation, and the tree's callbacks above leave the
     // curves' elements alone (isHeardAsKept(), through isHeardAsCurves()). Nor the MIDI links (midiLinksChanged()): no render
     // is made of them, and the tree's callbacks above leave what is in the song's MIDILINKS alone (isHeardAsMidiLinks()).
+    // Nor modulation (modulationChanged()): a render is a clip's file, stretched by its own settings along the tempo map, and
+    // no modulator or macro moves any of it; the tree's callbacks above leave the song's MODULATOR and MACRO elements, added,
+    // taken out or changed, alone (isHeardAsModulation()), where they looked for renders to make again at each of them (roadmap
+    // step S5.20, modulation's second piece). A track or a container added or taken out with modulators in it is the tree's,
+    // looked at as before.
 
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };

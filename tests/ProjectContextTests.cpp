@@ -14,6 +14,7 @@
 #include "model/devices/internal/Parameters.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"
@@ -228,6 +229,96 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     phazite::setTrackName (*song, track, "Lead");
     setSong (context, nullptr);
     CHECK (hear().empty());
+    context.removeListener (&view);
+}
+
+TEST_CASE ("Views hear modulators and macros added, removed and modulating as their group, their values as no change, and a track "
+           "that goes and comes back with one as its tracks' and their group")
+{
+    // The modulators are heard from the song's values (SongValues.h: Listener::modulationChanged()). A value set by hand, the
+    // first one too, and a macro turned are no change that views show, as the tree's callbacks took a parameter's value; a
+    // track that goes or comes with a modulator tells it taken out or added, so its group comes beside the tracks'.
+    struct View : phazite::ProjectContext::Listener
+    {
+        void projectChanged() override {}
+        void songChanged (const phazite::SongChanges& changes) override { heard.push_back (changes); }
+
+        std::vector<phazite::SongChanges> heard;
+    };
+
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    const auto delay = phazite::insertDeviceState (*song, tracks[0], phazite::makeOwnDeviceState (*song, phazite::devices::Delay::typeID));
+    REQUIRE (delay.isValid());
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+    setSong (context, song.get());
+    View view;
+    context.addListener (&view);
+
+    // The groups of what the view hears of an edit made as one step (an Undo: none), a word each.
+    const auto hear = [&view, &song] (const juce::String& name, const std::function<void()>& change)
+    {
+        phazite::test::dispatchPendingMessages();
+        view.heard.clear();
+
+        if (name.isEmpty())
+        {
+            change();
+        }
+        else
+        {
+            const phazite::UndoStep step (*song, name);
+            change();
+        }
+
+        phazite::test::dispatchPendingMessages();
+        phazite::SongChanges all;
+
+        for (const auto& changes : std::exchange (view.heard, {}))
+        {
+            all.tracks = all.tracks || changes.tracks;
+            all.devices = all.devices || changes.devices;
+            all.clips = all.clips || changes.clips;
+            all.automation = all.automation || changes.automation;
+            all.modulation = all.modulation || changes.modulation;
+            all.view = all.view || changes.view;
+        }
+
+        juce::StringArray groups;
+
+        for (const auto& [group, word] :
+             { std::pair (all.tracks, "tracks"), std::pair (all.devices, "devices"), std::pair (all.clips, "clips"),
+               std::pair (all.automation, "automation"), std::pair (all.modulation, "modulation"), std::pair (all.view, "view") })
+            if (group)
+                groups.add (word);
+
+        return groups.joinIntoString (" ").toStdString();
+    };
+
+    const auto ref = [] (phazite::ModulatorID modulator, const juce::String& parameter)
+    { return phazite::ParameterRef { phazite::DeviceID::fromRaw (modulator.getRaw()), parameter }; };
+
+    phazite::ModulatorID lfo, macro;
+    CHECK (hear ("Add LFO", [&] { lfo = phazite::addModulator (*song, tracks[0], phazite::ModulatorType::lfo); }) == "modulation");
+    CHECK (hear ("Add Macro", [&] { macro = phazite::addModulator (*song, tracks[0], phazite::ModulatorType::macro); }) == "modulation");
+    REQUIRE (lfo.isValid());
+    REQUIRE (macro.isValid());
+
+    // Its values: none, the first one set by hand too, as a parameter's value.
+    CHECK (hear ("Change Rate", [&] { phazite::setValueSetByHand (*song, ref (lfo, "rate"), 2.0f); }).empty());
+    CHECK (hear ("Change Rate", [&] { phazite::setValueSetByHand (*song, ref (lfo, "rate"), 3.0f); }).empty());
+    CHECK (hear ("Change Macro", [&] { phazite::setValueSetByHand (*song, ref (macro, juce::String (macro.getRaw())), 0.5f); }).empty());
+
+    // A modulation made, and a modulator removed.
+    CHECK (hear ("Modulate Feedback", [&] { phazite::setModulation (*song, macro, { delay, "feedback" }, 0.5f); }) == "modulation");
+    CHECK (hear ("Remove LFO", [&] { phazite::removeModulator (*song, lfo); }) == "modulation");
+
+    // A track with a modulator removed, and brought back by its Undo: the tracks', and the modulators' it took and brought.
+    REQUIRE (phazite::addModulator (*song, tracks[1], phazite::ModulatorType::random).isValid());
+    CHECK (hear ("Delete Track", [&] { phazite::deleteTracks (*song, { tracks[1] }, nullptr); }) == "tracks modulation");
+    CHECK (hear ({}, [&] { phazite::undo (*song); }) == "tracks modulation");
+
+    setSong (context, nullptr);
     context.removeListener (&view);
 }
 

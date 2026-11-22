@@ -6,7 +6,10 @@
 
 #include "model/base/Song.h"
 #include "model/base/internal/MidiLinksValue.h"
+#include "model/base/internal/ModulationValue.h"
+#include "model/base/internal/SongValues.h"
 #include "model/devices/ParameterRef.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/midi/MidiLinkValues.h"
 
 #include <juce_events/juce_events.h>
@@ -90,8 +93,15 @@ std::optional<float> getValueAtControllerPosition (const Song&, const ParameterR
 // begins no burst. While the song plays and a parameter's track writes automation, its burst writes as a control's drag
 // writes, punched in at its first value and out at the burst's end (one that changed nothing writes nothing: its hold is let
 // go of, AutomationWriter::gestureLetGo()).
+//
+// Learning ends as its parameter goes, in the call that tells of it: a modulator's or a macro's as the song's values tell it
+// taken out (SongValues::Listener::modulationChanged(), by its ID), any other's (a device's, a chain's, a send's, a fader's)
+// as the song's tree tells of a child taken out, its source looked for again (locateParameter()). Which of them a learned
+// parameter is, is its source (ParameterSource), found as learning starts: so that the tree's callback asks only of what
+// the tree still holds (isHeardFromTree()), and reads no area of the song's values.
 class MidiLinker final : private juce::Timer,
-                         private juce::ValueTree::Listener
+                         private juce::ValueTree::Listener,
+                         private SongValues::Listener
 {
 public:
     explicit MidiLinker (Song&);
@@ -122,6 +132,7 @@ private:
     Song::Ptr song;
     juce::ValueTree state;
     std::optional<ParameterRef> learning;
+    ParameterSource learningSource = ParameterSource::device; // what learning's parameter is (setLearning())
     std::optional<juce::String> linkMade;
 
     std::unique_ptr<Trial> burst;
@@ -130,13 +141,19 @@ private:
     double lastMove = 0.0;             // when it moved last, in devices::Clock's milliseconds
     static constexpr int restCheckMilliseconds = 50;
 
-    void setLearning (std::optional<ParameterRef>);
+    void setLearning (std::optional<ParameterRef>, ParameterSource = ParameterSource::device);
     void learn (MidiController);
     void turn (const ParameterRef&, float value);
     void finishWriting(); // the burst's passes told it ended, in its step
 
+    // Whether the song's tree holds a source's parameters, so that the tree's callback looks for one of them again: every
+    // source's but a modulator's and a macro's, which the song's values tell (modulationChanged()). A source whose area
+    // gets a listener of its own (roadmap step S5.20) leaves this list for it, with an override of its own below.
+    static bool isHeardFromTree (ParameterSource);
+
     void timerCallback() override;
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
+    void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>&) override;
 
     JUCE_DECLARE_NON_COPYABLE (MidiLinker)
 };

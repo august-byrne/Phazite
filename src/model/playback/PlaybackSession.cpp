@@ -10,6 +10,7 @@
 #include "model/transport/internal/Take.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <set>
 #include <utility>
 #include <vector>
@@ -165,6 +166,40 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
         }
     }
     else if (song->getUndoManager().isPerformingUndoRedo())
+        writer.followValuesSetByHand();
+}
+
+void PlaybackSession::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators,
+                                         const std::vector<ModulatorPlace>& reordered)
+{
+    using Change = SongValues::ModulationChange;
+    auto plan = ! reordered.empty(), taken = false;
+
+    for (const auto& modulator : modulators)
+    {
+        const auto inPlace = modulator.wasThere && modulator.isThere && ! modulator.has (Change::made) && ! modulator.has (Change::kind);
+
+        if (! inPlace || modulator.has (Change::modulations) || modulator.has (Change::valuesAppeared))
+            plan = true;
+
+        if (! inPlace)
+            continue;
+
+        if (modulator.now != nullptr
+            && modulator.has ((std::uint16_t) (Change::valuesSetByHand | Change::steps | Change::off | Change::macroValue)))
+        {
+            player.takeModulator (modulator.id, *modulator.now);
+            taken = true;
+        }
+
+        if (modulator.has (Change::name))
+            taken = true; // nothing plays it, but what a pass writes follows an undo of it, as of a value taken
+    }
+
+    if (plan)
+        triggerAsyncUpdate();
+
+    if (taken && song->getUndoManager().isPerformingUndoRedo())
         writer.followValuesSetByHand();
 }
 

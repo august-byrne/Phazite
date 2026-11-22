@@ -260,6 +260,31 @@ void SongPlayer::curvesChanged (const std::vector<ParameterRef>& parameters)
         changes.curves.insert ({ parameter.device.getRaw(), parameter.parameter });
 }
 
+void SongPlayer::modulationChanged (const std::vector<SongValues::ModulationChange>& changed, const std::vector<ModulatorPlace>& reordered)
+{
+    // The channel each was on and is on (the master's under 0), as a change at or under a modulator marked the channel it is
+    // on (markChange()): every part, a value taken at once too (the next plan reads its devices again either way).
+    const auto mark = [this] (const ModulatorPlace& place)
+    {
+        if (place.onMaster)
+            changes.channels.insert (0);
+        else if (place.track.isValid())
+            changes.channels.insert ((std::int64_t) place.track.getRaw());
+    };
+
+    for (const auto& modulator : changed)
+    {
+        if (modulator.wasThere)
+            mark (modulator.before);
+
+        if (modulator.isThere)
+            mark (modulator.after);
+    }
+
+    for (const auto& place : reordered)
+        mark (place);
+}
+
 namespace
 {
     std::atomic<bool> checking { false };
@@ -332,9 +357,10 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
     // The clips and their notes are values beside the tree, heard by clipsChanged() and clipNotesChanged(); the tempo map is
     // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsKept()), which marks
     // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats); the curves by
-    // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter. In a channel (a track, a folder, a
-    // return or the master), its devices' values are read again only for what can change them: a change at or under a
-    // device, a container, a chain or a modulator, or an element of the channel added, removed or moved; not the channel's
+    // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter; the modulators and macros by
+    // modulationChanged() (isHeardAsKept(), through isHeardAsModulation()), each by its channel. In a channel (a track, a
+    // folder, a return or the master), its devices' values are read again only for what can change them: a change at or under
+    // a device, a container or a chain, or an element of the channel added, removed or moved; not the channel's
     // own properties (its height, mute, solo, volume, pan), which no device reads, nor a plug-in's own values (VALUE), which
     // the plug-in keeps, the engine reading none.
     auto inDevice = structure;
@@ -349,8 +375,7 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
         if (element.hasType (schema::VALUE) || schema::isUncountedElement (element.getParent(), element))
             return; // a plug-in's value, or view state (a track's lanes)
 
-        if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN)
-            || element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO))
+        if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN))
             inDevice = true;
 
         if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
@@ -2256,31 +2281,15 @@ void SongPlayer::updateAudibility()
     }
 }
 
+void SongPlayer::takeModulator (ModulatorID id, const ModulatorValue& value)
+{
+    if (auto* node = findModulator ((std::int64_t) id.getRaw()))
+        setModulatorValues (*node, value);
+}
+
 bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // A modulator's parameter, steps or switch, and a macro's value: at once, from its element read as its value
-    // (ModulationValue.h).
-    if (const auto parent = tree.getParent(); tree.hasType (schema::VALUES) && parent.hasType (schema::MODULATOR))
-    {
-        if (auto* node = findModulator (getID (parent, schema::modulatorID)))
-            if (const auto value = readModulatorValue (parent, readModulatorPlace (parent)))
-                setModulatorValues (*node, *value);
-
-        return true;
-    }
-
-    if ((tree.hasType (schema::MODULATOR) && (property == schema::modulatorSteps || property == schema::deviceOff))
-        || (tree.hasType (schema::MACRO) && property == schema::macroValue))
-    {
-        if (auto* node = findModulator (getID (tree, schema::modulatorID)))
-            if (const auto value = readModulatorValue (tree, readModulatorPlace (tree)))
-                setModulatorValues (*node, *value);
-
-        return true;
-    }
-
-    if (tree.hasType (schema::MACRO) && property == schema::macroName)
-        return true;
+    // (A modulator's parameter, steps or switch, and a macro's value: the song's values tell them, takeModulator().)
 
     // A send's level, and a container's mix: at once.
     if (tree.hasType (schema::SEND) && property == schema::sendLevel)

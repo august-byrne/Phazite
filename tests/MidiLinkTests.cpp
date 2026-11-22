@@ -24,6 +24,7 @@
 #include "model/engine/internal/MidiTap.h"
 #include "model/midi/MidiLinkModel.h"
 #include "model/midi/internal/MidiLinks.h"
+#include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
@@ -537,6 +538,93 @@ TEST_CASE ("MIDI Learn Last Touched Parameter learns the parameter changed last,
     phazite::startMidiLearn (cutoff);
     phazite::removeDevice (s.song.context, s.synth);
     CHECK_FALSE (phazite::isLearningMidi (s.song.context));
+}
+
+TEST_CASE ("Learning a macro's value or a modulator's parameter ends as the macro or the modulator goes, in that call, by an "
+           "undo too, and stays while anything else goes; a device's ends as its track goes")
+{
+    // A modulator's and a macro's go as the song's values tell them taken out (SongValues.h: modulationChanged()), the others
+    // as the song's tree tells of a child taken out (MidiLinks.h: MidiLinker): each at once.
+    SynthSong s;
+    auto& context = s.song.context;
+    auto& song = getSong (s.song);
+    const auto track = s.song.firstTrack;
+    s.song.addTrack ("Other"); // the song keeps a track as this one goes
+    const auto macro = s.song.addModulator (track, phazite::ModulatorType::macro);
+    const auto lfo = s.song.addModulator (track, phazite::ModulatorType::lfo);
+    const auto other = s.song.addModulator (track, phazite::ModulatorType::random);
+    const auto effect = s.song.addEffect (track, phazite::devices::Reverb::typeID);
+    const auto macroValue = phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id);
+    REQUIRE (macroValue.exists());
+
+    // Something else goes: still learning.
+    phazite::startMidiLearn (macroValue);
+    REQUIRE (phazite::isLearningMidi (macroValue));
+    phazite::removeDevice (context, effect);
+    CHECK (phazite::isLearningMidi (macroValue));
+    phazite::removeModulator (context, other);
+    CHECK (phazite::isLearningMidi (macroValue));
+
+    // The macro goes: learning ends at once; its Undo brings the macro back, not the learning.
+    phazite::removeModulator (context, macro);
+    CHECK_FALSE (phazite::isLearningMidi (context));
+    phazite::undo (song);
+    REQUIRE (phazite::getModulator (context, macro).has_value());
+    CHECK_FALSE (phazite::isLearningMidi (context));
+
+    // An undo that takes the macro away again ends it too.
+    const auto again = phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id);
+    phazite::startMidiLearn (again);
+    REQUIRE (phazite::isLearningMidi (again));
+    phazite::redo (song);
+    CHECK_FALSE (phazite::getModulator (context, macro).has_value());
+    CHECK_FALSE (phazite::isLearningMidi (context));
+
+    // A modulator's parameter, as its track goes; then a device's parameter, as its track goes.
+    const auto deleteTrack = [&song, track]
+    {
+        const phazite::UndoStep step (song, "Delete Track");
+        phazite::deleteTracks (song, { track }, nullptr);
+    };
+
+    const auto rate = phazite::getModulatorParameter (context, lfo, "rate");
+    phazite::startMidiLearn (rate);
+    REQUIRE (phazite::isLearningMidi (rate));
+    deleteTrack();
+    CHECK_FALSE (phazite::isLearningMidi (context));
+    phazite::undo (song);
+
+    const auto cutoff = s.parameter ("cutoff");
+    phazite::startMidiLearn (cutoff);
+    REQUIRE (phazite::isLearningMidi (cutoff));
+    deleteTrack();
+    CHECK_FALSE (phazite::isLearningMidi (context));
+}
+
+TEST_CASE ("Learning a container's macro ends as the container goes, in that call, and its Undo doesn't start it again")
+{
+    // The container takes its macros out of the song with it, which the song's values tell taken out (SongValues.h:
+    // modulationChanged()): the learning of one of them ends at once (MidiLinks.h: MidiLinker).
+    SynthSong s;
+    auto& context = s.song.context;
+    auto& song = getSong (s.song);
+    const auto container = phazite::addContainer (context, s.song.firstTrack);
+    REQUIRE (container.isValid());
+    const auto macros = phazite::getContainerMacros (context, container);
+    REQUIRE (macros.size() == 8);
+    const auto macro = macros[2].id;
+    const auto value = phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id);
+    REQUIRE (value.exists());
+
+    phazite::startMidiLearn (value);
+    REQUIRE (phazite::isLearningMidi (value));
+    phazite::removeDevice (context, container);
+    CHECK_FALSE (phazite::getModulator (context, macro).has_value());
+    CHECK_FALSE (phazite::isLearningMidi (context));
+
+    phazite::undo (song);
+    REQUIRE (phazite::getModulator (context, macro).has_value());
+    CHECK_FALSE (phazite::isLearningMidi (context));
 }
 
 TEST_CASE ("A link made is a change of the song's own in its versions: \"Update MIDI links\"")

@@ -1062,7 +1062,7 @@ void VersionHistory::startWhatWaitedForTheCopy()
     if (std::exchange (openSnapshotWaiting, false) && ! versions.empty())
     {
         // Once its changes are known to be some (changesWorked()), if they aren't yet.
-        markNotesHeard();
+        markHeard();
 
         if (sinceBase.isUpToDate())
         {
@@ -2881,7 +2881,7 @@ void VersionHistory::baselineChanged (bool songIsIt)
     // The clips whose notes were heard to change marked first, as the tree's changes mark at once: the comparison with the
     // version compared keeps them, and the one with the baseline starts again below, so that none is left waiting for the
     // next ask (which kept mayHaveChanges() true with no changes since a version saved at once).
-    markNotesHeard();
+    markHeard();
 
     // Compared again with the song from here on, in the background: at once known to be none, where the song is it.
     if (baseline.isValid())
@@ -2925,7 +2925,7 @@ bool VersionHistory::hasChanges()
 
 bool VersionHistory::areChangesWorkedOut() const
 {
-    return notesHeard.empty() && sinceBase.isUpToDate() && (comparedVersion.isEmpty() || againstCompared.isUpToDate());
+    return ! isHeardWaiting() && sinceBase.isUpToDate() && (comparedVersion.isEmpty() || againstCompared.isUpToDate());
 }
 
 bool VersionHistory::mayHaveChanges()
@@ -2934,12 +2934,12 @@ bool VersionHistory::mayHaveChanges()
     if (shown.has_value())
         return shown->mayHaveChanges;
 
-    return hasChanges() || (hasRead && baseline.isValid() && (! notesHeard.empty() || ! sinceBase.isUpToDate()));
+    return hasChanges() || (hasRead && baseline.isValid() && (isHeardWaiting() || ! sinceBase.isUpToDate()));
 }
 
 void VersionHistory::askForChanges()
 {
-    markNotesHeard();
+    markHeard();
 
     if (! hasRead || store == nullptr)
         return;
@@ -3087,7 +3087,7 @@ void VersionHistory::markTrack (const juce::ValueTree& track, bool withTracksInI
 void VersionHistory::clipNotesChanged (const std::vector<ClipID>& clips)
 {
     // A change of the song as its tree's are (valueTreePropertyChanged()), in a clip: its track's line, once its track is
-    // known (markNotesHeard()).
+    // known (markHeard()).
     ++songChanges;
     edited();
     notesHeard.insert (notesHeard.end(), clips.begin(), clips.end());
@@ -3165,12 +3165,53 @@ void VersionHistory::sectionsChanged (const std::vector<SectionID>&)
     markSongOwn();
 }
 
-void VersionHistory::markNotesHeard()
+void VersionHistory::markHeard()
 {
     // A clip gone since was taken off its track, which marked it.
     for (const auto clip : std::exchange (notesHeard, {}))
         if (const auto track = getClipTrack (song, clip); track.isValid())
             markTrack (findTrackState (song, track), false);
+
+    // The master's line, by the ID it has now.
+    if (std::exchange (masterHeard, false))
+        if (const auto master = song.getState().getChildWithName (schema::MASTER); master.isValid())
+            markTrack (master, false);
+}
+
+void VersionHistory::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators,
+                                        const std::vector<ModulatorPlace>& reordered)
+{
+    // A change of the song as its tree's are, in modulators: the lines of the channels they were on and are on, by their IDs
+    // (a listener of the song's values reads nothing of the song).
+    ++songChanges;
+    edited();
+
+    const auto mark = [this] (const ModulatorPlace& place)
+    {
+        if (place.onMaster)
+        {
+            masterHeard = true;
+        }
+        else if (place.track.isValid())
+        {
+            sinceBase.markTrack (place.track.getRaw());
+            againstCompared.markTrack (place.track.getRaw());
+        }
+    };
+
+    for (const auto& modulator : modulators)
+    {
+        if (modulator.wasThere)
+            mark (modulator.before);
+
+        if (modulator.isThere)
+            mark (modulator.after);
+    }
+
+    for (const auto& place : reordered)
+        mark (place);
+
+    changesMayDiffer();
 }
 
 void VersionHistory::markCurve (const juce::String& key)

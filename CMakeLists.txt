@@ -350,6 +350,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/KeptByAge.h
     src/model/base/MidiLinksArea.cpp
     src/model/base/MidiLinksValue.cpp
+    src/model/base/ModulationArea.cpp
     src/model/base/ModulationValue.cpp
     src/model/base/NotesArea.cpp
     src/model/base/Numbers.h
@@ -381,6 +382,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/Immer.h
     src/model/base/internal/MidiLinksArea.h
     src/model/base/internal/MidiLinksValue.h
+    src/model/base/internal/ModulationArea.h
     src/model/base/internal/ModulationValue.h
     src/model/base/internal/NotesArea.h
     src/model/base/internal/SavedValues.h
@@ -1526,6 +1528,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongValuesClipsTests.cpp
         tests/SongValuesCurvesTests.cpp
         tests/SongValuesMidiLinksTests.cpp
+        tests/SongValuesModulationTests.cpp
         tests/SongValuesSectionsTests.cpp
         tests/SongValuesTempoTests.cpp
         tests/SongValuesTests.cpp

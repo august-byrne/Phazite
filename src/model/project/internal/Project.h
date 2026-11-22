@@ -418,6 +418,18 @@ private:
     bool sectionsToCompare = false;
     void sectionsChanged (const std::vector<SectionID>&) override;
 
+    // The modulators and macros that changed, by their IDs, and the owners whose modulators came in another order
+    // (SongValues.h: Listener::modulationChanged(); the tree's callbacks below leave the song's MODULATOR and MACRO elements
+    // and what is in them alone, isHeardAsKept()): compared with savedState when asked, each against the saved copy's of its
+    // ID, by element while the trees hold them (ModulationArea.h: findModulatorElement(), readOwnerOrder()), so that a
+    // macro turned and turned back is saved again. Bounded as toCompare is: past mostToCompare of them, the tracks and the
+    // master whole.
+    std::vector<ModulatorID> modulatorsToCompare;
+    std::vector<ModulatorPlace> modulatorOwnersToCompare;
+    bool comparingModulationWhole = false;
+    void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
+    bool areModulatorsAsSaved() const;
+
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
     // where nothing of it was marked.
     bool areNotesAsSaved() const;

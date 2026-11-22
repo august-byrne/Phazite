@@ -469,9 +469,9 @@ void ClipRenders::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&
         return; // the song's SECTIONS itself, of which no render is made (what is in it is the sections' area's)
 
     // Whatever was added but an area's of the song's values (isHeardAsKept(): a tempo change, tempoMapChanged(); what is in
-    // the chord lane; a curve's, which no render is made of: a render is a clip's file, stretched by its own settings along
-    // the tempo map; a clip comes as clipsChanged()), and but the song's CHORDLANE itself, of which no render is made
-    // (isChordLanePlaceholder()).
+    // the chord lane; a curve's or a modulator's, which no render is made of: a render is a clip's file, stretched by its
+    // own settings along the tempo map; a clip comes as clipsChanged()), and but the song's CHORDLANE itself, of which no
+    // render is made (isChordLanePlaceholder()).
     if (! isHeardAsKept (parent, child) && ! isChordLanePlaceholder (parent, child))
         rendersMayChange();
 }

@@ -15,6 +15,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
@@ -36,6 +37,7 @@
 #include "ui/playlist/TrackHeader.h"
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -431,6 +433,83 @@ TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when a
     unfreezes();
 }
 
+TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when one of its modulators or macros, or a macro of its "
+           "frozen container, changes, comes or goes, by an undo too, and stays frozen when another track's does")
+{
+    // The modulators are heard from the song's values (SongValues.h: Listener::modulationChanged()), by their places: a frozen
+    // track a changed modulator was on or is on is compared at the next turn with the modulators its file was made with
+    // (Freeze.h: FreezeKeeper::Holds::modulators), as values. An undo of the change that unfroze it leaves it playing live.
+    Song song;
+    auto& model = song.getSong();
+    const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
+    const auto unfreezes = [&isFrozen]
+    {
+        CHECK (isFrozen()); // not within the edit
+        CHECK (phazite::test::dispatchMessagesUntil ([&isFrozen] { return ! isFrozen(); }));
+    };
+
+    const auto edit = [&model] (const juce::String& name, const std::function<void()>& change)
+    {
+        const phazite::UndoStep step (model, name);
+        change();
+    };
+
+    const auto ref = [] (phazite::ModulatorID modulator, const juce::String& parameter)
+    { return phazite::ParameterRef { DeviceID::fromRaw (modulator.getRaw()), parameter }; };
+
+    const auto macroValue = [&ref] (phazite::ModulatorID macro) { return ref (macro, juce::String (macro.getRaw())); };
+
+    phazite::ModulatorID lfo, macro, other;
+    DeviceID container;
+
+    edit ("Add Modulators",
+          [&]
+          {
+              lfo = phazite::addModulator (model, song.bass, phazite::ModulatorType::lfo);
+              macro = phazite::addModulator (model, song.bass, phazite::ModulatorType::macro);
+              other = phazite::addModulator (model, song.reverb, phazite::ModulatorType::lfo);
+          });
+
+    container = phazite::addContainer (song.context, song.bass);
+    REQUIRE (container.isValid());
+    const auto containerMacros = phazite::getContainerMacros (model, container);
+    REQUIRE (containerMacros.size() == 8);
+    song.freeze();
+    REQUIRE (phazite::isFrozenDevice (model, container));
+
+    // Another track's modulator: still frozen.
+    edit ("Change Rate", [&] { phazite::setValueSetByHand (model, ref (other, "rate"), 2.0f); });
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+
+    // Its macro turned: unfrozen; the Undo leaves it live.
+    edit ("Change Macro", [&] { phazite::setValueSetByHand (model, macroValue (macro), 0.5f); });
+    unfreezes();
+    phazite::undo (model);
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (isFrozen());
+
+    // Its LFO's parameter, a macro of its frozen container, an LFO added and one removed: each unfreezes it.
+    song.freeze();
+    edit ("Change Rate", [&] { phazite::setValueSetByHand (model, ref (lfo, "rate"), 3.0f); });
+    unfreezes();
+    song.freeze();
+    edit ("Change Macro", [&] { phazite::setValueSetByHand (model, macroValue (containerMacros[1]), 0.25f); });
+    unfreezes();
+    song.freeze();
+    edit ("Add Random", [&] { phazite::addModulator (model, song.bass, phazite::ModulatorType::random); });
+    unfreezes();
+    song.freeze();
+    edit ("Remove LFO", [&] { phazite::removeModulator (model, lfo); });
+    unfreezes();
+
+    // An undo of a modulator's change made before the freeze: unfrozen.
+    song.freeze();
+    phazite::undo (model);
+    CHECK (phazite::getModulatorValue (model, lfo).has_value());
+    unfreezes();
+}
+
 TEST_CASE ("A frozen track's fader moved by hand is compared without reading its curves, which are read once one of them "
            "changes")
 {
@@ -477,6 +556,76 @@ TEST_CASE ("A frozen track's fader moved by hand is compared without reading its
     const auto before = phazite::countCurvePointsRead();
     model.writePending();
     CHECK (phazite::countCurvePointsRead() > before);
+    CHECK_FALSE (isFrozen());
+}
+
+TEST_CASE ("A frozen track's fader moved by hand is compared without reading its modulators, which are read once one of them "
+           "changes, and another track's modulator changed reads none of them")
+{
+    // What a frozen track's file holds of its modulators and macros is compared as values (Freeze.h:
+    // FreezeKeeper::Holds::modulators), read only where one of them was told changed since its last comparison (Freeze.cpp:
+    // FreezeKeeper::compare(), modulatorsAsFrozen), not at every turn of a fader dragged on it. Counted as the modulators read
+    // into values (ModulationValue.h: countModulatorsRead()).
+    Song song;
+    auto& model = song.getSong();
+    const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
+    const auto rate = [] (phazite::ModulatorID modulator)
+    { return phazite::ParameterRef { DeviceID::fromRaw (modulator.getRaw()), "rate" }; };
+
+    const auto edit = [&model] (const juce::String& name, const std::function<void()>& change)
+    {
+        const phazite::UndoStep step (model, name);
+        change();
+    };
+
+    // Bass with three, and the return with one, whose first value set by hand is set here.
+    phazite::ModulatorID lfo, other;
+
+    edit ("Add Modulators",
+          [&]
+          {
+              lfo = phazite::addModulator (model, song.bass, phazite::ModulatorType::lfo);
+              phazite::addModulator (model, song.bass, phazite::ModulatorType::macro);
+              phazite::addModulator (model, song.bass, phazite::ModulatorType::random);
+              other = phazite::addModulator (model, song.reverb, phazite::ModulatorType::lfo);
+              phazite::setValueSetByHand (model, rate (other), 2.0f);
+          });
+
+    // The modulators an edit of the return's LFO reads, compared at once (Song::writePending()), with no track frozen.
+    const auto readsOfOther = [&] (float value)
+    {
+        const auto before = phazite::countModulatorsRead();
+        edit ("Change Rate", [&] { phazite::setValueSetByHand (model, rate (other), value); });
+        model.writePending();
+        return phazite::countModulatorsRead() - before;
+    };
+
+    phazite::test::dispatchPendingMessages();
+    const auto unfrozenReads = readsOfOther (3.0f);
+    phazite::test::dispatchPendingMessages();
+    song.freeze();
+    phazite::test::dispatchPendingMessages();
+
+    // Each move of its fader, and its comparison at once: none of its modulators read, and still frozen.
+    for (const auto volume : { -3.0f, -4.0f, -5.0f })
+    {
+        const auto before = phazite::countModulatorsRead();
+        edit ("Change Volume", [&] { phazite::setChannelVolume (model, song.bass, volume); });
+        model.writePending();
+        CHECK (phazite::countModulatorsRead() == before);
+        CHECK (isFrozen());
+    }
+
+    // The return's LFO changed: what the edit reads with no track frozen, none of Bass's; still frozen.
+    CHECK (readsOfOther (4.0f) == unfrozenReads);
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+
+    // Its LFO changed: its comparison reads its modulators, and finds them changed.
+    edit ("Change Rate", [&] { phazite::setValueSetByHand (model, rate (lfo), 5.0f); });
+    const auto before = phazite::countModulatorsRead();
+    model.writePending();
+    CHECK (phazite::countModulatorsRead() > before);
     CHECK_FALSE (isFrozen());
 }
 

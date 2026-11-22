@@ -9,6 +9,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/WholeState.h"
@@ -90,33 +91,38 @@ public:
     // own, getFrozenFile(), whichever froze it), or as the project opened. Every other plays live.
     bool keepThrough (const std::function<bool()>& apply);
 
-    // What a frozen track's file holds, as the song held it then: a copy of its parts' elements, the song's values
-    // (model/base/internal/WholeState.h), its clips and their notes among them, the song's tempos (TempoMapValue.h), which
-    // put its notes and clips where they are in seconds (its time signatures put nothing there), and the curves of what it
-    // plays the automation of (its frozen devices', those in its frozen containers and their chains': CurveValues.h), in the
-    // song's order of its curves.
+    // What a frozen track's file holds, as the song held it then: a copy of its parts' elements (its frozen devices, a frozen
+    // container without its macros), the song's values (model/base/internal/WholeState.h), its clips and their notes among
+    // them, the song's tempos (TempoMapValue.h), which put its notes and clips where they are in seconds (its time signatures
+    // put nothing there), the curves of what it plays the automation of (its frozen devices', those in its frozen containers
+    // and their chains': CurveValues.h), in the song's order of its curves, and its modulators and macros, which can move
+    // them, as values (ModulationValue.h): its own, in their order, then each frozen container's macros, in the frozen
+    // devices' order.
     struct Holds
     {
         juce::ValueTree parts;
         ValuesKept values;
         immer::flex_vector<TempoEntry> tempos;
         SongCurves curves;
+        std::vector<ModulatorValue> modulators;
     };
 
 private:
     Song& song;
-    juce::ValueTree state;            // the song's
-    std::map<TrackID, Holds> frozen;  // what each frozen track's file holds
-    std::map<TrackID, Holds> files;   // and each track's file, kept as it is unfrozen, as the file stays
-    std::vector<ClipID> notesChanged; // the clips whose notes changed, compared at the next turn of the message loop
-    std::set<TrackID> clipTracks;     // the frozen tracks whose clips changed, the same
-    std::set<TrackID> toTake;         // the tracks frozen since, whose holdings the later moment takes (noteFrozenTracks())
-    std::set<DeviceID> curveOwners;   // what the curves that changed are of, the tracks that hold them compared the same
+    juce::ValueTree state;             // the song's
+    std::map<TrackID, Holds> frozen;   // what each frozen track's file holds
+    std::map<TrackID, Holds> files;    // and each track's file, kept as it is unfrozen, as the file stays
+    std::vector<ClipID> notesChanged;  // the clips whose notes changed, compared at the next turn of the message loop
+    std::set<TrackID> clipTracks;      // the frozen tracks whose clips changed, the same
+    std::set<TrackID> toTake;          // the tracks frozen since, whose holdings the later moment takes (noteFrozenTracks())
+    std::set<DeviceID> curveOwners;    // what the curves that changed are of, the tracks that hold them compared the same
+    std::set<TrackID> modulatorTracks; // the frozen tracks a modulator or a macro that changed was on or is on, the same
     bool checking = false;
 
     // The frozen tracks whose curves compared the same as their files' at their last comparison, with the same holdings, and
-    // none of whose curves was told changed since (curvesChanged()): compared without reading their curves (compare()).
-    std::set<TrackID> curvesAsFrozen;
+    // none of whose curves was told changed since (curvesChanged()): compared without reading their curves (compare()). The
+    // same of their modulators and macros, none of which was told changed since (modulationChanged()).
+    std::set<TrackID> curvesAsFrozen, modulatorsAsFrozen;
 
     // What the tree told (check()), for the next turn: the frozen tracks taken again (after an undo or a redo), these tracks
     // compared, every frozen track compared.
@@ -129,8 +135,8 @@ private:
     Waiting waiting;
 
     std::vector<TrackID> takeFrozenTracks (bool fromFiles = false);
-    void noteFrozenTracks (bool cameIn);                      // the same from a tree's callback, which reads nothing of the song's clips
-    void keepCurvesAsFrozen (const std::set<TrackID>& known); // of curvesAsFrozen, those whose holdings were kept
+    void noteFrozenTracks (bool cameIn);                // the same from a tree's callback, which reads nothing of the song's clips
+    void keepAsFrozen (const std::set<TrackID>& known); // of curvesAsFrozen and modulatorsAsFrozen, those whose holdings were kept
     void compare (TrackID);
     void check (const juce::ValueTree& changed, bool cameIn);
     void compareMarked(); // what waits: the clips', and what the tree told during an undo or a redo
@@ -150,6 +156,11 @@ private:
     // The curves that changed (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): their devices
     // marked, and the frozen tracks whose files play the automation of any of them compared at the later moment.
     void curvesChanged (const std::vector<ParameterRef>&) override;
+
+    // The modulators and macros that changed (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()):
+    // the frozen tracks they were on and are on (a container's macros' by its channel), and those whose modulators came in
+    // another order, marked and compared at the later moment, their modulators read and compared too (modulatorsAsFrozen).
+    void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
     void handleAsyncUpdate() override { compareMarked(); }
     void writePending() override; // what is marked compared now, but during an undo or a redo (Song.h)

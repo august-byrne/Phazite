@@ -75,7 +75,7 @@ public:
     void readLive (engine::FileReader&, const std::atomic<std::uint64_t>& blocksPlayed);
 
     // Takes a change of the song that is a value set by hand into what plays at once; false for any other change, which
-    // needs a new plan.
+    // needs a new plan. Not a modulator's nor a macro's, which the song's values tell (takeModulator()).
     bool takeValue (const juce::ValueTree& tree, const juce::Identifier& property);
 
     // What plays a device (by its ID), a track's strip (by its ID; 0 for the master's) and a container's chain (by its ID),
@@ -95,6 +95,10 @@ public:
 
     // What plays a modulator or a macro (by its ID), for its editor and slot; nullptr for none.
     engine::ModulatorNode* findModulator (std::int64_t id) const;
+
+    // A modulator's or a macro's values set by hand, its steps, its switch or a macro's value, as the song's values told it
+    // (SongValues::ModulationChange::now), into what plays it at once, if anything does; the next plan takes it too.
+    void takeModulator (ModulatorID, const ModulatorValue&);
 
     // Whether a parameter plays its value set by hand rather than its automation, while automation is written by hand
     // (AutomationWriter.h). It stays so from plan to plan, until it is written no more.
@@ -288,6 +292,12 @@ private:
 
     // The curves that changed (SongValues.h), each read again by the next compile.
     void curvesChanged (const std::vector<ParameterRef>&) override;
+
+    // The modulators and macros that changed (SongValues.h; its tree callbacks leave the song's MODULATOR and MACRO elements
+    // and what is in them alone, isHeardAsKept()): the channels they were on and are on, and those whose modulators came in
+    // another order, their devices read again by the next compile (as a change under one of its modulators marked its
+    // channel), whatever part changed, a value the session takes at once (takeModulator()) too.
+    void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
     // Whether a part kept from the plan before is checked against the song now (setChecking()): all of them while the
     // player plays few devices, a share otherwise, one part in every so many, its phase moving on with each plan.

@@ -102,11 +102,14 @@
 //      area says so in a comment beside its overrides. They are:
 //      - ClipRenders (model/arrangement/ClipRenders.cpp, internal/ClipRenders.h): rendersMayChange() where the area holds
 //        what a clip's render is made of (the clips', the tempo map's; not the notes', nor the curves': no render holds
-//        automation).
+//        automation; nor modulation's, which moves nothing a render is made of).
 //      - FreezeKeeper (model/mixer/Freeze.cpp, internal/Freeze.h): marks the frozen tracks whose file holds what changed
 //        (all of them for the tempo map) and compares them at its later moment. What a frozen track's file holds of an area is
-//        in its Holds (parts: copies of its elements, getWhatTheFreezeHolds(); values: ValuesKept; tempos), compared in
-//        holdsWhatWasFrozen(): an area held in parts moves to its value there at its switch.
+//        in its Holds (parts: copies of its elements, getWhatTheFreezeHolds(); values: ValuesKept; tempos; curves: its frozen
+//        devices' automation, getFrozenCurves(); modulators: its modulators and its frozen containers' macros, as values,
+//        getFrozenModulators()), compared in holdsWhatWasFrozen(): an area held in parts moves to its value there at its
+//        switch. An area whose value is read to compare it (the curves, the modulators) is read only for a track it told
+//        changed since its last comparison, at its first and as a version is applied (curvesAsFrozen, modulatorsAsFrozen).
 //      - PlaybackSession (model/playback/internal/PlaybackSession.h): a new plan (triggerAsyncUpdate()); for an area no plan
 //        holds and something else the session feeds does (the MIDI links: the MIDI tap's controllers), that marked and
 //        brought up to date at a later moment of its own (followMidiLinks(), at the next turn of the message loop, or at once
@@ -121,6 +124,9 @@
 //        SongChanges (ProjectContext.h; a group of its own where the views need one).
 //      - VersionHistory (model/versions/VersionHistory.cpp, internal/VersionHistory.h): counts the song's change
 //        (songChanges, edited()), marks the lines it is in (markTrack(), markSongOwn()) and calls changesMayDiffer().
+//      - MidiLinker (model/midi/MidiLinks.cpp, internal/MidiLinks.h): ends a learning whose parameter the area tells taken
+//        out, in that call (modulation's: a modulator or a macro by its ID); its tree callback asks only of the sources the
+//        tree still holds (isHeardFromTree()), where an area's leaves that list for an override of its own.
 //  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
 //      copyWholeSong(), copyWhole(), keepValues(), or a part's own whole copy, as copyWholeClip()): the changes' worker
 //      (model/versions/ChangesWorker.cpp: take(), makeSkeleton()); the saved copy (model/project/Project.cpp: savedState,
@@ -178,6 +184,7 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Immer.h"
 #include "model/base/internal/MidiLinksValue.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/ValueArea.h"
@@ -242,6 +249,9 @@ class Song;
 // step: the areas' own actions move them. The keeper performs its changes from inside JUCE's action for the tree's, which
 // JUCE adds to the step before
 // the tree's own: so an undo puts the tree back first and the clips after (JUCE workaround W62 (docs/juce-workarounds.md)).
+// Modulation's part of the keeper (ModulationArea.h) changes nothing: while the tree still holds the song's modulators and
+// macros (roadmap step S5.20, modulation's second piece), it tells Listener::modulationChanged() from the tree's
+// notifications, at once, in an undo and a redo too.
 //
 // The rule for what listens to the song's tree, with no exception: a tree callback never reads the clips' area (nor the
 // notes'), directly or through anything that reads them (the clips' functions, Clips.h, AudioClips.h; the notes', Notes.h;
@@ -384,6 +394,36 @@ public:
         TrackID before, after;
     };
 
+    // A modulator or a macro that changed (ModulationValue.h): its ID; where it was and where it is (an empty place where it
+    // wasn't, or isn't), whether it was there and whether it is (both, for one changed in place or come to another place); the
+    // parts of it that changed; and its value after, for one that is there, valid during the call alone: what plays may set
+    // its modulator's node from it at once (PlaybackSession.h), as nothing else of the song is read meanwhile. Set its
+    // members by name: later pieces of roadmap step S5.20 may add one.
+    struct ModulationChange
+    {
+        // The parts, as bits of parts: each its own, as what plays takes each its own way (PlaybackSession.h).
+        enum Part : std::uint16_t
+        {
+            made = 1 << 0,            // added, taken out, or come to another place (another channel, another container)
+            kind = 1 << 1,            // a modulator's kind, or a macro become a modulator: another modulator
+            name = 1 << 2,            // a macro's name
+            off = 1 << 3,             // a modulator's switch
+            valuesSetByHand = 1 << 4, // a modulator's values set by hand, any of them
+            valuesAppeared = 1 << 5,  // and with them its first value set by hand, or its last set back to its default
+            steps = 1 << 6,           // a step sequencer's steps
+            macroValue = 1 << 7,      // a macro's value
+            modulations = 1 << 8      // what it modulates: a modulation made, taken out, moved or changed in amount
+        };
+
+        ModulatorID id {};
+        ModulatorPlace before {}, after {};
+        bool wasThere = false, isThere = false;
+        std::uint16_t parts = 0;
+        const ModulatorValue* now = nullptr;
+
+        bool has (std::uint16_t part) const noexcept { return (parts & part) != 0; }
+    };
+
     // What hears the song's values change, from one place: one listener for every area, a function for each, which does
     // nothing unless a listener overrides it, so that an area added changes only the listeners that care. Each registers
     // once (addListener()). A listener only marks what changed, and reads nothing of the song while it is told: during an
@@ -450,6 +490,26 @@ public:
         // which it hears as it always did: so a step that makes the first section is heard twice, its SECTIONS added by the tree
         // and its section here, and only marks twice.
         virtual void sectionsChanged (const std::vector<SectionID>& sections) { juce::ignoreUnused (sections); }
+
+        // The song's modulators and macros (ModulationValue.h), by their IDs: each one added, taken out, come to another place
+        // or changed, each once in a call, with where it was and is, the parts of it that changed (ModulationChange::Part) and
+        // its value after (ModulationChange::now); and each owner (ModulatorPlace: a channel, or a container) that holds those
+        // it held before in another order. A track, a folder's tracks, a container or the track list that comes into the song
+        // or leaves it with modulators or macros in it tells each of them as added or taken out. While the song's tree is still
+        // modulation's storage (roadmap step S5.20, modulation's second piece), the keeper tells it from the tree's
+        // notifications under the song's modulators and macros (ModulationArea.h: ModulationKeeper), at once, one call for each
+        // notification that changes any (an undo's and a redo's too, as they come back one by one), so that a step that writes
+        // several of a modulator's properties tells several calls, as the tree did; from modulation's switch on, the area tells
+        // it once for each change of its value. Either way, what a step, its Undo or its Redo told in all is what differs in the
+        // song's modulation before and after. What listens to the song's root leaves what its tree tells of the song's
+        // MODULATOR and MACRO elements (added, taken out or changed) and of what is in them alone (isHeardAsKept(), below,
+        // through isHeardAsModulation()): a TRACK or a CONTAINER that comes or goes with modulators in it, and an owner's
+        // children in another order (its modulators among them), are the tree's, heard as before, and its modulators are told
+        // here, so the step is heard twice, and only marks twice.
+        virtual void modulationChanged (const std::vector<ModulationChange>& modulators, const std::vector<ModulatorPlace>& reordered)
+        {
+            juce::ignoreUnused (modulators, reordered);
+        }
     };
 
     void addListener (Listener*) const;
@@ -506,6 +566,7 @@ private:
     struct CurvesKeeper;                            // CurvesArea.h
     struct SectionsTeller;                          // SectionsArea.h
     struct SectionsKeeper;                          // SectionsArea.h
+    struct ModulationKeeper;                        // ModulationArea.h: the tree's feed of modulationChanged(), until the switch
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
     std::unique_ptr<ClipsTeller> clipsTeller;
@@ -586,11 +647,23 @@ bool isHeardAsMidiLinks (const juce::ValueTree& parent, const juce::ValueTree& c
 bool isHeardAsSections (const juce::ValueTree& element);
 bool isHeardAsSections (const juce::ValueTree& parent, const juce::ValueTree& child);
 
+// Whether what the song's tree tells of an element (a property changed, a child added, taken out or moved in it) is
+// modulation's, which a listener of the song's root hears from the values' listener alone (SongValues::Listener::
+// modulationChanged()) and leaves alone in its tree callbacks: a MODULATOR or a MACRO of the song's (one a channel of the
+// song holds, a track's or the master's, or a container on one: readModulationValue() reads it), or an element in one. And
+// whether a child added to an element or taken out of it is: a MODULATOR or a MACRO added to such a channel or container, or
+// taken out of it, or a child of an element that is. Not a TRACK, a CONTAINER or the track list added or taken out with
+// modulators in it: the tree's, heard as any element's, whose modulators the keeper tells (ModulationArea.h). While the tree
+// is modulation's storage (roadmap step S5.20, its second piece), the keeper tells what the tree tells here. In
+// ModulationArea.cpp.
+bool isHeardAsModulation (const juce::ValueTree& element);
+bool isHeardAsModulation (const juce::ValueTree& parent, const juce::ValueTree& child);
+
 // Whether what the song's tree tells is any area's of the song's values, which a listener of the song's root hears from the
 // values' listener alone (SongValues::Listener) and leaves alone in its tree callbacks: of an element (a property changed in
 // it, a child moved in it), and of a child added to an element or taken out of it. Each the OR of the areas' own functions
 // above (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, the curves', the
-// MIDI links', then the sections'.
+// MIDI links', the sections', then modulation's.
 // What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12,
 // above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
 bool isHeardAsKept (const juce::ValueTree& element);
