@@ -87,47 +87,50 @@ namespace
     };
 } // namespace
 
+//==============================================================================
+TempoMapValue getTempoMapValue (const Song& song)
+{
+    return readTempoMapValue (findTempoMap (song));
+}
+
 namespace
 {
-    // A song's state's tempo map: its tempos and time signatures, in order, a first at the song's start if there is none.
-    std::vector<TempoChange> readTempoChanges (const juce::ValueTree& songState)
+    // One kind of the song's tempo map: getTempoMapValue()'s, of which the tree, while it holds the map, is read for that
+    // kind alone, so that a reader of one kind (the tempo, the bars) reads no more than it did (the tempo map's switch makes
+    // these getTempoMapValue (song).tempos and .signatures).
+    immer::flex_vector<TempoEntry> getTempos (const Song& song)
     {
-        std::vector<TempoChange> changes;
-
-        for (const auto& entry : getEntries (songState.getChildWithName (schema::TEMPOMAP), schema::TEMPO))
-            changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]), (double) entry.getProperty (schema::bpm, 120.0),
-                                 juce::jlimit (-1.0f, 1.0f, (float) entry.getProperty (schema::tempoCurve, tempoJump)) });
-
-        if (changes.empty())
-            changes.push_back ({});
-
-        return changes;
+        return readTempoEntries (findTempoMap (song));
     }
 
-    std::vector<TimeSignatureChange> readTimeSignatureChanges (const juce::ValueTree& songState)
+    immer::flex_vector<SignatureEntry> getSignatures (const Song& song)
     {
-        std::vector<TimeSignatureChange> changes;
-
-        for (const auto& entry : getEntries (songState.getChildWithName (schema::TEMPOMAP), schema::TIMESIGNATURE))
-            changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]),
-                                 { (int) entry.getProperty (schema::numerator, 4), (int) entry.getProperty (schema::denominator, 4) } });
-
-        if (changes.empty())
-            changes.push_back ({});
-
-        return changes;
+        return readSignatureEntries (findTempoMap (song));
     }
 } // namespace
 
-//==============================================================================
 std::vector<TempoChange> getTempoChanges (const Song& song)
 {
-    return readTempoChanges (song.getState());
+    const auto tempos = getTempos (song);
+    std::vector<TempoChange> changes;
+    changes.reserve (tempos.size());
+
+    for (const auto& tempo : tempos)
+        changes.push_back ({ tempo.beat, tempo.bpm, tempo.curve });
+
+    return changes;
 }
 
 std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song& song)
 {
-    return readTimeSignatureChanges (song.getState());
+    const auto signatures = getSignatures (song);
+    std::vector<TimeSignatureChange> changes;
+    changes.reserve (signatures.size());
+
+    for (const auto& signature : signatures)
+        changes.push_back ({ signature.beat, { signature.numerator, signature.denominator } });
+
+    return changes;
 }
 
 Bars getBars (const Song& song)
@@ -137,21 +140,28 @@ Bars getBars (const Song& song)
 
 engine::TempoMap getTempoMap (const Song& song, double sampleRate)
 {
-    return getTempoMap (song.getState(), sampleRate);
+    return getTempoMap (getTempoMapValue (song), sampleRate);
+}
+
+engine::TempoMap getTempoMap (const TempoMapValue& value, double sampleRate)
+{
+    std::vector<engine::TempoMap::Tempo> tempos;
+    std::vector<engine::TempoMap::TimeSignature> signatures;
+    tempos.reserve (value.tempos.size());
+    signatures.reserve (value.signatures.size());
+
+    for (const auto& tempo : value.tempos)
+        tempos.push_back ({ tempo.beat.inBeats(), tempo.bpm, tempo.curve });
+
+    for (const auto& signature : value.signatures)
+        signatures.push_back ({ signature.beat.inBeats(), signature.numerator, signature.denominator });
+
+    return engine::TempoMap (std::move (tempos), std::move (signatures), sampleRate);
 }
 
 engine::TempoMap getTempoMap (const juce::ValueTree& songState, double sampleRate)
 {
-    std::vector<engine::TempoMap::Tempo> tempos;
-    std::vector<engine::TempoMap::TimeSignature> signatures;
-
-    for (const auto& change : readTempoChanges (songState))
-        tempos.push_back ({ change.beat.inBeats(), change.bpm, change.curve });
-
-    for (const auto& change : readTimeSignatureChanges (songState))
-        signatures.push_back ({ change.beat.inBeats(), change.signature.numerator, change.signature.denominator });
-
-    return engine::TempoMap (std::move (tempos), std::move (signatures), sampleRate);
+    return getTempoMap (readTempoMapValue (songState.getChildWithName (schema::TEMPOMAP)), sampleRate);
 }
 
 double toSeconds (const Song& song, BeatPosition beat)
@@ -568,6 +578,60 @@ void setTimeSignature (Song& song, TimeSignature timeSignature)
     auto first = getFirstOfMap (song, schema::TIMESIGNATURE);
     first.setProperty (schema::numerator, timeSignature.numerator, &song.getUndoManager());
     first.setProperty (schema::denominator, timeSignature.denominator, &song.getUndoManager());
+}
+
+void setTimeSignatureChanges (Song& song, const std::vector<TimeSignatureChange>& changes)
+{
+    const auto isTaken = [] (const TimeSignatureChange& change)
+    { return isValid (change.signature) && change.beat >= BeatPosition() && std::isfinite (change.beat.inBeats()); };
+
+    if (changes.empty() || ! std::all_of (changes.begin(), changes.end(), isTaken))
+        return;
+
+    auto sorted = changes;
+    std::stable_sort (sorted.begin(), sorted.end(),
+                      [] (const TimeSignatureChange& a, const TimeSignatureChange& b) { return a.beat < b.beat; });
+
+    if (sorted.front().beat != BeatPosition())
+        return; // the first starts at the song's start
+
+    const auto held = getTimeSignatureChanges (song);
+    const auto isHeld = [] (const TimeSignatureChange& a, const TimeSignatureChange& b)
+    { return a.beat == b.beat && a.signature == b.signature; };
+
+    if (std::equal (sorted.begin(), sorted.end(), held.begin(), held.end(), isHeld))
+        return;
+
+    // Each as setTimeSignature() writes the first: the map's elements, in its order, given the values in turn, then those
+    // left over added or taken away.
+    const UndoStep step (song, "Change Time Signatures");
+    auto* undo = &song.getUndoManager();
+    ensureTempoMap (song);
+    auto map = findTempoMap (song);
+    const auto elements = getEntries (map, schema::TIMESIGNATURE);
+
+    for (size_t i = 0; i < sorted.size(); ++i)
+    {
+        const auto& change = sorted[i];
+
+        if (i < elements.size())
+        {
+            auto element = elements[i];
+            element.setProperty (schema::mapBeat, change.beat.inBeats(), undo);
+            element.setProperty (schema::numerator, change.signature.numerator, undo);
+            element.setProperty (schema::denominator, change.signature.denominator, undo);
+        }
+        else
+        {
+            map.appendChild (juce::ValueTree (schema::TIMESIGNATURE, { { schema::mapBeat, change.beat.inBeats() },
+                                                                       { schema::numerator, change.signature.numerator },
+                                                                       { schema::denominator, change.signature.denominator } }),
+                             undo);
+        }
+    }
+
+    for (auto i = sorted.size(); i < elements.size(); ++i)
+        map.removeChild (elements[i], undo);
 }
 
 void addTempoCommands (CommandRegistry& registry, Selection& selection)

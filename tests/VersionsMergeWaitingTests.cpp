@@ -844,12 +844,12 @@ TEST_CASE ("Restoring a line from a damaged commit takes what it can, and nothin
         tempoMap.removeAllChildren (nullptr);
         tempoMap.setProperty (schema::versions::missing, true, nullptr);
         const auto damaged = commitDamaged (s, then, [] (const juce::ValueTree&) { return false; });
-        const auto mapBefore = song.getState().getChildWithName (schema::TEMPOMAP).createCopy();
+        const auto mapBefore = phazite::test::copyWholeSong (song).getChildWithName (schema::TEMPOMAP);
         phazite::VersionChange line;
         line.name = "Song";
         line.isSong = true;
         phazite::test::finished (s.context, [&] { return phazite::restoreFromVersion (s.context, damaged, line); });
-        CHECK (song.getState().getChildWithName (schema::TEMPOMAP).isEquivalentTo (mapBefore));
+        CHECK (phazite::test::copyWholeSong (song).getChildWithName (schema::TEMPOMAP).isEquivalentTo (mapBefore));
         CHECK_FALSE (song.getState().toXmlString().contains (schema::versions::missing.toString()));
     }
 }

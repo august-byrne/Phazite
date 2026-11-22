@@ -11,6 +11,7 @@
 #include "model/base/Beats.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/TempoMapValue.h"
 #include "model/transport/TempoValues.h"
 
 #include <optional>
@@ -21,15 +22,22 @@ namespace phazite
 class CommandRegistry;
 
 //==============================================================================
+// The song's tempo map as a value (model/base/internal/TempoMapValue.h), what the readers below read it from: each kind by
+// beat, at least one of each. The song's tree holds the map still (roadmap step S5.20: the tempo map's switch is to come), so
+// this reads it from the song's TEMPOMAP element at each call and returns it by value; once the song holds the value, it
+// returns a reference to it.
+TempoMapValue getTempoMapValue (const Song&);
+
 // The song's tempo map (TempoValues.h), and its bars.
 std::vector<TempoChange> getTempoChanges (const Song&);
 std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song&);
 Bars getBars (const Song&);
 
 // The song's tempo map as Phazite's engine plays it (engine/core/TempoMap.h), at a sample rate: at one sample a second, its
-// beats in seconds, which audio clips, fades, recordings and renders count in. And the same of a song's state, which needn't
-// be open (a version's: model/versions/).
+// beats in seconds, which audio clips, fades, recordings and renders count in. And the same of a tempo map's value, and of a
+// song's state, which needn't be open (a version's: model/versions/), read with readTempoMapValue().
 engine::TempoMap getTempoMap (const Song&, double sampleRate = 1.0);
+engine::TempoMap getTempoMap (const TempoMapValue&, double sampleRate);
 engine::TempoMap getTempoMap (const juce::ValueTree& songState, double sampleRate);
 
 // Where a beat is in seconds from the song's start, and the other way round; and its tempo at a beat, in beats per minute.
@@ -115,4 +123,12 @@ TimeSignature getTimeSignature (const Song&);
 
 // Changes the time signature, as one undo step, "Change Time Signature". An invalid one changes nothing.
 void setTimeSignature (Song&, TimeSignature);
+
+// Gives the song these time signatures along it, each from its beat (in any order: they are put in order by beat), as a
+// change of its own, one undo step, "Change Time Signatures". The model offers one time signature, from the song's start, to
+// the user (setTimeSignature(), above); the song's tempo map and Phazite's engine take several, which tests of what plays give
+// a song through this. Nothing changes for none, for one that isn't valid (isValid()) or starts before the song, for a list
+// whose first doesn't start at the song's start, or for the time signatures the song holds already. Two given at one beat are
+// both kept, in the order given.
+void setTimeSignatureChanges (Song&, const std::vector<TimeSignatureChange>&);
 } // namespace phazite

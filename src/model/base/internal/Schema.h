@@ -145,7 +145,7 @@ inline const Property<juce::String> notes { "notes", on (PHAZITE), Kind::song };
 // first starts at 0.
 // (TEMPO, with the elements above.)
 inline const Property<double> bpm { "bpm", on (TEMPO), within (20.0, 300.0).orElse (120.0), Kind::song };
-inline const Property<float> tempoCurve { "curve", on (TEMPO), within (-1.0, 1.0), Kind::song };
+inline const Property<float> tempoCurve { "curve", on (TEMPO), within (-1.0, 1.0), byDefault (1.0f), Kind::song };
 
 // Child of TEMPOMAP: a time signature, from where it starts (mapBeat), as many beats in a bar (numerator, int 1..32) of a
 // note value (denominator: 2, 4, 8 or 16): its bars are numerator x 4 / denominator quarter notes long. The first starts at 0.

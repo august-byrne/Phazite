@@ -919,11 +919,8 @@ TEST_CASE ("A plug-in in a helper hears where the song is in quarter notes, samp
     // From bar 2, three quarter notes in, the tempo halves; and from bar 3, six quarter notes in, the song is in 4/4, as its
     // tempo map can hold it.
     phazite::addTempoChange (getSong (song), phazite::BeatPosition::fromBeats (3.0), 60.0);
-    namespace schema = phazite::schema;
-    auto tempoMap = getSong (song).getState().getChildWithName (schema::TEMPOMAP);
-    tempoMap.appendChild (
-        juce::ValueTree (schema::TIMESIGNATURE, { { schema::mapBeat, 6.0 }, { schema::numerator, 4 }, { schema::denominator, 4 } }),
-        nullptr);
+    phazite::setTimeSignatureChanges (getSong (song),
+                                      { { phazite::BeatPosition(), { 6, 8 } }, { phazite::BeatPosition::fromBeats (6.0), { 4, 4 } } });
     const auto effect = song.addEffect (song.firstTrack, "PhaziteTestPlayhead");
     EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
 

@@ -49,15 +49,17 @@ namespace
 
     // The song's own parts (its properties, tempo map, sections and chord lane) and its tracks' order and names: each track
     // with its ID, kind and name in its folder, and the master's ID. What the song's own line and the lines' names and order
-    // are worked out from, without copying any track's parts.
-    juce::ValueTree makeSkeleton (const juce::ValueTree& song)
+    // are worked out from, without copying any track's parts. Each of the song's own parts whole (WholeState.h), as the song
+    // holds it, beside its tree too (roadmap step S5.20: the tempo map is to leave the tree).
+    juce::ValueTree makeSkeleton (const Song& whole)
     {
+        const auto song = whole.getState();
         juce::ValueTree own (song.getType());
         own.copyPropertiesFrom (song, nullptr);
 
         for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE })
             if (const auto part = song.getChildWithName (*type); part.isValid())
-                own.appendChild (part.createCopy(), nullptr);
+                own.appendChild (copyWhole (whole, part), nullptr);
 
         const std::function<void (const juce::ValueTree&, juce::ValueTree)> addTracks =
             [&addTracks] (const juce::ValueTree& from, juce::ValueTree into)
@@ -259,7 +261,7 @@ std::shared_ptr<ChangesWorker::Request> ChangesWorker::take (const Song& song, c
         if (order || songOwn)
         {
             request->skeleton = true;
-            request->songNow = makeSkeleton (songState);
+            request->songNow = makeSkeleton (song);
         }
 
         // Each track that changed, its own parts alone; none for one that is gone.

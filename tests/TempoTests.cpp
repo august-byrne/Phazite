@@ -162,17 +162,18 @@ TEST_CASE ("Every project's song has a tempo map, whose tempo and time signature
     phazite::test::TestSong song;
     auto& state = *phazite::findSong (song.context);
 
-    // Every project has one, at 120 BPM in 4/4 from the song's start.
-    const auto map = state.getState().getChildWithName (phazite::schema::TEMPOMAP);
-    REQUIRE (map.isValid());
-    CHECK ((double) map.getChildWithName (phazite::schema::TEMPO)[phazite::schema::bpm] == doctest::Approx (120.0));
-    CHECK ((int) map.getChildWithName (phazite::schema::TIMESIGNATURE)[phazite::schema::numerator] == 4);
+    // Every project has one, at 120 BPM in 4/4 from the song's start, which the song holds whole.
+    const auto wholeMap = [&state] { return phazite::test::copyWholeSong (state).getChildWithName (phazite::schema::TEMPOMAP); };
+    REQUIRE (wholeMap().isValid());
+    CHECK ((double) wholeMap().getChildWithName (phazite::schema::TEMPO)[phazite::schema::bpm] == doctest::Approx (120.0));
+    CHECK ((int) wholeMap().getChildWithName (phazite::schema::TIMESIGNATURE)[phazite::schema::numerator] == 4);
 
     // A change goes into the map; an undo puts it back, and a redo makes it again.
     phazite::setTempo (state, 96.5);
     phazite::setTimeSignature (state, { 7, 8 });
-    CHECK ((double) map.getChildWithName (phazite::schema::TEMPO)[phazite::schema::bpm] == doctest::Approx (96.5));
-    CHECK ((int) map.getChildWithName (phazite::schema::TIMESIGNATURE)[phazite::schema::numerator] == 7);
+    CHECK ((double) wholeMap().getChildWithName (phazite::schema::TEMPO)[phazite::schema::bpm] == doctest::Approx (96.5));
+    CHECK ((int) wholeMap().getChildWithName (phazite::schema::TIMESIGNATURE)[phazite::schema::numerator] == 7);
+    CHECK (phazite::getTempoChanges (state).front().bpm == doctest::Approx (96.5));
     CHECK (phazite::getTimeSignature (state) == phazite::TimeSignature { 7, 8 });
 
     phazite::undo (state);

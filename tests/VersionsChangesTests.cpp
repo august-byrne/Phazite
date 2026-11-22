@@ -13,6 +13,7 @@
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/ChangesWorker.h"
 #include "model/versions/internal/SongDiff.h"
@@ -172,6 +173,29 @@ TEST_CASE ("The changes since the last version, worked out from what changed, ar
 
     phazite::redo (song);
     checkChangesAreWhole (s.context, "Redo of the velocity");
+}
+
+TEST_CASE ("A tempo change and nothing else changes the song's own line alone, and a tempo set back by another edit leaves no change")
+{
+    // What the song's own line is worked out from (ChangesWorker.cpp: makeSkeleton()) holds the tempo map whole, as the song
+    // does: one that held none, or an empty one, would leave the song's own line changed with the tempo back where the version
+    // has it.
+    TestSong s;
+    s.addTrack ("Bass");
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+    auto& song = *phazite::findSong (s.context);
+    const auto tempo = phazite::getTempo (song);
+
+    phazite::setTempo (song, 100.0);
+    const auto lines = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
+    REQUIRE (lines.size() == 1);
+    CHECK (lines.front().isSong);
+    checkChangesAreWhole (s.context, "the tempo changed");
+
+    phazite::setTempo (song, tempo);
+    CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+    checkChangesAreWhole (s.context, "the tempo set back");
 }
 
 TEST_CASE ("The changes follow an edit once worked out in the background, the listeners told as they come in")

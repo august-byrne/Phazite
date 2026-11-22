@@ -568,6 +568,7 @@
         "high": 1.0,
         "whole": false
       },
+      "default": 1.0,
       "kind": "song",
       "counted": true
     },

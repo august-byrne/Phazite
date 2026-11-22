@@ -1434,11 +1434,8 @@ TEST_CASE ("A chorus's LFO a bar a cycle follows the song's bars: three quarter 
     TestSong song;
     song.setTempo (120.0);
     song.setTimeSignature (6, 8);
-    namespace schema = phazite::schema;
-    auto tempoMap = phazite::findSong (song.context)->getState().getChildWithName (schema::TEMPOMAP);
-    tempoMap.appendChild (
-        juce::ValueTree (schema::TIMESIGNATURE, { { schema::mapBeat, 6.0 }, { schema::numerator, 4 }, { schema::denominator, 4 } }),
-        nullptr);
+    phazite::setTimeSignatureChanges (*phazite::findSong (song.context),
+                                      { { phazite::BeatPosition(), { 6, 8 } }, { phazite::BeatPosition::fromBeats (6.0), { 4, 4 } } });
     const auto track = song.firstTrack;
     song.addAudioClip (track, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 8.0, 440.0, 0.25f), 0.0);
     const auto chorusID = song.addEffect (track, phazite::devices::Motion::typeID);
