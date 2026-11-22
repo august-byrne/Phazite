@@ -119,9 +119,9 @@ bool setTempoMapProperty (TempoMapValue&, const juce::String& step, const juce::
 // A tempo map's value with the entry a merge's clash names by its step (as setTempoMapProperty() finds it) made what an
 // element holds: put in its place where the value holds one there (moved where its beat puts it, as placeByBeat() moves one,
 // where it differs), else after those of its kind at its beat; taken out for an invalid element (the same value where the
-// value holds none there). The element read as readTempoMapValue() reads one, nothing kept within a range (what the song
-// holds is the caller's to ask: isHeldAsTheSongHoldsIt()). None for a step that names neither kind, or an element of
-// another type than the step's.
+// value holds none there). The element read as readHeldTempoMap() reads one, as everything that enters the song's tempo map
+// is (whether the map then holds what the song holds of one, a kind not left empty, is the caller's to ask:
+// isHeldAsTheSongHoldsIt()). None for a step that names neither kind, or an element of another type than the step's.
 std::optional<TempoMapValue> withEntryAt (const TempoMapValue&, const juce::String& step, const juce::ValueTree& element);
 
 // The same with the entry another value holds at that step (taken out where it holds none there); and whether a value holds an

@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
+#include "model/chords/internal/Chords.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
@@ -96,11 +97,20 @@ namespace
         return parent.hasType (schema::TEMPOMAP) || (child.hasType (schema::TEMPOMAP) && parent.hasType (schema::PHAZITE));
     }
 
+    // Whether an element is the chord lane's: the song's CHORDLANE, or an element in it. The song holds its lane as a value
+    // (model/base/internal/SongValues.h), its CHORDLANE an empty placeholder that says whether it has one, which the lane pass
+    // makes like the other's, the placeholder too (makeChordLaneLike(), below), never the passes over elements.
+    bool isChordLanes (const juce::ValueTree& parent, const juce::ValueTree& child)
+    {
+        return parent.hasType (schema::CHORDLANE) || (child.hasType (schema::CHORDLANE) && parent.hasType (schema::PHAZITE));
+    }
+
     // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read
     // (the stand-ins, and the elements that stand in for themselves: a clip a run of whose notes was lost), and without its
     // tracks' clips, which the clip pass gives them (ClipPass, below), nor the tempo map's entries, which the tempo pass
-    // gives the song (makeTempoMapLike()). The song hasn't the stand-ins, so what they held stays as it is now: not there. A
-    // stand-in is never part of a song (Schema.h: schema::versions::missing).
+    // gives the song (makeTempoMapLike()), nor the chord lane's, which the lane pass gives it (makeChordLaneLike()). The song
+    // hasn't the stand-ins, so what they held stays as it is now: not there. A stand-in is never part of a song (Schema.h:
+    // schema::versions::missing).
     juce::ValueTree copyForSong (const juce::ValueTree& element)
     {
         auto copy = element.createCopy();
@@ -108,7 +118,8 @@ namespace
         {
             for (int i = tree.getNumChildren(); --i >= 0;)
             {
-                if (auto child = tree.getChild (i); isStandIn (child) || child.hasType (schema::CLIP) || tree.hasType (schema::TEMPOMAP))
+                if (auto child = tree.getChild (i); isStandIn (child) || child.hasType (schema::CLIP) || tree.hasType (schema::TEMPOMAP)
+                                                    || tree.hasType (schema::CHORDLANE))
                     tree.removeChild (i, nullptr);
                 else
                     strip (child);
@@ -120,11 +131,12 @@ namespace
     }
 
     // Whether makeLike() places a child among the element's: taken, a track only withTracks, never a clip (a track's clips are
-    // the clip pass's: ClipPass, below), nor the song's TEMPOMAP or what is in it (the tempo pass's: makeTempoMapLike()).
+    // the clip pass's: ClipPass, below), nor the song's TEMPOMAP or what is in it (the tempo pass's: makeTempoMapLike()), nor
+    // its CHORDLANE or what is in it (the lane pass's: makeChordLaneLike()).
     bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, bool withTracks, Taken taken)
     {
         return isTaken (taken, element, child) && (withTracks || ! child.hasType (schema::TRACK)) && ! child.hasType (schema::CLIP)
-               && ! isTempoMaps (element, child);
+               && ! isTempoMaps (element, child) && ! isChordLanes (element, child);
     }
 
     std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true, Taken taken = Taken::counted)
@@ -941,11 +953,13 @@ namespace
         }
     };
 
-    // What gives the song's tracks their clips here is the clip pass alone, and the song its tempo map the tempo pass alone,
-    // never the keeper of the song's values, which takes in the clips' elements of a track that comes into the song's tree
-    // with them, and the tempo map's entries that come into its TEMPOMAP (SongValues.h: a safety net): every copy added to
-    // the song is without its tracks' clips and the tempo map's entries (copyForSong()). Checked in Debug builds, as each of
-    // the functions below ends.
+    // What gives the song's tracks their clips here is the clip pass alone, the song its tempo map the tempo pass alone, and
+    // the song its chord lane the lane pass alone, never the keeper of the song's values, which takes in the clips' elements
+    // of a track that comes into the song's tree with them, the tempo map's entries that come into its TEMPOMAP, and the
+    // chord lane's that come into its CHORDLANE (SongValues.h: a safety net): every copy added to the song is without its
+    // tracks' clips, the tempo map's entries and the chord lane's (copyForSong()), and the passes over elements leave the
+    // song's TEMPOMAP and CHORDLANE to the areas' passes (isPlaced()). Checked in Debug builds, as each of the functions
+    // below ends: what the keeper took in counted for every area that counts it, a line each, in the order of the areas.
     struct NothingTakenIn
     {
         explicit NothingTakenIn (const Song& s)
@@ -959,7 +973,13 @@ namespace
         static int count (const Song& s)
         {
             const auto* values = s.getValues();
-            return values != nullptr ? values->countAdopted() + values->countTempoMapAdopted() : 0;
+
+            if (values == nullptr)
+                return 0;
+
+            return values->countAdopted()             // the clips', with their notes
+                   + values->countTempoMapAdopted()   // the tempo map's
+                   + values->countChordLaneAdopted(); // the chord lane's
         }
 
         const Song& song;
@@ -968,9 +988,9 @@ namespace
         JUCE_DECLARE_NON_COPYABLE (NothingTakenIn)
     };
 
-    // The song's tempo map made the other song's (its TEMPOMAP's, read as a value: TempoMapValue.h, readTempoMapValue(); the
-    // map a song without one plays, 120 BPM in 4/4, where it has none), through the tempo map's one setter, in the mode of the
-    // moment (SongValues.h: setTempoMap(), which writes nothing for the map the song holds already). The rule for what the
+    // The song's tempo map made the other song's (its TEMPOMAP's, read as the song holds a map, as everything that enters the
+    // tempo map's area is: TempoMapValue.h, readHeldTempoMap(); the map a song without one plays, 120 BPM in 4/4, where it has
+    // none), through the tempo map's one setter, in the mode of the moment (SongValues.h: setTempoMap(), which writes nothing for the map the song holds already). The rule for what the
     // other's version couldn't read (a stand-in: the TEMPOMAP or an entry of it, which only a piece that isn't Phazite's can
     // make): a map that holds what could not be read is left as the song has it, whole. One stand-in entry keeps the whole
     // map from being applied, where the generic pass kept the stand-in elements and applied the rest: a map's entries have no
@@ -985,8 +1005,24 @@ namespace
             return false;
 
         const auto before = values->tempoMap.get();
-        values->setTempoMap (song, readTempoMapValue (then));
+        values->setTempoMap (song, readHeldTempoMap (then));
         return ! values->tempoMap.get().isSameAs (before);
+    }
+
+    // The song's chord lane made the other song's: a lane or none, as the other has one (its CHORDLANE, read as the song holds
+    // a lane: ChordLaneValue.h, readHeldChordLane()), through the chord lane's code, which adds or takes away the song's
+    // CHORDLANE and sets its value, in the mode of the moment (model/chords/internal/Chords.h: makeChordLaneAs(), which writes
+    // nothing for the lane the song holds already). The rule for what the other's version couldn't read, as the tempo map's
+    // (makeTempoMapLike()): a lane that holds what could not be read is left as the song has it, whole, its being there too
+    // (a lane's chords and keys have no identity of their own to keep in the stand-in's place). Whether it wrote.
+    bool makeChordLaneLike (Song& song, const juce::ValueTree& other)
+    {
+        const auto then = other.getChildWithName (schema::CHORDLANE);
+
+        if (song.getValues() == nullptr || (then.isValid() && (isStandIn (then) || ! findStandIns (then).empty())))
+            return false;
+
+        return makeChordLaneAs (song, then);
     }
 
     // Every track's clips made like the other's, once the rest of the song is: how many writes it made.
@@ -999,11 +1035,13 @@ namespace
 
     // The areas the song holds as values beside its tree made like the other's, once the rest of the song is, each through
     // its pass, a line each, in this order: the clips with their notes (makeClipsLike()), then the tempo map
-    // (makeTempoMapLike()), neither of which reads the other's. How many writes they made (the tempo map's one, where it wrote).
+    // (makeTempoMapLike()), then the chord lane (makeChordLaneLike()), none of which reads another's. How many writes they
+    // made (the tempo map's one, where it wrote; the chord lane's one, where it wrote).
     int makeValuesLike (Song& song, const juce::ValueTree& other, bool standInsStay)
     {
         auto writes = makeClipsLike (song, other, standInsStay);
         writes += makeTempoMapLike (song, other) ? 1 : 0;
+        writes += makeChordLaneLike (song, other) ? 1 : 0;
         return writes;
     }
 
@@ -1241,11 +1279,12 @@ namespace
                 if (const auto* value = state.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
                     state.setProperty (name, other[name], undo);
 
-        // Its tempo map, through the tempo pass; its sections, chord lane and the key set last: each as the other has it, or
-        // none.
+        // Its tempo map, through the tempo pass; its chord lane, through the lane pass; its sections and the key set last: each
+        // as the other has it, or none.
         makeTempoMapLike (song, other);
+        makeChordLaneLike (song, other);
 
-        for (const auto* type : { &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
+        for (const auto* type : { &schema::SECTIONS, &schema::LASTKEY })
         {
             auto live = state.getChildWithName (*type);
             const auto then = other.getChildWithName (*type);

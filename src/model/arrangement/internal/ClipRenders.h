@@ -192,6 +192,11 @@ private:
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override; // SongValues.h
     void tempoMapChanged() override;                                                                      // SongValues.h
 
+    // The chord lane (SongValues.h: chordLaneChanged()): nothing, as no clip's render is made of chords or keys; the tree
+    // callbacks above leave what is in the song's CHORDLANE alone (isHeardAsKept(), as every listener of the song's root does)
+    // and, unlike the other listeners, the CHORDLANE's own coming and going too (isChordLanePlaceholder()).
+    static bool isChordLanePlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child);
+
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };
 } // namespace phazite

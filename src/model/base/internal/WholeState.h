@@ -6,9 +6,10 @@
 // tree doesn't hold. These write what is kept beside the tree back in, so that what asks gets the tree a song that kept
 // everything in its tree would give: under each track, its clips first among its elements, in the track's order, each
 // written as ClipsValue.h's writeClipElement() writes it (each property only while it is set; an audio clip's warp markers;
-// a MIDI clip's NOTE elements, then its CONTROL elements, each kind in its order); and in the song's TEMPOMAP element, which
+// a MIDI clip's NOTE elements, then its CONTROL elements, each kind in its order); in the song's TEMPOMAP element, which
 // the tree keeps empty for it, its tempos then its time signatures, each kind by beat, each written as TempoMapValue.h's
-// writeTempoMap() writes it (a tempo's curve only while it isn't 1).
+// writeTempoMap() writes it (a tempo's curve only while it isn't 1); and in the song's CHORDLANE, where it has one, its
+// chords then its key changes, each kind in its order, each written as ChordLaneValue.h's writeChordLane() writes it.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -41,7 +42,8 @@ struct ValuesKept
 {
     NotesByClip notes;
     SongClips clips;
-    TempoMapValue tempoMap; // none (no entry of either kind) kept of a song that holds no values
+    TempoMapValue tempoMap;   // none (no entry of either kind) kept of a song that holds no values
+    ChordLaneValue chordLane; // empty kept of a song that holds no values, and of one without chords or keys
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -68,12 +70,19 @@ bool holdSameTrackClips (const ValuesKept&, const ValuesKept&, TrackID);
 // agree. Any thread.
 bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
 
+// Whether two songs, each a tree with its kept values, hold the same chord lane: both a lane or neither (the trees' CHORDLANE
+// elements, the sign of one), and the same chords and keys as one value (ChordLaneValue.h: each kind in its order), so that
+// a chord changed and changed back compares as the same. Both of Project's comparisons with the saved copy compare the lane
+// so (the quick one, and the whole song's), so that the two agree. Any thread. In ChordLaneArea.cpp.
+bool holdSameChordLane (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
+
 // Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
 // what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips
-// (holdSameTrackClips()), then the tempo map of an element either of which holds a TEMPOMAP (holdSameTempoMap()). What
-// Project's comparison of an element whole asks once the element's own properties compare (holdTheSameProject()). And
-// whether a child of an element is the place of what an area keeps (the song's TEMPOMAP), which that comparison leaves out of
-// the elements it compares one by one. Any thread.
+// (holdSameTrackClips()), then the tempo map of an element either of which holds a TEMPOMAP (holdSameTempoMap()), then the
+// chord lane of a song's element either of which holds a CHORDLANE (holdSameChordLane()). What Project's comparison of an
+// element whole asks once the element's own properties compare (holdTheSameProject()). And whether a child of an element is
+// the place of what an area keeps (the song's TEMPOMAP, its CHORDLANE), which that comparison leaves out of the elements it
+// compares one by one. Any thread.
 bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
 bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

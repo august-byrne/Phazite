@@ -951,8 +951,12 @@ private:
     // The clips that changed (SongValues.h): their tracks' lines, before and after, marked by their IDs as they are told.
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
 
-    // The tempo map (SongValues.h), which the tree's callbacks below leave alone (isHeardAsTempoMap()): the song's own line.
+    // The tempo map (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): the song's own line.
     void tempoMapChanged() override;
+
+    // The chord lane (SongValues.h), what is in whose CHORDLANE the tree's callbacks below leave alone (isHeardAsKept()):
+    // the song's own line, as a change of its element was. The element's own coming and going they mark as any element's.
+    void chordLaneChanged() override;
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();
@@ -979,8 +983,8 @@ private:
 
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
-        if (isHeardAsTempoMap (parent, child))
-            return; // tempoMapChanged()
+        if (isHeardAsKept (parent, child))
+            return; // the areas': tempoMapChanged(), chordLaneChanged()
 
         ++songChanges;
         markChildChanged (parent, child);
@@ -988,8 +992,8 @@ private:
 
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        if (isHeardAsTempoMap (parent, child))
-            return; // tempoMapChanged()
+        if (isHeardAsKept (parent, child))
+            return; // the areas': tempoMapChanged(), chordLaneChanged()
 
         ++songChanges;
         markChildChanged (parent, child);

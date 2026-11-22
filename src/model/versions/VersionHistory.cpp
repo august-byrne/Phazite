@@ -3152,6 +3152,14 @@ void VersionHistory::tempoMapChanged()
     markSongOwn();
 }
 
+void VersionHistory::chordLaneChanged()
+{
+    // A change of the song as its tree's are, in its chord lane: the song's own line (as markChanged() marks it).
+    ++songChanges;
+    edited();
+    markSongOwn();
+}
+
 void VersionHistory::markNotesHeard()
 {
     // A clip gone since was taken off its track, which marked it.
@@ -3183,8 +3191,8 @@ void VersionHistory::markOrder()
 
 void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (isHeardAsTempoMap (tree))
-        return; // tempoMapChanged()
+    if (isHeardAsKept (tree))
+        return; // the areas': tempoMapChanged(), chordLaneChanged()
 
     ++songChanges;
 
@@ -3215,8 +3223,8 @@ void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce
 
 void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex)
 {
-    if (isHeardAsTempoMap (parent))
-        return; // tempoMapChanged()
+    if (isHeardAsKept (parent))
+        return; // the areas': tempoMapChanged(), chordLaneChanged()
 
     ++songChanges;
 

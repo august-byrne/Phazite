@@ -77,7 +77,15 @@ out as it opens the file (section 7).
   and its `parameter`'s ID as a curve names them (a modulator's parameter by its name; a macro by its ID as `device` and
   the word `value` as `parameter`, so that the link names the macro's ID once); one link of a controller and one of a
   parameter, the first kept as the song opens;
-- `SECTIONS`, `CHORDLANE`: the song's parts and its chords;
+- `SECTIONS`: the song's parts;
+- `CHORDLANE`, once the song has a chord lane (without one, its keys are the key set last, `LASTKEY`): its chords
+  (`CHORD`: `start`, `length`, `degree`, `type`, and `accidental` and `inversion`, each written only while it isn't 0)
+  and the keys they are in (`CHORDKEY`: `start`, `keyRoot`, `keyScale`). Read in any order (the lane's readers sort each
+  kind by its start), one of a kind for a start (a chord's or a key's key is its start); a number that is absent or none
+  reads as its description says (a `start` of 0, a `length` of 4, a `degree` of 1, an `accidental` and an `inversion` of
+  0; a key without a `keyRoot` is none), and a property or an element Phazite doesn't know on the lane or an entry isn't
+  kept. An empty `CHORDLANE` is a lane still. Phazite writes the chords first, then the keys, each kind in the lane's
+  order;
 - `MERGING`, while a merge taken into the song waits for its version: what it merged, where, and the song before it
   (a piece in the project's Versions folder), as [versions-format.md](versions-format.md) says (section 8). It goes in
   and out of the song with the merge's undo step, is no part of a version's song, and is read as untrusted: one that

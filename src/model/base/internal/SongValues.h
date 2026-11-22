@@ -4,13 +4,15 @@
 // SongClips, each clip's properties and warp markers as a ClipValue, each track's clips in their order, each alias group's
 // clips), which the clips' code (model/arrangement/internal/Clips.h, AudioClips.h) computes each edit on; a MIDI clip's notes
 // and its controllers' values (ClipNotesValue.h: ClipNotes, every clip's in NotesByClip), which the notes' code
-// (model/notes/internal/Notes.h) computes each edit on, from one value to the next; and the song's tempo map
+// (model/notes/internal/Notes.h) computes each edit on, from one value to the next; the song's tempo map
 // (TempoMapValue.h: its tempos and time signatures), which the tempo map's code (model/transport/internal/Tempo.h) computes
-// each edit on. All as plain values in Phazite's own types.
+// each edit on; and the song's chord lane (ChordLaneValue.h: its chords and key changes), which the chord lane's code
+// (model/chords/internal/Chords.h) computes each edit on. All as plain values in Phazite's own types.
 //
 // The values are the storage: the song holds an area of each (SongValues) in its one undo history, and the song's tree holds
-// no CLIP element (nor a clip's NOTE, CONTROL or WARP elements), and no TEMPO or TIMESIGNATURE element: its TEMPOMAP element
-// stays, empty, the place a whole copy writes the map in. Each area's value header holds the conversion between its elements
+// no CLIP element (nor a clip's NOTE, CONTROL or WARP elements), no TEMPO or TIMESIGNATURE element, and no CHORD or CHORDKEY
+// element: its TEMPOMAP element stays, empty, the place a whole copy writes the map in, and its CHORDLANE, where it has one,
+// empty too, the sign that it has a lane. Each area's value header holds the conversion between its elements
 // and its value, the one place that reads and writes those elements by their names: what a file's clip or tempo map (or any
 // that comes into the song as an element: a version's track, a track pasted) is read into, and what a whole copy of the song
 // is written from (WholeState.h).
@@ -23,7 +25,11 @@
 //   1. Its value: internal/<Area>Value.h, with its .cpp in model/base/ (as TempoMapValue.h): the value's types, each with
 //      isSameAs() (ValueArea.h) and ==, the helpers that alone write it, its invariants as a function the check calls
 //      (TempoMapValue.h: isHeldAsTheSongHoldsIt(); ClipsValue.h: holdsItsLists()), and the conversion of its elements by
-//      name (read<Area>Value(), write<Area>(), a merge's property set on the value).
+//      name (read<Area>Value(), write<Area>(), a merge's property set on the value). Two readers of its element:
+//      read<Area>Value(), lenient (each property as the area's code always read it), for a song without values and for
+//      tests; and readHeld<Area>(), as the song holds the area (each number by its description, within its range, and what
+//      must hold together kept so, as ChordLaneValue.h's keepChordsApart()), which everything that enters the area reads:
+//      the adoption, the keeper, the versions' pass and a merge's choice (steps 2, 8 and 9).
 //   2. Its area: internal/<Area>Area.h and model/base/<Area>Area.cpp (as TempoMapArea.h), including this header: its teller
 //      (struct SongValues::<Area>Teller, a ValueArea listener that adds itself to the area and tells Listener of a change of
 //      its value); its part of the keeper (struct SongValues::<Area>Keeper: childAdded() and, where it acts there,
@@ -34,11 +40,18 @@
 //      (leadsTo<Area>(), write<Area>In()); its comparison of two kept values (holdSame<Area>(), declared in WholeState.h) and
 //      of two elements with their kept values (holdSame<Area>Of(), is<Area>Place()); and, if it holds IDs,
 //      findLargestIDIn (const <Area>Value&) (IDsHeld.h). Each new file listed in CMakeLists.txt (phazite_core) and in
-//      src/model/README.md.
+//      src/model/README.md. An area whose element's presence means something (the chord lane's CHORDLANE: a song without
+//      one takes its keys from the key set last): the element stays as an empty placeholder where the song has one, and
+//      only the area's code adds or takes it away, in the step that changes the value: the element first when adding, the
+//      value first when taking away, so that the value never says more than the element; isHeardAs<Area>() covers only
+//      what is inside it, and its own adding and taking away stays the tree's (the listeners hear it as a child of the
+//      root); holdSame<Area>() and the check (step 7) compare whether each has the element too; and whole state writes an
+//      empty placeholder as an empty element.
 //   3. Here, in SongValues: its area as a member (ValueArea<<Area>Value> <area>, after the others); its setter (set<Area>());
 //      a virtual <area>Changed() in Listener, empty by default; struct <Area>Teller and <Area>Keeper among the declarations
 //      below, and a std::unique_ptr<<Area>Teller> after the others; a count of what its keeper took in, if it takes any in
-//      (countTempoMapAdopted()); and isHeardAs<Area>(), below, from the listener's piece on (steps 12 and 14).
+//      (countTempoMapAdopted()); and isHeardAs<Area>(), below, from the listener's piece on, with its line in
+//      isHeardAsKept() (steps 12 and 14).
 //   4. SongValues.cpp: its area header included; its area in the constructor's initialiser list after the others
 //      (<area> (song.getUndoManager(), its empty value)), and its teller after the others' (<area>Teller
 //      (std::make_unique<<Area>Teller> (<area>, listeners))); the destructor lets go of its teller after the keeper and
@@ -57,7 +70,12 @@
 //      of each line's pass beside the whole song's, where that line holds it: a track's, makeTrackLikeIn() (as its
 //      ClipPass), and the song's own, makeSongOwnLikeIn() (as its makeTempoMapLike()); its elements left out of every pass
 //      over elements that names the areas' in its conditions: copyForSong(), isPlaced() (with isTempoMaps()),
-//      findPlaces(), findHolder() and sendItemsHome(); and its keeper's count (step 3) added to NothingTakenIn::count().
+//      findPlaces(), findHolder() and sendItemsHome(); and its keeper's count (step 3) a line of NothingTakenIn::count()
+//      and, where a merge's choice never leaves the area's elements to the keeper (not the clips', which come in with a
+//      track chosen whole), of NothingTakenInButClips::count() in model/versions/VersionsModel.cpp. An area with a
+//      placeholder (step 2): its pass owns the placeholder too, adding or taking it away through the area's function (as
+//      Chords.h's makeChordLaneAs()), and isPlaced(), copyForSong() and makeSongOwnLikeIn()'s list of the song's own
+//      elements leave the element and its children alone.
 //  10. Each SongValues::Listener: its <area>Changed() override, which only marks (step 13); one that follows nothing of the
 //      area says so in a comment beside its overrides. They are:
 //      - ClipRenders (model/arrangement/ClipRenders.cpp, internal/ClipRenders.h): rendersMayChange() where the area holds
@@ -82,13 +100,16 @@
 //      (model/versions/ChangesWorker.cpp: take(), makeSkeleton()); the saved copy (model/project/Project.cpp: savedState,
 //      the tree with keepValues(), written with copyWhole()); the clipboard (model/arrangement/Clipboard.cpp); an export
 //      (model/project/Export.cpp, DawProject.cpp).
-//  12. The tree's listeners: from the listener's piece (step 14) to the switch, the tree is still the area's storage, the
-//      keeper feeds <area>Changed() from the tree's callbacks under the area's elements, and each listener of step 10 leaves
-//      those elements alone in its tree callbacks with isHeardAs<Area>() (as isHeardAsTempoMap()'s calls in ClipRenders.cpp,
-//      Freeze.cpp, internal/Freeze.h, PlaybackSession.cpp, SongPlayer.cpp, Project.cpp, internal/Project.h,
-//      ProjectContext.cpp, VersionHistory.cpp and internal/VersionHistory.h). At the switch the feed goes (the teller tells),
-//      and those calls go with it where the tree then holds nothing of the area (the clips' went so); they stay where the
-//      area keeps a place in the tree that the keeper's safety net writes (the tempo map's TEMPOMAP).
+//  12. The tree's listeners: each listener of step 10 leaves what the areas tell alone in its tree callbacks by asking
+//      isHeardAsKept() (below) once, where it returns early for it (ClipRenders.cpp, Freeze.cpp, internal/Freeze.h,
+//      PlaybackSession.cpp, SongPlayer.cpp, Project.cpp, internal/Project.h, ProjectContext.cpp, VersionHistory.cpp and
+//      internal/VersionHistory.h); a new area adds its line there (its isHeardAs<Area>()), not a line in each listener. A
+//      listener that takes one area's notifications differently from another's says so in a comment where it does (the
+//      clip renders, which leave the chord lane's placeholder alone too). From the listener's piece (step 14) to the
+//      switch, the tree is still the area's storage, and the keeper feeds <area>Changed() from the tree's callbacks under
+//      the area's elements. At the switch the feed goes (the teller tells), and the area's line in isHeardAsKept() goes
+//      with it where the tree then holds nothing of the area (the clips' went so); it stays where the area keeps a place in
+//      the tree that the keeper's safety net writes (the tempo map's TEMPOMAP, the chord lane's CHORDLANE).
 //  13. What an area must not do: no tree callback reads any area, directly or through what reads it (the root's listeners
 //      have no order among them, and an Undo puts the tree back before the areas: below); a listener told of an area's
 //      change only marks; a set equal to what is held makes no undo step (nothing, or ValueArea.h's setWithoutStep() where
@@ -119,6 +140,7 @@
 #include "model/base/Beats.h"
 #include "model/base/ControlKinds.h"
 #include "model/base/IDs.h"
+#include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/ClipNotesValue.h"
 #include "model/base/internal/ClipsValue.h"
 #include "model/base/internal/Immer.h"
@@ -141,7 +163,8 @@ class Song;
 
 //==============================================================================
 // The song's values, which the song holds once its tree is consistent (Song::holdValues(), as model/project/internal/
-// Project.h's makeSong() makes a song): the clips' area, the notes' area and the tempo map's, in the song's one undo history,
+// Project.h's makeSong() makes a song): the clips' area, the notes' area, the tempo map's and the chord lane's, in the song's
+// one undo history,
 // and what keeps them and the tree together. Message thread only, as the song's tree is: nothing on the audio thread reads it
 // (what plays gets what the model compiles of it), and what runs on another thread gets a copy (WholeState.h:
 // copyWholeSong(), keepValues()).
@@ -166,7 +189,9 @@ class Song;
 // a TEMPO or a TIMESIGNATURE added to the song's TEMPOMAP by itself while the song is written outside the history is read
 // into the map (TempoMapValue.h: withEntryTaken()) and taken out again. One
 // added by itself in a step is refused as a lone CLIP is, for the same reason (a JUCE assertion: the tempo map's functions
-// change the map). Each in the mode of the moment: in the history's step in progress, or outside the history while the song
+// change the map). The chord lane's alike (ChordLaneArea.h): a CHORDLANE that comes in with CHORD or CHORDKEY elements has
+// them read in as the song's lane and is emptied, a lone one added outside the history is read in and taken out, and one
+// added in a step is refused. Each in the mode of the moment: in the history's step in progress, or outside the history while the song
 // is written outside it (Song::OutsideHistory). Nothing while the history undoes or redoes a step: the areas' own actions
 // move them. The keeper performs its changes from inside JUCE's action for the tree's, which JUCE adds to the step before
 // the tree's own: so an undo puts the tree back first and the clips after (JUCE workaround W62 (docs/juce-workarounds.md)).
@@ -190,7 +215,8 @@ public:
 
     ValueArea<SongClips> clips;
     ValueArea<NotesByClip> notes;
-    ValueArea<TempoMapValue> tempoMap; // each kind by beat, at least one of each (TempoMapValue.h)
+    ValueArea<TempoMapValue> tempoMap;   // each kind by beat, at least one of each (TempoMapValue.h)
+    ValueArea<ChordLaneValue> chordLane; // each kind in the lane's order, empty for a song without a lane (ChordLaneValue.h)
 
     // A clip's value: none for a clip that isn't the song's. A pointer into the area's value as it is now, valid until the
     // area's next change; to read the same value on past changes, keep a copy of the area's value (cheap: it shares what it
@@ -226,6 +252,13 @@ public:
     // the song holds is no change, and writes nothing: no step, the value the song holds kept (an entry has no identity of
     // its own to keep, nor a value of the map's anything else shares, so nothing is lost). In TempoMapArea.cpp.
     void setTempoMap (Song&, TempoMapValue);
+
+    // Gives the song this chord lane, the chord lane's code's one way to change it (model/chords/internal/Chords.h): in the
+    // song's undo history (the step in progress), or outside it while the song is written outside it. A lane equal to the one
+    // the song holds is no change, and writes nothing: no step, the value the song holds kept (an entry has no identity of
+    // its own to keep). Whether the song has a lane is its tree's CHORDLANE's to say, which the chord lane's code adds and
+    // takes away in the same step. In ChordLaneArea.cpp.
+    void setChordLane (Song&, ChordLaneValue);
 
     // The tempo map as Phazite's engine plays it (engine/core/TempoMap.h), made of the tempo map's value at a sample rate,
     // kept for the tempo map's code (model/transport/Tempo.cpp: getTempoMap()), so that it is made once for each change of
@@ -277,9 +310,18 @@ public:
 
         // The song's tempo map (TempoMapValue.h): its tempos or its time signatures, any of them. The tempo map's area tells it,
         // once for each change of its value: a step's, an undo's or a redo's whole step, a write outside the history. What
-        // listens to the song's root leaves what its tree tells under its TEMPOMAP element alone (isHeardAsTempoMap(),
-        // below): what the keeper takes in there (its safety net) is told here, once.
+        // listens to the song's root leaves what its tree tells under its TEMPOMAP element alone (isHeardAsKept(), below,
+        // through isHeardAsTempoMap()): what the keeper takes in there (its safety net) is told here, once.
         virtual void tempoMapChanged() {}
+
+        // The song's chord lane (ChordLaneValue.h): its chords or its key changes, any of them. The chord lane's area tells it,
+        // once for each change of its value: a step's, an undo's or a redo's whole step, a write outside the history. What
+        // listens to the song's root leaves what its tree tells inside its CHORDLANE alone (isHeardAsKept(), below, through
+        // isHeardAsChordLane()): what the keeper takes in there (its safety net) is told here, once. The CHORDLANE's own coming and going, which says
+        // whether the song has a lane (a song without one takes its keys from the key set last), is the tree's, which it hears
+        // as it always did: so a step that makes the lane (its first chord or key) is heard twice, its element added by the
+        // tree and its first key here, and only marks twice.
+        virtual void chordLaneChanged() {}
     };
 
     void addListener (Listener*) const;
@@ -299,6 +341,11 @@ public:
     // check they never leave to it.
     int countTempoMapAdopted() const noexcept { return tempoMapAdopted; }
 
+    // How many CHORD and CHORDKEY elements the keeper took into the chord lane's area from the song's tree since the song held
+    // its values (the safety net, above): what the versions, which give the song its lane through the chord lane's code
+    // (Chords.h: makeChordLaneAs()), check they never leave to it.
+    int countChordLaneAdopted() const noexcept { return chordLaneAdopted; }
+
 private:
     friend class Song;
 
@@ -308,13 +355,17 @@ private:
     struct TempoMapTeller;                          // TempoMapArea.h
     struct ClipsKeeper;                             // ClipsArea.h: the clips', with their notes
     struct TempoMapKeeper;                          // TempoMapArea.h
+    struct ChordLaneTeller;                         // ChordLaneArea.h
+    struct ChordLaneKeeper;                         // ChordLaneArea.h
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
     std::unique_ptr<ClipsTeller> clipsTeller;
     std::unique_ptr<NotesTeller> notesTeller;
     std::unique_ptr<TempoMapTeller> tempoMapTeller;
+    std::unique_ptr<ChordLaneTeller> chordLaneTeller;
     std::unique_ptr<Keeper> keeper;
     int adopted = 0, tempoMapAdopted = 0;
+    int chordLaneAdopted = 0;
 
     // In the history, or outside it, as the song is written now; and a value alike to the area's, without a step of its own
     // (ValueArea.h: setWithoutStep()). Each with its area's setters.
@@ -338,4 +389,23 @@ private:
 // in (its safety net, above), which the area tells. In TempoMapArea.cpp.
 bool isHeardAsTempoMap (const juce::ValueTree& element);
 bool isHeardAsTempoMap (const juce::ValueTree& parent, const juce::ValueTree& child);
+
+// Whether what the song's tree tells of an element (a property changed, a child moved in it) is the chord lane's, which a
+// listener of the song's root hears from the values' listener alone (SongValues::Listener::chordLaneChanged()) and leaves
+// alone in its tree callbacks: the song's CHORDLANE element (the child of its PHAZITE element), or an element in it. And
+// whether a child added to an element or taken out of it is: a child of an element that is. Not the CHORDLANE itself added
+// to the song or taken out, which says whether the song has a lane: the tree's, heard as any element's (Listener::
+// chordLaneChanged()). The song's CHORDLANE is an empty placeholder (the lane is its area's), so the tree tells of what is in
+// it only what the keeper takes in (its safety net, above), which the area tells. In ChordLaneArea.cpp.
+bool isHeardAsChordLane (const juce::ValueTree& element);
+bool isHeardAsChordLane (const juce::ValueTree& parent, const juce::ValueTree& child);
+
+// Whether what the song's tree tells is any area's of the song's values, which a listener of the song's root hears from the
+// values' listener alone (SongValues::Listener) and leaves alone in its tree callbacks: of an element (a property changed in
+// it, a child moved in it), and of a child added to an element or taken out of it. Each the OR of the areas' own functions
+// above (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, then the chord lane's. What every
+// listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12, above): a new
+// area adds its line here, not a line in each listener. In SongValues.cpp.
+bool isHeardAsKept (const juce::ValueTree& element);
+bool isHeardAsKept (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

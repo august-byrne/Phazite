@@ -1,28 +1,38 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Chords.h"
 #include "Progressions.h"
+#include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/transport/internal/Tempo.h"
+#include "model/versions/internal/AreaClashes.h"
 
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace phazite
 {
 namespace
 {
-    // Positions this close count as the same.
-    constexpr double tiny = 1.0e-6;
+    // Positions this close count as the same: the lane's nearness (ChordLaneValue.h), by which a lane that enters the song keeps
+    // its chords apart as the writers here leave them (keepChordsApart()).
+    constexpr double tiny = chordLaneNear;
 
-    juce::UndoManager* getUndo (Song& song)
-    {
-        return &song.getUndoManager();
-    }
+    // How near a beat a chord or a key change starts that is "at" it (findStartingAt()).
+    constexpr double nearAt = 1.0e-4;
 
     juce::ValueTree findLaneState (const Song& song)
     {
         return song.getState().getChildWithName (schema::CHORDLANE);
+    }
+
+    // The song's tree written as the song is written now: in the step in progress, or outside the history.
+    juce::UndoManager* getTreeUndo (Song& song)
+    {
+        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
     }
 
     std::optional<Key> readKey (const juce::ValueTree& state)
@@ -34,79 +44,10 @@ namespace
                      findScale (state[schema::keyScale].toString()).value_or (Scale::major) };
     }
 
-    void writeKey (juce::ValueTree state, const Key& key, juce::UndoManager* undo)
-    {
-        state.setProperty (schema::keyRoot, key.root, undo);
-        state.setProperty (schema::keyScale, getSavedScaleName (key.scale), undo);
-    }
-
     // The key before any is written: the one new tracks get, which a new project sets, or else C major.
     Key getDefaultKey (const Song& song)
     {
         return readKey (song.getState().getChildWithName (schema::LASTKEY)).value_or (Key {});
-    }
-
-    BeatPosition getStart (const juce::ValueTree& state)
-    {
-        return BeatPosition::fromBeats (std::max (0.0, (double) state[schema::chordStart]));
-    }
-
-    BeatRange getRange (const juce::ValueTree& chord)
-    {
-        return { getStart (chord), BeatDuration::fromBeats (std::max (0.0, (double) chord[schema::chordLength])) };
-    }
-
-    void setRange (juce::ValueTree chord, BeatRange range, juce::UndoManager* undo)
-    {
-        chord.setProperty (schema::chordStart, range.getStart().inBeats(), undo);
-        chord.setProperty (schema::chordLength, range.getLength().inBeats(), undo);
-    }
-
-    // A chord's numeral: its accidental and inversion only when they aren't 0.
-    void writeNumeral (juce::ValueTree chord, const Numeral& numeral, juce::UndoManager* undo)
-    {
-        chord.setProperty (schema::chordDegree, numeral.degree, undo);
-
-        if (numeral.accidental != 0)
-            chord.setProperty (schema::chordAccidental, numeral.accidental, undo);
-        else
-            chord.removeProperty (schema::chordAccidental, undo);
-
-        chord.setProperty (schema::chordType, getSavedChordTypeName (numeral.type), undo);
-
-        if (numeral.inversion != 0)
-            chord.setProperty (schema::chordInversion, numeral.inversion, undo);
-        else
-            chord.removeProperty (schema::chordInversion, undo);
-    }
-
-    juce::ValueTree makeChordState (BeatRange range, const Numeral& numeral)
-    {
-        juce::ValueTree chord (schema::CHORD);
-        setRange (chord, range, nullptr);
-        writeNumeral (chord, numeral, nullptr);
-        return chord;
-    }
-
-    // The lane's chord or key change that starts at a beat.
-    juce::ValueTree findStartingAt (const Song& song, const juce::Identifier& type, BeatPosition start)
-    {
-        for (auto child : findLaneState (song))
-            if (child.hasType (type) && std::abs ((getStart (child) - start).inBeats()) < 1.0e-4)
-                return child;
-
-        return {};
-    }
-
-    std::vector<juce::ValueTree> getChildren (const juce::ValueTree& lane, const juce::Identifier& type)
-    {
-        std::vector<juce::ValueTree> children;
-
-        for (auto child : lane)
-            if (child.hasType (type))
-                children.push_back (child);
-
-        return children;
     }
 
     BeatDuration getBarLength (const Song& song, BeatPosition where)
@@ -114,7 +55,7 @@ namespace
         return getBars (song).getBarLength (where);
     }
 
-    // A key change's key, as readKey() reads its element: none for one without a root.
+    // A key change's key, as the lane's code reads one: none for one without a root.
     std::optional<Key> readKey (const KeyEntry& entry)
     {
         if (entry.root < 0)
@@ -123,7 +64,7 @@ namespace
         return Key { entry.root, findScale (entry.scale).value_or (Scale::major) };
     }
 
-    // A chord's numeral, as readNumeral() reads its element: none for a type Phazite doesn't know.
+    // A chord's numeral, as the lane's code reads one: none for a type Phazite doesn't know.
     std::optional<Numeral> readNumeral (const ChordEntry& entry)
     {
         const auto type = findChordType (entry.type);
@@ -157,31 +98,235 @@ namespace
         return keys;
     }
 
+    // The key from the lane's keys (getKeysOf()) at a beat: the last that starts there or before.
+    Key findKeyAt (const std::vector<LaneKey>& keys, BeatPosition where)
+    {
+        auto key = keys.front().key;
+
+        for (const auto& change : keys)
+            if (change.start <= where + BeatDuration::fromBeats (tiny))
+                key = change.key;
+
+        return key;
+    }
+
+    //==============================================================================
+    // The lane as an edit works on it: its chords and its key changes, each kind in the lane's order, made from its value and
+    // set as the next one once (setLane()).
+    struct Lane
+    {
+        explicit Lane (const ChordLaneValue& value)
+            : chords (value.chords.begin(), value.chords.end()),
+              keys (value.keys.begin(), value.keys.end())
+        {
+        }
+
+        ChordLaneValue toValue() const
+        {
+            return { immer::flex_vector<ChordEntry> (chords.begin(), chords.end()),
+                     immer::flex_vector<KeyEntry> (keys.begin(), keys.end()) };
+        }
+
+        std::vector<ChordEntry> chords;
+        std::vector<KeyEntry> keys;
+    };
+
+    // The song's chord lane made the next value: its area's, in the step in progress, or outside the history while the song
+    // is written outside it (SongValues.h: setChordLane(), which writes nothing for the lane the song holds already).
+    void setLane (Song& song, const Lane& lane)
+    {
+        if (auto* values = song.getValues())
+            values->setChordLane (song, lane.toValue());
+        else
+            jassertfalse; // the chord lane's edits are a song's that holds its values (model/project/internal/Project.h: makeSong())
+    }
+
+    // The lane an edit that writes a chord or a key works on: the song's, its element added first where it has none (an
+    // action of the tree's in the step in progress), starting with a key from 0, the one getLaneKeys() gives until then. The
+    // edit sets the value it works out (setLane()), the step's second action, which that key alone makes another value: so
+    // Undo takes the lane's value back and its element away, and the keys are the key set last again. A song without values
+    // gets no element: nothing is written (setLane() refuses the edit).
+    Lane openLane (Song& song)
+    {
+        if (song.getValues() == nullptr || findLaneState (song).isValid())
+            return Lane (getChordLaneValue (song));
+
+        song.getState().appendChild (juce::ValueTree (schema::CHORDLANE), getTreeUndo (song));
+        Lane lane (getChordLaneValue (song)); // empty: a song without a lane holds none (ChordLaneValue.h)
+        const auto key = getDefaultKey (song);
+        lane.keys.push_back ({ BeatPosition(), key.root, getSavedScaleName (key.scale) });
+        return lane;
+    }
+
+    BeatRange getRange (const ChordEntry& chord)
+    {
+        return { chord.start, chord.length };
+    }
+
+    void setRange (ChordEntry& chord, BeatRange range)
+    {
+        chord.start = range.getStart();
+        chord.length = range.getLength();
+    }
+
+    // A chord's numeral: its accidental and inversion 0 where it has none, as the lane writes them (writeChordLane()).
+    void writeNumeral (ChordEntry& chord, const Numeral& numeral)
+    {
+        chord.degree = numeral.degree;
+        chord.accidental = numeral.accidental;
+        chord.type = getSavedChordTypeName (numeral.type);
+        chord.inversion = numeral.inversion;
+    }
+
+    ChordEntry makeChord (BeatRange range, const Numeral& numeral)
+    {
+        ChordEntry chord;
+        setRange (chord, range);
+        writeNumeral (chord, numeral);
+        return chord;
+    }
+
+    void writeKey (KeyEntry& change, const Key& key)
+    {
+        change.root = key.root;
+        change.scale = getSavedScaleName (key.scale);
+    }
+
+    // The lane's first chord or key change (in the lane's order) that starts at a beat.
+    template <typename Entry>
+    std::optional<size_t> findStartingAt (const std::vector<Entry>& entries, BeatPosition start)
+    {
+        for (size_t i = 0; i < entries.size(); ++i)
+            if (std::abs ((entries[i].start - start).inBeats()) < nearAt)
+                return i;
+
+        return std::nullopt;
+    }
+
+    // Room made for chords in a range (clearLaneRange()): those inside it go, and those that reach into it are cut at its
+    // edges, each in its place; the part after the range of one around it a chord of its own, after the others.
+    void clearChords (std::vector<ChordEntry>& chords, BeatRange range)
+    {
+        if (range.isEmpty())
+            return;
+
+        const auto start = range.getStart(), end = range.getEnd();
+        const auto margin = BeatDuration::fromBeats (tiny);
+        std::vector<ChordEntry> kept, after;
+        kept.reserve (chords.size());
+
+        for (auto chord : chords)
+        {
+            const auto r = getRange (chord);
+
+            if (r.getEnd() <= start + margin || r.getStart() >= end - margin)
+            {
+                kept.push_back (chord); // outside the range
+                continue;
+            }
+
+            if (r.getStart() >= start - margin && r.getEnd() <= end + margin)
+                continue; // inside it: gone
+
+            if (r.getStart() < start && r.getEnd() > end)
+            {
+                // Around the range: the part after it becomes a chord of its own.
+                auto piece = chord;
+                setRange (piece, { end, r.getEnd() });
+                after.push_back (piece);
+                setRange (chord, { r.getStart(), start });
+            }
+            else if (r.getStart() < start)
+            {
+                setRange (chord, { r.getStart(), start });
+            }
+            else
+            {
+                setRange (chord, { end, r.getEnd() });
+            }
+
+            kept.push_back (chord);
+        }
+
+        kept.insert (kept.end(), after.begin(), after.end());
+        chords = std::move (kept);
+    }
+
     //==============================================================================
     // Time edits.
 
-    // Moves a chord's range, cutting it where it would start before the song.
-    void moveChord (juce::ValueTree chord, BeatDuration distance, juce::UndoManager* undo)
+    // A chord's range moved, cut where it would start before the song: whether anything of it is left (none: it goes).
+    bool moveChord (ChordEntry& chord, BeatDuration distance)
     {
         const auto range = getRange (chord).movedBy (distance);
         const auto start = std::max (BeatPosition(), range.getStart());
 
         if (range.getEnd() <= start + BeatDuration::fromBeats (tiny))
-            chord.getParent().removeChild (chord, undo);
-        else
-            setRange (chord, { start, range.getEnd() }, undo);
+            return false;
+
+        setRange (chord, { start, range.getEnd() });
+        return true;
+    }
+
+    // Whether an element of another song's, or anything in it, stands in for what that song's version couldn't read
+    // (Schema.h: schema::versions::missing).
+    bool holdsStandIn (const juce::ValueTree& element)
+    {
+        if (element.hasProperty (schema::versions::missing))
+            return true;
+
+        for (const auto& child : element)
+            if (holdsStandIn (child))
+                return true;
+
+        return false;
     }
 } // namespace
 
 //==============================================================================
 ChordLaneValue getChordLaneValue (const Song& song)
 {
+    if (const auto* values = song.getValues())
+        return values->chordLane.get();
+
     return readChordLaneValue (findLaneState (song));
 }
 
 bool hasChordLane (const Song& song)
 {
     return findLaneState (song).isValid();
+}
+
+bool makeChordLaneAs (Song& song, const juce::ValueTree& lane)
+{
+    auto* values = song.getValues();
+
+    if (values == nullptr || (lane.isValid() && ! lane.hasType (schema::CHORDLANE)))
+        return false;
+
+    // Its element first where it comes, its value, then its element away where it goes: the value never says more than the
+    // element does (a song without a lane holds an empty one).
+    auto state = song.getState();
+    const auto live = findLaneState (song);
+    const auto before = values->chordLane.get();
+    auto wrote = false;
+
+    if (lane.isValid() && ! live.isValid())
+    {
+        state.appendChild (juce::ValueTree (schema::CHORDLANE), getTreeUndo (song));
+        wrote = true;
+    }
+
+    values->setChordLane (song, lane.isValid() ? readHeldChordLane (lane) : ChordLaneValue {});
+    wrote = wrote || ! values->chordLane.get().isSameAs (before);
+
+    if (! lane.isValid() && live.isValid())
+    {
+        state.removeChild (live, getTreeUndo (song));
+        wrote = true;
+    }
+
+    return wrote;
 }
 
 std::vector<LaneKey> getLaneKeys (const Song& song)
@@ -191,14 +336,7 @@ std::vector<LaneKey> getLaneKeys (const Song& song)
 
 Key getLaneKeyAt (const Song& song, BeatPosition where)
 {
-    const auto keys = getLaneKeys (song);
-    auto key = keys.front().key;
-
-    for (const auto& change : keys)
-        if (change.start <= where + BeatDuration::fromBeats (tiny))
-            key = change.key;
-
-    return key;
+    return findKeyAt (getLaneKeys (song), where);
 }
 
 std::vector<PlacedChord> getLaneChords (const Song& song)
@@ -217,13 +355,7 @@ std::vector<PlacedChord> getLaneChords (const Song& song)
         if (range.isEmpty() || ! numeral.has_value())
             continue;
 
-        auto key = keys.front().key;
-
-        for (const auto& change : keys)
-            if (change.start <= range.getStart() + BeatDuration::fromBeats (tiny))
-                key = change.key;
-
-        chords.push_back ({ range, *numeral, key });
+        chords.push_back ({ range, *numeral, findKeyAt (keys, range.getStart()) });
     }
 
     std::stable_sort (chords.begin(), chords.end(),
@@ -231,64 +363,15 @@ std::vector<PlacedChord> getLaneChords (const Song& song)
     return chords;
 }
 
-juce::ValueTree getLaneState (Song& song)
-{
-    auto phazite = song.getState();
-    auto lane = phazite.getChildWithName (schema::CHORDLANE);
-
-    if (! lane.isValid())
-    {
-        lane = juce::ValueTree (schema::CHORDLANE);
-        juce::ValueTree key (schema::CHORDKEY);
-        key.setProperty (schema::chordStart, 0.0, nullptr);
-        writeKey (key, getDefaultKey (song), nullptr);
-        lane.appendChild (key, nullptr);
-        phazite.appendChild (lane, getUndo (song));
-    }
-
-    return lane;
-}
-
 //==============================================================================
 void clearLaneRange (Song& song, BeatRange range)
 {
-    auto lane = findLaneState (song);
-
-    if (! lane.isValid() || range.isEmpty())
+    if (! hasChordLane (song) || range.isEmpty())
         return;
 
-    auto* undo = getUndo (song);
-    const auto start = range.getStart(), end = range.getEnd();
-    const auto margin = BeatDuration::fromBeats (tiny);
-
-    for (auto chord : getChildren (lane, schema::CHORD))
-    {
-        const auto r = getRange (chord);
-
-        if (r.getEnd() <= start + margin || r.getStart() >= end - margin)
-            continue; // outside the range
-
-        if (r.getStart() >= start - margin && r.getEnd() <= end + margin)
-        {
-            lane.removeChild (chord, undo);
-        }
-        else if (r.getStart() < start && r.getEnd() > end)
-        {
-            // Around the range: the part after it becomes a chord of its own.
-            auto after = chord.createCopy();
-            setRange (after, { end, r.getEnd() }, nullptr);
-            setRange (chord, { r.getStart(), start }, undo);
-            lane.appendChild (after, undo);
-        }
-        else if (r.getStart() < start)
-        {
-            setRange (chord, { r.getStart(), start }, undo);
-        }
-        else
-        {
-            setRange (chord, { end, r.getEnd() }, undo);
-        }
-    }
+    Lane lane (getChordLaneValue (song));
+    clearChords (lane.chords, range);
+    setLane (song, lane);
 }
 
 void putLaneChord (Song& song, BeatRange range, const Numeral& numeral)
@@ -296,9 +379,10 @@ void putLaneChord (Song& song, BeatRange range, const Numeral& numeral)
     if (range.isEmpty())
         return;
 
-    auto lane = getLaneState (song);
-    clearLaneRange (song, range);
-    lane.appendChild (makeChordState (range, numeral), getUndo (song));
+    auto lane = openLane (song);
+    clearChords (lane.chords, range);
+    lane.chords.push_back (makeChord (range, numeral));
+    setLane (song, lane);
 }
 
 bool hasLaneChordAt (const Song& song, BeatPosition start)
@@ -306,58 +390,80 @@ bool hasLaneChordAt (const Song& song, BeatPosition start)
     // As findStartingAt() finds one.
     const auto lane = getChordLaneValue (song);
     return std::any_of (lane.chords.begin(), lane.chords.end(),
-                        [start] (const ChordEntry& chord) { return std::abs ((chord.start - start).inBeats()) < 1.0e-4; });
+                        [start] (const ChordEntry& chord) { return std::abs ((chord.start - start).inBeats()) < nearAt; });
 }
 
 void setLaneChordNumeral (Song& song, BeatPosition start, const Numeral& numeral)
 {
-    if (auto chord = findStartingAt (song, schema::CHORD, start); chord.isValid())
-        writeNumeral (chord, numeral, getUndo (song));
+    Lane lane (getChordLaneValue (song));
+
+    if (const auto found = findStartingAt (lane.chords, start))
+    {
+        writeNumeral (lane.chords[*found], numeral);
+        setLane (song, lane);
+    }
 }
 
 void removeLaneChord (Song& song, BeatPosition start)
 {
-    if (auto chord = findStartingAt (song, schema::CHORD, start); chord.isValid())
-        chord.getParent().removeChild (chord, getUndo (song));
+    Lane lane (getChordLaneValue (song));
+
+    if (const auto found = findStartingAt (lane.chords, start))
+    {
+        lane.chords.erase (lane.chords.begin() + (std::ptrdiff_t) *found);
+        setLane (song, lane);
+    }
 }
 
 void setLaneChordEnd (Song& song, BeatPosition start, BeatPosition end)
 {
-    auto chord = findStartingAt (song, schema::CHORD, start);
+    Lane lane (getChordLaneValue (song));
+    const auto found = findStartingAt (lane.chords, start);
 
-    if (! chord.isValid() || end <= start + BeatDuration::fromBeats (tiny))
+    if (! found.has_value() || end <= start + BeatDuration::fromBeats (tiny))
         return;
 
-    // A copy goes in its place once the chords it grows over have made room.
-    auto lane = chord.getParent();
-    auto resized = chord.createCopy();
-    setRange (resized, { getStart (chord), end }, nullptr);
-    lane.removeChild (chord, getUndo (song));
-    clearLaneRange (song, { start, end });
-    lane.appendChild (resized, getUndo (song));
+    // The chord resized goes after the others once the chords it grows over have made room.
+    auto resized = lane.chords[*found];
+    setRange (resized, { resized.start, end });
+    lane.chords.erase (lane.chords.begin() + (std::ptrdiff_t) *found);
+    clearChords (lane.chords, { start, end });
+    lane.chords.push_back (resized);
+    setLane (song, lane);
 }
 
 void setLaneKey (Song& song, BeatPosition from, const Key& key)
 {
-    auto lane = getLaneState (song);
+    auto lane = openLane (song);
 
     // The key change at the beat, or a new one there.
-    if (auto change = findStartingAt (song, schema::CHORDKEY, from); change.isValid())
-        return writeKey (change, key, getUndo (song));
+    if (const auto found = findStartingAt (lane.keys, from))
+    {
+        writeKey (lane.keys[*found], key);
+    }
+    else
+    {
+        KeyEntry change;
+        change.start = BeatPosition::fromBeats (std::max (0.0, from.inBeats()));
+        writeKey (change, key);
+        lane.keys.push_back (change);
+    }
 
-    juce::ValueTree change (schema::CHORDKEY);
-    change.setProperty (schema::chordStart, std::max (0.0, from.inBeats()), nullptr);
-    writeKey (change, key, nullptr);
-    lane.appendChild (change, getUndo (song));
+    setLane (song, lane);
 }
 
 void removeLaneKeyChange (Song& song, BeatPosition at)
 {
-    if (at <= BeatPosition::fromBeats (1.0e-4))
+    if (at <= BeatPosition::fromBeats (nearAt))
         return;
 
-    if (auto change = findStartingAt (song, schema::CHORDKEY, at); change.isValid())
-        change.getParent().removeChild (change, getUndo (song));
+    Lane lane (getChordLaneValue (song));
+
+    if (const auto found = findStartingAt (lane.keys, at))
+    {
+        lane.keys.erase (lane.keys.begin() + (std::ptrdiff_t) *found);
+        setLane (song, lane);
+    }
 }
 
 void putProgression (Song& song, const Progression& progression, BeatRange range)
@@ -365,128 +471,145 @@ void putProgression (Song& song, const Progression& progression, BeatRange range
     if (range.isEmpty() || progression.chords.empty())
         return;
 
-    auto lane = getLaneState (song);
-    clearLaneRange (song, range);
+    auto lane = openLane (song);
+    clearChords (lane.chords, range);
 
+    // The lane's keys read once: placing chords changes none of them.
+    const auto keys = getKeysOf (song, lane.toValue());
     auto beat = range.getStart();
 
     for (size_t i = 0; beat < range.getEnd() - BeatDuration::fromBeats (tiny); i = (i + 1) % progression.chords.size())
     {
         const auto& chord = progression.chords[i];
-        const auto key = getLaneKeyAt (song, beat);
+        const auto key = findKeyAt (keys, beat);
         const auto root = getRootIn (chord.numeral, getKeyForProgression (key, progression.scale));
         const auto length = getBarLength (song, beat) * chord.bars;
         const auto end = std::min (range.getEnd(), beat + length);
 
-        lane.appendChild (makeChordState ({ beat, end }, toNumeral (root, chord.numeral.type, chord.numeral.inversion, key)),
-                          getUndo (song));
+        lane.chords.push_back (makeChord ({ beat, end }, toNumeral (root, chord.numeral.type, chord.numeral.inversion, key)));
         beat = end;
     }
+
+    setLane (song, lane);
 }
 
 //==============================================================================
 void insertLaneTime (Song& song, BeatPosition at, BeatDuration length)
 {
-    auto lane = findLaneState (song);
-
-    if (! lane.isValid() || length <= BeatDuration())
+    if (! hasChordLane (song) || length <= BeatDuration())
         return;
 
-    auto* undo = getUndo (song);
+    Lane lane (getChordLaneValue (song));
     const auto margin = BeatDuration::fromBeats (tiny);
 
-    for (auto state : lane)
-    {
-        if (state.hasType (schema::CHORDKEY))
-        {
-            if (const auto start = getStart (state); start > BeatPosition() + margin && start >= at - margin)
-                state.setProperty (schema::chordStart, (start + length).inBeats(), undo);
-        }
-        else if (state.hasType (schema::CHORD))
-        {
-            const auto r = getRange (state);
+    for (auto& change : lane.keys)
+        if (change.start > BeatPosition() + margin && change.start >= at - margin)
+            change.start = change.start + length;
 
-            if (r.getStart() >= at - margin)
-                setRange (state, r.movedBy (length), undo);
-            else if (r.getEnd() > at + margin)
-                setRange (state, { r.getStart(), r.getEnd() + length }, undo); // the time is inside it
-        }
+    for (auto& chord : lane.chords)
+    {
+        const auto r = getRange (chord);
+
+        if (r.getStart() >= at - margin)
+            setRange (chord, r.movedBy (length));
+        else if (r.getEnd() > at + margin)
+            setRange (chord, { r.getStart(), r.getEnd() + length }); // the time is inside it
     }
+
+    setLane (song, lane);
 }
 
 void removeLaneTime (Song& song, BeatRange range)
 {
-    auto lane = findLaneState (song);
-
-    if (! lane.isValid() || range.isEmpty())
+    if (! hasChordLane (song) || range.isEmpty())
         return;
 
-    auto* undo = getUndo (song);
+    Lane lane (getChordLaneValue (song));
     const auto length = range.getLength();
     const auto start = range.getStart(), end = range.getEnd();
     const auto margin = BeatDuration::fromBeats (tiny);
-
-    for (auto state : getChildren (lane, schema::CHORD))
+    // What is left of a chord once the range's time is taken out: none of one inside it.
+    const auto cut = [&] (ChordEntry chord) -> std::optional<ChordEntry>
     {
-        const auto r = getRange (state);
+        const auto r = getRange (chord);
 
         if (r.getEnd() <= start + margin)
-            continue;
+            return chord;
 
         if (r.getStart() >= end - margin)
-            setRange (state, r.movedBy (-length), undo);
+            setRange (chord, r.movedBy (-length));
         else if (r.getStart() >= start - margin && r.getEnd() <= end + margin)
-            lane.removeChild (state, undo);
+            return std::nullopt;
         else if (r.getStart() < start && r.getEnd() > end)
-            setRange (state, { r.getStart(), r.getEnd() - length }, undo);
+            setRange (chord, { r.getStart(), r.getEnd() - length });
         else if (r.getStart() < start)
-            setRange (state, { r.getStart(), start }, undo);
+            setRange (chord, { r.getStart(), start });
         else
-            setRange (state, { start, r.getEnd() - length }, undo);
-    }
+            setRange (chord, { start, r.getEnd() - length });
+
+        return chord;
+    };
+
+    std::vector<ChordEntry> chords;
+    chords.reserve (lane.chords.size());
+
+    for (const auto& chord : lane.chords)
+        if (const auto left = cut (chord))
+            chords.push_back (*left);
+
+    lane.chords = std::move (chords);
 
     // Key changes: what played after the range plays from its start, as the tempo's changes do (removeTempoMapTime()). The
     // last one in the range, or one where it ends, moves to its start; the others in it go, so that no two are on one beat;
     // those after it move back.
-    juce::ValueTree last;
-    std::vector<juce::ValueTree> inRange;
+    std::optional<size_t> last;
+    std::vector<bool> inRange (lane.keys.size(), false);
 
-    for (auto state : getChildren (lane, schema::CHORDKEY))
+    for (size_t i = 0; i < lane.keys.size(); ++i)
     {
-        const auto keyStart = getStart (state);
+        const auto keyStart = lane.keys[i].start;
 
         if (keyStart < start - margin)
             continue;
 
         if (keyStart > end + margin)
         {
-            state.setProperty (schema::chordStart, (keyStart - length).inBeats(), undo);
+            lane.keys[i].start = keyStart - length;
             continue;
         }
 
-        inRange.push_back (state);
+        inRange[i] = true;
 
-        if (! last.isValid() || keyStart >= getStart (last))
-            last = state;
+        if (! last.has_value() || keyStart >= lane.keys[*last].start)
+            last = i;
     }
 
-    for (const auto& state : inRange)
-        if (state != last)
-            lane.removeChild (state, undo);
+    std::vector<KeyEntry> keys;
+    keys.reserve (lane.keys.size());
 
-    if (last.isValid())
-        last.setProperty (schema::chordStart, start.inBeats(), undo);
+    for (size_t i = 0; i < lane.keys.size(); ++i)
+    {
+        if (inRange[i] && i != last)
+            continue;
+
+        keys.push_back (lane.keys[i]);
+
+        if (i == last)
+            keys.back().start = start;
+    }
+
+    lane.keys = std::move (keys);
+    setLane (song, lane);
 }
 
 void moveLaneTime (Song& song, BeatRange range, BeatPosition destination)
 {
-    auto lane = findLaneState (song);
     const auto start = range.getStart(), end = range.getEnd();
     const auto length = range.getLength();
     const auto margin = BeatDuration::fromBeats (tiny);
     const auto later = destination >= end - margin;
 
-    if (! lane.isValid() || range.isEmpty() || (destination > start + margin && destination < end - margin))
+    if (! hasChordLane (song) || range.isEmpty() || (destination > start + margin && destination < end - margin))
         return;
 
     // As moveTime() does: the chords are cut at the range's edges and the destination, then those in the range go to the
@@ -495,33 +618,47 @@ void moveLaneTime (Song& song, BeatRange range, BeatPosition destination)
     const auto changedEnd = later ? destination : end;
     const auto rangeShift = later ? destination - end : destination - start;
     const auto otherShift = later ? -length : length;
+    Lane lane (getChordLaneValue (song));
 
     for (const auto beat : { start, end, destination })
     {
-        for (auto chord : getChildren (lane, schema::CHORD))
+        // The chords as they are at this beat's turn, those cut at an earlier one too; not the pieces cut at this one.
+        const auto count = lane.chords.size();
+
+        for (size_t i = 0; i < count; ++i)
         {
-            const auto r = getRange (chord);
+            const auto r = getRange (lane.chords[i]);
 
             if (r.getStart() < beat - margin && r.getEnd() > beat + margin)
             {
-                auto after = chord.createCopy();
-                setRange (after, { beat, r.getEnd() }, nullptr);
-                setRange (chord, { r.getStart(), beat }, getUndo (song));
-                lane.appendChild (after, getUndo (song));
+                auto after = lane.chords[i];
+                setRange (after, { beat, r.getEnd() });
+                setRange (lane.chords[i], { r.getStart(), beat });
+                lane.chords.push_back (after);
             }
         }
     }
 
-    for (auto chord : getChildren (lane, schema::CHORD))
+    std::vector<ChordEntry> moved;
+    moved.reserve (lane.chords.size());
+
+    for (auto chord : lane.chords)
     {
-        const auto chordStart = getRange (chord).getStart();
+        const auto chordStart = chord.start;
 
         if (chordStart >= changedStart - margin && chordStart < changedEnd - margin)
         {
             const auto inRange = chordStart >= start - margin && chordStart < end - margin;
-            moveChord (chord, inRange ? rangeShift : otherShift, getUndo (song));
+
+            if (! moveChord (chord, inRange ? rangeShift : otherShift))
+                continue; // pushed before the song's start: gone
         }
+
+        moved.push_back (chord);
     }
+
+    lane.chords = std::move (moved);
+    setLane (song, lane);
 }
 
 LaneCopy copyLaneChords (const Song& song, BeatRange range)
@@ -529,12 +666,12 @@ LaneCopy copyLaneChords (const Song& song, BeatRange range)
     LaneCopy copy;
     copy.rangeStart = range.getStart();
 
-    for (const auto& chord : getChildren (findLaneState (song), schema::CHORD))
+    for (const auto& chord : getChordLaneValue (song).chords)
     {
         if (const auto r = getRange (chord).getIntersectionWith (range); r.getLength() > BeatDuration::fromBeats (tiny))
         {
-            auto piece = chord.createCopy();
-            setRange (piece, r, nullptr);
+            auto piece = chord;
+            setRange (piece, r);
             copy.chords.push_back (piece);
         }
     }
@@ -547,15 +684,44 @@ void pasteLaneChords (Song& song, const LaneCopy& copy, BeatPosition destination
     if (copy.chords.empty())
         return;
 
-    auto lane = getLaneState (song);
+    auto lane = openLane (song);
 
     for (const auto& chord : copy.chords)
     {
-        auto pasted = chord.createCopy();
+        auto pasted = chord;
         const auto range = getRange (chord).movedBy (destination - copy.rangeStart);
-        setRange (pasted, range, nullptr);
-        clearLaneRange (song, range); // a chord the inserted time made longer is cut around it
-        lane.appendChild (pasted, getUndo (song));
+        setRange (pasted, range);
+        clearChords (lane.chords, range); // a chord the inserted time made longer is cut around it
+        lane.chords.push_back (pasted);
     }
+
+    setLane (song, lane);
+}
+
+//==============================================================================
+AreaChoice chooseChordLaneClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
+{
+    // A path into the song's CHORDLANE, which the song holds as a value beside its tree (model/base/internal/SongValues.h),
+    // its tree's element an empty placeholder: the lane merges whole (SongMerge.cpp: mergesWhole()), so its clash is the
+    // whole element's, its path the lane's alone. The side chosen's lane made the song's, or none where that side had none
+    // (makeChordLaneAs(): its element added or taken out, its value set, in the choice's step). Refused (nothing written) for
+    // any other clash on its path, which a merge of two songs Phazite holds never makes, but a commit's song may come from
+    // anyone (tests/FuzzTests.cpp chooses every clash of a damaged merge): a property, an element in it, an element of
+    // another type, and one that stands in for what its version couldn't read.
+    if (clash.path.isEmpty() || ! clash.path[0].startsWith (schema::CHORDLANE.toString() + ":"))
+        return AreaChoice::notTheArea;
+
+    const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+
+    if (clash.property.isValid() || clash.path.size() != 1 || ! juce::isPositiveAndBelow (value, 3))
+        return AreaChoice::refused;
+
+    const auto& chosen = *elements[value];
+
+    if (chosen.isValid() && (! chosen.hasType (schema::CHORDLANE) || holdsStandIn (chosen)))
+        return AreaChoice::refused;
+
+    makeChordLaneAs (song, chosen);
+    return AreaChoice::chosen;
 }
 } // namespace phazite

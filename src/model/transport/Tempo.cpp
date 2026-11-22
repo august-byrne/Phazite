@@ -754,7 +754,8 @@ namespace
     // property or element is chosen elsewhere in the song: an entry (the path's last step, "TEMPO:16.000000") given the
     // property's value chosen, or taken out where the side chosen held no entry there (a property of a tempo both lines
     // added, chosen as what was before: known bug 239's tempo map), or put back as that side holds it where an earlier
-    // choice took it out; an entry one side added or took away made as the side chosen holds it, or taken out. Refused
+    // choice took it out; an entry one side added or took away made as the side chosen holds it (read as the song holds one:
+    // TempoMapValue.h, withEntryAt()), or taken out. Refused
     // (false, nothing written) for a clash on the TEMPOMAP itself, which holds nothing of its own, for an element that
     // isn't an entry of the kind its step names, and where the map would not hold what was chosen as the song holds a map
     // (isHeldAsTheSongHoldsIt(): a kind left without an entry, a number out of its range), which a merge of two songs
@@ -774,11 +775,12 @@ namespace
         if (clash.property.isValid())
         {
             // The side chosen's map (each side a whole song: the parting's, this line's before the merge, the other line's; one
-            // without a TEMPOMAP reads as the map a song without one plays), where that song could be read.
+            // without a TEMPOMAP reads as the map a song without one plays), where that song could be read, read as the song
+            // holds a map, as everything that enters the tempo map's area is (TempoMapValue.h: readHeldTempoMap()).
             const juce::ValueTree* sides[] = { &merging.base, &merging.before, &merging.theirs };
             const auto& side = *sides[value];
             const auto canRead = side.hasType (schema::PHAZITE);
-            const auto sideMap = readTempoMapValue (side.getChildWithName (schema::TEMPOMAP));
+            const auto sideMap = readHeldTempoMap (side.getChildWithName (schema::TEMPOMAP));
             const juce::var* chosen[] = { &clash.base, &clash.ours, &clash.theirs };
 
             if (canRead && ! holdsEntryAt (sideMap, step))

@@ -14,10 +14,12 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/WholeState.h"
+#include "model/chords/internal/Chords.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/DrumKit.h"
@@ -1291,6 +1293,176 @@ TEST_CASE ("A damaged tempo map opens as a whole value, each entry as its descri
     }
 }
 
+TEST_CASE ("A damaged chord lane opens as a whole value, each entry as its description reads it, saved and opened again the same")
+{
+    // The song takes in its file's chord lane as it opens (Song::holdValues(): ChordLaneValue.h, readHeldChordLane()): a chord
+    // without a start, a length or a degree, numbers that are none or outside their ranges, a key without a root, keys before
+    // chords, an empty lane, and what Phazite doesn't know on the lane and its entries. Each opens holding together (the
+    // check, in Edited::open()), holds what its description reads, and is the same once saved and opened again, its CHORDLANE
+    // written chords first, then keys, without what Phazite doesn't know. An empty lane stays a lane.
+    struct Case
+    {
+        const char* about;
+        const char* lane;
+        std::vector<juce::String> expected;
+    };
+
+    const auto describe = [] (const phazite::Song& song)
+    {
+        std::vector<juce::String> lines;
+
+        if (! phazite::hasChordLane (song))
+            return lines;
+
+        lines.push_back ("lane");
+        const auto lane = phazite::getChordLaneValue (song);
+
+        for (const auto& chord : lane.chords)
+            lines.push_back ("chord " + juce::String (chord.start.inBeats(), 2) + " " + juce::String (chord.length.inBeats(), 2) + " "
+                             + juce::String (chord.degree) + " " + juce::String (chord.accidental) + " " + juce::String (chord.inversion)
+                             + " " + chord.type);
+
+        for (const auto& key : lane.keys)
+            lines.push_back ("key " + juce::String (key.start.inBeats(), 2) + " " + juce::String (key.root) + " " + key.scale);
+
+        return lines;
+    };
+
+    const Case cases[] = {
+        { "a chord without a start, a length or a degree",
+          R"(<CHORDLANE><CHORD type="major"/></CHORDLANE>)",
+          { "lane", "chord 0.00 4.00 1 0 0 major" } },
+        { "numbers that are none, and beyond their ranges",
+          R"(<CHORDLANE><CHORD start="8" length="fast" degree="12" accidental="-3" inversion="40" type="minor"/></CHORDLANE>)",
+          { "lane", "chord 8.00 4.00 7 -1 16 minor" } },
+        { "a key without a root, and keys before chords",
+          R"(<CHORDLANE><CHORDKEY start="0" keyRoot="2" keyScale="minor"/><CHORDKEY start="8" keyScale="major"/>)"
+          R"(<CHORD start="0" length="8" degree="1" type="minor"/></CHORDLANE>)",
+          { "lane", "chord 0.00 8.00 1 0 0 minor", "key 0.00 2 minor", "key 8.00 -1 major" } },
+        { "an empty lane", R"(<CHORDLANE/>)", { "lane" } },
+        { "what Phazite doesn't know",
+          R"(<CHORDLANE colour="red"><LINE/><CHORD start="4" length="4" degree="5" type="major" swing="0.2"/></CHORDLANE>)",
+          { "lane", "chord 4.00 4.00 5 0 0 major" } },
+    };
+
+    for (const auto& each : cases)
+    {
+        INFO (juce::String (each.about));
+        Edited edited;
+        const auto project = edited.open (
+            [&each] (juce::XmlElement& song)
+            {
+                auto lane = juce::parseXML (each.lane);
+                REQUIRE (lane != nullptr);
+                song.addChildElement (lane.release());
+            });
+        REQUIRE (project != nullptr);
+        CHECK (describe (project->getSong()) == each.expected);
+
+        const auto lane = phazite::test::copyWholeSong (project->getSong()).getChildWithName (schema::CHORDLANE);
+        REQUIRE (lane.isValid());
+        CHECK (lane.getNumProperties() == 0);
+        auto keys = false;
+
+        for (const auto& child : lane)
+        {
+            CHECK ((child.hasType (schema::CHORD) || child.hasType (schema::CHORDKEY)));
+            CHECK_FALSE (child.hasProperty ("swing"));
+            CHECK_FALSE ((keys && child.hasType (schema::CHORD))); // chords first, then keys
+            keys = keys || child.hasType (schema::CHORDKEY);
+        }
+
+        REQUIRE (project->save().wasOk());
+        juce::String error;
+        const auto again = phazite::Project::open (edited.file, false, error);
+        REQUIRE_MESSAGE (again != nullptr, error.toStdString());
+        checkSong (again->getSong());
+        CHECK (describe (again->getSong()) == each.expected);
+        CHECK (phazite::test::copyWholeSong (again->getSong()).getChildWithName (schema::CHORDLANE).isEquivalentTo (lane));
+    }
+}
+
+TEST_CASE ("A chord lane whose chords overlap opens with its chords apart, as the lane's writers leave them, saved and opened again "
+           "the same")
+{
+    // The song takes in its file's chord lane with its chords apart (ChordLaneValue.h: readHeldChordLane(), keepChordsApart()):
+    // a chord reaches no further than the next one's start, one that would then have no length goes, and one without a
+    // length (4 beats long, its description's fallback) before another ends where the other starts. Of two at one start the
+    // loader has kept the first already (makeConsistent(): no two elements with one key). The chords that stay keep the
+    // file's order. Each opens holding
+    // together (the check, in Edited::open(), which asks that chords don't overlap) and is the same once saved and opened
+    // again.
+    struct Case
+    {
+        const char* about;
+        const char* lane;
+        std::vector<juce::String> expected;
+    };
+
+    const auto describe = [] (const phazite::Song& song)
+    {
+        std::vector<juce::String> lines;
+
+        for (const auto& chord : phazite::getChordLaneValue (song).chords)
+            lines.push_back (juce::String (chord.start.inBeats(), 2) + " " + juce::String (chord.length.inBeats(), 2) + " " + chord.type);
+
+        return lines;
+    };
+
+    const Case cases[] = {
+        { "chords that overlap",
+          R"(<CHORDLANE><CHORD start="0" length="8" type="major"/><CHORD start="4" length="4" type="minor"/></CHORDLANE>)",
+          { "0.00 4.00 major", "4.00 4.00 minor" } },
+        { "a chord without a length before another",
+          R"(<CHORDLANE><CHORD start="0" type="major"/><CHORD start="2" length="4" type="minor"/></CHORDLANE>)",
+          { "0.00 2.00 major", "2.00 4.00 minor" } },
+        { "a chord without a length after another, in the file's order",
+          R"(<CHORDLANE><CHORD start="4" length="4" type="minor"/><CHORD start="2" type="major"/></CHORDLANE>)",
+          { "4.00 4.00 minor", "2.00 2.00 major" } },
+        { "two chords at one start: the first, as the loader keeps it (no two of a lane's chords with one start)",
+          R"(<CHORDLANE><CHORD start="0" length="4" type="major"/><CHORD start="0" length="2" type="minor"/></CHORDLANE>)",
+          { "0.00 4.00 major" } },
+        { "a chord that would be left no length by the next one's start",
+          R"(<CHORDLANE><CHORD start="0" length="4" type="major"/><CHORD start="0.0000009" length="2" type="minor"/></CHORDLANE>)",
+          { "0.00 2.00 minor" } },
+        { "a chord over two others",
+          R"(<CHORDLANE><CHORD start="0" length="16" type="major"/><CHORD start="4" length="2" type="minor"/>)"
+          R"(<CHORD start="8" length="4" type="major"/></CHORDLANE>)",
+          { "0.00 4.00 major", "4.00 2.00 minor", "8.00 4.00 major" } },
+        { "chords that touch",
+          R"(<CHORDLANE><CHORD start="0" length="4" type="major"/><CHORD start="4" length="4" type="minor"/></CHORDLANE>)",
+          { "0.00 4.00 major", "4.00 4.00 minor" } },
+    };
+
+    for (const auto& each : cases)
+    {
+        INFO (juce::String (each.about));
+        Edited edited;
+        const auto project = edited.open (
+            [&each] (juce::XmlElement& song)
+            {
+                auto lane = juce::parseXML (each.lane);
+                REQUIRE (lane != nullptr);
+                song.addChildElement (lane.release());
+            });
+        REQUIRE (project != nullptr);
+        CHECK (describe (project->getSong()) == each.expected);
+        CHECK (phazite::holdsChordsApart (phazite::getChordLaneValue (project->getSong())));
+        const auto lane = phazite::test::copyWholeSong (project->getSong()).getChildWithName (schema::CHORDLANE);
+
+        REQUIRE (project->save().wasOk());
+        const auto firstSave = edited.file.loadFileAsString();
+        juce::String error;
+        const auto again = phazite::Project::open (edited.file, false, error);
+        REQUIRE_MESSAGE (again != nullptr, error.toStdString());
+        checkSong (again->getSong());
+        CHECK (describe (again->getSong()) == each.expected);
+        CHECK (phazite::test::copyWholeSong (again->getSong()).getChildWithName (schema::CHORDLANE).isEquivalentTo (lane));
+        REQUIRE (again->save().wasOk());
+        CHECK (edited.file.loadFileAsString() == firstSave);
+    }
+}
+
 TEST_CASE ("A number written as text reads as the same number wherever the song reads it: a project saved, opened and saved again "
            "is the same file")
 {
@@ -1400,8 +1572,8 @@ TEST_CASE ("A number written as text reads as the same number wherever the song 
         CHECK (edited.file.loadFileAsString() == firstSave);
     }
 
-    // The tempo map as the versions read one (TempoMapValue.h: readTempoMapValue(), which keeps nothing within a range): the
-    // same number for the same text.
+    // The tempo map as its lenient reader reads one (TempoMapValue.h: readTempoMapValue(), which keeps nothing within a range):
+    // the same number for the same text.
     for (const auto* text : { "1e-321", "1e-400", "0x10", " 4 ", "4abc", "nan", "inf" })
     {
         const auto quoted = juce::String ("the text \"") + text + "\"";
@@ -1413,6 +1585,73 @@ TEST_CASE ("A number written as text reads as the same number wherever the song 
         const auto tempos = phazite::readTempoMapValue (map).tempos;
         REQUIRE (tempos.size() == 2);
         CHECK (juce::exactlyEqual (tempos.back().beat.inBeats(), read.has_value() && std::isfinite (*read) ? *read : 0.0));
+    }
+}
+
+TEST_CASE ("A chord's start and a key change's written as text read as the same number as the loader reads them: a project saved, "
+           "opened and saved again is the same file")
+{
+    // As the other areas' numbers above: the chord lane's conversion reads a number's text as the loader does (SongText.h:
+    // readValueNumber()), so that "1e-321" stays that subnormal through two saves, and what is no finite number reads as the
+    // start's fallback, 0.
+    using phazite::readValueNumber;
+
+    for (const auto* text : { "1e-321", "1e-400", "0x10", " 4 ", "4abc", "nan", "inf" })
+    {
+        const auto quoted = juce::String ("the text \"") + text + "\"";
+        INFO (quoted);
+        const auto read = readValueNumber (juce::var (text));
+        const auto expected = read.has_value() && std::isfinite (*read) ? *read : 0.0;
+
+        Edited edited;
+        const auto project = edited.open (
+            [text] (juce::XmlElement& song)
+            {
+                auto* lane = song.createNewChildElement ("CHORDLANE");
+                auto* chord = lane->createNewChildElement ("CHORD");
+                chord->setAttribute ("start", text);
+                chord->setAttribute ("length", 2);
+                chord->setAttribute ("degree", 1);
+                chord->setAttribute ("type", "major");
+                auto* key = lane->createNewChildElement ("CHORDKEY");
+                key->setAttribute ("start", text);
+                key->setAttribute ("keyRoot", 2);
+                key->setAttribute ("keyScale", "minor");
+            });
+        REQUIRE (project != nullptr);
+
+        const auto starts = [] (const phazite::Song& song)
+        {
+            const auto lane = phazite::getChordLaneValue (song);
+            REQUIRE (lane.chords.size() == 1);
+            REQUIRE (lane.keys.size() == 1);
+            return std::pair (lane.chords[0].start.inBeats(), lane.keys[0].start.inBeats());
+        };
+
+        CHECK (juce::exactlyEqual (starts (project->getSong()).first, expected));
+        CHECK (juce::exactlyEqual (starts (project->getSong()).second, expected));
+        REQUIRE (project->save().wasOk());
+        const auto firstSave = edited.file.loadFileAsString();
+
+        juce::String error;
+        const auto again = phazite::Project::open (edited.file, false, error);
+        REQUIRE_MESSAGE (again != nullptr, error.toStdString());
+        checkSong (again->getSong());
+        CHECK (juce::exactlyEqual (starts (again->getSong()).first, expected));
+        CHECK (juce::exactlyEqual (starts (again->getSong()).second, expected));
+        REQUIRE (again->save().wasOk());
+        CHECK (edited.file.loadFileAsString() == firstSave);
+
+        // And as a lane is read where no loader read it first (ChordLaneValue.h: as the song holds one, a version's or a
+        // merge's, and as a song that keeps everything in its tree reads one), the same number for the same text.
+        juce::ValueTree lane (schema::CHORDLANE);
+        lane.appendChild (juce::ValueTree (schema::CHORD, { { schema::chordStart, text }, { schema::chordLength, 2.0 } }), nullptr);
+
+        for (const auto& value : { phazite::readHeldChordLane (lane), phazite::readChordLaneValue (lane) })
+        {
+            REQUIRE (value.chords.size() == 1);
+            CHECK (juce::exactlyEqual (value.chords[0].start.inBeats(), expected));
+        }
     }
 }
 

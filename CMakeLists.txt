@@ -335,6 +335,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/BackgroundJobs.cpp
     src/model/base/BackgroundJobs.h
     src/model/base/Beats.h
+    src/model/base/ChordLaneArea.cpp
     src/model/base/ChordLaneValue.cpp
     src/model/base/ClipNotesValue.cpp
     src/model/base/ClipsArea.cpp
@@ -363,6 +364,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
     src/model/base/WholeState.cpp
+    src/model/base/internal/ChordLaneArea.h
     src/model/base/internal/ChordLaneValue.h
     src/model/base/internal/ClipNotesValue.h
     src/model/base/internal/ClipsArea.h
@@ -1506,6 +1508,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongIndexTests.cpp
         tests/SongPlaceTextTests.cpp
         tests/SongTextTests.cpp
+        tests/SongValuesChordsTests.cpp
         tests/SongValuesClipsTests.cpp
         tests/SongValuesTempoTests.cpp
         tests/SongValuesTests.cpp

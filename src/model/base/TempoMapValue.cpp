@@ -387,13 +387,13 @@ std::optional<TempoMapValue> withEntryAt (const TempoMapValue& value, const juce
 
     if (type == schema::TEMPO.toString() && (! element.isValid() || element.hasType (schema::TEMPO)))
     {
-        const auto put = element.isValid() ? std::optional (readTempo (element)) : std::nullopt;
+        const auto put = element.isValid() ? std::optional (readHeldTempo (element)) : std::nullopt;
         return TempoMapValue { withEntryOfKind (value.tempos, key, put), value.signatures };
     }
 
     if (type == schema::TIMESIGNATURE.toString() && (! element.isValid() || element.hasType (schema::TIMESIGNATURE)))
     {
-        const auto put = element.isValid() ? std::optional (readSignature (element)) : std::nullopt;
+        const auto put = element.isValid() ? std::optional (readHeldSignature (element)) : std::nullopt;
         return TempoMapValue { value.tempos, withEntryOfKind (value.signatures, key, put) };
     }
 

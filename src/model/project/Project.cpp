@@ -2702,6 +2702,7 @@ void Project::backUpProjectFile()
 void Project::clearToCompare()
 {
     mayHaveChanged = comparingWhole = comparingClipsWhole = tempoToCompare = false;
+    chordLaneToCompare = false;
     toCompare.clear();
     notesToCompare.clear();
     clipsToCompare.clear();
@@ -2853,10 +2854,12 @@ void Project::compareWithSavedState()
     auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
-    // turn, a line each, in this order (the notes, the clips, the tempo map), each asked only while all before it compare.
+    // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane), each asked only while all before
+    // it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
+    same = same && isChordLaneAsSaved();
 
     clearToCompare();
 
@@ -3053,7 +3056,8 @@ void Project::clipNotesChanged (const std::vector<ClipID>& clips)
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    if (! schema::isUncountedElement (parent, child) && ! isHeardAsTempoMap (parent, child))
+    // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged().
+    if (! schema::isUncountedElement (parent, child) && ! isHeardAsKept (parent, child))
         markChanged (parent);
 }
 
@@ -3074,6 +3078,25 @@ void Project::tempoMapChanged()
 
     mayHaveChanged = true;
     tempoToCompare = true;
+}
+
+void Project::chordLaneChanged()
+{
+    // As markChanged() marks an element of the song: counted, and compared when asked.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+    chordLaneToCompare = true;
 }
 
 void Project::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>& reordered)
@@ -3161,6 +3184,16 @@ bool Project::isTempoMapAsSaved() const
     // The tempo map, against the saved copy's, as one value.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
     return holdSameTempoMap (song->getState(), keepValues (*song), savedState.tree, savedState.values);
+}
+
+bool Project::isChordLaneAsSaved() const
+{
+    if (! chordLaneToCompare)
+        return true;
+
+    // The chord lane, against the saved copy's, as one value, and whether each has one.
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+    return holdSameChordLane (song->getState(), keepValues (*song), savedState.tree, savedState.values);
 }
 
 bool Project::holdSameClip (ClipID clip, const ValuesKept& now) const

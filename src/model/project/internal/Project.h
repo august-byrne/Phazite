@@ -383,16 +383,24 @@ private:
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
 
     // The tempo map changed (SongValues.h: Listener::tempoMapChanged(); the tree's callbacks below leave its elements alone,
-    // isHeardAsTempoMap()): compared with savedState's when asked, as one value (WholeState.h: holdSameTempoMap()), so that
+    // isHeardAsKept()): compared with savedState's when asked, as one value (WholeState.h: holdSameTempoMap()), so that
     // a tempo changed and changed back is saved again.
     bool tempoToCompare = false;
     void tempoMapChanged() override;
+
+    // The chord lane changed (SongValues.h: Listener::chordLaneChanged(); the tree's callbacks below leave what is in its
+    // CHORDLANE alone, isHeardAsKept(), and mark the element's own coming and going as any element's): compared with
+    // savedState's when asked, as one value with whether each has a lane (WholeState.h: holdSameChordLane()), so that a chord
+    // changed and changed back is saved again.
+    bool chordLaneToCompare = false;
+    void chordLaneChanged() override;
 
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
     // where nothing of it was marked.
     bool areNotesAsSaved() const;
     bool areClipsAsSaved() const;
     bool isTempoMapAsSaved() const;
+    bool isChordLaneAsSaved() const;
 
     // Whether a clip of the song is as savedState holds it, all it holds (its properties, its track, its warp markers, its
     // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's
@@ -479,7 +487,7 @@ public:
 private:
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
     {
-        if (! isHeardAsTempoMap (tree))
+        if (! isHeardAsKept (tree)) // the areas': tempoMapChanged(), chordLaneChanged()
             markChanged (tree, property);
     }
 
@@ -488,7 +496,7 @@ private:
 
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
     {
-        if (! isHeardAsTempoMap (parent))
+        if (! isHeardAsKept (parent)) // the areas': tempoMapChanged(), chordLaneChanged()
             markChanged (parent);
     }
 

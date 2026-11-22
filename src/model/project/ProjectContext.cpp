@@ -117,8 +117,12 @@ namespace
             add (pending.clips);
         }
 
-        // The tempo map (SongValues.h): its group. Its tree callbacks below leave its elements alone (isHeardAsTempoMap()).
+        // The tempo map (SongValues.h): its group. Its tree callbacks below leave its elements alone (isHeardAsKept()).
         void tempoMapChanged() override { add (pending.tempo); }
+
+        // The chord lane (SongValues.h): its group, as a change in its element always was. Its tree callbacks below leave what
+        // is in its element alone (isHeardAsKept()); the element's own coming and going they mark as before (mark()).
+        void chordLaneChanged() override { add (pending.chords); }
 
         // Each clip whose notes changed named, on its track, as the song holds it now (a listener of the values reads nothing
         // of the song as it is told: this is later); one gone since was named as it was taken off its track.
@@ -316,8 +320,8 @@ namespace
 
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
-            if (isHeardAsTempoMap (tree))
-                return; // tempoMapChanged()
+            if (isHeardAsKept (tree))
+                return; // the areas': tempoMapChanged(), chordLaneChanged()
 
             // A device's value that turns what its sidechain hears on or off (a compressor's mode) changes what the mixer
             // shows of it.
@@ -367,8 +371,9 @@ namespace
         void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
         {
             // A device's first value set by hand, as its other values, is no change that views show; nor its last one set back
-            // to its default, which takes its VALUES away (keepValueSetByHand()). The tempo map's: tempoMapChanged().
-            if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE) || isHeardAsTempoMap (parent, child))
+            // to its default, which takes its VALUES away (keepValueSetByHand()). The areas' (isHeardAsKept()):
+            // tempoMapChanged(), chordLaneChanged().
+            if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE) || isHeardAsKept (parent, child))
                 return;
 
             if ((child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
@@ -379,12 +384,12 @@ namespace
         }
         void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
         {
-            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE) && ! isHeardAsTempoMap (parent, child))
+            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE) && ! isHeardAsKept (parent, child))
                 markRemoved (parent, child);
         }
         void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override
         {
-            if (! isHeardAsTempoMap (parent))
+            if (! isHeardAsKept (parent))
                 markMoved (parent, oldIndex, newIndex);
         }
     };

@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
@@ -266,14 +267,14 @@ struct Changed
         const phazite::Song rawSong { raw.createCopy() };
         problemsBefore = findSongProblems (rawSong, tables);
 
-        // A clip, its warp marker, its note or its controller's value, or a tempo or a time signature: the loader's part alone
-        // (makeConsistent()), on a song that keeps everything in its tree, since a song made by makeSong() holds its clips,
-        // their notes and its tempo map as values beside it (Song::holdValues()); and the song opened, whose values
-        // findOpened() reads back through whole state.
+        // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, or a chord or a key change:
+        // the loader's part alone (makeConsistent()), on a song that keeps everything in its tree, since a song made by
+        // makeSong() holds its clips, their notes, its tempo map and its chord lane as values beside it (Song::holdValues());
+        // and the song opened, whose values findOpened() reads back through whole state.
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
-            || element.hasType (schema::CONTROL) || isTempoMapEntry (element))
+            || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element))
         {
-            if (! isTempoMapEntry (element))
+            if (! isTempoMapEntry (element) && ! isChordLaneEntry (element))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -314,14 +315,21 @@ struct Changed
         return element.hasType (schema::TEMPO) || element.hasType (schema::TIMESIGNATURE);
     }
 
+    static bool isChordLaneEntry (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::CHORD) || element.hasType (schema::CHORDKEY);
+    }
+
     // The opened song's element in its clip's whole state (WholeState.h), as it holds its values: the clip itself, a note by
     // its ID, a warp marker or a controller's value by every property but the one changed; a tempo or a time signature in
-    // its tempo map's whole state, the same way; none if the loader took it out.
+    // its tempo map's whole state, and a chord or a key change in its chord lane's, the same way; none if the loader took it
+    // out.
     juce::ValueTree findOpened() const
     {
         REQUIRE (opened != nullptr);
-        const auto clipState = isTempoMapEntry (original) ? phazite::copyWholeSong (*opened).getChildWithName (schema::TEMPOMAP)
-                                                          : phazite::copyWholeClip (*opened, clip);
+        const auto clipState = isTempoMapEntry (original)    ? phazite::copyWholeSong (*opened).getChildWithName (schema::TEMPOMAP)
+                               : isChordLaneEntry (original) ? phazite::copyWholeSong (*opened).getChildWithName (schema::CHORDLANE)
+                                                             : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))
             return clipState;
@@ -404,6 +412,33 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                             REQUIRE (changed.loadedElement.isValid());
                             const auto kept =
                                 phazite::writeClipElement (phazite::keepWithinClip (phazite::readClipValue (changed.loadedElement)));
+                            wanted = phazite::readValueNumber (kept.hasProperty (*property) ? kept[*property] : property->getDefault())
+                                         .value_or (-1.0e300);
+                        }
+
+                        // A chord's as what the loader kept is then kept apart from the lane's other chords, as the song takes
+                        // a lane in (ChordLaneValue.h: readHeldChordLane(), keepChordsApart(): a length reaching no further
+                        // than the next chord's start): what the loader kept, held by the lane's value, the chord at its place
+                        // among the lane's chords (none of them gone).
+                        if (changed.original.hasType (schema::CHORD))
+                        {
+                            REQUIRE (changed.loadedElement.isValid());
+                            const auto laneElement = changed.loadedElement.getParent();
+                            const auto lane = phazite::readHeldChordLane (laneElement);
+                            int place = 0, chords = 0;
+
+                            for (const auto& child : laneElement)
+                            {
+                                if (child == changed.loadedElement)
+                                    place = chords;
+
+                                chords += child.hasType (schema::CHORD) ? 1 : 0;
+                            }
+
+                            REQUIRE (lane.chords.size() == (size_t) chords);
+                            juce::ValueTree written (schema::CHORDLANE);
+                            phazite::writeChordLane (lane, written);
+                            const auto kept = written.getChild (place); // the chords written first
                             wanted = phazite::readValueNumber (kept.hasProperty (*property) ? kept[*property] : property->getDefault())
                                          .value_or (-1.0e300);
                         }

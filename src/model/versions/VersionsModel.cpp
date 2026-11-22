@@ -2093,37 +2093,50 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
 
 namespace
 {
-    // The tempo map's choices set its value, never leaving its entries to the keeper of the song's values (SongValues.h: its
-    // safety net): checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp).
-    struct NoTempoMapTakenIn
+    // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net) but a track's clips: the tempo
+    // map's and the chord lane's choices set their values (chooseInAreas()), and no choice in the tree adds their entries;
+    // checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp: NothingTakenIn). What the
+    // keeper took in counted for every area that counts it but the clips, a line each, in the order of the areas: a track
+    // chosen whole in the tree (chooseInTree()) comes in with its clips, which the clips' keeper takes in, as it takes in a
+    // track that comes into the song any other way.
+    struct NothingTakenInButClips
     {
-        explicit NoTempoMapTakenIn (const Song& s)
+        explicit NothingTakenInButClips (const Song& s)
             : song (s),
               before (count (s))
         {
         }
 
-        ~NoTempoMapTakenIn() { jassert (count (song) == before); }
+        ~NothingTakenInButClips() { jassert (count (song) == before); }
 
         static int count (const Song& s)
         {
             const auto* values = s.getValues();
-            return values != nullptr ? values->countTempoMapAdopted() : 0;
+
+            if (values == nullptr)
+                return 0;
+
+            return values->countTempoMapAdopted()     // the tempo map's
+                   + values->countChordLaneAdopted(); // the chord lane's
         }
 
         const Song& song;
         const int before;
 
-        JUCE_DECLARE_NON_COPYABLE (NoTempoMapTakenIn)
+        JUCE_DECLARE_NON_COPYABLE (NothingTakenInButClips)
     };
 
     // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
-    // this order: the tempo map (a path into the song's TEMPOMAP), a note (a note's property: its path goes through its clip,
-    // so before the clip's), a clip (a clip's property, or any other path through a clip, refused). What the first whose path
-    // it is did with it; none of them (notTheArea) for a clash in the song's tree.
+    // this order: the tempo map (a path into the song's TEMPOMAP), the chord lane (a path into the song's CHORDLANE), a note (a
+    // note's property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path
+    // through a clip, refused). What the first whose path it is did with it; none of them (notTheArea) for a clash in the
+    // song's tree.
     AreaChoice chooseInAreas (Song& song, const MergeClash& clash, int value, const MergeSides& sides)
     {
         if (const auto choice = chooseTempoMapClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice;
+
+        if (const auto choice = chooseChordLaneClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;
 
         if (const auto choice = chooseNoteClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
@@ -2196,7 +2209,7 @@ bool chooseClash (ProjectContext& context, int index, int value)
 
     // A change of its own, one undo step, named for the choice: "Take the Other Branch's: Bass volume".
     const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
-    const NoTempoMapTakenIn byTheValueAlone (*song);
+    const NothingTakenInButClips byTheValuesAlone (*song);
 
     // Each area the song holds as a value beside its tree asked first; a clash none of them has, in the song's tree.
     const auto inAreas = chooseInAreas (*song, clash, value, { merging.base, merging.before, merging.theirs });

@@ -322,7 +322,7 @@ std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const juce::Va
 void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
 {
     // The clips and their notes are values beside the tree, heard by clipsChanged() and clipNotesChanged(); the tempo map is
-    // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsTempoMap()), which marks
+    // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsKept()), which marks
     // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats). In the automation: a
     // curve's points (by its parameter), or the curves themselves (every one). In a channel (a track, a folder, a return or
     // the master), its devices' values are read again only for what can change them: a change at or under a device, a
@@ -366,8 +366,10 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
 
 void SongPlayer::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (isHeardAsTempoMap (tree))
-        return; // tempoMapChanged()
+    // The areas' (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's, which nothing played reads
+    // (chordLaneChanged(): SongPlayer follows none of it).
+    if (isHeardAsKept (tree))
+        return;
 
     // A curve given to another parameter: its old one isn't known any more. A track's ID changed in place (a merge's
     // renumbering): what the plan before kept under it may be another track's, and its own is under an ID no longer known.
@@ -424,9 +426,9 @@ void SongPlayer::markSoundsIn (const juce::ValueTree& element)
 void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
     // Something added to a channel; or tracks added, which may hold notes and devices already (an undo), or the master in
-    // place of another (a song applied). View state added (a track's lanes) changes nothing that plays. The tempo map's:
-    // tempoMapChanged().
-    if (isHeardAsTempoMap (parent, child))
+    // place of another (a song applied). View state added (a track's lanes) changes nothing that plays. The areas'
+    // (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's, which nothing played reads.
+    if (isHeardAsKept (parent, child))
         return;
 
     if (! schema::isUncountedElement (parent, child))
@@ -438,8 +440,8 @@ void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& 
 
 void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
 {
-    if (isHeardAsTempoMap (parent, child))
-        return; // tempoMapChanged()
+    if (isHeardAsKept (parent, child))
+        return; // the areas': tempoMapChanged(); the chord lane's, which nothing played reads
 
     // A device's sounds taken away whole: its own again.
     if (child.hasType (schema::SOUNDS) && parent.hasType (schema::DEVICE))
@@ -453,9 +455,9 @@ void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree
 
 void SongPlayer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
 {
-    // A track's devices, a chain's devices, a channel's modulators, tracks in a folder: reordered. The tempo map's:
-    // tempoMapChanged().
-    if (! isHeardAsTempoMap (parent))
+    // A track's devices, a chain's devices, a channel's modulators, tracks in a folder: reordered. The areas'
+    // (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's, which nothing played reads.
+    if (! isHeardAsKept (parent))
         markChange (parent, true);
 }
 

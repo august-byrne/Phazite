@@ -26,6 +26,7 @@
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/WholeState.h"
+#include "model/chords/internal/Chords.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
@@ -1301,6 +1302,81 @@ TEST_CASE ("A tempo map edited through the model is an unsaved change, which its
 
     // Changed and not back: unsaved, as the whole song's comparison says.
     phazite::setTempo (song, 133.0);
+    CHECK_FALSE (project->isWholeAsSaved());
+    CHECK (project->hasUnsavedChanges());
+}
+
+TEST_CASE ("A chord lane edited through the model is an unsaved change, which its Undo takes back, and one changed back is saved "
+           "again")
+{
+    // The chord lane is heard from the song's values (SongValues.h: Listener::chordLaneChanged()), compared with the saved
+    // copy's as one value with whether each has a lane (WholeState.h: holdSameChordLane()), as the whole song's comparison
+    // says: first with no lane (the first chord makes it, and its Undo takes it away), then with one.
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Chords");
+    auto& song = project->getSong();
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+    REQUIRE_FALSE (phazite::hasChordLane (song));
+
+    const auto edit = [&song] (const juce::String& name, const std::function<void()>& change)
+    {
+        const phazite::UndoStep step (song, name);
+        change();
+    };
+
+    const auto check = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        INFO (name.toStdString());
+        edit (name, change);
+        CHECK_FALSE (project->isWholeAsSaved());
+        phazite::undo (song);
+        CHECK (project->isWholeAsSaved());
+        CHECK_FALSE (project->hasUnsavedChanges());
+        phazite::redo (song);
+        CHECK (project->hasUnsavedChanges());
+        phazite::undo (song);
+        REQUIRE (project->save().wasOk());
+        REQUIRE_FALSE (project->hasUnsavedChanges());
+    };
+
+    const phazite::Numeral one { 1, 0, phazite::ChordType::minor, 0 }, four { 4, 0, phazite::ChordType::major, 0 };
+    check ("Add Chord, which makes the lane", [&] { phazite::putLaneChord (song, { beats (0.0), beats (4.0) }, one); });
+    check ("Change Key, which makes the lane", [&] { phazite::setLaneKey (song, beats (0.0), { 2, phazite::Scale::minor }); });
+    CHECK_FALSE (phazite::hasChordLane (song));
+
+    edit ("Add Chord", [&] { phazite::putLaneChord (song, { beats (0.0), beats (4.0) }, one); });
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    check ("Change Chord", [&] { phazite::setLaneChordNumeral (song, beats (0.0), four); });
+    check ("Change Chord Length", [&] { phazite::setLaneChordEnd (song, beats (0.0), beats (8.0)); });
+    check ("Add Key Change", [&] { phazite::setLaneKey (song, beats (4.0), { 7, phazite::Scale::major }); });
+    check ("Delete Chord", [&] { phazite::removeLaneChord (song, beats (0.0)); });
+    check ("Insert Time", [&] { phazite::insertLaneTime (song, beats (2.0), phazite::BeatDuration::fromBeats (2.0)); });
+
+    // Changed and changed back before anything asked: as saved. A chord's numeral, and a chord deleted and added again where
+    // it was, which the lane holds as it did.
+    const auto changedBack = [&] (const juce::String& name, const std::function<void()>& change, const std::function<void()>& back)
+    {
+        INFO (name.toStdString());
+        edit (name, change);
+        edit (name, back);
+        CHECK (project->isWholeAsSaved());
+        CHECK_FALSE (project->hasUnsavedChanges());
+    };
+
+    changedBack (
+        "the numeral", [&] { phazite::setLaneChordNumeral (song, beats (0.0), four); },
+        [&] { phazite::setLaneChordNumeral (song, beats (0.0), one); });
+    changedBack (
+        "a chord deleted and added again", [&] { phazite::removeLaneChord (song, beats (0.0)); },
+        [&] { phazite::putLaneChord (song, { beats (0.0), beats (4.0) }, one); });
+
+    // Changed and not back: unsaved, as the whole song's comparison says.
+    edit ("Change Chord", [&] { phazite::setLaneChordNumeral (song, beats (0.0), four); });
     CHECK_FALSE (project->isWholeAsSaved());
     CHECK (project->hasUnsavedChanges());
 }

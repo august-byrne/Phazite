@@ -903,7 +903,11 @@ inline const Property<juce::String> sectionColour { "colour", on (SECTION), Form
 // key there, so that the chords follow when the key changes. song
 
 // Child of PHAZITE, added when the first chord or key is written: the chords (CHORD) and the keys they are in (CHORDKEY),
-// in no particular order.
+// in no particular order, written chords first, then keys, each kind in the lane's order. Without one, the song's keys are
+// the key set last (LASTKEY), and a lane made starts with it. A song's chords and keys are a value beside its tree while it
+// is open (model/base/internal/ChordLaneValue.h), each property below as its description reads it, and its tree's
+// CHORDLANE an empty placeholder that says it has a lane: so the song keeps no property or element Phazite doesn't know on
+// a CHORDLANE, a CHORD or a CHORDKEY, and writes a chord's accidental and inversion only while they aren't 0.
 // (CHORDLANE, with the elements above.)
 
 // Child of CHORDLANE: a chord over a stretch of the song. Chords don't overlap.

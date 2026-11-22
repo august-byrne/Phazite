@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
@@ -821,6 +822,77 @@ namespace
                               && isWithin ((double) signature.denominator, schema::denominator);
                    });
     }
+
+    // The chord lane's area: no chord or key of it in the song's tree, its CHORDLANE there (where the song has a lane) an empty
+    // placeholder, and no chord or key held without one (a song without a lane takes its keys from the key set last); every
+    // number within its description's range (Schema.h), read here from the description; and what the lane's readers rely on:
+    // chords that don't overlap, and a key's root a key's (0 to 11) or none (-1).
+    void checkChordLaneValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> findEntries = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::CHORD) || child.hasType (schema::CHORDKEY))
+                    problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
+
+                findEntries (child);
+            }
+        };
+
+        findEntries (song.getState());
+        const auto& lane = values.chordLane.get();
+
+        if (const auto element = song.getState().getChildWithName (schema::CHORDLANE); ! element.isValid())
+        {
+            if (! lane.chords.empty() || ! lane.keys.empty())
+                problems.push_back ("values: the song holds chords or keys but has no CHORDLANE, the sign of a chord lane");
+        }
+        else if (element.getNumChildren() > 0 || element.getNumProperties() > 0)
+        {
+            problems.push_back ("values: the song's CHORDLANE isn't an empty placeholder for its chord lane");
+        }
+
+        const auto isWithin = [] (double number, const schema::PropertyDescription& property)
+        {
+            const auto& range = property.getRange();
+
+            if (! std::isfinite (number) || ! range.has_value())
+                return std::isfinite (number);
+
+            return number >= range->low && number <= range->high && (! range->whole || juce::exactlyEqual (std::round (number), number));
+        };
+
+        size_t place = 0;
+
+        for (const auto& chord : lane.chords)
+        {
+            if (! isWithin (chord.start.inBeats(), schema::chordStart) || ! isWithin (chord.length.inBeats(), schema::chordLength)
+                || ! isWithin ((double) chord.degree, schema::chordDegree)
+                || ! isWithin ((double) chord.accidental, schema::chordAccidental)
+                || ! isWithin ((double) chord.inversion, schema::chordInversion))
+                problems.push_back ("values: the chord lane's chord " + std::to_string (place)
+                                    + " holds a number outside its description's range");
+
+            ++place;
+        }
+
+        // Chords that don't overlap, as the lane's writers leave them and as a lane that enters the song is kept
+        // (ChordLaneValue.h: holdsChordsApart()).
+        if (! holdsChordsApart (lane))
+            problems.push_back ("values: the chord lane holds chords that overlap");
+
+        place = 0;
+
+        for (const auto& key : lane.keys)
+        {
+            if (! isWithin (key.start.inBeats(), schema::chordStart) || (key.root != -1 && ! isWithin ((double) key.root, schema::keyRoot)))
+                problems.push_back ("values: the chord lane's key change " + std::to_string (place)
+                                    + " holds a number outside its description's range");
+
+            ++place;
+        }
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -831,10 +903,12 @@ std::vector<std::string> findValueProblems (const Song& song)
     if (values == nullptr)
         return problems;
 
-    // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map.
+    // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
+    // lane.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
+    checkChordLaneValue (song, *values, problems);
     return problems;
 }
 

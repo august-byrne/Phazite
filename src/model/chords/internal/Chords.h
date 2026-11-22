@@ -1,25 +1,40 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The chord lane's insides (ChordModel.h): its chords and keys in the song (Schema.h: CHORDLANE; docs/design.md, section
-// 14). Edits use the song's undo manager and begin no step: their caller's holds them.
+// 14). The song holds its lane as a value in an area of its values (model/base/internal/SongValues.h, ChordLaneArea.h): every
+// edit below reads the value, works the next one out and sets it once (SongValues::setChordLane()), in the step in progress,
+// or outside the history while the song is written outside it; none begins a step: their caller's holds them. A chord's and
+// a key change's entries have no identity of their own (they are found by where they start, two within a ten-thousandth of a
+// beat as one), so the lane is never written into elements by what differs.
 #pragma once
 
 #include "model/base/Song.h"
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/chords/ChordValues.h"
 
+#include <juce_data_structures/juce_data_structures.h>
+
+#include <vector>
+
 namespace phazite
 {
 struct Progression;
 
 // The song's chord lane as a value (model/base/internal/ChordLaneValue.h): its chords and keys, each kind in the song's
-// order. The song's tree holds the lane still (roadmap step S5.20: the chord lane's switch is to come), so this reads it from
-// its CHORDLANE element at each call, by value; the switch makes it the area's value, which it then gives without a read.
+// order. The area's value, cheap to copy; for a song that keeps everything in its tree (one made to be read or checked,
+// without values: Song::getValues()), read from its CHORDLANE element (readChordLaneValue()). Empty for a song without a lane.
 ChordLaneValue getChordLaneValue (const Song&);
 
 // Whether the song has a chord lane: one is added with its first chord or key, starting with the key new tracks get at that
-// moment (getLaneState()); until then its keys are that key (getLaneKeys()). The lane's element in the song's tree is what
-// says so, and stays there as that sign when the lane's chords and keys become the area's value.
+// moment (the edits below); until then its keys are that key (getLaneKeys()). The lane's element in the song's tree is what
+// says so (Schema.h: CHORDLANE, an empty placeholder: the lane's chords and keys are the area's value), never a reader's.
 bool hasChordLane (const Song&);
+
+// The song's lane made the one an element holds (a CHORDLANE, read as the song holds one: ChordLaneValue.h,
+// readHeldChordLane()), or none for an invalid tree: its element in the song's tree added or taken out where it has one and
+// the other none, and its value set, in the mode of the moment (the step in progress, or outside the history while the song
+// is written outside it). What gives the song a version's lane and a merge's choice of one (model/versions/ApplySong.cpp,
+// chooseChordLaneClash()). Whether it wrote anything.
+bool makeChordLaneAs (Song&, const juce::ValueTree& chordLaneOrNone);
 
 // The lane's chords, by their starts, each with the key it is in.
 std::vector<PlacedChord> getLaneChords (const Song&);
@@ -61,9 +76,6 @@ void removeLaneKeyChange (Song&, BeatPosition at);
 // major key plays in its relative minor (getKeyForProgression()).
 void putProgression (Song&, const Progression&, BeatRange);
 
-// The lane's state, added if it has none yet, with a key from 0 (the one getLaneKeys() gives until then).
-juce::ValueTree getLaneState (Song&);
-
 //==============================================================================
 // Time edits (model/arrangement/internal/Arrangement.h): chords go with the song's time, as sections do. A chord that an
 // edit cuts into gets shorter or longer.
@@ -75,10 +87,10 @@ void removeLaneTime (Song&, BeatRange);
 void moveLaneTime (Song&, BeatRange, BeatPosition destination);
 
 // Copies of the chords in a range, cut at its edges, as copyTime() copies what is in it: taken before it makes room at the
-// destination, and put there after it.
+// destination, and put there after it. Values, as the lane holds them.
 struct LaneCopy
 {
-    std::vector<juce::ValueTree> chords;
+    std::vector<ChordEntry> chords;
     BeatPosition rangeStart {};
 };
 

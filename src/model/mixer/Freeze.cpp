@@ -600,8 +600,9 @@ void FreezeKeeper::compare (TrackID track)
 void FreezeKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     // How tracks show and where windows were change nothing that plays; nor does the song's count of IDs, which every new
-    // ID moves, or how it plays and its grid, on its root. The tempo map's: tempoMapChanged().
-    if ((tree == state && schema::isUncountedProperty (tree, property)) || isHeardAsTempoMap (tree))
+    // ID moves, or how it plays and its grid, on its root. The areas' of the song's values (isHeardAsKept()): the tempo map's,
+    // tempoMapChanged(); the chord lane's, which no frozen file holds.
+    if ((tree == state && schema::isUncountedProperty (tree, property)) || isHeardAsKept (tree))
         return;
 
     if (! schema::isTrackViewProperty (property) && ! isIgnoredProperty (property))

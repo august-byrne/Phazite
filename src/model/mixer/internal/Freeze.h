@@ -128,29 +128,31 @@ private:
 
     // The notes of a frozen track's clip, its clips, and the tempo map (every frozen track's), heard as the song's values
     // change: marked, and compared once the step is whole (a listener of the values reads nothing of the song as it is told:
-    // SongValues.h). The tree's callbacks leave the tempo map alone (isHeardAsTempoMap()).
+    // SongValues.h). The chord lane (chordLaneChanged()): nothing, as no frozen track's file holds anything of chords or keys.
+    // The tree's callbacks below leave what the areas tell alone (isHeardAsKept()).
     void clipNotesChanged (const std::vector<ClipID>&) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
     void tempoMapChanged() override;
+
     void handleAsyncUpdate() override { compareMarked(); }
     void writePending() override; // what is marked compared now, but during an undo or a redo (Song.h)
 
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
-        if (! isHeardAsTempoMap (parent, child))
+        if (! isHeardAsKept (parent, child))
             check (parent, true);
     }
 
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        if (! isHeardAsTempoMap (parent, child))
+        if (! isHeardAsKept (parent, child))
             check (parent, false);
     }
 
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
     {
-        if (! isHeardAsTempoMap (parent))
+        if (! isHeardAsKept (parent))
             check (parent, false);
     }
 

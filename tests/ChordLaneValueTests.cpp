@@ -245,13 +245,49 @@ TEST_CASE ("Chord lane value: damaged lanes read as the lane's code read them, w
     CHECK_FALSE (written.getChild (5).hasProperty (schema::keyRoot));
     CHECK (phazite::readChordLaneValue ({}) == ChordLaneValue {});
 
-    // The readers on a song that holds the lane (as a file from others would before the loader makes it consistent), the
-    // same as the lane's code read it before.
-    auto song = phazite::createSong();
-    song->getState().appendChild (lane.createCopy(), nullptr);
+    // The readers on a song opened with the lane (a file from others, which the loader makes consistent and the song takes
+    // into its values: ChordLaneValue.h, readHeldChordLane()), the same as the lane's code read the lane the loader left.
+    auto state = phazite::makeNewSong();
+    state.appendChild (lane.createCopy(), nullptr);
+    const auto song = phazite::makeSong (state);
+    REQUIRE (song != nullptr);
     REQUIRE (phazite::hasChordLane (*song));
-    checkReadersAsBefore (*song, lane, phazite::Key {});
-    CHECK (phazite::getChordLaneValue (*song) == value);
+    const auto held = phazite::test::copyWholeSong (*song).getChildWithName (schema::CHORDLANE);
+    checkReadersAsBefore (*song, held, phazite::Key {});
+    CHECK (phazite::getChordLaneValue (*song) == phazite::readChordLaneValue (held));
+    CHECK_FALSE (phazite::getChordLaneValue (*song).chords.empty());
+    CHECK_FALSE (phazite::getChordLaneValue (*song).keys.empty());
+}
+
+TEST_CASE ("Chord lane value: a lane read as the song holds one reads each property by its description")
+{
+    // An absent start, length, degree, accidental and inversion as their fallbacks; numbers within their ranges and whole; a
+    // key's root that is no number none, one past B kept at B; text read as the song reads a number (a subnormal start, the
+    // InconsistentProjectTests' case). The chords apart (keepChordsApart(): the third starts where the first, 4 beats long by
+    // its fallback, ends; the second has no length of its own, so it overlaps nothing).
+    const auto lane = parse (R"(<CHORDLANE>)"
+                             R"(<CHORD type="major"/>)"
+                             R"(<CHORD start="-2" length="0" degree="9.6" accidental="3" inversion="20" type="minorSeventh"/>)"
+                             R"(<CHORD start=" 4 " length=" 2 " degree="x" accidental="-0.6" type="minor"/>)"
+                             R"(<CHORDKEY start="16" keyRoot="none" keyScale="dorian"/>)"
+                             R"(<CHORDKEY start="8" keyRoot="14" keyScale="major"/>)"
+                             R"(<OTHER start="4"/>)"
+                             R"(</CHORDLANE>)");
+
+    const auto value = phazite::readHeldChordLane (lane);
+    REQUIRE (value.chords.size() == 3);
+    REQUIRE (value.keys.size() == 2);
+    CHECK (value.chords[0] == ChordEntry { beat (0.0), phazite::BeatDuration::fromBeats (4.0), 1, 0, 0, "major" });
+    CHECK (value.chords[1] == ChordEntry { beat (0.0), phazite::BeatDuration::fromBeats (schema::moreThanZero), 7, 1, 16, "minorSeventh" });
+    CHECK (value.chords[2] == ChordEntry { beat (4.0), phazite::BeatDuration::fromBeats (2.0), 1, -1, 0, "minor" });
+    CHECK (value.keys[0] == KeyEntry { beat (16.0), -1, "dorian" });
+    CHECK (value.keys[1] == KeyEntry { beat (8.0), 11, "major" });
+    CHECK (phazite::readHeldChordLane ({}) == ChordLaneValue {});
+
+    // A lane the song wrote reads the same both ways.
+    const auto written = writeLane (value);
+    CHECK (phazite::readChordLaneValue (written) == value);
+    CHECK (phazite::readHeldChordLane (written) == value);
 }
 
 TEST_CASE ("Chord lane value: the lane's readers on a lane the model made read it as before, and the lane is there from its first "
@@ -282,4 +318,33 @@ TEST_CASE ("Chord lane value: the lane's readers on a lane the model made read i
     phazite::undo (*song);
     CHECK_FALSE (phazite::hasChordLane (*song));
     CHECK (phazite::getLaneKeyAt (*song, beat (30.0)) == phazite::Key { 7, phazite::Scale::major });
+}
+
+TEST_CASE ("Chord lane value: what enters the song's lane keeps its chords apart, as the lane's writers leave them")
+{
+    // keepChordsApart(): by their starts, each chord reaching no further than the next one's start, and gone where nothing of
+    // it would be left (the later of two at one start stays); a chord without a length of its own stays as it is, no chord's
+    // next; the chords that stay in the lane's order, the keys as they are; the same value where nothing overlaps.
+    const auto chord = [] (double start, double length, const char* type)
+    { return ChordEntry { beat (start), phazite::BeatDuration::fromBeats (length), 1, 0, 0, type }; };
+
+    const ChordLaneValue lane { { chord (8.0, 8.0, "a"), chord (0.0, 16.0, "b"), chord (4.0, 0.0, "c"), chord (8.0, 2.0, "d") },
+                                { KeyEntry { beat (0.0), 2, "minor" } } };
+    const ChordLaneValue apart { { chord (0.0, 8.0, "b"), chord (4.0, 0.0, "c"), chord (8.0, 2.0, "d") }, lane.keys };
+    CHECK_FALSE (phazite::holdsChordsApart (lane));
+    CHECK (phazite::keepChordsApart (lane) == apart);
+    CHECK (phazite::holdsChordsApart (apart));
+    CHECK (phazite::keepChordsApart (apart).isSameAs (apart)); // nothing overlaps: the same value
+
+    // Chords that touch, or overlap by no more than the lane's nearness, are apart.
+    const ChordLaneValue touching { { chord (0.0, 4.0 + phazite::chordLaneNear / 2.0, "a"), chord (4.0, 4.0, "b") }, {} };
+    CHECK (phazite::holdsChordsApart (touching));
+
+    // The keeper's safety net keeps them apart too: a chord taken in over the end of one held.
+    const auto taken = phazite::withEntryTaken (
+        ChordLaneValue { { chord (0.0, 8.0, "a") }, {} },
+        juce::ValueTree (schema::CHORD, { { schema::chordStart, 4.0 }, { schema::chordLength, 4.0 }, { schema::chordType, "b" } }));
+    REQUIRE (taken.chords.size() == 2);
+    CHECK (taken.chords[0] == chord (0.0, 4.0, "a"));
+    CHECK (taken.chords[1] == chord (4.0, 4.0, "b"));
 }
