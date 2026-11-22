@@ -997,19 +997,6 @@ namespace
         return clips.run();
     }
 
-    // The ID the song gives next, past every ID it holds: its tree's (Schema.h: findNextID()) and its clips', wherever the
-    // song keeps them (roadmap step S5.20 moves them out of its tree).
-    std::uint64_t findSongsNextID (const Song& song)
-    {
-        auto next = findNextID (song.getState());
-
-        for (const auto clip : getAllClips (song))
-            if (clip.getRaw() < schema::maxID)
-                next = std::max (next, clip.getRaw() + 1);
-
-        return next;
-    }
-
     // The song's count of IDs brought past every ID it holds now and past the other's count: what it took from the other
     // can hold IDs past its own count (a song opened again as it was saved before they were given), and the next item it
     // makes gets an ID that nothing of either has. The other's IDs counted in its whole tree, its clips' too. Not an undo
@@ -1017,7 +1004,7 @@ namespace
     void countIDsPast (Song& song, const juce::ValueTree& other)
     {
         auto state = song.getState();
-        const auto next = std::max (findSongsNextID (song), findNextID (other));
+        const auto next = std::max (findNextID (song), findNextID (other));
 
         if ((std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0) != next)
             state.setProperty (schema::nextID, (juce::int64) next, nullptr);
@@ -1112,7 +1099,7 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     const Song::OutsideHistory outside (song);
 
     // Its count of IDs the larger of the two: what either branch made keeps an ID of its own.
-    const auto next = std::max (findSongsNextID (song), findNextID (other));
+    const auto next = std::max (findNextID (song), findNextID (other));
     removeMovedItems (song.getState(), findPlaces (other), nullptr);
     makeLike (song, song.getState(), other, nullptr, true, Taken::everything);
     makeClipsLike (song, other, false);

@@ -1274,8 +1274,11 @@ bool mustGiveIDsAnew (std::uint64_t largestID, std::uint64_t nextID);
 // What the versions ask before they match a version's items with the song's by ID (model/versions/VersionsModel.cpp).
 bool areNumberedAlike (const juce::ValueTree& song, const juce::ValueTree& other);
 
-// The ID a song gives next: past its count (nextID) and every ID it holds.
+// The ID a song gives next: past its count (nextID) and every ID it holds. Of a song's tree (a version's, a merge's, a whole
+// copy): what the tree holds. Of a live song: its tree's and what its values hold beside it (IDsHeld.h: findLargestIDHeld()),
+// which its tree no longer does (roadmap step S5.20); what everything that works out a live song's next ID asks.
 std::uint64_t findNextID (const juce::ValueTree& song);
+std::uint64_t findNextID (const Song&);
 
 // Brings the song's count there (findNextID()). As a project opens and saves.
 void countIDs (Song&);

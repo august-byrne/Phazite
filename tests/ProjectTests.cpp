@@ -39,6 +39,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
+#include "model/versions/internal/ApplySong.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -1722,11 +1723,42 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (isUnsavedChange ([&reopened, folder]
                             { phazite::findTrackState (reopened, folder).setProperty (schema::folderBus, true, nullptr); }));
 
-    REQUIRE (phazite::insertSection (reopened, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) }).isValid());
-    auto section = reopened.getState().getChildWithName (schema::SECTIONS).getChild (0);
+    // A section's own properties, as the model changes them (Sections.h).
+    const auto section = phazite::insertSection (reopened, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
     REQUIRE (section.isValid());
-    CHECK (isUnsavedChange ([&section] { section.setProperty (schema::sectionRole, "chorus", nullptr); }));
-    CHECK (isUnsavedChange ([&section] { section.setProperty (schema::sectionEnergy, 0.9f, nullptr); }));
+    CHECK (isUnsavedChange ([&reopened, section] { phazite::renameSection (reopened, section, "Chorus"); }));
+    CHECK (isUnsavedChange ([&reopened, section] { phazite::setSectionColour (reopened, section, juce::Colours::orange); }));
+
+    // Its role and its energy, which no model function changes once it is made: the song made like a copy of itself whole with
+    // one of them changed (ApplySong.h), in an undo step, is an unsaved change; undone, the project is as it was saved.
+    const auto changeInCopy = [&reopened, section] (const juce::Identifier& property, const juce::var& value)
+    {
+        auto copy = phazite::test::copyWholeSong (reopened);
+        auto changed = false;
+
+        for (auto child : copy.getChildWithName (schema::SECTIONS))
+        {
+            if ((std::uint64_t) (juce::int64) child[schema::sectionID] == section.getRaw())
+            {
+                child.setProperty (property, value, nullptr);
+                changed = true;
+            }
+        }
+
+        REQUIRE (changed);
+        const phazite::UndoStep step (reopened, "Change Section");
+        phazite::makeSongLike (reopened, copy);
+    };
+
+    CHECK (isUnsavedChange ([&changeInCopy] { changeInCopy (schema::sectionRole, "chorus"); }));
+    CHECK (phazite::getSection (reopened, section).value_or (phazite::Section()).role == "chorus");
+    phazite::undo (reopened); // as saved again, as closing the project finds it, comparing the whole song with the saved copy
+    CHECK_FALSE (project->checkUnsavedChanges());
+
+    CHECK (isUnsavedChange ([&changeInCopy] { changeInCopy (schema::sectionEnergy, 0.9); }));
+    CHECK (phazite::getSection (reopened, section).value_or (phazite::Section()).energy == doctest::Approx (0.9));
+    phazite::undo (reopened);
+    CHECK_FALSE (project->checkUnsavedChanges());
 }
 
 TEST_CASE ("Saving stores plug-ins' own settings, without an undo step")

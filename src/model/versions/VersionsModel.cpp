@@ -1699,7 +1699,7 @@ namespace
                       "(a history these lines' merges made that Phazite can't follow yet, or records another tool wrote). "
                       "To bring over what you need from it, open that version and use Restore on its tracks.");
 
-            if (worked->next > findNextID (song->getState()) && ! worked->preview.renumbered.empty())
+            if (worked->next > findNextID (*song) && ! worked->preview.renumbered.empty())
             {
                 song->getState().setProperty (schema::nextID, (juce::int64) worked->next, nullptr);
                 // Its count of IDs, which isn't counted as a change (Cancel Merge leaves it as it is), no reason to keep the song

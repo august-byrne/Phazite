@@ -4,6 +4,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Take.h"
@@ -516,11 +517,13 @@ void PlaybackSession::followMidiLinks()
     if (! std::exchange (midiLinksChanged, false))
         return;
 
+    // The song's links' controllers, as the MIDI links' code gives them (MidiLinks.h).
+    const auto links = getMidiLinksValue (*song);
     std::vector<std::pair<int, int>> controllers;
+    controllers.reserve (links.links.size());
 
-    for (const auto& link : song->getState().getChildWithName (schema::MIDILINKS))
-        if (link.hasType (schema::MIDILINK))
-            controllers.emplace_back ((int) link[schema::midiLinkChannel], (int) link[schema::midiLinkNumber]);
+    for (const auto& link : links.links)
+        controllers.emplace_back (link.channel, link.number);
 
     tap.setDiverted (controllers);
 }

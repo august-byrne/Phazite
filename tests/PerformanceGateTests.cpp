@@ -32,10 +32,12 @@
 #include "model/arrangement/internal/AudioWork.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Grid.h"
+#include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
@@ -69,9 +71,11 @@
 #include "ui/playlist/TrackHeader.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -956,6 +960,67 @@ TEST_CASE ("Performance gate: selected automation points are found by their beat
     const auto small = comparisonsFor (1000), large = comparisonsFor (10000);
     INFO ("1,000 points: " << small << " comparisons; 10,000: " << large);
     CHECK (large < small * 20);
+}
+
+TEST_CASE ("Performance gate: asking whether each selected section is selected reads no value of the song's sections for each")
+{
+    // A paint of the sections' strip and of the playlist asks it of each section in view (SectionsStrip.cpp, Playlist.cpp),
+    // and the selection asks the song whether it holds that section (Selection.cpp: isThere()): a value made of every section
+    // for each (SectionsValue.h: getSectionsValue()) read the square of the sections, twice a frame while the playlist follows
+    // the playhead. Asked through SectionsValue.h's holdsSection(), it reads none into a value. Counted as the sections read
+    // (countSectionsRead()), and as allocations, which immer's lists of freed nodes hide from the count, but which must not grow
+    // either.
+    struct Counts
+    {
+        std::uint64_t read = 0;
+        std::optional<int> allocations;
+    };
+
+    const auto countsFor = [] (int numSections)
+    {
+        phazite::test::TestSong s;
+        auto& song = *phazite::findSong (s.context);
+        auto& selection = phazite::getSelection (s.context);
+        std::vector<phazite::SectionID> ids;
+
+        {
+            const phazite::UndoStep step (song, "Sections");
+
+            for (int i = 0; i < numSections; ++i)
+                ids.push_back (phazite::insertSection (song, phazite::BeatPosition::fromBeats (i * 4.0),
+                                                       { .name = "Part", .length = phazite::BeatDuration::fromBeats (4.0) }));
+        }
+
+        for (const auto& id : ids)
+            selection.addToSelection (id);
+
+        auto selected = 0;
+        const auto askEach = [&ids, &selection, &selected]
+        {
+            for (const auto& id : ids)
+                if (selection.isSelected (id))
+                    ++selected;
+        };
+
+        Counts counts;
+        const auto readBefore = phazite::countSectionsRead();
+        askEach();
+        counts.read = phazite::countSectionsRead() - readBefore;
+        CHECK (selected == numSections);
+        counts.allocations = phazite::test::countAllocations (askEach);
+        return counts;
+    };
+
+    // Ten times the sections, at most ten times the work (none, now); a hundred times, with a value read for each.
+    const auto small = countsFor (4), large = countsFor (40);
+    INFO ("4 sections: " << small.read << " read; 40: " << large.read);
+    CHECK (large.read <= small.read * 10 + 8);
+
+    if (small.allocations.has_value() && large.allocations.has_value()) // counted on this build (PerformanceCounts.h)
+    {
+        INFO ("4 sections: " << *small.allocations << " allocations; 40: " << *large.allocations);
+        CHECK (*large.allocations <= *small.allocations * 10 + 8);
+    }
 }
 
 //==============================================================================

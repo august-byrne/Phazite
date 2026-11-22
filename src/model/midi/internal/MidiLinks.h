@@ -5,6 +5,7 @@
 #pragma once
 
 #include "model/base/Song.h"
+#include "model/base/internal/MidiLinksValue.h"
 #include "model/devices/ParameterRef.h"
 #include "model/midi/MidiLinkValues.h"
 
@@ -27,8 +28,15 @@ struct MidiLink
     ParameterRef parameter;
 };
 
-// The parameter a link's element names, as the song names it elsewhere (ParameterRef.h): a macro's link holds the word
-// schema::midiLinkMacroValue as its parameter, which stays as a merge or a copy gives the macro a new ID.
+// The song's links as a value (model/base/internal/MidiLinksValue.h), in the song's order. The song's tree holds them still
+// (roadmap step S5.20: the MIDI links' switch is to come), so this reads them from its MIDILINKS element at each call, by
+// value; the switch makes it the area's value, which it then gives without a read.
+MidiLinksValue getMidiLinksValue (const Song&);
+
+// The parameter a link names, as the song names it elsewhere (ParameterRef.h): a macro's link holds the word
+// schema::midiLinkMacroValue as its parameter, which stays as a merge or a copy gives the macro a new ID. Of a link of the
+// song's value, and of a link's element (read as the value reads it: the loader's, makeConsistent()).
+ParameterRef readMidiLinkParameter (const Song&, const MidiLinkEntry&);
 ParameterRef readMidiLinkParameter (const Song&, const juce::ValueTree& link);
 
 // The song's links, by channel, then number; a parameter's controller; a controller's parameter.

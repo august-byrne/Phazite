@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Schema.h"
+#include "internal/IDsHeld.h"
 
 #include <algorithm>
 #include <functional>
@@ -75,11 +76,16 @@ std::uint64_t findNextID (const juce::ValueTree& song)
     return std::max (readNextID (song), findLargestID (song) + 1);
 }
 
+std::uint64_t findNextID (const Song& song)
+{
+    return std::max (findNextID (song.getState()), findLargestIDHeld (song) + 1);
+}
+
 void countIDs (Song& song)
 {
     auto state = song.getState();
 
-    if (const auto next = findNextID (state); next != readNextID (state))
+    if (const auto next = findNextID (song); next != readNextID (state))
         state.setProperty (schema::nextID, (juce::int64) next, nullptr);
 }
 

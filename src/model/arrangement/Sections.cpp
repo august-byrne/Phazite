@@ -3,6 +3,7 @@
 #include "internal/Arrangement.h"
 #include "internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SectionsValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/transport/internal/Tempo.h"
@@ -90,17 +91,17 @@ namespace
         return {};
     }
 
-    Section makeSection (const juce::ValueTree& state)
+    // A section of the song's value as the API gives it: its own colour, or else its role's.
+    Section makeSection (const SectionValue& value)
     {
         Section section;
-        section.id = getID (state);
-        section.range = getRange (state);
-        section.name = state[schema::sectionName].toString();
-        section.role = state[schema::sectionRole].toString();
-        section.tip = state[schema::sectionTip].toString();
-        section.energy = juce::jlimit (0.0f, 1.0f, (float) static_cast<double> (state.getProperty (schema::sectionEnergy, 0.5)));
-        section.colour = state.hasProperty (schema::sectionColour) ? juce::Colour::fromString (state[schema::sectionColour].toString())
-                                                                   : getRoleColour (section.role);
+        section.id = value.id;
+        section.range = { value.start, value.start + value.length };
+        section.name = value.name;
+        section.role = value.role;
+        section.tip = value.tip;
+        section.energy = value.energy;
+        section.colour = value.colour.has_value() ? juce::Colour::fromString (*value.colour) : getRoleColour (section.role);
         return section;
     }
 
@@ -134,18 +135,28 @@ namespace
 //==============================================================================
 std::vector<Section> getSections (const Song& song)
 {
+    // In the song's order: by their starts, two at one start in the order the song holds them.
+    const auto value = getSectionsValue (song);
     std::vector<Section> sections;
+    sections.reserve (value.sections.size());
 
-    for (const auto& state : getSectionStates (song))
-        sections.push_back (makeSection (state));
+    for (const auto& section : value.sections)
+        sections.push_back (makeSection (section));
 
+    std::stable_sort (sections.begin(), sections.end(),
+                      [] (const Section& a, const Section& b) { return a.range.getStart() < b.range.getStart(); });
     return sections;
 }
 
 std::optional<Section> getSection (const Song& song, SectionID id)
 {
-    if (const auto state = findSectionState (song, id); state.isValid())
-        return makeSection (state);
+    if (! id.isValid())
+        return std::nullopt;
+
+    const auto value = getSectionsValue (song);
+
+    if (const auto* section = value.find (id))
+        return makeSection (*section);
 
     return std::nullopt;
 }
@@ -161,11 +172,11 @@ std::optional<Section> getSectionAt (const Song& song, BeatPosition beat)
 
 BeatPosition getSectionsEnd (const Song& song)
 {
+    const auto value = getSectionsValue (song);
     BeatPosition end;
 
-    for (const auto& state : findSectionsState (song))
-        if (state.hasType (schema::SECTION))
-            end = std::max (end, getRange (state).getEnd());
+    for (const auto& section : value.sections)
+        end = std::max (end, section.start + section.length);
 
     return end;
 }
@@ -173,10 +184,12 @@ BeatPosition getSectionsEnd (const Song& song)
 std::vector<Section> getSelectedSections (const Selection& selection)
 {
     std::vector<Section> selected;
+    const auto& ids = selection.getSections();
 
-    if (auto* song = selection.getSong())
+    // The song's sections read once: each is there, so a selected one is one the selection holds (Selection::isSelected()).
+    if (auto* song = selection.getSong(); song != nullptr && ! ids.empty())
         for (const auto& section : getSections (*song))
-            if (selection.isSelected (section.id))
+            if (contains (ids, section.id))
                 selected.push_back (section);
 
     return selected;

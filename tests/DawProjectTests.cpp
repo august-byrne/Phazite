@@ -194,6 +194,33 @@ TEST_CASE ("A song as a DAWproject: its tracks, clips and notes, channels and se
     CHECK (content.metadata->getChildByName ("Title")->getAllSubText() == "Test");
 }
 
+TEST_CASE ("A DAWproject's markers are the song's sections, by their starts, each with its name and a colour of its own alone")
+{
+    // The export reads the song's sections as their value holds them (DawProject.cpp: writeMarkers(), SectionsValue.h): one
+    // that found none would write no markers.
+    Song song;
+    auto& model = *phazite::findSong (song.s.context);
+
+    {
+        const phazite::UndoStep step (model, "Sections");
+        phazite::insertSection (model, phazite::BeatPosition::fromBeats (28.0),
+                                { .name = "Outro", .length = phazite::BeatDuration::fromBeats (4.0), .colour = juce::Colour (0xff112233) });
+        phazite::insertSection (model, phazite::BeatPosition::fromBeats (12.0),
+                                { .name = "Drop", .length = phazite::BeatDuration::fromBeats (16.0), .role = "drop" });
+    }
+
+    const auto content = song.describe();
+    const auto* markers = find (*content.project, "Markers", "id", "markers");
+    REQUIRE (markers != nullptr);
+    juce::StringArray written;
+
+    for (const auto* marker : markers->getChildIterator())
+        written.add (marker->getStringAttribute ("time") + " " + marker->getStringAttribute ("name") + " "
+                     + marker->getStringAttribute ("color", "none"));
+
+    CHECK (written.joinIntoString (", ") == "0 Intro none, 12 Drop none, 28 Outro #112233");
+}
+
 namespace
 {
 // A point of a lane as a DAWproject holds it: its time in beats, its value in the lane's unit, and whether it holds to the

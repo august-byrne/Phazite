@@ -335,13 +335,17 @@ target_sources(phazite_core PRIVATE
     src/model/base/BackgroundJobs.cpp
     src/model/base/BackgroundJobs.h
     src/model/base/Beats.h
+    src/model/base/ChordLaneValue.cpp
     src/model/base/ControlKinds.h
     src/model/base/CurveValues.cpp
     src/model/base/IDs.h
+    src/model/base/IDsHeld.cpp
     src/model/base/Json.cpp
     src/model/base/Json.h
     src/model/base/KeptByAge.h
+    src/model/base/MidiLinksValue.cpp
     src/model/base/Numbers.h
+    src/model/base/SectionsValue.cpp
     src/model/base/Selection.cpp
     src/model/base/Schema.cpp
     src/model/base/Song.cpp
@@ -354,10 +358,14 @@ target_sources(phazite_core PRIVATE
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
     src/model/base/WholeState.cpp
+    src/model/base/internal/ChordLaneValue.h
     src/model/base/internal/CurveValues.h
+    src/model/base/internal/IDsHeld.h
     src/model/base/internal/Immer.h
+    src/model/base/internal/MidiLinksValue.h
     src/model/base/internal/Schema.h
     src/model/base/internal/SchemaDescription.h
+    src/model/base/internal/SectionsValue.h
     src/model/base/internal/Selection.h
     src/model/base/internal/SongIndex.h
     src/model/base/internal/SongValues.h
@@ -1301,6 +1309,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
         tests/ChordLaneTests.cpp
+        tests/ChordLaneValueTests.cpp
         tests/CleanUpTests.cpp
         tests/ChordModelTests.cpp
         tests/ChordValueTests.cpp
@@ -1390,6 +1399,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/LiveInputTests.cpp
         tests/LockFreeTests.cpp
         tests/MidiLinkTests.cpp
+        tests/MidiLinksValueTests.cpp
         tests/MainWindowTests.cpp
         tests/LongRun.cpp
         tests/MessageQueueTests.cpp
@@ -1468,6 +1478,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SchemaTests.cpp
         tests/ScrollingFrameTests.cpp
         tests/SectionTests.cpp
+        tests/SectionsValueTests.cpp
         tests/SelectionTests.cpp
         tests/SettingsModalTests.cpp
         tests/SettingsPanelTests.cpp

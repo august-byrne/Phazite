@@ -4,12 +4,16 @@
 #include "GoldenFiles.h"
 #include "SongCheck.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
+#include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
 #include <cmath>
@@ -42,6 +46,60 @@ TEST_CASE ("A song numbers its items from its own count, which goes past every I
     song.getState().setProperty (phazite::schema::nextID, (juce::int64) 50, nullptr);
     phazite::countIDs (song);
     CHECK (song.makeID() == 50);
+}
+
+TEST_CASE ("A live song's next ID is past every ID its values hold beside its tree: a note's, a clip's, an alias group's, as it "
+           "saves and opens again")
+{
+    // The song's tree holds no clip nor note (SongValues.h): its next ID worked out from the tree alone would be one a clip, a
+    // note or an alias group of the song's has (IDsHeld.h: findLargestIDHeld(); Schema.h: findNextID() of a song).
+    for (const auto* largestIs : { "a note's", "a clip's", "an alias group's" })
+    {
+        INFO ("the largest ID " << largestIs);
+        phazite::test::TestSong s;
+        const auto track = s.addTrack ("Keys");
+        const auto clip = s.addMidiClip (track, 0.0, 4.0);
+        auto& song = *phazite::findSong (s.context);
+        std::uint64_t largest = 0;
+
+        if (juce::String (largestIs) == "a note's")
+        {
+            s.addNote (clip, 60, 0.0, 1.0);
+            const auto* notes = song.getValues()->findClipNotes (clip);
+            REQUIRE ((notes != nullptr && notes->notes.size() == 1));
+            largest = notes->notes[0].id.getRaw();
+        }
+        else if (juce::String (largestIs) == "a clip's")
+        {
+            largest = s.addMidiClip (track, 8.0, 4.0).getRaw();
+        }
+        else
+        {
+            // An alias group numbered past the song's count, as a file can hold one.
+            const auto alias = s.copyClip (clip, 8.0, true);
+            largest = (std::uint64_t) (juce::int64) song.getState()[phazite::schema::nextID] + 500;
+            const phazite::UndoStep step (song, "Link");
+            phazite::setClipLink (song, clip, largest);
+            phazite::setClipLink (song, alias, largest);
+        }
+
+        // The count behind them all, as a song's whose count was worked out from its tree alone.
+        song.getState().setProperty (phazite::schema::nextID, (juce::int64) 1, nullptr);
+        REQUIRE (phazite::findLargestIDHeld (song) == largest);
+        CHECK (phazite::findNextID (song.getState()) <= largest);
+        CHECK (phazite::findNextID (song) == largest + 1);
+
+        // Counted as the project saves: the file's count is past it; and opened again, so is the song's.
+        REQUIRE (s.getProject().save().wasOk());
+        const auto saved = phazite::test::readXml (s.getProject().getFile());
+        REQUIRE (saved != nullptr);
+        CHECK ((std::uint64_t) saved->getStringAttribute (phazite::schema::nextID.getName().toString()).getLargeIntValue() > largest);
+
+        s.reopen();
+        auto& reopened = *phazite::findSong (s.context);
+        CHECK (phazite::findNextID (reopened) > largest);
+        CHECK (reopened.makeID() > largest);
+    }
 }
 
 //==============================================================================

@@ -61,6 +61,7 @@ public:
     void selectOnly (SectionID);
     void addToSelection (SectionID);
     void deselect (SectionID);
+    const std::vector<SectionID>& getSections() const noexcept { return sections; } // as selected: some may be gone
 
     //==============================================================================
     // Notes, of the clips an editor shows (the piano roll's), by their references: other clips deselect them, and so does

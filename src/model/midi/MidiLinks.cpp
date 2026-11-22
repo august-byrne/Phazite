@@ -48,25 +48,36 @@ namespace
 } // namespace
 
 //==============================================================================
-ParameterRef readMidiLinkParameter (const Song& song, const juce::ValueTree& link)
+MidiLinksValue getMidiLinksValue (const Song& song)
 {
-    const auto device = DeviceID::fromRaw (readID (link[schema::midiLinkDevice]));
-    const auto parameter = link[schema::midiLinkParameter].toString();
+    return readMidiLinksValue (song.getState().getChildWithName (schema::MIDILINKS));
+}
+
+ParameterRef readMidiLinkParameter (const Song& song, const MidiLinkEntry& link)
+{
+    const auto device = DeviceID::fromRaw (link.device);
 
     // A macro's one parameter has the macro's ID (Parameters.h), which its link doesn't repeat.
-    if (parameter == schema::midiLinkMacroValue
+    if (link.parameter == schema::midiLinkMacroValue
         && findModulatorState (song, ModulatorID::fromRaw (device.getRaw())).hasType (schema::MACRO))
         return { device, juce::String (device.getRaw()) };
 
-    return { device, parameter };
+    return { device, link.parameter };
+}
+
+ParameterRef readMidiLinkParameter (const Song& song, const juce::ValueTree& link)
+{
+    return readMidiLinkParameter (song, readMidiLinkEntry (link));
 }
 
 std::vector<MidiLink> getMidiLinks (const Song& song)
 {
+    const auto value = getMidiLinksValue (song);
     std::vector<MidiLink> links;
+    links.reserve (value.links.size());
 
-    for (const auto& link : getLinkStates (song))
-        links.push_back ({ readController (link), readMidiLinkParameter (song, link) });
+    for (const auto& link : value.links)
+        links.push_back ({ { link.channel, link.number }, readMidiLinkParameter (song, link) });
 
     std::stable_sort (links.begin(), links.end(), [] (const MidiLink& a, const MidiLink& b) { return a.controller < b.controller; });
     return links;
@@ -74,17 +85,21 @@ std::vector<MidiLink> getMidiLinks (const Song& song)
 
 std::optional<MidiController> findMidiLink (const Song& song, const ParameterRef& parameter)
 {
-    for (const auto& link : getLinkStates (song))
+    const auto value = getMidiLinksValue (song);
+
+    for (const auto& link : value.links)
         if (readMidiLinkParameter (song, link) == parameter)
-            return readController (link);
+            return MidiController { link.channel, link.number };
 
     return {};
 }
 
 std::optional<ParameterRef> findLinkedParameter (const Song& song, MidiController controller)
 {
-    for (const auto& link : getLinkStates (song))
-        if (readController (link) == controller)
+    const auto value = getMidiLinksValue (song);
+
+    for (const auto& link : value.links)
+        if (MidiController { link.channel, link.number } == controller)
             return readMidiLinkParameter (song, link);
 
     return {};

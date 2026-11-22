@@ -2,6 +2,7 @@
 #include "internal/Selection.h"
 #include "internal/CurveValues.h"
 #include "internal/Schema.h"
+#include "internal/SectionsValue.h"
 #include "internal/SongIndex.h"
 #include "internal/SongValues.h"
 
@@ -143,11 +144,9 @@ bool Selection::isThere (SectionID id) const
     if (song == nullptr || ! id.isValid())
         return false;
 
-    for (const auto& section : song->getState().getChildWithName (schema::SECTIONS))
-        if ((std::uint64_t) (juce::int64) section[schema::sectionID] == id.getRaw())
-            return true;
-
-    return false;
+    // Among the song's sections, without a value made of them (SectionsValue.h: holdsSection()): a paint asks this of each
+    // section in view.
+    return holdsSection (*song, id);
 }
 
 bool Selection::holdsDevices() const

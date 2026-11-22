@@ -526,8 +526,8 @@ TEST_CASE ("Sections are kept in the project itself, with IDs no track, clip or 
     Song song;
     auto& s = song.getSong();
 
-    // In the song's own element for them.
-    CHECK (s.getState().getChildWithName (phazite::schema::SECTIONS).getNumChildren() == 7);
+    // In the song's own element for them, as its file holds it (the song whole).
+    CHECK (phazite::test::copyWholeSong (s).getChildWithName (phazite::schema::SECTIONS).getNumChildren() == 7);
 
     // Their IDs are the song's: a clip made after them gets another, and so does a copy of one.
     std::set<std::uint64_t> ids { song.addClip (0, 0, 4, "Clip").getRaw() };

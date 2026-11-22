@@ -5,6 +5,8 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <cmath>
+#include <optional>
 
 namespace phazite
 {
@@ -60,21 +62,6 @@ namespace
         chord.setProperty (schema::chordLength, range.getLength().inBeats(), undo);
     }
 
-    std::optional<Numeral> readNumeral (const juce::ValueTree& chord)
-    {
-        const auto type = findChordType (chord[schema::chordType].toString());
-
-        if (! type.has_value())
-            return std::nullopt;
-
-        Numeral numeral;
-        numeral.degree = juce::jlimit (1, 7, (int) chord.getProperty (schema::chordDegree, 1));
-        numeral.accidental = juce::jlimit (-1, 1, (int) chord[schema::chordAccidental]);
-        numeral.type = *type;
-        numeral.inversion = juce::jlimit (0, (int) getChordIntervals (*type).size() - 1, (int) chord[schema::chordInversion]);
-        return numeral;
-    }
-
     // A chord's numeral: its accidental and inversion only when they aren't 0.
     void writeNumeral (juce::ValueTree chord, const Numeral& numeral, juce::UndoManager* undo)
     {
@@ -127,6 +114,49 @@ namespace
         return getBars (song).getBarLength (where);
     }
 
+    // A key change's key, as readKey() reads its element: none for one without a root.
+    std::optional<Key> readKey (const KeyEntry& entry)
+    {
+        if (entry.root < 0)
+            return std::nullopt;
+
+        return Key { entry.root, findScale (entry.scale).value_or (Scale::major) };
+    }
+
+    // A chord's numeral, as readNumeral() reads its element: none for a type Phazite doesn't know.
+    std::optional<Numeral> readNumeral (const ChordEntry& entry)
+    {
+        const auto type = findChordType (entry.type);
+
+        if (! type.has_value())
+            return std::nullopt;
+
+        Numeral numeral;
+        numeral.degree = entry.degree;
+        numeral.accidental = entry.accidental;
+        numeral.type = *type;
+        numeral.inversion = juce::jlimit (0, (int) getChordIntervals (*type).size() - 1, entry.inversion);
+        return numeral;
+    }
+
+    // The lane's keys from its value, by their starts, the default key from 0 where none starts there (getLaneKeys()).
+    std::vector<LaneKey> getKeysOf (const Song& song, const ChordLaneValue& lane)
+    {
+        std::vector<LaneKey> keys;
+        keys.reserve (lane.keys.size() + 1);
+
+        for (const auto& entry : lane.keys)
+            if (const auto key = readKey (entry))
+                keys.push_back ({ entry.start, *key });
+
+        std::stable_sort (keys.begin(), keys.end(), [] (const LaneKey& a, const LaneKey& b) { return a.start < b.start; });
+
+        if (keys.empty() || keys.front().start > BeatPosition::fromBeats (tiny))
+            keys.insert (keys.begin(), { BeatPosition(), getDefaultKey (song) });
+
+        return keys;
+    }
+
     //==============================================================================
     // Time edits.
 
@@ -144,20 +174,19 @@ namespace
 } // namespace
 
 //==============================================================================
+ChordLaneValue getChordLaneValue (const Song& song)
+{
+    return readChordLaneValue (findLaneState (song));
+}
+
+bool hasChordLane (const Song& song)
+{
+    return findLaneState (song).isValid();
+}
+
 std::vector<LaneKey> getLaneKeys (const Song& song)
 {
-    std::vector<LaneKey> keys;
-
-    for (const auto& state : getChildren (findLaneState (song), schema::CHORDKEY))
-        if (const auto key = readKey (state))
-            keys.push_back ({ getStart (state), *key });
-
-    std::stable_sort (keys.begin(), keys.end(), [] (const LaneKey& a, const LaneKey& b) { return a.start < b.start; });
-
-    if (keys.empty() || keys.front().start > BeatPosition::fromBeats (tiny))
-        keys.insert (keys.begin(), { BeatPosition(), getDefaultKey (song) });
-
-    return keys;
+    return getKeysOf (song, getChordLaneValue (song));
 }
 
 Key getLaneKeyAt (const Song& song, BeatPosition where)
@@ -174,13 +203,16 @@ Key getLaneKeyAt (const Song& song, BeatPosition where)
 
 std::vector<PlacedChord> getLaneChords (const Song& song)
 {
-    const auto keys = getLaneKeys (song);
+    // The lane read once, for its keys and its chords.
+    const auto lane = getChordLaneValue (song);
+    const auto keys = getKeysOf (song, lane);
     std::vector<PlacedChord> chords;
+    chords.reserve (lane.chords.size());
 
-    for (const auto& state : getChildren (findLaneState (song), schema::CHORD))
+    for (const auto& entry : lane.chords)
     {
-        const auto range = getRange (state);
-        const auto numeral = readNumeral (state);
+        const BeatRange range { entry.start, entry.length };
+        const auto numeral = readNumeral (entry);
 
         if (range.isEmpty() || ! numeral.has_value())
             continue;
@@ -271,7 +303,10 @@ void putLaneChord (Song& song, BeatRange range, const Numeral& numeral)
 
 bool hasLaneChordAt (const Song& song, BeatPosition start)
 {
-    return findStartingAt (song, schema::CHORD, start).isValid();
+    // As findStartingAt() finds one.
+    const auto lane = getChordLaneValue (song);
+    return std::any_of (lane.chords.begin(), lane.chords.end(),
+                        [start] (const ChordEntry& chord) { return std::abs ((chord.start - start).inBeats()) < 1.0e-4; });
 }
 
 void setLaneChordNumeral (Song& song, BeatPosition start, const Numeral& numeral)

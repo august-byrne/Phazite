@@ -325,7 +325,7 @@ TEST_CASE ("A device removed takes its links along in its step, and Undo brings 
 
     undoCheck.check ("Remove Device", [&s] { phazite::removeDevice (s.song.context, s.synth); });
     CHECK (phazite::getMidiLinks (s.song.context).size() == 1); // the fader's stays
-    CHECK (getSong (s.song).getState().getChildWithName (phazite::schema::MIDILINKS).getNumChildren() == 1);
+    CHECK (phazite::test::copyWholeSong (getSong (s.song)).getChildWithName (phazite::schema::MIDILINKS).getNumChildren() == 1);
 
     phazite::undo (getSong (s.song));
     auto again = s.parameter ("cutoff");
@@ -416,6 +416,41 @@ TEST_CASE ("A linked controller goes to its parameter alone: not to the instrume
     CHECK (played.back().event.type == phazite::devices::NoteEvent::Type::controller);
     CHECK (played.back().event.number == 22);
     phazite::test::dispatchPendingMessages();
+}
+
+TEST_CASE ("The MIDI tap diverts the controllers of the song's links as they are: linked, undone, redone, unlinked")
+{
+    // What the session diverts it reads from the song's links (PlaybackSession.cpp: followMidiLinks(), through MidiLinks.h's
+    // getMidiLinksValue()): one that found none would let a linked controller through to the instrument.
+    SynthSong s;
+    auto& tap = getAudioIO().getMidiTap();
+    auto& song = getSong (s.song);
+    REQUIRE_FALSE (tap.isDiverted (5, 30));
+
+    {
+        const phazite::UndoStep step (song, "Link MIDI Controller");
+        phazite::linkMidiController (song, { 5, 30 }, { s.synth, "cutoff" });
+    }
+
+    phazite::test::dispatchPendingMessages();
+    CHECK (tap.isDiverted (5, 30));
+    CHECK_FALSE (tap.isDiverted (5, 31));
+
+    phazite::undo (song);
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (tap.isDiverted (5, 30));
+
+    phazite::redo (song);
+    phazite::test::dispatchPendingMessages();
+    CHECK (tap.isDiverted (5, 30));
+
+    {
+        const phazite::UndoStep step (song, "Remove MIDI Link");
+        phazite::unlinkMidiController (song, { 5, 30 });
+    }
+
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (tap.isDiverted (5, 30));
 }
 
 TEST_CASE ("Another project opened ends learning, and its own links are diverted, not the first's")

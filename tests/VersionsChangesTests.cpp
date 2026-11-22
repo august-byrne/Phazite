@@ -9,6 +9,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
@@ -197,6 +198,71 @@ TEST_CASE ("A tempo change and nothing else changes the song's own line alone, a
     phazite::setTempo (song, tempo);
     CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
     checkChangesAreWhole (s.context, "the tempo set back");
+}
+
+TEST_CASE ("A tempo change in a song with a MIDI link names the tempo alone in the song's own line")
+{
+    // What the song's own line is worked out from (ChangesWorker.cpp: makeSkeleton()) holds the song's MIDI links whole, as
+    // the song does: one that held none would name the MIDI links in the song's own line at any change of the song's own, as
+    // gone, where the whole songs compared name the tempo alone.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    auto& song = *phazite::findSong (s.context);
+
+    {
+        const phazite::UndoStep step (song, "Link MIDI Controller");
+        phazite::linkMidiController (song, { 1, 21 }, s.getVolumeParameter (bass));
+    }
+
+    REQUIRE (phazite::getMidiLinks (song).size() == 1);
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    phazite::setTempo (song, 100.0);
+    const auto lines = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
+    REQUIRE (lines.size() == 1);
+    CHECK (lines.front().isSong);
+    CHECK (lines.front().what == "tempo");
+    checkChangesAreWhole (s.context, "the tempo changed");
+}
+
+TEST_CASE ("A MIDI link added alone, or removed alone, is listed once, in the song's own line, as its MIDI links")
+{
+    // What the song's own line is worked out from (ChangesWorker.cpp: makeSkeleton()) holds the song's MIDI links: one that
+    // held none compared none with none, and a link added to a song whose kept version had none was listed nowhere.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    auto& song = *phazite::findSong (s.context);
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    {
+        const phazite::UndoStep step (song, "Link MIDI Controller");
+        phazite::linkMidiController (song, { 1, 21 }, s.getVolumeParameter (bass));
+    }
+
+    REQUIRE (phazite::getMidiLinks (song).size() == 1);
+    const auto added = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
+    REQUIRE (added.size() == 1);
+    CHECK (added.front().isSong);
+    CHECK (added.front().what == "MIDI links");
+    checkChangesAreWhole (s.context, "a MIDI link added");
+
+    // Kept, then taken away alone.
+    keepVersion (s.context, "Linked");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    {
+        const phazite::UndoStep step (song, "Unlink MIDI Controller");
+        phazite::unlinkMidiController (song, { 1, 21 });
+    }
+
+    REQUIRE (phazite::getMidiLinks (song).empty());
+    const auto removed = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
+    REQUIRE (removed.size() == 1);
+    CHECK (removed.front().isSong);
+    CHECK (removed.front().what == "MIDI links");
+    checkChangesAreWhole (s.context, "a MIDI link removed");
 }
 
 TEST_CASE ("A curve edited and nothing else changes its device's track's line alone, and the edit undone leaves no change")

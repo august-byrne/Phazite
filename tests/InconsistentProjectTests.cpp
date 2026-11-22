@@ -2173,11 +2173,11 @@ TEST_CASE ("A MIDI link to what the song hasn't, a controller's or a parameter's
             second->setAttribute ("number", "125");
         });
     REQUIRE (project != nullptr);
-    const auto links = findAll (project->getSong().getState(), schema::MIDILINK);
+    const auto links = phazite::getMidiLinksValue (project->getSong()).links;
     REQUIRE (links.size() == 1);
-    CHECK ((int) links[0][schema::midiLinkChannel] == 1);
-    CHECK ((int) links[0][schema::midiLinkNumber] == 21);
-    CHECK (links[0][schema::midiLinkParameter].toString() == "cutoff");
+    CHECK (links[0].channel == 1);
+    CHECK (links[0].number == 21);
+    CHECK (links[0].parameter == "cutoff");
 }
 
 namespace

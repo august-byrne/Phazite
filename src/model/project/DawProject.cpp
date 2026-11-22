@@ -12,6 +12,7 @@
 #include "model/base/WholeFile.h"
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/WholeState.h"
 #include "model/engine/AppInfo.h"
@@ -285,27 +286,25 @@ namespace
 
         void writeMarkers (juce::XmlElement& arrangement)
         {
-            std::vector<juce::ValueTree> sections;
-
-            for (const auto& section : song.getState().getChildWithName (schema::SECTIONS))
-                if (section.hasType (schema::SECTION))
-                    sections.push_back (section);
+            // The song's sections as their value holds them (SectionsValue.h), by their starts; a colour of their own alone.
+            const auto value = getSectionsValue (song);
+            std::vector<SectionValue> sections (value.sections.begin(), value.sections.end());
 
             if (sections.empty())
                 return;
 
-            std::sort (sections.begin(), sections.end(),
-                       [] (const auto& a, const auto& b) { return (double) a[schema::sectionStart] < (double) b[schema::sectionStart]; });
+            std::stable_sort (sections.begin(), sections.end(),
+                              [] (const SectionValue& a, const SectionValue& b) { return a.start < b.start; });
             auto* markers = arrangement.createNewChildElement ("Markers");
             markers->setAttribute ("id", "markers");
 
             for (const auto& section : sections)
             {
                 auto* marker = markers->createNewChildElement ("Marker");
-                marker->setAttribute ("time", number ((double) section[schema::sectionStart]));
-                marker->setAttribute ("name", section[schema::sectionName].toString());
+                marker->setAttribute ("time", number (section.start.inBeats()));
+                marker->setAttribute ("name", section.name);
 
-                if (const auto colour = juce::Colour::fromString (section[schema::sectionColour].toString()); ! colour.isTransparent())
+                if (const auto colour = juce::Colour::fromString (section.colour.value_or (juce::String())); ! colour.isTransparent())
                     marker->setAttribute ("color", toColourText (colour));
             }
         }
@@ -2260,8 +2259,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
         if (reading == nullptr || song == nullptr)
             return VersionHistory::Taken::refused ("Phazite couldn't read the version it came from. " + nothing);
 
-        song->getState().setProperty (schema::nextID,
-                                      (juce::int64) std::max (findNextID (song->getState()), findNextID (songNow->getState())), nullptr);
+        song->getState().setProperty (schema::nextID, (juce::int64) std::max (findNextID (*song), findNextID (*songNow)), nullptr);
         import->said = takeDawProject (*song, *in, import->audio); // unpacked already: nothing more on this thread
 
         return VersionHistory::Taken::readAgain (

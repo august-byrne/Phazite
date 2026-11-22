@@ -4,11 +4,22 @@
 #pragma once
 
 #include "model/base/Song.h"
+#include "model/base/internal/ChordLaneValue.h"
 #include "model/chords/ChordValues.h"
 
 namespace phazite
 {
 struct Progression;
+
+// The song's chord lane as a value (model/base/internal/ChordLaneValue.h): its chords and keys, each kind in the song's
+// order. The song's tree holds the lane still (roadmap step S5.20: the chord lane's switch is to come), so this reads it from
+// its CHORDLANE element at each call, by value; the switch makes it the area's value, which it then gives without a read.
+ChordLaneValue getChordLaneValue (const Song&);
+
+// Whether the song has a chord lane: one is added with its first chord or key, starting with the key new tracks get at that
+// moment (getLaneState()); until then its keys are that key (getLaneKeys()). The lane's element in the song's tree is what
+// says so, and stays there as that sign when the lane's chords and keys become the area's value.
+bool hasChordLane (const Song&);
 
 // The lane's chords, by their starts, each with the key it is in.
 std::vector<PlacedChord> getLaneChords (const Song&);

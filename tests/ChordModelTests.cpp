@@ -101,7 +101,7 @@ TEST_CASE ("The chord lane: empty, in the new project's key, until chords go on 
     // A new project's key is the lane's until a key is chosen; nothing is written by reading.
     phazite::setLastKey (song.getSong(), { 7, Scale::major });
     CHECK (phazite::getLaneKeyAt (song.context, beat (10.0)) == Key { 7, Scale::major });
-    CHECK_FALSE (song.getSong().getState().getChildWithName (phazite::schema::CHORDLANE).isValid());
+    CHECK_FALSE (phazite::hasChordLane (song.getSong()));
 }
 
 TEST_CASE ("The chord lane: a progression laid over a range, repeated or cut to fit it, as one undo step")
@@ -332,8 +332,8 @@ TEST_CASE ("The chord lane is saved, and read back the same")
     const auto namesBefore = song.names();
     const auto placesBefore = song.places();
 
-    // As saved: the chords' numerals by name, and the key by name.
-    const auto lane = song.getSong().getState().getChildWithName (phazite::schema::CHORDLANE);
+    // As saved (the song whole, as its file holds it): the chords' numerals by name, and the key by name.
+    const auto lane = phazite::test::copyWholeSong (song.getSong()).getChildWithName (phazite::schema::CHORDLANE);
     REQUIRE (lane.isValid());
     const auto key = lane.getChildWithName (phazite::schema::CHORDKEY);
     CHECK (key[phazite::schema::keyScale].toString() == juce::String ("minor"));

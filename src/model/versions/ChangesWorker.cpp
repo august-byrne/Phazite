@@ -49,18 +49,18 @@ namespace
         return copy;
     }
 
-    // The song's own parts (its properties, tempo map, sections and chord lane) and its tracks' order and names: each track
-    // with its ID, kind and name in its folder, and the master's ID. What the song's own line and the lines' names and order
-    // are worked out from, without copying any track's parts. Each of the song's own parts whole (WholeState.h), as the song
-    // holds it, beside its tree too (roadmap step S5.20: the tempo map is a value beside it, its TEMPOMAP an empty place that
-    // copyWhole() fills).
+    // The song's own parts (its properties, tempo map, sections, chord lane and MIDI links: all that the song's own line
+    // compares, SongDiff.h: findSongChange()) and its tracks' order and names: each track with its ID, kind and name in its
+    // folder, and the master's ID. What the song's own line and the lines' names and order are worked out from, without
+    // copying any track's parts. Each of the song's own parts whole (WholeState.h), as the song holds it, beside its tree too
+    // (roadmap step S5.20: the tempo map is a value beside it, its TEMPOMAP an empty place that copyWhole() fills).
     juce::ValueTree makeSkeleton (const Song& whole)
     {
         const auto song = whole.getState();
         juce::ValueTree own (song.getType());
         own.copyPropertiesFrom (song, nullptr);
 
-        for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE })
+        for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::MIDILINKS })
             if (const auto part = song.getChildWithName (*type); part.isValid())
                 own.appendChild (copyWhole (whole, part), nullptr);
 
