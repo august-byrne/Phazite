@@ -9,6 +9,7 @@
 #include "model/base/BackgroundJobs.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongValues.h"
 #include "model/engine/AudioFiles.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -18,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace phazite
@@ -86,6 +88,7 @@ void purgeClipRenders (const Song&);
 // checkFailedAgain()), or the clip needs another render (other settings, or another cache folder) or needs it again after
 // no clip did: its clips stay silent and say so (hasFailed(), getFailedClips()).
 class ClipRenders : private juce::ValueTree::Listener,
+                    private SongValues::ClipsListener,
                     private FileIdentityListener,
                     private juce::Timer,
                     private juce::AsyncUpdater
@@ -157,6 +160,7 @@ private:
 
     std::map<juce::File, Failure> failed;
     std::vector<ClipID> failedClips;
+    std::set<ClipID> failedTakenOut; // listed as failed, taken out since the list was found: listed again as they come back
     int rendersStarted = 0;
 
     // A job that ended, by the jobs, for the message thread to have played: whether it failed (not stopped, and no render),
@@ -176,7 +180,7 @@ private:
 
     void update();
     void findFailedClips();
-    void clipsChanged();
+    void rendersMayChange();     // the clips, or what they play, changed: update() in a while
     void jobFinished (Finished); // on its thread
 
     void timerCallback() override;
@@ -186,6 +190,7 @@ private:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
+    void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override; // SongValues.h
 
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };

@@ -2,6 +2,7 @@
 #include "UndoCheck.h"
 #include "GoldenFiles.h"
 #include "PlanCheck.h"
+#include "UiTestHelpers.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
@@ -339,7 +340,11 @@ void UndoCheck::stepBackOrForth (const juce::String& what, const std::function<v
 
 void UndoCheck::walkBackAndForth()
 {
+    // The whole song as the walk begins, once the message loop has turned after the last step: what follows a step there (a
+    // frozen track whose clip it changed plays live again: model/mixer/internal/Freeze.h) has followed it, as the walk's end
+    // below waits for too.
     catchUp();
+    dispatchPendingMessages();
     const auto whole = writeSong (song, SongPart::whole);
     const auto end = getDepth() - base;
 
@@ -380,6 +385,10 @@ void UndoCheck::walkBackAndForth()
         compareStep (step, "Redo");
     }
 
+    // The whole song, what is no undo step with it, once the message loop has turned: what follows a step's undo and redo
+    // there (a frozen track whose clips the walk changed plays live again at the next turn: model/mixer/internal/Freeze.h)
+    // has followed it, as it does in the app.
+    dispatchPendingMessages();
     compare ("The walk", "back to where the check began and forth again, the whole song isn't as it was", whole,
              writeSong (song, SongPart::whole));
 }

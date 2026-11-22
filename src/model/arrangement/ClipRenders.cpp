@@ -227,12 +227,19 @@ ClipRenders::ClipRenders (const Song& s)
       jobs ("Phazite clip renders", 2, juce::Thread::Priority::low)
 {
     state.addListener (this);
+
+    if (const auto* values = song.getValues())
+        values->addClipsListener (this);
+
     addFileIdentityListener (*this);
     update();
 }
 
 ClipRenders::~ClipRenders()
 {
+    if (const auto* values = song.getValues())
+        values->removeClipsListener (this);
+
     state.removeListener (this);
     removeFileIdentityListener (*this);
     stopTimer();
@@ -342,6 +349,7 @@ void ClipRenders::findFailedClips()
                 clips.push_back (clip);
 
     failedClips = std::move (clips);
+    failedTakenOut.clear();
 }
 
 void ClipRenders::checkFailedAgain()
@@ -457,35 +465,61 @@ void ClipRenders::handleAsyncUpdate()
 
 void ClipRenders::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
 {
-    // A clip's sound, or the tempo it follows.
-    if (tree.hasType (schema::CLIP) || tree.hasType (schema::TEMPO))
-        clipsChanged();
+    // The tempo the clips follow; a clip not on a track's element (a file that put one elsewhere). A clip's sound on a track:
+    // clipsChanged().
+    if (tree.hasType (schema::TEMPO) || (tree.hasType (schema::CLIP) && ! isHeardAsClips (tree)))
+        rendersMayChange();
 }
 
-void ClipRenders::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&)
+void ClipRenders::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
-    clipsChanged(); // a clip, or a track with clips, back from undo, say
+    if (! isHeardAsClips (parent, child))
+        rendersMayChange(); // a track with clips, back from undo, say (a clip: clipsChanged())
 }
 
-void ClipRenders::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
+void ClipRenders::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
 {
-    // A tempo change taken away, or a clip's last warp marker: the clips under it play at another speed now, from a render
-    // of their own.
-    clipsChanged();
+    // A tempo change taken away: the clips under it play at another speed now, from a render of their own. (A clip's last
+    // warp marker: clipsChanged().)
+    if (! isHeardAsClips (parent, child))
+        rendersMayChange();
+}
+
+void ClipRenders::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>&)
+{
+    // A clip's sound, or a clip added or taken out: the renders found again in a while. The clips listed as failed follow at
+    // once by their IDs alone (nothing of the song is read as the clips' listener is told: SongValues.h): one taken out leaves
+    // the list, and comes back to it as it comes back (an undo, or a move to another track); the list is found again whole as
+    // the renders are (update()).
+    for (const auto& change : clips)
+    {
+        if (! change.after.isValid())
+        {
+            if (const auto found = std::find (failedClips.begin(), failedClips.end(), change.id); found != failedClips.end())
+            {
+                failedClips.erase (found);
+                failedTakenOut.insert (change.id);
+            }
+        }
+        else if (! change.before.isValid() && failedTakenOut.erase (change.id) > 0)
+        {
+            failedClips.push_back (change.id);
+        }
+    }
+
+    rendersMayChange();
 }
 
 void ClipRenders::fileIdentityChanged (const juce::File&)
 {
     // Whichever file it is: the renders the clips need are found again as they would be after a change of the clips.
-    clipsChanged();
+    rendersMayChange();
 }
 
-void ClipRenders::clipsChanged()
+void ClipRenders::rendersMayChange()
 {
+    // The clips whose renders failed found again then too (update()), not at each change: a drag of a clip changes it at
+    // every step, and the song isn't read as the clips' listener is told.
     startTimer (quietMilliseconds);
-
-    // The clips whose renders failed at once, while there are any: not one deleted, or one that needs another render now.
-    if (! failed.empty() || ! failedClips.empty())
-        findFailedClips();
 }
 } // namespace phazite

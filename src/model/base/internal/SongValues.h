@@ -363,7 +363,11 @@ bool hasGroupsOfOne (const SongClips&);
 // element comes back; one that comes without them, and isn't remembered, keeps the value a copy gave it, or an empty one;
 // a clip that joins an alias group (its clipLink set) takes the group's value. Each in the mode of the moment: in the
 // history's step in progress, or outside the history while the song is written outside it (Song::OutsideHistory). Nothing
-// while the history undoes or redoes a step: the area's own action moves it. What the keeper can't see: a clip added or
+// while the history undoes or redoes a step: the area's own action moves it. The keeper is also what tells the clips'
+// listeners (ClipsListener) what the tree says of the clips, a step's, an undo's and a redo's alike: it hears the tree after
+// the song's index (which listens to the track list, below the root), and in no set order among the song's other listeners
+// of the root (JUCE tells those of one element in the order of their handles' addresses), which needs none: the clips'
+// listeners only mark what they are told, and the tree's own listeners hear nothing of a clip. What the keeper can't see: a clip added or
 // taken out with no undo manager outside an OutsideHistory scope is written into the step in progress (if any) as if it had
 // one; nothing in Phazite does that to a song that holds its values (the loader does it before: makeSong()).
 class SongValues final
@@ -400,6 +404,35 @@ public:
     void addNotesListener (NotesListener*);
     void removeNotesListener (NotesListener*);
 
+    // A clip that changed, with the track it was on before and the one it is on after: none before for a clip added, none
+    // after for one taken out (erased), the same track twice for a change in place.
+    struct ClipChange
+    {
+        ClipID id;
+        TrackID before, after;
+    };
+
+    // What hears the song's clips change, from one place, by their IDs: a clip added, taken out, moved to another track or
+    // changed in place (any of its properties, its warp markers), and the tracks whose order of clips changed; a track added
+    // or taken out tells each of its clips (those of the tracks in it too) as added or taken out, in one call. A step, an undo,
+    // a redo and a write outside the history alike. A clip's notes and controllers' values are no part of it: NotesListener's.
+    // While the song's tree holds its clips, the keeper tells these from the tree's notifications as they come, in the order
+    // they come (a clip moved to another track is taken out of one and added to the other: two calls), and what listens to the
+    // song's root hears nothing of a clip from the tree (isHeardAsClips(), below), so that nothing hears a change twice. Once
+    // the clips are an area of their own (roadmap step S5.20) the area tells them, as one call for each change of its value.
+    // A listener only marks what changed (the clips, the tracks), and reads nothing of the song while it is told: during an
+    // undo the rest of the step may not be back yet (ValueArea.h). It does its work later (a plan's next compile, the next turn
+    // of the message loop), however many calls came before. Listening changes nothing of the values: a song held const may
+    // be listened to.
+    struct ClipsListener
+    {
+        virtual ~ClipsListener() = default;
+        virtual void clipsChanged (const std::vector<ClipChange>& clips, const std::vector<TrackID>& reordered) = 0;
+    };
+
+    void addClipsListener (ClipsListener*) const;
+    void removeClipsListener (ClipsListener*) const;
+
     // Whether the keeper remembers a clip's element with its value, taken out of the song (above): for the keeper's tests,
     // which check that it lets go of what nothing can bring back (tests/SongValuesTests.cpp). Not for the check of the song's
     // values (tests/SongCheck.h): a clip taken out leaves the area at once, a step still open or not, so no entry of the area
@@ -412,6 +445,7 @@ private:
     struct Teller;
     struct Keeper;
     std::unique_ptr<Teller> teller;
+    mutable juce::ListenerList<ClipsListener> clipsListeners; // told by the keeper (addClipsListener())
     std::unique_ptr<Keeper> keeper;
 
     void setAll (Song&, NotesByClip next); // in the history, or outside it, as the song is written now
@@ -420,6 +454,16 @@ private:
     JUCE_DECLARE_NON_COPYABLE (SongValues)
     JUCE_DECLARE_NON_MOVEABLE (SongValues)
 };
+
+// Whether what the song's tree tells of an element (a property changed, a child added, taken out or moved in it) is the
+// clips', which a listener of the song's root hears from the clips' listener alone (SongValues::ClipsListener) and leaves
+// alone in its tree callbacks: a clip on a track, or an element in one (its warp markers; and its NOTE and CONTROL elements,
+// which a song that holds its values holds only while the keeper takes them in, the notes' listener's). And whether a child
+// added to an element, taken out of it or moved in it is: a clip on its track, or a child of an element that is. A clip
+// elsewhere (a file that put one elsewhere, which the loader takes out: model/project/internal/Project.h, makeConsistent())
+// is no clip of a track's, which the clips' listener isn't told of: the tree's listeners hear it as they always did.
+bool isHeardAsClips (const juce::ValueTree& element);
+bool isHeardAsClips (const juce::ValueTree& parent, const juce::ValueTree& child);
 
 //==============================================================================
 // The conversion between a clip's element and its value: the one place that reads and writes NOTE and CONTROL by name.

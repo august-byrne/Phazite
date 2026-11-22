@@ -35,6 +35,7 @@ class Take;
 class PlaybackSession : private juce::ValueTree::Listener,
                         private Song::ParameterListener,
                         private SongValues::NotesListener,
+                        private SongValues::ClipsListener,
                         private PluginInstances::Listener,
                         private juce::AsyncUpdater,
                         private juce::Timer // which stops playback at the song's end
@@ -207,11 +208,18 @@ private:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent, {}); }
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex) override
+    {
+        if (! isHeardAsClips (parent, parent.getChild (newIndex))) // a track's clips reordered: clipsChanged()
+            changed (parent, {});
+    }
+
     void handleAsyncUpdate() override { update(); }
 
-    // A clip's notes changed (SongValues.h): a new plan, as a change in its element made one. What plays it hears it itself.
+    // A clip's notes changed, or clips (SongValues.h): a new plan, as a change in the song's tree makes one. What plays it
+    // hears which itself.
     void clipNotesChanged (const std::vector<ClipID>&) override { triggerAsyncUpdate(); }
+    void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override { triggerAsyncUpdate(); }
 
     // A value set by hand (a plug-in's, by a control or in its window, plays at once), and one a program the song set set (a
     // plug-in's, which plays at once too); a plug-in's own window's gestures; and its latency, which needs a new plan.

@@ -1139,6 +1139,73 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     CHECK (project->hasUnsavedChanges());
 }
 
+TEST_CASE ("A clip changed, added, moved to another track or deleted through the model is an unsaved change, which its Undo "
+           "takes back")
+{
+    // The clips are heard from the song's values (SongValues.h: ClipsListener), compared with the saved copy clip by clip and
+    // by each track's clips, as the whole song's comparison says. A project found unsaved stays so until it is saved: so each
+    // change is undone before anything asks (as saved), then redone (unsaved), undone and saved again.
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Clips");
+    auto& song = project->getSong();
+    const auto tracks = phazite::ensureTracks (song, 2);
+    const auto clip = phazite::insertMidiClip (song, tracks[0], { beats (0.0), beats (4.0) }, nullptr);
+    REQUIRE (clip.isValid());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    const auto check = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        INFO (name.toStdString());
+
+        {
+            const phazite::UndoStep step (song, name);
+            change();
+        }
+
+        CHECK_FALSE (project->isWholeAsSaved());
+        phazite::undo (song);
+        CHECK (project->isWholeAsSaved());
+        CHECK_FALSE (project->hasUnsavedChanges());
+        phazite::redo (song);
+        CHECK (project->hasUnsavedChanges());
+        phazite::undo (song);
+        REQUIRE (project->save().wasOk());
+        REQUIRE_FALSE (project->hasUnsavedChanges());
+    };
+
+    check ("Mute Clip", [&] { phazite::toggleClipsMuted (song, { clip }); });
+    check ("Move Clip", [&] { phazite::moveClip (song, clip, beats (8.0), tracks[0]); });
+    check ("Move Clip", [&] { phazite::moveClip (song, clip, beats (0.0), tracks[1]); });
+    check ("Add Clip", [&] { REQUIRE (phazite::insertMidiClip (song, tracks[1], { beats (0.0), beats (4.0) }, nullptr).isValid()); });
+    check ("Delete Clip", [&] { phazite::deleteClips (song, { clip }, false); });
+
+    // Changed and changed back before anything asked: as saved.
+    phazite::toggleClipsMuted (song, { clip });
+    phazite::toggleClipsMuted (song, { clip });
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    // More clips changed than are compared one by one (their tracks compared whole then): changed back, as saved; all but
+    // one changed back, unsaved.
+    std::vector<phazite::ClipID> many;
+
+    for (size_t i = 0; i <= phazite::Project::mostToCompare; ++i)
+        many.push_back (phazite::insertMidiClip (song, tracks[1], { beats (8.0 + 4.0 * (double) i), beats (4.0) }, nullptr));
+
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (project->save().wasOk());
+    phazite::toggleClipsMuted (song, many);
+    phazite::toggleClipsMuted (song, many);
+    CHECK (project->isWholeAsSaved());
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    phazite::toggleClipsMuted (song, many);
+    phazite::toggleClipsMuted (song, std::vector<phazite::ClipID> (many.begin() + 1, many.end()));
+    CHECK_FALSE (project->isWholeAsSaved());
+    CHECK (project->hasUnsavedChanges());
+}
+
 TEST_CASE ("The check for unsaved changes says what the whole song's comparison says: notes swapped, a delete undone, a clip "
            "and a track moved and back, with few notifications or many")
 {
@@ -1147,11 +1214,21 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Partial");
     auto& song = project->getSong();
-    const auto tracks = phazite::ensureTracks (song, 3);
+    const auto tracks = phazite::ensureTracks (song, 4);
     const auto clip = phazite::insertMidiClip (song, tracks[0], { beats (0.0), beats (4.0) }, nullptr);
     const auto other = phazite::insertMidiClip (song, tracks[2], { beats (0.0), beats (4.0) }, nullptr);
     REQUIRE (clip.isValid());
     REQUIRE (other.isValid());
+
+    // A track whose clip comes before two sends, which the mixer puts after it: -6 dB, then 0 dB.
+    const auto sent = phazite::insertMidiClip (song, tracks[3], { beats (0.0), beats (4.0) }, nullptr);
+    const auto firstSend = phazite::addSend (song, tracks[3], phazite::addReturnTrack (song, "A", nullptr), false);
+    const auto secondSend = phazite::addSend (song, tracks[3], phazite::addReturnTrack (song, "B", nullptr), false);
+    REQUIRE (sent.isValid());
+    REQUIRE (firstSend.isValid());
+    REQUIRE (secondSend.isValid());
+    phazite::setSendLevel (song, firstSend, -6.0f);
+    phazite::setSendLevel (song, secondSend, 0.0f);
     REQUIRE (phazite::addNote (song, clip, 60, beats (0.0), phazite::BeatDuration::fromBeats (1.0), 10).isValid());
     REQUIRE (phazite::addNote (song, clip, 64, beats (1.0), phazite::BeatDuration::fromBeats (1.0), 20).isValid());
 
@@ -1280,6 +1357,22 @@ TEST_CASE ("The check for unsaved changes says what the whole song's comparison 
         notifyElsewhere (many);
         phazite::moveClip (song, clip, beats (0.0), tracks[0]);
         answer();
+
+        // A clip moved to another track and back, which puts it after the sends of its track, the second send then set to
+        // what the first is: at the second's place in the saved copy is the first, the same, but the track holds its clip
+        // and its sends in another order. Undone, so that the next round starts with the clip before them.
+        startSaved();
+
+        {
+            const phazite::UndoStep step (song, "Move and Change");
+            phazite::moveClip (song, sent, beats (0.0), tracks[1]);
+            notifyElsewhere (many);
+            phazite::moveClip (song, sent, beats (0.0), tracks[3]);
+            phazite::setSendLevel (song, secondSend, -6.0f);
+        }
+
+        CHECK (answer());
+        phazite::undo (song);
 
         // A track moved and moved back, a value in it changed meanwhile.
         startSaved();

@@ -74,7 +74,10 @@ PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
     song->addParameterListener (this);
 
     if (auto* values = song->getValues())
+    {
         values->addNotesListener (this);
+        values->addClipsListener (this);
+    }
 
     songState.addListener (this);
     getSessions().push_back (this);
@@ -99,7 +102,10 @@ PlaybackSession::~PlaybackSession()
     song->removeParameterListener (this);
 
     if (auto* values = song->getValues())
+    {
         values->removeNotesListener (this);
+        values->removeClipsListener (this);
+    }
 
     plugins.setListener (nullptr);
     recorder = nullptr; // what it opened for the tracks closes
@@ -123,6 +129,10 @@ AudioIO& PlaybackSession::getAudioIO() const noexcept
 
 void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
+    // A clip added, taken out or moved on its track, or something in a clip: clipsChanged().
+    if (isHeardAsClips (parent, child))
+        return;
+
     // The MIDI links, which no plan holds: what the MIDI tap takes.
     if (isInMidiLinks (parent) || child.hasType (schema::MIDILINKS))
     {
@@ -138,6 +148,9 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    if (isHeardAsClips (tree))
+        return; // clipsChanged()
+
     if (isInMidiLinks (tree))
     {
         midiLinksChanged = true;
@@ -579,6 +592,9 @@ void PlaybackSession::stopGuideNotes (std::int64_t track)
 
 void PlaybackSession::update()
 {
+    // What waits to be written into the song first (a frozen track whose clip changed played live again: Song::writePending()),
+    // so that the plan follows it, and the update it asks for is this one.
+    song->writePending();
     cancelPendingUpdate();
     auto& engine = host.getEngine();
     songEnd = getSongLoopBeats (*song).getEnd();

@@ -1548,6 +1548,59 @@ TEST_CASE ("Performance gate: the check for unsaved changes compares no element 
     CHECK (noteAdded * 8 < wholeSong);
 }
 
+TEST_CASE ("Performance gate: the check for unsaved changes after a clip's property was set finds the clip's saved copy without a "
+           "look at its track's other clips, and compares that clip alone")
+{
+    // The clips are heard from the song's values (model/base/internal/SongValues.h: ClipsListener), each compared with its
+    // saved copy. Finding that copy scanned the saved track's children for each clip at each check (2026-11-21: 257 elements
+    // looked at for a clip of the track of 256 clips here, at every edit); the saved copy's clips are found by their IDs now,
+    // once for each saved copy.
+    phazite::test::TestSong s;
+    auto& song = getSong (s);
+    auto& project = s.getProject();
+    const auto few = s.firstTrack;
+    const auto many = s.addTrack ("Many");
+    const auto inFew = s.addMidiClip (few, 0.0, 4.0);
+    s.addMidiClip (few, 4.0, 4.0);
+    phazite::ClipID inMany;
+
+    for (int i = 0; i < 256; ++i)
+        if (const auto clip = s.addMidiClip (many, i * 4.0, 4.0); i == 128)
+            inMany = clip;
+
+    REQUIRE (inMany.isValid());
+    REQUIRE (project.save().wasOk());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (project.hasUnsavedChanges());
+
+    // A clip muted and played again before anything asks: the check compares it with its saved copy, and finds it the same.
+    struct Looked
+    {
+        juce::int64 searched = 0, compared = 0;
+    };
+
+    const auto check = [&song, &project] (phazite::ClipID clip)
+    {
+        phazite::toggleClipsMuted (song, { clip });
+        phazite::toggleClipsMuted (song, { clip });
+        const auto searched = phazite::Project::countSavedElementsSearched();
+        const auto compared = phazite::Project::countElementsCompared();
+        CHECK_FALSE (project.hasUnsavedChanges());
+        return Looked { phazite::Project::countSavedElementsSearched() - searched, phazite::Project::countElementsCompared() - compared };
+    };
+
+    check (inFew); // the saved copy's clips found, once
+
+    const auto inTheFew = check (inFew);
+    const auto inTheMany = check (inMany);
+    INFO ("Saved elements looked at for a clip of 2: " << inTheFew.searched << ", of 256: " << inTheMany.searched
+                                                       << "; elements compared: " << inTheFew.compared << " and " << inTheMany.compared);
+    CHECK (inTheMany.searched == 1);
+    CHECK (inTheFew.searched == 1);
+    CHECK (inTheMany.compared == inTheFew.compared);
+    CHECK (inTheMany.compared >= 1);
+}
+
 TEST_CASE ("Performance gate: the loader's checks of a song read from its text make no allocation for each note")
 {
     // makeConsistent() goes through every element and number of a song as it opens (a project, a version's pieces joined):

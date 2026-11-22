@@ -41,6 +41,7 @@
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
@@ -785,7 +786,11 @@ TEST_SUITE ("golden")
                      s.selection.selectOnly (clips.front().id);
                  });
 
-        s.run ({ "edit.deleteAndCloseGap" });
+        // Two, frozen by its bounce, plays live again as its clip goes, at the next turn of the message loop (the clips are
+        // heard from the song's values: model/mixer/internal/Freeze.h).
+        REQUIRE (phazite::isFrozen (s.context, two));
+        s.record ("edit.deleteAndCloseGap", [&s, two]
+                  { REQUIRE (phazite::test::dispatchMessagesUntil ([&s, two] { return ! phazite::isFrozen (s.context, two); })); });
 
         // A time range on One, which ends inside a clip, so that Split cuts it there: time inserted and removed, the range
         // looped and split, duplicated (the copy replaces the part Split cut off, and becomes the range) and deleted (the

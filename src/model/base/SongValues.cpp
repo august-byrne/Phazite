@@ -131,6 +131,28 @@ namespace
                 collectClips (child, clips);
     }
 
+    // The clip an element is, or is in (only tracks hold clips, so nothing above a track is looked at): invalid for one in
+    // none. One in a clip's NOTE or CONTROL counts as in the clip only with events (the notes' business, else).
+    juce::ValueTree findClipOf (juce::ValueTree element, bool events)
+    {
+        for (; element.isValid(); element = element.getParent())
+        {
+            if (element.hasType (schema::CLIP))
+                return element;
+
+            if ((! events && isEventElement (element)) || element.hasType (schema::TRACK) || element.hasType (schema::TRACKS)
+                || element.hasType (schema::PHAZITE))
+                return {};
+        }
+
+        return {};
+    }
+
+    TrackID getTrackIDOf (const juce::ValueTree& track)
+    {
+        return track.hasType (schema::TRACK) ? TrackID::fromRaw ((std::uint64_t) (juce::int64) track[schema::trackID]) : TrackID();
+    }
+
     // Two entries of the area alike without a look inside: one clip's, the same value (ValueArea.h).
     struct SameEntry
     {
@@ -257,15 +279,92 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
                 next.clips = next.clips.set (getClipIDOf (member), value);
     }
 
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
+    //==============================================================================
+    // What the clips' listeners are told (ClipsListener), from what the tree tells, whatever the history does (an undo's and a
+    // redo's too): a property of a clip, or of an element in it (a warp marker), and a child added to one, taken out of it or
+    // moved in it: the clip, changed in place on its track; a clip added to a track or taken off it; a track's clips in another
+    // order; a track added or taken out (alone, in a folder, the track list): each of its clips, in one call. Not a clip's NOTE
+    // and CONTROL elements: the notes' listener's. The tree is read here, as the clips' storage it still is: its listeners read
+    // nothing of the song as they are told.
+    bool isTelling() const { return ! values.clipsListeners.isEmpty(); }
+
+    void tell (const std::vector<ClipChange>& clips, const std::vector<TrackID>& reordered) const
     {
-        if (isUndoingOrRedoing())
+        if (! clips.empty() || ! reordered.empty())
+            values.clipsListeners.call ([&clips, &reordered] (ClipsListener& listener) { listener.clipsChanged (clips, reordered); });
+    }
+
+    // A change in an element: the clip it is in, if any, changed in place on its track.
+    void tellChangedIn (const juce::ValueTree& element) const
+    {
+        if (const auto clip = findClipOf (element, false); clip.isValid())
+            if (const auto track = getTrackIDOf (clip.getParent()); track.isValid())
+                tell ({ { ClipID::fromRaw (getClipIDOf (clip)), track, track } }, {});
+    }
+
+    // A child added to an element, or taken out of it, with the clips it holds (collectClips()).
+    void tellChild (const juce::ValueTree& parent, const juce::ValueTree& child, const std::vector<juce::ValueTree>& clips,
+                    bool added) const
+    {
+        const auto change = [added] (const juce::ValueTree& clip, TrackID track)
+        { return ClipChange { ClipID::fromRaw (getClipIDOf (clip)), added ? TrackID() : track, added ? track : TrackID() }; };
+
+        if (child.hasType (schema::CLIP))
+        {
+            if (const auto track = getTrackIDOf (parent); track.isValid())
+                tell ({ change (child, track) }, {});
+
+            return;
+        }
+
+        if (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS))
+        {
+            std::vector<ClipChange> changes;
+            changes.reserve (clips.size());
+
+            for (const auto& clip : clips)
+                if (const auto track = getTrackIDOf (clip.getParent()); track.isValid())
+                    changes.push_back (change (clip, track));
+
+            tell (changes, {});
+            return;
+        }
+
+        if (! isEventElement (child))
+            tellChangedIn (parent);
+    }
+
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex) override
+    {
+        if (! isTelling())
+            return;
+
+        if (const auto moved = parent.getChild (newIndex); moved.hasType (schema::CLIP))
+        {
+            if (const auto track = getTrackIDOf (parent); track.isValid())
+                tell ({}, { track });
+        }
+        else if (! isEventElement (moved))
+        {
+            tellChangedIn (parent);
+        }
+    }
+
+    //==============================================================================
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
+    {
+        const auto undoing = isUndoingOrRedoing();
+
+        if (undoing && ! isTelling())
             return;
 
         std::vector<juce::ValueTree> clips;
         collectClips (child, clips);
 
-        if (clips.empty())
+        if (isTelling())
+            tellChild (parent, child, clips, true);
+
+        if (undoing || clips.empty())
             return;
 
         auto next = values.notes.get();
@@ -308,15 +407,20 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
         sweep();
     }
 
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int) override
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        if (isUndoingOrRedoing())
+        const auto undoing = isUndoingOrRedoing();
+
+        if (undoing && ! isTelling())
             return;
 
         std::vector<juce::ValueTree> clips;
         collectClips (child, clips);
 
-        if (clips.empty())
+        if (isTelling())
+            tellChild (parent, child, clips, false);
+
+        if (undoing || clips.empty())
             return;
 
         auto next = values.notes.get();
@@ -342,6 +446,9 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
 
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
     {
+        if (isTelling())
+            tellChangedIn (tree);
+
         // Nothing in Phazite gives a clip of the song another ID (a clip is given its ID before it joins the song), which would
         // leave its value under its old one: the check of the song's values finds that (tests/SongCheck.h).
         if (! tree.hasType (schema::CLIP) || isUndoingOrRedoing())
@@ -458,6 +565,29 @@ void SongValues::removeNotesListener (NotesListener* listener)
 {
     JUCE_ASSERT_MESSAGE_THREAD
     teller->listeners.remove (listener);
+}
+
+void SongValues::addClipsListener (ClipsListener* listener) const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    clipsListeners.add (listener);
+}
+
+void SongValues::removeClipsListener (ClipsListener* listener) const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    clipsListeners.remove (listener);
+}
+
+bool isHeardAsClips (const juce::ValueTree& element)
+{
+    const auto clip = findClipOf (element, true);
+    return clip.isValid() && clip.getParent().hasType (schema::TRACK);
+}
+
+bool isHeardAsClips (const juce::ValueTree& parent, const juce::ValueTree& child)
+{
+    return (child.hasType (schema::CLIP) && parent.hasType (schema::TRACK)) || isHeardAsClips (parent);
 }
 
 bool SongValues::remembers (const juce::ValueTree& clip) const

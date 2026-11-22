@@ -137,7 +137,23 @@ public:
     // track's ID, its folder's tracks' too), or every device for 0. What plays the song sets it
     // (model/plugins/internal/PluginInstances.h).
     void setDeviceStateStore (std::function<void (std::uint64_t trackID)> store);
-    void storeDeviceStates (std::uint64_t trackID = 0); // nothing without one
+    void storeDeviceStates (std::uint64_t trackID = 0); // what waits to be written first (writePending()); the states, if a store
+
+    // What writes into the song a while after the changes that ask for it, at the next turn of the message loop (a frozen
+    // track whose clips changed plays live again: model/mixer/internal/Freeze.h, FreezeKeeper), and writes it at once when
+    // asked: before the song is stored (storeDeviceStates(), which every save, autosave and version kept asks first) and
+    // before what plays it compiles a plan of it (model/playback/internal/PlaybackSession.h), so that neither takes the song
+    // as it was before what is pending. A writer writes nothing while the song's history undoes or redoes a step: it waits for
+    // its own turn then. Message thread.
+    struct PendingWriter
+    {
+        virtual ~PendingWriter() = default;
+        virtual void writePending() = 0;
+    };
+
+    void addPendingWriter (PendingWriter*);
+    void removePendingWriter (PendingWriter*);
+    void writePending(); // each writer's
 
     // Whether it shows another song for a while, in place, which goes again as it was (a version opened live:
     // model/versions/VersionsModel.h, openVersion(); the trial that shows it holds the undo history meanwhile:
@@ -177,6 +193,7 @@ private:
     int changesOutsideHistory = 0;
     std::map<std::uint64_t, int> deviceChangesOutsideHistory, deviceChangesHeld;
     juce::ListenerList<ParameterListener> parameterListeners;
+    juce::ListenerList<PendingWriter> pendingWriters;
     std::function<void (std::uint64_t)> deviceStateStore;
     std::function<void (bool)> showingHeard;
     bool showingOther = false;

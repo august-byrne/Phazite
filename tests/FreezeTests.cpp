@@ -3,6 +3,7 @@
 // background up to the fader (stopping before a sidechained device), played from a file in the project's Cache folder,
 // kept frozen while only its mixer changes and unfrozen when what it froze changes, opened frozen, and cancelled without
 // a trace; and a bounce onto a new audio track under the original, as one undo step.
+#include "PerformanceCounts.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -220,14 +221,14 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::isFrozen (song.context, song.bass));
 
-    // Its clip: unfrozen, in the clip's own undo step.
+    // Its clip: unfrozen at the next turn of the message loop, in the clip's own undo step (the unfreezing is none).
     {
         const phazite::UndoStep step (model, "Move Clip");
         const auto halfASecond = phazite::BeatPosition::fromBeats (1.0); // at 120 BPM
         phazite::trimClipStart (model, song.clip, halfASecond);
     }
 
-    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK (phazite::test::dispatchMessagesUntil ([&song] { return ! phazite::isFrozen (song.context, song.bass); }));
     CHECK_FALSE (phazite::isFrozenDevice (model, song.stereo));
     CHECK (phazite::describeUndo (&model) == juce::String ("Undo Move Clip"));
 
@@ -250,7 +251,112 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
 
     song.freeze();
     phazite::undo (model);
+    CHECK (phazite::test::dispatchMessagesUntil ([&song] { return ! phazite::isFrozen (song.context, song.bass); }));
+}
+
+TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when its clip moves, a clip is added to it or an undo "
+           "puts one back, and stays frozen through an undo and a redo of something else")
+{
+    // The clips are heard from the song's values (SongValues.h: ClipsListener), compared once the step is whole: during an
+    // undo, the rest of the step may not be back yet.
+    Song song;
+    auto& model = song.getSong();
+    const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
+    const auto unfreezes = [&isFrozen]
+    {
+        CHECK (isFrozen()); // not within the edit
+        CHECK (phazite::test::dispatchMessagesUntil ([&isFrozen] { return ! isFrozen(); }));
+    };
+
+    // An undo and a redo of something else: still frozen.
+    TrackID other;
+
+    {
+        const phazite::UndoStep step (model, "Add Track");
+        other = phazite::insertTrack (model, song.bass, nullptr);
+    }
+
+    REQUIRE (other.isValid());
+    song.freeze();
+
+    {
+        const phazite::UndoStep step (model, "Add Clip");
+        REQUIRE (phazite::test::addMidiClip (model, other, { phazite::test::at (0.0), phazite::test::at (4.0) }).isValid());
+    }
+
+    phazite::undo (model);
+    phazite::test::dispatchPendingMessages();
+    phazite::redo (model);
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+
+    // Its clip moved.
+    {
+        const phazite::UndoStep step (model, "Move Clip");
+        phazite::moveClip (model, song.clip, phazite::test::at (2.0), song.bass);
+    }
+
+    unfreezes();
+
+    // A clip added to it.
+    phazite::undo (model);
+    phazite::test::dispatchPendingMessages();
+    song.freeze();
+    const auto sound = phazite::test::writeSound (song.temp.folder.getChildFile ("Second.wav"), 0.5);
+
+    {
+        const phazite::UndoStep step (model, "Add Clip");
+        REQUIRE (phazite::test::addAudioClip (model, song.bass, "Second", sound, 4.0, 0.5).isValid());
+    }
+
+    unfreezes();
+
+    // A clip put back by an undo: its delete made before the freeze (the clip added above kept, so that there is something
+    // to freeze).
+    {
+        const phazite::UndoStep step (model, "Delete Clip");
+        phazite::deleteClips (model, { song.clip }, false);
+    }
+
+    phazite::test::dispatchPendingMessages();
+    song.freeze();
+    phazite::undo (model);
+    const auto clips = phazite::getClips (model, song.bass);
+    CHECK (std::find (clips.begin(), clips.end(), song.clip) != clips.end());
+    unfreezes();
+}
+
+TEST_CASE ("A frozen track whose clip changed plays live in what is saved, and in the plan compiled, before the next turn of the "
+           "message loop")
+{
+    // What waits for the next turn is written as the song is stored and as a plan of it is compiled (Song::writePending()):
+    // a save made before that turn wrote the track frozen, playing a file that no longer holds what it plays, and the
+    // playback session's plan played the file until another plan followed the unfreezing.
+    Song song;
+    const auto moveClip = [&song] (double beat) // the project's song, which reopen() makes anew
+    {
+        auto& model = song.getSong();
+        const phazite::UndoStep step (model, "Move Clip");
+        phazite::moveClip (model, song.clip, phazite::test::at (beat), song.bass);
+    };
+
+    // Saved.
+    song.freeze();
+    REQUIRE (song.project->save().wasOk());
+    moveClip (2.0);
+    REQUIRE (song.project->save().wasOk());
     CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK_FALSE (song.project->hasUnsavedChanges());
+    song.reopen();
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+
+    // Played: one plan, which plays it live.
+    song.freeze();
+    phazite::test::PlanCounter plans (song.context);
+    moveClip (0.0);
+    plans.makePlanNow();
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK (plans.take() == 1);
 }
 
 TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unfrozen without its file")

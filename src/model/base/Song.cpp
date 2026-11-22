@@ -89,8 +89,28 @@ void Song::setDeviceStateStore (std::function<void (std::uint64_t)> store)
 
 void Song::storeDeviceStates (std::uint64_t trackID)
 {
+    writePending();
+
     if (deviceStateStore != nullptr)
         deviceStateStore (trackID);
+}
+
+void Song::addPendingWriter (PendingWriter* writer)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    pendingWriters.add (writer);
+}
+
+void Song::removePendingWriter (PendingWriter* writer)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    pendingWriters.remove (writer);
+}
+
+void Song::writePending()
+{
+    // None but on the message thread: a song read or checked on another thread (model/versions/SongPieces.cpp) has none.
+    pendingWriters.call ([] (PendingWriter& writer) { writer.writePending(); });
 }
 
 void Song::setShowingOther (bool showing)

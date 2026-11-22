@@ -155,6 +155,7 @@ TEST_CASE ("The changes since the last version, worked out from what changed, ar
         checkChangesAreWhole (s.context, name);
     };
 
+    edit ("the lone clip muted", [&] { phazite::toggleClipsMuted (song, { lone }); });
     edit ("a lone clip's note moved", [&] { phazite::moveNote (song, phazite::getClipNotes (song, lone).front().getRef(), at (1.0), 62); });
     edit ("a note of the alias made quieter",
           [&] { phazite::setNoteVelocities (song, { phazite::getClipNotes (song, alias).back().getRef() }, 40); });

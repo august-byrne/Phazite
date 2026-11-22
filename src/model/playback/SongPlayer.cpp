@@ -222,13 +222,19 @@ SongPlayer::SongPlayer (Song& s, PluginInstances* p)
     songState.addListener (this);
 
     if (auto* values = song.getValues())
+    {
         values->addNotesListener (this);
+        values->addClipsListener (this);
+    }
 }
 
 SongPlayer::~SongPlayer()
 {
     if (auto* values = song.getValues())
+    {
         values->removeNotesListener (this);
+        values->removeClipsListener (this);
+    }
 
     songState.removeListener (this);
 }
@@ -237,6 +243,19 @@ void SongPlayer::clipNotesChanged (const std::vector<ClipID>& clips)
 {
     // Their tracks are found as the next compile starts (compile()): a listener of the values reads nothing of the song.
     changes.noteClips.insert (changes.noteClips.end(), clips.begin(), clips.end());
+}
+
+void SongPlayer::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>& reordered)
+{
+    // The tracks a clip was on and is on, and those whose clips play in another order (a track's notes are put together, and
+    // its audio's regions kept, in its clips' order): their notes and audio.
+    for (const auto& clip : clips)
+        for (const auto track : { clip.before, clip.after })
+            if (track.isValid())
+                changes.notes.insert ((std::int64_t) track.getRaw());
+
+    for (const auto track : reordered)
+        changes.notes.insert ((std::int64_t) track.getRaw());
 }
 
 namespace
@@ -308,16 +327,18 @@ std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const juce::Va
 
 void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
 {
-    // A change in a clip, or to a clip: its track's notes and audio (a tempo change moves no note: they are in beats). In
-    // the tempo map: every track's audio, which plays in seconds. In the automation: a curve's points (by its parameter),
-    // or the curves themselves (every one). In a channel (a track, a folder, a return or the master), its devices' values
-    // are read again only for what can change them: a change at or under a device, a container, a chain or a modulator, or
-    // an element of the channel added, removed or moved; not the channel's own properties (its height, mute, solo, volume,
-    // pan), which no device reads, nor a plug-in's own values (VALUE), which the plug-in keeps, the engine reading none.
+    // A change in a clip on a track, or to one, is the clips' listener's (clipsChanged()): never heard here. In the tempo map:
+    // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats). In the automation: a
+    // curve's points (by its parameter), or the curves themselves (every one). In a channel (a track, a folder, a return or
+    // the master), its devices' values are read again only for what can change them: a change at or under a device, a
+    // container, a chain or a modulator, or an element of the channel added, removed or moved; not the channel's own
+    // properties (its height, mute, solo, volume, pan), which no device reads, nor a plug-in's own values (VALUE), which the
+    // plug-in keeps, the engine reading none.
     auto inDevice = structure;
 
     for (auto element = changed; element.isValid(); element = element.getParent())
     {
+        // A clip that isn't on a track's element (a file that put one elsewhere): what holds it, as before the clips' listener.
         if (element.hasType (schema::CLIP))
             return (void) changes.notes.insert (getID (element.getParent(), schema::trackID));
 
@@ -357,6 +378,9 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
 
 void SongPlayer::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    if (isHeardAsClips (tree))
+        return; // clipsChanged()
+
     // A curve given to another parameter: its old one isn't known any more. A track's ID changed in place (a merge's
     // renumbering): what the plan before kept under it may be another track's, and its own is under an ID no longer known.
     if (tree.hasType (schema::CURVE) && (property == schema::curveDevice || property == schema::curveParameter))
@@ -414,11 +438,14 @@ void SongPlayer::markSoundsIn (const juce::ValueTree& element)
 
 void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
-    // A clip added to a track, or something to a clip or a channel; or tracks added, which may hold notes and devices
-    // already (an undo), the master or the tempo map in place of another (a song applied). View state added (a track's
-    // lanes) changes nothing that plays.
+    // Something added to a channel; or tracks added, which may hold notes and devices already (an undo), the master or the
+    // tempo map in place of another (a song applied). View state added (a track's lanes) changes nothing that plays. A clip
+    // added to a track, or something to a clip: clipsChanged().
+    if (isHeardAsClips (parent, child))
+        return;
+
     if (child.hasType (schema::CLIP))
-        markChange (child, true);
+        markChange (child, true); // one not on a track's element
     else if (! schema::isUncountedElement (parent, child))
         markChange (parent, true);
 
@@ -428,26 +455,25 @@ void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& 
 
 void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
 {
+    if (isHeardAsClips (parent, child))
+        return; // a clip taken off its track, or something out of a clip: clipsChanged()
+
     // A device's sounds taken away whole: its own again.
     if (child.hasType (schema::SOUNDS) && parent.hasType (schema::DEVICE))
         changes.sounds.insert (getID (parent, schema::deviceID));
 
-    // A clip taken off its track (which it has no more: its old parent's).
-    if (child.hasType (schema::CLIP) && parent.hasType (schema::TRACK))
-        changes.notes.insert (getID (parent, schema::trackID));
-    else if (! schema::isUncountedElement (parent, child))
+    if (! schema::isUncountedElement (parent, child))
         markChange (parent, true);
 
     markTracksIn (child);
 }
 
-void SongPlayer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
+void SongPlayer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex)
 {
-    // A track's clips or devices, a chain's devices, a channel's modulators, tracks in a folder: reordered.
-    if (parent.hasType (schema::TRACK))
-        changes.notes.insert (getID (parent, schema::trackID));
-
-    markChange (parent, true);
+    // A track's devices, a chain's devices, a channel's modulators, tracks in a folder: reordered. A track's clips, or
+    // something in a clip: clipsChanged().
+    if (! isHeardAsClips (parent, parent.getChild (newIndex)))
+        markChange (parent, true);
 }
 
 void SongPlayer::letGoOfPlugins()
@@ -2597,9 +2623,9 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
     // As the plan before played it, while nothing of its clips, the tempo, the rate, the song's folders or its files on the
     // disk changed, nor the sources its renders are named for (each asked about only once what was known of it is too old:
     // getFileKey()); placed again otherwise, its files asked about again if its clips changed.
-    const auto clipsChanged = compiling.hasNotes (strip.id);
+    const auto changedClips = compiling.hasNotes (strip.id);
 
-    if (const auto kept = audio.find (strip.id); kept != audio.end() && ! clipsChanged && isOnDiskAsKept (kept->second))
+    if (const auto kept = audio.find (strip.id); kept != audio.end() && ! changedClips && isOnDiskAsKept (kept->second))
     {
         if (shouldCheck())
             checkAudio (kept->second, trackState, tempo);
@@ -2618,10 +2644,10 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
         return;
     }
 
-    auto made = makeAudio (trackState, tempo, clipsChanged);
+    auto made = makeAudio (trackState, tempo, changedClips);
     strip.audio = made.regions;
 
-    if (! clipsChanged)
+    if (! changedClips)
         trustedForPlan.emplace_back (strip.id, trackState); // made from what was known of its files, not asked again
 
     if (made.whole)

@@ -822,7 +822,10 @@ VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
     state.addListener (this);
 
     if (auto* values = song.getValues())
+    {
         values->addNotesListener (this);
+        values->addClipsListener (this);
+    }
 
     open();
     startTimer (tickMilliseconds);
@@ -840,7 +843,10 @@ VersionHistory::~VersionHistory()
     stopTimer();
     backgroundBounce = nullptr; // cancelled, before what it renders goes
     if (auto* values = song.getValues())
+    {
         values->removeNotesListener (this);
+        values->removeClipsListener (this);
+    }
 
     state.removeListener (this);
 
@@ -3116,6 +3122,34 @@ void VersionHistory::clipNotesChanged (const std::vector<ClipID>& clips)
     changesMayDiffer();
 }
 
+void VersionHistory::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>& reordered)
+{
+    // A change of the song as its tree's are, in clips: the lines of the tracks they were on and are on, and of those whose
+    // clips came in another order, by their IDs (a listener of the song's values reads nothing of the song).
+    ++songChanges;
+    edited();
+
+    const auto mark = [this] (TrackID track)
+    {
+        sinceBase.markTrack (track.getRaw());
+        againstCompared.markTrack (track.getRaw());
+    };
+
+    for (const auto& clip : clips)
+    {
+        if (clip.before.isValid())
+            mark (clip.before);
+
+        if (clip.after.isValid() && clip.after != clip.before)
+            mark (clip.after);
+    }
+
+    for (const auto track : reordered)
+        mark (track);
+
+    changesMayDiffer();
+}
+
 void VersionHistory::markNotesHeard()
 {
     // A clip gone since was taken off its track, which marked it.
@@ -3147,6 +3181,9 @@ void VersionHistory::markOrder()
 
 void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    if (isHeardAsClips (tree))
+        return; // clipsChanged()
+
     ++songChanges;
 
     if (tree.hasType (schema::MERGING)) // a conflict switched
@@ -3176,6 +3213,9 @@ void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce
 
 void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex)
 {
+    if (isHeardAsClips (parent, parent.getChild (newIndex)))
+        return; // clipsChanged()
+
     ++songChanges;
 
     // Tracks in another order: the song's line, and their numbers.
