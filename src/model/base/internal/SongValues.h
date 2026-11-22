@@ -345,7 +345,7 @@ SongClips withTrackOrder (const SongClips&, TrackID, immer::flex_vector<ClipID> 
 bool holdsItsLists (const SongClips&);
 
 // Whether an alias group holds one clip alone, which the model never leaves (the last clip of a group leaves it as the
-// next-to-last goes: Clips.cpp, removeClipState()); what a song's consistency check is to say there is none of.
+// next-to-last goes: Clips.h, eraseClip()); what a song's consistency check is to say there is none of.
 bool hasGroupsOfOne (const SongClips&);
 
 //==============================================================================
@@ -384,7 +384,7 @@ public:
     void eraseClipNotes (Song&, ClipID);
 
     // A copy of a clip (to, not in the song yet) given the clip's value: the same value, shared until one of them is edited.
-    // What the clips' code that copies a clip in the song does (model/arrangement/Clips.cpp: copyClipState()), so that
+    // What the clips' code that copies a clip in the song does (model/arrangement/Clips.cpp: addCopy()), so that
     // the copy, an alias or not, holds what the clip holds without a walk through its notes.
     void copyClipNotes (Song&, ClipID from, ClipID to);
 
@@ -477,6 +477,21 @@ ClipValue readClipValue (const juce::ValueTree& clip);
 // length on an audio clip, a file on a MIDI clip...) is left as it is, as are properties and children Phazite doesn't know,
 // its NOTE and CONTROL children, and a MIDI clip's WARP children. Its track is where the element is, not written.
 void writeClipElement (const ClipValue&, juce::ValueTree& clip, juce::UndoManager*);
+
+// Makes a clip's element, which holds held (as readClipValue() reads it), hold a value instead, in the undo history given (or
+// outside any): only the properties whose values differ from held's are written, each as the clips' edits write it (a
+// property held only while it is set is removed at its default: writeClipElement()'s table), the markers anew where they
+// differ; nothing else, so that a property the edit doesn't change stays as the element holds it (an empty name, an offset of
+// 0 another file wrote). The value is written as it is: what keeps it within what a clip holds is the caller's
+// (keepWithinClip()). Only the value's kind's properties are written (a MIDI clip's length and offset, an audio clip's sound,
+// part, gain, fades and takes); its track is where the element is, not written. What the clips' code (model/arrangement/
+// Clips.cpp) writes a clip of the song's tree with.
+void writeClipElement (const ClipValue& value, const ClipValue& held, juce::ValueTree& clip, juce::UndoManager*);
+
+// A clip's value kept within what a clip holds, as writeClipElement() keeps what it writes: its start at 0 or later, a MIDI
+// clip's length at least shortestClipBeats, the part of its file starting at 0 or later and ending at its start or later, and
+// its fades' bends within -1 to 1.
+ClipValue keepWithinClip (ClipValue);
 
 // A clip's value with one of its properties (by its name in the song: schema::clipStart, clipMute...) given a value as the
 // value would read it from an element that held it, or taken away (a void value: as if the element hadn't it): a merge's

@@ -25,9 +25,6 @@
 namespace phazite
 {
 //==============================================================================
-// The song's audio clips' elements.
-bool isAudioState (const juce::ValueTree& clipState);
-
 // Whether a clip is an audio clip of the song's.
 bool isAudioClip (const Song&, ClipID);
 
@@ -37,48 +34,22 @@ struct FilePart
     double start = 0.0, end = 0.0;
 };
 
-FilePart getFilePart (const juce::ValueTree& clipState);
 FilePart getFilePart (const ClipValue&);
 
 // A fade of an audio clip's value as the playlist shows it (PlaylistValues.h).
 FadeCurve getFadeCurve (const ClipFade&);
 
-// A new audio clip's element, with an ID of the song's, on no track yet: playing a part of a file from a beat.
-juce::ValueTree makeAudioClipState (Song&, const juce::String& name, const juce::File&, BeatPosition start, FilePart);
-
-// The same as a value (its track the caller's to give; Clips.h: addClip() adds it), its start not before the song's and its
-// file by the path the song keeps for it, relative to the project's folder.
+// A new audio clip's value, with an ID of the song's, on no track yet (its track the caller's to give; Clips.h: addClip()
+// adds it): playing a part of a file from a beat, its start not before the song's and its file by the path the song keeps for
+// it, relative to the project's folder.
 ClipValue makeAudioClip (Song&, const juce::String& name, const juce::File&, BeatPosition start, FilePart);
 
-// The file it plays (Song::getFile() is where a kept path starts), how long that file is in seconds, and how it plays it:
-// at the song's tempo where it starts, or along the song's tempo changes (followsTempoChanges()).
-juce::File getClipFile (const Song&, const juce::ValueTree& clipState);
-double getClipFileLength (const Song&, const juce::ValueTree& clipState);
-stretch::Settings getClipStretch (const Song&, const juce::ValueTree& clipState);
-
-// Whether it follows the song's tempo where the tempo changes under its file, from the file's start to its end as the clip
-// places them. Then each beat of its sound plays on a beat of the song, at the file's tempo from where the clip starts, so
-// that it speeds up and slows down with the song, and its render follows a time map (stretch::Settings); under one tempo it
-// plays at one ratio, as Phazite always played it.
-bool followsTempoChanges (const Song&, const juce::ValueTree& clipState);
-
-// How far into its file, in the file's seconds as it plays them, a move of its start or end takes it: from where that plays
-// now, in the song's seconds, to a beat.
-double getFileSecondsBetween (const Song&, const juce::ValueTree& clipState, double from, BeatPosition to);
-
-// Where its part would start in its sound as it plays (backwards while it plays backwards), in seconds, if its start were
-// so far into what plays it, in the song's seconds (PlayedPosition::offset): what a slip of it sets.
-double getPartStartFor (const Song&, const juce::ValueTree& clipState, double offset);
-
-// What plays for it: the file, or Phazite's render of it (getRenderFile()); and where, in the song's seconds, with how far
+// What plays for a clip: the file, or Phazite's render of it (getRenderFile()); and where, in the song's seconds, with how far
 // into what plays it starts.
 struct PlayedPosition
 {
     double start = 0.0, end = 0.0, offset = 0.0;
 };
-
-juce::File getPlayedFile (const Song&, const juce::ValueTree& clipState);
-PlayedPosition getPlayedPosition (const Song&, const juce::ValueTree& clipState);
 
 // The song's tempo as audio clips' places need it, read once for many clips (a plan's compile reads it once for all the
 // song's: known bug 124): its map in seconds (getTempoMap()) and its changes.
@@ -98,25 +69,59 @@ struct PlayedClip
     double fadeIn = 0.0, fadeOut = 0.0;
 };
 
-// The same of a clip's value: its file, from the value; and what plays for a clip of the song, given its value as the song
-// holds it now (else an assertion in Debug), read from the live clip by its ID, as the clips' code works it out from the
-// clip's element for now (as Clips.h's getLiveClipRange()).
+// An audio clip's value, as the song holds it or as an edit is to give it (Clips.cpp and AudioClips.cpp work each edit out on
+// values), worked out from the value alone, with what the song gives: its tempo, its folder and its files' lengths.
+//
+// The file it plays (Song::getFile() is where a kept path starts), how long that file is in seconds, and how it plays it: at
+// the song's tempo where it starts, or along the song's tempo changes (followsTempoChanges()).
 juce::File getClipFile (const Song&, const ClipValue&);
+double getClipFileLength (const Song&, const ClipValue&);
+stretch::Settings getClipStretch (const Song&, const ClipValue&);
+
+// Whether it follows the song's tempo where the tempo changes under its file, from the file's start to its end as the clip
+// places them. Then each beat of its sound plays on a beat of the song, at the file's tempo from where the clip starts, so
+// that it speeds up and slows down with the song, and its render follows a time map (stretch::Settings); under one tempo it
+// plays at one ratio, as Phazite always played it. False for a MIDI clip's value.
+bool followsTempoChanges (const Song&, const ClipValue&);
+
+// How far into its file, in the file's seconds as it plays them, a move of its start or end takes it: from where that plays
+// now, in the song's seconds, to a beat.
+double getFileSecondsBetween (const Song&, const ClipValue&, double from, BeatPosition to);
+
+// Where its part would start in its sound as it plays (backwards while it plays backwards), in seconds, if its start were
+// so far into what plays it, in the song's seconds (PlayedPosition::offset): what a slip of it sets.
+double getPartStartFor (const Song&, const ClipValue&, double offset);
+
+// What plays for it, and where (PlayedPosition); and all of what plays for it, each worked out once.
+juce::File getPlayedFile (const Song&, const ClipValue&);
+PlayedPosition getPlayedPosition (const Song&, const ClipValue&);
 PlayedClip getPlayedClip (const Song&, const ClipValue&, const ClipTempo&);
 
 // Where it is in beats: from its start for as long as its part takes to play.
-BeatRange getAudioClipRange (const Song&, const juce::ValueTree& clipState);
+BeatRange getAudioClipRange (const Song&, const ClipValue&);
 
-// Where it starts and the part of its file it plays, in the caller's undo step.
+// The shape of a fade as Phazite's engine plays it.
+engine::FadeCurve toEngineFade (FadeCurve);
+
+//==============================================================================
+// The same of an audio clip's element: its kind, its part, a new one, the file it plays, how it plays it and where, and its
+// fades, read from it (each that works something out reads the element into a value first: SongValues.h, readClipValue());
+// and its part and a fade written into it, in the caller's undo step (only what differs: SongValues.h, writeClipElement()).
+// For the tests and what reads a song's elements (the loader, a merge, a version applied: model/versions/); the clips' own
+// code names clips by their IDs and values (roadmap step S5.20 takes these away once nothing names an element).
+bool isAudioState (const juce::ValueTree& clipState);
+FilePart getFilePart (const juce::ValueTree& clipState);
+juce::ValueTree makeAudioClipState (Song&, const juce::String& name, const juce::File&, BeatPosition start, FilePart);
+juce::File getClipFile (const Song&, const juce::ValueTree& clipState);
+double getClipFileLength (const Song&, const juce::ValueTree& clipState);
+stretch::Settings getClipStretch (const Song&, const juce::ValueTree& clipState);
+bool followsTempoChanges (const Song&, const juce::ValueTree& clipState);
+juce::File getPlayedFile (const Song&, const juce::ValueTree& clipState);
+PlayedPosition getPlayedPosition (const Song&, const juce::ValueTree& clipState);
 void setAudioPart (Song&, juce::ValueTree clipState, BeatPosition start, FilePart);
-
-// How long it fades in and out, in seconds, and the fades' shapes, in the caller's undo step; and the shape as Phazite's
-// engine plays it.
 double getClipFade (const juce::ValueTree& clipState, bool fadeIn);
 void setClipFade (Song&, juce::ValueTree clipState, bool fadeIn, double seconds);
 FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn);
-void setClipFadeCurve (Song&, juce::ValueTree clipState, bool fadeIn, FadeCurve);
-engine::FadeCurve toEngineFade (FadeCurve);
 
 //==============================================================================
 // The same by the clip's ID: of an audio clip of the song's, and for any other clip, or one that isn't there, nothing (an
@@ -155,7 +160,7 @@ struct SecondsRange
     double start = 0.0, end = 0.0;
 };
 
-SecondsRange getAudioFileRange (const Song&, const juce::ValueTree& clipState);
+SecondsRange getAudioFileRange (const Song&, const ClipValue&);
 SecondsRange getAudioFileRange (const Song&, ClipID); // nothing for a clip that isn't an audio clip of the song's
 
 // The time, in seconds, in the clip's file (getClipFile()) that plays at a song beat as the clip plays it, or would play
@@ -210,7 +215,8 @@ void setClipTempo (Song&, ClipID, double bpm);
 // writes the path found into every clip that plays the old one); their tempo (clipTempo), pitch (clipPitch) and direction
 // (clipReversed), which setClipPitch(), setClipReversed(), setClipFollowsTempo() and setClipTempo() write into each clip of
 // the group; and their warp markers (WARP, times in that one file), which the markers' edits write into each; the rest of a
-// clip is its own. Whether a property is one of those; whether two audio clips' elements share them, compared as values,
+// clip is its own. Each of those edits gives every clip of the group the same value of all of them (SongValues.h:
+// ClipSound). Whether a property is one of those; whether two audio clips' elements share them, compared as values,
 // each property as read (its default where it has none: no tempo, no pitch, forwards) and the markers in their order, each as
 // juce::ValueTree::isEquivalentTo() compares elements, the first's against the other's: as the loader (makeConsistent())
 // and a merge (model/versions/internal/SongMerge.h) compare them; and the first's given to the other, in place of its own

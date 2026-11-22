@@ -1139,7 +1139,7 @@ void removeClipNotesAlone (Song& song, ClipID clip, const std::vector<NoteID>& n
         return;
 
     // Holding other notes than its group's, it leaves the group (and the last one left of it leaves it too, as
-    // removeClipState() leaves it): an alias group's clips hold one value.
+    // eraseClip() leaves it): an alias group's clips hold one value.
     const Song::OutsideHistory outside (song);
 
     if (value->link != 0)

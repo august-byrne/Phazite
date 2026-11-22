@@ -1111,3 +1111,91 @@ TEST_CASE ("Song values: a song that keeps everything in its tree is read from i
     CHECK (phazite::copyWholeSong (song).isEquivalentTo (phazite::copyWholeSong (*made)));
     CHECK (phazite::test::findValueProblems (song).empty());
 }
+
+TEST_CASE ("Song values: a clip's next value written over the one its element held changes only the properties whose values "
+           "differ, each as the clips' edits write it, and leaves the rest as the element holds it")
+{
+    // A MIDI clip's element as another file may write it: an empty name, an offset and a mute at their defaults.
+    juce::ValueTree track (schema::TRACK);
+    track.setProperty (schema::trackID, 5, nullptr);
+    juce::ValueTree clip (schema::CLIP);
+    clip.setProperty (schema::clipID, 7, nullptr);
+    clip.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
+    clip.setProperty (schema::clipName, juce::String(), nullptr);
+    clip.setProperty (schema::clipStart, 2.0, nullptr);
+    clip.setProperty (schema::clipLength, 4.0, nullptr);
+    clip.setProperty (schema::clipOffset, 0.0, nullptr);
+    clip.setProperty (schema::clipMute, false, nullptr);
+    track.appendChild (clip, nullptr);
+
+    Heard heard;
+    track.addListener (&heard);
+    auto held = phazite::readClipValue (clip);
+    const auto writeAndCount = [&] (const phazite::ClipValue& next)
+    {
+        heard.properties = heard.added = heard.removed = heard.moved = 0;
+        phazite::writeClipElement (next, held, clip, nullptr);
+        CHECK (phazite::readClipValue (clip) == next);
+        held = next;
+        return heard.count();
+    };
+
+    CHECK (writeAndCount (held) == 0);
+
+    // Moved: its start alone, what it holds at the defaults staying as it is.
+    auto moved = held;
+    moved.start = phazite::test::at (6.0);
+    CHECK (writeAndCount (moved) == 1);
+    CHECK (clip.hasProperty (schema::clipName));
+    CHECK (clip.hasProperty (schema::clipOffset));
+    CHECK (clip.hasProperty (schema::clipMute));
+
+    // A length as the value gives it, under the shortest too (the edits keep their own values: a split's right half).
+    auto shortened = moved;
+    shortened.length = phazite::test::lasting (1.0e-3);
+    CHECK (writeAndCount (shortened) == 1);
+    CHECK (juce::exactlyEqual ((double) clip[schema::clipLength], 1.0e-3));
+
+    // What changes is written while it is set, and taken away at its default.
+    auto named = shortened;
+    named.name = "Bass";
+    named.offset = phazite::test::lasting (1.0);
+    named.muted = true;
+    CHECK (writeAndCount (named) == 3);
+    auto unnamed = named;
+    unnamed.name = {};
+    unnamed.offset = {};
+    unnamed.muted = false;
+    CHECK (writeAndCount (unnamed) == 3);
+    CHECK_FALSE (clip.hasProperty (schema::clipName));
+    CHECK_FALSE (clip.hasProperty (schema::clipOffset));
+    CHECK_FALSE (clip.hasProperty (schema::clipMute));
+
+    // An audio clip's markers only where they differ; what a value of the other kind holds (a MIDI clip's length) isn't an
+    // audio clip's to write.
+    juce::ValueTree audio (schema::CLIP);
+    auto loop = makeClip (8, 5);
+    loop.kind = phazite::ClipValue::Kind::audio;
+    loop.length = {};
+    loop.sound.file = "Audio/Loop.wav";
+    loop.sound.tempo = 120.0;
+    loop.sound.warps = { { 0.5, 0.5 }, { 1.0, 1.25 } };
+    loop.fileEnd = 2.0;
+    phazite::writeClipElement (loop, audio, nullptr);
+    track.appendChild (audio, nullptr);
+    heard.properties = heard.added = heard.removed = heard.moved = 0;
+    auto faded = loop;
+    faded.fadeIn.seconds = 0.25;
+    faded.length = phazite::test::lasting (8.0);
+    phazite::writeClipElement (faded, loop, audio, nullptr);
+    CHECK (heard.count() == 1);
+    CHECK_FALSE (audio.hasProperty (schema::clipLength));
+
+    auto unwarped = faded;
+    unwarped.sound.warps = {};
+    heard.properties = heard.added = heard.removed = heard.moved = 0;
+    phazite::writeClipElement (unwarped, faded, audio, nullptr);
+    CHECK (heard.removed == 2);
+    CHECK (phazite::readClipValue (audio) == unwarped);
+    track.removeListener (&heard);
+}

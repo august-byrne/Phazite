@@ -47,10 +47,9 @@ BeatPosition getContentStart (const Song&, ClipID);
 // Where a clip is: a MIDI clip's as its value holds it (an audio clip's start alone: its length follows from its part).
 BeatRange getClipRange (const ClipValue&);
 
-// Where a clip of the song is, given its value as the song holds it now (else an assertion in Debug): a MIDI clip's from the
-// value, an audio clip's read from the live clip by its ID, for as long as the part of its file it plays takes at the tempo
-// there (which a value alone can't say yet: AudioClips.cpp works it out from the clip's element). For a value that isn't the
-// song's (changed, or a copy's), getClipRange (const ClipValue&) is a MIDI clip's.
+// Where a clip is in the song: a MIDI clip's as its value holds it, an audio clip's for as long as the part of its file it
+// plays takes at the song's tempo there (AudioClips.h: getAudioClipRange()), worked out from the value alone: the song's, or
+// one an edit is to give it.
 BeatRange getLiveClipRange (const Song&, const ClipValue&);
 
 // Where a clip is on its track, without the rest of its value: its ID, its kind, its start, and a MIDI clip's length and
@@ -79,12 +78,12 @@ juce::String getClipName (const Song&, ClipID);
 juce::String getClipName (const Song&, const ClipValue&);
 
 //==============================================================================
-// The song's clips changed by their IDs and plain values: how what writes a clip outside the clips' own code writes it,
-// whatever stores it (the song's tree for now, written as the clips' code has always written it: SongValues.h,
-// writeClipElement()). None begins an undo step: each change joins the caller's, or is made outside the history while the
-// song is written outside it (Song::OutsideHistory). What else changes clips by ID is below: moveClip(), deleteClips(),
-// setClipFade() and the rest, and AudioClips.h's; every one of them, and what the clips' code writes of a clip's element,
-// writes through getUndoOf().
+// The song's clips changed by their IDs and plain values: how anything writes a clip, the clips' own edits too, whatever
+// stores it (the song's tree for now, written as the clips' code has always written it: SongValues.h, writeClipElement()).
+// None begins an undo step: each change joins the caller's, or is made outside the history while the song is written outside
+// it (Song::OutsideHistory). What else changes clips by ID is below: moveClip(), deleteClips(), setClipFade() and the rest,
+// and AudioClips.h's, each worked out on the clips' values and set through these; every one of them writes through
+// getUndoOf().
 
 // A new MIDI clip's value, with an ID of the song's, on no track yet (its track is the caller's to give): from the range's
 // start (not before the song's), at least shortestClipBeats long. With no name, it has none of its own: it is called after
@@ -101,14 +100,26 @@ ClipValue makeMidiClip (Song&, const juce::String& name, BeatRange);
 // docs/known-bugs.md); every other caller asks before it calls.
 ClipID addClip (Song&, ClipValue, const ClipNotes* notes = nullptr, int index = -1);
 
-// Gives a clip of the song (by its value's ID) the value's properties, changing only what differs: on another track, it
-// moves to the end of that one's clips (one that holds no clips isn't one it goes on). A MIDI clip that joins an alias group
-// takes the group's notes; one that leaves keeps those it holds. Nothing for a clip that isn't the song's.
+// Gives a clip of the song (by its value's ID) the value's properties, kept within what a clip holds (SongValues.h:
+// keepWithinClip()), changing only what differs from what it holds: on another track, it moves to the end of that one's
+// clips (one that holds no clips isn't one it goes on). A MIDI clip that joins an alias group takes the group's notes; one
+// that leaves keeps those it holds. Nothing for a clip that isn't the song's.
 void setClip (Song&, const ClipValue&);
 
+// The same for a clip whose value the caller read (getClipValue()) and holds as the song holds it: what the clips' own edits
+// set (Clips.cpp, AudioClips.cpp), each having worked the next value out by its own rules (its start, length and part kept
+// within what a clip holds as each edit keeps them, which setClip() above does for what is given from outside). Only what
+// differs between the two values is written (SongValues.h: writeClipElement()), so the clip isn't read again; on another
+// track, it moves to the end of that one's clips.
+void setClip (Song&, const ClipValue& held, const ClipValue& next);
+
+// Takes a clip out of the song, its notes with it. The last clip left in its alias group leaves the group too (a group of one
+// would still show as linked to nothing), as Make Unique leaves it.
+void eraseClip (Song&, ClipID);
+
 // The value a clip of the song would hold were setClip() to give it this one, changing nothing: what a clip takes of it
-// (SongValues.h, writeClipElement(): a start at 0 or later, a MIDI clip's length at least shortestClipBeats, a file's part
-// ending at its start or later, nothing of the other kind of clip's properties), as getClipValue() would read it after.
+// (SongValues.h, keepWithinClip(): a start at 0 or later, a MIDI clip's length at least shortestClipBeats, a file's part
+// ending at its start or later; nothing of the other kind of clip's properties), as getClipValue() would read it after.
 // None for a clip that isn't the song's.
 std::optional<ClipValue> getClipValueAsSet (const Song&, const ClipValue&);
 
@@ -135,10 +146,12 @@ void moveClipStart (Song&, ClipID, BeatPosition start);
 void setClipPlace (Song&, ClipID, BeatPosition start, BeatDuration length, BeatDuration offset);
 
 //==============================================================================
-// The song's clips' elements, which the clips' own code reads and writes. Outside it, what writes a clip writes it through
-// the functions above; what still names an element here is the loader, a version applied (model/versions/ApplySong.cpp),
-// what reads a song's notes or audio from its tree, what hears the tree change, and the tests (roadmap step S5.20 moves
-// them onto the clips' IDs and values next).
+// The song's clips' elements. The clips' own code reads and writes them in its storage alone (Clips.cpp: the functions
+// above, and these); every edit is worked out on values. What still names an element here is the loader, a version applied
+// and a merge (model/versions/), what reads a song's notes from its tree, what hears the tree change, and the tests (roadmap
+// step S5.20 moves them onto the clips' IDs and values, then takes these away). Those that work something out of an element
+// or write one (getClipRange() of an audio clip's, setClipPlace() of one) read it into a value (SongValues.h:
+// readClipValue()) and write only what differs.
 
 // The undo manager the clips' code writes the song's clips through, the one place it is chosen: the song's history, or none
 // while the song is written outside it (Song::isWritingOutsideHistory()).

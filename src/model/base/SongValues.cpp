@@ -1050,13 +1050,56 @@ namespace
                 clip.removeProperty (name, undo); // which tells no one where the element hasn't it
         }
 
-        void setFade (const ClipFade& fade, const juce::Identifier& seconds, const juce::Identifier& shape,
+        // Each part of a fade, or (held given) each that differs from held's.
+        void setFade (const ClipFade& fade, const ClipFade* held, const juce::Identifier& seconds, const juce::Identifier& shape,
                       const juce::Identifier& bend) const
         {
-            const auto kept = juce::jlimit (-1.0f, 1.0f, fade.bend);
-            setWhile (fade.seconds > 0.0, seconds, fade.seconds);
-            setWhile (fade.sCurve, shape, juce::String (schema::fadeIsSCurve));
-            setWhile (! juce::exactlyEqual (kept, 0.0f), bend, kept);
+            if (held == nullptr || ! juce::exactlyEqual (fade.seconds, held->seconds))
+                setWhile (fade.seconds > 0.0, seconds, fade.seconds);
+
+            if (held == nullptr || fade.sCurve != held->sCurve)
+                setWhile (fade.sCurve, shape, juce::String (schema::fadeIsSCurve));
+
+            if (held == nullptr || ! juce::exactlyEqual (fade.bend, held->bend))
+                setWhile (! juce::exactlyEqual (fade.bend, 0.0f), bend, fade.bend);
+        }
+
+        // The markers: each in its place where there are as many, else all of them anew, after the clip's other children.
+        void setMarkers (const immer::flex_vector<WarpValue>& warps) const
+        {
+            std::vector<juce::ValueTree> markers;
+
+            for (const auto& child : clip)
+                if (child.hasType (schema::WARP))
+                    markers.push_back (child);
+
+            if (markers.size() == warps.size())
+            {
+                for (size_t i = 0; i < markers.size(); ++i)
+                {
+                    const auto writeMarker = [&marker = markers[i], this] (const juce::Identifier& name, double written)
+                    {
+                        if (! marker.hasProperty (name) || ! juce::exactlyEqual ((double) marker[name], written))
+                            marker.setProperty (name, written, undo);
+                    };
+
+                    writeMarker (schema::warpTime, warps[i].time);
+                    writeMarker (schema::warpPlaysAt, warps[i].playsAt);
+                }
+
+                return;
+            }
+
+            for (auto& marker : markers)
+                clip.removeChild (marker, undo);
+
+            for (const auto& warp : warps)
+            {
+                juce::ValueTree marker (schema::WARP);
+                marker.setProperty (schema::warpTime, warp.time, nullptr);
+                marker.setProperty (schema::warpPlaysAt, warp.playsAt, nullptr);
+                clip.appendChild (marker, undo);
+            }
         }
     };
 } // namespace
@@ -1108,98 +1151,154 @@ void writeClipElement (const ClipValue& value, juce::ValueTree& clip, juce::Undo
     //   clipLength                     MIDI   always, at least shortestClipBeats (makeMidiClipState(), setClipPlace())
     //   clipOffset                     MIDI   while more than 0 (setClipPlace())
     //   clipMute                       both   while on (toggleClipsMuted())
-    //   clipLink                       both   while not 0 (copyClips(), makeClipsUnique(), removeClipState()...)
+    //   clipLink                       both   while not 0 (copyClips(), makeClipsUnique(), eraseClip()...)
     //   clipFile                       audio  always (makeAudioClipState(), giveSharedSound())
     //   clipFileStart, clipFileEnd     audio  always, the start at 0 or later, the end not before it (setAudioPart())
-    //   clipTempo                      audio  while more than 0 (writeSound())
-    //   clipPitch                      audio  while not 0 (writeSound())
-    //   clipReversed                   audio  while on (writeSound())
+    //   clipTempo                      audio  while more than 0 (setClipTempo())
+    //   clipPitch                      audio  while not 0 (setClipPitch())
+    //   clipReversed                   audio  while on (setClipReversed())
     //   clipGain                       audio  while not 0 (setClipGain())
     //   clipFadeIn, clipFadeOut        audio  while more than 0 (setClipFade())
-    //   clipFadeInShape, ...OutShape   audio  while an S-curve (setClipFadeCurve())
-    //   clipFadeInBend, ...OutBend     audio  while not 0, kept within -1 to 1 (setClipFadeCurve())
+    //   clipFadeInShape, ...OutShape   audio  while an S-curve (setFadeShape())
+    //   clipFadeInBend, ...OutBend     audio  while not 0, kept within -1 to 1 (setFadeShape())
     //   clipTakes, clipTake,           audio  while it has takes (AudioRecorder.cpp's placeTake(), playTake())
     //   clipTakeLength
     //   WARP children                  audio  each marker, in the value's order (writeWarpPoints())
     //
     // A property of the other kind's, never written by the clips' code, is left as it is.
     jassert (clip.hasType (schema::CLIP));
-    const auto audio = value.isAudio();
+    const auto kept = keepWithinClip (value);
+    const auto audio = kept.isAudio();
     const auto made = ! clip.hasProperty (schema::clipID);
     const ClipWriter writer { clip, undo };
 
-    writer.set (schema::clipID, (juce::int64) value.id.getRaw());
+    writer.set (schema::clipID, (juce::int64) kept.id.getRaw());
     writer.set (schema::clipKind, juce::String (audio ? schema::clipIsAudio : schema::clipIsMidi));
 
-    if (value.name.isNotEmpty() || (audio && made))
-        writer.set (schema::clipName, value.name);
+    if (kept.name.isNotEmpty() || (audio && made))
+        writer.set (schema::clipName, kept.name);
     else if (! audio || clip[schema::clipName].toString().isNotEmpty())
         clip.removeProperty (schema::clipName, undo);
 
-    writer.set (schema::clipStart, std::max (0.0, value.start.inBeats()));
+    writer.set (schema::clipStart, kept.start.inBeats());
 
     if (! audio)
     {
-        writer.set (schema::clipLength, std::max (value.length.inBeats(), shortestClipBeats));
-        writer.setWhile (value.offset.inBeats() > 0.0, schema::clipOffset, value.offset.inBeats());
+        writer.set (schema::clipLength, kept.length.inBeats());
+        writer.setWhile (kept.offset.inBeats() > 0.0, schema::clipOffset, kept.offset.inBeats());
     }
 
-    writer.setWhile (value.muted, schema::clipMute, true);
-    writer.setWhile (value.link != 0, schema::clipLink, (juce::int64) value.link);
+    writer.setWhile (kept.muted, schema::clipMute, true);
+    writer.setWhile (kept.link != 0, schema::clipLink, (juce::int64) kept.link);
 
     if (! audio)
         return;
 
-    const auto fileStart = std::max (0.0, value.fileStart);
-    writer.set (schema::clipFile, value.sound.file);
-    writer.set (schema::clipFileStart, fileStart);
-    writer.set (schema::clipFileEnd, std::max (fileStart, value.fileEnd));
-    writer.setWhile (value.sound.tempo > 0.0, schema::clipTempo, value.sound.tempo);
-    writer.setWhile (! juce::exactlyEqual (value.sound.pitch, 0.0f), schema::clipPitch, value.sound.pitch);
-    writer.setWhile (value.sound.reversed, schema::clipReversed, true);
-    writer.setWhile (! juce::exactlyEqual (value.gain, 0.0f), schema::clipGain, value.gain);
-    writer.setFade (value.fadeIn, schema::clipFadeIn, schema::clipFadeInShape, schema::clipFadeInBend);
-    writer.setFade (value.fadeOut, schema::clipFadeOut, schema::clipFadeOutShape, schema::clipFadeOutBend);
-    writer.setWhile (value.takes > 0, schema::clipTakes, value.takes);
-    writer.setWhile (value.takes > 0, schema::clipTake, value.take);
-    writer.setWhile (value.takes > 0, schema::clipTakeLength, value.takeLength);
+    writer.set (schema::clipFile, kept.sound.file);
+    writer.set (schema::clipFileStart, kept.fileStart);
+    writer.set (schema::clipFileEnd, kept.fileEnd);
+    writer.setWhile (kept.sound.tempo > 0.0, schema::clipTempo, kept.sound.tempo);
+    writer.setWhile (! juce::exactlyEqual (kept.sound.pitch, 0.0f), schema::clipPitch, kept.sound.pitch);
+    writer.setWhile (kept.sound.reversed, schema::clipReversed, true);
+    writer.setWhile (! juce::exactlyEqual (kept.gain, 0.0f), schema::clipGain, kept.gain);
+    writer.setFade (kept.fadeIn, nullptr, schema::clipFadeIn, schema::clipFadeInShape, schema::clipFadeInBend);
+    writer.setFade (kept.fadeOut, nullptr, schema::clipFadeOut, schema::clipFadeOutShape, schema::clipFadeOutBend);
+    writer.setWhile (kept.takes > 0, schema::clipTakes, kept.takes);
+    writer.setWhile (kept.takes > 0, schema::clipTake, kept.take);
+    writer.setWhile (kept.takes > 0, schema::clipTakeLength, kept.takeLength);
+    writer.setMarkers (kept.sound.warps);
+}
 
-    // The markers: each in its place where there are as many, else all of them anew, after the clip's other children.
-    std::vector<juce::ValueTree> markers;
+void writeClipElement (const ClipValue& value, const ClipValue& held, juce::ValueTree& clip, juce::UndoManager* undo)
+{
+    // Each property whose value differs, by its rule in writeClipElement()'s table above (a name, written by renameClips(),
+    // set while it isn't empty and else removed), the value's as it is: the edits keep their values themselves.
+    jassert (clip.hasType (schema::CLIP));
+    const auto audio = value.isAudio();
+    const ClipWriter writer { clip, undo };
 
-    for (const auto& child : clip)
-        if (child.hasType (schema::WARP))
-            markers.push_back (child);
+    if (value.id != held.id)
+        writer.set (schema::clipID, (juce::int64) value.id.getRaw());
 
-    const auto& warps = value.sound.warps;
+    if (value.kind != held.kind)
+        writer.set (schema::clipKind, juce::String (audio ? schema::clipIsAudio : schema::clipIsMidi));
 
-    if (markers.size() == warps.size())
+    if (value.name != held.name)
+        writer.setWhile (value.name.isNotEmpty(), schema::clipName, value.name);
+
+    if (value.start != held.start)
+        writer.set (schema::clipStart, value.start.inBeats());
+
+    if (! audio)
     {
-        for (size_t i = 0; i < markers.size(); ++i)
-        {
-            const auto writeMarker = [&marker = markers[i], undo] (const juce::Identifier& name, double written)
-            {
-                if (! marker.hasProperty (name) || ! juce::exactlyEqual ((double) marker[name], written))
-                    marker.setProperty (name, written, undo);
-            };
+        if (value.length != held.length)
+            writer.set (schema::clipLength, value.length.inBeats());
 
-            writeMarker (schema::warpTime, warps[i].time);
-            writeMarker (schema::warpPlaysAt, warps[i].playsAt);
-        }
+        if (value.offset != held.offset)
+            writer.setWhile (value.offset.inBeats() > 0.0, schema::clipOffset, value.offset.inBeats());
+    }
 
+    if (value.muted != held.muted)
+        writer.setWhile (value.muted, schema::clipMute, true);
+
+    if (value.link != held.link)
+        writer.setWhile (value.link != 0, schema::clipLink, (juce::int64) value.link);
+
+    if (! audio)
         return;
-    }
 
-    for (auto& marker : markers)
-        clip.removeChild (marker, undo);
+    const auto& sound = value.sound;
+    const auto& heldSound = held.sound;
 
-    for (const auto& warp : warps)
-    {
-        juce::ValueTree marker (schema::WARP);
-        marker.setProperty (schema::warpTime, warp.time, nullptr);
-        marker.setProperty (schema::warpPlaysAt, warp.playsAt, nullptr);
-        clip.appendChild (marker, undo);
-    }
+    if (sound.file != heldSound.file)
+        writer.set (schema::clipFile, sound.file);
+
+    if (! juce::exactlyEqual (value.fileStart, held.fileStart))
+        writer.set (schema::clipFileStart, value.fileStart);
+
+    if (! juce::exactlyEqual (value.fileEnd, held.fileEnd))
+        writer.set (schema::clipFileEnd, value.fileEnd);
+
+    if (! juce::exactlyEqual (sound.tempo, heldSound.tempo))
+        writer.setWhile (sound.tempo > 0.0, schema::clipTempo, sound.tempo);
+
+    if (! juce::exactlyEqual (sound.pitch, heldSound.pitch))
+        writer.setWhile (! juce::exactlyEqual (sound.pitch, 0.0f), schema::clipPitch, sound.pitch);
+
+    if (sound.reversed != heldSound.reversed)
+        writer.setWhile (sound.reversed, schema::clipReversed, true);
+
+    if (! juce::exactlyEqual (value.gain, held.gain))
+        writer.setWhile (! juce::exactlyEqual (value.gain, 0.0f), schema::clipGain, value.gain);
+
+    writer.setFade (value.fadeIn, &held.fadeIn, schema::clipFadeIn, schema::clipFadeInShape, schema::clipFadeInBend);
+    writer.setFade (value.fadeOut, &held.fadeOut, schema::clipFadeOut, schema::clipFadeOutShape, schema::clipFadeOutBend);
+
+    if (value.takes != held.takes)
+        writer.setWhile (value.takes > 0, schema::clipTakes, value.takes);
+
+    if (value.take != held.take)
+        writer.setWhile (value.takes > 0, schema::clipTake, value.take);
+
+    if (! juce::exactlyEqual (value.takeLength, held.takeLength))
+        writer.setWhile (value.takes > 0, schema::clipTakeLength, value.takeLength);
+
+    if (! (sound.warps == heldSound.warps))
+        writer.setMarkers (sound.warps);
+}
+
+ClipValue keepWithinClip (ClipValue value)
+{
+    value.start = BeatPosition::fromBeats (std::max (0.0, value.start.inBeats()));
+
+    if (value.isMidi())
+        value.length = BeatDuration::fromBeats (std::max (value.length.inBeats(), shortestClipBeats));
+
+    value.fileStart = std::max (0.0, value.fileStart);
+    value.fileEnd = std::max (value.fileStart, value.fileEnd);
+    value.fadeIn.bend = juce::jlimit (-1.0f, 1.0f, value.fadeIn.bend);
+    value.fadeOut.bend = juce::jlimit (-1.0f, 1.0f, value.fadeOut.bend);
+    return value;
 }
 
 bool setClipProperty (ClipValue& value, const juce::Identifier& property, const juce::var& given)

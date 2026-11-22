@@ -4,6 +4,7 @@
 #include "internal/AudioWork.h"
 #include "internal/Clips.h"
 #include "model/base/Toggles.h"
+#include "model/base/internal/Immer.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/engine/AudioFiles.h"
@@ -13,32 +14,22 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <vector>
 
 namespace phazite
 {
+// Every edit here works on clips' values (SongValues.h: ClipValue): it reads each clip it changes once (Clips.h:
+// getClipValue()), works the next value out, and sets it (Clips.h: setClip()); what an alias group's audio clips share, their
+// sound (SongValues.h: ClipSound), is given to each of them as one value. The functions that take a clip's element read it
+// into a value and ask the value's.
 namespace
 {
     // Bumped whenever renders would come out differently, so that a project's old ones aren't played.
     constexpr const char* renderVersion = "rubberband-4.0-r3-1";
 
-    // What a clip's sound is made from, and how (Schema.h).
-    struct Sound
-    {
-        juce::File file;
-        double tempo = 0.0; // the file's, while the clip follows the song's; 0 while it doesn't
-        float pitch = 0.0f;
-        bool reversed = false;
-    };
-
-    Sound getSound (const Song& song, const juce::ValueTree& clipState)
-    {
-        return { getClipFile (song, clipState), (double) clipState.getProperty (schema::clipTempo, 0.0),
-                 (float) clipState.getProperty (schema::clipPitch, 0.0f), (bool) clipState.getProperty (schema::clipReversed, false) };
-    }
-
-    stretch::Settings getSettings (const Sound& sound, double songTempo)
+    stretch::Settings getSettings (const ClipSound& sound, double songTempo)
     {
         return { sound.tempo > 0.0 && songTempo > 0.0 ? sound.tempo / songTempo : 1.0, (double) sound.pitch, sound.reversed };
     }
@@ -48,43 +39,37 @@ namespace
         return getAudioFileInfo (file).getSeconds();
     }
 
-    void setOrRemove (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value, juce::UndoManager* um)
+    // An audio clip's value: none for a clip that isn't an audio clip of the song's.
+    std::optional<ClipValue> findAudioClip (const Song& song, ClipID clip)
     {
-        if (value.isVoid())
-            state.removeProperty (property, um);
-        else
-            state.setProperty (property, value, um);
+        auto value = getClipValue (song, clip);
+        return value.has_value() && value->isAudio() ? value : std::nullopt;
     }
 
-    void writeSound (Song& song, juce::ValueTree& clipState, const Sound& sound)
+    // What an audio clip's value is, for one that isn't there: as an element without any of its properties would read (an
+    // invalid file, its start and part at 0), which is what the functions by ID below have always worked out for it.
+    ClipValue getNoAudioClip()
     {
-        auto* um = getUndoOf (song);
-        setOrRemove (clipState, schema::clipTempo, sound.tempo > 0.0 ? juce::var (sound.tempo) : juce::var(), um);
-        setOrRemove (clipState, schema::clipPitch, juce::exactlyEqual (sound.pitch, 0.0f) ? juce::var() : juce::var (sound.pitch), um);
-        setOrRemove (clipState, schema::clipReversed, sound.reversed ? juce::var (true) : juce::var(), um);
+        ClipValue none;
+        none.kind = ClipValue::Kind::audio;
+        none.length = {};
+        return none;
     }
 
-    // An audio clip's element, or invalid.
-    juce::ValueTree findAudioState (const Song& song, ClipID clip)
+    // Gives a clip and each other clip of its alias group (which play the same audio) one sound, the same value in each
+    // (SongValues.h: ClipSound), keeping their starts and the parts of their files they play.
+    void giveSound (Song& song, const ClipValue& clip, const ClipSound& sound)
     {
-        const auto clipState = findClipState (song, clip);
-        return isAudioState (clipState) ? clipState : juce::ValueTree();
-    }
-
-    // Changes how a clip sounds, keeping its start and the part of its file it plays: in each clip of its alias group too.
-    template <typename Change>
-    void changeSound (Song& song, ClipID clip, Change&& change)
-    {
-        const auto clipState = findAudioState (song, clip);
-
-        if (! clipState.isValid())
-            return;
-
-        for (auto alias : getAliasStates (song, clipState))
+        for (const auto alias : getAliasClips (song, clip.id))
         {
-            auto sound = getSound (song, alias);
-            change (sound);
-            writeSound (song, alias, sound);
+            const auto held = alias == clip.id ? std::optional<ClipValue> (clip) : getClipValue (song, alias);
+
+            if (held.has_value() && held->isAudio())
+            {
+                auto next = *held;
+                next.sound = sound;
+                setClip (song, *held, next);
+            }
         }
     }
 
@@ -124,16 +109,15 @@ namespace
     // A clip's warp markers as the song holds them (Schema.h: WARP), each a time of its file as recorded with where that
     // plays straight at the clip's tempo, in time order, both rising (any that doesn't is left out); none while the clip
     // doesn't follow the song's tempo.
-    std::vector<std::pair<double, double>> getWarpPoints (const juce::ValueTree& clipState)
+    std::vector<std::pair<double, double>> getWarpPoints (const ClipValue& clip)
     {
         std::vector<std::pair<double, double>> points;
 
-        if ((double) clipState.getProperty (schema::clipTempo, 0.0) <= 0.0)
+        if (clip.sound.tempo <= 0.0)
             return points;
 
-        for (const auto& child : clipState)
-            if (child.hasType (schema::WARP))
-                points.emplace_back ((double) child[schema::warpTime], (double) child[schema::warpPlaysAt]);
+        for (const auto& warp : clip.sound.warps)
+            points.emplace_back (warp.time, warp.playsAt);
 
         std::sort (points.begin(), points.end());
         std::vector<std::pair<double, double>> rising;
@@ -145,25 +129,22 @@ namespace
         return rising;
     }
 
-    // A clip's warp markers, in each clip of its alias group (which play the same audio), in place of those there.
-    void writeWarpPoints (Song& song, const juce::ValueTree& clipState, const std::vector<std::pair<double, double>>& points)
+    // A clip's sound with these warp markers in place of its own, in their order.
+    ClipSound withWarpPoints (ClipSound sound, const std::vector<std::pair<double, double>>& points)
     {
-        auto* um = getUndoOf (song);
+        auto warps = immer::flex_vector<WarpValue>().transient();
 
-        for (auto alias : getAliasStates (song, clipState))
-        {
-            for (auto i = alias.getNumChildren(); --i >= 0;)
-                if (alias.getChild (i).hasType (schema::WARP))
-                    alias.removeChild (i, um);
+        for (const auto& [at, playsAt] : points)
+            warps.push_back ({ at, playsAt });
 
-            for (const auto& [at, playsAt] : points)
-            {
-                juce::ValueTree warp (schema::WARP);
-                warp.setProperty (schema::warpTime, at, nullptr);
-                warp.setProperty (schema::warpPlaysAt, playsAt, nullptr);
-                alias.appendChild (warp, um);
-            }
-        }
+        sound.warps = points.empty() ? immer::flex_vector<WarpValue>() : warps.persistent();
+        return sound;
+    }
+
+    // A clip's warp markers, in each clip of its alias group (which play the same audio), in place of those there.
+    void writeWarpPoints (Song& song, const ClipValue& clip, const std::vector<std::pair<double, double>>& points)
+    {
+        giveSound (song, clip, withWarpPoints (clip.sound, points));
     }
 
     // How a clip's played sound (its file, backwards while the clip plays backwards) lines up with the song: where its part
@@ -184,14 +165,13 @@ namespace
         double timeAt (double beat) const { return warp (unwarp (partStart) + (beat - startBeat) * 60.0 / tempo); }
     };
 
-    ClipTime getClipTime (const Song& song, const juce::ValueTree& clipState)
+    ClipTime getClipTime (const Song& song, const ClipValue& clip)
     {
-        const auto part = getFilePart (clipState);
-        const auto length = getClipFileLength (song, clipState);
-        const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
-        ClipTime time { reversed ? length - part.end : part.start, part.end - part.start, length,
-                        getClipRange (clipState).getStart().inBeats(), (double) clipState.getProperty (schema::clipTempo, 0.0) };
-        time.warps = getWarpPoints (clipState);
+        const auto part = getFilePart (clip);
+        const auto length = getClipFileLength (song, clip);
+        const auto reversed = clip.sound.reversed;
+        ClipTime time { reversed ? length - part.end : part.start, part.end - part.start, length, clip.start.inBeats(), clip.sound.tempo };
+        time.warps = getWarpPoints (clip);
 
         // Backwards, the sound's time runs from the file's end: each marker at the same audio, mirrored, each stretch as long.
         if (reversed && ! time.warps.empty())
@@ -214,17 +194,15 @@ namespace
     // under the clip's file, from the file's start to its end as the clip places them: then it plays along the markers and
     // the changes, rather than at one ratio as it does under one tempo. Nothing otherwise, found without reading the file for a
     // clip that keeps its speed, or one without markers in a song of one tempo.
-    std::optional<ClipTime> findMappedTime (const Song& song, const juce::ValueTree& clipState, const ClipTempo& tempo)
+    std::optional<ClipTime> findMappedTime (const Song& song, const ClipValue& clip, const ClipTempo& tempo)
     {
-        if ((double) clipState.getProperty (schema::clipTempo, 0.0) <= 0.0)
+        if (clip.sound.tempo <= 0.0)
             return std::nullopt;
 
-        const auto warped = clipState.getChildWithName (schema::WARP).isValid();
-
-        if (! warped && tempo.changes.size() <= 1)
+        if (clip.sound.warps.empty() && tempo.changes.size() <= 1)
             return std::nullopt;
 
-        const auto time = getClipTime (song, clipState);
+        const auto time = getClipTime (song, clip);
 
         if (time.fileLength <= 0.0 || (time.warps.empty() && tempo.map.isSteadyBetween (time.beatAt (0.0), time.beatAt (time.fileLength))))
             return std::nullopt;
@@ -232,24 +210,22 @@ namespace
         return time;
     }
 
-    std::optional<ClipTime> findMappedTime (const Song& song, const juce::ValueTree& clipState)
+    std::optional<ClipTime> findMappedTime (const Song& song, const ClipValue& clip)
     {
         // Without making the tempo map for a clip that keeps its speed, or one without markers in a song of one tempo.
-        if ((double) clipState.getProperty (schema::clipTempo, 0.0) <= 0.0
-            || (! clipState.getChildWithName (schema::WARP).isValid() && ! hasTempoChanges (song)))
+        if (clip.sound.tempo <= 0.0 || (clip.sound.warps.empty() && ! hasTempoChanges (song)))
             return std::nullopt;
 
-        return findMappedTime (song, clipState, ClipTempo (song));
+        return findMappedTime (song, clip, ClipTempo (song));
     }
 
     std::vector<std::pair<double, double>> makeTimeMap (const ClipTempo&, const ClipTime&); // below
 
     // How it plays its file (getClipStretch()), with the song's tempo read already and how it lines up along markers and
     // the tempo's changes found (findMappedTime()).
-    stretch::Settings getStretch (const Song& song, const juce::ValueTree& clipState, const ClipTempo& tempo,
-                                  const std::optional<ClipTime>& mapped)
+    stretch::Settings getStretch (const ClipValue& clip, const ClipTempo& tempo, const std::optional<ClipTime>& mapped)
     {
-        auto settings = getSettings (getSound (song, clipState), tempo.map.getTempoAt (getClipRange (clipState).getStart().inBeats()));
+        auto settings = getSettings (clip.sound, tempo.map.getTempoAt (clip.start.inBeats()));
 
         // Along its warp markers and the song's tempo changes, the stretch follows each of them, its ratio being the whole file's.
         if (mapped.has_value())
@@ -262,10 +238,10 @@ namespace
     }
 
     // Where it plays (getPlayedPosition()), with the same, and its stretch worked out.
-    PlayedPosition getPosition (const Song& song, const juce::ValueTree& clipState, const ClipTempo& tempo,
-                                const std::optional<ClipTime>& mapped, const stretch::Settings& settings)
+    PlayedPosition getPosition (const Song& song, const ClipValue& clip, const ClipTempo& tempo, const std::optional<ClipTime>& mapped,
+                                const stretch::Settings& settings)
     {
-        const auto start = tempo.map.toSamples (getClipRange (clipState).getStart().inBeats());
+        const auto start = tempo.map.toSamples (clip.start.inBeats());
 
         // Along its markers and the song's tempo changes: where its part's end plays, and how far into the render its part's
         // start is.
@@ -273,17 +249,17 @@ namespace
             return { start, tempo.map.toSamples (time->beatAt (time->partStart + time->partLength)),
                      start - tempo.map.toSamples (time->beatAt (0.0)) };
 
-        const auto part = getFilePart (clipState);
-        const auto from = settings.reversed ? getFileSeconds (getClipFile (song, clipState)) - part.end : part.start;
+        const auto part = getFilePart (clip);
+        const auto from = settings.reversed ? getFileSeconds (getClipFile (song, clip)) - part.end : part.start;
         return { start, start + (part.end - part.start) * settings.timeRatio, from * settings.timeRatio };
     }
 
     // Its fades as they play (getFittedFades()), where it plays.
-    std::pair<double, double> getFades (const juce::ValueTree& clipState, const PlayedPosition& position)
+    std::pair<double, double> getFades (const ClipValue& clip, const PlayedPosition& position)
     {
         const auto length = position.end - position.start;
-        auto in = juce::jlimit (0.0, length, getClipFade (clipState, true));
-        auto out = juce::jlimit (0.0, length, getClipFade (clipState, false));
+        auto in = juce::jlimit (0.0, length, clip.fadeIn.seconds);
+        auto out = juce::jlimit (0.0, length, clip.fadeOut.seconds);
 
         if (in + out > length && in + out > 0.0)
         {
@@ -382,52 +358,22 @@ double getClipFileLength (const Song& song, const juce::ValueTree& clipState)
 
 stretch::Settings getClipStretch (const Song& song, const juce::ValueTree& clipState)
 {
-    const ClipTempo tempo (song);
-    return getStretch (song, clipState, tempo, findMappedTime (song, clipState, tempo));
+    return getClipStretch (song, readClipValue (clipState));
 }
 
 bool followsTempoChanges (const Song& song, const juce::ValueTree& clipState)
 {
-    return isAudioState (clipState) && findMappedTime (song, clipState).has_value();
-}
-
-double getFileSecondsBetween (const Song& song, const juce::ValueTree& clipState, double from, BeatPosition to)
-{
-    // Along markers and tempo changes, the clip's beats are its sound's, at its file's tempo between its markers.
-    if (const auto time = findMappedTime (song, clipState))
-        return time->timeAt (to.inBeats()) - time->timeAt (toBeats (song, from).inBeats());
-
-    return (toSeconds (song, to) - from) / getClipStretch (song, clipState).timeRatio;
-}
-
-double getPartStartFor (const Song& song, const juce::ValueTree& clipState, double offset)
-{
-    // The sound's start would play at the song's time so far before the clip's start: its part starts where that puts it.
-    if (const auto time = findMappedTime (song, clipState))
-    {
-        const auto start = toSeconds (song, BeatPosition::fromBeats (time->startBeat));
-        const auto soundStart = toBeats (song, start - offset).inBeats();
-        return time->warp (time->unwarp (0.0) + (time->startBeat - soundStart) * 60.0 / time->tempo);
-    }
-
-    return offset / getClipStretch (song, clipState).timeRatio;
+    return isAudioState (clipState) && followsTempoChanges (song, readClipValue (clipState));
 }
 
 juce::File getPlayedFile (const Song& song, const juce::ValueTree& clipState)
 {
-    const auto file = getClipFile (song, clipState);
-
-    if (const auto settings = getClipStretch (song, clipState); ! stretch::isUnchanged (settings))
-        return getRenderFile (song, file, settings);
-
-    return file;
+    return getPlayedFile (song, readClipValue (clipState));
 }
 
 PlayedPosition getPlayedPosition (const Song& song, const juce::ValueTree& clipState)
 {
-    const ClipTempo tempo (song);
-    const auto mapped = findMappedTime (song, clipState, tempo);
-    return getPosition (song, clipState, tempo, mapped, getStretch (song, clipState, tempo, mapped));
+    return getPlayedPosition (song, readClipValue (clipState));
 }
 
 ClipTempo::ClipTempo (const Song& song)
@@ -436,47 +382,93 @@ ClipTempo::ClipTempo (const Song& song)
 {
 }
 
-namespace
-{
-    // What plays for a clip's element (getPlayedClip()).
-    PlayedClip getPlayedClip (const Song& song, const juce::ValueTree& clipState, const ClipTempo& tempo)
-    {
-        // Each worked out once, as getPlayedFile(), getPlayedPosition() and getFittedFades() work it out.
-        const auto mapped = findMappedTime (song, clipState, tempo);
-        const auto settings = getStretch (song, clipState, tempo, mapped);
-        const auto file = getClipFile (song, clipState);
-        PlayedClip played { stretch::isUnchanged (settings) ? file : getRenderFile (song, file, settings),
-                            getPosition (song, clipState, tempo, mapped, settings) };
-        std::tie (played.fadeIn, played.fadeOut) = getFades (clipState, played.position);
-        return played;
-    }
-} // namespace
-
+//==============================================================================
 juce::File getClipFile (const Song& song, const ClipValue& clip)
 {
     return findProjectFile (song, clip.sound.file);
 }
 
-PlayedClip getPlayedClip (const Song& song, const ClipValue& clip, const ClipTempo& tempo)
+double getClipFileLength (const Song& song, const ClipValue& clip)
 {
-    // A clip of the song's: its value isn't read again to compare, which a plan's compile would pay for at every clip.
-    const auto clipState = findClipState (song, clip.id);
-    jassert (clipState.isValid() && isAudioState (clipState) == clip.isAudio());
-    return getPlayedClip (song, clipState, tempo);
+    return getFileSeconds (getClipFile (song, clip));
 }
 
-BeatRange getAudioClipRange (const Song& song, const juce::ValueTree& clipState)
+stretch::Settings getClipStretch (const Song& song, const ClipValue& clip)
 {
-    const auto start = getClipRange (clipState).getStart();
-    return { start, toBeats (song, getPlayedPosition (song, clipState).end) };
+    const ClipTempo tempo (song);
+    return getStretch (clip, tempo, findMappedTime (song, clip, tempo));
+}
+
+bool followsTempoChanges (const Song& song, const ClipValue& clip)
+{
+    return clip.isAudio() && findMappedTime (song, clip).has_value();
+}
+
+double getFileSecondsBetween (const Song& song, const ClipValue& clip, double from, BeatPosition to)
+{
+    // Along markers and tempo changes, the clip's beats are its sound's, at its file's tempo between its markers.
+    if (const auto time = findMappedTime (song, clip))
+        return time->timeAt (to.inBeats()) - time->timeAt (toBeats (song, from).inBeats());
+
+    return (toSeconds (song, to) - from) / getClipStretch (song, clip).timeRatio;
+}
+
+double getPartStartFor (const Song& song, const ClipValue& clip, double offset)
+{
+    // The sound's start would play at the song's time so far before the clip's start: its part starts where that puts it.
+    if (const auto time = findMappedTime (song, clip))
+    {
+        const auto start = toSeconds (song, BeatPosition::fromBeats (time->startBeat));
+        const auto soundStart = toBeats (song, start - offset).inBeats();
+        return time->warp (time->unwarp (0.0) + (time->startBeat - soundStart) * 60.0 / time->tempo);
+    }
+
+    return offset / getClipStretch (song, clip).timeRatio;
+}
+
+juce::File getPlayedFile (const Song& song, const ClipValue& clip)
+{
+    const auto file = getClipFile (song, clip);
+
+    if (const auto settings = getClipStretch (song, clip); ! stretch::isUnchanged (settings))
+        return getRenderFile (song, file, settings);
+
+    return file;
+}
+
+PlayedPosition getPlayedPosition (const Song& song, const ClipValue& clip)
+{
+    const ClipTempo tempo (song);
+    const auto mapped = findMappedTime (song, clip, tempo);
+    return getPosition (song, clip, tempo, mapped, getStretch (clip, tempo, mapped));
+}
+
+PlayedClip getPlayedClip (const Song& song, const ClipValue& clip, const ClipTempo& tempo)
+{
+    // Each worked out once, as getPlayedFile(), getPlayedPosition() and getFittedFades() work it out.
+    const auto mapped = findMappedTime (song, clip, tempo);
+    const auto settings = getStretch (clip, tempo, mapped);
+    const auto file = getClipFile (song, clip);
+    PlayedClip played { stretch::isUnchanged (settings) ? file : getRenderFile (song, file, settings),
+                        getPosition (song, clip, tempo, mapped, settings) };
+    std::tie (played.fadeIn, played.fadeOut) = getFades (clip, played.position);
+    return played;
+}
+
+BeatRange getAudioClipRange (const Song& song, const ClipValue& clip)
+{
+    return { clip.start, toBeats (song, getPlayedPosition (song, clip).end) };
 }
 
 void setAudioPart (Song& song, juce::ValueTree clipState, BeatPosition start, FilePart part)
 {
-    auto* um = getUndoOf (song);
-    clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), um);
-    clipState.setProperty (schema::clipFileStart, std::max (0.0, part.start), um);
-    clipState.setProperty (schema::clipFileEnd, std::max (part.start, part.end), um);
+    // The element given, which a value is read from and written into: what the clips' own edits do by its ID (Clips.cpp).
+    const auto held = readClipValue (clipState);
+    auto next = held;
+    next.start = BeatPosition::fromBeats (std::max (0.0, start.inBeats()));
+    next.fileStart = std::max (0.0, part.start);
+    next.fileEnd = std::max (part.start, part.end);
+    writeClipElement (next, held, clipState, getUndoOf (song));
 }
 
 double getClipFade (const juce::ValueTree& clipState, bool fadeIn)
@@ -486,12 +478,10 @@ double getClipFade (const juce::ValueTree& clipState, bool fadeIn)
 
 void setClipFade (Song& song, juce::ValueTree clipState, bool fadeIn, double seconds)
 {
-    const auto& property = fadeIn ? schema::clipFadeIn : schema::clipFadeOut;
-
-    if (seconds > 0.0)
-        clipState.setProperty (property, seconds, getUndoOf (song));
-    else
-        clipState.removeProperty (property, getUndoOf (song));
+    const auto held = readClipValue (clipState);
+    auto next = held;
+    (fadeIn ? next.fadeIn : next.fadeOut).seconds = std::max (0.0, seconds);
+    writeClipElement (next, held, clipState, getUndoOf (song));
 }
 
 FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn)
@@ -499,25 +489,6 @@ FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn)
     const auto shape = clipState[fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape].toString();
     const auto bend = (float) clipState.getProperty (fadeIn ? schema::clipFadeInBend : schema::clipFadeOutBend, 0.0f);
     return { shape == schema::fadeIsSCurve ? FadeShape::sCurve : FadeShape::curve, juce::jlimit (-1.0f, 1.0f, bend) };
-}
-
-void setClipFadeCurve (Song& song, juce::ValueTree clipState, bool fadeIn, FadeCurve curve)
-{
-    // What is as at first isn't written: a straight curve.
-    auto* um = getUndoOf (song);
-    const auto& shapeProperty = fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape;
-    const auto& bendProperty = fadeIn ? schema::clipFadeInBend : schema::clipFadeOutBend;
-    const auto bend = juce::jlimit (-1.0f, 1.0f, curve.bend);
-
-    if (curve.shape == FadeShape::sCurve)
-        clipState.setProperty (shapeProperty, schema::fadeIsSCurve, um);
-    else
-        clipState.removeProperty (shapeProperty, um);
-
-    if (juce::exactlyEqual (bend, 0.0f))
-        clipState.removeProperty (bendProperty, um);
-    else
-        clipState.setProperty (bendProperty, bend, um);
 }
 
 engine::FadeCurve toEngineFade (FadeCurve curve)
@@ -528,7 +499,8 @@ engine::FadeCurve toEngineFade (FadeCurve curve)
 //==============================================================================
 bool isAudioClip (const Song& song, ClipID clip)
 {
-    return findAudioState (song, clip).isValid();
+    // The clip's kind alone, where the song keeps it (Clips.h: the storage).
+    return isAudioState (findClipState (song, clip));
 }
 
 FilePart getFilePart (const ClipValue& clip)
@@ -543,49 +515,50 @@ FadeCurve getFadeCurve (const ClipFade& fade)
 
 juce::File getClipFile (const Song& song, ClipID clip)
 {
-    const auto clipState = findAudioState (song, clip);
-    return clipState.isValid() ? getClipFile (song, clipState) : juce::File();
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? getClipFile (song, *value) : juce::File();
 }
 
 double getClipFileLength (const Song& song, ClipID clip)
 {
-    const auto clipState = findAudioState (song, clip);
-    return clipState.isValid() ? getClipFileLength (song, clipState) : 0.0;
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? getClipFileLength (song, *value) : 0.0;
 }
 
 bool followsTempoChanges (const Song& song, ClipID clip)
 {
-    return followsTempoChanges (song, findAudioState (song, clip));
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() && followsTempoChanges (song, *value);
 }
 
 juce::File getPlayedFile (const Song& song, ClipID clip)
 {
-    const auto clipState = findAudioState (song, clip);
-    return clipState.isValid() ? getPlayedFile (song, clipState) : juce::File();
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? getPlayedFile (song, *value) : juce::File();
 }
 
 PlayedPosition getPlayedPosition (const Song& song, ClipID clip)
 {
-    const auto clipState = findAudioState (song, clip);
-    return clipState.isValid() ? getPlayedPosition (song, clipState) : PlayedPosition();
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? getPlayedPosition (song, *value) : PlayedPosition();
 }
 
 std::pair<double, double> getFittedFades (const Song& song, ClipID clip)
 {
-    const auto clipState = findAudioState (song, clip);
-    return clipState.isValid() ? getFades (clipState, getPlayedPosition (song, clipState)) : std::pair<double, double>();
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? getFades (*value, getPlayedPosition (song, *value)) : std::pair<double, double>();
 }
 
 SecondsRange getAudioFileRange (const Song& song, ClipID clip)
 {
-    const auto clipState = findAudioState (song, clip);
-    return clipState.isValid() ? getAudioFileRange (song, clipState) : SecondsRange();
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? getAudioFileRange (song, *value) : SecondsRange();
 }
 
 stretch::Settings getClipStretch (const Song& song, ClipID clip)
 {
-    if (const auto clipState = findAudioState (song, clip); clipState.isValid())
-        return getClipStretch (song, clipState);
+    if (const auto value = findAudioClip (song, clip))
+        return getClipStretch (song, *value);
 
     return {};
 }
@@ -612,62 +585,68 @@ juce::File getRenderFile (const Song& song, const juce::File& source, const stre
     return song.getCacheFolder().getChildFile (renderFilePrefix + juce::String::toHexString (key.toString().hashCode64()) + ".wav");
 }
 
-SecondsRange getAudioFileRange (const Song& song, const juce::ValueTree& clipState)
+SecondsRange getAudioFileRange (const Song& song, const ClipValue& clip)
 {
-    if (const auto time = findMappedTime (song, clipState))
+    if (const auto time = findMappedTime (song, clip))
     {
         const auto map = getTempoMap (song);
         return { map.toSamples (time->beatAt (0.0)), map.toSamples (time->beatAt (time->fileLength)) };
     }
 
-    const auto position = getPlayedPosition (song, clipState);
+    const auto position = getPlayedPosition (song, clip);
     const auto start = position.start - position.offset;
-    return { start, start + getClipFileLength (song, clipState) * getClipStretch (song, clipState).timeRatio };
+    return { start, start + getClipFileLength (song, clip) * getClipStretch (song, clip).timeRatio };
 }
 
 double getFileTimeAt (const Song& song, ClipID clip, BeatPosition beat)
 {
-    const auto clipState = findAudioState (song, clip);
+    const auto found = findAudioClip (song, clip);
+    const auto value = found.has_value() ? *found : getNoAudioClip();
 
     // Along markers and tempo changes, the sound's time is the song's beat, at the file's tempo between its markers.
-    if (const auto time = findMappedTime (song, clipState))
+    if (const auto time = findMappedTime (song, value))
     {
         const auto into = time->timeAt (beat.inBeats());
-        return (bool) clipState.getProperty (schema::clipReversed, false) ? time->fileLength - into : into;
+        return value.sound.reversed ? time->fileLength - into : into;
     }
 
-    const auto position = getPlayedPosition (song, clipState);
-    const auto settings = getClipStretch (song, clipState);
+    const auto position = getPlayedPosition (song, value);
+    const auto settings = getClipStretch (song, value);
     const auto intoFile = (toSeconds (song, beat) - (position.start - position.offset)) / settings.timeRatio;
-    return settings.reversed ? getClipFileLength (song, clipState) - intoFile : intoFile;
+    return settings.reversed ? getClipFileLength (song, value) - intoFile : intoFile;
 }
 
 double getClipTempo (const Song& song, ClipID clip)
 {
-    return (double) findAudioState (song, clip).getProperty (schema::clipTempo, 0.0);
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? value->sound.tempo : 0.0;
 }
 
 float getClipPitch (const Song& song, ClipID clip)
 {
-    return (float) findAudioState (song, clip).getProperty (schema::clipPitch, 0.0f);
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? value->sound.pitch : 0.0f;
 }
 
 bool isClipReversed (const Song& song, ClipID clip)
 {
-    return (bool) findAudioState (song, clip).getProperty (schema::clipReversed, false);
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() && value->sound.reversed;
 }
 
 float getClipGain (const Song& song, ClipID clip)
 {
-    return (float) findAudioState (song, clip).getProperty (schema::clipGain, 0.0f);
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? value->gain : 0.0f;
 }
 
 void setClipGain (Song& song, ClipID clip, float decibels)
 {
-    if (auto clipState = findAudioState (song, clip); clipState.isValid())
+    if (const auto held = findAudioClip (song, clip))
     {
-        const auto gain = juce::jlimit (minClipGain, maxClipGain, decibels);
-        setOrRemove (clipState, schema::clipGain, juce::exactlyEqual (gain, 0.0f) ? juce::var() : juce::var (gain), getUndoOf (song));
+        auto next = *held;
+        next.gain = juce::jlimit (minClipGain, maxClipGain, decibels);
+        setClip (song, *held, next);
     }
 }
 
@@ -675,48 +654,72 @@ void setClipPitch (Song& song, ClipID clip, float semitones)
 {
     const auto pitch = juce::jlimit (-maxClipPitch, maxClipPitch, semitones);
 
-    if (! juce::exactlyEqual (getClipPitch (song, clip), pitch))
-        changeSound (song, clip, [pitch] (Sound& sound) { sound.pitch = pitch; });
+    if (const auto held = findAudioClip (song, clip); held.has_value() && ! juce::exactlyEqual (held->sound.pitch, pitch))
+    {
+        auto sound = held->sound;
+        sound.pitch = pitch;
+        giveSound (song, *held, sound);
+    }
 }
 
 void setClipReversed (Song& song, ClipID clip, bool reversed)
 {
     // The same part of the audio plays, backwards.
-    if (isClipReversed (song, clip) != reversed)
-        changeSound (song, clip, [reversed] (Sound& sound) { sound.reversed = reversed; });
+    if (const auto held = findAudioClip (song, clip); held.has_value() && held->sound.reversed != reversed)
+    {
+        auto sound = held->sound;
+        sound.reversed = reversed;
+        giveSound (song, *held, sound);
+    }
 }
+
+namespace
+{
+    // An audio clip's value as setClipFollowsTempo() would leave it (and each clip of its alias group): following the song's
+    // tempo from its file's, or at its own speed again, its warp markers gone with the tempo they were set at. The same value
+    // where nothing changes: it follows (or doesn't) already, or it would follow without its file, whose length, and so its
+    // tempo, is unknown.
+    ClipValue withTempoFollowed (const Song& song, const ClipValue& clip, bool follows)
+    {
+        if ((clip.sound.tempo > 0.0) == follows || (follows && getClipFileLength (song, clip) <= 0.0))
+            return clip;
+
+        auto next = clip;
+        next.sound.tempo = follows ? getFileTempo (song, clip.start, getClipFile (song, clip)) : 0.0;
+
+        if (! follows)
+            next.sound = withWarpPoints (next.sound, {});
+
+        return next;
+    }
+} // namespace
 
 void setClipFollowsTempo (Song& song, ClipID clip, bool follows)
 {
-    const auto clipState = findAudioState (song, clip);
-
-    // Without its file, how long it lasts is unknown, and so is its tempo.
-    if (! clipState.isValid() || (getClipTempo (song, clip) > 0.0) == follows || (follows && getClipFileLength (song, clipState) <= 0.0))
-        return;
-
-    const auto tempo = follows ? getFileTempo (song, getClipRange (clipState).getStart(), getClipFile (song, clipState)) : 0.0;
-    changeSound (song, clip, [tempo] (Sound& sound) { sound.tempo = tempo; });
-
-    // At its own speed, its warp markers go with the tempo they were set at.
-    if (! follows)
-        writeWarpPoints (song, clipState, {});
+    if (const auto held = findAudioClip (song, clip))
+        if (const auto next = withTempoFollowed (song, *held, follows); ! (next.sound == held->sound))
+            giveSound (song, *held, next.sound);
 }
 
 void setClipTempo (Song& song, ClipID clip, double bpm)
 {
-    if (getClipTempo (song, clip) <= 0.0)
+    const auto held = findAudioClip (song, clip);
+
+    if (! held.has_value() || held->sound.tempo <= 0.0)
         return;
 
-    const auto tempo = juce::jlimit (minClipTempo, maxClipTempo, bpm);
-    changeSound (song, clip, [tempo] (Sound& sound) { sound.tempo = tempo; });
+    auto sound = held->sound;
+    sound.tempo = juce::jlimit (minClipTempo, maxClipTempo, bpm);
+    giveSound (song, *held, sound);
 }
 
 //==============================================================================
 namespace
 {
-    // The properties an alias group's audio clips share, each with its value where a clip has none (writeSound() writes
+    // The properties an alias group's audio clips share, each with its value where a clip has none (the clips' code writes
     // none for it; every audio clip names its file, as the loader keeps it). The file's path is compared as the song holds it
-    // (Schema.h: clipFile), whether the file is there or not.
+    // (Schema.h: clipFile), whether the file is there or not. For the elements of a whole copy of a song (the loader's, a
+    // merge's): the clips' own edits give a group's clips one value (SongValues.h: ClipSound).
     struct SharedProperty
     {
         juce::Identifier name;
@@ -790,10 +793,9 @@ namespace
     constexpr double fastestWarp = 8.0;
 
     // The time of a clip's file where the clip starts, as recorded: its part's start, or its end while it plays backwards.
-    double getStartTimeInFile (const juce::ValueTree& clipState)
+    double getStartTimeInFile (const ClipValue& clip)
     {
-        const auto part = getFilePart (clipState);
-        return (bool) clipState.getProperty (schema::clipReversed, false) ? part.end : part.start;
+        return clip.sound.reversed ? clip.fileEnd : clip.fileStart;
     }
 
     std::vector<std::pair<double, double>>::iterator findPoint (std::vector<std::pair<double, double>>& points, double time)
@@ -808,18 +810,47 @@ namespace
         const auto along = (beat.inBeats() - time.startBeat) * 60.0 / time.tempo;
         return reversed ? startStraight - along : startStraight + along;
     }
+
+    // The beats times of a clip's file play at (getBeatsOfFileTimes()).
+    std::vector<BeatPosition> getBeatsOfFileTimes (const Song& song, const ClipValue& clip, const std::vector<double>& fileTimes)
+    {
+        std::vector<BeatPosition> beats;
+        const auto reversed = clip.sound.reversed;
+
+        // Along markers and tempo changes, by the clip's time; else at one ratio, from where the file's start plays.
+        if (const auto time = findMappedTime (song, clip))
+        {
+            for (const auto fileTime : fileTimes)
+                beats.push_back (BeatPosition::fromBeats (time->beatAt (reversed ? time->fileLength - fileTime : fileTime)));
+
+            return beats;
+        }
+
+        const auto length = getClipFileLength (song, clip);
+        const auto start = getAudioFileRange (song, clip).start;
+        const auto ratio = getClipStretch (song, clip).timeRatio;
+
+        for (const auto fileTime : fileTimes)
+            beats.push_back (toBeats (song, start + (reversed ? length - fileTime : fileTime) * ratio));
+
+        return beats;
+    }
 } // namespace
 
 std::vector<WarpMarker> getWarpMarkers (const Song& song, ClipID clip)
 {
     std::vector<WarpMarker> markers;
-    const auto points = getWarpPoints (findAudioState (song, clip));
+    const auto value = findAudioClip (song, clip);
+
+    if (! value.has_value())
+        return markers;
+
     std::vector<double> times;
 
-    for (const auto& point : points)
+    for (const auto& point : getWarpPoints (*value))
         times.push_back (point.first);
 
-    const auto beats = getBeatsOfFileTimes (song, clip, times);
+    const auto beats = getBeatsOfFileTimes (song, *value, times);
 
     for (size_t i = 0; i < times.size(); ++i)
         markers.push_back ({ times[i], beats[i] });
@@ -834,64 +865,55 @@ BeatPosition getBeatOfFileTime (const Song& song, ClipID clip, double fileTime)
 
 std::vector<BeatPosition> getBeatsOfFileTimes (const Song& song, ClipID clip, const std::vector<double>& fileTimes)
 {
-    std::vector<BeatPosition> beats;
-    const auto clipState = findAudioState (song, clip);
+    if (const auto value = findAudioClip (song, clip))
+        return getBeatsOfFileTimes (song, *value, fileTimes);
 
-    if (! clipState.isValid())
-        return std::vector<BeatPosition> (fileTimes.size());
-
-    const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
-
-    // Along markers and tempo changes, by the clip's time; else at one ratio, from where the file's start plays.
-    if (const auto time = findMappedTime (song, clipState))
-    {
-        for (const auto fileTime : fileTimes)
-            beats.push_back (BeatPosition::fromBeats (time->beatAt (reversed ? time->fileLength - fileTime : fileTime)));
-
-        return beats;
-    }
-
-    const auto length = getClipFileLength (song, clipState);
-    const auto start = getAudioFileRange (song, clipState).start;
-    const auto ratio = getClipStretch (song, clipState).timeRatio;
-
-    for (const auto fileTime : fileTimes)
-        beats.push_back (toBeats (song, start + (reversed ? length - fileTime : fileTime) * ratio));
-
-    return beats;
+    return std::vector<BeatPosition> (fileTimes.size());
 }
 
 bool addWarpMarker (Song& song, ClipID clip, double at)
 {
-    if (! findAudioState (song, clip).isValid() || at < 0.0 || at > getClipFileLength (song, findAudioState (song, clip)))
+    const auto held = findAudioClip (song, clip);
+
+    if (! held.has_value() || at < 0.0 || at > getClipFileLength (song, *held))
         return false;
 
-    setClipFollowsTempo (song, clip, true);
-    const auto clipState = findAudioState (song, clip);
-    auto points = getWarpPoints (clipState);
+    // It follows the song's tempo first (setClipFollowsTempo()), which stays done whatever comes of the marker.
+    const auto following = withTempoFollowed (song, *held, true);
+    auto points = getWarpPoints (following);
 
-    if (getClipTempo (song, clip) <= 0.0
+    if (following.sound.tempo <= 0.0
         || std::any_of (points.begin(), points.end(), [at] (const auto& point) { return std::abs (point.first - at) < minWarpGap; }))
+    {
+        if (! (following.sound == held->sound))
+            giveSound (song, *held, following.sound);
+
         return false;
+    }
 
     // Where it plays now, straight: nothing moves.
     points.emplace_back (at, alongPoints (points, at, false));
     std::sort (points.begin(), points.end());
-    writeWarpPoints (song, clipState, points);
+    giveSound (song, *held, withWarpPoints (following.sound, points));
     return true;
 }
 
 void moveWarpMarker (Song& song, ClipID clip, double at, BeatPosition beat)
 {
-    const auto clipState = findAudioState (song, clip);
-    auto points = getWarpPoints (clipState);
+    const auto held = findAudioClip (song, clip);
+
+    if (! held.has_value())
+        return;
+
+    const auto& value = *held;
+    auto points = getWarpPoints (value);
 
     if (findPoint (points, at) == points.end())
         return;
 
     // The audio where the clip starts stays there (a marker on it stays with it): held by a marker of its own while the moved
     // one's stretches would reach it.
-    const auto startTime = getStartTimeInFile (clipState);
+    const auto startTime = getStartTimeInFile (value);
     const auto startStraight = alongPoints (points, startTime, false);
 
     if (std::abs (startTime - at) < minWarpGap)
@@ -907,8 +929,8 @@ void moveWarpMarker (Song& song, ClipID clip, double at, BeatPosition beat)
     }
 
     // Where the beat is, played straight, kept between its neighbours, each stretch no faster or slower than fastestWarp.
-    const auto time = getClipTime (song, clipState);
-    const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
+    const auto time = getClipTime (song, value);
+    const auto reversed = value.sound.reversed;
     const auto index = (size_t) std::distance (points.begin(), findPoint (points, at));
     auto low = -std::numeric_limits<double>::max(), high = std::numeric_limits<double>::max();
 
@@ -930,44 +952,50 @@ void moveWarpMarker (Song& song, ClipID clip, double at, BeatPosition beat)
         return;
 
     points[index].second = juce::jlimit (low, high, getStraightFor (time, reversed, startStraight, beat));
-    writeWarpPoints (song, clipState, points);
+    writeWarpPoints (song, value, points);
 }
 
 void removeWarpMarker (Song& song, ClipID clip, double at)
 {
-    const auto clipState = findAudioState (song, clip);
-    auto points = getWarpPoints (clipState);
+    const auto held = findAudioClip (song, clip);
+
+    if (! held.has_value())
+        return;
+
+    auto points = getWarpPoints (*held);
 
     if (const auto found = findPoint (points, at); found != points.end())
     {
         points.erase (found);
-        writeWarpPoints (song, clipState, points);
+        writeWarpPoints (song, *held, points);
     }
 }
 
 void removeWarpMarkers (Song& song, ClipID clip)
 {
-    if (const auto clipState = findAudioState (song, clip); clipState.isValid() && clipState.getChildWithName (schema::WARP).isValid())
-        writeWarpPoints (song, clipState, {});
+    if (const auto held = findAudioClip (song, clip); held.has_value() && ! held->sound.warps.empty())
+        writeWarpPoints (song, *held, {});
 }
 
 void quantizeClipAudio (Song& song, ClipID clip, const std::vector<double>& hits, BeatDuration grid, double strength)
 {
-    if (! findAudioState (song, clip).isValid() || grid.inBeats() <= 0.0)
+    const auto held = findAudioClip (song, clip);
+
+    if (! held.has_value() || grid.inBeats() <= 0.0)
         return;
 
-    setClipFollowsTempo (song, clip, true);
-    const auto clipState = findAudioState (song, clip);
+    // It follows the song's tempo first (setClipFollowsTempo()), which stays done whatever comes of the hits.
+    const auto value = withTempoFollowed (song, *held, true);
 
-    if (getClipTempo (song, clip) <= 0.0)
+    if (value.sound.tempo <= 0.0)
         return;
 
-    const auto time = getClipTime (song, clipState);
-    const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
-    const auto points = getWarpPoints (clipState);
-    const auto startTime = getStartTimeInFile (clipState);
+    const auto time = getClipTime (song, value);
+    const auto reversed = value.sound.reversed;
+    const auto points = getWarpPoints (value);
+    const auto startTime = getStartTimeInFile (value);
     const auto startStraight = alongPoints (points, startTime, false);
-    const auto played = getAudioClipRange (song, clipState);
+    const auto played = getAudioClipRange (song, value);
     const auto step = grid.inBeats();
     const auto share = juce::jlimit (0.0, 1.0, strength);
 
@@ -1007,38 +1035,43 @@ void quantizeClipAudio (Song& song, ClipID clip, const std::vector<double>& hits
         if (rising.empty() || point.second > rising.back().second + minWarpGap / fastestWarp)
             rising.push_back (point);
 
-    writeWarpPoints (song, clipState, rising);
+    giveSound (song, *held, withWarpPoints (value.sound, rising));
 }
 
 int getClipTakeCount (const Song& song, ClipID clip)
 {
-    return (int) findAudioState (song, clip).getProperty (schema::clipTakes, 0);
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? value->takes : 0;
 }
 
 int getClipTake (const Song& song, ClipID clip)
 {
-    return (int) findAudioState (song, clip).getProperty (schema::clipTake, 1);
+    const auto value = findAudioClip (song, clip);
+    return value.has_value() ? value->take : 1;
 }
 
 void playTake (Song& song, ClipID clip, int take)
 {
-    auto clipState = findAudioState (song, clip);
-    const auto playing = getClipTake (song, clip);
+    const auto held = findAudioClip (song, clip);
 
-    if (getClipTakeCount (song, clip) < 2 || take < 1 || take > getClipTakeCount (song, clip) || take == playing)
+    if (! held.has_value() || held->takes < 2 || take < 1 || take > held->takes || take == held->take)
         return;
 
     // The takes lie one after another in the clip's file, each as long as the range they were recorded round.
-    const auto shift = (double) clipState[schema::clipTakeLength] * (take - playing);
-    const auto part = getFilePart (clipState);
-    clipState.setProperty (schema::clipTake, take, getUndoOf (song));
-    setAudioPart (song, clipState, getClipRange (clipState).getStart(), { part.start + shift, part.end + shift });
+    const auto shift = held->takeLength * (take - held->take);
+    auto next = *held;
+    next.take = take;
+    next.start = BeatPosition::fromBeats (std::max (0.0, held->start.inBeats())); // as setAudioPart() keeps it
+    next.fileStart = std::max (0.0, held->fileStart + shift);
+    next.fileEnd = std::max (held->fileStart + shift, held->fileEnd + shift);
+    setClip (song, *held, next);
 }
 
 std::vector<ClipID> getAudioClips (const Song& song)
 {
     std::vector<ClipID> clips;
 
+    // Their kinds where the song keeps them (Clips.h: the storage).
     for (const auto& clipState : getClipStates (song))
         if (isAudioState (clipState))
             clips.push_back (getClipID (clipState));
@@ -1084,7 +1117,7 @@ namespace
         std::vector<ClipID> audio;
 
         for (const auto clip : clips)
-            if (findAudioState (song, clip).isValid())
+            if (isAudioClip (song, clip))
                 audio.push_back (clip);
 
         return audio;
@@ -1118,12 +1151,12 @@ void toggleClipsFollowTempo (Song& song, const std::vector<ClipID>& clips)
 //==============================================================================
 std::optional<float> getClipPeak (const Song& song, ClipID clip)
 {
-    const auto clipState = findAudioState (song, clip);
+    const auto value = findAudioClip (song, clip);
 
-    if (! clipState.isValid())
+    if (! value.has_value())
         return {};
 
-    return readPeak (getClipFile (song, clipState), getFilePart (clipState), nullptr, nullptr).peak;
+    return readPeak (getClipFile (song, *value), getFilePart (*value), nullptr, nullptr).peak;
 }
 
 PeakRead readPeak (const juce::File& file, FilePart part, const std::function<bool()>& shouldStop,
