@@ -1859,10 +1859,11 @@ TEST_CASE ("Performance gate: a drawn lane of 10,000 points taken into the song'
     state.appendChild (automation, nullptr);
     phazite::Song song (state);
     const auto allocations = phazite::test::countAllocations ([&song] { song.holdValues(); });
-    REQUIRE (phazite::getPoints (song, volume).size() == (size_t) numPoints);
 
     if (! allocations.has_value())
-        return; // nothing counted on this build
+        return; // nothing counted on this build, and nothing run: the song holds no values
+
+    REQUIRE (phazite::getPoints (song, volume).size() == (size_t) numPoints);
 
     // Measured (2026-11-22, Windows, Debug): 1,338 allocations for 10,000 points (the value's leaves and nodes, the elements
     // taken out of the tree, the other areas' adoption): fewer than one for five points.
