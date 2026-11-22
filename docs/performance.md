@@ -954,6 +954,64 @@ song's; in the history at d0d651b1) took 0.08 ms for the drag's step and 0.62 ms
 microseconds a note are still spent in the model's functions around the value (each note's own look at its clip's
 place in the tree and at where the clip can grow to), which the clips' move takes next.
 
+**The clips and the tempo map as values (roadmap step S5.20, 2026-11-22).** The song's clips (with each track's order
+of them and the alias groups) and its tempo map are values beside the tree too, and the engine's tempo map is made
+once for a change of the song's. Measured as above: `main` (f70b396f) and the branch (f1f72912) in turns, the median
+of five runs (three where said), the `windows-profile` build on a quiet machine.
+
+The piano roll in a window, a clip of 5,000 notes in a song of 4,800 clips:
+
+| What | `main` | The notes, the clips and the tempo map as values |
+|---|---|---|
+| A step of a rectangle selecting across the clip | 2.67 ms | 1.00 ms |
+| A step of a drag of 500 notes / its Undo | 3.68 / 8.52 ms | 2.02 / 1.11 ms |
+| Select All | 3.43 ms | 1.18 ms |
+| Transpose Up, every note / its Undo | 24.9 / 10.9 ms | 8.6 / 2.1 ms |
+| Quantize, every note / its Undo | 43.2 / 20.5 ms | 15.3 / 1.7 ms |
+| Duplicate, every note / its Undo | 45.4 / 10.6 ms | 19.3 / 1.7 ms |
+| Delete, every note / its Undo | 26.3 / 13.7 ms | 5.3 / 1.8 ms |
+| Every track's clips (`getClips()`, 200 calls) | 5.67 ms | 4.33 ms |
+| A clip's info by its ID (`getClip()`) / a track's row / a clip's note shapes | 1.4 / 2.1 / 2.7 µs | 0.9 / 1.4 / 1.1 µs |
+| A clip moved, as a drag's step moves it (the model alone) | 3.0 µs | 3.5 µs |
+
+The playlist of 200 tracks and 4,800 clips, in a window:
+
+| What | `main` | As values |
+|---|---|---|
+| A note added to a clip in view / out of view | 1.28 / 1.23 ms | 0.58 / 0.56 ms |
+| A clip moved a beat, as a drag's step moves it | 1.31 ms | 0.62 ms |
+| A track renamed / added at the end | 13.9 / 17.6 ms | 11.8 / 15.5 ms |
+| A wheel notch down / up; the scroll bar's thumb dragged | 5.83 / 0.59 / 0.57 ms | 5.73 / 0.59 / 0.55 ms |
+
+Plans, saves and the versions (the median of three runs):
+
+| What | `main` | As values |
+|---|---|---|
+| A song of 500 audio clips: a clip moved, with its new plan | 3.77 ms | 1.78 ms |
+| ...the tempo changed, with its new plan | 7.38 ms | 3.96 ms |
+| ...a whole compile, as a render's | 205 ms | 202 ms |
+| A song of 100 tracks: a note added / a clip moved, with its new plan | 1.67 / 1.63 ms | 1.56 / 1.56 ms |
+| ...a whole compile; Save | 137 ms; 105 ms | 134 ms; 105 ms |
+| The check for unsaved changes after a track moved and moved back | 8.19 ms | 0.04 ms |
+| A note moved a step, with what follows (the views, the plan) | 3.84 ms | 3.32 ms |
+| The whole window painted | 21.2 ms | 19.8 ms |
+| A branch switch: the longest the message thread is kept (32 tracks) | 73 ms | 57 ms |
+| A big project (40 tracks, 10,240 notes): Save / Autosave / Open | 55 / 35 / 46 ms | 58 / 42 / 55 ms |
+| Autosave, on the UI thread ("the UI's work on a big song") | 4.5 ms | 5.6 ms |
+| The song of 100 tracks compared whole (nothing does it on the message thread) | 49 ms | 63 ms |
+
+What fell is what reads and changes notes, clips and tempos: a value is found in a map and changed by making the
+next one, an Undo puts a value back, and a plan asks the song for beats and seconds without making a tempo map each
+time. What grew is what takes the song WHOLE: a project opened has its notes, clips and tempo map read into values
+after the loader made its tree consistent (Open), and a copy for an autosave or a comparison has them written back
+into a tree, until the file is read and written from values and the versions compare values (the end of step
+S5.20). A clip moved through the model alone costs half a microsecond more (a value made where two properties were
+set).
+
+The model alone (`--test-case="*notes as values*"`, the median of three): a step of a drag of 500 notes 0.67 ms
+(1.10 before the clips moved); 5,000 notes transposed 6.2 ms (10.8); 500 notes deleted 1.07 ms (1.40); the song
+copied whole 4.3 ms (4.0); what a drag of 500 notes over 60 moves keeps in the undo history 352 KB.
+
 ### Benchmark: a sandboxed plug-in's round trip at 128 samples
 
 One plug-in played in a helper, a block of 128 samples (2.67 ms at 48 kHz) at a time, against the same plug-in in
