@@ -24,7 +24,7 @@ namespace
             visited.fetch_add (count, std::memory_order_relaxed);
     }
 
-    // Each element's ID is its "id" (Schema.h: trackID, clipID, noteID), saved as a number.
+    // Each track's ID is its "id" (Schema.h: trackID), saved as a number.
     std::uint64_t getID (const juce::ValueTree& state)
     {
         return (std::uint64_t) (juce::int64) state[schema::trackID];
@@ -50,8 +50,7 @@ namespace
 
     //==============================================================================
     // The walks the model made before it had an index, kept as what the index is checked against: the tracks through the
-    // track list and its folders (only a folder holds tracks); a clip on any of them; and an alias group's clips, through
-    // every track of the list a clip is in.
+    // track list and its folders (only a folder holds tracks).
     void collectTracks (const juce::ValueTree& parent, std::vector<juce::ValueTree>& found)
     {
         for (const auto& child : parent)
@@ -86,54 +85,6 @@ namespace
         }
 
         return {};
-    }
-
-    void collectLinked (const juce::ValueTree& parent, const juce::String& link, const juce::ValueTree& except,
-                        std::vector<juce::ValueTree>& found)
-    {
-        for (const auto& child : parent)
-        {
-            visit();
-
-            if (child.hasType (schema::TRACK))
-                collectLinked (child, link, except, found);
-            else if (child.hasType (schema::CLIP) && child != except && child[schema::clipLink].toString() == link)
-                found.push_back (child);
-        }
-    }
-
-    std::vector<juce::ValueTree> walkLinked (const juce::ValueTree& clipState)
-    {
-        std::vector<juce::ValueTree> aliases { clipState };
-
-        if (const auto link = clipState[schema::clipLink].toString(); link.isNotEmpty())
-        {
-            auto list = clipState.getParent();
-
-            while (list.isValid() && ! list.hasType (schema::TRACKS))
-                list = list.getParent();
-
-            collectLinked (list, link, clipState, aliases);
-        }
-
-        return aliases;
-    }
-
-    // Where an element is under an ancestor: its index among its parent's children, after its parent's, and so on up. In
-    // the order of these, elements are in the order a walk from the ancestor meets them.
-    std::vector<int> getPlace (const juce::ValueTree& element, const juce::ValueTree& ancestor)
-    {
-        std::vector<int> place;
-
-        for (auto e = element; e.isValid() && e != ancestor;)
-        {
-            const auto parent = e.getParent();
-            place.push_back (parent.indexOf (e));
-            e = parent;
-        }
-
-        std::reverse (place.begin(), place.end());
-        return place;
     }
 
     // Whether to compare this answer with a walk: each while a walk is short, and in a big song a share of them, so that the
@@ -212,19 +163,6 @@ juce::ValueTree SongIndex::findTrack (std::uint64_t id) const
     return found;
 }
 
-juce::ValueTree SongIndex::findClip (std::uint64_t id) const
-{
-    auto found = findClipIndexed (id);
-
-    if (shouldCheck (getSize()))
-    {
-        const NotCounted notCounted;
-        jassert (found == walkToClip (id)); // the index and the song differ
-    }
-
-    return found;
-}
-
 std::vector<juce::ValueTree> SongIndex::getTracks() const
 {
     knowOrder();
@@ -261,11 +199,11 @@ SongIndex::TrackPlace SongIndex::getTrackPlace (const juce::ValueTree& trackStat
 
     TrackPlace place;
 
-    if (const auto found = findPlace(); found.has_value() && isInSong (trackState, getID (trackState), false))
+    if (const auto found = findPlace(); found.has_value() && isInSong (trackState, getID (trackState)))
     {
         place = *found;
     }
-    else if (isInSong (trackState, getID (trackState), false))
+    else if (isInSong (trackState, getID (trackState)))
     {
         // One of the song's that the order doesn't hold where it should (a change not heard yet, or two tracks with its ID):
         // the order made again from the tree, and the track found in it.
@@ -332,20 +270,6 @@ void SongIndex::orderChanged() const
     orderKnown = false;
     order.clear();
     places.clear();
-    ++layout;
-}
-
-std::vector<juce::ValueTree> SongIndex::findLinked (const juce::ValueTree& clipState) const
-{
-    auto found = findLinkedIndexed (clipState);
-
-    if (clipState[schema::clipLink].toString().isNotEmpty() && shouldCheck (getSize()))
-    {
-        const NotCounted notCounted;
-        jassert (found == walkLinked (clipState)); // the index and the song differ
-    }
-
-    return found;
 }
 
 bool SongIndex::isExact() const
@@ -356,7 +280,6 @@ bool SongIndex::isExact() const
     if (getTracks() != walked)
         return false;
 
-    size_t numClips = 0, numLinked = 0;
     int number = 0;
 
     for (size_t i = 0; i < walked.size(); ++i)
@@ -367,36 +290,15 @@ bool SongIndex::isExact() const
         if (findTrackIndexed (getID (track)) != walkToTrack (getID (track))
             || getTrackPlace (track) != TrackPlace { (int) i, isFolder (track) ? 0 : number })
             return false;
-
-        for (const auto& clip : track)
-        {
-            if (! clip.hasType (schema::CLIP))
-                continue;
-
-            ++numClips;
-
-            if (findClipIndexed (getID (clip)) != walkToClip (getID (clip)) || findLinkedIndexed (clip) != walkLinked (clip))
-                return false;
-
-            // As the index groups them: by a link that names a group (an empty one names none).
-            if (clip[schema::clipLink].toString().isNotEmpty())
-                ++numLinked;
-        }
     }
 
-    // Nothing more than that: no track, clip or group the song doesn't hold.
-    size_t indexedTracks = 0, indexedClips = 0, indexedLinked = 0;
+    // Nothing more than that: no track the song doesn't hold.
+    size_t indexedTracks = 0;
 
     for (const auto& [id, entry] : tracks)
         indexedTracks += (size_t) entry.count;
 
-    for (const auto& [id, clip] : clips)
-        indexedClips += (size_t) clip.count;
-
-    for (const auto& [link, group] : groups)
-        indexedLinked += group.clips.size();
-
-    return indexedTracks == walked.size() && indexedClips == numClips && indexedLinked == numLinked;
+    return indexedTracks == walked.size();
 }
 
 //==============================================================================
@@ -444,8 +346,6 @@ void SongIndex::forget() const
 {
     built = false;
     tracks.clear();
-    clips.clear();
-    groups.clear();
     listChildren = 0;
     hasDuplicates = false;
     orderChanged();
@@ -463,43 +363,15 @@ void SongIndex::addTrack (const juce::ValueTree& track) const
         hasDuplicates = true;
     }
 
-    const auto folder = isFolder (track);
+    if (! isFolder (track))
+        return;
 
     for (const auto& child : track)
     {
         visit();
 
-        if (child.hasType (schema::CLIP))
-            addClip (child);
-        else if (folder && child.hasType (schema::TRACK))
+        if (child.hasType (schema::TRACK))
             addTrack (child);
-    }
-}
-
-void SongIndex::addClip (const juce::ValueTree& clipState) const
-{
-    const auto link = clipState[schema::clipLink].toString();
-
-    if (auto [entry, added] = clips.try_emplace (getID (clipState)); added)
-    {
-        entry->second.element = clipState;
-        entry->second.link = link;
-    }
-    else if (entry->second.element == clipState)
-    {
-        return; // held already (above)
-    }
-    else
-    {
-        ++entry->second.count;
-        hasDuplicates = true;
-    }
-
-    if (link.isNotEmpty())
-    {
-        auto& group = groups[link];
-        group.clips.push_back (clipState);
-        group.sortedAt = -1;
     }
 }
 
@@ -511,49 +383,19 @@ void SongIndex::removeTrack (const juce::ValueTree& track) const
         return; // not one of the song's tracks: none of what it holds is
 
     tracks.erase (entry);
-    const auto folder = isFolder (track);
 
-    for (const auto& child : track)
-    {
-        if (child.hasType (schema::CLIP))
-            removeClip (child);
-        else if (folder && child.hasType (schema::TRACK))
-            removeTrack (child);
-    }
-}
-
-void SongIndex::removeClip (const juce::ValueTree& clipState) const
-{
-    const auto entry = clips.find (getID (clipState));
-
-    if (entry == clips.end() || entry->second.element != clipState)
+    if (! isFolder (track))
         return;
 
-    if (const auto& link = entry->second.link; link.isNotEmpty())
-    {
-        if (const auto group = groups.find (link); group != groups.end())
-        {
-            auto& members = group->second.clips;
-            members.erase (std::remove (members.begin(), members.end(), clipState), members.end());
-
-            if (members.empty())
-                groups.erase (group);
-        }
-    }
-
-    clips.erase (entry);
+    for (const auto& child : track)
+        if (child.hasType (schema::TRACK))
+            removeTrack (child);
 }
 
 bool SongIndex::isIndexedTrack (const juce::ValueTree& track) const
 {
     const auto entry = tracks.find (getID (track));
     return entry != tracks.end() && entry->second.element == track;
-}
-
-SongIndex::Clip* SongIndex::findIndexedClip (const juce::ValueTree& clipState) const
-{
-    const auto entry = clips.find (getID (clipState));
-    return entry != clips.end() && entry->second.count == 1 && entry->second.element == clipState ? &entry->second : nullptr;
 }
 
 void SongIndex::seeChildren (const juce::ValueTree& parent) const
@@ -570,20 +412,12 @@ void SongIndex::seeChildren (const juce::ValueTree& parent) const
 }
 
 //==============================================================================
-bool SongIndex::isInSong (const juce::ValueTree& element, std::uint64_t id, bool clip) const
+bool SongIndex::isInSong (const juce::ValueTree& element, std::uint64_t id) const
 {
     if (! element.isValid() || getID (element) != id)
         return false;
 
     auto parent = element.getParent();
-
-    if (clip)
-    {
-        if (! parent.hasType (schema::TRACK))
-            return false;
-
-        parent = parent.getParent();
-    }
 
     // Up through folders to the track list: only a folder holds tracks.
     for (;; parent = parent.getParent())
@@ -615,22 +449,6 @@ juce::ValueTree SongIndex::walkToTrack (std::uint64_t id) const
     return walkToTrackIn (root.getChildWithName (schema::TRACKS), id);
 }
 
-juce::ValueTree SongIndex::walkToClip (std::uint64_t id) const
-{
-    for (const auto& track : walkTracks())
-    {
-        for (const auto& child : track)
-        {
-            visit();
-
-            if (child.hasType (schema::CLIP) && getID (child) == id)
-                return child;
-        }
-    }
-
-    return {};
-}
-
 std::vector<juce::ValueTree> SongIndex::walkTracks() const
 {
     std::vector<juce::ValueTree> found;
@@ -640,7 +458,7 @@ std::vector<juce::ValueTree> SongIndex::walkTracks() const
 
 size_t SongIndex::getSize() const
 {
-    return tracks.size() + clips.size();
+    return tracks.size();
 }
 
 juce::ValueTree SongIndex::findTrackIndexed (std::uint64_t id) const
@@ -665,92 +483,12 @@ juce::ValueTree SongIndex::findTrackIndexed (std::uint64_t id) const
     if (entry->second.count != 1)
         return walkToTrack (id);
 
-    if (isInSong (entry->second.element, id, false))
+    if (isInSong (entry->second.element, id))
         return entry->second.element;
 
     // Gone, or moved, before the index heard of it: the tree's answer, and the index made again as it is next asked.
     forget();
     return walkToTrack (id);
-}
-
-juce::ValueTree SongIndex::findClipIndexed (std::uint64_t id) const
-{
-    prepare();
-    visit();
-    auto entry = clips.find (id);
-
-    if (entry == clips.end())
-    {
-        if (! isBehind())
-            return {};
-
-        forget();
-        prepare();
-
-        if (entry = clips.find (id); entry == clips.end())
-            return {};
-    }
-
-    if (entry->second.count != 1)
-        return walkToClip (id);
-
-    if (isInSong (entry->second.element, id, true))
-        return entry->second.element;
-
-    forget();
-    return walkToClip (id);
-}
-
-std::vector<juce::ValueTree> SongIndex::findLinkedIndexed (const juce::ValueTree& clipState) const
-{
-    const auto link = clipState[schema::clipLink].toString();
-
-    if (link.isEmpty())
-        return { clipState };
-
-    prepare();
-    const auto* clip = findIndexedClip (clipState);
-    const auto group = groups.find (link);
-
-    if (clip == nullptr || clip->link != link || group == groups.end())
-        return walkLinked (clipState);
-
-    // In the song's order, put in it again only after tracks or clips were added, removed or moved.
-    auto& members = group->second;
-
-    if (members.sortedAt != layout)
-    {
-        std::vector<std::pair<std::vector<int>, juce::ValueTree>> placed;
-
-        for (const auto& member : members.clips)
-            placed.emplace_back (getPlace (member, trackList), member);
-
-        std::sort (placed.begin(), placed.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
-        members.clips.clear();
-
-        for (const auto& [place, member] : placed)
-            members.clips.push_back (member);
-
-        members.sortedAt = layout;
-    }
-
-    std::vector<juce::ValueTree> aliases { clipState };
-    visit (members.clips.size());
-
-    for (const auto& member : members.clips)
-    {
-        // Each still in the group and in the song, unless a change came before the index heard of it.
-        if (member[schema::clipLink].toString() != link || ! isInSong (member, getID (member), true))
-        {
-            forget();
-            return walkLinked (clipState);
-        }
-
-        if (member != clipState)
-            aliases.push_back (member);
-    }
-
-    return aliases;
 }
 
 //==============================================================================
@@ -759,37 +497,9 @@ void SongIndex::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Ide
     if (! built)
         return;
 
-    // An element's ID changed, or what a track is (a folder holds tracks): made again as it is next asked for.
-    if (property == schema::trackID)
-    {
-        if (tree.hasType (schema::TRACK) || tree.hasType (schema::CLIP))
-            forget();
-
-        return;
-    }
-
-    if (property == schema::trackKind && tree.hasType (schema::TRACK))
-    {
+    // A track's ID changed, or what a track is (a folder holds tracks): made again as it is next asked for.
+    if ((property == schema::trackID || property == schema::trackKind) && tree.hasType (schema::TRACK))
         forget();
-        return;
-    }
-
-    // A clip linked to others, or no longer: from one group to the other.
-    if (property == schema::clipLink && tree.hasType (schema::CLIP))
-    {
-        if (hasDuplicates)
-        {
-            forget();
-            return;
-        }
-
-        if (findIndexedClip (tree) == nullptr)
-            return; // not the song's
-
-        removeClip (tree);
-        addClip (tree);
-        ++layout;
-    }
 }
 
 void SongIndex::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
@@ -797,27 +507,17 @@ void SongIndex::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& c
     if (! built)
         return;
 
-    if (hasDuplicates && (child.hasType (schema::TRACK) || child.hasType (schema::CLIP)))
+    if (hasDuplicates && child.hasType (schema::TRACK))
     {
         forget();
         return;
     }
 
-    if (child.hasType (schema::TRACK))
+    if (child.hasType (schema::TRACK)
+        && (parent == trackList || (parent.hasType (schema::TRACK) && isFolder (parent) && isIndexedTrack (parent))))
     {
-        if (parent == trackList || (parent.hasType (schema::TRACK) && isFolder (parent) && isIndexedTrack (parent)))
-        {
-            orderChanged();
-            addTrack (child);
-        }
-    }
-    else if (child.hasType (schema::CLIP))
-    {
-        if (parent.hasType (schema::TRACK) && isIndexedTrack (parent))
-        {
-            ++layout;
-            addClip (child);
-        }
+        orderChanged();
+        addTrack (child);
     }
 
     seeChildren (parent);
@@ -828,24 +528,16 @@ void SongIndex::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&
     if (! built)
         return;
 
-    if (hasDuplicates && (child.hasType (schema::TRACK) || child.hasType (schema::CLIP)))
+    if (hasDuplicates && child.hasType (schema::TRACK))
     {
         forget();
         return;
     }
 
-    if (child.hasType (schema::TRACK))
+    if (child.hasType (schema::TRACK) && isIndexedTrack (child))
     {
-        if (isIndexedTrack (child))
-        {
-            orderChanged();
-            removeTrack (child);
-        }
-    }
-    else if (child.hasType (schema::CLIP))
-    {
-        ++layout;
-        removeClip (child);
+        orderChanged();
+        removeTrack (child);
     }
 
     seeChildren (parent);

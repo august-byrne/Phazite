@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Audio clips' own settings, as the audio clip editor and the clip commands change them (AudioClipModel.h says what each
-// does to what is heard), and where a clip's whole audio file plays in the song. The song holds each audio clip on its
-// track's element (Schema.h: an audio CLIP): its file, the part of the file it plays, in the file's own seconds, where it
-// starts, in beats, and how it plays the part: following the song's tempo from its own, pitched, backwards. How long it
-// lasts follows from those and the tempo. What plays it plays the file as it is, or else a render of it that Phazite makes
-// (roadmap step 2.18; ClipRenders.h). None of these begins an undo step: their changes join the caller's.
+// does to what is heard), and where a clip's whole audio file plays in the song. The song holds each audio clip as a value
+// (SongValues.h: ClipValue; Schema.h: an audio CLIP): its file, the part of the file it plays, in the file's own seconds,
+// where it starts, in beats, and how it plays the part: following the song's tempo from its own, pitched, backwards. How
+// long it lasts follows from those and the tempo. What plays it plays the file as it is, or else a render of it that
+// Phazite makes (roadmap step 2.18; ClipRenders.h). None of these begins an undo step: their changes join the caller's.
 #pragma once
 
 #include "devices/stretch/Stretch.h"
@@ -104,24 +104,9 @@ BeatRange getAudioClipRange (const Song&, const ClipValue&);
 engine::FadeCurve toEngineFade (FadeCurve);
 
 //==============================================================================
-// The same of an audio clip's element: its kind, its part, a new one, the file it plays, how it plays it and where, and its
-// fades, read from it (each that works something out reads the element into a value first: SongValues.h, readClipValue());
-// and its part and a fade written into it, in the caller's undo step (only what differs: SongValues.h, writeClipElement()).
-// For the tests and what reads a song's elements (the loader, a merge, a version applied: model/versions/); the clips' own
-// code names clips by their IDs and values (roadmap step S5.20 takes these away once nothing names an element).
+// Whether a clip's element is an audio clip's: for what reads a whole copy of a song's tree, or one before the song holds its
+// values (the loader, a merge: model/versions/), whose clips are elements.
 bool isAudioState (const juce::ValueTree& clipState);
-FilePart getFilePart (const juce::ValueTree& clipState);
-juce::ValueTree makeAudioClipState (Song&, const juce::String& name, const juce::File&, BeatPosition start, FilePart);
-juce::File getClipFile (const Song&, const juce::ValueTree& clipState);
-double getClipFileLength (const Song&, const juce::ValueTree& clipState);
-stretch::Settings getClipStretch (const Song&, const juce::ValueTree& clipState);
-bool followsTempoChanges (const Song&, const juce::ValueTree& clipState);
-juce::File getPlayedFile (const Song&, const juce::ValueTree& clipState);
-PlayedPosition getPlayedPosition (const Song&, const juce::ValueTree& clipState);
-void setAudioPart (Song&, juce::ValueTree clipState, BeatPosition start, FilePart);
-double getClipFade (const juce::ValueTree& clipState, bool fadeIn);
-void setClipFade (Song&, juce::ValueTree clipState, bool fadeIn, double seconds);
-FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn);
 
 //==============================================================================
 // The same by the clip's ID: of an audio clip of the song's, and for any other clip, or one that isn't there, nothing (an
@@ -220,7 +205,8 @@ void setClipTempo (Song&, ClipID, double bpm);
 // each property as read (its default where it has none: no tempo, no pitch, forwards) and the markers in their order, each as
 // juce::ValueTree::isEquivalentTo() compares elements, the first's against the other's: as the loader (makeConsistent())
 // and a merge (model/versions/internal/SongMerge.h) compare them; and the first's given to the other, in place of its own
-// (a merge's keeper's, to every other clip of its group).
+// (a merge's keeper's, to every other clip of its group). The last two for whole copies of a song's tree, and its tree before
+// the song holds its values (the loader), whose clips are elements.
 bool isSharedInAliasGroup (const juce::Identifier& property);
 bool shareTheSound (const juce::ValueTree& first, const juce::ValueTree& other);
 void giveSharedSound (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager*);

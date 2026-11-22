@@ -30,6 +30,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/ApplySong.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
@@ -37,6 +38,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <tuple>
 #include <utility>
 
@@ -2081,9 +2083,27 @@ TEST_CASE ("A conflict's choice a clip can't hold as it is, a MIDI clip shorter 
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
 
     {
+        // A version's song built by hand: the song whole, its clip's element shortened, and the song made like it.
         auto& song = *phazite::findSong (s.context);
+        auto version = phazite::test::copyWholeSong (song);
+        juce::ValueTree element;
+        const std::function<void (const juce::ValueTree&)> find = [&] (const juce::ValueTree& parent)
+        {
+            for (const auto& child : parent)
+            {
+                if (child.hasType (schema::CLIP) && (std::uint64_t) (juce::int64) child[schema::clipID] == clip.getRaw())
+                    element = child;
+
+                find (child);
+            }
+        };
+
+        find (version);
+        REQUIRE (element.isValid());
+        element.setProperty (schema::clipLength, phazite::shortestClipBeats / 16.0, nullptr);
         const phazite::UndoStep step (song, "Shorten by Hand");
-        phazite::findClipState (song, clip).setProperty (schema::clipLength, phazite::shortestClipBeats / 16.0, &song.getUndoManager());
+        phazite::makeSongLike (song, version);
+        REQUIRE (phazite::getClipValue (song, clip)->length.inBeats() < phazite::shortestClipBeats);
     }
 
     const auto theirs = keepVersion (s.context, "Too short");

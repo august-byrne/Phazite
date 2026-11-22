@@ -126,17 +126,13 @@ namespace
         return true;
     }
 
-    // What a frozen track's file holds, as the song has it: the track's clips, its frozen devices, its modulators and
-    // macros, which can move them, the frozen devices' automation (of the devices in its frozen containers too), and the
-    // song's tempos, which put its notes and clips where they are in seconds.
+    // What a frozen track's file holds, as the song's tree has it: its frozen devices, its modulators and macros, which can
+    // move them, the frozen devices' automation (of the devices in its frozen containers too), and the song's tempos, which
+    // put its notes and clips where they are in seconds. Its clips, with their notes, are the song's values' (Holds::values).
     std::vector<juce::ValueTree> getWhatTheFreezeHolds (const Song& song, TrackID track)
     {
         std::vector<juce::ValueTree> parts;
         const auto state = findTrackState (song, track);
-
-        for (const auto& clip : getClipStates (state))
-            parts.push_back (clip);
-
         std::set<DeviceID> devices;
 
         for (const auto id : getFrozenDevices (song, track))
@@ -173,7 +169,7 @@ namespace
         juce::ValueTree copy ("FROZEN");
 
         for (const auto& part : getWhatTheFreezeHolds (song, track))
-            copy.appendChild (part.createCopy(), nullptr); // a clip's notes in the values kept
+            copy.appendChild (part.createCopy(), nullptr);
 
         return { copy, keepValues (song) };
     }
@@ -186,19 +182,12 @@ namespace
             return false;
 
         // Each as it is in the song, against its copy as copyWhatTheFreezeHolds() made it: in place, since this runs at every
-        // change in a frozen track (a fader dragged); a clip's notes as values, the same value or one alike.
-        const auto now = keepValues (song);
-
+        // change in a frozen track (a fader dragged); and its clips with their notes as values, the same values or ones alike.
         for (int i = 0; i < (int) parts.size(); ++i)
-        {
-            const auto& part = parts[(size_t) i];
-
-            if (! isSameSound (part, frozen.parts.getChild (i))
-                || (part.hasType (schema::CLIP) && ! holdSameNotes (now, frozen.values, getClipID (part))))
+            if (! isSameSound (parts[(size_t) i], frozen.parts.getChild (i)))
                 return false;
-        }
 
-        return true;
+        return holdSameTrackClips (keepValues (song), frozen.values, track);
     }
 
     // The element of a type a tree is in (itself, if it is one), or an invalid one.
@@ -311,6 +300,11 @@ void freezeFromFile (Song& song, TrackID track, const juce::File& rendered, juce
         return;
 
     state.setProperty (schema::trackFrozen, true, undo);
+
+    // What the track holds as it is frozen, taken here by what keeps the song's frozen tracks (FreezeKeeper, the song's
+    // writer of what is pending), not in its tree callback, which reads no clip of the song's (SongValues.h): so what
+    // changes after it, in the same turn too, unfreezes it.
+    song.writePending();
 }
 
 void unfreeze (Song& song, TrackID track)
@@ -448,10 +442,21 @@ void FreezeKeeper::compareMarked()
     auto wait = std::exchange (waiting, {});
     auto tracks = std::exchange (wait.tracks, {});
 
-    if (! wait.takeTracks && ! wait.all && tracks.empty() && notesChanged.empty() && clipTracks.empty())
+    if (! wait.takeTracks && ! wait.all && tracks.empty() && notesChanged.empty() && clipTracks.empty() && toTake.empty())
         return;
 
     const juce::ScopedValueSetter<bool> busy (checking, true);
+
+    // The tracks frozen in a step since (noteFrozenTracks()), each with what it holds now, if it is still frozen.
+    for (const auto track : std::exchange (toTake, {}))
+    {
+        if (frozen.contains (track) || ! (bool) findTrackState (song, track)[schema::trackFrozen])
+            continue;
+
+        const auto holds = copyWhatTheFreezeHolds (song, track);
+        frozen[track] = holds;
+        files[track] = holds;
+    }
 
     // A track frozen or played live again, or tracks added, removed or moved by the undo or the redo (as check() takes them).
     // One that came back frozen meanwhile is compared with what its file holds (files): what it was as it came back is gone
@@ -481,7 +486,42 @@ void FreezeKeeper::forgetMarked()
 {
     notesChanged.clear();
     clipTracks.clear();
+    toTake.clear();
     waiting = {};
+}
+
+void FreezeKeeper::noteFrozenTracks (bool cameIn)
+{
+    // Which tracks are frozen now, from the tree alone: one known as it was; one whose holdings wait for the later moment
+    // still waits; one that came into the song frozen (cameIn: a track moved, which JUCE takes out and puts in again, or
+    // brought back) with what its file was kept with, if this kept it, compared at the later moment; any other (frozen in
+    // place, by freezeFromFile(), which has it taken at once, or by a version applied) waits for the later moment to take
+    // what it holds.
+    std::map<TrackID, Holds> now;
+    std::set<TrackID> later;
+
+    for (const auto track : getFrozenTracks (song))
+    {
+        if (const auto known = frozen.find (track); known != frozen.end())
+        {
+            now[track] = known->second;
+        }
+        else if (const auto file = files.find (track); cameIn && ! toTake.contains (track) && file != files.end())
+        {
+            now[track] = file->second;
+            waiting.tracks.insert (track);
+        }
+        else
+        {
+            later.insert (track);
+        }
+    }
+
+    frozen = std::move (now);
+    toTake = std::move (later);
+
+    for (const auto& [track, holds] : frozen)
+        files[track] = holds;
 }
 
 std::vector<TrackID> FreezeKeeper::takeFrozenTracks (bool fromFiles)
@@ -554,46 +594,45 @@ void FreezeKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::
 {
     // How tracks show and where windows were change nothing that plays; nor does the song's count of IDs, which every new
     // ID moves, or how it plays and its grid, on its root.
-    if (isHeardAsClips (tree) || (tree == state && schema::isUncountedProperty (tree, property)))
+    if (tree == state && schema::isUncountedProperty (tree, property))
         return;
 
     if (! schema::isTrackViewProperty (property) && ! isIgnoredProperty (property))
-        check (tree);
+        check (tree, false);
 }
 
-void FreezeKeeper::check (const juce::ValueTree& changed)
+void FreezeKeeper::check (const juce::ValueTree& changed, bool cameIn)
 {
     if (checking)
         return;
 
-    // While the history undoes or redoes a step, what the change asks for waits for the next turn (the class's comment); and
-    // what waited is done before anything else is compared.
-    const auto undoing = song.getUndoManager().isPerformingUndoRedo();
-
-    if (undoing)
-        triggerAsyncUpdate();
-    else
-        compareMarked();
-
+    // What the change asks to compare waits for the next turn (the class's comment), or for the song's being stored or
+    // compiled, which writes what is pending first: a tree's callback reads no clip of the song's, with no exception
+    // (SongValues.h: there is no order among the song's tree listeners, so the keeper of the song's values may not have
+    // given a track it moved its clips back yet, and an undo puts the clips back after the tree).
     const juce::ScopedValueSetter<bool> busy (checking, true);
+    const auto undoing = song.getUndoManager().isPerformingUndoRedo();
+    triggerAsyncUpdate();
     const auto track = findEnclosing (changed, schema::TRACK);
 
-    // A track frozen or unfrozen, or tracks added, removed or moved (an undo brings a frozen track back frozen).
+    // A track frozen or unfrozen, or tracks added, removed or moved (an undo brings a frozen track back frozen). During an
+    // undo or a redo, taken at the next turn. In a step, noted now from the tree alone (noteFrozenTracks()): what a track
+    // frozen in it holds is taken by freezeFromFile() as it freezes it, or at the later moment; first what an undo or a
+    // redo left to take.
+    if (! undoing && std::exchange (waiting.takeTracks, false))
+        noteFrozenTracks (true);
+
     if (changed == state || changed.hasType (schema::TRACKS) || (track.isValid() && changed == track))
     {
         if (undoing)
             waiting.takeTracks = true;
         else
-            takeFrozenTracks();
+            noteFrozenTracks (cameIn);
     }
 
     if (track.isValid())
     {
-        if (undoing)
-            waiting.tracks.insert (getTrackID (track));
-        else
-            compare (getTrackID (track));
-
+        waiting.tracks.insert (getTrackID (track));
         return;
     }
 
@@ -604,21 +643,7 @@ void FreezeKeeper::check (const juce::ValueTree& changed)
 
     // The song's automation or its tempos, which any frozen track's file may hold.
     if (changed == state || findEnclosing (changed, schema::AUTOMATION).isValid() || findEnclosing (changed, schema::TEMPOMAP).isValid())
-    {
-        if (undoing)
-        {
-            waiting.all = true;
-            return;
-        }
-
-        std::vector<TrackID> tracks;
-
-        for (const auto& entry : frozen)
-            tracks.push_back (entry.first);
-
-        for (const auto frozenTrack : tracks)
-            compare (frozenTrack);
-    }
+        waiting.all = true;
 }
 
 //==============================================================================

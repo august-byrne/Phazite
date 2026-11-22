@@ -984,12 +984,22 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 
     auto& song = project->getSong();
     auto trackState = phazite::findTrackState (song, trackID);
-    auto clipState = phazite::findClipState (song, clipID);
+    const auto clipValue = phazite::getClipValue (song, clipID);
     REQUIRE (trackState.isValid());
-    REQUIRE (clipState.isValid());
+    REQUIRE (clipValue.has_value());
 
-    // Notifications that change nothing.
-    clipState.sendPropertyChangeMessage (phazite::schema::clipMute);
+    // Notifications that change nothing; and a clip set to the value it holds, which tells nobody (its area's value is the
+    // same).
+    struct Told final : phazite::SongValues::ClipsListener
+    {
+        int calls = 0;
+        void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<phazite::TrackID>&) override { ++calls; }
+    } told;
+
+    song.getValues()->addClipsListener (&told);
+    phazite::setClip (song, *clipValue);
+    song.getValues()->removeClipsListener (&told);
+    CHECK (told.calls == 0);
     trackState.sendPropertyChangeMessage (phazite::schema::trackName);
     CHECK_FALSE (project->hasUnsavedChanges());
 

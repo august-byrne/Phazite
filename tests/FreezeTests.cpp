@@ -34,6 +34,8 @@
 #include "ui/playlist/TrackHeader.h"
 
 #include <algorithm>
+#include <memory>
+#include <vector>
 
 namespace
 {
@@ -357,6 +359,134 @@ TEST_CASE ("A frozen track whose clip changed plays live in what is saved, and i
     plans.makePlanNow();
     CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
     CHECK (plans.take() == 1);
+}
+
+TEST_CASE ("A frozen track moved into a folder and out again stays frozen, whatever order the song's listeners are told in")
+{
+    // JUCE tells the listeners of the song's root in the order of their handles' addresses (SongValues.h), so the keeper of
+    // the song's values may give a track JUCE moves (taken out, put in again) its clips back before or after the freezes'
+    // keeper hears of it; which comes first depends on where they were made. The project context, which makes the freezes'
+    // keeper and the song's other listeners, is made again for each round, after allocations of other sizes, so that the
+    // rounds meet both orders. Two frozen tracks, each moved in its own step, the moves undone and redone.
+    Song song;
+    auto& model = song.getSong();
+    song.freeze();
+    TrackID keys, folder;
+
+    {
+        const phazite::UndoStep step (model, "Add Tracks");
+        keys = phazite::insertTrack (model, song.bass, nullptr);
+        folder = phazite::insertFolder (model, keys, nullptr);
+        const auto sound = phazite::test::writeSound (song.temp.folder.getChildFile ("Keys.wav"), 1.0);
+        REQUIRE (phazite::test::addAudioClip (model, keys, "Keys", sound, 0.0, 1.0).isValid());
+    }
+
+    phazite::freezeFromFile (model, keys, phazite::test::writeSound (song.temp.folder.getChildFile ("Frozen.wav"), 1.0));
+    phazite::test::dispatchPendingMessages();
+    const auto isFrozen = [&song] (TrackID track) { return phazite::isFrozen (song.context, track); };
+    REQUIRE (isFrozen (song.bass));
+    REQUIRE (isFrozen (keys));
+    std::vector<std::unique_ptr<char[]>> ballast;
+
+    for (int round = 0; round < 8; ++round)
+    {
+        CAPTURE (round);
+        song.close();
+
+        for (int i = 0; i <= round; ++i)
+            ballast.push_back (std::make_unique<char[]> ((size_t) (48 + 40 * round + 16 * i)));
+
+        song.open();
+
+        for (const auto track : { song.bass, keys })
+        {
+            {
+                const phazite::UndoStep step (model, "Into the Folder");
+                phazite::moveTrackIntoFolder (model, track, folder);
+            }
+
+            phazite::test::dispatchPendingMessages();
+            CHECK (phazite::getParentFolder (model, track) == folder);
+            CHECK (isFrozen (track));
+
+            {
+                const phazite::UndoStep step (model, "Out of the Folder");
+                phazite::moveTracksAfter (model, { track }, folder);
+            }
+
+            phazite::test::dispatchPendingMessages();
+            CHECK_FALSE (phazite::getParentFolder (model, track).isValid());
+            CHECK (isFrozen (track));
+        }
+
+        // The last move undone (back into the folder) and redone (out again).
+        phazite::undo (model);
+        phazite::test::dispatchPendingMessages();
+        CHECK (phazite::getParentFolder (model, keys) == folder);
+        CHECK (isFrozen (keys));
+        phazite::redo (model);
+        phazite::test::dispatchPendingMessages();
+        CHECK_FALSE (phazite::getParentFolder (model, keys).isValid());
+        CHECK (isFrozen (song.bass));
+        CHECK (isFrozen (keys));
+    }
+}
+
+TEST_CASE ("A track frozen and its clip moved in the same turn of the message loop unfreezes, in one step too")
+{
+    // What a frozen track holds is taken as it is frozen (freezeFromFile(), which has the freezes' keeper take it then, not
+    // in a callback of the song's tree, which reads no clip of the song's), so that what changes after it unfreezes it.
+    Song song;
+    auto& model = song.getSong();
+    const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
+
+    phazite::freezeFromFile (model, song.bass, phazite::test::writeSound (song.temp.folder.getChildFile ("First.wav"), 2.0));
+    REQUIRE (isFrozen());
+
+    {
+        const phazite::UndoStep step (model, "Move Clip");
+        phazite::moveClip (model, song.clip, phazite::test::at (2.0), song.bass);
+    }
+
+    CHECK (phazite::test::dispatchMessagesUntil ([&isFrozen] { return ! isFrozen(); }));
+
+    // Frozen and its clip moved in one step, as Bounce in Place freezes in a step of its own.
+    {
+        const phazite::UndoStep step (model, "Freeze and Move");
+        phazite::freezeFromFile (model, song.bass, phazite::test::writeSound (song.temp.folder.getChildFile ("Second.wav"), 2.0),
+                                 &model.getUndoManager());
+        REQUIRE (isFrozen());
+        phazite::moveClip (model, song.clip, phazite::test::at (0.0), song.bass);
+    }
+
+    CHECK (phazite::test::dispatchMessagesUntil ([&isFrozen] { return ! isFrozen(); }));
+}
+
+TEST_CASE ("A frozen track deleted and brought back by Undo is still frozen")
+{
+    Song song;
+    auto& model = song.getSong();
+    const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
+    song.freeze();
+
+    {
+        const phazite::UndoStep step (model, "Delete Track");
+        phazite::deleteTracks (model, { song.bass }, nullptr);
+    }
+
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (phazite::findTrackState (model, song.bass).isValid());
+    phazite::undo (model);
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+    CHECK (phazite::getClips (model, song.bass) == std::vector { song.clip });
+
+    // Again, through a Redo of the delete.
+    phazite::redo (model);
+    phazite::test::dispatchPendingMessages();
+    phazite::undo (model);
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
 }
 
 TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unfrozen without its file")

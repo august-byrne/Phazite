@@ -48,13 +48,13 @@ namespace
         return channels;
     }
 
-    // Everything in a channel's element, but the tracks a folder holds, which are channels of their own, and its clips, which
-    // are read by their IDs (Clips.h: getClipValues()).
+    // Everything in a channel's element, but the tracks a folder holds, which are channels of their own (its clips are read
+    // by their IDs: Clips.h, getClipValues()).
     void forEachIn (const juce::ValueTree& element, const std::function<void (const juce::ValueTree&)>& visit)
     {
         for (const auto& child : element)
         {
-            if (child.hasType (schema::TRACK) || child.hasType (schema::CLIP))
+            if (child.hasType (schema::TRACK))
                 continue;
 
             visit (child);

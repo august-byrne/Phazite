@@ -1310,9 +1310,16 @@ TEST_CASE ("The MIDI tap raced by four inputs while the message thread changes w
         }
     }
 
+    // Every controller diverted before the inputs start, and no round until one of them has sent: on a machine that gives
+    // this thread no turn while they send, they would otherwise send everything while nothing is diverted, and the case
+    // would find nothing to take (seen once on CI).
+    tap.setDiverted (all);
     const auto dropped = tap.getDropped();
     int popped = 0, torn = 0, round = 0;
     ++started;
+
+    while (taken.load() == 0)
+        std::this_thread::yield();
 
     const auto takeWaiting = [&]
     {

@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
 #include "model/project/internal/Project.h"
 
@@ -79,6 +80,40 @@ juce::ValueTree findFirst (const juce::ValueTree& tree, const juce::Identifier& 
     return {};
 }
 
+// The first element of a type that a property can be checked on as a song opened holds it: for a clip's, the first clip of
+// the kind that holds the property (an audio clip's file, part, sound, gain, fades; one recorded round a loop's takes), as
+// the song holds a clip of each kind's own properties alone (SongValues.h: ClipValue); else the first of the type.
+juce::ValueTree findFirstFor (const juce::ValueTree& tree, const juce::Identifier& type, const juce::Identifier& property)
+{
+    if (type != schema::CLIP)
+        return findFirst (tree, type);
+
+    const auto isTake = property == schema::clipTakes || property == schema::clipTake || property == schema::clipTakeLength;
+    const auto isAudio = isTake || property == schema::clipFile || property == schema::clipFileStart || property == schema::clipFileEnd
+                         || property == schema::clipTempo || property == schema::clipPitch || property == schema::clipReversed
+                         || property == schema::clipGain || property == schema::clipFadeIn || property == schema::clipFadeOut
+                         || property == schema::clipFadeInShape || property == schema::clipFadeOutShape
+                         || property == schema::clipFadeInBend || property == schema::clipFadeOutBend;
+    juce::ValueTree found;
+    const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+    {
+        for (const auto& child : element)
+        {
+            if (found.isValid())
+                return;
+
+            if (child.hasType (schema::CLIP) && (! isAudio || child[schema::clipKind].toString() == schema::clipIsAudio)
+                && (! isTake || child.hasProperty (schema::clipTakes)))
+                found = child;
+            else
+                visit (child);
+        }
+    };
+
+    visit (tree);
+    return found;
+}
+
 // Whether an element is still in the song it was found in.
 bool isInSong (const juce::ValueTree& element)
 {
@@ -147,8 +182,9 @@ bool isSameSaved (const juce::var& a, const juce::var& b)
 }
 
 // A song of the representative project with one value changed, checked as it is and after the loader; and what the
-// loader made of it, or none if it took it out (or the element it was on). For a clip's note or controller's value, also
-// the song opened as a project opens it (makeSong()), which holds its clips' notes as values beside its tree.
+// loader made of it, or none if it took it out (or the element it was on). For a clip, its warp marker, its note or its
+// controller's value, also the song opened as a project opens it (makeSong()), which holds its clips and their notes as
+// values beside its tree.
 struct Changed
 {
     juce::ValueTree element, original;
@@ -163,7 +199,7 @@ struct Changed
         : changedProperty (property)
     {
         auto raw = readRepresentative();
-        element = findFirst (raw, type);
+        element = findFirstFor (raw, type, property);
         REQUIRE_MESSAGE (element.isValid(), "the representative project holds no " << type.toString());
         original = element.createCopy();
         element.setProperty (property, value, nullptr);
@@ -171,12 +207,14 @@ struct Changed
         const phazite::Song rawSong { raw.createCopy() };
         problemsBefore = findSongProblems (rawSong, tables);
 
-        // A clip's note or controller's value: the loader's part alone (makeConsistent()), on a song that keeps everything in
-        // its tree, since a song made by makeSong() holds its clips' notes as values beside it (Song::holdValues()); and the
-        // song opened, whose values findOpened() reads back through whole state.
-        if (element.hasType (schema::NOTE) || element.hasType (schema::CONTROL))
+        // A clip, its warp marker, its note or its controller's value: the loader's part alone (makeConsistent()), on a song
+        // that keeps everything in its tree, since a song made by makeSong() holds its clips and their notes as values beside it
+        // (Song::holdValues()); and the song opened, whose values findOpened() reads back through whole state.
+        if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
+            || element.hasType (schema::CONTROL))
         {
-            clip = phazite::ClipID::fromRaw (phazite::readID (element.getParent()[schema::clipID]));
+            const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
+            clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
 
             if (&tables == &schema::getTables())
             {
@@ -208,15 +246,15 @@ struct Changed
         return loadedElement[property];
     }
 
-    // The opened song's element in its clip's whole state (WholeState.h), as it holds its values: a note by its ID, a
-    // controller's value by every property but the one changed; none if the loader took it out.
+    // The opened song's element in its clip's whole state (WholeState.h), as it holds its values: the clip itself, a note by
+    // its ID, a warp marker or a controller's value by every property but the one changed; none if the loader took it out.
     juce::ValueTree findOpened() const
     {
         REQUIRE (opened != nullptr);
         const auto clipState = phazite::copyWholeClip (*opened, clip);
 
-        if (! clipState.isValid())
-            return {};
+        if (! clipState.isValid() || original.hasType (schema::CLIP))
+            return clipState;
 
         for (const auto& child : clipState)
         {
@@ -285,7 +323,28 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                     {
                         REQUIRE (opened.isValid());
                         const auto held = opened.hasProperty (*property) ? opened[*property] : property->getDefault();
-                        CHECK (juce::exactlyEqual (phazite::readLoadedNumber (held).value_or (-1.0e300), *expected));
+
+                        // A clip's own property as what the loader kept is then kept with the clip's others, as the song
+                        // takes a clip in (SongValues.h: keepWithinClip(): a MIDI clip no shorter than the shortest, a take
+                        // among its takes): what the loader kept, held by a clip's value.
+                        auto wanted = *expected;
+
+                        if (changed.original.hasType (schema::CLIP))
+                        {
+                            REQUIRE (changed.loadedElement.isValid());
+                            const auto kept =
+                                phazite::writeClipElement (phazite::keepWithinClip (phazite::readClipValue (changed.loadedElement)));
+                            wanted = phazite::readLoadedNumber (kept.hasProperty (*property) ? kept[*property] : property->getDefault())
+                                         .value_or (-1.0e300);
+                        }
+
+                        CHECK (juce::exactlyEqual (phazite::readLoadedNumber (held).value_or (-1.0e300), wanted));
+                    }
+                    else if (property == &schema::clipTake)
+                    {
+                        // A clip's take, which a value reads as the first where its element has none, and whole state writes with
+                        // the clip's takes.
+                        CHECK ((! opened.isValid() || ! opened.hasProperty (*property) || (int) opened[*property] == 1));
                     }
                     else
                     {

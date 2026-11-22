@@ -117,6 +117,25 @@ public:
         shared->moveTo (std::move (next));
     }
 
+    // The area's next value where it is alike to the value now but not the same one (the same values held in another value,
+    // whose identity alone matters: model/base/internal/SongValues.h, an alias group's one value), which is no change of the
+    // song's and so makes no step of its own: a part of the area's action in the step in progress where it has one, so that a
+    // redo of that step holds it; else outside the history, where an Undo that puts back a value from before it loses an
+    // identity alone, nothing of the song's.
+    void setWithoutStep (Value next)
+    {
+        JUCE_ASSERT_MESSAGE_THREAD
+        jassert (! undoManager.isPerformingUndoRedo()); // nothing changes the area while an undo or a redo is told
+
+        if (detail::isSameAreaValue (next, shared->now))
+            return;
+
+        if (auto* open = findOpenAction())
+            open->after = next;
+
+        shared->moveTo (std::move (next));
+    }
+
     struct Listener
     {
         virtual ~Listener() = default;

@@ -25,10 +25,12 @@
 //           with ".."; a full path of any computer's is one Phazite writes itself; nothing for a song without a file
 //   alias   the clips of an alias group (Schema.h: clipLink) hold the same notes and controllers' values (every property of
 //           each NOTE and CONTROL, in the same order), are of one kind, and are two at least
-//   values  of a song that holds its clips' notes as values beside its tree (model/base/internal/SongValues.h; the live song,
-//           not a copy): no clip in its tree holds a NOTE or a CONTROL element, every MIDI clip in its tree has a value and
-//           no value belongs to a clip that isn't in its tree, an audio clip has none, and the clips of an alias group hold
-//           ONE value (the same, not two alike)
+//   values  of a song that holds its clips and their notes as values beside its tree (model/base/internal/SongValues.h; the
+//           live song, not a copy): no CLIP element in its tree; the clips' lists agree with its clips (holdsItsLists()) and
+//           no alias group is of one clip; each clip on a track of the song that holds clips (not a folder or a return);
+//           every MIDI clip has a value of notes, an audio clip none, and no value belongs to a clip that isn't a MIDI clip
+//           of the song's; and the clips of an alias group hold ONE value of notes, or audio clips ONE sound (the same, not
+//           two alike)
 #pragma once
 
 #include "TestHelpers.h"

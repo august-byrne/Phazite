@@ -35,8 +35,8 @@ juce::File getDefaultProjectsFolder();
 // A song made of a state (Schema.h: PHAZITE, which it takes), with what every song has added (its tempo map, its track list
 // with the master, its next ID), as a project opens. Its file, if given, is where its audio files' paths start from, and
 // its cache folder where its frozen tracks' files are. No undo steps. Nothing for a state that isn't a song. Once it is
-// consistent, its clips' notes and controllers' values leave the state for values beside it (Song::holdValues()): the
-// state given doesn't hold them then. Message thread.
+// consistent, its clips with their notes and controllers' values leave the state for values beside it (Song::holdValues()):
+// the state given holds no CLIP element then. Message thread.
 Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file = {}, const juce::File& cacheFolder = {});
 
 // The furthest place in beats a song holds anything at, as a file from elsewhere is taken in: a million beats, days of music
@@ -326,9 +326,10 @@ private:
     juce::int64 autosavedAt = 0; // when autosave() last wrote it, in milliseconds since 1970; 0 for none
 
     // The song as it was at a moment: a copy of its tree, and what it kept beside its tree then (model/base/internal/
-    // WholeState.h), which copyWhole() makes the song whole of. Never the whole song itself: a clip of the copy is then of
-    // the same shape as a clip of the song (holding no more than the song's own tree holds), which the comparisons below
-    // find by its place and compare with the song's, its notes compared as values (holdSameNotes()).
+    // WholeState.h), which copyWhole() makes the song whole of. Never the whole song itself: the copy's tree is then of the
+    // same shape as the song's (holding no more than the song's own tree holds), which the comparisons below find an element
+    // in by its place and compare with the song's, its clips and their notes compared as values (WholeState.h:
+    // holdSameTrackClips()).
     struct SongCopy
     {
         juce::ValueTree tree;
@@ -384,23 +385,14 @@ private:
     bool comparingClipsWhole = false; // past mostToCompare: each one's track whole
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
 
-    // Whether a clip of the song is as savedState holds it, all it holds (its properties, its warp markers, its notes and
-    // controllers' values), and whether a track holds what savedState's does. While the song's tree holds the clips, a
-    // track's clips are among its children, so that one added, taken out or moved moves the places of its other children (its
-    // sends, its devices), by which what else notified is found in the saved copy (findSavedCopy()): such a track is
-    // compared whole, as an element whose elements were added, removed or moved is; and a clip changed in place, with the
-    // saved copy's clip of its ID on the saved copy's track of the same ID (no clip was added, taken out or moved since the
-    // song was last as saved, or its track is compared whole). Once the clips are an area of the song's values (roadmap step
-    // S5.20), the clips compare savedState.values with the song's, and a track its clips' IDs in their order.
-    bool holdSameClip (ClipID, const ValuesKept& now);
+    // Whether a clip of the song is as savedState holds it, all it holds (its properties, its track, its warp markers, its
+    // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's
+    // values against savedState.values, by their IDs (WholeState.h: holdSameClip(), holdSameTrackClips()). A clip gone, or on
+    // a track compared whole anyway, compares as that track does.
+    bool holdSameClip (ClipID, const ValuesKept& now) const;
     bool holdSameTrackClips (TrackID, const ValuesKept& now) const;
     bool isComparedWhole (const juce::ValueTree&) const; // it, or what it is in, is among toCompare whole
 
-    // The saved copy's clips by their IDs, found once for each saved copy, as one is first asked for, so that finding a clip
-    // looks at none of its track's others (setSavedState() forgets them).
-    std::map<ClipID, juce::ValueTree> savedClips;
-    bool savedClipsFound = false;
-    juce::ValueTree findSavedClip (ClipID);
     void setSavedState (SongCopy);
 
     // What a store of the plug-ins' states wrote into the song without notifying (storeForSaving() while isWriting) where
@@ -458,7 +450,7 @@ private:
     // What isn't a change (Schema.h: schema::isUncountedProperty() and isUncountedElement(): view state, how the song plays,
     // its next ID) is left out of notifications and of the comparison with savedState alike. A plug-in's own change (its
     // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()). Each
-    // element with what its song kept beside its tree (a clip's notes: holdSameNotes()).
+    // element with what its song kept beside its tree (a track's clips and their notes: holdSameTrackClips()).
     static bool holdTheSameProject (const juce::ValueTree&, const ValuesKept&, const juce::ValueTree&, const ValuesKept&);
 
 public:
@@ -466,11 +458,6 @@ public:
     // whole counts, with each of its elements): what the performance tests count (tests/PerformanceGateTests.cpp). Message
     // thread.
     static juce::int64 countElementsCompared();
-
-    // How many elements of the saved copies were looked at to find the saved copy of a clip changed in place (each clip found
-    // counts one; the copy's clips, found once for each saved copy, each of its tracks' children): what the performance tests
-    // count, so that a clip edited in a track of many clips is found without a look at the others. Message thread.
-    static juce::int64 countSavedElementsSearched();
 
     // How many notifications since the last comparison are compared one by one; past them, each one's track whole.
     static constexpr size_t mostToCompare = 64;
@@ -480,21 +467,12 @@ public:
     bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), keepValues (*song), savedState.tree, savedState.values); }
 
 private:
-    // A clip's, or what is in one, a clip added, taken out or moved on its track: clipsChanged()'s.
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
-    {
-        if (! isHeardAsClips (tree))
-            markChanged (tree, property);
-    }
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }
 
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markChildChanged (parent, child); }
 
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex) override
-    {
-        if (! isHeardAsClips (parent, parent.getChild (newIndex)))
-            markChanged (parent);
-    }
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { markChanged (parent); }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Project)
 };

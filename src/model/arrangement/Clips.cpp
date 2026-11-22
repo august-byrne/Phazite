@@ -20,12 +20,11 @@
 #include <utility>
 #include <vector>
 
-// The clips' own code, in two parts. The storage, the only functions that know where a clip is kept (the song's tree, its
-// CLIP elements on their tracks' elements, until the song holds its clips as values: roadmap step S5.20): a clip's value
-// read (getClipValue(), getClipValues(), getClipPlacements()...), a clip added, set, copied and taken out (addClip(), setClip(),
-// eraseClip()...), and the reads of the clips' elements kept for the tests and what reads a song's elements (getClipID(),
-// getClipRange() of an element...). And every edit, written on the clips' values: each reads the clips it changes as values
-// (each once, as the notes' edits do), works the next values out by its rules, and sets them.
+// The clips' own code, in two parts. The storage, the only functions that know where a clip is kept (the song's clips' area,
+// beside its tree: model/base/internal/SongValues.h): a clip's value read (getClipValue(), getClipValues(),
+// getClipPlacements()...), and a clip added, set, copied and taken out (addClip(), setClip(), eraseClip()...). And every edit,
+// written on the clips' values: each reads the clips it changes as values (each once, as the notes' edits do), works the
+// next values out by its rules, and sets them.
 namespace phazite
 {
 namespace
@@ -41,44 +40,47 @@ namespace
     //==============================================================================
     // The storage's own.
 
-    // Whether a track's element holds clips: a track's, not a folder's or a return's (Schema.h: trackKind).
-    bool holdsClips (const juce::ValueTree& trackState)
+    // The song's clips as its clips' area holds them now; none for a song that holds no values (one made to be read or checked
+    // keeps everything in its tree, which nothing reads clips of by their IDs: Song::getValues()). Each answer counts as one
+    // look, and each clip of a list walked as one more, for the speed gates (SongIndex::countVisited(), as a walk of a
+    // track's elements counted).
+    const SongClips& getSongClips (const Song& song)
     {
+        static const SongClips none;
+        SongIndex::countVisited (1);
+
+        if (const auto* values = song.getValues())
+            return values->clips.get();
+
+        return none;
+    }
+
+    // Whether a track holds clips: a track's, not a folder's or a return's (Schema.h: trackKind).
+    bool holdsClips (const Song& song, TrackID track)
+    {
+        const auto trackState = findTrackState (song, track);
         return trackState.hasType (schema::TRACK) && ! isFolderState (trackState) && ! isReturnState (trackState);
     }
 
-    // Where among a track's elements a clip goes to be at a place among its clips (from 0): before the clip there now, or
-    // after them all (-1) for a place past them, or none (-1).
-    int findChildIndexForClip (const juce::ValueTree& trackState, int place)
+    ClipPlacement toPlacement (const ClipValue& clip)
     {
-        if (place < 0)
-            return -1;
-
-        for (int i = 0, clips = 0; i < trackState.getNumChildren(); ++i)
-            if (trackState.getChild (i).hasType (schema::CLIP) && clips++ == place)
-                return i;
-
-        return -1;
+        return { clip.id, clip.kind, clip.start, clip.isAudio() ? BeatDuration() : clip.length, clip.offset };
     }
 
-    // A clip's place, read from its element without the rest of its value: as readClipValue() reads those properties.
-    ClipPlacement readClipPlacement (const juce::ValueTree& clipState)
+    // The places of a track's clips, in its order.
+    std::vector<ClipPlacement> readClipPlacements (const SongClips& clips, TrackID track)
     {
-        const auto audio = isAudioState (clipState);
-        const auto range = getClipRange (clipState);
-        return { getClipID (clipState), audio ? ClipValue::Kind::audio : ClipValue::Kind::midi, range.getStart(),
-                 audio ? BeatDuration() : range.getLength(), getClipOffset (clipState) };
-    }
-
-    // The places of a track's element's clips, in its order.
-    std::vector<ClipPlacement> readClipPlacements (const juce::ValueTree& trackState)
-    {
-        const auto clips = getClipStates (trackState);
         std::vector<ClipPlacement> places;
-        places.reserve (clips.size());
 
-        for (const auto& clipState : clips)
-            places.push_back (readClipPlacement (clipState));
+        if (const auto* list = clips.tracks.find (track.getRaw()))
+        {
+            SongIndex::countVisited (list->size());
+            places.reserve (list->size());
+
+            for (const auto id : *list)
+                if (const auto* clip = clips.find (id))
+                    places.push_back (toPlacement (*clip));
+        }
 
         return places;
     }
@@ -86,60 +88,49 @@ namespace
     // The same of a clip of the song's by its ID (none for one that isn't), and the track it is on.
     std::optional<ClipPlacement> findClipPlacement (const Song& song, ClipID clip, TrackID* track = nullptr)
     {
-        const auto clipState = findClipState (song, clip);
+        const auto* value = getSongClips (song).find (clip);
 
-        if (! clipState.isValid())
+        if (value == nullptr)
             return std::nullopt;
 
         if (track != nullptr)
-            *track = getTrackID (clipState.getParent());
+            *track = value->track;
 
-        return readClipPlacement (clipState);
+        return toPlacement (*value);
+    }
+
+    // Each track's clips' IDs of the song, track by track in the song's order, each track's in its order.
+    template <typename Each>
+    void forEachClip (const Song& song, Each&& each)
+    {
+        const auto& clips = getSongClips (song);
+
+        if (clips.clips.empty())
+            return;
+
+        for (const auto& trackState : getTrackStates (song))
+            if (const auto* list = clips.tracks.find (getTrackID (trackState).getRaw()))
+            {
+                SongIndex::countVisited (list->size());
+
+                for (const auto id : *list)
+                    if (const auto* clip = clips.find (id))
+                        each (*clip);
+            }
     }
 
     // A copy of a clip of the song (copy: its value, with an ID of its own), added after the clips of the track its value
-    // names: its element the clip's copied (so that what the copy's value doesn't hold of it comes along, as a copy of the
-    // element always took it), then given what differs; its notes the clip's (SongValues.h: copyClipNotes()), shared until
-    // either is edited, where the song holds its values, else its elements in the copy. Returns its ID, or none.
+    // names, with the clip's notes (shared until either is edited). Returns its ID, or none.
     ClipID addCopy (Song& song, const ClipValue& clip, const ClipValue& copy)
     {
-        const auto clipState = findClipState (song, clip.id);
-        auto trackState = findTrackState (song, copy.track);
+        auto* values = song.getValues();
 
-        if (! clipState.isValid() || ! holdsClips (trackState))
+        if (values == nullptr || values->findClip (clip.id) == nullptr || ! holdsClips (song, copy.track))
             return {};
 
-        auto copyState = clipState.createCopy();
-        writeClipElement (copy, clip, copyState, nullptr);
-
-        if (auto* values = song.getValues())
-            values->copyClipNotes (song, clip.id, copy.id);
-
-        trackState.appendChild (copyState, getUndoOf (song));
+        const auto notes = copy.isMidi() ? values->findClipNotes (clip.id) : nullptr;
+        values->setClip (song, copy, -1, notes);
         return copy.id;
-    }
-
-    // A clip's element, which holds held, made to hold next (setClip()): only what differs written, and on another track,
-    // moved to the end of that one's clips.
-    void writeClip (Song& song, juce::ValueTree& clipState, const ClipValue& held, const ClipValue& next)
-    {
-        jassert (held.id == next.id);
-
-        if (held == next)
-            return;
-
-        auto* undo = getUndoOf (song);
-        writeClipElement (next, held, clipState, undo);
-
-        // To the end of another track's clips, as placeClipState() moves it.
-        if (next.track != held.track)
-        {
-            if (auto trackState = findTrackState (song, next.track); holdsClips (trackState) && clipState.getParent() != trackState)
-            {
-                clipState.getParent().removeChild (clipState, undo);
-                trackState.appendChild (clipState, undo);
-            }
-        }
     }
 
     // A clip of the song changed by its ID with one look for it: change (const ClipValue&) gives the value it is to hold,
@@ -147,43 +138,25 @@ namespace
     template <typename Change>
     void changeClip (Song& song, ClipID clip, Change&& change)
     {
-        if (auto clipState = findClipState (song, clip); clipState.isValid())
+        if (const auto* held = getSongClips (song).find (clip))
         {
-            const auto held = readClipValue (clipState);
-            writeClip (song, clipState, held, change (held));
+            const auto value = *held;
+            setClip (song, value, change (value));
         }
     }
 
     // The places of a clip's alias group's clips, the clip's first, then the others in the song's order (the clip's alone in
-    // none; none for a clip that isn't the song's), with one look for it.
+    // none; none for a clip that isn't the song's).
     std::vector<ClipPlacement> getAliasPlacements (const Song& song, ClipID clip)
     {
-        const auto clipState = findClipState (song, clip);
-
-        if (! clipState.isValid())
-            return {};
-
-        if (! clipState.hasProperty (schema::clipLink))
-            return { readClipPlacement (clipState) };
-
         std::vector<ClipPlacement> places;
+        const auto& clips = getSongClips (song);
 
-        for (const auto& alias : getAliasStates (song, clipState))
-            places.push_back (readClipPlacement (alias));
+        for (const auto alias : getAliasClips (song, clip))
+            if (const auto* value = clips.find (alias))
+                places.push_back (toPlacement (*value));
 
         return places;
-    }
-
-    // Every clip of the song in an alias group, with its group (Schema.h: clipLink), track by track.
-    std::vector<std::pair<ClipID, std::uint64_t>> getClipLinks (const Song& song)
-    {
-        std::vector<std::pair<ClipID, std::uint64_t>> links;
-
-        for (const auto& clipState : getClipStates (song))
-            if (const auto link = (std::uint64_t) (juce::int64) clipState[schema::clipLink]; link != 0)
-                links.emplace_back (getClipID (clipState), link);
-
-        return links;
     }
 
     //==============================================================================
@@ -552,48 +525,10 @@ namespace
 //==============================================================================
 // The storage.
 
-juce::UndoManager* getUndoOf (Song& song)
-{
-    return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-}
-
-juce::ValueTree findClipState (const Song& song, ClipID id)
-{
-    return id.isValid() ? song.getIndex().findClip (id.getRaw()) : juce::ValueTree();
-}
-
-std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState)
-{
-    std::vector<juce::ValueTree> clips;
-    SongIndex::countVisited ((std::uint64_t) trackState.getNumChildren()); // a walk of a track's elements, for the speed gates
-
-    for (const auto& child : trackState)
-        if (child.hasType (schema::CLIP))
-            clips.push_back (child);
-
-    return clips;
-}
-
-std::vector<juce::ValueTree> getClipStates (const Song& song)
-{
-    std::vector<juce::ValueTree> clips;
-
-    for (const auto& trackState : getTrackStates (song))
-    {
-        SongIndex::countVisited ((std::uint64_t) trackState.getNumChildren());
-
-        for (const auto& child : trackState)
-            if (child.hasType (schema::CLIP))
-                clips.push_back (child);
-    }
-
-    return clips;
-}
-
 std::optional<ClipValue> getClipValue (const Song& song, ClipID clip)
 {
-    if (const auto clipState = findClipState (song, clip); clipState.isValid())
-        return readClipValue (clipState);
+    if (const auto* value = getSongClips (song).find (clip))
+        return *value;
 
     return std::nullopt;
 }
@@ -601,9 +536,17 @@ std::optional<ClipValue> getClipValue (const Song& song, ClipID clip)
 std::vector<ClipValue> getClipValues (const Song& song, TrackID track)
 {
     std::vector<ClipValue> values;
+    const auto& clips = getSongClips (song);
 
-    for (const auto& clipState : getClipStates (findTrackState (song, track)))
-        values.push_back (readClipValue (clipState));
+    if (const auto* list = clips.tracks.find (track.getRaw()))
+    {
+        SongIndex::countVisited (list->size());
+        values.reserve (list->size());
+
+        for (const auto id : *list)
+            if (const auto* clip = clips.find (id))
+                values.push_back (*clip);
+    }
 
     return values;
 }
@@ -611,230 +554,261 @@ std::vector<ClipValue> getClipValues (const Song& song, TrackID track)
 std::vector<ClipValue> getClipValues (const Song& song)
 {
     std::vector<ClipValue> values;
-
-    for (const auto& clipState : getClipStates (song))
-        values.push_back (readClipValue (clipState));
-
+    forEachClip (song, [&values] (const ClipValue& clip) { values.push_back (clip); });
     return values;
 }
 
 std::vector<ClipID> getAllClips (const Song& song)
 {
     std::vector<ClipID> clips;
-
-    for (const auto& clipState : getClipStates (song))
-        clips.push_back (getClipID (clipState));
-
+    forEachClip (song, [&clips] (const ClipValue& clip) { clips.push_back (clip.id); });
     return clips;
 }
 
 std::vector<ClipID> getClips (const Song& song, TrackID track)
 {
-    std::vector<ClipID> clips;
+    if (const auto* list = getSongClips (song).tracks.find (track.getRaw()))
+    {
+        SongIndex::countVisited (list->size());
+        return { list->begin(), list->end() };
+    }
 
-    for (const auto& clipState : getClipStates (findTrackState (song, track)))
-        clips.push_back (getClipID (clipState));
-
-    return clips;
+    return {};
 }
 
 TrackID getClipTrack (const Song& song, ClipID clip)
 {
-    if (const auto clipState = findClipState (song, clip); clipState.isValid())
-        return getTrackID (clipState.getParent());
+    if (const auto* value = getSongClips (song).find (clip))
+        return value->track;
 
     return {};
 }
 
 bool hasClips (const Song& song, TrackID track)
 {
-    return ! getClipStates (findTrackState (song, track)).empty();
+    return getSongClips (song).tracks.find (track.getRaw()) != nullptr;
 }
 
 bool hasClips (const Song& song, TrackID track, ClipValue::Kind kind)
 {
-    const auto clips = getClipStates (findTrackState (song, track));
-    return std::any_of (clips.begin(), clips.end(),
-                        [kind] (const juce::ValueTree& clipState) { return isAudioState (clipState) == (kind == ClipValue::Kind::audio); });
+    const auto& clips = getSongClips (song);
+
+    if (const auto* list = clips.tracks.find (track.getRaw()))
+        for (const auto id : *list)
+            if (const auto* clip = clips.find (id); clip != nullptr && clip->kind == kind)
+                return true;
+
+    return false;
 }
 
 bool isMidiClip (const Song& song, ClipID clip)
 {
-    return isMidiState (findClipState (song, clip));
+    const auto* value = getSongClips (song).find (clip);
+    return value != nullptr && value->isMidi();
 }
 
 std::vector<ClipPlacement> getClipPlacements (const Song& song, TrackID track)
 {
-    return readClipPlacements (findTrackState (song, track));
+    return readClipPlacements (getSongClips (song), track);
 }
 
 std::vector<ClipPlacement> getClipPlacements (const Song& song)
 {
-    const auto clips = getClipStates (song);
     std::vector<ClipPlacement> places;
-    places.reserve (clips.size());
-
-    for (const auto& clipState : clips)
-        places.push_back (readClipPlacement (clipState));
-
+    forEachClip (song, [&places] (const ClipValue& clip) { places.push_back (toPlacement (clip)); });
     return places;
 }
 
 std::vector<ClipID> getAliasClips (const Song& song, ClipID clip)
 {
-    std::vector<ClipID> clips;
+    const auto& clips = getSongClips (song);
+    const auto* value = clips.find (clip);
 
-    if (const auto clipState = findClipState (song, clip); clipState.isValid())
+    if (value == nullptr)
+        return {};
+
+    const auto* members = value->link != 0 ? clips.groups.find (value->link) : nullptr;
+
+    if (members == nullptr)
+        return { clip }; // in no group
+
+    // The others in the song's order: by their tracks' places among the song's tracks, then by their places on their tracks,
+    // each track's list looked through once.
+    struct Placed
     {
-        if (! clipState.hasProperty (schema::clipLink))
-            return { clip }; // in no group
+        ClipID id;
+        int track = 0;
+        size_t place = 0;
+    };
 
-        for (const auto& alias : getAliasStates (song, clipState))
-            clips.push_back (getClipID (alias));
+    std::vector<Placed> others;
+    std::map<std::uint64_t, std::vector<size_t>> byTrack; // the others on each track, by their places in others
+
+    for (const auto member : *members)
+    {
+        if (member == clip)
+            continue;
+
+        if (const auto* other = clips.find (member))
+        {
+            byTrack[other->track.getRaw()].push_back (others.size());
+            others.push_back ({ member });
+        }
     }
 
-    return clips;
+    for (const auto& [track, onIt] : byTrack)
+    {
+        const auto trackPlace = song.getIndex().getTrackPlace (findTrackState (song, TrackID::fromRaw (track))).index;
+        const auto* list = clips.tracks.find (track);
+        size_t place = 0;
+
+        for (const auto index : onIt)
+            others[index].track = trackPlace;
+
+        if (list != nullptr)
+            for (const auto id : *list)
+            {
+                for (const auto index : onIt)
+                    if (others[index].id == id)
+                        others[index].place = place;
+
+                ++place;
+            }
+    }
+
+    std::sort (others.begin(), others.end(),
+               [] (const Placed& a, const Placed& b) { return a.track != b.track ? a.track < b.track : a.place < b.place; });
+
+    std::vector<ClipID> aliases { clip };
+
+    for (const auto& other : others)
+        aliases.push_back (other.id);
+
+    return aliases;
 }
 
 ClipID addClip (Song& song, ClipValue clip, const ClipNotes* notes, int index)
 {
-    auto trackState = findTrackState (song, clip.track);
+    auto* values = song.getValues();
 
-    if (! holdsClips (trackState))
+    if (values == nullptr || ! holdsClips (song, clip.track))
         return {};
 
-    if (! clip.id.isValid() || findClipState (song, clip.id).isValid())
+    if (! clip.id.isValid() || values->findClip (clip.id) != nullptr)
         clip.id = ClipID::fromRaw (song.makeID());
 
-    // Its element written as its maker writes a new one; its notes given to it as it joins the song, without a walk through
-    // them (SongValues.h: a clip of a song that holds its values holds none in its element; one of a song that keeps
-    // everything in its tree, its elements).
-    juce::ValueTree clipState (schema::CLIP);
-    writeClipElement (clip, clipState, nullptr);
-
-    if (notes != nullptr && clip.isMidi())
-    {
-        if (auto* values = song.getValues())
-            values->setClipNotes (song, clip.id, *notes);
-        else
-            writeClipNotes (*notes, clipState);
-    }
-
-    trackState.addChild (clipState, findChildIndexForClip (trackState, index), getUndoOf (song));
-    return clip.id;
+    // What a clip takes of its value (keepWithinClip()), its notes given to it as it joins the song, without a walk through
+    // them; a MIDI clip without, the alias group's it joins or an empty value (SongValues.h: setClip()).
+    const auto id = clip.id;
+    values->setClip (song, keepWithinClip (std::move (clip)), index, notes);
+    return id;
 }
 
 void setClip (Song& song, const ClipValue& clip)
 {
-    // What the song holds of it read, and what a clip takes of the value given written where it differs.
+    // What the song holds of it read, and what a clip takes of the value given set where it differs.
     if (const auto held = getClipValue (song, clip.id))
         setClip (song, *held, keepWithinClip (clip));
 }
 
 void setClip (Song& song, const ClipValue& held, const ClipValue& next)
 {
-    if (held == next)
-        return;
+    jassert (held.id == next.id);
 
-    if (auto clipState = findClipState (song, held.id); clipState.isValid())
-        writeClip (song, clipState, held, next);
-}
-
-void eraseClip (Song& song, ClipID clip)
-{
-    auto clipState = findClipState (song, clip);
-
-    if (! clipState.isValid())
-        return;
-
-    // The last one left of a group of linked clips leaves it, as Make Unique leaves it (makeClipsUnique()): it would still
-    // show as linked to nothing.
-    if (clipState.hasProperty (schema::clipLink))
-        if (const auto aliases = getAliasClips (song, clip); aliases.size() == 2)
-            setClipLink (song, aliases[1], 0);
-
-    clipState.getParent().removeChild (clipState, getUndoOf (song));
-}
-
-std::optional<ClipValue> getClipValueAsSet (const Song& song, const ClipValue& clip)
-{
-    const auto clipState = findClipState (song, clip.id);
-
-    if (! clipState.isValid())
-        return std::nullopt;
-
-    // Written as setClip() writes it, into a copy of what of its element it writes (its properties and its markers, not its
-    // notes), and read back.
-    juce::ValueTree copy (schema::CLIP);
-    copy.copyPropertiesFrom (clipState, nullptr);
-
-    for (const auto& child : clipState)
-        if (child.hasType (schema::WARP))
-            copy.appendChild (child.createCopy(), nullptr);
-
-    writeClipElement (keepWithinClip (clip), readClipValue (copy), copy, nullptr);
-    auto held = readClipValue (copy);
-    held.track = holdsClips (findTrackState (song, clip.track)) ? clip.track : getClipTrack (song, clip.id);
-    return held;
-}
-
-void setClipLink (Song& song, ClipID clip, std::uint64_t link)
-{
-    // The one property alone, as the clips' code writes it (copyClips(), makeClipsUnique()).
-    auto clipState = findClipState (song, clip);
-
-    if (! clipState.isValid())
-        return;
-
-    if (link != 0)
-        clipState.setProperty (schema::clipLink, (juce::int64) link, getUndoOf (song));
-    else
-        clipState.removeProperty (schema::clipLink, getUndoOf (song));
-}
-
-void copyTrackClips (Song& song, TrackID from, TrackID to, const std::map<std::uint64_t, std::uint64_t>& ids, bool asAliases)
-{
-    const auto fromState = findTrackState (song, from);
-    auto toState = findTrackState (song, to);
-
-    if (! fromState.isValid() || ! holdsClips (toState) || fromState == toState)
+    // The same value: nothing. One whose sound is alike but not the same value (SongValues.h: ClipSound) is set, so that an
+    // alias group's clips can be given one, without a step of its own (SongValues.h: setClip()).
+    if (held == next && held.sound.isSameAs (next.sound))
         return;
 
     auto* values = song.getValues();
 
-    for (int i = 0; i < fromState.getNumChildren(); ++i)
+    if (values == nullptr || values->findClip (held.id) == nullptr)
+        return;
+
+    // On another track only if it holds clips, at the end of its clips (one that holds none isn't one it goes on).
+    auto value = next;
+
+    if (value.track != held.track && ! holdsClips (song, value.track))
+        value.track = held.track;
+
+    values->setClip (song, std::move (value));
+}
+
+void eraseClip (Song& song, ClipID clip)
+{
+    auto* values = song.getValues();
+    const auto* value = values != nullptr ? values->findClip (clip) : nullptr;
+
+    if (value == nullptr)
+        return;
+
+    // The last one left of a group of linked clips leaves it, as Make Unique leaves it (makeClipsUnique()): it would still
+    // show as linked to nothing.
+    if (const auto* members = value->link != 0 ? values->clips.get().groups.find (value->link) : nullptr; members != nullptr)
+        if (const auto group = *members; group.size() == 2)
+            setClipLink (song, group[0] == clip ? group[1] : group[0], 0);
+
+    values->eraseClip (song, clip);
+}
+
+std::optional<ClipValue> getClipValueAsSet (const Song& song, const ClipValue& clip)
+{
+    const auto* held = getSongClips (song).find (clip.id);
+
+    if (held == nullptr)
+        return std::nullopt;
+
+    // What setClip() sets: what a clip takes of it, on its track where that holds clips, else on the one it is on.
+    auto value = keepWithinClip (clip);
+    value.track = holdsClips (song, clip.track) ? clip.track : held->track;
+    return value;
+}
+
+void setClipLink (Song& song, ClipID clip, std::uint64_t link)
+{
+    changeClip (song, clip,
+                [link] (ClipValue value)
+                {
+                    value.link = link;
+                    return value;
+                });
+}
+
+void copyTrackClips (Song& song, TrackID from, TrackID to, const std::map<std::uint64_t, std::uint64_t>& ids, bool asAliases)
+{
+    auto* values = song.getValues();
+
+    if (values == nullptr || from == to || ! holdsClips (song, to))
+        return;
+
+    // Each clip of the track, as the area holds them now, in its order: its value on the copy, with its notes, shared.
+    const auto clips = values->clips.get();
+    const auto notes = values->notes.get();
+
+    if (const auto* list = clips.tracks.find (from.getRaw()))
     {
-        const auto clipState = fromState.getChild (i);
+        for (const auto old : *list)
+        {
+            const auto* clip = clips.find (old);
 
-        if (! clipState.hasType (schema::CLIP))
-            continue;
+            if (clip == nullptr)
+                continue;
 
-        // Its element as it is, its notes in it where the song keeps everything in its tree; else its value shared.
-        const auto old = getClipID (clipState);
-        const auto found = ids.find (old.getRaw());
-        const auto id = ClipID::fromRaw (found != ids.end() ? found->second : song.makeID());
-        auto copy = clipState.createCopy();
-        copy.setProperty (schema::clipID, (juce::int64) id.getRaw(), nullptr);
+            auto copy = *clip;
+            const auto found = ids.find (old.getRaw());
+            copy.id = ClipID::fromRaw (found != ids.end() ? found->second : song.makeID());
+            copy.track = to;
 
-        if (! asAliases)
-            copy.removeProperty (schema::clipLink, nullptr);
+            if (! asAliases)
+                copy.link = 0;
 
-        if (values != nullptr)
-            values->copyClipNotes (song, old, id);
-
-        toState.addChild (copy, i, getUndoOf (song));
+            values->setClip (song, std::move (copy), -1, notes.find (old));
+        }
     }
 }
 
 void setTrackClipOrder (Song& song, TrackID track, const std::vector<ClipID>& order)
 {
-    auto trackState = findTrackState (song, track);
-    std::vector<int> places; // where the track's clips' elements are among its elements, in their order
-
-    for (int i = 0; i < trackState.getNumChildren(); ++i)
-        if (trackState.getChild (i).hasType (schema::CLIP))
-            places.push_back (i);
-
     auto held = getClips (song, track), given = order;
     std::sort (held.begin(), held.end());
     std::sort (given.begin(), given.end());
@@ -845,131 +819,22 @@ void setTrackClipOrder (Song& song, TrackID track, const std::vector<ClipID>& or
         return;
     }
 
-    // Each place filled in turn with the clip the order puts there: the two elements swapped, by two moves that leave every
-    // element between them where it was.
-    auto* undo = getUndoOf (song);
-
-    for (size_t i = 0; i < places.size(); ++i)
-    {
-        const auto place = places[i];
-
-        if (getClipID (trackState.getChild (place)) == order[i])
-            continue;
-
-        int from = -1;
-
-        for (size_t j = i + 1; j < places.size() && from < 0; ++j)
-            if (getClipID (trackState.getChild (places[j])) == order[i])
-                from = places[j];
-
-        jassert (from > place);
-        trackState.moveChild (from, place, undo); // the clip that was at place is now at place + 1
-
-        if (from > place + 1)
-            trackState.moveChild (place + 1, from, undo);
-    }
+    if (auto* values = song.getValues(); values != nullptr && order != getClips (song, track))
+        values->setTrackClipOrder (song, track, immer::flex_vector<ClipID> (order.begin(), order.end()));
 }
 
 BeatPosition getClipsEnd (const Song& song)
 {
-    // Every clip read where the song keeps it, without a list of their places: a MIDI clip's place, an audio clip's value.
+    // Every clip, whatever its track: a MIDI clip's place, an audio clip's range worked out.
     BeatPosition end;
 
-    for (const auto& clipState : getClipStates (song))
+    for (const auto& entry : getSongClips (song).clips)
     {
-        const auto clip = readClipPlacement (clipState);
-        end = std::max (end, clip.isAudio() ? getLiveClipRange (song, readClipValue (clipState)).getEnd() : clip.start + clip.length);
+        const auto& clip = entry.second;
+        end = std::max (end, clip.isAudio() ? getLiveClipRange (song, clip).getEnd() : clip.start + clip.length);
     }
 
     return end;
-}
-
-//==============================================================================
-// The clips' elements read (for the tests, and what reads a song's elements: Clips.h).
-
-ClipID getClipID (const juce::ValueTree& clipState)
-{
-    return ClipID::fromRaw ((std::uint64_t) (juce::int64) clipState[schema::clipID]);
-}
-
-bool isMidiState (const juce::ValueTree& clipState)
-{
-    return clipState.hasType (schema::CLIP) && ! isAudioState (clipState);
-}
-
-BeatRange getClipRange (const juce::ValueTree& clipState)
-{
-    const auto start = BeatPosition::fromBeats (clipState[schema::clipStart]);
-    return { start, start + BeatDuration::fromBeats (clipState[schema::clipLength]) };
-}
-
-BeatRange getClipRange (const Song& song, const juce::ValueTree& clipState)
-{
-    return isAudioState (clipState) ? getLiveClipRange (song, readClipValue (clipState)) : getClipRange (clipState);
-}
-
-BeatDuration getClipOffset (const juce::ValueTree& clipState)
-{
-    return BeatDuration::fromBeats (clipState.getProperty (schema::clipOffset, 0.0));
-}
-
-BeatPosition getContentStart (const juce::ValueTree& clipState)
-{
-    return getClipRange (clipState).getStart() - getClipOffset (clipState);
-}
-
-std::vector<juce::ValueTree> getAliasStates (const Song& song, const juce::ValueTree& clipState)
-{
-    return song.getIndex().findLinked (clipState);
-}
-
-juce::ValueTree makeMidiClipState (Song& song, const juce::String& name, BeatRange range)
-{
-    const auto start = std::max (0.0, range.getStart().inBeats());
-    juce::ValueTree clipState (schema::CLIP);
-    clipState.setProperty (schema::clipID, (juce::int64) song.makeID(), nullptr);
-    clipState.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
-
-    if (name.isNotEmpty())
-        clipState.setProperty (schema::clipName, name, nullptr);
-
-    clipState.setProperty (schema::clipStart, start, nullptr);
-    clipState.setProperty (schema::clipLength, std::max (range.getLength().inBeats(), minimumClipLength.inBeats()), nullptr);
-    return clipState;
-}
-
-juce::String getClipName (const Song& song, const juce::ValueTree& clipState)
-{
-    if (const auto own = clipState[schema::clipName].toString(); own.isNotEmpty())
-        return own;
-
-    return getTrackName (song, getTrackID (clipState.getParent()));
-}
-
-ClipID placeClipState (Song& song, juce::ValueTree clipState, TrackID track)
-{
-    auto trackState = findTrackState (song, track);
-
-    // Only a track holds clips, not a folder or a return (Schema.h: trackKind), which would neither show nor play them.
-    if (! holdsClips (trackState))
-        return {};
-
-    if (clipState.getParent() != trackState)
-    {
-        if (auto parent = clipState.getParent(); parent.isValid())
-            parent.removeChild (clipState, getUndoOf (song));
-
-        trackState.appendChild (clipState, getUndoOf (song));
-    }
-
-    return getClipID (clipState);
-}
-
-void setClipPlace (Song& song, juce::ValueTree clipState, BeatPosition start, BeatDuration length, BeatDuration offset)
-{
-    // The element given, which a value is read from and written into, as setClipPlace() by ID sets a clip of the song.
-    const auto held = readClipValue (clipState);
-    writeClipElement (withPlace (held, start, length, offset), held, clipState, getUndoOf (song));
 }
 
 //==============================================================================
@@ -1004,14 +869,17 @@ BeatRange getClipRange (const Song& song, const ClipPlacement& clip)
 
 BeatRange getClipRange (const Song& song, ClipID clip)
 {
-    // With one look for it: its place, or an audio clip's value (getClipRange() of an element).
-    return getClipRange (song, findClipState (song, clip));
+    // With one look for it: a MIDI clip's place, or an audio clip's range worked out from its value.
+    if (const auto* value = getSongClips (song).find (clip))
+        return getLiveClipRange (song, *value);
+
+    return {};
 }
 
 juce::String getClipName (const Song& song, ClipID clip)
 {
-    const auto value = getClipValue (song, clip);
-    return value.has_value() ? getClipName (song, *value) : getTrackName (song, TrackID());
+    const auto* value = getSongClips (song).find (clip);
+    return value != nullptr ? getClipName (song, *value) : getTrackName (song, TrackID());
 }
 
 juce::String getClipName (const Song& song, const ClipValue& clip)
@@ -1021,7 +889,6 @@ juce::String getClipName (const Song& song, const ClipValue& clip)
 
 ClipValue makeMidiClip (Song& song, const juce::String& name, BeatRange range)
 {
-    // As makeMidiClipState() makes its element.
     ClipValue clip;
     clip.id = ClipID::fromRaw (song.makeID());
     clip.kind = ClipValue::Kind::midi;
@@ -1033,24 +900,23 @@ ClipValue makeMidiClip (Song& song, const juce::String& name, BeatRange range)
 
 bool setClipFiles (Song& song, const juce::String& path, const juce::String& newPath)
 {
-    // Each audio clip that plays the file (each of an alias group plays it: each is given the new path).
-    auto any = false;
+    // Each audio clip that plays the file (each of an alias group plays it: each is given the new path), track by track.
+    std::vector<ClipValue> playing;
+    forEachClip (song,
+                 [&playing, &path] (const ClipValue& clip)
+                 {
+                     if (clip.isAudio() && clip.sound.file == path)
+                         playing.push_back (clip);
+                 });
 
-    for (const auto& place : getClipPlacements (song))
+    for (const auto& clip : playing)
     {
-        if (! place.isAudio())
-            continue;
-
-        if (const auto clip = getClipValue (song, place.id); clip.has_value() && clip->sound.file == path)
-        {
-            auto next = *clip;
-            next.sound.file = newPath;
-            setClip (song, *clip, next);
-            any = true;
-        }
+        auto next = clip;
+        next.sound.file = newPath;
+        setClip (song, clip, next);
     }
 
-    return any;
+    return ! playing.empty();
 }
 
 void moveClipStart (Song& song, ClipID clip, BeatPosition start)
@@ -1065,15 +931,17 @@ void setClipPlace (Song& song, ClipID clip, BeatPosition start, BeatDuration len
 
 bool canTrackHold (const Song& song, TrackID track, bool midi, const std::vector<ClipID>& leaving)
 {
-    // The track's kind from its element, and its clips' places with one look for it.
-    const auto trackState = findTrackState (song, track);
-
-    if (! holdsClips (trackState))
+    // The track's kind from its element, and its clips' kinds.
+    if (! holdsClips (song, track))
         return false;
 
-    for (const auto& clip : readClipPlacements (trackState))
-        if (clip.isAudio() == midi && std::find (leaving.begin(), leaving.end(), clip.id) == leaving.end())
-            return false;
+    const auto& clips = getSongClips (song);
+
+    if (const auto* list = clips.tracks.find (track.getRaw()))
+        for (const auto id : *list)
+            if (const auto* clip = clips.find (id);
+                clip != nullptr && clip->isAudio() == midi && std::find (leaving.begin(), leaving.end(), id) == leaving.end())
+                return false;
 
     return midi || ! hasInstrument (song, track);
 }
@@ -1457,14 +1325,15 @@ std::vector<ClipID> duplicateClips (Song& song, const std::vector<ClipID>& clips
 
 void unlinkLoneClips (Song& song)
 {
-    std::map<std::uint64_t, std::vector<ClipID>> groups;
+    // The groups as they are now, each left alone taken out of its group in turn.
+    std::vector<ClipID> lone;
 
-    for (const auto& [clip, link] : getClipLinks (song))
-        groups[link].push_back (clip);
+    for (const auto& group : getSongClips (song).groups)
+        if (group.second.size() == 1)
+            lone.push_back (group.second.front());
 
-    for (const auto& [link, members] : groups)
-        if (members.size() == 1)
-            setClipLink (song, members.front(), 0);
+    for (const auto clip : lone)
+        setClipLink (song, clip, 0);
 }
 
 void makeClipsUnique (Song& song, const std::vector<ClipID>& clips)

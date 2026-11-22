@@ -7,6 +7,7 @@
 #include "model/base/Numbers.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
@@ -184,31 +185,48 @@ namespace
         return std::nullopt;
     }
 
-    // The MIDI clips that an edit, or a reading of many notes, names: each read once (getClipValue()), as it is first named,
-    // so that a clip's place, length, offset and alias group are read once for all of its notes, not once for each. What
-    // grows a clip it read (growToHold()) reads it again.
+    // The MIDI clips that an edit, or a reading of many notes, names: each found in the song's clips' area by its ID, without a
+    // copy (SongValues.h: SongClips), the area as it was as this was made held meanwhile, so that what is found stays valid
+    // while the edit changes the song; a clip's place, length, offset and alias group read from there once for all of its
+    // notes, not once for each. What grows a clip it found (growToHold()) reads it again (readAgain()).
     class MidiClips
     {
     public:
         explicit MidiClips (const Song& s)
-            : song (s)
+            : song (s),
+              held (s.getValues() != nullptr ? s.getValues()->clips.get() : SongClips())
         {
         }
 
-        // None for a clip that isn't a MIDI clip of the song's. Kept for as long as this is.
-        ClipValue* find (ClipID clip)
+        // None for a clip that isn't a MIDI clip of the song's. Valid for as long as this is.
+        const ClipValue* find (ClipID clip) const
         {
-            auto found = read.find (clip.getRaw());
+            SongIndex::countVisited (1); // a look, for the speed gates, as the clips' storage counts one (Clips.cpp)
 
-            if (found == read.end())
-                found = read.emplace (clip.getRaw(), findMidiClip (song, clip)).first;
+            if (const auto found = grown.find (clip.getRaw()); found != grown.end())
+                return &found->second;
 
-            return found->second.has_value() ? &*found->second : nullptr;
+            const auto* value = held.find (clip);
+            return value != nullptr && value->isMidi() ? value : nullptr;
+        }
+
+        // A clip as the song holds it now, after this changed it: none for one that isn't a MIDI clip of the song's any more.
+        const ClipValue* readAgain (ClipID clip)
+        {
+            if (auto now = findMidiClip (song, clip))
+            {
+                auto& kept = grown[clip.getRaw()];
+                kept = std::move (*now);
+                return &kept;
+            }
+
+            return nullptr;
         }
 
     private:
         const Song& song;
-        std::unordered_map<std::uint64_t, std::optional<ClipValue>> read;
+        const SongClips held;                               // the song's clips as this was made: what it finds in
+        std::unordered_map<std::uint64_t, ClipValue> grown; // those read again since
     };
 
     // A song beat as a position among the clip's notes, which count from its content's start; and back.
@@ -274,8 +292,9 @@ namespace
             ClipNotes before, after;
         };
 
-        // A MIDI clip of the song's, as this edit read it: none for one that isn't.
-        ClipValue* findClip (ClipID clip) { return clips.find (clip); }
+        // A MIDI clip of the song's, as this edit read it: none for one that isn't. And what reads them.
+        const ClipValue* findClip (ClipID clip) const { return clips.find (clip); }
+        MidiClips& getClips() { return clips; }
 
         // The value of a clip's group, for this edit: nullptr for a clip that isn't a MIDI clip of the song's.
         Group* find (const ClipValue* clip)
@@ -435,10 +454,10 @@ namespace
 
     // Makes the clip end at the end of the bar a song beat is in, if the clip ends before the beat, but only into the
     // empty space after it: never past the start of the next clip on its track, so that a note edit never makes one clip
-    // cover another. The clip's value read again, as the clip now is.
-    void growToHold (Song& song, Rooms& rooms, ClipValue& clip, BeatPosition end)
+    // cover another. The clip read again where it grew (clip then points at what the song holds now).
+    void growToHold (Song& song, Rooms& rooms, MidiClips& clips, const ClipValue*& clip, BeatPosition end)
     {
-        const auto range = getClipRange (clip);
+        const auto range = getClipRange (*clip);
 
         if (end <= range.getEnd() + tinyBeats)
             return;
@@ -446,15 +465,15 @@ namespace
         const auto bars = getBars (song);
         auto newEnd = bars.getBarStart (bars.getBarAt (end - tinyBeats) + 1);
 
-        if (const auto roomEnd = rooms.findEnd (clip))
+        if (const auto roomEnd = rooms.findEnd (*clip))
             newEnd = std::min (newEnd, *roomEnd);
 
         if (newEnd > range.getEnd() + tinyBeats)
         {
-            setClipPlace (song, clip.id, range.getStart(), newEnd - range.getStart(), clip.offset);
+            setClipPlace (song, clip->id, range.getStart(), newEnd - range.getStart(), clip->offset);
 
-            if (auto now = findMidiClip (song, clip.id))
-                clip = std::move (*now);
+            if (const auto* now = clips.readAgain (clip->id))
+                clip = now;
         }
     }
 
@@ -504,16 +523,11 @@ std::uint64_t countNotesRead() noexcept
 
 ClipNotes getClipNotesValue (const Song& song, ClipID clip)
 {
-    if (const auto* values = song.getValues())
-    {
-        const auto* value = values->findClipNotes (clip);
-        return value != nullptr ? *value : ClipNotes();
-    }
-
-    // A song that keeps everything in its tree (one made to be read or checked: Song::getValues()): its clip's elements, which
-    // hold its notes there.
-    const auto clipState = findClipState (song, clip);
-    return isMidiState (clipState) ? readClipNotes (clipState) : ClipNotes();
+    // None of a song that keeps everything in its tree (one made to be read or checked: Song::getValues()), whose clips are no
+    // clips of the song's (Clips.h).
+    const auto* values = song.getValues();
+    const auto* value = values != nullptr ? values->findClipNotes (clip) : nullptr;
+    return value != nullptr ? *value : ClipNotes();
 }
 
 void setClipNotesValue (Song& song, ClipID clip, const ClipNotes& value)
@@ -717,7 +731,7 @@ namespace
                        BeatDuration length, NoteValues values, std::optional<BeatPosition> earliest = {},
                        std::optional<BeatPosition> latest = {})
     {
-        auto* value = edit.findClip (clip);
+        const auto* value = edit.findClip (clip);
         auto* group = edit.find (value);
 
         if (group == nullptr)
@@ -725,7 +739,7 @@ namespace
 
         start = std::max (std::min (start, latest.value_or (start)), earliest.value_or (value->start));
         length = std::max (length, getMinimumNoteLength());
-        growToHold (song, rooms, *value, start + length);
+        growToHold (song, rooms, edit.getClips(), value, start + length);
         values.id = wanted.isValid() && group->after.find (wanted) == nullptr ? wanted : NoteID::fromRaw (song.makeID());
         values.pitch = clampPitch (pitch);
         values.start = toClipBeat (*value, start);
@@ -764,14 +778,15 @@ std::vector<NoteRef> addNotes (Song& song, const std::vector<NoteData>& notes)
 
 void growClipForNote (Song& song, ClipID clip, BeatPosition start, BeatDuration length)
 {
-    auto value = findMidiClip (song, clip);
+    MidiClips clips (song);
+    const auto* value = clips.find (clip);
 
-    if (! value.has_value())
+    if (value == nullptr)
         return;
 
     // Where addNoteTo() puts the note, and what it grows the clip to hold.
     Rooms rooms (song);
-    growToHold (song, rooms, *value, std::max (start, value->start) + std::max (length, getMinimumNoteLength()));
+    growToHold (song, rooms, clips, value, std::max (start, value->start) + std::max (length, getMinimumNoteLength()));
 }
 
 juce::String getControllerName (int number)
@@ -1435,10 +1450,10 @@ namespace
     void placeNoteIn (Song& song, NotesEdit& edit, Rooms& rooms, const std::vector<ClipID>& clips, NoteID id, BeatPosition wanted,
                       int pitch, BeatDuration length)
     {
-        std::vector<ClipValue*> named;
+        std::vector<const ClipValue*> named;
 
         for (const auto clip : clips)
-            if (auto* value = edit.findClip (clip))
+            if (const auto* value = edit.findClip (clip))
                 named.push_back (value);
 
         auto* group = named.empty() ? nullptr : edit.find (named.front());
@@ -1464,7 +1479,8 @@ namespace
         }
 
         for (size_t i = 0; i < named.size(); ++i)
-            growToHold (song, rooms, *named[i], (i == 0 && ! movedByAnother ? first : toSongBeat (*named[i], start)) + length);
+            growToHold (song, rooms, edit.getClips(), named[i],
+                        (i == 0 && ! movedByAnother ? first : toSongBeat (*named[i], start)) + length);
 
         group->after = withNotesChanged (group->after, { id },
                                          [start, pitch, length] (NoteValues& each)
@@ -1488,8 +1504,8 @@ namespace
         length = std::max (length, getMinimumNoteLength());
 
         for (const auto clip : clips)
-            if (auto* value = edit.findClip (clip))
-                growToHold (song, rooms, *value, toSongBeat (*value, note->start) + length);
+            if (const auto* value = edit.findClip (clip))
+                growToHold (song, rooms, edit.getClips(), value, toSongBeat (*value, note->start) + length);
 
         group->after = withNotesChanged (group->after, { id }, [length] (NoteValues& each) { each.length = length; });
     }

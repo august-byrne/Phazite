@@ -901,17 +901,11 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         std::vector<juce::ValueTree> inside { copy };
         collectTrackStates (copy, inside);
 
-        // Nor does a copy of a pad's track play the pad, which plays on the original. Its clips aren't the copy's tree's: the
-        // clips' code copies each track's in (copyTrackClips()), with the IDs the copy gave them, once the copy is the song's.
+        // Nor does a copy of a pad's track play the pad, which plays on the original. Its clips aren't the song's tree's: the
+        // clips' code copies each track's onto its copy (copyTrackClips()), once the copy is the song's.
         for (auto state : inside)
-        {
             for (const auto* property : { &schema::trackFrozen.getName(), &schema::trackPadDevice.getName(), &schema::trackPad.getName() })
                 state.removeProperty (*property, nullptr);
-
-            for (auto i = state.getNumChildren(); --i >= 0;)
-                if (state.getChild (i).hasType (schema::CLIP))
-                    state.removeChild (i, nullptr);
-        }
 
         auto parent = original.getParent();
         parent.addChild (copy, parent.indexOf (original) + 1, &song.getUndoManager());

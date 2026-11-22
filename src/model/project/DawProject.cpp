@@ -625,12 +625,9 @@ namespace
 
             const auto start = clip.start.inBeats();
             const auto from = clip.fileStart;
-            // A clip without its end (only a damaged file's: Phazite writes it on every audio clip, and the loader leaves one that
-            // is absent absent) plays to the file's end; one whose end is 0 (an empty file's, or a part set to nothing) plays
-            // nothing, as Phazite plays it. The clip's value holds both as 0, so whether it has one is read from its element, by
-            // its ID, until the clips' value is their storage and holds "no end" itself (S5.20).
-            const auto hasEnd = findClipState (song, clip.id).hasProperty (schema::clipFileEnd);
-            const auto to = hasEnd ? clip.fileEnd : (double) reader->lengthInSamples / reader->sampleRate;
+            // Where its part ends, as Phazite plays it: one whose end is 0 (an empty file's, a part set to nothing, or a damaged
+            // file's clip without one, which the song holds as its description's 0: SongValues.h, readClipValue()) plays nothing.
+            const auto to = clip.fileEnd;
             const auto end = tempo.toBeats (tempo.toSamples (start) + (to - from));
 
             auto* element = clips.createNewChildElement ("Clip");

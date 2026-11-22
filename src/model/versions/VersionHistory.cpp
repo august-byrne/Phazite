@@ -3181,9 +3181,6 @@ void VersionHistory::markOrder()
 
 void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (isHeardAsClips (tree))
-        return; // clipsChanged()
-
     ++songChanges;
 
     if (tree.hasType (schema::MERGING)) // a conflict switched
@@ -3213,9 +3210,6 @@ void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce
 
 void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex)
 {
-    if (isHeardAsClips (parent, parent.getChild (newIndex)))
-        return; // clipsChanged()
-
     ++songChanges;
 
     // Tracks in another order: the song's line, and their numbers.

@@ -208,11 +208,7 @@ private:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex) override
-    {
-        if (! isHeardAsClips (parent, parent.getChild (newIndex))) // a track's clips reordered: clipsChanged()
-            changed (parent, {});
-    }
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent, {}); }
 
     void handleAsyncUpdate() override { update(); }
 

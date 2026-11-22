@@ -483,14 +483,14 @@ namespace
     //==============================================================================
     // The song's tracks' clips made like the other's in a pass of their own, once the rest of what is made like the other's
     // is (the tracks there, each where the other has it), through the clips' functions (model/arrangement/internal/Clips.h)
-    // by the song and the clips' IDs and values, so that it is the same whatever stores the song's clips. For each track it
+    // by the song and the clips' IDs and values (the song's clips' area: model/base/internal/SongValues.h). For each track it
     // makes like the other's: the clips the track holds that the other hasn't there taken away (or left for the track the
     // other has them on, or sent there); each the other holds there set as the other holds it (one on another track now is
     // moved, keeping what it is: its selection too) or added with its ID; and the track's clips put in the other's order.
     // Then each alias group given its notes as one value (Notes.h: setClipNotesValue()) and its audio clips' sound, its clips
     // on tracks the pass doesn't make like the other's too (known bug 234). What the other's version couldn't read (a stand-in)
     // stays as the song has it. Each write only where the song differs, in the history's step in progress, or outside it while
-    // the song is written outside it (Song::OutsideHistory), as the clips' functions write (Clips.h: getUndoOf()).
+    // the song is written outside it (Song::OutsideHistory), as the clips' functions write.
     class ClipPass
     {
     public:
@@ -896,8 +896,17 @@ namespace
 
             for (const auto& [element, value] : given)
             {
-                if (! value.isAudio() || value.link == 0 || ! groups.insert (value.link).second)
+                if (! value.isAudio() || value.link == 0)
                     continue;
+
+                const auto* values = song.getValues();
+                const auto* stored = values != nullptr ? values->findClip (value.id) : nullptr; // until the clips change: copied
+
+                if (stored == nullptr || ! groups.insert (value.link).second)
+                    continue;
+
+                // The very sound the clip holds, so that the group holds one (SongValues.h: ClipSound).
+                const auto sound = stored->sound;
 
                 for (const auto member : getAliasClips (song, value.id))
                 {
@@ -910,9 +919,9 @@ namespace
                         continue;
 
                     auto next = *held;
-                    next.sound = keepWhatWritesAlike (held->sound, value.sound);
+                    next.sound = sound;
 
-                    if (! (next.sound == held->sound))
+                    if (! next.sound.isSameAs (held->sound))
                     {
                         setClip (song, *held, next);
                         ++writes;
@@ -920,6 +929,32 @@ namespace
                 }
             }
         }
+    };
+
+    // What gives the song's tracks their clips here is the clip pass alone, never the keeper of the song's values, which takes
+    // in the clips' elements of a track that comes into the song's tree with them (SongValues.h: a safety net): every copy
+    // added to the song is without its tracks' clips (copyForSong()). Checked in Debug builds, as each of the functions below
+    // ends.
+    struct NoClipsTakenIn
+    {
+        explicit NoClipsTakenIn (const Song& s)
+            : song (s),
+              before (count (s))
+        {
+        }
+
+        ~NoClipsTakenIn() { jassert (count (song) == before); }
+
+        static int count (const Song& s)
+        {
+            const auto* values = s.getValues();
+            return values != nullptr ? values->countAdopted() : 0;
+        }
+
+        const Song& song;
+        const int before;
+
+        JUCE_DECLARE_NON_COPYABLE (NoClipsTakenIn)
     };
 
     // Every track's clips made like the other's, once the rest of the song is: how many writes it made.
@@ -1027,6 +1062,7 @@ namespace
 
 void makeSongLike (Song& song, const juce::ValueTree& other)
 {
+    const NoClipsTakenIn byThePassAlone (song);
     auto* undo = &song.getUndoManager();
     const auto standIns = findStandIns (other);
     removeMovedItems (song.getState(), findPlaces (other), undo, standIns);
@@ -1037,6 +1073,8 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
 
 void makeSongTheSame (Song& song, const juce::ValueTree& other)
 {
+    const NoClipsTakenIn byThePassAlone (song);
+
     // Outside the history, as what the song keeps beside its tree is written too (Song::OutsideHistory).
     const Song::OutsideHistory outside (song);
 
@@ -1051,6 +1089,7 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
 
 void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
 {
+    const NoClipsTakenIn byThePassAlone (song);
     const Song::OutsideHistory outside (song);
 
     // Everything, outside the history, and its count of IDs as the copy's: what the history holds is the copy's already, so
@@ -1233,6 +1272,7 @@ namespace
 
 bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
 {
+    const NoClipsTakenIn byThePassAlone (song);
     const auto done = makeTrackLikeIn (song, song.getState(), id, other, &song.getUndoManager());
     countIDsPast (song, other);
     return done;
@@ -1240,6 +1280,7 @@ bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
 
 void makeSongOwnLike (Song& song, const juce::ValueTree& other)
 {
+    const NoClipsTakenIn byThePassAlone (song);
     makeSongOwnLikeIn (song, song.getState(), other, &song.getUndoManager());
     countIDsPast (song, other);
 }

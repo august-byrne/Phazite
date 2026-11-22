@@ -128,15 +128,20 @@ namespace
             add (pending.clips);
         }
 
-        // Each clip whose notes changed named, on its track; one gone since was named as it was taken off its track.
+        // Each clip whose notes changed named, on its track, as the song holds it now (a listener of the values reads nothing
+        // of the song as it is told: this is later); one gone since was named as it was taken off its track.
         void nameNotesChanged()
         {
-            if (song == nullptr)
-                return;
+            const auto* values = song != nullptr ? song->getValues() : nullptr;
 
             for (const auto clip : std::exchange (notesChanged, {}))
-                if (const auto clipState = findClipState (*song.get(), clip); clipState.isValid())
-                    nameClip (clipState, clipState.getParent());
+            {
+                if (const auto* value = values != nullptr ? values->findClip (clip) : nullptr)
+                {
+                    name (pending.changedClips, clip);
+                    name (pending.clipTracks, value->track);
+                }
+            }
         }
 
         void changeListenerCallback (juce::ChangeBroadcaster*) override
@@ -165,13 +170,6 @@ namespace
         {
             std::sort (items.named.begin(), items.named.end());
             items.named.erase (std::unique (items.named.begin(), items.named.end()), items.named.end());
-        }
-
-        // A clip, on the track whose element holds it (its parent).
-        void nameClip (const juce::ValueTree& clip, const juce::ValueTree& track)
-        {
-            name (pending.changedClips, getClipID (clip));
-            name (pending.clipTracks, isTrackElement (track) ? getTrackID (track) : TrackID());
         }
 
         // The channel whose element holds a device, a send or a container's chain, at any depth; and a send's return, whose
@@ -232,14 +230,6 @@ namespace
                 if (element.hasType (schema::CHORDLANE))
                     return add (pending.chords);
 
-                // A clip on a track, and what is in it, is the clips' listener's (clipsChanged()), never marked here: this is
-                // one elsewhere (a file that put one there), whose track can't be named.
-                if (element.hasType (schema::CLIP))
-                {
-                    nameClip (element, element.getParent());
-                    return add (pending.clips);
-                }
-
                 // Devices, on a track's element or the master's.
                 if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::SEND))
                 {
@@ -287,11 +277,6 @@ namespace
                 add (pending.sections);
             else if (child.hasType (schema::CHORDLANE))
                 add (pending.chords);
-            else if (child.hasType (schema::CLIP)) // one not on a track (one on a track: clipsChanged())
-            {
-                nameClip (child, parent);
-                add (pending.clips);
-            }
             else if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
             {
                 nameChannelOf (parent);
@@ -342,10 +327,6 @@ namespace
 
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
-            // A clip's, or one of what is in it: clipsChanged().
-            if (isHeardAsClips (tree))
-                return;
-
             // A device's value that turns what its sidechain hears on or off (a compressor's mode) changes what the mixer
             // shows of it.
             if (switchesSidechain (tree, property))
@@ -391,11 +372,11 @@ namespace
                 mark (tree);
         }
 
-        void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
         {
             // A device's first value set by hand, as its other values, is no change that views show; nor its last one set back
-            // to its default, which takes its VALUES away (keepValueSetByHand()). A clip, or something in one: clipsChanged().
-            if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE) || isHeardAsClips (parent, child))
+            // to its default, which takes its VALUES away (keepValueSetByHand()).
+            if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE))
                 return;
 
             if ((child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
@@ -406,13 +387,12 @@ namespace
         }
         void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
         {
-            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE) && ! isHeardAsClips (parent, child))
+            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE))
                 markRemoved (parent, child);
         }
         void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override
         {
-            if (! isHeardAsClips (parent, parent.getChild (newIndex)))
-                markMoved (parent, oldIndex, newIndex);
+            markMoved (parent, oldIndex, newIndex);
         }
     };
 

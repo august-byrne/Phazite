@@ -26,7 +26,7 @@ between them, which compiles the song into what plays. The layers and where the 
 | Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
 | Browser previews on an engine of their own | Built | |
 | Every element of the song described once in code: its type, range, default and kind | Built | `src/model/base/internal/Schema.h`, `SchemaDescription.h`; `tests/SchemaTests.cpp` |
-| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: a clip's notes and controllers' values are values beside the tree (built); the other areas next |
+| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: the clips, and a clip's notes and controllers' values, are values beside the tree (built); the other areas next |
 | Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
 | Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
 
@@ -50,18 +50,22 @@ sends, automation, modulators and macros, sections and the chord lane.
   counts differs from it.
 - **Aliases.** The clips of an alias group hold ONE value of notes, the same under each clip's ID, so an edit through
   any of them changes every clip of the group in the same undo step.
-- **Notes as values beside the tree.** A MIDI clip's notes and controllers' values are an immutable value
-  (`src/model/base/internal/SongValues.h`: `ClipNotes`), and the song holds them in an area of values by the clip's
-  ID (`ValueArea.h`), in its one undo history, rather than as elements of its tree: a clip of the song holds no NOTE
-  or CONTROL element. Every note edit is a function from one value to the next, set once for each alias group. A
-  keeper, a listener of the song's tree that hears before any other but the index, keeps the two together for every
-  change of the tree that isn't the notes' own: a clip that comes into the song with notes as elements (a paste, a
-  version, an import, a merge) has them read into its value; a clip taken out has its value remembered with its element,
-  and given back if the same element comes back (a move); a clip that joins an alias group takes the group's value.
-  Whatever needs the song whole (a save, a version, the clipboard, a comparison) asks for it (`WholeState.h`), and
-  gets each clip's NOTE elements, then its CONTROL elements, written back in. What hears the song's changes (what
-  plays it, the open project's views, the unsaved mark, the versions, frozen tracks) hears the values' changes too,
-  by clip, and reads them only once the step is whole.
+- **Clips and notes as values beside the tree.** The song's clips are immutable values (`src/model/base/internal/
+  SongValues.h`: `SongClips`, each clip's properties and warp markers a `ClipValue`, each track's clips in their order,
+  each alias group's clips), and a MIDI clip's notes and controllers' values are one (`ClipNotes`, by the clip's ID, one
+  value for an alias group); the song holds them in two areas of values (`ValueArea.h`), in its one undo history, rather
+  than as elements of its tree: the song's tree holds no CLIP element. Every clip edit and every note edit is a function
+  from one value to the next; a MIDI clip that joins an alias group takes the group's notes. A keeper, a listener of the
+  song's tree, keeps the values and the tree together: a track taken out of the song has its clips remembered with its
+  element and erased, and given back if the same element comes back (a move); a track that comes into the
+  song with its clips' elements (a safety net: the versions give a track its clips through the clips'
+  functions) has them read into the values and taken out of the tree. An undo puts the tree back before the clips, so no
+  tree callback reads the clips: what reads them reads them at its listener's later moment. Whatever needs the song whole
+  (a save, a version, the clipboard, a comparison) asks for it (`WholeState.h`), and gets each track's clips written back
+  in, first among its elements, in the track's order, each property only while it is set, a clip's warp markers, NOTE
+  elements and CONTROL elements after it. What hears the song's changes (what plays it, the open project's views, the
+  unsaved mark, the versions, frozen tracks) hears the values' changes too, by clip, and reads them only once the step is
+  whole.
 - **Time edits** make a section longer or shorter rather than cutting it in two.
 
 ### Time
@@ -340,7 +344,7 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
   deleted, only twice as fast, and its undo step larger), most of all in Undo, a merge and the copy a save takes
   ([decisions.md](decisions.md), "Engineering"). Every element is described once in code first (roadmap step S5.19),
   which the values, the loader and the merge are made from; then the song moves one area at a time behind the
-  model's functions (S5.20), the notes first (done: a clip's notes are values beside the tree), with one undo history
+  model's functions (S5.20), the notes first, then the clips (done: both are values beside the tree), with one undo history
   for the tree's changes and the values' while both are there, and the project file as it is.
 - **Beats are quarter notes everywhere,** and a time signature only sets the bar's length and the counted beat.
   Everything that keeps time then agrees, in every meter.
@@ -360,8 +364,8 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
 
 ## Not built
 
-- The song as an immutable value: being built, before the beta (roadmap step S5.20). A clip's notes and
-  controllers' values are values beside the tree (built); the rest of the song is still a `ValueTree`, every name of it
+- The song as an immutable value: being built, before the beta (roadmap step S5.20). The clips, and a clip's notes and
+  controllers' values, are values beside the tree (built); the rest of the song is still a `ValueTree`, every name of it
   described in `Schema.h` (S5.19), and moves one area at a time next.
 - Other stretch modes, such as slicing drums at their hits or re-pitching: Planned.
 - Tracks that aren't being edited pre-rendered in the background: Planned, after v1.

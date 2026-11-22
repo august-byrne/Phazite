@@ -304,16 +304,6 @@ TEST_CASE ("Views hear where the changes of clips and devices were: the clips, t
     CHECK (changes.devices);
     CHECK (changes.deviceChannels.any);
 
-    // A clip whose element isn't on a track's (a file that put one elsewhere): its track can't be named, so any.
-    juce::ValueTree stray (phazite::schema::CLIP);
-    stray.setProperty (phazite::schema::clipID, (juce::int64) song->makeID(), nullptr);
-    song->getState().appendChild (stray, nullptr);
-    changes = take();
-    CHECK (changes.clips);
-    CHECK (changes.clipTracks.any);
-    song->getState().removeChild (stray, nullptr);
-    take();
-
     setSong (context, nullptr);
     context.removeListener (&view);
 }

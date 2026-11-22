@@ -277,13 +277,24 @@ TEST_CASE ("Clean Up and an import keep every file the song plays: each clip's b
     };
 
     // What a look offers of the Audio folder. A render Phazite made for a clip in the background (the Generated folder) and
-    // no longer uses is offered too, sooner or later as the machine has it: that is another case's subject, and what CI's
-    // release build is taken to have seen here after the reopen (everything offered is in the failure's message, to tell).
-    std::string offered;
+    // no longer uses is offered too, sooner or later as the machine has it: that is another case's subject. And a look
+    // offers nothing while a version can't be read whole (what it plays is unknown), which is what CI's release build saw
+    // here after the reopen: the automatic save that the save before it began may still be on its way to the disk. So it
+    // looks until every version reads; what it offered and what it couldn't read are in a failure's message.
+    std::string offered, unreadable;
     CAPTURE (offered);
-    const auto lookInAudioFolder = [&s, &offered]
+    CAPTURE (unreadable);
+    const auto lookInAudioFolder = [&s, &offered, &unreadable]
     {
-        const auto all = getNames (lookForUnused (s.context));
+        phazite::UnusedAudio found;
+        const auto readsEveryVersion = [&s, &found, &unreadable]
+        {
+            found = lookForUnused (s.context);
+            unreadable = found.unreadable.joinIntoString ("; ").toStdString();
+            return found.unreadable.isEmpty();
+        };
+        CHECK (dispatchMessagesUntil (readsEveryVersion));
+        const auto all = getNames (found);
         offered = all.joinIntoString (", ").toStdString();
         juce::StringArray inAudio;
 

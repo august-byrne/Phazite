@@ -1077,7 +1077,7 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
         auto root = song->getState();
         root.addListener (&heard);
         song->getValues()->notes.addListener (&heard);
-        const auto element = phazite::findClipState (*song, clip);
+        const auto clipBefore = phazite::getClipValue (*song, clip);
         const auto inTheBeat = [&]
         {
             const auto values = phazite::getControlValues (*song, { clip }, pedal);
@@ -1094,9 +1094,9 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
         root.removeListener (&heard);
         song->getValues()->notes.removeListener (&heard);
 
-        // The clip's own element, not a copy of it put in its place; and what was heard, each value of the lane's in the beat
-        // taken out and each drawn put in (none of them the same), nothing else.
-        CHECK (phazite::findClipState (*song, clip) == element);
+        // The clip as it was (a controller's values are its notes' value's); and what was heard, each value of the lane's in the
+        // beat taken out and each drawn put in (none of them the same), nothing else.
+        CHECK (phazite::getClipValue (*song, clip) == clipBefore);
         CHECK (counts.changes == (int) (removed + inTheBeat()));
         phazite::setSong (context, nullptr);
         return counts;
@@ -1107,10 +1107,11 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
                                             << many.changes << " changes, " << many.visited << " looked at");
     CHECK (few.notesRead == 0);
     CHECK (many.notesRead == 0);
-    CHECK (few.changes == 7);                  // five values of the pedal's in the beat, both its ends in it, and two drawn
-    CHECK (many.changes == few.changes);       // whatever else the clip holds
-    CHECK (many.visited - few.visited <= 100); // no walk through the clip: its value is read, not its elements (3 and 3 looked
-                                               // at, 2026-11-21; one walk of its 20,000 elements before the notes were values)
+    CHECK (few.changes == 7);            // five values of the pedal's in the beat, both its ends in it, and two drawn
+    CHECK (many.changes == few.changes); // whatever else the clip holds
+    CHECK (many.visited == few.visited); // no walk through the clip: its value is read, not its elements (0 and 0 looked at
+                                         // once the clips were values, 3 and 3 before; one walk of its 20,000 elements before
+                                         // the notes were values)
 }
 
 TEST_CASE ("Performance gate: a step of a note's drag in the piano roll doesn't walk the controller values its clip holds")
@@ -1548,13 +1549,13 @@ TEST_CASE ("Performance gate: the check for unsaved changes compares no element 
     CHECK (noteAdded * 8 < wholeSong);
 }
 
-TEST_CASE ("Performance gate: the check for unsaved changes after a clip's property was set finds the clip's saved copy without a "
-           "look at its track's other clips, and compares that clip alone")
+TEST_CASE ("Performance gate: the check for unsaved changes after a clip's property was set compares that clip alone, as much "
+           "for a clip of a track of 256 clips as of 2")
 {
-    // The clips are heard from the song's values (model/base/internal/SongValues.h: ClipsListener), each compared with its
-    // saved copy. Finding that copy scanned the saved track's children for each clip at each check (2026-11-21: 257 elements
-    // looked at for a clip of the track of 256 clips here, at every edit); the saved copy's clips are found by their IDs now,
-    // once for each saved copy.
+    // The clips are heard from the song's values (model/base/internal/SongValues.h: ClipsListener), each compared with the
+    // saved copy's values (WholeState.h: holdSameClip()), the clip found by its ID in each: no element of either tree, and
+    // nothing of its track's other clips. Before the clips were values, finding the saved clip scanned the saved track's
+    // children (2026-11-21: 257 elements looked at for a clip of the track of 256 clips here, at every edit).
     phazite::test::TestSong s;
     auto& song = getSong (s);
     auto& project = s.getProject();
@@ -1574,31 +1575,22 @@ TEST_CASE ("Performance gate: the check for unsaved changes after a clip's prope
     REQUIRE_FALSE (project.hasUnsavedChanges());
 
     // A clip muted and played again before anything asks: the check compares it with its saved copy, and finds it the same.
-    struct Looked
-    {
-        juce::int64 searched = 0, compared = 0;
-    };
-
     const auto check = [&song, &project] (phazite::ClipID clip)
     {
         phazite::toggleClipsMuted (song, { clip });
         phazite::toggleClipsMuted (song, { clip });
-        const auto searched = phazite::Project::countSavedElementsSearched();
         const auto compared = phazite::Project::countElementsCompared();
         CHECK_FALSE (project.hasUnsavedChanges());
-        return Looked { phazite::Project::countSavedElementsSearched() - searched, phazite::Project::countElementsCompared() - compared };
+        return phazite::Project::countElementsCompared() - compared;
     };
 
-    check (inFew); // the saved copy's clips found, once
+    check (inFew); // once before what is counted, which then counts the same work for each
 
     const auto inTheFew = check (inFew);
     const auto inTheMany = check (inMany);
-    INFO ("Saved elements looked at for a clip of 2: " << inTheFew.searched << ", of 256: " << inTheMany.searched
-                                                       << "; elements compared: " << inTheFew.compared << " and " << inTheMany.compared);
-    CHECK (inTheMany.searched == 1);
-    CHECK (inTheFew.searched == 1);
-    CHECK (inTheMany.compared == inTheFew.compared);
-    CHECK (inTheMany.compared >= 1);
+    INFO ("Elements compared for a clip of 2: " << inTheFew << ", of 256: " << inTheMany);
+    CHECK (inTheMany == inTheFew);
+    CHECK (inTheMany >= 1); // the clip compared: none would be a check skipped
 }
 
 TEST_CASE ("Performance gate: the loader's checks of a song read from its text make no allocation for each note")

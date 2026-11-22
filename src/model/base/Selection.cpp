@@ -14,7 +14,7 @@ namespace
 {
     // Whether the song's tree holds an item of a kind with an ID: a track (or a folder, a return or the master), or a device
     // (or a container) of a track, of the master or of a container. Each kind's ID is its element's "id". Not a clip, which
-    // the song is to hold outside its tree (roadmap step S5.20): the song's index finds it by its ID.
+    // the song holds beside its tree (SongValues.h), found there by its ID.
     bool holds (const juce::ValueTree& parent, Selection::Kind kind, std::uint64_t id)
     {
         jassert (kind != Selection::Kind::clip);
@@ -43,7 +43,7 @@ namespace
     {
         for (const auto& child : parent)
         {
-            if (child.hasType (schema::CLIP) || child.hasType (schema::AUTOMATION))
+            if (child.hasType (schema::AUTOMATION))
                 continue;
 
             for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
@@ -75,19 +75,11 @@ namespace
 
 bool hasNote (const Song& song, const NoteRef& ref)
 {
-    // In its clip's value (SongValues.h), which a clip that isn't the song's has none of.
-    if (const auto* values = song.getValues())
-    {
-        const auto* clip = values->findClipNotes (ref.clip);
-        return clip != nullptr && clip->find (ref.note) != nullptr;
-    }
-
-    // A song that keeps everything in its tree: among its clip's elements.
-    for (const auto& child : song.getIndex().findClip (ref.clip.getRaw()))
-        if (child.hasType (schema::NOTE) && readNoteValues (child).id == ref.note)
-            return true;
-
-    return false;
+    // In its clip's value (SongValues.h), which a clip that isn't the song's has none of; and a song that keeps everything in
+    // its tree (one made to be read or checked: Song::getValues()) none.
+    const auto* values = song.getValues();
+    const auto* clip = values != nullptr ? values->findClipNotes (ref.clip) : nullptr;
+    return clip != nullptr && clip->find (ref.note) != nullptr;
 }
 
 void Selection::countPointComparisons (std::uint64_t count) noexcept
@@ -124,18 +116,22 @@ bool Selection::isThere (Item item) const
     if (song == nullptr || item.id == 0)
         return false;
 
-    // A track or a clip by the song's index; a device (in a track's chain, the master's or a container's) looked for.
+    // A clip in the song's values; a track by the song's index; a device (in a track's chain, the master's or a container's)
+    // looked for.
+    if (item.kind == Kind::clip)
+    {
+        const auto* values = song->getValues();
+        return values != nullptr && values->findClip (ClipID::fromRaw (item.id)) != nullptr;
+    }
+
     if (item.kind == Kind::device)
         return holds (song->getState(), item.kind, item.id);
 
-    const auto& index = song->getIndex();
-    const auto there = item.kind == Kind::clip
-                           ? index.findClip (item.id).isValid()
-                           : (std::uint64_t) (juce::int64) song->getState().getChildWithName (schema::MASTER)[schema::trackID] == item.id
-                                 || index.findTrack (item.id).isValid();
+    const auto there = (std::uint64_t) (juce::int64) song->getState().getChildWithName (schema::MASTER)[schema::trackID] == item.id
+                       || song->getIndex().findTrack (item.id).isValid();
 
-    // The index and the song's tree differ. A clip's place in the index is checked by the index itself (SongIndex.h: isExact()).
-    jassert (! SongIndex::isChecking() || item.kind == Kind::clip || there == holds (song->getState(), item.kind, item.id));
+    // The index and the song's tree differ.
+    jassert (! SongIndex::isChecking() || there == holds (song->getState(), item.kind, item.id));
     return there;
 }
 

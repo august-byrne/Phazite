@@ -29,19 +29,19 @@ public:
     // Whatever listens to the song listens to this, its root (a juce::ValueTree::Listener added to what this returns), and
     // finds the element a change was made to from what the callback names: never to one of its elements' handles, nor
     // through a juce::Value or CachedValue of an element's property. The song's index (below) listens to its track list,
-    // and JUCE tells a change to the listeners of the elements below first, so it hears of every change to the tracks and
-    // clips before anything else asks it about one (tools/check-architecture.sh counts: song-listeners). Its clips' notes are
+    // and JUCE tells a change to the listeners of the elements below first, so it hears of every change to the tracks before
+    // anything else asks it about one (tools/check-architecture.sh counts: song-listeners). Its clips and their notes are
     // values beside it (getValues()), which tell their own listeners.
     juce::ValueTree getState() const noexcept { return state; }
 
-    // Where its tracks and clips are, by their IDs, which the model's functions that take IDs find them by
+    // Where its tracks are, by their IDs, which the model's functions that take IDs find them by
     // (model/base/internal/SongIndex.h): kept from its state, which stays the only truth of them.
     const SongIndex& getIndex() const noexcept { return *index; }
 
-    // What it holds beside its tree as values (model/base/internal/SongValues.h): its MIDI clips' notes and controllers'
-    // values, which its tree's clips then don't hold. None until holdValues(), which makeSong() calls once the song read is
-    // consistent (model/project/internal/Project.h), on the message thread: never as a Song is made, as one made on another
-    // thread to be read or checked (model/versions/SongPieces.cpp) keeps everything in its tree. Message thread.
+    // What it holds beside its tree as values (model/base/internal/SongValues.h): its clips, and its MIDI clips' notes and
+    // controllers' values, which its tree then doesn't hold. None until holdValues(), which makeSong() calls once the song
+    // read is consistent (model/project/internal/Project.h), on the message thread: never as a Song is made, as one made on
+    // another thread to be read or checked (model/versions/SongPieces.cpp) keeps everything in its tree. Message thread.
     SongValues* getValues() noexcept { return values.get(); }
     const SongValues* getValues() const noexcept { return values.get(); }
     void holdValues(); // once; in model/base/SongValues.cpp

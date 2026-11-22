@@ -49,6 +49,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/Devices.h"
@@ -3431,15 +3432,15 @@ TEST_CASE ("Benchmark: a clip of 5,000 notes edited in the piano roll, and what 
                << milliseconds (averageOf (480, [&] (int i) { REQUIRE (phazite::getClip (context, clips[(size_t) i * 10]).has_value()); }),
                                 4)
                << " |\n";
-        // A lookup alone, by the song's index, with its check of the answer against the tree (SongIndex.h).
+        // A lookup alone, in the song's clips' area (SongValues.h).
         const auto lookups = millisecondsOf (
             [&]
             {
                 for (int i = 0; i < 100000; ++i)
-                    if (! phazite::findClipState (*song, clips[(size_t) (i * 7919) % clips.size()]).isValid())
+                    if (song->getValues()->findClip (clips[(size_t) (i * 7919) % clips.size()]) == nullptr)
                         FAIL ("a clip not found");
             });
-        report << "| A clip found by its ID (findClipState()) | " << juce::String (lookups * 10.0, 1) << " ns |\n";
+        report << "| A clip found by its ID (SongValues::findClip()) | " << juce::String (lookups * 10.0, 1) << " ns |\n";
         report << "| A track's row (getTrackRow()) | "
                << milliseconds (averageOf (200, [&] (int i) { REQUIRE (phazite::getTrackRow (context, tracks[(size_t) i]).has_value()); }),
                                 4)

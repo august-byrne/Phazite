@@ -129,10 +129,6 @@ AudioIO& PlaybackSession::getAudioIO() const noexcept
 
 void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    // A clip added, taken out or moved on its track, or something in a clip: clipsChanged().
-    if (isHeardAsClips (parent, child))
-        return;
-
     // The MIDI links, which no plan holds: what the MIDI tap takes.
     if (isInMidiLinks (parent) || child.hasType (schema::MIDILINKS))
     {
@@ -148,9 +144,6 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (isHeardAsClips (tree))
-        return; // clipsChanged()
-
     if (isInMidiLinks (tree))
     {
         midiLinksChanged = true;

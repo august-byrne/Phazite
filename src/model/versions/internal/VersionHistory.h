@@ -975,21 +975,14 @@ private:
     void timerCallback() override;
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
 
-    // A clip added, taken out or moved on its track, or something in a clip: clipsChanged().
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
-        if (isHeardAsClips (parent, child))
-            return;
-
         ++songChanges;
         markChildChanged (parent, child);
     }
 
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        if (isHeardAsClips (parent, child))
-            return;
-
         ++songChanges;
         markChildChanged (parent, child);
     }

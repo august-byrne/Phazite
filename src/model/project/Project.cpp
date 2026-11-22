@@ -1876,7 +1876,8 @@ Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file, const 
     forgetCurvesOfGoneDevices (*song);
     song->getState().removeProperty (schema::playStart, nullptr);
 
-    // Its clips' notes and controllers' values as values beside its tree, from here on (model/base/internal/SongValues.h).
+    // Its clips, and their notes and controllers' values, as values beside its tree from here on, its tree holding no CLIP
+    // element (model/base/internal/SongValues.h).
     song->holdValues();
     song->getUndoManager().clearUndoHistory();
     return song;
@@ -2725,8 +2726,6 @@ void Project::clearToCompare()
 void Project::setSavedState (SongCopy copy)
 {
     savedState = std::move (copy);
-    savedClips.clear();
-    savedClipsFound = false;
 }
 
 Project::SongCopy Project::copySong() const
@@ -2757,7 +2756,7 @@ void Project::forgetSavedState()
 
 namespace
 {
-    std::atomic<juce::int64> elementsComparedWithSaved { 0 }, savedElementsSearched { 0 };
+    std::atomic<juce::int64> elementsComparedWithSaved { 0 };
 
     // An element's place among those of its parent's that count (what holdTheSameProject() compares), or -1.
     int indexAmongCounted (const juce::ValueTree& parent, const juce::ValueTree& element)
@@ -2804,11 +2803,6 @@ void Project::compareStoredStates()
 juce::int64 Project::countElementsCompared()
 {
     return elementsComparedWithSaved.load (std::memory_order_relaxed);
-}
-
-juce::int64 Project::countSavedElementsSearched()
-{
-    return savedElementsSearched.load (std::memory_order_relaxed);
 }
 
 juce::ValueTree Project::findSavedCopy (const juce::ValueTree& element) const
@@ -2967,8 +2961,9 @@ void Project::versionsMoved()
 {
     // With unsaved changes, the file holds an older song, which the names it holds go with: these go with the song at its
     // next save, and into the autosave at the next. Without, into the file in the background, once nothing else writes it.
+    // Whether it has any is found at the next turn (writeVersionsNames()), not here: this is a tree's callback, which reads
+    // none of the song's clips (model/base/internal/SongValues.h), as the comparison with the saved copy does.
     namesPending = true;
-    compareWithSavedState();
 
     if (changedSinceSave || ! savedState.tree.isValid())
         changedSinceAutosave = true;
@@ -3085,7 +3080,7 @@ void Project::clipNotesChanged (const std::vector<ClipID>& clips)
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    if (! schema::isUncountedElement (parent, child) && ! isHeardAsClips (parent, child))
+    if (! schema::isUncountedElement (parent, child))
         markChanged (parent);
 }
 
@@ -3142,58 +3137,18 @@ bool Project::isComparedWhole (const juce::ValueTree& element) const
                         { return entry.property.isNull() && (entry.element == element || element.isAChildOf (entry.element)); });
 }
 
-juce::ValueTree Project::findSavedClip (ClipID clip)
+bool Project::holdSameClip (ClipID clip, const ValuesKept& now) const
 {
-    // The copy's tracks (and the tracks in its folders) once, each child of each looked at once: only tracks hold clips.
-    if (! savedClipsFound)
-    {
-        savedClipsFound = true;
-        std::vector<juce::ValueTree> holders;
+    const auto* value = now.clips.find (clip);
 
-        if (const auto tracks = savedState.tree.getChildWithName (schema::TRACKS); tracks.isValid())
-            holders.push_back (tracks);
-
-        while (! holders.empty())
-        {
-            const auto holder = holders.back();
-            holders.pop_back();
-
-            for (const auto& child : holder)
-            {
-                savedElementsSearched.fetch_add (1, std::memory_order_relaxed);
-
-                if (child.hasType (schema::TRACK))
-                    holders.push_back (child);
-                else if (child.hasType (schema::CLIP) && holder.hasType (schema::TRACK))
-                    savedClips.emplace (getClipID (child), child);
-            }
-        }
-    }
-
-    savedElementsSearched.fetch_add (1, std::memory_order_relaxed);
-    const auto found = savedClips.find (clip);
-    return found != savedClips.end() ? found->second : juce::ValueTree();
-}
-
-bool Project::holdSameClip (ClipID clip, const ValuesKept& now)
-{
-    const auto clipState = findClipState (*song, clip);
-
-    // Gone: its track compared whole (holdSameTrackClips()). In what is compared whole anyway (its track, or a track added
-    // back): that finds it.
-    if (! clipState.isValid() || isComparedWhole (clipState))
+    // Gone: its track compared whole (holdSameTrackClips()); or on a track compared whole anyway (one of those, or a track
+    // that notified whole: added back), which finds it.
+    if (value == nullptr || tracksToCompare.contains (value->track) || isComparedWhole (findTrackState (*song, value->track)))
         return true;
 
-    const auto track = clipState.getParent();
-
-    if (tracksToCompare.contains (getTrackID (track)))
-        return true;
-
-    // On the saved copy's track of the same ID: no clip was added, taken out or moved since the song was last as saved but
-    // one whose track is compared whole, so that the clip is where it was in the copy, if the song is as saved but for it.
-    const auto saved = findSavedClip (clip);
-    return saved.isValid() && getTrackID (saved.getParent()) == getTrackID (track)
-           && holdTheSameProject (clipState, now, saved, savedState.values);
+    // Against the saved copy's clip of its ID (its track among its value), as a value, by its ID: one compared.
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+    return phazite::holdSameClip (now, savedState.values, clip);
 }
 
 bool Project::holdSameTrackClips (TrackID track, const ValuesKept& now) const
@@ -3203,9 +3158,8 @@ bool Project::holdSameTrackClips (TrackID track, const ValuesKept& now) const
     if (! trackState.isValid() || isComparedWhole (trackState))
         return true; // gone: what it was taken out of notified, and is compared whole; or compared whole anyway
 
-    // Whole: the places of its other children moved with its clips (holdSameClip()'s comment, in Project.h).
-    const auto saved = findSavedCopy (trackState);
-    return saved.isValid() && saved.hasType (schema::TRACK) && holdTheSameProject (trackState, now, saved, savedState.values);
+    // Its clips, in their order, against the saved copy's clips of its ID.
+    return phazite::holdSameTrackClips (now, savedState.values, track);
 }
 
 bool Project::holdTheSameProject (const juce::ValueTree& a, const ValuesKept& aValues, const juce::ValueTree& b, const ValuesKept& bValues)
@@ -3240,8 +3194,9 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const ValuesKept& aV
     if (numCounted != 0)
         return false;
 
-    // A clip's notes and controllers' values as each song keeps them beside its tree.
-    if (a.hasType (schema::CLIP) && ! holdSameNotes (aValues, bValues, getClipID (a)))
+    // A track's clips, with their notes and controllers' values, as each song keeps them beside its tree.
+    if (a.hasType (schema::TRACK)
+        && ! phazite::holdSameTrackClips (aValues, bValues, TrackID::fromRaw ((std::uint64_t) (juce::int64) a[schema::trackID])))
         return false;
 
     // The counted elements, in the same order, holding the same.

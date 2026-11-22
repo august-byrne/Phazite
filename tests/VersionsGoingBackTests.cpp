@@ -19,6 +19,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
@@ -1464,50 +1465,79 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
     auto renamed = before.createCopy();
     findClipElement (renamed, clips[1]).setProperty (schema::clipName, "Q2", nullptr);
 
-    // Each made the song's as one undo step, what the song's tree is told of it kept, its Undo and Redo exact.
+    // Each made the song's as one undo step, what the song's tree is told of it and what the clips' listener is told kept, its
+    // Undo and Redo exact.
     TreeChanges heard (*song);
+
+    struct ClipsTold final : phazite::SongValues::ClipsListener
+    {
+        std::vector<phazite::ClipID> changed;
+        std::vector<phazite::TrackID> reordered;
+
+        void clipsChanged (const std::vector<phazite::SongValues::ClipChange>& clipsNow,
+                           const std::vector<phazite::TrackID>& tracksNow) override
+        {
+            for (const auto& change : clipsNow)
+            {
+                CHECK (change.before == change.after); // in place, on its track
+                changed.push_back (change.id);
+            }
+
+            reordered.insert (reordered.end(), tracksNow.begin(), tracksNow.end());
+        }
+    } told;
+
+    song->getValues()->addClipsListener (&told);
 
     const auto apply = [&] (const juce::ValueTree& version, const juce::String& what)
     {
         INFO (what.toStdString());
         const auto textBefore = writeSong (*song, SongPart::undoable);
         heard.reset();
+        told.changed.clear();
+        told.reordered.clear();
 
         {
             const phazite::UndoStep step (*song, what);
             phazite::makeSongLike (*song, version);
         }
 
-        const auto told = heard.properties;
+        const auto treeTold = heard.properties;
         const auto added = heard.added, removed = heard.removed, moved = heard.moved;
+        const auto clipsTold = told;
         checkSongIs (*song, version);
         const auto textAfter = writeSong (*song, SongPart::undoable);
         phazite::undo (*song);
         CHECK (describeSongDifferences (textBefore, writeSong (*song, SongPart::undoable)).isEmpty());
         phazite::redo (*song);
         CHECK (describeSongDifferences (textAfter, writeSong (*song, SongPart::undoable)).isEmpty());
-        heard.properties = told;
+        heard.properties = treeTold;
         heard.added = added;
         heard.removed = removed;
         heard.moved = moved;
+        told.changed = clipsTold.changed;
+        told.reordered = clipsTold.reordered;
     };
 
+    // The tree holds no clip: it hears nothing of them; the clips' listener hears the track's clips in another order.
     apply (reversed, "Reversed");
     CHECK (phazite::getClips (*song, track) == std::vector { clips[2], clips[1], clips[0] });
     CHECK (heard.properties.isEmpty());
-    CHECK (heard.added == 0);
-    CHECK (heard.removed == 0);
-    CHECK (heard.moved > 0);
+    CHECK (heard.added + heard.removed + heard.moved == 0);
+    CHECK (told.changed.empty());
+    CHECK (told.reordered == std::vector { track });
 
     apply (before, "In order again");
     CHECK (phazite::getClips (*song, track) == clips);
 
     apply (renamed, "Renamed");
     INFO (heard.properties.joinIntoString (", ").toStdString());
-    REQUIRE (heard.properties.size() == 1);
-    CHECK (heard.properties[0] == "CLIP@" + schema::clipName.toString());
+    CHECK (heard.properties.isEmpty());
     CHECK (heard.added + heard.removed + heard.moved == 0);
+    CHECK (told.changed == std::vector { clips[1] });
+    CHECK (told.reordered.empty());
     CHECK (phazite::getClipValue (*song, clips[1])->name == "Q2");
+    song->getValues()->removeClipsListener (&told);
 }
 
 TEST_CASE ("A version's alias groups, a member moved, one taken away and one added since, come back whole, MIDI and audio, their "
@@ -1710,16 +1740,15 @@ TEST_CASE ("A song made as it was copied, after a step that changed its clips wa
 TEST_CASE ("A clip a track's line sends home goes among its home track's clips where the version has it, first, in the middle "
            "or last, whatever else the home track holds and wherever")
 {
-    // The home track's elements: its clips alone, a device before them (added before the clips were made), or a device
-    // after them (added after).
+    // The home track's elements: its clips alone, or a device with them. One case of a device: made before the clips or
+    // after them, it is in the same place, as the song holds its clips beside its tree and a whole copy writes them first.
     enum class Layout
     {
         clipsAlone,
-        deviceBefore,
-        deviceAfter
+        withDevice
     };
 
-    for (const auto layout : { Layout::clipsAlone, Layout::deviceBefore, Layout::deviceAfter })
+    for (const auto layout : { Layout::clipsAlone, Layout::withDevice })
     {
         for (std::size_t sent = 0; sent < 3; ++sent)
         {
@@ -1730,15 +1759,12 @@ TEST_CASE ("A clip a track's line sends home goes among its home track's clips w
             std::vector<phazite::ClipID> clips;
             phazite::DeviceID device;
 
-            const auto addDevice = [&]
+            if (layout == Layout::withDevice)
             {
                 const phazite::UndoStep step (*song, "Add Device");
                 device = phazite::insertDeviceState (*song, home, phazite::makeOwnDeviceState (*song, phazite::devices::Equalizer::typeID));
                 REQUIRE (device.isValid());
-            };
-
-            if (layout == Layout::deviceBefore)
-                addDevice();
+            }
 
             {
                 const phazite::UndoStep step (*song, "Clips");
@@ -1751,19 +1777,8 @@ TEST_CASE ("A clip a track's line sends home goes among its home track's clips w
                 }
             }
 
-            if (layout == Layout::deviceAfter)
-                addDevice();
-
-            // The layout as named: the device's element before the clips' or after them.
-            if (layout != Layout::clipsAlone)
-            {
-                const auto homeState = phazite::findTrackState (*song, home);
-                const auto deviceAt = homeState.indexOf (phazite::findDeviceState (*song, device));
-                const auto firstClipAt = homeState.indexOf (phazite::findClipState (*song, clips.front()));
-                const auto lastClipAt = homeState.indexOf (phazite::findClipState (*song, clips.back()));
-                REQUIRE (deviceAt >= 0);
-                CHECK ((layout == Layout::deviceBefore ? deviceAt < firstClipAt : deviceAt > lastClipAt));
-            }
+            if (layout == Layout::withDevice)
+                REQUIRE (phazite::findTrackState (*song, home).indexOf (phazite::findDeviceState (*song, device)) >= 0);
 
             const auto version = phazite::test::copyWholeSong (*song);
 
@@ -1925,12 +1940,11 @@ TEST_CASE ("A version in which a track is in another folder brings it back there
     undo.walkBackAndForth();
 }
 
-// A known difference, pinned: an audio clip the version holds without a name of its own (renamed to nothing, which takes the
-// property away) comes back through addClip(), whose writer gives a new audio clip an empty name as its makers do, so the
-// song holds name="" where the version holds none, which the comparison of the two counts as a change. It goes when the
-// clips leave the song's tree (roadmap step S5.20's clips' switch writes a name only while it is set): that piece makes
-// this case compare the song with the version itself, the clip holding no name.
-TEST_CASE ("An audio clip a version holds without a name comes back as the version's, but for an empty name")
+// An audio clip the version holds without a name of its own (renamed to nothing, which takes the property away), deleted
+// and brought back: the song is the version, the clip holding no name. When the song's tree held its clips, the writer of a
+// new audio clip's element gave it an empty name, which the comparison with the version counted as a change; a clip's
+// value writes its name only while it is set (SongValues.h: writeClipElement()).
+TEST_CASE ("An audio clip a version holds without a name comes back as the version's, without one")
 {
     const TemporaryFolder temporary;
     auto song = phazite::createSong();
@@ -1957,13 +1971,85 @@ TEST_CASE ("An audio clip a version holds without a name comes back as the versi
         phazite::makeSongLike (*song, version);
     }
 
-    // The one difference: the name, there and empty. Everything else is the version's.
+    // Without a name, as the version holds it (a clip's name is written only while it is set): the song is the version.
     const auto broughtBack = phazite::copyWholeClip (*song, clip);
     INFO (phazite::writeElement (broughtBack).toString().toStdString());
-    REQUIRE (broughtBack.hasProperty (schema::clipName));
-    CHECK (broughtBack[schema::clipName].toString().isEmpty());
+    CHECK_FALSE (broughtBack.hasProperty (schema::clipName));
+    checkSongIs (*song, version);
+}
 
-    auto versionWithName = version.createCopy();
-    findClipElement (versionWithName, clip).setProperty (schema::clipName, juce::String(), nullptr);
-    checkSongIs (*song, versionWithName);
+TEST_CASE ("Bring Back of the version the song is, and a clip or its notes set to what they hold, make no undo step, alias "
+           "groups of MIDI and audio clips too")
+{
+    // An alias group's clips hold one value of what they share (SongValues.h: ClipSound, and one ClipNotes): a value alike in
+    // another value is no change of the song's, which an area gives them without a step of its own; in the tree, a step
+    // without actions was none (JUCE drops it).
+    const TemporaryFolder temporary;
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    const auto file = writeSound (temporary.folder.getChildFile ("Tone.wav"), 2.0);
+    phazite::ClipID riff, tone, riffAlias, toneAlias;
+
+    {
+        const phazite::UndoStep step (*song, "Clips");
+        riff = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
+        addMidiNote (*song, riff, 60, at (0.0), lasting (1.0));
+        tone = addAudioClip (*song, tracks[1], "Tone", file, 0.0, 1.0);
+        REQUIRE (phazite::addWarpMarker (*song, tone, 0.5)); // so that its sound holds markers: a value with an identity
+        riffAlias = phazite::copyClips (*song, { riff }, true).at (0);
+        toneAlias = phazite::copyClips (*song, { tone }, true).at (0);
+        phazite::moveClip (*song, riffAlias, at (8.0), tracks[0]);
+        phazite::moveClip (*song, toneAlias, at (8.0), tracks[1]);
+    }
+
+    REQUIRE (phazite::getAliasClips (*song, riff).size() == 2);
+    REQUIRE (phazite::getAliasClips (*song, tone).size() == 2);
+    REQUIRE_FALSE (phazite::getWarpMarkers (*song, tone).empty());
+    song->getUndoManager().clearUndoHistory();
+    const auto version = phazite::test::copyWholeSong (*song);
+
+    {
+        const phazite::UndoStep step (*song, "Bring Back");
+        phazite::makeSongLike (*song, version);
+    }
+
+    CHECK_FALSE (phazite::canUndo (*song));
+    checkSongIs (*song, version);
+
+    // Each clip set to the value it holds; the audio group's clips given their sound alike in another value (its markers a
+    // vector of their own), and the MIDI group's its notes alike in another value.
+    {
+        const phazite::UndoStep step (*song, "Set");
+
+        for (const auto clip : { riff, riffAlias, tone, toneAlias })
+            phazite::setClip (*song, phazite::getClipValue (*song, clip).value());
+
+        const auto held = phazite::getClipValue (*song, tone).value();
+        auto sound = held.sound;
+        sound.warps = immer::flex_vector<phazite::WarpValue> (held.sound.warps.begin(), held.sound.warps.end());
+        REQUIRE_FALSE (sound.isSameAs (held.sound));
+        REQUIRE (sound == held.sound);
+
+        for (const auto clip : { tone, toneAlias })
+        {
+            const auto each = phazite::getClipValue (*song, clip).value();
+            auto alike = each;
+            alike.sound = sound;
+            phazite::setClip (*song, each, alike);
+        }
+
+        const auto notes = phazite::getClipNotesValue (*song, riff);
+        auto alike = phazite::makeClipNotes (std::vector<phazite::NoteValues> (notes.notes.begin(), notes.notes.end()));
+        REQUIRE_FALSE (alike.isSameAs (notes));
+        REQUIRE (alike == notes);
+        phazite::setClipNotesValue (*song, riff, alike);
+    }
+
+    CHECK_FALSE (phazite::canUndo (*song));
+    checkSongIs (*song, version);
+
+    // The groups hold one value each: the one given.
+    CHECK (phazite::getClipValue (*song, toneAlias)->sound.isSameAs (phazite::getClipValue (*song, tone)->sound));
+    CHECK (phazite::getClipNotesValue (*song, riffAlias).isSameAs (phazite::getClipNotesValue (*song, riff)));
+    phazite::test::checkValues (*song);
 }

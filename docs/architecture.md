@@ -74,8 +74,8 @@ to it.
 
 ## How the song becomes sound
 
-The song lives in the model (`src/model/base/Song.h`): its tree, and beside it its clips' notes and controllers'
-values as immutable values (`src/model/base/internal/SongValues.h`). Each open song has a playback session
+The song lives in the model (`src/model/base/Song.h`): its tree, and beside it its clips and their notes and
+controllers' values as immutable values (`src/model/base/internal/SongValues.h`). Each open song has a playback session
 (`src/model/playback/internal/PlaybackSession.h`), which compiles the song into a plan (`src/engine/core/Plan.h`)
 through `SongPlayer` (`src/model/playback/internal/SongPlayer.h`), the notes read from their values, and gives the
 engine a new plan as the song or its values change, at most once a turn of the message loop; values set by hand reach what plays at once, without a new plan. A plan is
@@ -122,7 +122,7 @@ Exports, freezes and bounces compile the song the same way and play it offline, 
 - **Values that change many times a second are polled**, never stored in the project or sent as change messages, and a
   display repaints only when what it draws moved, so that a quiet song costs nothing to show.
 - **Whatever listens to a song listens to its root** (`Song::getState()`), never to one of its elements nor through a
-  `juce::Value` of an element's property. The song's index, which finds tracks, clips and notes by their IDs, listens to
+  `juce::Value` of an element's property. The song's index, which finds tracks by their IDs, listens to
   the track list, and JUCE tells a change to the elements below first, so it hears of every change there before anything
   else can ask it about one.
 

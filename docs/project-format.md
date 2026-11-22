@@ -46,17 +46,19 @@ numbers in 15 significant digits, true and false as `1` and `0`, text without th
 
 A reader must take any XML 1.0 (other writers may indent differently) and must keep what it doesn't know: Phazite keeps
 an element or property it doesn't know through a load and a save (an element with all it holds, but not text between
-its tags), but on a `NOTE` or a `CONTROL`: a clip's notes and controllers' values are values in Phazite (each with the
-properties this page names), so a property or an element it doesn't know on one of them isn't kept (an element of a
-type it doesn't know among a clip's children is). An element it does know, where `Schema.h` doesn't put it, it leaves
+its tags), but on a `CLIP`, a `WARP`, a `NOTE` or a `CONTROL`: a song's clips, their warp markers and a clip's notes and
+controllers' values are values in Phazite (each with the properties this page names), so a property or an element it
+doesn't know on one of them isn't kept, nor a property of the other kind of clip's (a `length` on an audio clip, a
+`file` on a MIDI clip). Phazite writes a clip's properties only while they are set, so one another program wrote at its
+default (`offset="0"`, `name=""`) is gone at the next save. An element it does know, where `Schema.h` doesn't put it, it leaves
 out as it opens the file (section 7).
 
 ## 3. The song
 
 `PHAZITE` holds, among others (Schema.h names every one):
 - `TEMPOMAP`: the tempos and time signatures, each from its beat;
-- `TRACKS`: the tracks top to bottom, a folder's tracks inside it, each with its clips, its devices, its sends and its
-  channel; and `MASTER`, the master's channel and devices;
+- `TRACKS`: the tracks top to bottom, a folder's tracks inside it, each with its clips (first among its elements, in
+  the track's order of them), its devices, its sends and its channel; and `MASTER`, the master's channel and devices;
 - `AUTOMATION`: the curves, each a parameter's by its device's ID and the parameter's ID, with its points in beats,
   each at a position along the parameter's control's travel (`value`, 0 to 1, as its knob or fader moves along its
   scale: for a frequency, logarithmic, minimum × (maximum / minimum)^position, so 0.5 on a 20 Hz to 20 kHz cutoff is
@@ -93,7 +95,7 @@ the file.
 **MIDI channels.** A MIDI clip's `NOTE` and `CONTROL` (a controller event: a controller, the pitch wheel, pressure or a
 program change) each play on a MIDI channel, `channel`, from 1 to 16 as musicians count them; one without it is on
 channel 1, which Phazite never writes. A `CONTROL` of kind `programChange` plays: its `value` is the program, 0 to 127.
-Phazite writes a clip's `NOTE` elements, then its `CONTROL` elements, after whatever else the clip holds, each kind in
+Phazite writes a clip's `NOTE` elements, then its `CONTROL` elements, after its warp markers, each kind in
 its order (a note's place among the notes means nothing; the controllers' values keep theirs, which is the order they
 play in at one beat); a reader takes them in any order.
 

@@ -3,6 +3,8 @@
 #include "SongIDs.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/modulation/Modulators.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
@@ -19,6 +21,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace phazite::test
@@ -642,64 +645,88 @@ std::vector<std::string> findValueProblems (const Song& song)
     if (values == nullptr)
         return problems;
 
+    const auto& clips = values->clips.get();
     const auto& notes = values->notes.get();
-    std::set<std::uint64_t> inTree;
-    std::map<juce::String, std::pair<std::uint64_t, ClipNotes>> groups; // each alias group's first clip and its value
+    const auto clipText = [] (std::uint64_t id) { return "values: clip " + std::to_string (id); };
 
+    // No clip in the song's tree: its clips are the area's.
     const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
     {
         for (const auto& child : element)
         {
-            if (child.hasType (schema::TRACK))
-            {
-                visit (child);
-                continue;
-            }
+            if (child.hasType (schema::CLIP))
+                problems.push_back (clipText ((std::uint64_t) (juce::int64) child[schema::clipID]) + " is an element in the song's tree");
 
-            if (! child.hasType (schema::CLIP))
-                continue;
-
-            const auto id = (std::uint64_t) (juce::int64) child[schema::clipID];
-            const auto clipText = "values: clip " + std::to_string (id);
-            inTree.insert (id);
-
-            for (const auto& event : child)
-                if (event.hasType (schema::NOTE) || event.hasType (schema::CONTROL))
-                    problems.push_back (clipText + " holds a " + event.getType().toString().toStdString() + " element in the song's tree");
-
-            const auto* value = notes.find (ClipID::fromRaw (id));
-
-            if (child[schema::clipKind].toString() == schema::clipIsAudio)
-            {
-                if (value != nullptr)
-                    problems.push_back (clipText + ", an audio clip, has a value of notes");
-
-                continue;
-            }
-
-            if (value == nullptr)
-            {
-                problems.push_back (clipText + ", a MIDI clip, has no value of notes");
-                continue;
-            }
-
-            if (const auto link = child[schema::clipLink].toString(); link.isNotEmpty())
-            {
-                if (const auto found = groups.find (link); found == groups.end())
-                    groups.emplace (link, std::pair { id, *value });
-                else if (! found->second.second.isSameAs (*value))
-                    problems.push_back (clipText + " of alias group " + link.toStdString() + " holds "
-                                        + (found->second.second == *value ? "a value alike" : "another value") + ", not clip "
-                                        + std::to_string (found->second.first) + "'s");
-            }
+            visit (child);
         }
     };
 
-    visit (song.getState().getChildWithName (schema::TRACKS));
+    visit (song.getState());
 
-    for (const auto& [id, value] : notes.clips)
-        if (inTree.count (id) == 0)
-            problems.push_back ("values: a value of notes for clip " + std::to_string (id) + ", which isn't in the song's tree");
+    // The area's lists agree with its clips, and no alias group is of one clip.
+    if (! holdsItsLists (clips))
+        problems.push_back ("values: the clips' lists (each track's, each alias group's) don't hold the clips the area holds");
+
+    if (hasGroupsOfOne (clips))
+        problems.push_back ("values: an alias group holds one clip alone");
+
+    // Each clip on a track of the song that can hold it; a MIDI clip with its notes, an audio clip without; and the clips of an
+    // alias group hold ONE value of notes (the same, not two alike), or audio clips one sound.
+    std::map<std::uint64_t, ClipID> firstOfGroups;
+
+    for (const auto& [id, clip] : clips.clips)
+    {
+        if (const auto track = findTrackState (song, clip.track);
+            ! track.hasType (schema::TRACK) || isFolderState (track) || isReturnState (track))
+            problems.push_back (clipText (id) + " is on track " + std::to_string (clip.track.getRaw())
+                                + ", which isn't a track of the song's that holds clips");
+
+        const auto* value = notes.find (clip.id);
+
+        if (clip.isAudio() && value != nullptr)
+            problems.push_back (clipText (id) + ", an audio clip, has a value of notes");
+
+        if (clip.isMidi() && value == nullptr)
+            problems.push_back (clipText (id) + ", a MIDI clip, has no value of notes");
+
+        if (clip.link == 0)
+            continue;
+
+        const auto [first, isFirst] = firstOfGroups.try_emplace (clip.link, clip.id);
+
+        if (isFirst)
+            continue;
+
+        const auto* other = clips.find (first->second);
+
+        if (other == nullptr || other->kind != clip.kind)
+            continue; // the alias rule says it of the whole copy
+
+        const auto group = " of alias group " + std::to_string (clip.link);
+
+        if (clip.isMidi())
+        {
+            if (const auto* firstValue = notes.find (other->id);
+                firstValue != nullptr && value != nullptr && ! firstValue->isSameAs (*value))
+                problems.push_back (clipText (id) + group + " holds " + (*firstValue == *value ? "a value alike" : "another value")
+                                    + ", not clip " + std::to_string (other->id.getRaw()) + "'s");
+        }
+        else if (! clip.sound.isSameAs (other->sound))
+        {
+            problems.push_back (clipText (id) + group + " holds " + (clip.sound == other->sound ? "a sound alike" : "another sound")
+                                + ", not clip " + std::to_string (other->id.getRaw()) + "'s");
+        }
+    }
+
+    // The notes' area holds the MIDI clips' values alone.
+    for (const auto& entry : notes.clips)
+    {
+        const auto* clip = clips.find (ClipID::fromRaw (entry.first));
+
+        if (clip == nullptr || ! clip->isMidi())
+            problems.push_back ("values: a value of notes for clip " + std::to_string (entry.first)
+                                + ", which isn't a MIDI clip of the song's");
+    }
 
     return problems;
 }

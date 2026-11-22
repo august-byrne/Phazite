@@ -312,68 +312,19 @@ bool isAudioState (const juce::ValueTree& clipState)
     return clipState[schema::clipKind].toString() == schema::clipIsAudio;
 }
 
-FilePart getFilePart (const juce::ValueTree& clipState)
-{
-    return { (double) clipState[schema::clipFileStart], (double) clipState[schema::clipFileEnd] };
-}
-
-juce::ValueTree makeAudioClipState (Song& song, const juce::String& name, const juce::File& file, BeatPosition start, FilePart part)
-{
-    juce::ValueTree clipState (schema::CLIP);
-    clipState.setProperty (schema::clipID, (juce::int64) song.makeID(), nullptr);
-    clipState.setProperty (schema::clipKind, schema::clipIsAudio, nullptr);
-    clipState.setProperty (schema::clipName, name, nullptr);
-    clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), nullptr);
-    // Relative to the project's folder, as devices keep their files (DeviceFiles.h), written the same on every system.
-    clipState.setProperty (schema::clipFile, getProjectPath (song, file), nullptr);
-    clipState.setProperty (schema::clipFileStart, part.start, nullptr);
-    clipState.setProperty (schema::clipFileEnd, part.end, nullptr);
-    return clipState;
-}
-
 ClipValue makeAudioClip (Song& song, const juce::String& name, const juce::File& file, BeatPosition start, FilePart part)
 {
-    // As makeAudioClipState() makes its element.
     ClipValue clip;
     clip.id = ClipID::fromRaw (song.makeID());
     clip.kind = ClipValue::Kind::audio;
     clip.length = {};
     clip.name = name;
     clip.start = BeatPosition::fromBeats (std::max (0.0, start.inBeats()));
+    // Relative to the project's folder, as devices keep their files (DeviceFiles.h), written the same on every system.
     clip.sound.file = getProjectPath (song, file);
     clip.fileStart = part.start;
     clip.fileEnd = part.end;
     return clip;
-}
-
-juce::File getClipFile (const Song& song, const juce::ValueTree& clipState)
-{
-    return findProjectFile (song, clipState[schema::clipFile].toString());
-}
-
-double getClipFileLength (const Song& song, const juce::ValueTree& clipState)
-{
-    return getFileSeconds (getClipFile (song, clipState));
-}
-
-stretch::Settings getClipStretch (const Song& song, const juce::ValueTree& clipState)
-{
-    return getClipStretch (song, readClipValue (clipState));
-}
-
-bool followsTempoChanges (const Song& song, const juce::ValueTree& clipState)
-{
-    return isAudioState (clipState) && followsTempoChanges (song, readClipValue (clipState));
-}
-
-juce::File getPlayedFile (const Song& song, const juce::ValueTree& clipState)
-{
-    return getPlayedFile (song, readClipValue (clipState));
-}
-
-PlayedPosition getPlayedPosition (const Song& song, const juce::ValueTree& clipState)
-{
-    return getPlayedPosition (song, readClipValue (clipState));
 }
 
 ClipTempo::ClipTempo (const Song& song)
@@ -460,37 +411,6 @@ BeatRange getAudioClipRange (const Song& song, const ClipValue& clip)
     return { clip.start, toBeats (song, getPlayedPosition (song, clip).end) };
 }
 
-void setAudioPart (Song& song, juce::ValueTree clipState, BeatPosition start, FilePart part)
-{
-    // The element given, which a value is read from and written into: what the clips' own edits do by its ID (Clips.cpp).
-    const auto held = readClipValue (clipState);
-    auto next = held;
-    next.start = BeatPosition::fromBeats (std::max (0.0, start.inBeats()));
-    next.fileStart = std::max (0.0, part.start);
-    next.fileEnd = std::max (part.start, part.end);
-    writeClipElement (next, held, clipState, getUndoOf (song));
-}
-
-double getClipFade (const juce::ValueTree& clipState, bool fadeIn)
-{
-    return (double) clipState.getProperty (fadeIn ? schema::clipFadeIn : schema::clipFadeOut, 0.0);
-}
-
-void setClipFade (Song& song, juce::ValueTree clipState, bool fadeIn, double seconds)
-{
-    const auto held = readClipValue (clipState);
-    auto next = held;
-    (fadeIn ? next.fadeIn : next.fadeOut).seconds = std::max (0.0, seconds);
-    writeClipElement (next, held, clipState, getUndoOf (song));
-}
-
-FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn)
-{
-    const auto shape = clipState[fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape].toString();
-    const auto bend = (float) clipState.getProperty (fadeIn ? schema::clipFadeInBend : schema::clipFadeOutBend, 0.0f);
-    return { shape == schema::fadeIsSCurve ? FadeShape::sCurve : FadeShape::curve, juce::jlimit (-1.0f, 1.0f, bend) };
-}
-
 engine::FadeCurve toEngineFade (FadeCurve curve)
 {
     return { curve.shape == FadeShape::sCurve ? engine::FadeShape::sCurve : engine::FadeShape::curve, curve.bend };
@@ -499,8 +419,10 @@ engine::FadeCurve toEngineFade (FadeCurve curve)
 //==============================================================================
 bool isAudioClip (const Song& song, ClipID clip)
 {
-    // The clip's kind alone, where the song keeps it (Clips.h: the storage).
-    return isAudioState (findClipState (song, clip));
+    // The clip's kind alone, where the song keeps it (SongValues.h: the clips' area).
+    const auto* values = song.getValues();
+    const auto* value = values != nullptr ? values->findClip (clip) : nullptr;
+    return value != nullptr && value->isAudio();
 }
 
 FilePart getFilePart (const ClipValue& clip)
@@ -1061,7 +983,7 @@ void playTake (Song& song, ClipID clip, int take)
     const auto shift = held->takeLength * (take - held->take);
     auto next = *held;
     next.take = take;
-    next.start = BeatPosition::fromBeats (std::max (0.0, held->start.inBeats())); // as setAudioPart() keeps it
+    next.start = BeatPosition::fromBeats (std::max (0.0, held->start.inBeats())); // as the clips' edits keep it
     next.fileStart = std::max (0.0, held->fileStart + shift);
     next.fileEnd = std::max (held->fileStart + shift, held->fileEnd + shift);
     setClip (song, *held, next);
@@ -1071,17 +993,17 @@ std::vector<ClipID> getAudioClips (const Song& song)
 {
     std::vector<ClipID> clips;
 
-    // Their kinds where the song keeps them (Clips.h: the storage).
-    for (const auto& clipState : getClipStates (song))
-        if (isAudioState (clipState))
-            clips.push_back (getClipID (clipState));
+    // Track by track, each track's in its order.
+    for (const auto& clip : getClipPlacements (song))
+        if (clip.isAudio())
+            clips.push_back (clip.id);
 
     return clips;
 }
 
 namespace
 {
-    // The devices' sound files an element of the song names, and those of what it holds: a clip's elements hold none.
+    // The devices' sound files an element of the song names, and those of what it holds (the song's tree holds no clip).
     void addSoundFilePaths (const juce::ValueTree& element, juce::StringArray& paths)
     {
         if (element.hasType (schema::SOUNDS))
@@ -1091,8 +1013,7 @@ namespace
                         paths.addIfNotAlreadyThere (path);
 
         for (const auto& child : element)
-            if (! child.hasType (schema::CLIP))
-                addSoundFilePaths (child, paths);
+            addSoundFilePaths (child, paths);
     }
 } // namespace
 

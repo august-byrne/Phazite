@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes. The song holds its
-// clips (schema::CLIP, on their tracks' elements): where each is, in beats, its name, mute and alias group, and a MIDI
-// clip's notes (model/notes/internal/Notes.h) or an audio clip's part of its file (AudioClips.h), by their IDs.
+// clips as values beside its tree, in its clips' area (model/base/internal/SongValues.h: SongClips), each track's in their
+// order: where each is, in beats, its name, mute and alias group, and a MIDI clip's notes (model/notes/internal/Notes.h) or
+// an audio clip's part of its file (AudioClips.h), by their IDs.
 #pragma once
 
 #include "model/arrangement/PlaylistValues.h"
@@ -19,8 +20,9 @@
 namespace phazite
 {
 //==============================================================================
-// The song's clips by their IDs, as plain values (model/base/internal/SongValues.h: ClipValue): how what reads a clip
-// outside the clips' own code reads it, whatever stores it (the song's tree for now, read with readClipValue()).
+// The song's clips by their IDs, as plain values (model/base/internal/SongValues.h: ClipValue), read from the song's clips'
+// area: a lookup in a map, a copy of a small value. What reads many clips often without a copy finds them in the area itself
+// (SongValues::findClip()). A song that holds no values (one made to be read or checked: Song::getValues()) has no clips here.
 
 // A clip's value: none for a clip that isn't the song's (gone).
 std::optional<ClipValue> getClipValue (const Song&, ClipID);
@@ -78,12 +80,11 @@ juce::String getClipName (const Song&, ClipID);
 juce::String getClipName (const Song&, const ClipValue&);
 
 //==============================================================================
-// The song's clips changed by their IDs and plain values: how anything writes a clip, the clips' own edits too, whatever
-// stores it (the song's tree for now, written as the clips' code has always written it: SongValues.h, writeClipElement()).
-// None begins an undo step: each change joins the caller's, or is made outside the history while the song is written outside
-// it (Song::OutsideHistory). What else changes clips by ID is below: moveClip(), deleteClips(), setClipFade() and the rest,
-// and AudioClips.h's, each worked out on the clips' values and set through these; every one of them writes through
-// getUndoOf().
+// The song's clips changed by their IDs and plain values: how anything writes a clip, the clips' own edits too, each a new
+// value of the song's clips' area (SongValues.h: SongValues::setClip()). None begins an undo step: each change joins the
+// caller's, or is made outside the history while the song is written outside it (Song::OutsideHistory). What else changes
+// clips by ID is below: moveClip(), deleteClips(), setClipFade() and the rest, and AudioClips.h's, each worked out on the
+// clips' values and set through these.
 
 // A new MIDI clip's value, with an ID of the song's, on no track yet (its track is the caller's to give): from the range's
 // start (not before the song's), at least shortestClipBeats long. With no name, it has none of its own: it is called after
@@ -108,9 +109,8 @@ void setClip (Song&, const ClipValue&);
 
 // The same for a clip whose value the caller read (getClipValue()) and holds as the song holds it: what the clips' own edits
 // set (Clips.cpp, AudioClips.cpp), each having worked the next value out by its own rules (its start, length and part kept
-// within what a clip holds as each edit keeps them, which setClip() above does for what is given from outside). Only what
-// differs between the two values is written (SongValues.h: writeClipElement()), so the clip isn't read again; on another
-// track, it moves to the end of that one's clips.
+// within what a clip holds as each edit keeps them, which setClip() above does for what is given from outside). Nothing
+// for a next value the same as the one held; on another track, it moves to the end of that one's clips.
 void setClip (Song&, const ClipValue& held, const ClipValue& next);
 
 // Takes a clip out of the song, its notes with it. The last clip left in its alias group leaves the group too (a group of one
@@ -132,15 +132,14 @@ void setClipLink (Song&, ClipID, std::uint64_t link);
 bool setClipFiles (Song&, const juce::String& path, const juce::String& newPath);
 
 // Copies a track's clips onto another (a copy of it, as Duplicate makes one: model/arrangement/internal/Tracks.h,
-// duplicateTracks()), in their order, each with the ID the copy gave it (ids: an old ID to its new one, as Schema.h's
-// giveNewIDs() gives them; a new one for a clip they don't name) and its notes, shared until either is edited; as aliases
-// (each copy in its clip's alias group), or each in none. In the song's tree each copy goes where its clip is among its
-// track's elements, so that a copy of the track without its clips gets them back where they were.
+// duplicateTracks()): each copy where its clip is in the song, added after the clips the other holds (a fresh copy holds
+// none), in the track's order, with the ID the copy gave it (ids: an old ID to its new one, as Schema.h's giveNewIDs() gives
+// them; a new one for a clip they don't name) and its notes, shared until either is edited; as aliases (each copy in its
+// clip's alias group), or each in none.
 void copyTrackClips (Song&, TrackID from, TrackID to, const std::map<std::uint64_t, std::uint64_t>& ids, bool asAliases);
 
 // Puts a track's clips in another order (the order getClips() gives): the same clips, each once, else nothing changes. What
-// makes a track's clips like another song's (model/versions/internal/ApplySong.h) puts them in its order with. In the song's
-// tree the clips' elements change places among the places they held, the track's other elements staying where they are.
+// makes a track's clips like another song's (model/versions/internal/ApplySong.h) puts them in its order with.
 void setTrackClipOrder (Song&, TrackID, const std::vector<ClipID>& order);
 
 // Moves a clip to start at a beat (not before the song does), on its track, playing what it did.
@@ -151,67 +150,25 @@ void moveClipStart (Song&, ClipID, BeatPosition start);
 void setClipPlace (Song&, ClipID, BeatPosition start, BeatDuration length, BeatDuration offset);
 
 //==============================================================================
-// The song's clips' elements. The clips' own code reads and writes them in its storage alone (Clips.cpp: the functions
-// above, and these); every edit is worked out on values. What still names an element here is the loader, a version applied
-// and a merge (model/versions/), what reads a song's notes from its tree, what hears the tree change, and the tests (roadmap
-// step S5.20 moves them onto the clips' IDs and values, then takes these away). Those that work something out of an element
-// or write one (getClipRange() of an audio clip's, setClipPlace() of one) read it into a value (SongValues.h:
-// readClipValue()) and write only what differs.
-
-// The undo manager the clips' code writes the song's clips through, the one place it is chosen: the song's history, or none
-// while the song is written outside it (Song::isWritingOutsideHistory()).
-juce::UndoManager* getUndoOf (Song&);
-
-// A clip's element: invalid for a clip that isn't the song's (gone).
-juce::ValueTree findClipState (const Song&, ClipID);
-
-// The clips' elements on a track's element; and on every track of the song, track by track. And a track's clips' IDs, in
-// the order its element holds them, and the track a clip is on (none for a clip that is gone).
-std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState);
-std::vector<juce::ValueTree> getClipStates (const Song&);
+// A track's clips' IDs, in its order, and the track a clip is on (none for a clip that is gone).
 std::vector<ClipID> getClips (const Song&, TrackID);
 TrackID getClipTrack (const Song&, ClipID);
 
-ClipID getClipID (const juce::ValueTree& clipState);
-BeatDuration getClipOffset (const juce::ValueTree& clipState);
-BeatPosition getContentStart (const juce::ValueTree& clipState); // where its notes count from: its start, less its offset
-bool isMidiState (const juce::ValueTree& clipState);
-
-// Where a clip is: a MIDI clip's as its element holds it, and any clip's, an audio clip's for as long as the part of its file
-// it plays takes at the tempo there.
-BeatRange getClipRange (const juce::ValueTree& clipState);
-BeatRange getClipRange (const Song&, const juce::ValueTree& clipState);
+// Where a clip is: a MIDI clip's as its value holds it, an audio clip's for as long as the part of its file it plays takes at
+// the tempo there (getLiveClipRange()); nothing for a clip that isn't the song's.
 BeatRange getClipRange (const Song&, ClipID);
 
 // Where the song's last clip ends, muted or not, in folders too; its start for a song without clips.
 BeatPosition getClipsEnd (const Song&);
 
-// The clips of a clip's alias group, which hold the same notes (schema::clipLink), the clip itself first; only the clip
-// if it is in none.
-std::vector<juce::ValueTree> getAliasStates (const Song&, const juce::ValueTree& clipState);
-
-// A new MIDI clip's element, with an ID of the song's, on no track yet. With no name, it has none of its own: it is called after
-// the track it goes on (getClipName()).
-juce::ValueTree makeMidiClipState (Song&, const juce::String& name, BeatRange);
-
-// A clip's name: its own (schema::clipName), or else its track's, whatever the track is called now.
-juce::String getClipName (const Song&, const juce::ValueTree& clipState);
-
 // A step of its own, "Rename Clip" ("Rename Clips" for several): the clips, and the aliases of each, which play what it plays,
 // take the name. A name that is empty, or a clip's track's, leaves the clip without one of its own, called after its track.
 void renameClips (Song&, const std::vector<ClipID>&, const juce::String& name);
-
-// Puts a clip's element on a track's, or moves it there (in the caller's undo step). Returns its ID, or none if the track
-// isn't there or holds no clips (a folder or a return: Schema.h, trackKind).
-ClipID placeClipState (Song&, juce::ValueTree clipState, TrackID);
 
 // Whether a track can hold clips of a kind, MIDI or audio: audio and notes don't share a track (docs/design/building-blocks.md).
 // A track that holds clips (not a folder or a return), whose clips, but for those named in leaving, are all of that kind; and
 // for audio, one without an instrument, which would silence it.
 bool canTrackHold (const Song&, TrackID, bool midi, const std::vector<ClipID>& leaving = {});
-
-// Where a clip is, in the caller's undo step: its start, its length, and how far into its notes it starts.
-void setClipPlace (Song&, juce::ValueTree clipState, BeatPosition start, BeatDuration length, BeatDuration offset);
 
 //==============================================================================
 // The selected clips, top to bottom by track, then left to right. Sections aren't among them (Sections.h).

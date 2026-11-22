@@ -232,6 +232,123 @@ TEST_CASE ("A note that lacks a pitch, a start, a length or a velocity opens wit
     }
 }
 
+TEST_CASE ("A clip that lacks a number its description gives a range, or holds one that is no number, opens with the one its "
+           "description gives")
+{
+    // A file from others can hold a clip without a property Phazite writes, or with one that is no number (which the loader
+    // takes away where its description gives no fallback). The song holds its clips as values (model/base/internal/
+    // SongValues.h: ClipValue), which always hold each, so the clip opens with what its description gives (Schema.h): a
+    // start at 0, a MIDI clip 4 beats long, its take the first; else none (an offset, a part of its file, a tempo, a pitch, a
+    // gain, fades and their bends, takes of 0). Phazite writes a property only while it isn't its default (SongValues.h:
+    // writeClipElement()), so where the clips saved hold one at its default, the clip is first given a value that is written
+    // (give), and the file is required to hold it before it is taken away.
+    struct Case
+    {
+        const char* property;
+        bool audio;
+        double expected;
+        std::function<void (phazite::ClipValue&)> give = nullptr; // none for a property always written
+    };
+
+    const auto read = [] (const phazite::ClipValue& clip, const juce::String& name)
+    {
+        const std::map<juce::String, double> numbers { { "start", clip.start.inBeats() },
+                                                       { "length", clip.length.inBeats() },
+                                                       { "offset", clip.offset.inBeats() },
+                                                       { "fileStart", clip.fileStart },
+                                                       { "fileEnd", clip.fileEnd },
+                                                       { "tempo", clip.sound.tempo },
+                                                       { "pitch", (double) clip.sound.pitch },
+                                                       { "gain", (double) clip.gain },
+                                                       { "fadeIn", clip.fadeIn.seconds },
+                                                       { "fadeOut", clip.fadeOut.seconds },
+                                                       { "fadeInBend", (double) clip.fadeIn.bend },
+                                                       { "fadeOutBend", (double) clip.fadeOut.bend },
+                                                       { "takes", (double) clip.takes },
+                                                       { "take", (double) clip.take },
+                                                       { "takeLength", clip.takeLength } };
+
+        return numbers.at (name);
+    };
+
+    const auto takes = [] (phazite::ClipValue& clip)
+    {
+        clip.takes = 3;
+        clip.take = 2;
+        clip.takeLength = 0.05;
+    };
+
+    const std::vector<Case> cases {
+        { "start", false, 0.0 },
+        { "length", false, 4.0 },
+        { "offset", false, 0.0, [] (phazite::ClipValue& clip) { clip.offset = phazite::BeatDuration::fromBeats (1.0); } },
+        { "start", true, 0.0 },
+        { "fileStart", true, 0.0 },
+        { "fileEnd", true, 0.0 },
+        { "tempo", true, 0.0, [] (phazite::ClipValue& clip) { clip.sound.tempo = 120.0; } },
+        { "pitch", true, 0.0, [] (phazite::ClipValue& clip) { clip.sound.pitch = 2.0f; } },
+        { "gain", true, 0.0, [] (phazite::ClipValue& clip) { clip.gain = -3.0f; } },
+        { "fadeIn", true, 0.0, [] (phazite::ClipValue& clip) { clip.fadeIn.seconds = 0.05; } },
+        { "fadeOut", true, 0.0, [] (phazite::ClipValue& clip) { clip.fadeOut.seconds = 0.05; } },
+        { "fadeInBend", true, 0.0, [] (phazite::ClipValue& clip) { clip.fadeIn.bend = 0.5f; } },
+        { "fadeOutBend", true, 0.0, [] (phazite::ClipValue& clip) { clip.fadeOut.bend = 0.5f; } },
+        { "takes", true, 0.0, takes },
+        { "take", true, 1.0, takes },
+        { "takeLength", true, 0.0, takes },
+    };
+
+    for (const auto& each : cases)
+    {
+        for (const auto noNumber : { false, true })
+        {
+            CAPTURE (each.property);
+            CAPTURE (noNumber);
+            Edited edited;
+
+            if (each.give != nullptr)
+            {
+                auto& song = *phazite::findSong (edited.s.context);
+                const auto clips = phazite::getClips (song, each.audio ? edited.audio : edited.lead);
+                REQUIRE (clips.size() == 1);
+                auto value = phazite::getClipValue (song, clips.front()).value();
+                each.give (value);
+
+                {
+                    const phazite::UndoStep step (song, "Give");
+                    phazite::setClip (song, value);
+                }
+
+                REQUIRE (edited.s.getProject().save().wasOk());
+            }
+
+            const auto project = edited.open (
+                [&each, noNumber] (juce::XmlElement& song)
+                {
+                    auto* clip = Edited::findTrack (song, each.audio ? "Audio" : "Lead")->getChildByName ("CLIP");
+                    REQUIRE (clip != nullptr);
+
+                    if (noNumber)
+                    {
+                        clip->setAttribute (each.property, "not a number");
+                    }
+                    else
+                    {
+                        REQUIRE (clip->hasAttribute (each.property)); // so that taking it away takes something
+                        clip->removeAttribute (each.property);
+                    }
+                });
+            REQUIRE (project != nullptr);
+            checkSong (project->getSong());
+
+            const auto clips = phazite::getClips (project->getSong(), each.audio ? edited.audio : edited.lead);
+            REQUIRE (clips.size() == 1);
+            const auto clip = phazite::getClipValue (project->getSong(), clips.front());
+            REQUIRE (clip.has_value());
+            CHECK (read (*clip, each.property) == doctest::Approx (each.expected));
+        }
+    }
+}
+
 TEST_CASE ("A clip where no track holds clips, and a note outside a MIDI clip, are left out")
 {
     Edited edited;
@@ -269,6 +386,119 @@ TEST_CASE ("A clip on a return or a folder is left out, as only a track holds cl
     const auto clips = findAll (whole, schema::CLIP);
     REQUIRE (clips.size() == 1); // the lead's MIDI clip alone
     CHECK (clips.front().getParent()[schema::trackName].toString() == juce::String ("Lead"));
+}
+
+TEST_CASE ("A clip anywhere but on a track, in an element Phazite doesn't know too, is left out of the song and of its tree")
+{
+    // The loader takes a CLIP out of every element it knows that holds none (a device here), but leaves the insides of an
+    // element of a kind it doesn't know as they are (Project.cpp, makeConsistent()): the song, which holds its clips as
+    // values, takes those out of its tree as it opens (SongValues.cpp, adopt()), so that its tree holds no CLIP at all.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* lead = Edited::findTrack (song, "Lead");
+            auto* clip = lead->getChildByName ("CLIP");
+            REQUIRE (clip != nullptr);
+            auto* device = lead->getChildByName ("DEVICE");
+            REQUIRE (device != nullptr);
+            // In an element Phazite knows; on a track, in one it doesn't; on the song, the same.
+            device->addChildElement (new juce::XmlElement (*clip));
+            lead->createNewChildElement ("FUTURE")->addChildElement (new juce::XmlElement (*clip));
+            song.createNewChildElement ("ELSEWHERE")->addChildElement (new juce::XmlElement (*clip));
+        });
+    REQUIRE (project != nullptr); // open() checks the song: no CLIP in its tree
+    auto& song = project->getSong();
+    CHECK (findAll (song.getState(), schema::CLIP).empty());
+    CHECK (phazite::getAllClips (song).size() == 2); // the MIDI clip and the audio clip, each once
+    CHECK (phazite::getClips (song, edited.lead).size() == 1);
+
+    // What Phazite doesn't know stays, without the clip.
+    CHECK (phazite::findTrackState (song, edited.lead).getChildWithName ("FUTURE").isValid());
+    CHECK (song.getState().getChildWithName ("ELSEWHERE").isValid());
+}
+
+TEST_CASE ("A clip whose properties don't hold together opens as the clips' own edits keep one, and is the same opened again")
+{
+    // Each property within its range, as the loader keeps it, but not with the others: a file's end before its start, a MIDI
+    // clip shorter than the shortest, a take past its count of takes, a take without takes. The song takes each in as the
+    // clips' setters keep a value (SongValues.h: keepWithinClip()), so what it holds is a clip's value, which a save writes
+    // and an open reads back as it was.
+    struct Case
+    {
+        const char* what;
+        bool audio;
+        std::function<void (juce::XmlElement& clip)> edit;
+        std::function<void (const phazite::ClipValue&)> check;
+    };
+
+    const std::vector<Case> cases {
+        { "a file's end before its start", true,
+          [] (juce::XmlElement& clip)
+          {
+              clip.setAttribute ("fileStart", 0.2);
+              clip.setAttribute ("fileEnd", 0.1);
+          },
+          [] (const phazite::ClipValue& clip)
+          {
+              CHECK (clip.fileStart == doctest::Approx (0.2));
+              CHECK (clip.fileEnd == doctest::Approx (0.2));
+          } },
+        { "a MIDI clip shorter than the shortest", false, [] (juce::XmlElement& clip) { clip.setAttribute ("length", 0.001); },
+          [] (const phazite::ClipValue& clip) { CHECK (clip.length.inBeats() == doctest::Approx (phazite::shortestClipBeats)); } },
+        { "a take past its count", true,
+          [] (juce::XmlElement& clip)
+          {
+              clip.setAttribute ("takes", 3);
+              clip.setAttribute ("take", 7);
+              clip.setAttribute ("takeLength", 0.05);
+          },
+          [] (const phazite::ClipValue& clip)
+          {
+              CHECK (clip.takes == 3);
+              CHECK (clip.take == 3);
+          } },
+        { "a take without takes", true, [] (juce::XmlElement& clip) { clip.setAttribute ("take", 2); },
+          [] (const phazite::ClipValue& clip)
+          {
+              CHECK (clip.takes == 0);
+              CHECK (clip.take == 1);
+          } },
+    };
+
+    for (const auto& each : cases)
+    {
+        CAPTURE (each.what);
+        Edited edited;
+        const auto track = each.audio ? edited.audio : edited.lead;
+        const auto read = [track] (phazite::Project& project)
+        {
+            const auto clips = phazite::getClips (project.getSong(), track);
+            REQUIRE (clips.size() == 1);
+            return phazite::getClipValue (project.getSong(), clips.front()).value();
+        };
+
+        auto project = edited.open (
+            [&each] (juce::XmlElement& song)
+            {
+                auto* clip = Edited::findTrack (song, each.audio ? "Audio" : "Lead")->getChildByName ("CLIP");
+                REQUIRE (clip != nullptr);
+                each.edit (*clip);
+            });
+        REQUIRE (project != nullptr);
+        const auto opened = read (*project);
+        CHECK (phazite::keepWithinClip (opened) == opened);
+        each.check (opened);
+
+        // Saved, and opened again: the same.
+        REQUIRE (project->save().wasOk());
+        project = nullptr;
+        juce::String error;
+        const auto again = phazite::Project::open (edited.file, false, error);
+        REQUIRE (again != nullptr);
+        checkSong (again->getSong());
+        CHECK (read (*again) == opened);
+    }
 }
 
 TEST_CASE ("Two tracks with one ID both open, each with an ID of its own")

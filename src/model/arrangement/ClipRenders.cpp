@@ -465,24 +465,21 @@ void ClipRenders::handleAsyncUpdate()
 
 void ClipRenders::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
 {
-    // The tempo the clips follow; a clip not on a track's element (a file that put one elsewhere). A clip's sound on a track:
-    // clipsChanged().
-    if (tree.hasType (schema::TEMPO) || (tree.hasType (schema::CLIP) && ! isHeardAsClips (tree)))
+    // The tempo the clips follow. A clip's sound: clipsChanged().
+    if (tree.hasType (schema::TEMPO))
         rendersMayChange();
 }
 
-void ClipRenders::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
+void ClipRenders::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&)
 {
-    if (! isHeardAsClips (parent, child))
-        rendersMayChange(); // a track with clips, back from undo, say (a clip: clipsChanged())
+    rendersMayChange(); // a tempo change added, say (a clip: clipsChanged())
 }
 
-void ClipRenders::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
+void ClipRenders::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
 {
     // A tempo change taken away: the clips under it play at another speed now, from a render of their own. (A clip's last
     // warp marker: clipsChanged().)
-    if (! isHeardAsClips (parent, child))
-        rendersMayChange();
+    rendersMayChange();
 }
 
 void ClipRenders::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>&)

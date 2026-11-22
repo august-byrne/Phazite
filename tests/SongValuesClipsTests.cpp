@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's clips change hears it from one place, by IDs (model/base/internal/SongValues.h: ClipsListener),
-// which the song's keeper tells from its tree's notifications while the tree holds the clips (roadmap step S5.20). For each
-// kind of change made through the model's functions, the calls it tells, folded per undo step into what the clips' area will
-// tell once it holds them (one call for each step: each clip's track before the step and after it, and the tracks whose
+// which the song's clips' area tells at each change of its value. For each kind of change made through the model's
+// functions, the calls it tells, folded per undo step (each clip's track before the step and after it, and the tracks whose
 // clips came in another order), are what the clips' values say changed; its Undo tells the mirror of it, its Redo the same.
 //   phazite_tests.exe --test-case="Song values' clips*"
 #include "TestClips.h"
@@ -84,7 +83,7 @@ struct Folded
 };
 
 // The calls folded: each clip's first track before, and its last after; the reordered tracks once each. What the clips' area
-// tells in one call once it holds the clips, so that these cases pass unchanged then.
+// tells in one call for an undo or a redo of the step.
 Folded fold (const std::vector<Told::Call>& calls)
 {
     Folded folded;
@@ -331,20 +330,13 @@ TEST_CASE ("Song values' clips: a warp marker added to an audio clip tells the c
 
 TEST_CASE ("Song values' clips: what listens to the song's tree hears nothing of a clip, and the clips' listener nothing else")
 {
-    // isHeardAsClips() says which of the tree's notifications are the clips' listener's.
+    // The song's tree holds no clip: what listens to it hears nothing of one, and the clips' listener hears each once.
     Watched w;
     const auto clip = w.s.addMidiClip (w.s.firstTrack, 0.0, 4.0);
-    const auto clipState = phazite::findClipState (w.song, clip);
-    const auto trackState = phazite::findTrackState (w.song, w.s.firstTrack);
-    REQUIRE (clipState.isValid());
+    REQUIRE (clip.isValid());
+    CHECK_FALSE (phazite::findTrackState (w.song, w.s.firstTrack).getChildWithName (phazite::schema::CLIP).isValid());
 
-    CHECK (phazite::isHeardAsClips (clipState));
-    CHECK (phazite::isHeardAsClips (trackState, clipState));
-    CHECK_FALSE (phazite::isHeardAsClips (trackState));
-    CHECK_FALSE (phazite::isHeardAsClips (w.song.getState()));
-
-    // What a listener of the song's root hears that isn't the clips' (isHeardAsClips() says no), as the listeners that moved
-    // onto the clips' listener leave the rest to their tree callbacks.
+    // Everything a listener of the song's root hears.
     struct TreeHeard final : juce::ValueTree::Listener
     {
         explicit TreeHeard (const juce::ValueTree& rootToHear)
@@ -357,35 +349,16 @@ TEST_CASE ("Song values' clips: what listens to the song's tree hears nothing of
         juce::ValueTree root;
         int heard = 0;
 
-        void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override
-        {
-            if (! phazite::isHeardAsClips (tree))
-                ++heard;
-        }
-
-        void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
-        {
-            if (! phazite::isHeardAsClips (parent, child))
-                ++heard;
-        }
-
-        void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
-        {
-            if (! phazite::isHeardAsClips (parent, child))
-                ++heard;
-        }
-
-        void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex) override
-        {
-            if (! phazite::isHeardAsClips (parent, parent.getChild (newIndex)))
-                ++heard;
-        }
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++heard; }
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++heard; }
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++heard; }
+        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++heard; }
     };
 
     TreeHeard tree (w.song.getState());
 
     // A clip's property set, and a clip renamed: through the tree, nothing; to the clips' listener, one call each, which
-    // tells that clip alone, once (nothing told twice for one notification of the tree).
+    // tells that clip alone, once.
     const auto toldOnce = [&w, &tree, clip] (const std::function<void()>& edit)
     {
         tree.heard = 0;
