@@ -50,6 +50,7 @@ struct ValuesKept
     ChordLaneValue chordLane; // empty kept of a song that holds no values, and of one without chords or keys
     MidiLinksValue midiLinks; // none kept of a song that holds no values, and of one without links
     SongCurves curves;        // none kept of a song that holds no values, and of one without automation
+    SectionsValue sections;   // none kept of a song that holds no values, and of one without sections
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -101,15 +102,22 @@ bool holdSameCurve (const ValuesKept&, const ValuesKept&, const ParameterRef&);
 bool holdSameCurveOrder (const ValuesKept&, const ValuesKept&);
 bool holdSameCurves (const ValuesKept&, const ValuesKept&);
 
+// Whether two songs, each a tree with its kept values, hold the same sections: both a SECTIONS or neither (the trees'
+// elements: an empty one is written into the file, as the first section made it), and the same sections as one value
+// (SectionsValue.h: in their order), so that a section changed and changed back compares as the same. Both of Project's
+// comparisons with the saved copy compare the sections so (the quick one, and the whole song's), so that the two agree. Any
+// thread. In SectionsArea.cpp.
+bool holdSameSections (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
+
 // Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
 // what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips
 // (holdSameTrackClips()), then the tempo map of an element either of which holds a TEMPOMAP (holdSameTempoMap()), then the
 // chord lane of a song's element either of which holds a CHORDLANE (holdSameChordLane()), then the curves of two songs'
 // elements (holdSameCurves()), then the MIDI links of a song's element either of which holds a MIDILINKS
-// (holdSameMidiLinks()). What Project's comparison of an element whole asks once the element's own properties compare
-// (holdTheSameProject()). And whether a child of an element is the place of what an area keeps (the song's TEMPOMAP, its
-// CHORDLANE, its MIDILINKS, its AUTOMATION), which that comparison leaves out of the elements it compares one by one. Any
-// thread.
+// (holdSameMidiLinks()), then the sections of a song's element either of which holds a SECTIONS (holdSameSections()). What
+// Project's comparison of an element whole asks once the element's own properties compare (holdTheSameProject()). And
+// whether a child of an element is the place of what an area keeps (the song's TEMPOMAP, its CHORDLANE, its MIDILINKS, its
+// AUTOMATION, its SECTIONS), which that comparison leaves out of the elements it compares one by one. Any thread.
 bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
 bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

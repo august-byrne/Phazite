@@ -26,7 +26,7 @@ between them, which compiles the song into what plays. The layers and where the 
 | Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
 | Browser previews on an engine of their own | Built | |
 | Every element of the song described once in code: its type, range, default and kind | Built | `src/model/base/internal/Schema.h`, `SchemaDescription.h`; `tests/SchemaTests.cpp` |
-| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: the clips, a clip's notes and controllers' values, the tempo map, the chord lane, the MIDI links and automation's curves are values beside the tree (built); the other areas next |
+| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: the clips, a clip's notes and controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves and the sections are values beside the tree (built); the other areas next |
 | Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
 | Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
 
@@ -346,10 +346,10 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
   ([decisions.md](decisions.md), "Engineering"). Every element is described once in code first (roadmap step S5.19),
   which the values, the loader and the merge are made from; then the song moves one area at a time behind the
   model's functions (S5.20), the notes first, then the clips, then the tempo map, then the chord lane, then the MIDI
-  links, then automation (done: all six are values beside the tree, the chord lane's element left as the sign that the
-  song has one, the MIDI links' as the place their first link made, automation's AUTOMATION as the place of its curves,
-  each point with a key the selection of points holds, never saved), with one undo history for the tree's changes and
-  the values' while both are there, and the project file as it is.
+  links, then automation, then the sections (done: all seven are values beside the tree, the chord lane's element left
+  as the sign that the song has one, the MIDI links' and the sections' as the places their first link and section made,
+  automation's AUTOMATION as the place of its curves, each point with a key the selection of points holds, never saved),
+  with one undo history for the tree's changes and the values' while both are there, and the project file as it is.
 - **Beats are quarter notes everywhere,** and a time signature only sets the bar's length and the counted beat.
   Everything that keeps time then agrees, in every meter.
 - **Control points every 32 samples from the song's start,** so that what a song sounds like does not depend on
@@ -369,8 +369,8 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
 ## Not built
 
 - The song as an immutable value: being built, before the beta (roadmap step S5.20). The clips, a clip's notes and
-  controllers' values, the tempo map, the chord lane, the MIDI links and automation's curves are values beside the tree
-  (built: the engine's tempo map is made once for each change of the song's); the rest of the song is still a `ValueTree`, every name of it
+  controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves and the sections are values
+  beside the tree (built: the engine's tempo map is made once for each change of the song's); the rest of the song is still a `ValueTree`, every name of it
   described in `Schema.h` (S5.19), and moves one area at a time next.
 - Other stretch modes, such as slicing drums at their hits or re-pitching: Planned.
 - Tracks that aren't being edited pre-rendered in the background: Planned, after v1.

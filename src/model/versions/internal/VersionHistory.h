@@ -964,6 +964,10 @@ private:
     // The MIDI links (SongValues.h), what is in whose MIDILINKS the tree's callbacks below leave alone (isHeardAsKept()): the
     // song's own line, as a change of its element was. The element's own coming and going they mark as any element's.
     void midiLinksChanged() override;
+
+    // The sections (SongValues.h), what is in whose SECTIONS the tree's callbacks below leave alone (isHeardAsKept()): the
+    // song's own line, as a change of its element was. The element's own coming and going they mark as any element's.
+    void sectionsChanged (const std::vector<SectionID>&) override;
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();

@@ -194,7 +194,10 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   that side holds it). What is left of it for the tempo map: where the side before can't be read (its song isn't a
   `PHAZITE` element: `canRead` false in `chooseTempoMapClash()`), what was before still takes the bpm away, which
   reads as 120. Any other keyed element both lines added with a clashing property is likely the same (a chord, a
-  chord lane's key, a section's property, a MIDI link). Found by the
+  chord lane's key, a MIDI link). A section's property can be so only in a damaged commit's song: sections merge by
+  their IDs, and the merge renumbers what both lines added under one ID, or joins it (`renumberAdditions()`,
+  `src/model/versions/SongMerge.cpp`); and there a void length chosen is refused (`chooseSectionClash()`,
+  `src/model/arrangement/Sections.cpp`). Found by the
   review of roadmap step S5.20's tempo map listener (2026-11-22). To fix: where the parting had no element at the
   clash's path, what was before removes the element: the merge reports such a clash as one on the whole element, or
   `chooseClash()` is told that the parting held none; the tempo map does it through its value (`chooseTempoMapClash()`),

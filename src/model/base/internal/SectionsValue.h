@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's sections as a value (roadmap step S5.20, the sections' area): each section, by its ID, in the song's order, in
 // Phazite's own types, and the conversion between the value and the SECTIONS element with its SECTION children (Schema.h),
-// the one place that reads and writes those by name. The song doesn't hold this value yet: its sections are still its tree's
-// elements, which getSectionsValue() below reads into it, so that what reads the song's sections reads them as a value,
-// whatever stores them.
+// the one place that reads and writes those by name. The song holds this value in an area of its values (SongValues.h,
+// SectionsArea.h), which the sections' code (model/arrangement/internal/Sections.h) computes each edit on; its tree's
+// SECTIONS, where it has one, is an empty placeholder (added with the first section), the place a whole copy writes the
+// sections in.
 //
 // Its own header, beside SongValues.h and the other areas' (one header for each area's values). The song's reader is here,
 // in the model's base, rather than with the sections' code (model/arrangement/internal/Sections.h), because the selection
@@ -58,19 +59,50 @@ struct SectionsValue
     bool operator== (const SectionsValue& other) const { return sections == other.sections; }
 };
 
-// The song's sections (the song's tree holds them still: this reads them from its SECTIONS element at each call, by value;
-// the sections' switch, roadmap step S5.20, makes this the area's value, which it then gives without a read).
+// The song's sections: the area's value, cheap to copy; for a song that keeps everything in its tree (one made to be read or
+// checked, without values: Song::getValues()), read from its SECTIONS element (readSectionsValue()). None for a song without.
 SectionsValue getSectionsValue (const Song&);
 
 // Whether the song holds a section with this ID (an invalid one: no), without a value made of its sections: what a path that
-// asks it of each section, as a paint does (Selection.h: isSelected()), asks. On tree storage it walks the SECTIONS element's
-// SECTION children comparing their IDs; the sections' switch, roadmap step S5.20, makes it a look in the area's value.
+// asks it of each section, as a paint does (Selection.h: isSelected()), asks. A look in the area's value, which copies
+// nothing; for a song that keeps everything in its tree, a walk of its SECTIONS element's SECTION children.
 bool holdsSection (const Song&, SectionID);
 
 // The song's sections read from its SECTIONS element (an invalid tree reads as none): each SECTION child in the element's
 // order, each property as the sections' code has always read it (setSectionProperty()). A child of another type is no section,
-// and a property Phazite doesn't know no part of one.
+// and a property Phazite doesn't know no part of one. What reads the sections of a song that keeps everything in its tree
+// (getSectionsValue()), and the tests.
 SectionsValue readSectionsValue (const juce::ValueTree& sectionsElement);
+
+// The song's sections read from a SECTIONS as the song holds them (SongValues.h: the loaded sections Song::holdValues() takes
+// in, the keeper's safety net, a version's sections and a merge's choice, SectionsArea.h): each SECTION child in the element's
+// order (readHeldSection()), kept as the sections' writers keep them (keepSectionsHeld()). A child of another type, and a
+// property Phazite doesn't know, are no part of it.
+SectionsValue readHeldSections (const juce::ValueTree& sectionsElement);
+
+// One section read so from its SECTION element: its ID as readID() reads one, text or a number; its start and its length
+// each by its description (SongText.h: readDescribed(): within its range, and its fallback where it has none or what it has
+// is no finite number, so that a length is more than 0); its energy within 0 to 1, its description's default (0.5) where it
+// has none or no finite number; its name, role and tip as text; its colour as written (an empty one empty, none where it has
+// none). None for an element that is no SECTION, and for one without an ID the song can count on from (0, or at or past
+// schema::maxID), which no section holds.
+std::optional<SectionValue> readHeldSection (const juce::ValueTree& sectionElement);
+
+// The sections with one more, read from its SECTION element as readHeldSection() reads one, after the others (where an
+// element appended to the song's SECTIONS is read), kept as keepSectionsHeld() keeps them; the sections as they are for any
+// other element, and for one the song can't hold. The keeper's safety net.
+SectionsValue withSectionTaken (const SectionsValue&, const juce::ValueTree& sectionElement);
+
+// The sections as the song holds them: one of each ID (of two, the first in the value's order stays), and none without an ID
+// the song can count on from. The one rule for what enters the song's sections (readHeldSections(), withSectionTaken()) and
+// for the sections' writers (model/arrangement/Sections.cpp), which give each section an ID of its own already. The same
+// value where it keeps them all. Sections may overlap, as the loader leaves them (the sections' code places a new one
+// between the others, but a file, an outline or an import may hold two that overlap).
+SectionsValue keepSectionsHeld (const SectionsValue&);
+
+// Whether the sections are held as keepSectionsHeld() keeps them (it would change nothing): what the song's consistency check
+// asks of its value.
+bool holdsSectionsHeld (const SectionsValue&);
 
 // How many sections were read into values (readSectionsValue()) since Phazite started, on any thread: for the test that
 // asking whether each section is selected, as a paint does, reads none (tests/PerformanceGateTests.cpp). Allocations can't
@@ -85,8 +117,10 @@ std::uint64_t countSectionsRead() noexcept;
 // (model/project/internal/Project.h, makeConsistent()). Whether the property is one of a section's (else nothing changes).
 bool setSectionProperty (SectionValue&, const juce::Identifier& property, const juce::var& value);
 
-// The song's sections appended to a SECTIONS element (a copy of the song's, emptied, outside any song: WholeState.h), each a
-// SECTION as the sections' code writes one: its ID, start, length, name and energy always, its role and tip only where it has
-// one, and its colour where it has one, as written (an empty one empty: the sections' code writes none empty).
+// A section as a SECTION element, as the sections' code writes one: its ID, start, length, name and energy always, its role
+// and tip only where it has one, and its colour where it has one, as written (an empty one empty: the sections' code writes
+// none empty). And the song's sections appended to a SECTIONS element (a copy of the song's, emptied, outside any song:
+// WholeState.h), each so, in their order.
+juce::ValueTree writeSectionElement (const SectionValue&);
 void writeSections (const SectionsValue&, juce::ValueTree& sectionsCopy);
 } // namespace phazite

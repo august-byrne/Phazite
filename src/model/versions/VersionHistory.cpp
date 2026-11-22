@@ -3157,6 +3157,14 @@ void VersionHistory::midiLinksChanged()
     markSongOwn();
 }
 
+void VersionHistory::sectionsChanged (const std::vector<SectionID>&)
+{
+    // A change of the song as its tree's are, in its sections: the song's own line (as markChanged() marks it).
+    ++songChanges;
+    edited();
+    markSongOwn();
+}
+
 void VersionHistory::markNotesHeard()
 {
     // A clip gone since was taken off its track, which marked it.

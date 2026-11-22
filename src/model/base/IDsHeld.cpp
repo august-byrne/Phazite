@@ -4,6 +4,7 @@
 #include "model/base/internal/ClipsArea.h"
 #include "model/base/internal/NotesArea.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SectionsArea.h"
 #include "model/base/internal/SongValues.h"
 
 #include <algorithm>
@@ -21,6 +22,7 @@ std::uint64_t findLargestIDHeld (const Song& song)
     std::uint64_t largest = 0;
     largest = std::max (largest, findLargestIDIn (values->clips.get()));
     largest = std::max (largest, findLargestIDIn (values->notes.get()));
+    largest = std::max (largest, findLargestIDIn (values->sections.get())); // the sections' (each section's ID)
     return largest;
 }
 

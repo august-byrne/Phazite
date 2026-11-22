@@ -16,6 +16,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/WholeState.h"
@@ -39,6 +40,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <set>
@@ -2417,6 +2419,112 @@ TEST_CASE ("A MIDI link to what the song hasn't, a controller's or a parameter's
     CHECK (links[0].channel == 1);
     CHECK (links[0].number == 21);
     CHECK (links[0].parameter == "cutoff");
+}
+
+TEST_CASE ("Damaged sections open as a whole value, each section as its description reads it, saved and opened again the same file")
+{
+    // The song takes in its file's sections as it opens (Song::holdValues(): SectionsValue.h, readHeldSections()): numbers
+    // written as text, an ID as text, what Phazite doesn't know on the SECTIONS and a section, a child of another type, a
+    // section without a length (four beats, its description's fallback), an energy beyond its range, a colour written empty,
+    // two at one start (in the file's order), two of one ID and one without an ID (each kept, given an ID of its own), and an
+    // empty SECTIONS. Each opens holding together (the check, in Edited::open()), holds what its description reads, in the
+    // file's order, each section with an ID of its own, and is the same once saved and opened again, its SECTIONS written
+    // without what Phazite doesn't know, and the same file saved twice. An empty SECTIONS stays one.
+    struct Case
+    {
+        const char* about;
+        const char* sections;
+        std::vector<juce::String> expected;
+    };
+
+    // The sections' IDs, each once and none 0: every section opens with an ID of its own (the loader gives one where its file
+    // names none, or one another section holds: Project.cpp, keepIDs()).
+    const auto idsOf = [] (const phazite::Song& song)
+    {
+        std::set<std::uint64_t> ids;
+
+        for (const auto& section : phazite::getSectionsValue (song).sections)
+            if (section.id.getRaw() != 0)
+                ids.insert (section.id.getRaw());
+
+        return ids;
+    };
+
+    const auto describe = [] (const phazite::Song& song)
+    {
+        std::vector<juce::String> lines;
+
+        if (! song.getState().getChildWithName (schema::SECTIONS).isValid())
+            return lines;
+
+        lines.push_back ("sections");
+
+        for (const auto& section : phazite::getSectionsValue (song).sections)
+            lines.push_back (section.name + " " + juce::String (section.start.inBeats(), 3) + " "
+                             + juce::String (section.length.inBeats(), 3) + " " + juce::String (section.energy, 2) + " "
+                             + (section.colour.has_value() ? "\"" + *section.colour + "\"" : juce::String ("none")));
+
+        return lines;
+    };
+
+    const Case cases[] = {
+        { "numbers as text, and an ID",
+          R"(<SECTIONS><SECTION id=" 900001 " start=" 16 " length="8.0" name="Verse" energy="0.25"/></SECTIONS>)",
+          { "sections", "Verse 16.000 8.000 0.25 none" } },
+        { "what Phazite doesn't know",
+          R"(<SECTIONS colour="red"><LINE/><SECTION id="900002" start="0" length="4" name="Intro" shape="round"/></SECTIONS>)",
+          { "sections", "Intro 0.000 4.000 0.50 none" } },
+        { "no length, an energy beyond its range, a colour written empty",
+          R"(<SECTIONS><SECTION id="900003" start="4" name="Short" energy="3" colour=""/></SECTIONS>)",
+          { "sections", "Short 4.000 4.000 1.00 \"\"" } },
+        { "two at one start, in the file's order",
+          R"(<SECTIONS><SECTION id="900005" start="8" length="4" name="Second" colour="ff112233"/>)"
+          R"(<SECTION id="900004" start="8" length="2" name="First"/></SECTIONS>)",
+          { "sections", "Second 8.000 4.000 0.50 \"ff112233\"", "First 8.000 2.000 0.50 none" } },
+        { "two of one ID, and one without an ID: each given an ID of its own",
+          R"(<SECTIONS><SECTION id="900006" start="0" length="4" name="A"/><SECTION id="900006" start="4" length="4" name="B"/>)"
+          R"(<SECTION start="8" length="4" name="C"/><SECTION id="" start="12" length="4" name="D"/></SECTIONS>)",
+          { "sections", "A 0.000 4.000 0.50 none", "B 4.000 4.000 0.50 none", "C 8.000 4.000 0.50 none", "D 12.000 4.000 0.50 none" } },
+        { "an empty SECTIONS", R"(<SECTIONS/>)", { "sections" } },
+    };
+
+    for (const auto& each : cases)
+    {
+        INFO (juce::String (each.about));
+        Edited edited;
+        const auto project = edited.open (
+            [&each] (juce::XmlElement& song)
+            {
+                auto sections = juce::parseXML (juce::String (each.sections));
+                REQUIRE (sections != nullptr);
+                song.addChildElement (sections.release());
+            });
+        REQUIRE (project != nullptr);
+        CHECK (describe (project->getSong()) == each.expected);
+        CHECK (idsOf (project->getSong()).size() == phazite::getSectionsValue (project->getSong()).sections.size());
+
+        const auto sections = phazite::test::copyWholeSong (project->getSong()).getChildWithName (schema::SECTIONS);
+        REQUIRE (sections.isValid());
+        CHECK (sections.getNumProperties() == 0);
+
+        for (const auto& child : sections)
+        {
+            CHECK (child.hasType (schema::SECTION));
+            CHECK_FALSE (child.hasProperty ("shape"));
+        }
+
+        REQUIRE (project->save().wasOk());
+        const auto firstSave = edited.file.loadFileAsString();
+        juce::String error;
+        const auto again = phazite::Project::open (edited.file, false, error);
+        REQUIRE_MESSAGE (again != nullptr, error.toStdString());
+        checkSong (again->getSong());
+        CHECK (describe (again->getSong()) == each.expected);
+        CHECK (idsOf (again->getSong()) == idsOf (project->getSong()));
+        CHECK (phazite::test::copyWholeSong (again->getSong()).getChildWithName (schema::SECTIONS).isEquivalentTo (sections));
+        REQUIRE (again->save().wasOk());
+        CHECK (edited.file.loadFileAsString() == firstSave);
+    }
 }
 
 TEST_CASE ("Damaged MIDI links open as a whole value, each link as its description reads it, saved and opened again the same file")

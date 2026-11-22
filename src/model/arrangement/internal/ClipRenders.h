@@ -197,6 +197,11 @@ private:
     // and, unlike the other listeners, the CHORDLANE's own coming and going too (isChordLanePlaceholder()).
     static bool isChordLanePlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child);
 
+    // The sections (SongValues.h: sectionsChanged()): nothing, as no clip's render is made of them; the tree callbacks above
+    // leave what is in the song's SECTIONS alone (isHeardAsKept()) and, as the chord lane's, the SECTIONS's own coming and
+    // going too (isSectionsPlaceholder()), so that a section edit makes the renders look again at nothing.
+    static bool isSectionsPlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child);
+
     // Not the curves (SongValues.h: curvesChanged()): no render holds automation, and the tree's callbacks above leave the
     // curves' elements alone (isHeardAsKept(), through isHeardAsCurves()). Nor the MIDI links (midiLinksChanged()): no render
     // is made of them, and the tree's callbacks above leave what is in the song's MIDILINKS alone (isHeardAsMidiLinks()).

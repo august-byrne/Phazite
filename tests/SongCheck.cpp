@@ -10,6 +10,7 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TempoMapValue.h"
@@ -1034,6 +1035,58 @@ namespace
         if (std::adjacent_find (keys.begin(), keys.end()) != keys.end())
             problems.push_back ("values: two of the song's points hold one key");
     }
+
+    // The sections' area: no SECTION in the song's tree, its SECTIONS there (where the song has one) an empty placeholder, and
+    // no section held without one (a whole copy writes the sections in it); every section with an ID the song can count on
+    // from, one of each (SectionsValue.h: holdsSectionsHeld()); and every number within its description's range (Schema.h),
+    // read here from the description, a length more than 0. That each ID is held once across the song, and the song's next ID
+    // past it, is the id rule above, on the song whole (findIDProblems(), which reads the sections written into whole state).
+    void checkSectionsValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> findSections = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::SECTION))
+                    problems.push_back ("values: a SECTION is an element in the song's tree");
+
+                findSections (child);
+            }
+        };
+
+        findSections (song.getState());
+        const auto& sections = values.sections.get();
+
+        if (const auto element = song.getState().getChildWithName (schema::SECTIONS); ! element.isValid())
+        {
+            if (! sections.sections.empty())
+                problems.push_back ("values: the song holds sections but has no SECTIONS, the place of its sections");
+        }
+        else if (element.getNumChildren() > 0 || element.getNumProperties() > 0)
+        {
+            problems.push_back ("values: the song's SECTIONS isn't an empty placeholder for its sections");
+        }
+
+        if (! holdsSectionsHeld (sections))
+            problems.push_back ("values: the sections hold two of one ID, or one without an ID the song can count on from");
+
+        const auto isWithin = [] (double number, const schema::PropertyDescription& property)
+        {
+            const auto& range = property.getRange();
+            return range.has_value() && number >= range->low && number <= range->high;
+        };
+
+        size_t place = 0;
+
+        for (const auto& section : sections.sections)
+        {
+            if (! isWithin (section.start.inBeats(), schema::sectionStart) || ! isWithin (section.length.inBeats(), schema::sectionLength)
+                || ! isWithin ((double) section.energy, schema::sectionEnergy))
+                problems.push_back ("values: the section " + std::to_string (place) + " holds a number outside its description's range");
+
+            ++place;
+        }
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -1045,13 +1098,14 @@ std::vector<std::string> findValueProblems (const Song& song)
         return problems;
 
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
-    // lane, the MIDI links, the curves.
+    // lane, the MIDI links, the curves, the sections.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
     checkChordLaneValue (song, *values, problems);
     checkMidiLinksValue (song, *values, problems);
     checkCurvesValue (song, *values, problems);
+    checkSectionsValue (song, *values, problems);
     return problems;
 }
 

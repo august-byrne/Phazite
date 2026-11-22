@@ -411,6 +411,13 @@ private:
     bool midiLinksToCompare = false;
     void midiLinksChanged() override;
 
+    // The sections changed (SongValues.h: Listener::sectionsChanged(); the tree's callbacks below leave what is in its
+    // SECTIONS alone, isHeardAsKept(), and mark the element's own coming and going as any element's): compared with
+    // savedState's when asked, as one value with whether each has a SECTIONS (WholeState.h: holdSameSections()), so that a
+    // section changed and changed back is saved again.
+    bool sectionsToCompare = false;
+    void sectionsChanged (const std::vector<SectionID>&) override;
+
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
     // where nothing of it was marked.
     bool areNotesAsSaved() const;
@@ -419,6 +426,7 @@ private:
     bool isChordLaneAsSaved() const;
     bool areCurvesAsSaved() const;
     bool areMidiLinksAsSaved() const;
+    bool areSectionsAsSaved() const;
 
     // Whether a clip of the song is as savedState holds it, all it holds (its properties, its track, its warp markers, its
     // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's

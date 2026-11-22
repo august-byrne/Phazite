@@ -251,6 +251,11 @@ private:
     // plans on purpose, roadmap step S5.20).
     void chordLaneChanged() override { triggerAsyncUpdate(); }
 
+    // The sections (SongValues.h; its tree callbacks above leave what is in the song's SECTIONS alone, isHeardAsKept()): a new
+    // plan, as a change in their element made one, though no plan holds sections, as the chord lane's (kept so until a piece
+    // lowers the counts of plans on purpose, roadmap step S5.20).
+    void sectionsChanged (const std::vector<SectionID>&) override { triggerAsyncUpdate(); }
+
     void curvesChanged (const std::vector<ParameterRef>&) override { triggerAsyncUpdate(); } // the curves: a new plan, as above
 
     // The MIDI links (SongValues.h; its tree callbacks above leave what is in the song's MIDILINKS alone, isHeardAsKept(), and

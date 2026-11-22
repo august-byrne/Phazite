@@ -280,6 +280,9 @@ private:
     // no plan holds (the session gives the MIDI tap them: PlaybackSession.h); its tree callbacks leave what is in the song's
     // MIDILINKS alone too.
 
+    // The sections (SongValues.h: sectionsChanged()): nothing, as nothing a plan holds reads them; its tree callbacks leave what
+    // is in the song's SECTIONS alone (isHeardAsKept()), and its SECTIONS's own coming and going marks nothing that plays.
+
     // The curves that changed (SongValues.h), each read again by the next compile.
     void curvesChanged (const std::vector<ParameterRef>&) override;
 

@@ -145,6 +145,8 @@ private:
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
     void tempoMapChanged() override;
 
+    // The sections (sectionsChanged()): nothing, as no frozen track's file holds anything of them.
+
     // The curves that changed (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): their devices
     // marked, and the frozen tracks whose files play the automation of any of them compared at the later moment.
     void curvesChanged (const std::vector<ParameterRef>&) override;

@@ -1011,12 +1011,13 @@ TEST_CASE ("Performance gate: asking whether each selected section is selected r
     // A paint of the sections' strip and of the playlist asks it of each section in view (SectionsStrip.cpp, Playlist.cpp),
     // and the selection asks the song whether it holds that section (Selection.cpp: isThere()): a value made of every section
     // for each (SectionsValue.h: getSectionsValue()) read the square of the sections, twice a frame while the playlist follows
-    // the playhead. Asked through SectionsValue.h's holdsSection(), it reads none into a value. Counted as the sections read
-    // (countSectionsRead()), and as allocations, which immer's lists of freed nodes hide from the count, but which must not grow
-    // either.
+    // the playhead. Asked through SectionsValue.h's holdsSection(), it reads none into a value. Counted as the lists of sections
+    // built from the song's value (Sections.h: countSectionListsBuilt(), none), as the sections read from the tree
+    // (countSectionsRead(), which a live song never reads), and as allocations, which immer's lists of freed nodes hide from
+    // the count, but which must not grow either.
     struct Counts
     {
-        std::uint64_t read = 0;
+        std::uint64_t built = 0, read = 0;
         std::optional<int> allocations;
     };
 
@@ -1047,8 +1048,10 @@ TEST_CASE ("Performance gate: asking whether each selected section is selected r
         };
 
         Counts counts;
+        const auto builtBefore = phazite::countSectionListsBuilt();
         const auto readBefore = phazite::countSectionsRead();
         askEach();
+        counts.built = phazite::countSectionListsBuilt() - builtBefore;
         counts.read = phazite::countSectionsRead() - readBefore;
         CHECK (selected == numSections);
         counts.allocations = phazite::test::countAllocations (askEach);
@@ -1057,6 +1060,8 @@ TEST_CASE ("Performance gate: asking whether each selected section is selected r
 
     // Ten times the sections, at most ten times the work (none, now); a hundred times, with a value read for each.
     const auto small = countsFor (4), large = countsFor (40);
+    CHECK (small.built == 0);
+    CHECK (large.built == 0);
     INFO ("4 sections: " << small.read << " read; 40: " << large.read);
     CHECK (large.read <= small.read * 10 + 8);
 
@@ -1065,6 +1070,42 @@ TEST_CASE ("Performance gate: asking whether each selected section is selected r
         INFO ("4 sections: " << *small.allocations << " allocations; 40: " << *large.allocations);
         CHECK (*large.allocations <= *small.allocations * 10 + 8);
     }
+}
+
+TEST_CASE ("Performance gate: an edit of a section and the playlist's paint that follows build one list of the sections for each "
+           "part that draws them")
+{
+    // What draws the sections asks the song for them once a paint (PlaylistModel.h: getSongSections(), which builds a list of
+    // every section, sorted: Sections.h, getSections()), never once for each section: the lanes behind the tracks
+    // (Playlist.cpp: Playlist::Lanes::paint()) and the sections' strip in the time bar (SectionsStrip.cpp: paint()). Counted
+    // for one rename of a section, its changes delivered to the views and the whole window painted once, with as many lists
+    // for 40 sections as for 4: the bound is what this measured when the sections left the song's tree (roadmap step S5.20),
+    // the edit's own work and the views' answers to it included.
+    const auto builtFor = [] (int numSections)
+    {
+        phazite::test::PlaylistScreen screen;
+        std::vector<phazite::SectionID> ids;
+
+        {
+            const phazite::UndoStep step (*screen.song, "Sections");
+
+            for (int i = 0; i < numSections; ++i)
+                ids.push_back (phazite::insertSection (*screen.song, at (i * 4.0), { .name = "Part", .length = lasting (4.0) }));
+        }
+
+        phazite::test::deliverChanges();
+        screen.window.paintEverything (juce::SoftwareImageType());
+        const auto before = phazite::countSectionListsBuilt();
+        phazite::renameSection (screen.context, ids[1], "Renamed");
+        phazite::test::deliverChanges();
+        screen.window.paintEverything (juce::SoftwareImageType());
+        return phazite::countSectionListsBuilt() - before;
+    };
+
+    const auto small = builtFor (4), large = builtFor (40);
+    MESSAGE ("4 sections: " << small << " lists built; 40: " << large);
+    CHECK (large == small);
+    CHECK (small <= 2); // measured: the lanes' paint and the strip's, one list each; the edit and the views' answers build none
 }
 
 //==============================================================================

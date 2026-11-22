@@ -2704,6 +2704,7 @@ void Project::clearToCompare()
     mayHaveChanged = comparingWhole = comparingClipsWhole = tempoToCompare = false;
     chordLaneToCompare = false;
     midiLinksToCompare = false;
+    sectionsToCompare = false;
     toCompare.clear();
     notesToCompare.clear();
     clipsToCompare.clear();
@@ -2864,6 +2865,7 @@ void Project::compareWithSavedState()
     same = same && isChordLaneAsSaved();
     same = same && areCurvesAsSaved();
     same = same && areMidiLinksAsSaved();
+    same = same && areSectionsAsSaved();
 
     clearToCompare();
 
@@ -3122,6 +3124,25 @@ void Project::midiLinksChanged()
     midiLinksToCompare = true;
 }
 
+void Project::sectionsChanged (const std::vector<SectionID>&)
+{
+    // As markChanged() marks an element of the song: counted, and compared when asked (the sections as one value).
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+    sectionsToCompare = true;
+}
+
 void Project::curvesChanged (const std::vector<ParameterRef>& parameters)
 {
     // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare curves, all of
@@ -3283,6 +3304,16 @@ bool Project::areMidiLinksAsSaved() const
     // The MIDI links, against the saved copy's, as one value, and whether each has a MIDILINKS.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
     return holdSameMidiLinks (song->getState(), keepValues (*song), savedState.tree, savedState.values);
+}
+
+bool Project::areSectionsAsSaved() const
+{
+    if (! sectionsToCompare)
+        return true;
+
+    // The sections, against the saved copy's, as one value, and whether each has a SECTIONS.
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+    return holdSameSections (song->getState(), keepValues (*song), savedState.tree, savedState.values);
 }
 
 bool Project::holdSameClip (ClipID clip, const ValuesKept& now) const

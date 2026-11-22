@@ -465,6 +465,9 @@ void ClipRenders::handleAsyncUpdate()
 
 void ClipRenders::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
+    if (isSectionsPlaceholder (parent, child))
+        return; // the song's SECTIONS itself, of which no render is made (what is in it is the sections' area's)
+
     // Whatever was added but an area's of the song's values (isHeardAsKept(): a tempo change, tempoMapChanged(); what is in
     // the chord lane; a curve's, which no render is made of: a render is a clip's file, stretched by its own settings along
     // the tempo map; a clip comes as clipsChanged()), and but the song's CHORDLANE itself, of which no render is made
@@ -475,6 +478,9 @@ void ClipRenders::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&
 
 void ClipRenders::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
 {
+    if (isSectionsPlaceholder (parent, child))
+        return; // the song's SECTIONS itself
+
     // Whatever was taken out but an area's of the song's values (isHeardAsKept(): a tempo change, tempoMapChanged(); what is
     // in the chord lane; a curve's; a clip's last warp marker comes as clipsChanged()), and but the song's CHORDLANE itself
     // (isChordLanePlaceholder()).
@@ -487,6 +493,14 @@ bool ClipRenders::isChordLanePlaceholder (const juce::ValueTree& parent, const j
     // The song's CHORDLANE itself, added or taken out: the tree's to tell, which isHeardAsKept() leaves to the listeners of
     // the song's root (SongValues.h: isHeardAsChordLane() leaves it out), and which the renders alone leave alone too.
     return child.hasType (schema::CHORDLANE) && parent.hasType (schema::PHAZITE);
+}
+
+bool ClipRenders::isSectionsPlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child)
+{
+    // The song's SECTIONS itself, added or taken out (with the first section, or by a version's sections): the tree's to tell,
+    // which isHeardAsKept() leaves to the listeners of the song's root (SongValues.h: isHeardAsSections() leaves it out), and
+    // which the renders alone leave alone too, as the chord lane's.
+    return child.hasType (schema::SECTIONS) && parent.hasType (schema::PHAZITE);
 }
 
 void ClipRenders::tempoMapChanged()

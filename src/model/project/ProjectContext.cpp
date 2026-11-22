@@ -133,6 +133,11 @@ namespace
         // (mark(), markRemoved()).
         void midiLinksChanged() override { add (pending.midiLinks); }
 
+        // The sections (SongValues.h): their group, as a change in their element always was. Its tree callbacks below leave what
+        // is in the song's SECTIONS alone (isHeardAsKept()); the element's own coming and going they mark as before (mark(),
+        // markRemoved()).
+        void sectionsChanged (const std::vector<SectionID>&) override { add (pending.sections); }
+
         // Each clip whose notes changed named, on its track, as the song holds it now (a listener of the values reads nothing
         // of the song as it is told: this is later); one gone since was named as it was taken off its track.
         void nameNotesChanged()

@@ -352,6 +352,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/MidiLinksValue.cpp
     src/model/base/NotesArea.cpp
     src/model/base/Numbers.h
+    src/model/base/SectionsArea.cpp
     src/model/base/SectionsValue.cpp
     src/model/base/Selection.cpp
     src/model/base/Schema.cpp
@@ -380,6 +381,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/NotesArea.h
     src/model/base/internal/Schema.h
     src/model/base/internal/SchemaDescription.h
+    src/model/base/internal/SectionsArea.h
     src/model/base/internal/SectionsValue.h
     src/model/base/internal/Selection.h
     src/model/base/internal/SongIndex.h
@@ -1516,6 +1518,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongValuesClipsTests.cpp
         tests/SongValuesCurvesTests.cpp
         tests/SongValuesMidiLinksTests.cpp
+        tests/SongValuesSectionsTests.cpp
         tests/SongValuesTempoTests.cpp
         tests/SongValuesTests.cpp
         tests/SoundKeyTests.cpp

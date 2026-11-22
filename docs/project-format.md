@@ -84,7 +84,14 @@ out as it opens the file (section 7).
   number, made whole, and a property or an element Phazite doesn't know on `MIDILINKS` or a link isn't kept. Written
   in the song's order (a link made goes after the others), each link's four properties, its `device`'s ID as text; the
   element is written once the first link is made, and stays, empty, once the last goes;
-- `SECTIONS`: the song's parts;
+- `SECTIONS`: the song's parts (`SECTION`: `id`, `start`, `length`, `name` and `energy`, always written, and `role`, `tip`
+  and `colour` each written only where the section has one, a `colour` written empty kept so). Read in any order (the
+  sections' readers sort them by their starts, two at one start in the file's order), each ID once (a second section of
+  one ID, and one without an ID the song can count on from, is kept and given a new ID as the song opens, as a track or
+  a clip would be: section 7, "IDs"); a number that is absent or none reads as its description says (a `start` of 0, a
+  `length` of 4, an `energy` of 0.5), a number written as text reads as the loader reads a number, and a property or an
+  element Phazite doesn't know on `SECTIONS` or a section isn't kept. Written in the song's order (a section made goes
+  after the others); the element is written once the first section is made, and stays, empty, once the last goes;
 - `CHORDLANE`, once the song has a chord lane (without one, its keys are the key set last, `LASTKEY`): its chords
   (`CHORD`: `start`, `length`, `degree`, `type`, and `accidental` and `inversion`, each written only while it isn't 0)
   and the keys they are in (`CHORDKEY`: `start`, `keyRoot`, `keyScale`). Read in any order (the lane's readers sort each

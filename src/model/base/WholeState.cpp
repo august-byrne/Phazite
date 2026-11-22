@@ -6,6 +6,7 @@
 #include "internal/CurvesArea.h"
 #include "internal/MidiLinksArea.h"
 #include "internal/Schema.h"
+#include "internal/SectionsArea.h"
 #include "internal/TempoMapArea.h"
 
 namespace phazite
@@ -33,6 +34,9 @@ namespace
         if (leadsToCurves (parent, child))
             return true;
 
+        if (leadsToSections (parent, child)) // the song's SECTIONS, for the sections
+            return true;
+
         return false;
     }
 
@@ -50,6 +54,7 @@ namespace
         writeChordLaneIn (element, kept);
         writeMidiLinksIn (element, kept);
         writeCurvesIn (element, kept);
+        writeSectionsIn (element, kept); // the sections in the song's SECTIONS: SectionsArea.h
 
         for (auto child : element)
             if (leadsToKept (element, child))
@@ -96,6 +101,7 @@ ValuesKept keepValues (const Song& song)
         kept.chordLane = values->chordLane.get();
         kept.midiLinks = values->midiLinks.get();
         kept.curves = values->curves.get();
+        kept.sections = values->sections.get();
     }
 
     return kept;
@@ -128,6 +134,9 @@ bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, con
     if (! holdSameMidiLinksOf (element, kept, otherElement, otherKept))
         return false;
 
+    if (! holdSameSectionsOf (element, kept, otherElement, otherKept)) // then the sections
+        return false;
+
     return true;
 }
 
@@ -145,6 +154,9 @@ bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child)
         return true;
 
     if (isMidiLinksPlace (parent, child))
+        return true;
+
+    if (isSectionsPlace (parent, child)) // the sections' SECTIONS
         return true;
 
     return false;

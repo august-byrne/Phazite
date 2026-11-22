@@ -2119,7 +2119,8 @@ namespace
             return values->countTempoMapAdopted()    // the tempo map's
                    + values->countChordLaneAdopted() // the chord lane's
                    + values->countMidiLinksAdopted() // the MIDI links'
-                   + values->countCurvesAdopted();   // the curves'
+                   + values->countCurvesAdopted()    // the curves'
+                   + values->countSectionsAdopted(); // the sections'
         }
 
         const Song& song;
@@ -2144,6 +2145,9 @@ namespace
 
         if (const auto choice = chooseMidiLinkClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice; // a path into the song's MIDILINKS
+
+        if (const auto choice = chooseSectionClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice; // a path into the song's SECTIONS
 
         if (const auto choice = chooseCurveClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;

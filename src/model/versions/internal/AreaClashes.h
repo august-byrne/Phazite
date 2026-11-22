@@ -51,6 +51,10 @@ AreaChoice chooseChordLaneClash (Song&, const MergeClash&, int value, const Merg
 // controller, through the MIDI links' value.
 AreaChoice chooseMidiLinkClash (Song&, const MergeClash&, int value, const MergeSides&);
 
+// The sections' (model/arrangement/Sections.cpp): a path into the song's SECTIONS, whose sections merge by their IDs: a
+// section's property, or a whole section, through the sections' value.
+AreaChoice chooseSectionClash (Song&, const MergeClash&, int value, const MergeSides&);
+
 AreaChoice chooseCurveClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseNoteClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSides&);

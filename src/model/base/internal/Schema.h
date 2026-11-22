@@ -872,7 +872,10 @@ inline bool isVersionsProperty (const juce::ValueTree& tree, const juce::Identif
 // The song's sections (model/arrangement/internal/Sections.h; docs/design.md, section 6): named, colored parts of the
 // song over every track. song
 
-// Child of PHAZITE, added with the first section: the sections (SECTION), in no particular order.
+// Child of PHAZITE, added with the first section (and kept once the last goes): the sections (SECTION), in no particular
+// order. A song's sections are a value beside its tree while it is open (model/base/internal/SectionsValue.h), each property
+// below as its description reads it, and its tree's SECTIONS an empty placeholder, kept where the song has one: so the song
+// keeps no property or element Phazite doesn't know on a SECTIONS or a SECTION.
 // (SECTIONS, with the elements above.)
 
 // Child of SECTIONS: a section. Sections don't overlap.
@@ -885,7 +888,7 @@ inline const Property<std::int64_t> sectionID { "id", on (SECTION), Form::ownID,
 // On SECTION. double, 0 or more: where it starts, in beats from the song's start.
 inline const Property<double> sectionStart { "start", on (SECTION), within (0.0, maxBeats).orElse (0.0), Kind::song };
 
-// On SECTION. double, more than 0: how long it lasts, in beats.
+// On SECTION. double, more than 0: how long it lasts, in beats. A section written without it (or with none) opens 4 beats long.
 inline const Property<double> sectionLength { "length", on (SECTION), within (moreThanZero, maxBeats).orElse (4.0), Kind::song };
 
 // On SECTION: its name.
@@ -897,7 +900,7 @@ inline const Property<juce::String> sectionRole { "role", on (SECTION), Kind::so
 // On SECTION: a one-line suggestion of what to put in it, or none.
 inline const Property<juce::String> sectionTip { "tip", on (SECTION), Kind::song };
 
-// On SECTION. float 0..1, default 0.5: how intense it is, as the inspector shows it.
+// On SECTION. float 0..1, default 0.5: how intense it is, as the inspector shows it. Always written, as every section has one.
 inline const Property<float> sectionEnergy { "energy", on (SECTION), within (0.0, 1.0), byDefault (0.5f), Kind::song };
 
 // On SECTION, if it was given a color of its own: the color, as juce::Colour::toString() writes it. Without it, its

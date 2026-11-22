@@ -276,18 +276,19 @@ struct Changed
         problemsBefore = findSongProblems (rawSong, tables);
 
         // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, a chord or a key change, a
-        // MIDI link, or a curve or its point: the loader's part alone (makeConsistent()), on a song that keeps everything in its
-        // tree, since a song made by makeSong() holds its clips, their notes, its tempo map, its chord lane, its MIDI links and
-        // its curves as values beside it (Song::holdValues()); and the song opened, whose values findOpened() reads back through
-        // whole state.
+        // MIDI link, a curve or its point, or a section: the loader's part alone (makeConsistent()), on a song that keeps
+        // everything in its tree, since a song made by makeSong() holds its clips, their notes, its tempo map, its chord lane,
+        // its MIDI links, its curves and its sections as values beside it (Song::holdValues()); and the song opened, whose
+        // values findOpened() reads back through whole state.
         if (isCurveElement (element))
             curveKey = schema::getElementKey (element.hasType (schema::CURVE) ? element : element.getParent());
 
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
             || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element)
-            || isCurveElement (element))
+            || isCurveElement (element) || isSection (element))
         {
-            if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element) && ! isCurveElement (element))
+            if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element) && ! isCurveElement (element)
+                && ! isSection (element))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -334,6 +335,7 @@ struct Changed
     }
 
     static bool isMidiLink (const juce::ValueTree& element) { return element.hasType (schema::MIDILINK); }
+    static bool isSection (const juce::ValueTree& element) { return element.hasType (schema::SECTION); }
 
     static bool isCurveElement (const juce::ValueTree& element)
     {
@@ -358,8 +360,8 @@ struct Changed
 
     // The opened song's element in its clip's whole state (WholeState.h), as it holds its values: the clip itself, a note by
     // its ID, a warp marker or a controller's value by every property but the one changed; a tempo or a time signature in
-    // its tempo map's whole state, a chord or a key change in its chord lane's, a MIDI link in its links', and a curve or a
-    // point in its automation's, the same way; none if the loader took it out.
+    // its tempo map's whole state, a chord or a key change in its chord lane's, a MIDI link in its links', a curve or a point
+    // in its automation's, and a section in its sections', the same way; none if the loader took it out.
     juce::ValueTree findOpened() const
     {
         REQUIRE (opened != nullptr);
@@ -367,6 +369,7 @@ struct Changed
                                : isChordLaneEntry (original) ? phazite::copyWholeSong (*opened).getChildWithName (schema::CHORDLANE)
                                : isMidiLink (original)       ? phazite::copyWholeSong (*opened).getChildWithName (schema::MIDILINKS)
                                : isCurveElement (original)   ? findCurveState()
+                               : isSection (original)        ? phazite::copyWholeSong (*opened).getChildWithName (schema::SECTIONS)
                                                              : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))
@@ -495,6 +498,14 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                         // A clip's take, which a value reads as the first where its element has none, and whole state writes with
                         // the clip's takes.
                         CHECK ((! opened.isValid() || ! opened.hasProperty (*property) || (int) opened[*property] == 1));
+                    }
+                    else if (property == &schema::sectionEnergy)
+                    {
+                        // A section's energy, which a value reads as its description's default where its element has none, and
+                        // whole state writes with the section's others (SectionsValue.h: writeSectionElement()).
+                        CHECK ((! opened.isValid() || ! opened.hasProperty (*property)
+                                || juce::exactlyEqual (phazite::readValueNumber (opened[*property]).value_or (-1.0),
+                                                       phazite::readValueNumber (property->getDefault()).value_or (-2.0))));
                     }
                     else
                     {
