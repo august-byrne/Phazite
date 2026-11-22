@@ -24,7 +24,8 @@ found by reading while the automation's curves were made values (2026-11-22), an
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
 the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
-onto another's beat does.
+onto another's beat does. 241 was found by the design of modulation's values (the same step, 2026-11-22), and waits for
+that area's third piece, which fixes it.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -223,6 +224,16 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `src/model/arrangement/ClipRenders.cpp`), and JUCE's `moveFileTo()` deletes the target before it moves. A compile in
   that instant finds no file. To fix: replace the file in one step (`writeWholeFile()`'s way, or a move that replaces),
   and an export that leaves to the background threads the renders they are already making.
+- **241. A modulator or a macro removed leaves the MIDI links of what it was** (found reading the code for roadmap step
+  S5.20's modulation, 2026-11-22). Removing a modulator or a macro (`removeModulator()`, in
+  `src/model/modulation/Modulation.cpp`, and its step in `ModulationModel.cpp`) takes its modulations with it but doesn't
+  call `forgetWhatNamesTheGone()` (`src/model/mixer/internal/Mixer.h`), as every other removal does, so a MIDI link of
+  the macro's value or of one of the modulator's parameters stays in the song, naming nothing, until the next removal of
+  anything calls it or the song next opens (the loader drops it: `makeConsistent()`). Meanwhile the controller turns
+  nothing, and the link shows in the MIDI links' list (and is saved) as a parameter the song hasn't. To fix: call
+  `forgetWhatNamesTheGone()` after the removal, in the removal's step, with a test under `UndoCheck` that Undo brings
+  the link back with the modulator; a change of behaviour of its own, in the third piece of S5.20's modulation, which
+  takes this entry out.
 
 ## Notes and clips
 

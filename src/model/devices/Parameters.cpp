@@ -5,6 +5,7 @@
 #include "internal/Devices.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -12,7 +13,9 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 
+#include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace phazite
 {
@@ -59,6 +62,13 @@ namespace
     bool isVCA (const juce::ValueTree& channel, DeviceID fader)
     {
         return readID (channel, schema::channelVCA) == fader.getRaw();
+    }
+
+    // A modulator or a macro read as its value from its element, which a parameter found holds: that one element read,
+    // never another walk of the song (locateParameter() found it).
+    std::optional<ModulatorValue> readModulatorAt (const juce::ValueTree& state)
+    {
+        return readModulatorValue (state, readModulatorPlace (state));
     }
 
     std::optional<FoundParameter> found (const ParameterRef& ref, ParameterSource kind, const juce::ValueTree& state,
@@ -164,15 +174,20 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
         return {};
     }
 
-    if (const auto modulator = findModulatorState (song, ModulatorID::fromRaw (ref.device.getRaw())); modulator.isValid())
+    // A modulator's or a macro's: its element found once (which setValueSetByHand() writes), read as its value from there.
+    if (const auto state = findModulatorState (song, ModulatorID::fromRaw (ref.device.getRaw())); state.isValid())
     {
-        // A macro's one parameter has the macro's ID.
-        if (modulator.hasType (schema::MACRO))
-            return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterSource::macro, modulator) : std::nullopt;
+        const auto modulator = readModulatorAt (state);
 
-        if (const auto kind = getModulatorKind (modulator))
-            if (const auto index = devices::findModulatorParameter (*kind, ref.parameter.toStdString()); index >= 0)
-                return found (ref, ParameterSource::modulator, modulator, &devices::getModulatorParameters (*kind)[(size_t) index]);
+        if (! modulator.has_value())
+            return {};
+
+        // A macro's one parameter has the macro's ID.
+        if (modulator->isMacro())
+            return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterSource::macro, state) : std::nullopt;
+
+        if (const auto index = devices::findModulatorParameter (*modulator->kind, ref.parameter.toStdString()); index >= 0)
+            return found (ref, ParameterSource::modulator, state, &devices::getModulatorParameters (*modulator->kind)[(size_t) index]);
 
         return {};
     }
@@ -245,7 +260,10 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
             return { parameter.source, "Send level", { 0.0f, 1.0f }, atZeroDecibels, {} };
 
         case ParameterSource::macro:
-            return { parameter.source, state[schema::macroName].toString(), { 0.0f, 1.0f }, 0.0f, {} };
+        {
+            const auto macro = readModulatorAt (state);
+            return { parameter.source, macro.has_value() ? macro->name : juce::String(), { 0.0f, 1.0f }, 0.0f, {} };
+        }
 
         case ParameterSource::chainVolume:
             return { parameter.source, "Volume", { 0.0f, 1.0f }, atZeroDecibels, {} };
@@ -330,9 +348,21 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
     switch (parameter.source)
     {
         case ParameterSource::device:
-        case ParameterSource::modulator:
             return readSavedValue (*parameter.info,
                                    state.getChildWithName (schema::VALUES).getProperty (juce::Identifier (parameter.ref.parameter)));
+
+        case ParameterSource::modulator:
+        {
+            // Its value's, read from its element, by the parameter's place among its kind's; the parameter's default for one it
+            // hasn't.
+            const auto modulator = readModulatorAt (state);
+
+            if (! modulator.has_value() || modulator->isMacro())
+                return parameter.info->defaultValue;
+
+            const auto index = devices::findModulatorParameter (*modulator->kind, parameter.ref.parameter.toStdString());
+            return index >= 0 ? modulator->getParameterValue (index) : parameter.info->defaultValue;
+        }
 
         case ParameterSource::volume:
             return engine::decibelsToFaderPosition (
@@ -345,7 +375,10 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
             return engine::decibelsToFaderPosition ((float) state.getProperty (schema::sendLevel, 0.0f));
 
         case ParameterSource::macro:
-            return (float) state.getProperty (schema::macroValue, 0.0f);
+        {
+            const auto macro = readModulatorAt (state);
+            return macro.has_value() ? macro->value : 0.0f;
+        }
 
         case ParameterSource::chainVolume:
             return engine::decibelsToFaderPosition ((float) state.getProperty (schema::channelVolume, 0.0f));
@@ -628,12 +661,6 @@ float getCurrentValue (const Song& song, const ParameterRef& ref, bool withModul
 }
 
 //==============================================================================
-bool isDefaultValue (const devices::ParameterInfo& info, float value)
-{
-    // To a millionth of its size: a value back from a control's range can be a little off.
-    return std::abs (value - info.defaultValue) <= 1.0e-6f * std::max (1.0f, std::abs (info.defaultValue));
-}
-
 void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& info, float value, juce::UndoManager* undo)
 {
     const juce::Identifier parameter (toString (info.id));
@@ -651,27 +678,6 @@ void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& 
         if (values.getNumProperties() == 0 && values.getNumChildren() == 0)
             element.removeChild (values, undo);
     }
-}
-
-juce::var toSavedValue (const devices::ParameterInfo& info, float value)
-{
-    if (info.unit == devices::Unit::choice)
-        if (const auto name = devices::getChoiceName (info, juce::roundToInt (value - info.minimum)); ! name.empty())
-            return juce::String::fromUTF8 (name.data(), (int) name.size());
-
-    return value;
-}
-
-float readSavedValue (const devices::ParameterInfo& info, const juce::var& saved)
-{
-    if (saved.isVoid())
-        return info.defaultValue;
-
-    if (info.unit == devices::Unit::choice && saved.isString())
-        if (const auto choice = devices::findChoice (info, saved.toString().toStdString()))
-            return info.minimum + (float) *choice;
-
-    return (float) saved;
 }
 
 float readValueSetByHand (const juce::ValueTree& element, const devices::ParameterInfo& info)

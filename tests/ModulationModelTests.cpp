@@ -81,6 +81,27 @@ struct Song
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::TrackID a, b;
 };
+
+// A modulator's or a macro's element as the song writes it (its whole state: TestHelpers.h), invalid for none.
+juce::ValueTree findWritten (const phazite::Song& song, ModulatorID id)
+{
+    namespace schema = phazite::schema;
+    juce::ValueTree found;
+    const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+    {
+        for (const auto& child : element)
+        {
+            if ((child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
+                && phazite::readID (child[schema::modulatorID]) == id.getRaw())
+                found = child;
+
+            visit (child);
+        }
+    };
+
+    visit (phazite::test::copyWholeSong (song));
+    return found;
+}
 } // namespace
 
 TEST_CASE ("A track's modulators and macros are added and removed, each one named undo step")
@@ -132,47 +153,61 @@ TEST_CASE ("Modulators and macros are the song's, with what they modulate")
     auto& s = *song.song;
     const auto a = song.a;
 
-    // The song's LFO: its kind, as Phazite starts one (both ways); its rate, its switch and what it modulates.
+    // The song's LFO: its kind, as Phazite starts one (both ways); its rate, its switch and what it modulates. Read through
+    // its value (Modulation.h), and as the song writes it (its whole state).
     const auto lfo = phazite::addModulator (context, a, ModulatorType::lfo);
-    const auto element = phazite::findModulatorState (s, lfo);
-    REQUIRE (element.isValid());
-    CHECK (element[schema::modulatorType].toString() == juce::String ("lfo"));
-    CHECK (element.getChildWithName (schema::VALUES)["bipolar"].toString() == juce::String ("Bipolar")); // a choice, by its name
+    const auto value = [&s] (ModulatorID id) { return phazite::getModulatorValue (s, id); };
+    REQUIRE (value (lfo).has_value());
+    CHECK (value (lfo)->kind == phazite::devices::ModulatorKind::lfo);
+    CHECK (findWritten (s, lfo)[schema::modulatorType].toString() == juce::String ("lfo"));
+    CHECK (findWritten (s, lfo).getChildWithName (schema::VALUES)["bipolar"].toString()
+           == juce::String ("Bipolar")); // a choice, by its name
     CHECK (phazite::isBipolar (context, lfo));
 
     phazite::getModulatorParameter (context, lfo, "rate").setValue (4.0f);
-    CHECK ((float) element.getChildWithName (schema::VALUES)["rate"] == doctest::Approx (4.0f));
+    const auto rate = phazite::devices::findModulatorParameter (phazite::devices::ModulatorKind::lfo, "rate");
+    CHECK (value (lfo)->getParameterValue (rate) == doctest::Approx (4.0f));
+    CHECK ((float) findWritten (s, lfo).getChildWithName (schema::VALUES)["rate"] == doctest::Approx (4.0f));
     phazite::setModulatorOn (context, lfo, false);
-    CHECK ((bool) element[schema::deviceOff]);
+    CHECK (value (lfo)->off);
+    CHECK ((bool) findWritten (s, lfo)[schema::deviceOff]);
     CHECK_FALSE (phazite::isModulatorOn (context, lfo));
     phazite::setModulatorOn (context, lfo, true);
     phazite::modulate (context, lfo, song.cutoff(), 0.5f);
-    const auto modulates = element.getChildWithName (schema::MODULATES);
+    REQUIRE (value (lfo)->modulations.size() == 1);
+    CHECK (value (lfo)->modulations[0].parameter == song.cutoff());
+    CHECK (value (lfo)->modulations[0].amount == doctest::Approx (0.5f));
+    const auto modulates = findWritten (s, lfo).getChildWithName (schema::MODULATES);
     CHECK (modulates[schema::modulatesParameter].toString() == juce::String ("cutoff"));
     CHECK ((double) modulates[schema::modulatesAmount] == doctest::Approx (0.5));
     CHECK (phazite::getModulations (context, song.cutoff()).size() == 1);
     phazite::undo (s);
-    CHECK_FALSE (element.getChildWithName (schema::MODULATES).isValid());
+    CHECK (value (lfo)->modulations.empty());
+    CHECK_FALSE (findWritten (s, lfo).getChildWithName (schema::MODULATES).isValid());
     CHECK (phazite::getModulations (context, song.cutoff()).empty());
     phazite::redo (s);
     CHECK (phazite::getModulations (context, song.cutoff()).size() == 1);
 
     // A macro's name and value, and a step sequencer's steps, are the song's.
     const auto macro = phazite::addModulator (context, a, ModulatorType::macro);
-    const auto macroElement = phazite::findModulatorState (s, macro);
-    REQUIRE (macroElement.hasType (schema::MACRO));
+    REQUIRE (value (macro).has_value());
+    REQUIRE (value (macro)->isMacro());
     phazite::renameMacro (context, macro, "Air");
-    CHECK (macroElement[schema::macroName].toString() == juce::String ("Air"));
+    CHECK (value (macro)->name == juce::String ("Air"));
+    CHECK (findWritten (s, macro)[schema::macroName].toString() == juce::String ("Air"));
     phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id).setValue (0.25f);
-    CHECK ((float) macroElement[schema::macroValue] == doctest::Approx (0.25f));
+    CHECK (value (macro)->value == doctest::Approx (0.25f));
+    CHECK ((float) findWritten (s, macro)[schema::macroValue] == doctest::Approx (0.25f));
     const auto steps = phazite::addModulator (context, a, ModulatorType::steps);
     phazite::setStep (context, steps, 1, 0.5f);
-    CHECK (phazite::getModulatorSteps (phazite::findModulatorState (s, steps))[1] == doctest::Approx (0.5f));
+    REQUIRE (value (steps)->steps.size() > 1);
+    CHECK (value (steps)->steps[1] == doctest::Approx (0.5f));
     CHECK (phazite::getSteps (context, steps)[1] == doctest::Approx (0.5f));
 
     // Removed, it goes, with what it modulates.
     phazite::removeModulator (context, lfo);
-    CHECK_FALSE (phazite::findModulatorState (s, lfo).isValid());
+    CHECK_FALSE (value (lfo).has_value());
+    CHECK_FALSE (findWritten (s, lfo).isValid());
     CHECK (phazite::getModulations (context, song.cutoff()).empty());
 }
 

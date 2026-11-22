@@ -111,13 +111,14 @@ namespace
                && description.pluginFormatName == identity[keys::format].toString();
     }
 
-    // How many steps a step sequencer's element plays (its numSteps set by hand, else its default).
-    int getNumSteps (const juce::ValueTree& sequencer)
+    // How many steps a step sequencer plays (its numSteps set by hand, else its default).
+    int countSteps (const ModulatorValue& sequencer)
     {
         constexpr auto kind = devices::ModulatorKind::steps;
-        const auto& info = devices::getModulatorParameters (kind)[(size_t) devices::findModulatorParameter (kind, "numSteps")];
+        const auto index = devices::findModulatorParameter (kind, "numSteps");
+        const auto& info = devices::getModulatorParameters (kind)[(size_t) index];
         return juce::jlimit (1, devices::Modulator::maxSteps,
-                             roundToNearestInt (readValueSetByHand (sequencer, info), juce::roundToInt (info.defaultValue)));
+                             roundToNearestInt (sequencer.getParameterValue (index), juce::roundToInt (info.defaultValue)));
     }
 
     //==============================================================================
@@ -185,35 +186,31 @@ namespace
     // preset doesn't hold (a send).
     using Locate = std::function<bool (const juce::var& target, const ParameterRef&)>;
 
-    // What a modulator or a macro modulates, from its element (Schema.h: MODULATES), in the order it was made.
-    juce::Array<juce::var> describeModulations (const juce::ValueTree& modulator, const Locate& where)
+    // What a modulator or a macro modulates (ModulationValue.h: its modulations), in the order it was made.
+    juce::Array<juce::var> describeModulations (const ModulatorValue& modulator, const Locate& where)
     {
         juce::Array<juce::var> targets;
 
-        for (const auto& child : modulator)
+        for (const auto& modulation : modulator.modulations)
         {
-            if (! child.hasType (schema::MODULATES))
-                continue;
-
-            const auto parameter = getModulatedParameter (child);
             auto target = makeObject();
 
-            if (! where (target, parameter))
+            if (! where (target, modulation.parameter))
                 continue;
 
-            set (target, keys::parameter, parameter.parameter);
-            set (target, keys::amount, (float) child[schema::modulatesAmount]);
+            set (target, keys::parameter, modulation.parameter.parameter);
+            set (target, keys::amount, modulation.amount);
             targets.add (target);
         }
 
         return targets;
     }
 
-    juce::var describeMacro (const juce::ValueTree& macro, const Locate& where)
+    juce::var describeMacro (const ModulatorValue& macro, const Locate& where)
     {
         auto preset = makeObject();
-        set (preset, keys::name, macro[schema::macroName].toString());
-        set (preset, keys::value, (float) macro.getProperty (schema::macroValue, 0.0f));
+        set (preset, keys::name, macro.name);
+        set (preset, keys::value, macro.value);
         set (preset, keys::modulates, describeModulations (macro, where));
         return preset;
     }
@@ -299,9 +296,9 @@ namespace
         const auto inContainer = [&container] (const juce::var& target, const ParameterRef& parameter)
         { return locateInChains (container, target, parameter, keys::device); };
 
-        for (const auto& child : container)
-            if (child.hasType (schema::MACRO))
-                macroPresets.add (describeMacro (child, inContainer));
+        for (const auto& macro : getOwnedModulators (song, { .container = getDeviceID (container) }))
+            if (macro.isMacro())
+                macroPresets.add (describeMacro (macro, inContainer));
 
         set (preset, keys::chains, chainPresets);
         set (preset, keys::macros, macroPresets);
@@ -991,35 +988,34 @@ juce::var makeTrackPreset (Song& song, TrackID track)
 
     for (const auto id : getModulators (song, track))
     {
-        const auto modulator = findModulatorState (song, id);
+        const auto modulator = getModulatorValue (song, id);
 
-        if (modulator.hasType (schema::MACRO))
+        if (! modulator.has_value())
+            continue;
+
+        if (modulator->isMacro())
         {
-            macros.add (describeMacro (modulator, onTrack));
+            macros.add (describeMacro (*modulator, onTrack));
             continue;
         }
 
-        const auto type = findModulatorType (modulator[schema::modulatorType].toString());
-        const auto kind = getModulatorKind (modulator);
-
-        if (! type.has_value() || ! kind.has_value())
-            continue;
-
+        const auto kind = *modulator->kind;
         auto preset = makeObject();
-        set (preset, keys::type, keys::modulatorTypeNames[(size_t) *type]);
+        set (preset, keys::type, keys::modulatorTypeNames[(size_t) getModulatorType (*modulator)]);
 
         // Its parameters' values set by hand (a preset loads it switched on).
         const auto parameters = makeObject();
+        const auto infos = devices::getModulatorParameters (kind);
 
-        for (const auto& info : devices::getModulatorParameters (*kind))
-            set (parameters, juce::Identifier (toString (info.id)), toPresetValue (info, readValueSetByHand (modulator, info)));
+        for (size_t i = 0; i < infos.size(); ++i)
+            set (parameters, juce::Identifier (toString (infos[i].id)), toPresetValue (infos[i], modulator->getParameterValue ((int) i)));
 
         set (preset, keys::parameters, parameters);
 
-        if (*kind == devices::ModulatorKind::steps)
+        if (kind == devices::ModulatorKind::steps)
         {
-            auto steps = getModulatorSteps (modulator);
-            steps.resize ((size_t) getNumSteps (modulator), 0.0f);
+            std::vector<float> steps (modulator->steps.begin(), modulator->steps.end());
+            steps.resize ((size_t) countSteps (*modulator), 0.0f);
             juce::Array<juce::var> savedSteps;
 
             for (const auto step : steps)
@@ -1028,7 +1024,7 @@ juce::var makeTrackPreset (Song& song, TrackID track)
             set (preset, keys::steps, savedSteps);
         }
 
-        set (preset, keys::modulates, describeModulations (modulator, onTrack));
+        set (preset, keys::modulates, describeModulations (*modulator, onTrack));
         modulators.add (preset);
     }
 
@@ -1198,7 +1194,8 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
         {
             const auto type = findModulatorType (modulator[keys::type].toString());
             const auto added = type.has_value() ? addModulator (song, track, *type) : ModulatorID();
-            const auto kind = getModulatorKind (findModulatorState (song, added));
+            const auto made = getModulatorValue (song, added);
+            const auto kind = made.has_value() ? made->kind : std::nullopt;
 
             if (! kind.has_value())
                 continue;

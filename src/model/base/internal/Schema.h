@@ -470,20 +470,32 @@ inline const Property<bool> sendPreFader { "preFader", on (SEND), Kind::song };
 // macros, with what each modulates. song
 
 // Child of TRACK and of MASTER: a modulator, in their order. On MODULATOR: its ID (ModulatorID, of the song's); its type,
-// one of preset::modulatorTypeNames ("lfo"); and deviceOff, true when it is switched off. Its parameters' values set by
-// hand are its VALUES, by their IDs in its description (devices/modulation/Modulators.h: "rate"), as a device's are, none
-// for one never set; a step sequencer's steps are modulatorSteps: each step's value, -1 to 1, to a ten-thousandth,
-// separated by spaces, without the zeros at the end.
+// one of the words below, in ModulatorType's order (model/modulation/ModulationValues.h; preset::modulatorTypeNames lists
+// them so): an LFO, an envelope follower, a step sequencer, a random source, a breakpoint envelope or a note follower
+// ("lfo"); and deviceOff, true when it is switched off. Its parameters' values set by hand are its VALUES, by their IDs in
+// its description (devices/modulation/Modulators.h: "rate"), as a device's are, none for one never set; a step sequencer's
+// steps are modulatorSteps: each step's value, -1 to 1, to a ten-thousandth, separated by spaces, without the zeros at the
+// end. The model reads and writes them through their values (model/base/internal/ModulationValue.h).
 // (MODULATOR, with the elements above.)
+inline constexpr const char* modulatorIsLfo = "lfo";
+inline constexpr const char* modulatorIsEnvelopeFollower = "envelopeFollower";
+inline constexpr const char* modulatorIsSteps = "steps";
+inline constexpr const char* modulatorIsRandom = "random";
+inline constexpr const char* modulatorIsBreakpoints = "breakpoints";
+inline constexpr const char* modulatorIsNoteFollower = "noteFollower";
 inline const Property<std::int64_t> modulatorID { "id", on (MODULATOR, MACRO), Form::ownID, Kind::song };
-inline const Property<juce::String> modulatorType { "type", on (MODULATOR), Kind::song };
+inline const Property<juce::String> modulatorType { "type", on (MODULATOR),
+                                                    oneOf (modulatorIsLfo, modulatorIsEnvelopeFollower, modulatorIsSteps, modulatorIsRandom,
+                                                           modulatorIsBreakpoints, modulatorIsNoteFollower),
+                                                    Kind::song };
 inline const Property<juce::String> modulatorSteps { "steps", on (MODULATOR), Form::numbers, within (-1.0, 1.0).orElse (0.0), Kind::song };
 
 // Child of a track's TRACK and of a CONTAINER: a macro, in their order (a track's on tracks and returns, not on folders;
-// a container has eight). On MACRO: its ID (ModulatorID, of the song's); its name; and its value, 0 to 1, none for 0.
+// a container has eight). On MACRO: its ID (ModulatorID, of the song's); its name; and its value, 0 to 1, default 0, none
+// for 0.
 // (MACRO, with the elements above.)
 inline const Property<juce::String> macroName { "name", on (MACRO), Kind::song };
-inline const Property<float> macroValue { "value", on (MACRO), within (0.0, 1.0), Kind::song };
+inline const Property<float> macroValue { "value", on (MACRO), within (0.0, 1.0), byDefault (0.0f), Kind::song };
 
 // Child of MODULATOR and of MACRO: what it modulates, in the order its modulations were made. On MODULATES: the parameter,
 // by its device's ID as a curve names it (curveDevice: "1042") and its own ID; and the amount, -1 to 1, to a
@@ -1261,8 +1273,10 @@ namespace preset
     inline constexpr const char* containerKind = "container";
     inline constexpr const char* trackKind = "track";
 
-    // What a modulator's "type" says, in ModulatorType's order (model/modulation/ModulationValues.h), macros left out.
-    inline constexpr const char* modulatorTypeNames[] = { "lfo", "envelopeFollower", "steps", "random", "breakpoints", "noteFollower" };
+    // What a modulator's "type" says, in ModulatorType's order (model/modulation/ModulationValues.h), macros left out: the
+    // words of the song's modulatorType.
+    inline constexpr const char* modulatorTypeNames[] = { modulatorIsLfo,    modulatorIsEnvelopeFollower, modulatorIsSteps,
+                                                          modulatorIsRandom, modulatorIsBreakpoints,      modulatorIsNoteFollower };
 } // namespace preset
 } // namespace phazite::schema
 

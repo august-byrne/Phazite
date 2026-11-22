@@ -574,6 +574,9 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         if (channel.pad >= 0 && channel.padSource != 0 && ! channel.refuses (channel.padSource))
             separatedPads[channel.padDevice].insert (channel.pad);
 
+    // The song's modulators and macros, read once for every channel's (addModulation()).
+    const auto songModulation = getModulationValue (song);
+
     for (const auto& channel : channels)
     {
         engine::Plan::Strip strip;
@@ -646,7 +649,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
             strip.inputChannels = getHeardInput (channel.state);
 
         addFaderAutomation (strip, channel.state, false);
-        addModulation (strip, channel.state, deviceIDs);
+        addModulation (strip, songModulation, channel.state, deviceIDs);
         tellWhatMoves (strip);
         setChannel (channel.state, false);
         places[channel.id] = (int) plan->strips.size();
@@ -688,7 +691,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         const auto masterState = song.getState().getChildWithName (schema::MASTER);
         const auto masterDeviceIDs = addDevices (*plan, places, {}, master, masterState);
         addFaderAutomation (master, masterState, true);
-        addModulation (master, masterState, masterDeviceIDs);
+        addModulation (master, songModulation, masterState, masterDeviceIDs);
         tellWhatMoves (master);
         setChannel (masterState, true);
     }
@@ -1652,95 +1655,87 @@ std::shared_ptr<engine::SendLevel> SongPlayer::getSendLevel (const juce::ValueTr
 }
 
 //==============================================================================
-std::shared_ptr<engine::ModulatorNode> SongPlayer::getModulator (const juce::ValueTree& state)
+std::shared_ptr<engine::ModulatorNode> SongPlayer::getModulator (const ModulatorValue& value)
 {
     // A macro, or a modulator of one of the six kinds, kept by its ID. (A song has few: their values are read again for
     // each plan.)
-    std::optional<devices::ModulatorKind> kind;
-
-    if (state.hasType (schema::MODULATOR))
-    {
-        kind = getModulatorKind (state);
-
-        if (! kind.has_value())
-            return nullptr;
-    }
-
-    const auto id = getID (state, schema::modulatorID);
+    const auto id = (std::int64_t) value.id.getRaw();
     auto& node = modulators[id];
 
-    if (node == nullptr || node->getKind() != kind)
+    if (node == nullptr || node->getKind() != value.kind)
     {
-        node = kind.has_value() ? std::make_shared<engine::ModulatorNode> (*kind) : std::make_shared<engine::ModulatorNode>();
+        node = value.kind.has_value() ? std::make_shared<engine::ModulatorNode> (*value.kind) : std::make_shared<engine::ModulatorNode>();
         node->prepare (preparedRate, preparedBlockSize, (std::uint32_t) id);
     }
 
-    setModulatorValues (*node, state);
+    setModulatorValues (*node, value);
     usedModulators.insert (id);
     return node;
 }
 
-void SongPlayer::setModulatorValues (engine::ModulatorNode& node, const juce::ValueTree& state)
+void SongPlayer::setModulatorValues (engine::ModulatorNode& node, const ModulatorValue& value)
 {
     if (node.isMacro())
     {
-        node.setMacroValue ((float) state.getProperty (schema::macroValue, 0.0f));
+        node.setMacroValue (value.value);
         return;
     }
 
-    // Those set by hand, the others at their defaults (devices/modulation/Modulators.h); its steps; and its switch.
+    // Those set by hand, the others at their defaults (devices/modulation/Modulators.h); its steps; and its switch. (Its
+    // value is of the node's kind: one of another kind makes a new node, getModulator().)
     const auto parameters = devices::getModulatorParameters (*node.getKind());
+    const auto sameKind = value.kind == node.getKind();
 
     for (size_t i = 0; i < parameters.size(); ++i)
-        node.setParameter ((int) i, readValueSetByHand (state, parameters[i]));
-
-    const auto steps = getModulatorSteps (state);
+        node.setParameter ((int) i, sameKind ? value.getParameterValue ((int) i) : parameters[i].defaultValue);
 
     for (int i = 0; i < devices::Modulator::maxSteps; ++i)
-        node.setStep (i, (size_t) i < steps.size() ? steps[(size_t) i] : 0.0f);
+        node.setStep (i, (size_t) i < value.steps.size() ? value.steps[(size_t) i] : 0.0f);
 
-    node.setOn (! (bool) state[schema::deviceOff]);
+    node.setOn (! value.off);
 }
 
-void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs)
+void SongPlayer::addModulation (engine::Plan::Strip& strip, const SongModulation& modulation, const juce::ValueTree& channelState,
+                                const std::vector<std::int64_t>& deviceIDs)
 {
     // Its modulators and macros, in their order, then its containers' macros, and what each moves: its devices' parameters
     // (a container's macros those in it), its fader and its sends' levels (which the strips they go to take, by the sends'
-    // IDs: compile()).
-    std::vector<juce::ValueTree> sources;
+    // IDs: compile()). Each owner's from the song's modulation (ModulationValue.h): the channel's by its track's ID, the
+    // master's under 0, a container's by its ID.
+    std::vector<const ModulatorValue*> sources;
 
-    const auto addSources = [this, &strip, &sources] (const juce::ValueTree& parent)
+    const auto addSources = [this, &strip, &sources, &modulation] (const immer::flex_vector<ModulatorID>* list)
     {
-        for (const auto& child : parent)
+        if (list == nullptr)
+            return;
+
+        for (const auto& id : *list)
         {
-            if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
+            if (const auto* value = modulation.find (id))
             {
-                if (auto node = getModulator (child))
-                {
-                    strip.modulators.push_back (std::move (node));
-                    sources.push_back (child);
-                }
+                strip.modulators.push_back (getModulator (*value));
+                sources.push_back (value);
             }
         }
     };
 
-    addSources (channelState);
+    const auto isMaster = channelState.hasType (schema::MASTER);
+    const auto channel = isMaster ? TrackID() : getTrackID (channelState);
+    addSources (modulation.channels.find (isMaster ? 0 : channel.getRaw()));
 
     for (const auto& child : channelState)
         if (child.hasType (schema::CONTAINER))
-            addSources (child);
+            addSources (modulation.containers.find (getDeviceID (child).getRaw()));
 
     const auto fader = (std::int64_t) getID (channelState, schema::channelFader);
+    std::optional<std::vector<DeviceID>> sends;
 
     for (size_t source = 0; source < sources.size(); ++source)
     {
-        for (const auto& modulates : sources[source])
+        for (const auto& modulates : sources[source]->modulations)
         {
-            if (! modulates.hasType (schema::MODULATES))
-                continue;
-
-            const auto target = getModulatedParameter (modulates);
-            const auto amount = (float) modulates[schema::modulatesAmount];
+            const auto& target = modulates.parameter;
+            const auto amount = modulates.amount;
             const auto device = (std::int64_t) target.device.getRaw();
             modulated.insert ({ target.device.getRaw(), target.parameter });
 
@@ -1754,11 +1749,14 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTre
                 continue;
             }
 
+            // A send of this channel's (Mixer.h: its sends, read once; the master has none).
             if (target.parameter == schema::sendLevelParameter)
             {
-                for (const auto& send : channelState)
-                    if (send.hasType (schema::SEND) && getID (send, schema::sendID) == device)
-                        sendModulation[device].push_back ({ (int) source, amount });
+                if (! sends.has_value())
+                    sends = isMaster ? std::vector<DeviceID>() : getSends (song, channel);
+
+                if (std::find (sends->begin(), sends->end(), target.device) != sends->end())
+                    sendModulation[device].push_back ({ (int) source, amount });
 
                 continue;
             }
@@ -2259,11 +2257,13 @@ void SongPlayer::updateAudibility()
 
 bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // A modulator's parameter, steps or switch, and a macro's value: at once.
+    // A modulator's parameter, steps or switch, and a macro's value: at once, from its element read as its value
+    // (ModulationValue.h).
     if (const auto parent = tree.getParent(); tree.hasType (schema::VALUES) && parent.hasType (schema::MODULATOR))
     {
         if (auto* node = findModulator (getID (parent, schema::modulatorID)))
-            setModulatorValues (*node, parent);
+            if (const auto value = readModulatorValue (parent, readModulatorPlace (parent)))
+                setModulatorValues (*node, *value);
 
         return true;
     }
@@ -2272,7 +2272,8 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
         || (tree.hasType (schema::MACRO) && property == schema::macroValue))
     {
         if (auto* node = findModulator (getID (tree, schema::modulatorID)))
-            setModulatorValues (*node, tree);
+            if (const auto value = readModulatorValue (tree, readModulatorPlace (tree)))
+                setModulatorValues (*node, *value);
 
         return true;
     }

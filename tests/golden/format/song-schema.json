@@ -2258,6 +2258,15 @@
         "MODULATOR"
       ],
       "type": "text",
+      "form": "words",
+      "words": [
+        "lfo",
+        "envelopeFollower",
+        "steps",
+        "random",
+        "breakpoints",
+        "noteFollower"
+      ],
       "kind": "song",
       "counted": true
     },
@@ -2296,6 +2305,7 @@
         "high": 1.0,
         "whole": false
       },
+      "default": 0.0,
       "kind": "song",
       "counted": true
     },

@@ -30,6 +30,7 @@
 #include "model/devices/SwapModel.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Containers.h"
@@ -38,9 +39,11 @@
 #include "model/modulation/internal/Modulation.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/versions/internal/ApplySong.h"
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <string>
 
 namespace
@@ -53,8 +56,8 @@ using phazite::DeviceID;
 using phazite::ParameterRef;
 using phazite::TrackID;
 
-// How many elements of a type in the song name an item by a property: the MODULATES that modulate one of its parameters,
-// say.
+// How many elements of a type in the song, as its whole state writes it (TestHelpers.h: copyWholeSong()), name an item by a
+// property: the MODULATES that modulate one of its parameters, say.
 int countNaming (const phazite::Song& song, const juce::Identifier& type, const juce::Identifier& property, std::uint64_t id)
 {
     auto count = 0;
@@ -69,7 +72,7 @@ int countNaming (const phazite::Song& song, const juce::Identifier& type, const 
         }
     };
 
-    visit (song.getState());
+    visit (phazite::test::copyWholeSong (song));
     return count;
 }
 
@@ -261,6 +264,70 @@ TEST_CASE ("Deleting a return takes away the sends to it, with what modulated th
     CHECK (phazite::getSendTarget (song, phazite::getSends (song, other).front()) == keptReturn);
     CHECK (countModulations (song, send) == 0);
     CHECK (phazite::getAutomatableParameters (song, track).size() == 2); // the fader's volume and pan alone
+    checkIDs (song);
+    undo.walkBackAndForth();
+}
+
+//==============================================================================
+TEST_CASE ("What names a modulator, a macro or a send stays while it does, when an unrelated device goes by an edit or a version")
+{
+    // A MIDI link of a macro's value and one of a modulator's parameter, and a modulation of a send's level, name items that
+    // are no devices: what finds the items still there (Mixer.cpp: forgetWhatNamesTheGone(); ApplySong.cpp:
+    // removeBrokenReferences()) finds those the song's values hold too (IDsHeld.h: forEachNameableIDHeld()), so that this
+    // holds wherever the song keeps them (roadmap step S5.20): it fails on modulation's switch unless that turns its line on.
+    TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.firstTrack;
+    const auto other = s.addTrack ("Other");
+    s.addReturn (track, "phaziteReverb");
+    REQUIRE (phazite::getSends (song, track).size() == 1);
+    const auto send = phazite::getSends (song, track).front();
+    const auto lfo = s.addModulator (track, phazite::ModulatorType::lfo);
+    s.modulate (lfo, { send, schema::sendLevelParameter }, 0.5f);
+    const auto macro = s.addModulator (track, phazite::ModulatorType::macro);
+    const ParameterRef macroValue { DeviceID::fromRaw (macro.getRaw()), juce::String (macro.getRaw()) };
+    const ParameterRef rate { DeviceID::fromRaw (lfo.getRaw()), "rate" };
+    change (song, "Link",
+            [&]
+            {
+                phazite::linkMidiController (song, { 1, 1 }, macroValue);
+                phazite::linkMidiController (song, { 1, 2 }, rate);
+            });
+    const auto version = phazite::test::copyWholeSong (song); // the song before the device came
+
+    const auto keepsThem = [&song, &macroValue, &rate, send]
+    {
+        CHECK (phazite::findLinkedParameter (song, { 1, 1 }) == std::optional<ParameterRef> (macroValue));
+        CHECK (phazite::findLinkedParameter (song, { 1, 2 }) == std::optional<ParameterRef> (rate));
+        CHECK (countModulations (song, send) == 1);
+    };
+
+    keepsThem();
+    UndoCheck undo (song);
+    const auto eq = s.addEffect (other, phazite::devices::Equalizer::typeID);
+    undo.check ("Remove EQ", [&] { phazite::removeDevice (song, eq); });
+    CHECK_FALSE (phazite::findDeviceState (song, eq).isValid());
+    keepsThem();
+    undo.stepBackOrForth ("Undo", [&] { phazite::undo (song); });
+    REQUIRE (phazite::findDeviceState (song, eq).isValid());
+    keepsThem();
+    undo.stepBackOrForth ("Redo", [&] { phazite::redo (song); });
+    keepsThem();
+
+    // A version applied whose song hasn't the device, as an apply makes it, what names nothing there taken away.
+    const auto again = s.addEffect (other, phazite::devices::Equalizer::typeID);
+    undo.checkSeveral ("Apply",
+                       [&]
+                       {
+                           change (song, "Apply",
+                                   [&]
+                                   {
+                                       phazite::makeSongLike (song, version);
+                                       phazite::removeBrokenReferences (song);
+                                   });
+                       });
+    CHECK_FALSE (phazite::findDeviceState (song, again).isValid());
+    keepsThem();
     checkIDs (song);
     undo.walkBackAndForth();
 }

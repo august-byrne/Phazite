@@ -899,7 +899,7 @@ struct Named
             }
         };
 
-        visit (phazite::findSong (s.context)->getState());
+        visit (phazite::test::copyWholeSong (*phazite::findSong (s.context)));
         return found;
     }
 

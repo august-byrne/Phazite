@@ -420,6 +420,26 @@ TEST_CASE ("What another DAW can't play is bounced beside it: the track muted wi
     CHECK (content.metadata->getChildByName ("Comment")->getAllSubText() == "A comment"); // nothing else left out
 }
 
+TEST_CASE ("A track whose modulators or macros modulate something is bounced for its modulation; one whose modulate nothing isn't")
+{
+    // What the export reads of a track's modulation (DawProject.cpp: findWhyBounced(), by Modulation.h's hasModulations()),
+    // built through the model, so that it holds wherever the song keeps its modulation (roadmap step S5.20): a track with no
+    // devices whose LFO moves its volume, one whose macro moves its pan, and one with an LFO that moves nothing.
+    TestSong s;
+    const auto moved = s.addTrack ("Moved"), panned = s.addTrack ("Panned"), still = s.addTrack ("Still");
+    s.modulate (s.addModulator (moved, phazite::ModulatorType::lfo), s.getVolumeParameter (moved), 0.5f);
+    s.modulate (s.addModulator (panned, phazite::ModulatorType::macro), s.getPanParameter (panned), -0.25f);
+    s.addModulator (still, phazite::ModulatorType::lfo);
+
+    auto& song = *phazite::findSong (s.context);
+    song.storeDeviceStates();
+    const auto content = phazite::describeDawProject (song, "Test", {});
+    REQUIRE (content.bounces.size() == 2);
+    CHECK (content.bounces[0].first == moved);
+    CHECK (content.bounces[1].first == panned);
+    CHECK (find (*content.project, "Track", "id", id ("t", still) + "b") == nullptr);
+}
+
 TEST_CASE ("A DAWproject's audio clip plays its part of the file, and one whose part ends at 0 plays nothing, as in Phazite")
 {
     // A saved end of 0 (an empty file's, or a part set to nothing) is a clip that plays nothing in Phazite, so the clip

@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -75,11 +76,14 @@ namespace
         }
     }
 
-    // The IDs of the items that tracks, devices, chains and sends are (Schema.h: holdsID()), as what names one names it.
-    // Clips and automation hold none that these name.
+    // The IDs of the items that tracks, devices, chains and sends are (Schema.h: holdsID()), as what names one names it: the
+    // tree's (its clips and its automation aside, which hold none that these name), and those the song's values hold of
+    // items that something can name (IDsHeld.h: forEachNameableIDHeld(), a modulator's and a macro's once they leave the
+    // tree, which a MIDI link names).
     std::set<std::uint64_t> getItemIDs (const Song& song)
     {
         std::set<std::uint64_t> ids;
+        forEachNameableIDHeld (song, [&ids] (std::uint64_t id) { ids.insert (id); });
         const std::function<void (const juce::ValueTree&)> visit = [&ids, &visit] (const juce::ValueTree& tree)
         {
             for (const auto& child : tree)

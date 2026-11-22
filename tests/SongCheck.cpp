@@ -328,7 +328,7 @@ namespace
 
                 if (child.hasType (schema::MODULATOR))
                 {
-                    if (const auto kind = getModulatorKind (child); ! kind.has_value())
+                    if (const auto kind = readModulatorKind (child); ! kind.has_value())
                         add ("kind", child, "a modulator of no type Phazite has: " + child[schema::modulatorType].toString());
                     else if (const auto values = child.getChildWithName (schema::VALUES); values.isValid())
                         checkSetByHand (child, values,
@@ -360,11 +360,11 @@ namespace
                     // value by the word "value", its ID being the macro's), one link of each parameter (one of each
                     // controller is its key's).
                     const auto device = DeviceID::fromRaw (readID (child[schema::midiLinkDevice]));
-                    const auto isMacro = findModulatorState (song, ModulatorID::fromRaw (device.getRaw())).hasType (schema::MACRO);
+                    const auto ofMacro = phazite::isMacro (song, ModulatorID::fromRaw (device.getRaw()));
                     const ParameterRef parameter { device,
-                                                   isMacro ? juce::String (device.getRaw()) : child[schema::midiLinkParameter].toString() };
+                                                   ofMacro ? juce::String (device.getRaw()) : child[schema::midiLinkParameter].toString() };
 
-                    if (isMacro && child[schema::midiLinkParameter].toString() != schema::midiLinkMacroValue)
+                    if (ofMacro && child[schema::midiLinkParameter].toString() != schema::midiLinkMacroValue)
                         add ("names", child,
                              "a MIDI link of a macro that doesn't name its value: " + child[schema::midiLinkParameter].toString());
 

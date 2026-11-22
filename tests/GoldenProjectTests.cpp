@@ -872,6 +872,12 @@ const std::map<juce::String, juce::String>& getNamesNotInTheProject()
                                  "tests/InconsistentProjectTests.cpp opens files that cross the mark and saves and opens them again" },
         { "ownDeviceFormat", "the format a device of Phazite's own names in the device lists, never saved" },
         { "fadeIsCurve", "the shape of a fade without a shape of its own, which no clip writes" },
+        { "modulatorIsEnvelopeFollower", "the representative project holds an LFO and a step sequencer, as it did before a "
+                                         "modulator's type had its words (roadmap step S5.20), and the golden project changes "
+                                         "with none: tests/GoldenModulationTests.cpp plays every kind" },
+        { "modulatorIsRandom", "as modulatorIsEnvelopeFollower" },
+        { "modulatorIsBreakpoints", "as modulatorIsEnvelopeFollower" },
+        { "modulatorIsNoteFollower", "as modulatorIsEnvelopeFollower" },
         { "DEVICE@formatID", "a VST3's class ID, as its preset file holds it: the tests' plug-ins are of a format of their own" },
         { "MASTER@vca", "the master has a fader, never a VCA: the rules name every channel's" },
         { "MASTER@height", "the master's row is collapsed or not, and nothing else: the rules name every track's view settings for it" },

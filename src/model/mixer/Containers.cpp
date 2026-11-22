@@ -144,18 +144,6 @@ std::vector<DeviceID> getContainerDevices (const Song& song, DeviceID container)
     return ids;
 }
 
-std::vector<ModulatorID> getContainerMacros (const Song& song, DeviceID container)
-{
-    std::vector<ModulatorID> ids;
-
-    if (const auto state = findDeviceState (song, container); isContainerState (state))
-        for (const auto& child : state)
-            if (child.hasType (schema::MACRO))
-                ids.push_back (ModulatorID::fromRaw ((std::uint64_t) (juce::int64) child[schema::modulatorID]));
-
-    return ids;
-}
-
 DeviceID findContainerOf (const Song& song, DeviceID device)
 {
     const auto container = getOwningContainer (findDeviceState (song, device));

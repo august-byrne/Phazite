@@ -23,24 +23,14 @@ namespace
     // goes with the fader it had (forgetWhatNamesTheGone()); a curve stays while an undo could bring that fader back.
     void followVolume (Song& song, TrackID folder, const ParameterRef& was)
     {
-        auto* undo = &song.getUndoManager();
         const auto now = getVolume (song, folder);
         const auto device = juce::String ((juce::int64) now.device.getRaw());
 
         // Its curve, in its place among the song's (Automation.h).
         renameCurve (song, was, now);
 
-        for (const auto& modulator : getModulatorStates (song))
-        {
-            for (auto modulates : modulator)
-            {
-                if (modulates.hasType (schema::MODULATES) && getModulatedParameter (modulates) == was)
-                {
-                    modulates.setProperty (schema::modulatesDevice, device, undo);
-                    modulates.setProperty (schema::modulatesParameter, now.parameter, undo);
-                }
-            }
-        }
+        // Its modulations, each in its place (Modulation.h).
+        renameModulated (song, was, now);
 
         // Its MIDI link, which turns it by its new name.
         if (const auto controller = findMidiLink (song, was); controller.has_value() && was != now)

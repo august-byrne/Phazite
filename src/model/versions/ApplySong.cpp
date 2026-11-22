@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
@@ -1649,6 +1650,10 @@ int removeBrokenReferences (Song& song)
     };
 
     collect (state);
+
+    // And those the song's values hold of items that something can name, which its tree may not (IDsHeld.h:
+    // forEachNameableIDHeld(), a modulator's and a macro's once they leave the tree).
+    forEachNameableIDHeld (song, [&items] (std::uint64_t id) { items.insert (id); });
     std::vector<juce::ValueTree> modulations;
     std::vector<juce::ValueTree> sidechains;
     const std::function<void (const juce::ValueTree&)> find = [&] (const juce::ValueTree& element)

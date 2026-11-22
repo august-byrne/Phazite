@@ -276,9 +276,10 @@ TEST_CASE ("A macro the other side added and linked to a MIDI controller keeps i
     REQUIRE (linked.has_value());
     CHECK (linked->device != macro.device);
     CHECK (phazite::describeParameter (*sides.ours, *linked).has_value());
-    const auto state = phazite::findModulatorState (*sides.ours, phazite::ModulatorID::fromRaw (linked->device.getRaw()));
-    CHECK (state.hasType (schema::MACRO));
-    CHECK (state.getParent()[schema::trackName].toString() == "Drums");
+    const auto linkedMacro = phazite::getModulatorValue (*sides.ours, phazite::ModulatorID::fromRaw (linked->device.getRaw()));
+    REQUIRE (linkedMacro.has_value());
+    CHECK (linkedMacro->isMacro());
+    CHECK (phazite::getTrackName (*sides.ours, linkedMacro->place.track) == "Drums");
     checkSong (*sides.ours);
 }
 

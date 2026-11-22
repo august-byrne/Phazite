@@ -4,11 +4,19 @@
 // each modulates (Schema.h: MODULATES), by the parameters' references (model/devices/internal/Parameters.h). Phazite's
 // engine plays them from the song (model/playback/internal/SongPlayer.h). The changes join the caller's undo step. Not for
 // the UI.
+//
+// Read as values (model/base/internal/ModulationValue.h: ModulatorValue, SongModulation; roadmap step S5.20, modulation's
+// first piece): every reader of the song's modulation reads it through the readers below, which read the song's tree, still
+// its storage, through the conversion. A reader that needs one modulator reads one (getModulatorValue()), one owner's its
+// list (getOwnedModulators()), and what modulates one parameter asks findModulationsOf(), which reads no modulator whole:
+// a knob asks it at each tick. The whole song's (getModulationValue()) is for what reads it all: the plan's compile, the
+// passes.
 #pragma once
 
 #include "devices/modulation/Modulators.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/devices/ParameterRef.h"
 #include "model/modulation/ModulationValues.h"
 
@@ -20,23 +28,45 @@
 namespace phazite
 {
 //==============================================================================
-// The song's modulators and macros as it holds them: every one's element (the tracks', the master's and the containers');
-// one's by its ID, invalid for one the song hasn't; and the ID an element names.
-std::vector<juce::ValueTree> getModulatorStates (const Song&);
-juce::ValueTree findModulatorState (const Song&, ModulatorID);
-ModulatorID getModulatorID (const juce::ValueTree& modulatorState);
+// The song's modulation, every modulator and macro of it: read from its tree (a walk of every channel and container), for
+// what reads it all.
+SongModulation getModulationValue (const Song&);
 
-// What a MODULATES element names; a step sequencer's steps as its element keeps them; a modulator's type by the name the
-// song gives it (Schema.h: modulatorType); and its kind as Phazite's engine plays it (devices/modulation/Modulators.h),
-// whose parameters it has: nothing for a macro.
-ParameterRef getModulatedParameter (const juce::ValueTree& modulates);
-std::vector<float> getModulatorSteps (const juce::ValueTree& modulatorState);
+// A modulator or a macro by its ID, none for one the song hasn't (nor for a modulator of a type Phazite doesn't know, which
+// the loader takes away): one element found and read, as much as finding its element cost.
+std::optional<ModulatorValue> getModulatorValue (const Song&, ModulatorID);
+
+// An owner's modulators and macros (ModulationValue.h: ModulatorPlace, the container's where it names one, else the
+// channel's), in their order, modulators and macros together; none for an owner the song hasn't.
+std::vector<ModulatorValue> getOwnedModulators (const Song&, const ModulatorPlace& owner);
+
+// What modulates a parameter, whether or not the song has the parameter: each modulator's and macro's modulation of it, in
+// the order of the song's modulators (its tracks', each channel's own then its containers', then the master's). No
+// modulator read whole: what a knob asks at each tick (ModulationModel.h: getModulationRange()).
+std::vector<Modulation> findModulationsOf (const Song&, const ParameterRef&);
+
+// Whether one is a macro (none for one the song hasn't); a container's macros, in their order; and whether a track's
+// modulators and macros, or its containers' macros, modulate anything.
+bool isMacro (const Song&, ModulatorID);
+std::vector<ModulatorID> getContainerMacros (const Song&, DeviceID container);
+bool hasModulations (const Song&, TrackID);
+
+// A modulator's type by the name the song gives it (Schema.h: modulatorType); and a value's type, its switch, whether it
+// goes both ways (isBipolar(), below) and how many steps a step sequencer plays (1 for any other).
 std::optional<ModulatorType> findModulatorType (const juce::String& name);
-std::optional<devices::ModulatorKind> getModulatorKind (const juce::ValueTree& modulatorState);
+ModulatorType getModulatorType (const ModulatorValue&);
+bool isModulatorOn (const ModulatorValue&);
+bool isBipolar (const ModulatorValue&);
+int getNumSteps (const ModulatorValue&);
+
+// A modulator's or a macro's element in the song, invalid for one the song hasn't: for what still writes the element
+// (model/devices/internal/Parameters.h: FoundParameter's state, which setValueSetByHand() writes), until the writers move
+// onto the values (roadmap step S5.20, modulation's third piece). No reader asks it.
+juce::ValueTree findModulatorState (const Song&, ModulatorID);
 
 //==============================================================================
 // A channel's modulators, in their order, then its macros: a track's, a folder's or the master's (by its ID, or none). A
-// container's macros are its own (model/mixer/internal/Containers.h: getContainerMacros()).
+// container's macros are its own (getContainerMacros()).
 std::vector<ModulatorID> getModulators (const Song&, TrackID);
 
 // What a modulator or a macro is; whose it is (a container's macro's: its container's channel); the container whose macro
@@ -88,6 +118,10 @@ bool canModulate (const Song&, ModulatorID, const ParameterRef&);
 // Makes a modulation or changes its amount (-1 to 1, to a ten-thousandth), and takes it away.
 void setModulation (Song&, ModulatorID, const ParameterRef&, float amount);
 void removeModulation (Song&, ModulatorID, const ParameterRef&);
+
+// Every modulation of a parameter made one of another, in its place, as much (a folder's fader that becomes the other kind:
+// model/mixer/internal/Buses.h). In the caller's undo step.
+void renameModulated (Song&, const ParameterRef& from, const ParameterRef& to);
 
 // What modulates the originals of copies modulates the copies too, as much, by the IDs a copy was given (giveNewIDs():
 // each original's to its copy's): for a copy that the modulators aren't in, a container's chain's, whose macros are the

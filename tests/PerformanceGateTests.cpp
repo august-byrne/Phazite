@@ -37,6 +37,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/Selection.h"
@@ -49,6 +50,7 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/ModulationModel.h"
 #include "model/modulation/ModulationValues.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
@@ -1070,6 +1072,127 @@ TEST_CASE ("Performance gate: asking whether each selected section is selected r
         INFO ("4 sections: " << *small.allocations << " allocations; 40: " << *large.allocations);
         CHECK (*large.allocations <= *small.allocations * 10 + 8);
     }
+}
+
+TEST_CASE ("Performance gate: a modulated knob's ring and a modulator's slot read the modulators they show, however many the song "
+           "holds")
+{
+    // A knob asks at each tick of the display ticker what modulates its parameter (ModulationModel.h: getModulationRange(), from
+    // Controls.cpp's ParameterAttachment::update()), and a modulator's slot whether its modulator is on, its value and whether
+    // it goes both ways (ModulatorSlots.cpp: updateValues()). Each reads into a value only the modulators it shows, never the
+    // song's whole modulation (Modulation.h: findModulationsOf() reads none whole, getModulatorValue() one): counted as the
+    // modulators read (ModulationValue.h: countModulatorsRead()), the same for 4 modulators on the track as for 40. And the
+    // channel's slots, each with its name (ModulationModel.h: getModulators(), whose names count each slot's place among its
+    // kind's without reading the others whole: Modulation.h, getModulatorName()), a few reads for each slot, never one for
+    // each slot of each slot.
+    struct Counts
+    {
+        std::uint64_t knob = 0, slot = 0, still = 0, slots = 0;
+    };
+
+    const auto countsFor = [] (int numModulators)
+    {
+        phazite::test::TestSong s;
+        const auto track = s.addTrack ("Keys");
+        const auto synth = s.setInstrument (track, dev::Synth::typeID);
+        const auto lfo = s.addModulator (track, phazite::ModulatorType::lfo);
+        s.modulate (lfo, { synth, "cutoff" }, 0.5f);
+
+        for (int i = 1; i < numModulators; ++i)
+            s.addModulator (track, i % 2 == 0 ? phazite::ModulatorType::random : phazite::ModulatorType::macro);
+
+        const auto cutoff = phazite::getParameter (s.context, { synth, "cutoff" });
+        const auto resonance = phazite::getParameter (s.context, { synth, "resonance" });
+        Counts counts;
+
+        auto before = phazite::countModulatorsRead();
+        CHECK (phazite::getModulationRange (cutoff).has_value());
+        counts.knob = phazite::countModulatorsRead() - before;
+
+        before = phazite::countModulatorsRead();
+        CHECK_FALSE (phazite::getModulationRange (resonance).has_value()); // a knob nothing modulates, as most are
+        counts.still = phazite::countModulatorsRead() - before;
+
+        before = phazite::countModulatorsRead();
+        CHECK (phazite::isModulatorOn (s.context, lfo));
+        CHECK (phazite::isBipolar (s.context, lfo));
+        juce::ignoreUnused (phazite::getModulatorValue (s.context, lfo));
+        counts.slot = phazite::countModulatorsRead() - before;
+
+        before = phazite::countModulatorsRead();
+        CHECK (phazite::getModulators (s.context, track).size() == (size_t) numModulators);
+        counts.slots = phazite::countModulatorsRead() - before;
+        return counts;
+    };
+
+    const auto small = countsFor (4), large = countsFor (40);
+    INFO ("4 modulators: " << small.knob << " read for the knob, " << small.slot << " for the slot; 40: " << large.knob << ", "
+                           << large.slot);
+    CHECK (small.knob == 1); // its one modulation's modulator, once
+    CHECK (large.knob == small.knob);
+    CHECK (small.still == 0);
+    CHECK (large.still == 0);
+    CHECK (small.slot <= 3); // its own modulator, once for each of its three questions
+    CHECK (large.slot == small.slot);
+    // Measured 2026-11-22: 6 for each slot (the channel's list, then each slot's track, container, type, name and switch), 24
+    // for 4 and 240 for 40; when each name read its owner's modulators whole, 40 more for each slot of 40.
+    INFO ("slots: 4 modulators: " << small.slots << " read; 40: " << large.slots);
+    CHECK (small.slots <= 4 * 6);
+    CHECK (large.slots <= 40 * 6);
+}
+
+TEST_CASE ("Performance gate: removing an effect allocates no more for a song of many clips than for one of few, and reads no "
+           "modulator")
+{
+    // Every removal finds what still names something (Mixer.h: forgetWhatNamesTheGone()), the song's items' IDs among them:
+    // its tree's, and those of its values that something can name (IDsHeld.h: forEachNameableIDHeld()), never a clip's (a
+    // clip is no item that a curve, a MIDI link, a modulation or a send names), nor its modulation read whole while its tree
+    // holds it (the tree's walk finds a modulator's and a macro's IDs). The same for 8 tracks of 10 clips as for 8 of 250.
+    struct Counts
+    {
+        std::uint64_t modulatorsRead = 0;
+        std::optional<int> allocations {};
+    };
+
+    const auto countsFor = [] (int clipsPerTrack)
+    {
+        phazite::test::TestSong s;
+        std::vector<phazite::TrackID> tracks { s.firstTrack };
+
+        while (tracks.size() < 8)
+            tracks.push_back (s.addTrack ("Track"));
+
+        for (const auto track : tracks)
+            for (int i = 0; i < clipsPerTrack; ++i)
+                s.addMidiClip (track, i * 4.0, 4.0);
+
+        const auto synth = s.setInstrument (tracks[0], dev::Synth::typeID);
+        const auto lfo = s.addModulator (tracks[0], phazite::ModulatorType::lfo);
+        s.modulate (lfo, { synth, "cutoff" }, 0.5f);
+        const auto macro = s.addModulator (tracks[0], phazite::ModulatorType::macro);
+        s.modulate (macro, s.getVolumeParameter (tracks[0]), 0.25f);
+        const auto first = s.addEffect (tracks[1], dev::Delay::typeID);
+        const auto second = s.addEffect (tracks[1], dev::Delay::typeID);
+        phazite::test::dispatchPendingMessages();
+
+        Counts counts;
+        const auto before = phazite::countModulatorsRead();
+        phazite::removeDevice (s.context, first);
+        counts.modulatorsRead = phazite::countModulatorsRead() - before;
+        phazite::test::dispatchPendingMessages();
+        counts.allocations = phazite::test::countAllocations ([&s, second] { phazite::removeDevice (s.context, second); });
+        return counts;
+    };
+
+    const auto few = countsFor (10), many = countsFor (250);
+    INFO ("8 tracks of 10 clips: " << few.allocations.value_or (-1) << " allocations; of 250: " << many.allocations.value_or (-1));
+    CHECK (few.modulatorsRead == 0);
+    CHECK (many.modulatorsRead == 0);
+
+    if (! few.allocations.has_value() || ! many.allocations.has_value())
+        return; // nothing counted on this build, where the counted removal didn't run (PerformanceCounts.h)
+
+    CHECK (*many.allocations <= *few.allocations + 8); // 127 and 127, measured 2026-11-22
 }
 
 TEST_CASE ("Performance gate: an edit of a section and the playlist's paint that follows build one list of the sections for each "

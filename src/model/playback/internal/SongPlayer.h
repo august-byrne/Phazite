@@ -29,7 +29,9 @@ namespace phazite
 {
 class PluginInstances;
 struct ClipTempo;
+struct ModulatorValue;
 struct PlayedClip;
+struct SongModulation;
 
 class SongPlayer : private juce::ValueTree::Listener,
                    private SongValues::Listener
@@ -399,9 +401,12 @@ private:
     void setChainValues (engine::ChainState&, const juce::ValueTree& chainState);
     void updateChainAudibility (const juce::ValueTree& containerState);
     static engine::Plan::Container::Chain* findPlannedChain (engine::Plan::Strip&, std::int64_t id);
-    std::shared_ptr<engine::ModulatorNode> getModulator (const juce::ValueTree& modulatorState);
-    void setModulatorValues (engine::ModulatorNode&, const juce::ValueTree& modulatorState);
-    void addModulation (engine::Plan::Strip&, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs);
+    // A modulator or a macro as the song holds it (model/base/internal/ModulationValue.h), its node kept by its ID; and a
+    // channel's own and its containers' from the song's modulation, which the compile reads once.
+    std::shared_ptr<engine::ModulatorNode> getModulator (const ModulatorValue&);
+    void setModulatorValues (engine::ModulatorNode&, const ModulatorValue&);
+    void addModulation (engine::Plan::Strip&, const SongModulation&, const juce::ValueTree& channelState,
+                        const std::vector<std::int64_t>& deviceIDs);
     void loadSounds (engine::DeviceNode&, const juce::ValueTree& deviceState);
     void loadSound (engine::DeviceNode&, const juce::ValueTree& deviceState, const juce::Identifier& property); // its pad's or oscillator's
     void setChannel (const juce::ValueTree& channelState, bool isMaster);

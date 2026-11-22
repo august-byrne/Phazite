@@ -3,8 +3,6 @@
 #include "internal/Modulation.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
-#include "model/base/Numbers.h"
-#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/devices/internal/Parameters.h"
@@ -15,6 +13,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <vector>
 
 namespace phazite
 {
@@ -23,18 +23,6 @@ namespace
     juce::String toString (std::string_view text)
     {
         return juce::String (text.data(), text.size());
-    }
-
-    // Whether any of the song's modulators or macros modulates a parameter (Schema.h: MODULATES): most parameters none
-    // does, which a knob asks at each tick.
-    bool isModulated (const Song& song, const ParameterRef& parameter)
-    {
-        for (const auto& modulator : getModulatorStates (song))
-            for (const auto& child : modulator)
-                if (child.hasType (schema::MODULATES) && getModulatedParameter (child) == parameter)
-                    return true;
-
-        return false;
     }
 
     // What plays a modulator or a macro while Phazite's engine plays the song, or nullptr.
@@ -92,19 +80,11 @@ namespace
         }
     }
 
-    // A step sequencer's element, and how many steps it plays; invalid for another modulator.
-    juce::ValueTree findSequencer (const Song& song, ModulatorID id)
+    // A step sequencer, none for another modulator (Modulation.h: getNumSteps(), how many steps it plays).
+    std::optional<ModulatorValue> findSequencer (const Song& song, ModulatorID id)
     {
-        const auto state = findModulatorState (song, id);
-        return getModulatorKind (state) == devices::ModulatorKind::steps ? state : juce::ValueTree();
-    }
-
-    int getNumSteps (const juce::ValueTree& sequencer)
-    {
-        constexpr auto kind = devices::ModulatorKind::steps;
-        const auto index = devices::findModulatorParameter (kind, "numSteps");
-        const auto value = readValueSetByHand (sequencer, devices::getModulatorParameters (kind)[(size_t) index]);
-        return juce::jlimit (1, devices::Modulator::maxSteps, roundToNearestInt (value, 1));
+        auto value = getModulatorValue (song, id);
+        return value.has_value() && value->kind == devices::ModulatorKind::steps ? value : std::nullopt;
     }
 
     // A handle's parameter in its song, while there is one, by the reference automation and modulation name it with.
@@ -170,9 +150,11 @@ bool isModulatorOn (const ProjectContext& context, ModulatorID id)
 
 void setModulatorOn (ProjectContext& context, ModulatorID id, bool on)
 {
-    if (auto* song = findSong (context);
-        song != nullptr && findModulatorState (*song, id).hasType (schema::MODULATOR) && isModulatorOn (*song, id) != on)
+    if (auto* song = findSong (context); song != nullptr)
     {
+        if (const auto value = getModulatorValue (*song, id); ! value.has_value() || value->isMacro() || isModulatorOn (*value) == on)
+            return;
+
         const UndoStep step (*song, on ? "Turn Modulator On" : "Turn Modulator Off");
         setModulatorOn (*song, id, on);
     }
@@ -182,14 +164,16 @@ std::vector<ModulatorParameter> getModulatorParameters (const ProjectContext& co
 {
     std::vector<ModulatorParameter> parameters;
     auto* song = findSong (context);
-    const auto state = song != nullptr ? findModulatorState (*song, id) : juce::ValueTree();
+    const auto value = song != nullptr ? getModulatorValue (*song, id) : std::nullopt;
+
+    if (! value.has_value())
+        return parameters;
 
     // A modulator's as its kind describes them (its switch is not among them, but the modulator's own); a macro's value.
-    if (const auto kind = getModulatorKind (state))
+    if (const auto& kind = value->kind)
         for (const auto& info : devices::getModulatorParameters (*kind))
             parameters.push_back ({ toString (info.id), toString (info.name) });
-
-    if (state.hasType (schema::MACRO))
+    else
         parameters.push_back ({ getMacroParameterID (id), getModulatorName (*song, id) });
 
     return parameters;
@@ -198,9 +182,12 @@ std::vector<ModulatorParameter> getModulatorParameters (const ProjectContext& co
 ParameterHandle getModulatorParameter (ProjectContext& context, ModulatorID id, const juce::String& parameterID)
 {
     auto* song = findSong (context);
-    const auto state = song != nullptr ? findModulatorState (*song, id) : juce::ValueTree();
+    const auto value = song != nullptr ? getModulatorValue (*song, id) : std::nullopt;
 
-    if (const auto kind = getModulatorKind (state))
+    if (! value.has_value())
+        return {};
+
+    if (const auto& kind = value->kind)
     {
         const auto index = devices::findModulatorParameter (*kind, parameterID.toStdString());
 
@@ -211,7 +198,7 @@ ParameterHandle getModulatorParameter (ProjectContext& context, ModulatorID id, 
         return makeParameterHandle (*song, getRef (id, parameterID), "Change " + toString (info.name), false);
     }
 
-    if (! state.hasType (schema::MACRO) || parameterID != getMacroParameterID (id))
+    if (parameterID != getMacroParameterID (id))
         return {};
 
     return makeParameterHandle (*song, getRef (id, parameterID), "Change " + getModulatorName (*song, id), false);
@@ -220,9 +207,9 @@ ParameterHandle getModulatorParameter (ProjectContext& context, ModulatorID id, 
 void renameMacro (ProjectContext& context, ModulatorID id, const juce::String& name)
 {
     auto* song = findSong (context);
-    const auto state = song != nullptr ? findModulatorState (*song, id) : juce::ValueTree();
+    const auto value = song != nullptr ? getModulatorValue (*song, id) : std::nullopt;
 
-    if (! state.hasType (schema::MACRO) || name.trim().isEmpty() || name.trim() == state[schema::macroName].toString())
+    if (! value.has_value() || ! value->isMacro() || name.trim().isEmpty() || name.trim() == value->name)
         return;
 
     const UndoStep step (*song, "Rename Macro");
@@ -250,8 +237,8 @@ float getModulatorValue (const ProjectContext& context, ModulatorID id)
         return node->isMacro() ? node->getValue() : juce::jlimit (-1.0f, 1.0f, node->getValue());
 
     // Without the engine, a macro's value is the one set by hand, and a modulator moves nothing.
-    if (const auto state = findModulatorState (*song, id); state.hasType (schema::MACRO))
-        return (float) state.getProperty (schema::macroValue, 0.0f);
+    if (const auto value = getModulatorValue (*song, id); value.has_value() && value->isMacro())
+        return value->value;
 
     return 0.0f;
 }
@@ -267,10 +254,10 @@ std::vector<float> getSteps (const ProjectContext& context, ModulatorID id)
     std::vector<float> steps;
     auto* song = findSong (context);
 
-    if (const auto sequencer = song != nullptr ? findSequencer (*song, id) : juce::ValueTree(); sequencer.isValid())
+    if (const auto sequencer = song != nullptr ? findSequencer (*song, id) : std::nullopt)
     {
-        steps = getModulatorSteps (sequencer);
-        steps.resize ((size_t) getNumSteps (sequencer), 0.0f);
+        steps.assign (sequencer->steps.begin(), sequencer->steps.end());
+        steps.resize ((size_t) getNumSteps (*sequencer), 0.0f);
     }
 
     return steps;
@@ -280,8 +267,8 @@ void setStep (ProjectContext& context, ModulatorID id, int index, float value)
 {
     auto* song = findSong (context);
 
-    if (const auto sequencer = song != nullptr ? findSequencer (*song, id) : juce::ValueTree();
-        sequencer.isValid() && juce::isPositiveAndBelow (index, getNumSteps (sequencer)))
+    if (const auto sequencer = song != nullptr ? findSequencer (*song, id) : std::nullopt;
+        sequencer.has_value() && juce::isPositiveAndBelow (index, getNumSteps (*sequencer)))
     {
         const UndoStep step (*song, "Change Step");
         setModulatorStep (*song, id, index, value);
@@ -449,32 +436,52 @@ std::optional<ModulationRange> getModulationRange (const ParameterHandle& handle
 {
     const auto target = findTarget (handle);
 
-    if (! target.has_value() || ! isModulated (*target->first, target->second))
+    if (! target.has_value())
         return {};
 
+    // What modulates it, which most parameters have none of, found without a modulator read whole: a knob asks at each tick.
     const auto& song = *target->first;
-    const auto found = locateParameter (song, target->second);
-    const auto modulations = getModulations (song, target->second);
+    const auto modulations = findModulationsOf (song, target->second);
 
-    if (! found.has_value() || modulations.empty())
+    if (modulations.empty())
         return {};
+
+    const auto found = locateParameter (song, target->second);
+
+    if (! found.has_value())
+        return {};
+
+    // Each modulation's modulator read once: whether it is on, and whether it goes both ways.
+    struct Source
+    {
+        float amount = 0.0f;
+        bool isOn = false, bipolar = false;
+    };
+
+    std::vector<Source> sources;
+
+    for (const auto& modulation : modulations)
+    {
+        const auto modulator = getModulatorValue (song, modulation.modulator);
+        sources.push_back (
+            { modulation.amount, modulator.has_value() && isModulatorOn (*modulator), modulator.has_value() && isBipolar (*modulator) });
+    }
 
     // From where its value is without modulation (its automation's, while the engine plays it), each modulation's reach: a
     // bipolar modulator's both ways. Only those whose modulators are on, unless all are off.
-    const auto anyOn =
-        std::any_of (modulations.begin(), modulations.end(), [&song] (const Modulation& m) { return isModulatorOn (song, m.modulator); });
+    const auto anyOn = std::any_of (sources.begin(), sources.end(), [] (const Source& source) { return source.isOn; });
     const auto range = describeParameter (song, *found).range;
     const auto toPart = [&range] (float value) { return range.convertTo0to1 (range.snapToLegalValue (value)); };
     const auto base = toPart (getCurrentValue (song, *found, false));
     auto low = base, high = base;
 
-    for (const auto& modulation : modulations)
+    for (const auto& source : sources)
     {
-        if (anyOn && ! isModulatorOn (song, modulation.modulator))
+        if (anyOn && ! source.isOn)
             continue;
 
-        const auto amount = modulation.amount;
-        const auto reach = isBipolar (song, modulation.modulator) ? std::abs (amount) : 0.0f;
+        const auto amount = source.amount;
+        const auto reach = source.bipolar ? std::abs (amount) : 0.0f;
         low += std::min ({ amount, -reach, 0.0f });
         high += std::max ({ amount, reach, 0.0f });
     }

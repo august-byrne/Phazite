@@ -350,8 +350,10 @@ target_sources(phazite_core PRIVATE
     src/model/base/KeptByAge.h
     src/model/base/MidiLinksArea.cpp
     src/model/base/MidiLinksValue.cpp
+    src/model/base/ModulationValue.cpp
     src/model/base/NotesArea.cpp
     src/model/base/Numbers.h
+    src/model/base/SavedValues.cpp
     src/model/base/SectionsArea.cpp
     src/model/base/SectionsValue.cpp
     src/model/base/Selection.cpp
@@ -378,7 +380,9 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/Immer.h
     src/model/base/internal/MidiLinksArea.h
     src/model/base/internal/MidiLinksValue.h
+    src/model/base/internal/ModulationValue.h
     src/model/base/internal/NotesArea.h
+    src/model/base/internal/SavedValues.h
     src/model/base/internal/Schema.h
     src/model/base/internal/SchemaDescription.h
     src/model/base/internal/SectionsArea.h
@@ -1426,6 +1430,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MetronomeTests.cpp
         tests/ModelFuzzTests.cpp
         tests/ModulationModelTests.cpp
+        tests/ModulationValueTests.cpp
         tests/ModulationUiTests.cpp
         tests/MixerModelTests.cpp
         tests/MixerTests.cpp

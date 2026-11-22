@@ -21,6 +21,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -121,22 +122,19 @@ namespace
                && device[schema::pluginFormat].toString() == "VST3";
     }
 
-    // What of a track another DAW can't play, which its bounce plays: why, or nothing. Its clips read by their IDs
-    // (Clips.h), after its other parts.
+    // What of a track another DAW can't play, which its bounce plays: why, or nothing. Its modulation (Modulation.h) and its
+    // clips read by their IDs (Clips.h), after its other parts.
     juce::String findWhyBounced (const Song& song, const juce::ValueTree& track)
     {
         if ((bool) track[schema::trackFrozen])
             return "frozen";
 
         for (const auto& child : track)
-        {
             if (child.hasType (schema::CONTAINER) || (child.hasType (schema::DEVICE) && ! isVst3 (child)))
                 return "devices";
 
-            if ((child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
-                && child.getChildWithName (schema::MODULATES).isValid())
-                return "modulation";
-        }
+        if (hasModulations (song, getTrackID (track)))
+            return "modulation";
 
         // An audio clip's gain, tempo (while it follows the song's), pitch, direction and takes, as only Phazite plays them.
         for (const auto& clip : getClipValues (song, getTrackID (track)))

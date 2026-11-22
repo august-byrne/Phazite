@@ -21,12 +21,12 @@ class CommandRegistry;
 
 inline constexpr int macrosPerContainer = 8;
 
-// Whether a device is a container, and an instrument container; its devices, all its chains' in their order; its macros, in
-// their order; and the container a device is in, none for one on a channel.
+// Whether a device is a container, and an instrument container; its devices, all its chains' in their order; and the
+// container a device is in, none for one on a channel. (Its macros are modulation's: model/modulation/internal/Modulation.h,
+// getContainerMacros().)
 bool isContainer (const Song&, DeviceID);
 bool isInstrumentContainer (const Song&, DeviceID);
 std::vector<DeviceID> getContainerDevices (const Song&, DeviceID container);
-std::vector<ModulatorID> getContainerMacros (const Song&, DeviceID container);
 DeviceID findContainerOf (const Song&, DeviceID device);
 
 //==============================================================================

@@ -10,6 +10,7 @@
 #include "model/base/Json.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/WholeState.h"
@@ -22,7 +23,6 @@
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
-#include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
@@ -1045,7 +1045,7 @@ namespace
 
                     if (child.hasType (schema::MODULATOR))
                     {
-                        if (const auto kind = getModulatorKind (child))
+                        if (const auto kind = readModulatorKind (child))
                             keepValuesSetByHand (child,
                                                  [modulator = *kind] (std::string_view id) -> const devices::ParameterInfo*
                                                  {

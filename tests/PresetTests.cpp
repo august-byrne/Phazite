@@ -482,6 +482,115 @@ TEST_CASE ("A track's preset makes a new track with its devices, mix and modulat
     CHECK (phazite::getTrackName (song, tracks[3]) == juce::String ("Bass"));
 }
 
+TEST_CASE ("A container's and a track's presets keep their macros' names and values, their modulators' values and steps, and "
+           "what each modulates")
+{
+    // What each preset reads of the song's modulation (Presets.cpp: a container's macros, a track's modulators and macros),
+    // which reads it by IDs (model/modulation/internal/Modulation.h): built and checked through the model, so that it holds
+    // wherever the song keeps its modulation (roadmap step S5.20). Each preset in a subcase of its own, which fails alone.
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Moving" + juce::String (phazite::presetExtension));
+    const auto macroValueOf = [] (phazite::ProjectContext& context, phazite::ModulatorID macro)
+    { return phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id).getValue(); };
+
+    SUBCASE ("A container's preset")
+    {
+        {
+            Song first (temp.folder, "First");
+            auto& context = first.context;
+
+            // A container's two macros, named, turned and modulating its EQ.
+            const auto eq = first.addEffect (first.track (0), "phaziteEq");
+            const auto container = phazite::groupIntoContainer (context, { eq });
+            const auto macros = phazite::getContainerMacros (context, container);
+            phazite::renameMacro (context, macros[0].id, "Air");
+            phazite::getModulatorParameter (context, macros[0].id, phazite::getModulatorParameters (context, macros[0].id)[0].id)
+                .setValue (0.25f);
+            phazite::modulate (context, macros[0].id, { eq, "band7Gain" }, 0.5f);
+            phazite::getModulatorParameter (context, macros[1].id, phazite::getModulatorParameters (context, macros[1].id)[0].id)
+                .setValue (0.75f);
+            REQUIRE (phazite::saveDevicePreset (context, container, file));
+        }
+
+        Song second (temp.folder, "Second");
+        auto& context = second.context;
+        REQUIRE (phazite::loadPreset (context, file, second.track (0)));
+
+        // The container's macros, each as it was, and what the first modulates.
+        const auto effects = phazite::getEffects (context, second.track (0));
+        REQUIRE (effects.size() == 1);
+        const auto macros = phazite::getContainerMacros (context, effects[0].id);
+        REQUIRE (macros.size() == 8);
+        CHECK (macros[0].name == juce::String ("Air"));
+        CHECK (macroValueOf (context, macros[0].id) == doctest::Approx (0.25f));
+        CHECK (macroValueOf (context, macros[1].id) == doctest::Approx (0.75f));
+        CHECK (macroValueOf (context, macros[2].id) == doctest::Approx (0.0f));
+        const auto eq = phazite::getContainerDevices (context, effects[0].id)[0].id;
+        const auto shelf = phazite::getModulations (context, ParameterRef { eq, "band7Gain" });
+        REQUIRE (shelf.size() == 1);
+        CHECK (shelf[0].modulator == macros[0].id);
+        CHECK (shelf[0].amount == doctest::Approx (0.5f));
+    }
+
+    SUBCASE ("A track's preset")
+    {
+        {
+            Song first (temp.folder, "First");
+            auto& context = first.context;
+
+            // A track's LFO, its rate set; a step sequencer, two steps set; and a macro, named and turned, on its volume.
+            const auto track = first.track (1);
+            phazite::chooseInstrument (context, track, first.find ("phaziteSynth"));
+            const auto synth = phazite::getInstrument (context, track)->id;
+            const auto lfo = phazite::addModulator (context, track, ModulatorType::lfo);
+            phazite::getModulatorParameter (context, lfo, "rate").setValue (3.0f);
+            phazite::modulate (context, lfo, { synth, "cutoff" }, -0.25f);
+            const auto steps = phazite::addModulator (context, track, ModulatorType::steps);
+            phazite::setStep (context, steps, 1, 0.5f);
+            phazite::setStep (context, steps, 3, -0.25f);
+            phazite::modulate (context, steps, phazite::getPan (context, track).getRef(), 0.125f);
+            const auto macro = phazite::addModulator (context, track, ModulatorType::macro);
+            phazite::renameMacro (context, macro, "Swell");
+            phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id).setValue (0.4f);
+            phazite::modulate (context, macro, phazite::getVolume (context, track).getRef(), -0.5f);
+            REQUIRE (phazite::saveTrackPreset (context, track, file));
+        }
+
+        Song second (temp.folder, "Second");
+        auto& context = second.context;
+        REQUIRE (phazite::loadPreset (context, file, second.track (0)));
+
+        // The track's modulators and macro, each set as it was, modulating what it did.
+        const auto track = phazite::getTrackIDs (second.getSong())[1];
+        const auto modulators = phazite::getModulators (context, track);
+        REQUIRE (modulators.size() == 3);
+        CHECK (modulators[0].type == ModulatorType::lfo);
+        CHECK (modulators[1].type == ModulatorType::steps);
+        CHECK (modulators[2].type == ModulatorType::macro);
+        CHECK (phazite::getModulatorParameter (context, modulators[0].id, "rate").getValue() == doctest::Approx (3.0f));
+        const auto loadedSteps = phazite::getSteps (context, modulators[1].id);
+        REQUIRE (loadedSteps.size() > 3);
+        CHECK (loadedSteps[1] == doctest::Approx (0.5f));
+        CHECK (loadedSteps[3] == doctest::Approx (-0.25f));
+        CHECK (modulators[2].name == juce::String ("Swell"));
+        CHECK (macroValueOf (context, modulators[2].id) == doctest::Approx (0.4f));
+
+        const auto synth = phazite::getInstrument (context, track)->id;
+        const auto cutoff = phazite::getModulations (context, ParameterRef { synth, "cutoff" });
+        REQUIRE (cutoff.size() == 1);
+        CHECK (cutoff[0].modulator == modulators[0].id);
+        CHECK (cutoff[0].amount == doctest::Approx (-0.25f));
+        const auto pan = phazite::getModulations (context, phazite::getPan (context, track).getRef());
+        REQUIRE (pan.size() == 1);
+        CHECK (pan[0].modulator == modulators[1].id);
+        CHECK (pan[0].amount == doctest::Approx (0.125f));
+        const auto volume = phazite::getModulations (context, phazite::getVolume (context, track).getRef());
+        REQUIRE (volume.size() == 1);
+        CHECK (volume[0].modulator == modulators[2].id);
+        CHECK (volume[0].amount == doctest::Approx (-0.5f));
+    }
+}
+
 TEST_CASE ("A drum sampler's preset brings its sounds into the project that takes it")
 {
     phazite::test::TemporaryFolder temp;

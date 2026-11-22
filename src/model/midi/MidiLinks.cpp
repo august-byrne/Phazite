@@ -93,8 +93,7 @@ ParameterRef readMidiLinkParameter (const Song& song, const MidiLinkEntry& link)
     const auto device = DeviceID::fromRaw (link.device);
 
     // A macro's one parameter has the macro's ID (Parameters.h), which its link doesn't repeat.
-    if (link.parameter == schema::midiLinkMacroValue
-        && findModulatorState (song, ModulatorID::fromRaw (device.getRaw())).hasType (schema::MACRO))
+    if (link.parameter == schema::midiLinkMacroValue && isMacro (song, ModulatorID::fromRaw (device.getRaw())))
         return { device, juce::String (device.getRaw()) };
 
     return { device, link.parameter };

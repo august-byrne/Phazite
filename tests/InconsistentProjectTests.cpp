@@ -1127,8 +1127,15 @@ TEST_CASE ("A macro, and the master's fader and VCA, past the mark, are given an
     REQUIRE (project != nullptr);
     auto& song = project->getSong();
 
-    // The macro, given anew.
-    const auto macros = findAll (findNamedTrack (song, "Lead"), schema::MACRO);
+    // The macro, given anew (as the song's whole state writes it).
+    const auto leadID = phazite::readID (findNamedTrack (song, "Lead")[schema::trackID]);
+    juce::ValueTree lead;
+
+    for (const auto& track : findAll (phazite::test::copyWholeSong (song), schema::TRACK))
+        if (phazite::readID (track[schema::trackID]) == leadID)
+            lead = track;
+
+    const auto macros = findAll (lead, schema::MACRO);
     REQUIRE (macros.size() == 1);
     const auto newMacro = phazite::readID (macros.front()[schema::modulatorID]);
     CHECK (newMacro < phazite::schema::maxCountedID);
@@ -1965,7 +1972,7 @@ TEST_CASE ("A step sequencer's steps open within -1 to 1, what is no finite numb
             modulator->setAttribute ("steps", "0.5 1e12345678901 -3 nan 0.25");
         });
     REQUIRE (project != nullptr);
-    const auto modulators = findAll (project->getSong().getState(), schema::MODULATOR);
+    const auto modulators = findAll (phazite::test::copyWholeSong (project->getSong()), schema::MODULATOR); // as its file holds it
     REQUIRE (modulators.size() == 1);
     // Those changed written as Phazite writes a step (juce::String of the number), the others as they were.
     CHECK (modulators.front()[schema::modulatorSteps].toString()
@@ -2023,8 +2030,9 @@ TEST_CASE ("A send to a return the song hasn't is left out, with what modulated 
     REQUIRE (project != nullptr);
     const auto state = project->getSong().getState();
     CHECK (findAll (state, schema::SEND).empty());
-    CHECK (findAll (state, schema::MODULATES).empty());
-    CHECK (findAll (state, schema::MODULATOR).size() == 1);
+    const auto whole = phazite::test::copyWholeSong (project->getSong()); // modulation as the song's file holds it
+    CHECK (findAll (whole, schema::MODULATES).empty());
+    CHECK (findAll (whole, schema::MODULATOR).size() == 1);
 }
 
 TEST_CASE ("A track preset's volume beyond any fader's loads at the top of its range, and its sounds that aren't audio files stay out")

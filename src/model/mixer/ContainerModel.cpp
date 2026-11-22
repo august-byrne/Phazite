@@ -8,6 +8,7 @@
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/modulation/ModulationModel.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
