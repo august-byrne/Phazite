@@ -517,13 +517,20 @@ TEST_CASE ("Curve values: the song's curves keep the order they were made in thr
     const auto keyedCurves = withCurve (curves, b, otherKeys);
     CHECK_FALSE (keyedCurves.isSameAs (curves));
     CHECK (keyedCurves == curves);
-    const phazite::ValuesKept kept { {}, {}, {}, {}, {}, curves }, keptKeyed { {}, {}, {}, {}, {}, keyedCurves };
+    // What a song keeps, with these curves alone (by the member's name: the next area adds a member).
+    const auto keepCurves = [] (const phazite::SongCurves& held)
+    {
+        phazite::ValuesKept valuesKept;
+        valuesKept.curves = held;
+        return valuesKept;
+    };
+    const auto kept = keepCurves (curves), keptKeyed = keepCurves (keyedCurves);
     CHECK (phazite::holdSameCurve (kept, keptKeyed, b));
     CHECK (phazite::holdSameCurves (kept, keptKeyed));
     CHECK (phazite::holdSameCurveOrder (kept, keptKeyed));
     keyed.position = 0.25f;
     CHECK_FALSE (keyed == curve.points[0]);
-    const phazite::ValuesKept keptMoved { {}, {}, {}, {}, {}, withCurve (curves, b, { otherKeys.points.set (0, keyed) }) };
+    const auto keptMoved = keepCurves (withCurve (curves, b, { otherKeys.points.set (0, keyed) }));
     CHECK_FALSE (phazite::holdSameCurve (kept, keptMoved, b));
     CHECK_FALSE (phazite::holdSameCurves (kept, keptMoved));
 
