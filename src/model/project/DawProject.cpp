@@ -418,20 +418,17 @@ namespace
         {
             juce::XmlElement* sends = nullptr;
 
-            for (const auto& send : track)
+            for (const auto& send : getSendValues (song, TrackID::fromRaw (readID (track[schema::trackID]))))
             {
-                if (! send.hasType (schema::SEND))
-                    continue;
-
                 if (sends == nullptr)
                     sends = channel.createNewChildElement ("Sends");
 
-                const auto sendID = id + "s" + send[schema::sendID].toString();
+                const auto sendID = id + "s" + juce::String ((juce::int64) send.id.getRaw());
                 auto* element = sends->createNewChildElement ("Send");
-                element->setAttribute ("destination", channelID (readID (send[schema::sendTo])));
-                element->setAttribute ("type", (bool) send[schema::sendPreFader] ? "pre" : "post");
+                element->setAttribute ("destination", channelID (send.to.getRaw()));
+                element->setAttribute ("type", send.preFader ? "pre" : "post");
                 element->setAttribute ("id", sendID);
-                addVolume (*element, sendID + "v", toLinear ((float) send.getProperty (schema::sendLevel, 0.0)));
+                addVolume (*element, sendID + "v", toLinear (send.level));
             }
         }
 
@@ -675,12 +672,11 @@ namespace
             std::set<std::uint64_t> pluginIDs, sendIDs;
 
             for (const auto& child : track)
-            {
                 if (isVst3 (child))
                     pluginIDs.insert (readID (child[schema::deviceID]));
-                else if (child.hasType (schema::SEND))
-                    sendIDs.insert (readID (child[schema::sendID]));
-            }
+
+            for (const auto& send : getSendValues (song, TrackID::fromRaw (readID (track[schema::trackID]))))
+                sendIDs.insert (send.id.getRaw());
 
             const auto toGain = [] (float position) { return toLinear (faderPositionToDecibels (position)); };
             const auto toNormalized = [] (float position) { return (double) position; };

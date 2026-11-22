@@ -455,15 +455,20 @@ inline constexpr const char* chainPanParameter = "pan";
 inline constexpr const char* crossoverParameter = "crossover";
 
 // Child of a track's TRACK: a send to a return, in the order the track's sends were added (model/mixer/internal/Mixer.h).
-// On SEND: its ID (DeviceID, of the song's); the return it sends to, by the return's track's ID (sendTo); its level in
-// decibels, as a fader's (sendLevel; -100 for silence; none for 0 dB); and sendPreFader, true for a send before the
-// track's fader, none for one after it. A send goes with its return, in the same undo step; one to a return the song
-// hasn't goes as the project opens.
+// On SEND: its ID (DeviceID, of the song's); the return it sends to, by the return's track's ID (sendTo, written as a number,
+// as every ID an item holds is, unlike a device a lane names); its level in decibels, as a fader's (sendLevel; -100 for
+// silence; default 0 dB, written as none); and sendPreFader, true for a send before the track's fader (default false, a send
+// after it, written as none). A send goes with its return, in the same undo step; one to a return the song hasn't goes as
+// the project opens. What reads a send reads it as a value (model/base/internal/SendsValue.h: SendValue, and the conversion
+// of SEND); until the sends leave the tree (roadmap step S5.20), their writers (model/mixer/Mixer.cpp) and the loader, the
+// tree's callbacks that hear a send change (until the sends' second piece), the compile's modulations (until modulation's
+// pieces), the versions' difference and merge on whole copies, and the selection's walk, which skips a SEND, still name it
+// (SendsValue.h, at its top, lists them).
 // (SEND, with the elements above.)
 inline const Property<std::int64_t> sendID { "id", on (SEND), Form::ownID, Kind::song };
 inline const Property<std::int64_t> sendTo { "to", on (SEND), Form::idName, Kind::song };
-inline const Property<float> sendLevel { "level", on (SEND), within (-100.0, 6.0), Kind::song };
-inline const Property<bool> sendPreFader { "preFader", on (SEND), Kind::song };
+inline const Property<float> sendLevel { "level", on (SEND), within (-100.0, 6.0), byDefault (0.0f), Kind::song };
+inline const Property<bool> sendPreFader { "preFader", on (SEND), byDefault (false), Kind::song };
 
 //==============================================================================
 // The song's modulation (model/modulation/internal/Modulation.h): each track's modulators and macros, and a container's

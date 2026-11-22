@@ -118,6 +118,19 @@ namespace
         }
     }
 
+    // A send's element, which the sends' writers write (invalid for one the song hasn't): what they find it by until the sends
+    // leave the song's tree (roadmap step S5.20), as getSendValue() finds its value.
+    juce::ValueTree findSendState (const Song& song, DeviceID send)
+    {
+        if (send.isValid())
+            for (const auto& track : getTrackStates (song))
+                for (const auto& child : track)
+                    if (child.hasType (schema::SEND) && (std::uint64_t) (juce::int64) child[schema::sendID] == send.getRaw())
+                        return child;
+
+        return {};
+    }
+
     // Sets a property without an undo step, only if its value is another (as a store of a plug-in's state does:
     // model/plugins/internal/PluginInstances.h). JUCE workaround W8 (docs/juce-workarounds.md).
     void store (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value)
@@ -838,27 +851,37 @@ std::vector<DeviceID> getSends (const Song& song, TrackID track)
 {
     std::vector<DeviceID> sends;
 
-    for (const auto& child : findTrackState (song, track))
-        if (child.hasType (schema::SEND))
-            sends.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) child[schema::sendID]));
+    for (const auto& send : getSendValues (song, track))
+        sends.push_back (send.id);
 
     return sends;
 }
 
-juce::ValueTree findSendState (const Song& song, DeviceID send)
+std::optional<SendValue> getSendValue (const Song& song, DeviceID send)
 {
     if (send.isValid())
         for (const auto& track : getTrackStates (song))
-            for (const auto& child : track)
-                if (child.hasType (schema::SEND) && (std::uint64_t) (juce::int64) child[schema::sendID] == send.getRaw())
-                    return child;
+            if (auto found = findTrackSend (track, send))
+                return found;
 
-    return {};
+    return std::nullopt;
+}
+
+TrackID getSendTrack (const Song& song, DeviceID send)
+{
+    const auto found = getSendValue (song, send);
+    return found.has_value() ? found->from : TrackID();
+}
+
+std::vector<SendValue> getSendValues (const Song& song, TrackID track)
+{
+    return readTrackSends (findTrackState (song, track));
 }
 
 TrackID getSendTarget (const Song& song, DeviceID send)
 {
-    return TrackID::fromRaw ((std::uint64_t) (juce::int64) findSendState (song, send)[schema::sendTo]);
+    const auto found = getSendValue (song, send);
+    return found.has_value() ? found->to : TrackID();
 }
 
 DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
@@ -879,8 +902,8 @@ DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
         {
             std::vector<TrackID> next;
 
-            for (const auto send : getSends (song, reached[i]))
-                next.push_back (getSendTarget (song, send));
+            for (const auto& send : getSendValues (song, reached[i]))
+                next.push_back (send.to);
 
             for (auto parent = getParentFolder (song, reached[i]); parent.isValid(); parent = getParentFolder (song, parent))
                 if (isBus (song, parent))
@@ -911,7 +934,8 @@ DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
 
 bool isPreFader (const Song& song, DeviceID send)
 {
-    return (bool) findSendState (song, send)[schema::sendPreFader];
+    const auto found = getSendValue (song, send);
+    return found.has_value() && found->preFader;
 }
 
 void setPreFader (Song& song, DeviceID send, bool preFader)
@@ -937,7 +961,8 @@ void setSendLevel (Song& song, DeviceID send, float decibels)
 
 float getSendLevel (const Song& song, DeviceID send)
 {
-    return (float) findSendState (song, send).getProperty (schema::sendLevel, 0.0f);
+    const auto found = getSendValue (song, send);
+    return found.has_value() ? found->level : 0.0f;
 }
 
 DeviceID addSendTo (Song& song, TrackID from, TrackID returnTrack)

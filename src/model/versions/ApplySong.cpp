@@ -8,6 +8,7 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
@@ -1699,15 +1700,25 @@ int removeBrokenReferences (Song& song)
         return found;
     };
 
-    const auto isSend = [] (const juce::ValueTree& element) { return element.hasType (schema::SEND); };
+    // The sends on the song's tracks, each read as a value however many share an ID or have none (readTrackSends()): every
+    // SEND element the song holds, as the count of them was, where Schema.h puts them (under a TRACK, as the song holds them).
+    const auto countSends = [&song]
+    {
+        size_t found = 0;
+
+        for (const auto& track : getTrackStates (song))
+            found += readTrackSends (track).size();
+
+        return (int) found;
+    };
     const auto hasSidechain = [] (const juce::ValueTree& element)
     { return element.hasType (schema::DEVICE) && element.hasProperty (schema::deviceSidechain); };
 
-    const auto sendsBefore = count (isSend);
+    const auto sendsBefore = countSends();
     forgetWhatNamesTheGone (song);
     const auto sidechainsBefore = count (hasSidechain);
     forgetSidechainLoops (song);
 
-    return (int) (modulations.size() + sidechains.size()) + sendsBefore - count (isSend) + sidechainsBefore - count (hasSidechain);
+    return (int) (modulations.size() + sidechains.size()) + sendsBefore - countSends() + sidechainsBefore - count (hasSidechain);
 }
 } // namespace phazite

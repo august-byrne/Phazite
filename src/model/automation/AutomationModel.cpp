@@ -137,10 +137,7 @@ namespace
         if (const auto channel = findChannelOfFader (song, device); channel.isValid())
             return getTrackID (channel);
 
-        if (const auto send = findSendState (song, device); send.isValid())
-            return getTrackID (send.getParent());
-
-        return {};
+        return getSendTrack (song, device); // none for none
     }
 } // namespace
 

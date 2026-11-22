@@ -672,9 +672,9 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
             const auto added = findNamed (again, "Added"), returned = findNamed (again, "Return");
             REQUIRE (added.isValid());
             REQUIRE (returned.isValid());
-            const auto sends = findAll (phazite::findTrackState (again, added), schema::SEND);
+            const auto sends = phazite::getSendValues (again, added);
             REQUIRE (sends.size() == 1);
-            CHECK (phazite::readID (sends.front()[schema::sendTo]) == returned.getRaw());
+            CHECK (sends.front().to == returned);
             CHECK (findAll (phazite::findTrackState (again, added), schema::LANE).size() == 1);
             const phazite::ParameterRef volumeAgain { phazite::getFader (again, added), phazite::getVolumeParameterID (again, added) };
             CHECK (phazite::getPoints (again, volumeAgain).size() == 1);
@@ -927,11 +927,11 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
         CHECK (phazite::readID (again.getState()[schema::nextID]) < phazite::schema::maxCountedID);
 
         // All of it there, what named each naming it.
-        const auto sends = findAll (added, schema::SEND);
-        REQUIRE (sends.size() == 1);
-        CHECK (phazite::readID (sends.front()[schema::sendTo]) == phazite::readID (returned[schema::trackID]));
-        CHECK (findAll (added, schema::LANE).size() == 1);
         const auto addedID = phazite::TrackID::fromRaw (phazite::readID (added[schema::trackID]));
+        const auto sends = phazite::getSendValues (again, addedID);
+        REQUIRE (sends.size() == 1);
+        CHECK (sends.front().to.getRaw() == phazite::readID (returned[schema::trackID]));
+        CHECK (findAll (added, schema::LANE).size() == 1);
         const phazite::ParameterRef volumeAgain { phazite::getFader (again, addedID), phazite::getVolumeParameterID (again, addedID) };
         CHECK (phazite::getPoints (again, volumeAgain).size() == 1);
         const auto devices = findAll (again.getState(), schema::DEVICE);
@@ -2028,9 +2028,8 @@ TEST_CASE ("A send to a return the song hasn't is left out, with what modulated 
             modulates->setAttribute ("amount", 0.5);
         });
     REQUIRE (project != nullptr);
-    const auto state = project->getSong().getState();
-    CHECK (findAll (state, schema::SEND).empty());
-    const auto whole = phazite::test::copyWholeSong (project->getSong()); // modulation as the song's file holds it
+    const auto whole = phazite::test::copyWholeSong (project->getSong()); // the sends and modulation as its file holds them
+    CHECK (findAll (whole, schema::SEND).empty());                        // the song whole holds none
     CHECK (findAll (whole, schema::MODULATES).empty());
     CHECK (findAll (whole, schema::MODULATOR).size() == 1);
 }

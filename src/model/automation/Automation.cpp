@@ -477,7 +477,7 @@ namespace
     // parameter now (a plug-in that isn't installed, or doesn't load, knows none of its own).
     bool isCurveOwnerThere (const Song& song, DeviceID owner)
     {
-        return findDeviceState (song, owner).isValid() || findSendState (song, owner).isValid()
+        return findDeviceState (song, owner).isValid() || getSendValue (song, owner).has_value()
                || findChannelOfFader (song, owner).isValid() || findContainerChain (song, owner).isValid();
     }
 
@@ -606,9 +606,8 @@ namespace
             if (const auto* id = state.getPropertyPointer (*property))
                 ids.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) *id));
 
-        for (const auto& child : state)
-            if (child.hasType (schema::SEND))
-                ids.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) child[schema::sendID]));
+        for (const auto& send : getSendValues (song, track))
+            ids.push_back (send.id);
 
         for (const auto& device : getDeviceStates (state))
         {
@@ -744,9 +743,8 @@ TrackID getParameterTrack (const Song& song, const ParameterRef& parameter)
             return getDeviceChannel (song, parameter.device); // a container's devices are on its channel
         case ParameterSource::volume:
         case ParameterSource::pan:
-            return getTrackID (found->state);
         case ParameterSource::send:
-            return getTrackID (found->state.getParent());
+            return getTrackID (found->state); // a fader's channel, or the track a send is on (FoundParameter::state)
         case ParameterSource::chainVolume:
         case ParameterSource::chainPan:
         case ParameterSource::crossover:

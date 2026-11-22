@@ -92,9 +92,12 @@ float getCurrentValue (const Song&, const ParameterRef&, bool withModulation);
 
 //==============================================================================
 // A parameter found in the song, for what reads one often (a control, at each of the display ticker's ticks): what it is of,
-// the element that holds its value set by hand, and for one of Phazite's own devices' parameters, its description. The
-// functions above, given one, take it as found, which holds while its element is the song's and still names it
-// (isStillThere()).
+// its element (state), and for one of Phazite's own devices' parameters, its description. The element is the one that holds
+// its value set by hand, or where it is looked for: a device's or a plug-in's DEVICE, a fader's channel (its TRACK or the
+// MASTER), a container's chain's CHAIN, a modulator's or a macro's own element, and for a send's level the TRACK the send is
+// on, among whose sends alone it is looked for by its ID (SendsValue.h: findTrackSend()), one look at each tick. The functions
+// above, given one, take it as found, which holds while its element is the song's and still names it, or for a send, still
+// holds it (isStillThere()).
 struct FoundParameter
 {
     // Made by locateParameter() alone; a constructor of its own, so that a braced reference ({ device, "gain" }) is never

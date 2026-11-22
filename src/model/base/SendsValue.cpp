@@ -1,0 +1,349 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#include "internal/SendsValue.h"
+#include "Song.h"
+#include "internal/IDsHeld.h"
+#include "internal/Schema.h"
+#include "internal/SongIndex.h"
+#include "internal/SongText.h"
+
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <utility>
+
+namespace phazite
+{
+bool SendValue::operator== (const SendValue& other) const noexcept
+{
+    return id == other.id && from == other.from && to == other.to && juce::exactlyEqual (level, other.level) && preFader == other.preFader;
+}
+
+bool SongSends::operator== (const SongSends& other) const
+{
+    return isSameAs (other) || (sends == other.sends && tracks == other.tracks);
+}
+
+//==============================================================================
+namespace
+{
+    std::atomic<std::uint64_t> sendsRead { 0 }; // countSendsRead(): a count alone, which orders nothing
+
+    using SendList = immer::flex_vector<DeviceID>;
+    using SendLists = immer::map<std::uint64_t, SendList>;
+
+    // The lists without a send under a track, the track's entry gone with its last send (the same lists for a track of none,
+    // and for a send its list hasn't).
+    SendLists withoutIn (const SendLists& lists, TrackID track, DeviceID send)
+    {
+        if (! track.isValid())
+            return lists;
+
+        if (const auto* list = lists.find (track.getRaw()))
+        {
+            for (size_t i = 0; i < list->size(); ++i)
+            {
+                if ((*list)[i] == send)
+                {
+                    const auto rest = list->erase (i);
+                    return rest.empty() ? lists.erase (track.getRaw()) : lists.set (track.getRaw(), rest);
+                }
+            }
+        }
+
+        return lists;
+    }
+
+    // The lists with a send under a track, at a place (or after the others), none for a track of none.
+    SendLists withIn (const SendLists& lists, TrackID track, DeviceID send, int index)
+    {
+        if (! track.isValid())
+            return lists;
+
+        const auto* found = lists.find (track.getRaw());
+        auto list = found != nullptr ? *found : SendList();
+        const auto place = index >= 0 ? std::min ((size_t) index, list.size()) : list.size();
+        return lists.set (track.getRaw(), list.insert (place, send));
+    }
+
+    // Whether an ID is one the song can count on from (Schema.h: schema::maxID), as every item's is once the song is loaded.
+    bool isHeldID (DeviceID id)
+    {
+        return id.isValid() && id.getRaw() < schema::maxID;
+    }
+
+    // An ID an element holds or names, as readID() reads one, a number or text: a number's own value, with no text made of it
+    // (the sends' readers look through a track's sends by their IDs, as a control's handle checks its send at each tick).
+    std::uint64_t readHeldID (const juce::var& held)
+    {
+        return held.isInt() || held.isInt64() ? (std::uint64_t) (juce::int64) held : readID (held);
+    }
+
+    // A send's level as its description reads it, as a float (the song's sends' levels are floats: Schema.h, sendLevel).
+    float readLevel (const juce::var& held)
+    {
+        return (float) readDescribed (held, schema::sendLevel);
+    }
+
+    // Each TRACK under an element (the track list, a folder), a folder before the tracks in it, as the song orders its tracks
+    // (model/arrangement/internal/Tracks.h: getTrackStates()).
+    void forEachTrack (const juce::ValueTree& parent, const std::function<void (const juce::ValueTree&)>& visit)
+    {
+        for (const auto& child : parent)
+        {
+            if (child.hasType (schema::TRACK))
+            {
+                visit (child);
+                forEachTrack (child, visit);
+            }
+        }
+    }
+} // namespace
+
+SongSends withSend (const SongSends& sends, SendValue send, int index)
+{
+    jassert (send.id.isValid());
+    auto next = sends;
+    const auto* old = sends.find (send.id);
+
+    if (old == nullptr || old->from != send.from)
+    {
+        if (old != nullptr)
+            next.tracks = withoutIn (next.tracks, old->from, send.id);
+
+        next.tracks = withIn (next.tracks, send.from, send.id, index);
+    }
+
+    const auto key = send.id.getRaw(); // read before the value is moved: a call's arguments come in no set order
+    next.sends = next.sends.set (key, std::move (send));
+    return next;
+}
+
+SongSends withoutSend (const SongSends& sends, DeviceID id)
+{
+    const auto* old = sends.find (id);
+
+    if (old == nullptr)
+        return sends;
+
+    auto next = sends;
+    next.tracks = withoutIn (next.tracks, old->from, id);
+    next.sends = next.sends.erase (id.getRaw());
+    return next;
+}
+
+SongSends withTrackSendOrder (const SongSends& sends, TrackID track, immer::flex_vector<DeviceID> order)
+{
+    const auto* list = sends.tracks.find (track.getRaw());
+    const auto now = list != nullptr ? *list : SendList();
+    std::vector<DeviceID> held (now.begin(), now.end()), given (order.begin(), order.end());
+    std::sort (held.begin(), held.end());
+    std::sort (given.begin(), given.end());
+
+    if (held != given)
+    {
+        jassertfalse; // the same sends, in another order
+        return sends;
+    }
+
+    if (order.empty() || std::equal (order.begin(), order.end(), now.begin(), now.end()))
+        return sends; // the order it holds: the same value
+
+    auto next = sends;
+    next.tracks = next.tracks.set (track.getRaw(), std::move (order));
+    return next;
+}
+
+bool holdsItsLists (const SongSends& sends)
+{
+    size_t listed = 0, onTracks = 0;
+
+    for (const auto& [key, list] : sends.tracks)
+    {
+        if (list.empty())
+            return false;
+
+        std::vector<DeviceID> seen (list.begin(), list.end());
+        std::sort (seen.begin(), seen.end());
+
+        if (std::adjacent_find (seen.begin(), seen.end()) != seen.end())
+            return false;
+
+        for (const auto& id : seen)
+            if (const auto* send = sends.find (id); send == nullptr || send->from.getRaw() != key)
+                return false;
+
+        listed += list.size();
+    }
+
+    for (const auto& [id, send] : sends.sends)
+    {
+        if (id != send.id.getRaw())
+            return false;
+
+        onTracks += send.from.isValid() ? size_t { 1 } : size_t { 0 };
+    }
+
+    return listed == onTracks;
+}
+
+//==============================================================================
+bool setSendProperty (SendValue& send, const juce::Identifier& property, const juce::var& value)
+{
+    if (property == schema::sendID)
+        send.id = DeviceID::fromRaw (readHeldID (value));
+    else if (property == schema::sendTo)
+        send.to = TrackID::fromRaw (readHeldID (value));
+    else if (property == schema::sendLevel)
+        send.level = readLevel (value);
+    else if (property == schema::sendPreFader)
+        send.preFader = (bool) value;
+    else
+        return false;
+
+    return true;
+}
+
+SendValue readSendValue (const juce::ValueTree& element, TrackID from)
+{
+    SendValue send;
+    send.from = from;
+
+    for (const auto* property :
+         { &schema::sendID.getName(), &schema::sendTo.getName(), &schema::sendLevel.getName(), &schema::sendPreFader.getName() })
+        setSendProperty (send, *property, element[*property]);
+
+    sendsRead.fetch_add (1, std::memory_order_relaxed);
+    return send;
+}
+
+std::uint64_t countSendsRead() noexcept
+{
+    return sendsRead.load (std::memory_order_relaxed);
+}
+
+std::optional<SendValue> readHeldSend (const juce::ValueTree& element, TrackID from)
+{
+    if (! element.hasType (schema::SEND))
+        return std::nullopt;
+
+    auto send = readSendValue (element, from);
+    return isHeldID (send.id) ? std::optional<SendValue> (std::move (send)) : std::nullopt;
+}
+
+juce::ValueTree writeSendElement (const SendValue& send)
+{
+    juce::ValueTree element (schema::SEND);
+    element.setProperty (schema::sendID, (juce::int64) send.id.getRaw(), nullptr);
+    element.setProperty (schema::sendTo, (juce::int64) send.to.getRaw(), nullptr);
+
+    // None for 0 dB, as setSendLevel() writes it (Mixer.cpp: setChannelValue(), which writes a level to a ten-thousandth and
+    // none for one that rounds to 0). The float the value holds, which a file's text holds as the fewest digits that read back
+    // as it (SongText.h: writeValue()): the text of every level setSendLevel() wrote, and of every level a file held in as
+    // many digits as a float keeps.
+    if (! juce::exactlyEqual (send.level, 0.0f))
+        element.setProperty (schema::sendLevel, send.level, nullptr);
+
+    if (send.preFader)
+        element.setProperty (schema::sendPreFader, true, nullptr);
+
+    return element;
+}
+
+std::vector<SendValue> readTrackSends (const juce::ValueTree& track)
+{
+    std::vector<SendValue> sends;
+
+    if (! track.hasType (schema::TRACK))
+        return sends;
+
+    const auto from = TrackID::fromRaw (readHeldID (track[schema::trackID]));
+
+    for (const auto& child : track)
+        if (child.hasType (schema::SEND))
+            sends.push_back (readSendValue (child, from));
+
+    return sends;
+}
+
+std::optional<SendValue> findTrackSend (const juce::ValueTree& track, DeviceID id)
+{
+    if (! id.isValid() || ! track.hasType (schema::TRACK))
+        return std::nullopt;
+
+    for (const auto& child : track)
+        if (child.hasType (schema::SEND) && readHeldID (child[schema::sendID]) == id.getRaw())
+            return readSendValue (child, TrackID::fromRaw (readHeldID (track[schema::trackID])));
+
+    return std::nullopt;
+}
+
+SongSends readSendsValue (const juce::ValueTree& song)
+{
+    auto sends = immer::map<std::uint64_t, SendValue>().transient();
+    auto tracks = immer::map<std::uint64_t, SendList>().transient();
+
+    forEachTrack (song.getChildWithName (schema::TRACKS),
+                  [&sends, &tracks] (const juce::ValueTree& track)
+                  {
+                      const auto from = TrackID::fromRaw (readHeldID (track[schema::trackID]));
+                      auto list = SendList().transient();
+
+                      for (const auto& child : track)
+                      {
+                          if (auto send = readHeldSend (child, from); send.has_value() && sends.find (send->id.getRaw()) == nullptr)
+                          {
+                              list.push_back (send->id);
+                              const auto key = send->id.getRaw();
+                              sends.set (key, std::move (*send));
+                          }
+                      }
+
+                      if (list.size() > 0 && from.isValid())
+                          tracks.set (from.getRaw(), list.persistent());
+                  });
+
+    return { sends.persistent(), tracks.persistent() };
+}
+
+SongSends getSendsValue (const Song& song)
+{
+    return readSendsValue (song.getState());
+}
+
+bool holdsSend (const Song& song, DeviceID id)
+{
+    if (! id.isValid())
+        return false;
+
+    for (const auto& track : song.getIndex().getTracks())
+        for (const auto& child : track)
+            if (child.hasType (schema::SEND) && readHeldID (child[schema::sendID]) == id.getRaw())
+                return true;
+
+    return false;
+}
+
+//==============================================================================
+std::uint64_t findLargestIDIn (const SongSends& sends)
+{
+    std::uint64_t largest = 0;
+
+    for (const auto& entry : sends.sends)
+        largest = countHeldID (largest, entry.second.id.getRaw());
+
+    return largest;
+}
+
+void forEachIDHeld (const SongSends& sends, const std::function<void (std::uint64_t)>& visit)
+{
+    for (const auto& entry : sends.sends)
+        visit (entry.second.id.getRaw());
+}
+
+void forEachIDNamed (const SongSends& sends, const std::function<void (std::uint64_t)>& visit)
+{
+    for (const auto& entry : sends.sends)
+        if (entry.second.to.isValid())
+            visit (entry.second.to.getRaw());
+}
+} // namespace phazite

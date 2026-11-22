@@ -1324,6 +1324,7 @@
         "high": 6.0,
         "whole": false
       },
+      "default": 0.0,
       "kind": "song",
       "counted": true
     },
@@ -1896,6 +1897,7 @@
         "SEND"
       ],
       "type": "bool",
+      "default": false,
       "kind": "song",
       "counted": true
     },

@@ -11,6 +11,7 @@
 #include "engine/core/Plan.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongValues.h"
 #include "model/devices/ParameterRef.h"
 
@@ -366,7 +367,7 @@ private:
     {
         juce::ValueTree state {};
         std::int64_t id = 0, output = 0;
-        std::vector<juce::ValueTree> sends {}; // its SEND children, looked for once
+        std::vector<SendValue> sends {}; // its sends, read once
         std::vector<std::int64_t> needs {};
         std::set<std::int64_t> refused {};
         std::int64_t padDevice = 0; // a pad track's drum sampler, by its ID, and its pad (schema::trackPadDevice, trackPad)
@@ -387,7 +388,7 @@ private:
     void finishRings (engine::Plan&);            // the taps the plan's paths read, on their strips, and the rings made
     void markWhatReadsLeaving (engine::Plan&);   // the delays whose growth would play again what paths that left added (live)
     void replace (std::shared_ptr<engine::Delay>& kept, std::shared_ptr<engine::Delay> by) const; // a path's delay
-    std::shared_ptr<engine::SendLevel> getSendLevel (const juce::ValueTree& sendState);
+    std::shared_ptr<engine::SendLevel> getSendLevel (const SendValue&);
     std::vector<std::int64_t> addDevices (engine::Plan&, const std::map<std::int64_t, int>& places, const ChannelInfo&,
                                           engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false,
                                           const std::set<std::int64_t>* only = nullptr); // their IDs

@@ -12,6 +12,7 @@
 #include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/mixer/DeviceType.h"
 #include "model/mixer/internal/Buses.h"
 
@@ -203,14 +204,22 @@ TrackID addNewReturnTrack (Song&, Selection*);
 // the track itself. Returns the return track, or none.
 TrackID addReturnWithEffect (Song&, TrackID sender, juce::ValueTree effect);
 
-// A track's sends (Schema.h: SEND), each to a return by the return's track, in their order; a send's element (invalid
-// for one the song hasn't) and where it goes; and adding one from a track to a return: after the fader, or before it with
-// preFader, its level starting at -6 dB. Returns none if the track can't send there or the return isn't one. Joins the
-// caller's step.
+// A track's sends (Schema.h: SEND), each to a return by the return's track, in their order; and adding one from a track to a
+// return: after the fader, or before it with preFader, its level starting at -6 dB. Returns none if the track can't send
+// there or the return isn't one. Joins the caller's step.
 std::vector<DeviceID> getSends (const Song&, TrackID);
-juce::ValueTree findSendState (const Song&, DeviceID send);
-TrackID getSendTarget (const Song&, DeviceID send);
 DeviceID addSend (Song&, TrackID from, TrackID returnTrack, bool preFader);
+
+// The sends as values (model/base/internal/SendsValue.h), which every reader of a send reads them as: a send by its ID (none
+// for one the song hasn't), the track it is on (none for none), a track's sends in their order (none for a folder, the
+// master, or a track the song hasn't), and the return a send goes to. Each reads the song's tree for now, as the sends' code
+// always did (a walk of the tracks' sends for one by its ID, of the track's children for a track's), and the area of the
+// song's values once the sends leave the tree (roadmap step S5.20). A control's parameter that found its send looks for it on
+// the track it found it on alone, at each tick (model/devices/internal/Parameters.h: FoundParameter).
+std::optional<SendValue> getSendValue (const Song&, DeviceID send);
+TrackID getSendTrack (const Song&, DeviceID send);
+std::vector<SendValue> getSendValues (const Song&, TrackID);
+TrackID getSendTarget (const Song&, DeviceID send);
 bool isPreFader (const Song&, DeviceID send);
 void setPreFader (Song&, DeviceID send, bool); // as one undo step, "Change Send"
 

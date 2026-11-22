@@ -3,6 +3,7 @@
 #include "internal/CurveValues.h"
 #include "internal/Schema.h"
 #include "internal/SectionsValue.h"
+#include "internal/SendsValue.h"
 #include "internal/SongIndex.h"
 #include "internal/SongValues.h"
 
@@ -39,13 +40,14 @@ namespace
         return false;
     }
 
-    // Whether the song holds what a curve's points belong to (Schema.h: CURVE, curveDevice): a device, a container's chain, a
-    // send, or a channel's fader or VCA, as model/automation/ finds a curve's owner.
+    // Whether the song's tree holds what a curve's points belong to (Schema.h: CURVE, curveDevice): a device, a container's
+    // chain, or a channel's fader or VCA, as model/automation/ finds a curve's owner; a send is the sends' (holdsSend()), which
+    // the walk leaves to them.
     bool holdsCurveOwner (const juce::ValueTree& parent, std::uint64_t id)
     {
         for (const auto& child : parent)
         {
-            if (child.hasType (schema::AUTOMATION))
+            if (child.hasType (schema::AUTOMATION) || child.hasType (schema::SEND))
                 continue;
 
             for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
@@ -264,7 +266,8 @@ int Selection::getNumObjectsSelected() const
         const auto* values = song->getValues();
         const auto* curve = values != nullptr ? values->findCurve (pointsParameter) : nullptr;
 
-        if (curve != nullptr && holdsCurveOwner (song->getState(), pointsParameter.device.getRaw()))
+        if (curve != nullptr
+            && (holdsCurveOwner (song->getState(), pointsParameter.device.getRaw()) || holdsSend (*song, pointsParameter.device)))
             for (const auto& point : curve->points)
                 if (isPointSelected (point.key))
                     ++count;

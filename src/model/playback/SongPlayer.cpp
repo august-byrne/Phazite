@@ -602,13 +602,13 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
             for (const auto& send : other.sends)
             {
-                if (getID (send, schema::sendTo) == channel.id)
+                if ((std::int64_t) send.to.getRaw() == channel.id)
                 {
                     // After the fader, the track's sound before its mute: the send's cut says whether it sends
                     // (updateAudibility()), so that a track soloed out still sends to a return that is soloed. Its level
                     // follows its automation and its track's modulators (addModulation(), as the track was compiled).
-                    const auto beforeFader = (bool) send[schema::sendPreFader];
-                    const auto sendID = getID (send, schema::sendID);
+                    const auto beforeFader = send.preFader;
+                    const auto sendID = (std::int64_t) send.id.getRaw();
                     const auto modulation = sendModulation.find (sendID);
                     inputs.push_back ({ places[other.id], nullptr, beforeFader, getSendLevel (send), nullptr, ! beforeFader,
                                         findCurve ((std::uint64_t) sendID, schema::sendLevelParameter),
@@ -1214,9 +1214,7 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
                 if (parent.hasProperty (schema::channelFader))
                     info.output = getID (parent, schema::trackID);
 
-        for (const auto& child : state)
-            if (child.hasType (schema::SEND))
-                info.sends.push_back (child);
+        info.sends = getSendValues (song, TrackID::fromRaw ((std::uint64_t) info.id));
 
         // A pad track plays its drum sampler's pad, after the sampler's track.
         if (state.hasProperty (schema::trackPad))
@@ -1240,7 +1238,7 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
 
             if (isReturn)
                 for (const auto& send : other.sends)
-                    if (getID (send, schema::sendTo) == info.id)
+                    if ((std::int64_t) send.to.getRaw() == info.id)
                         info.needs.push_back (other.id);
         }
 
@@ -1641,15 +1639,15 @@ void SongPlayer::leaveOutWhatIsNotHeard (engine::Plan& plan)
     plan.strips = std::move (kept);
 }
 
-std::shared_ptr<engine::SendLevel> SongPlayer::getSendLevel (const juce::ValueTree& sendState)
+std::shared_ptr<engine::SendLevel> SongPlayer::getSendLevel (const SendValue& send)
 {
-    const auto id = getID (sendState, schema::sendID);
+    const auto id = (std::int64_t) send.id.getRaw();
     auto& kept = sendLevels[id];
 
     if (kept == nullptr)
         kept = std::make_shared<engine::SendLevel>();
 
-    kept->setDecibels ((float) sendState.getProperty (schema::sendLevel, 0.0f));
+    kept->setDecibels (send.level);
     usedSends.insert (id);
     return kept;
 }
@@ -2201,12 +2199,16 @@ void SongPlayer::updateAudibility()
     // docs/design/decisions.md): its sends before its fader go on, and those after it are silent with it. What another
     // track's solo silences sends nothing; but a track that only a solo silences (not its mute) still sends to a return
     // that is soloed.
-    const auto sendGoesOn = [&] (const juce::ValueTree& state, const juce::ValueTree& send)
+    const auto sendGoesOn = [&] (const juce::ValueTree& state, const SendValue& send)
     {
         const auto heard = isHeard (state);
-        return heard || ((bool) send[schema::sendPreFader] && ! isSoloedOut (state))
-               || (! heard && ! getSwitches (state).muted && isSoloedReturn (getID (send, schema::sendTo)));
+        return heard || (send.preFader && ! isSoloedOut (state))
+               || (! heard && ! getSwitches (state).muted && isSoloedReturn ((std::int64_t) send.to.getRaw()));
     };
+
+    // A track's sends, by its element's ID.
+    const auto getSendsOf = [this] (const juce::ValueTree& state)
+    { return getSendValues (song, TrackID::fromRaw ((std::uint64_t) getID (state, schema::trackID))); };
 
     // Whether something still listens to a bus that isn't heard: a sidechain keyed from it, or a send of it that goes on
     // (one before its fader, while it is muted).
@@ -2215,8 +2217,8 @@ void SongPlayer::updateAudibility()
         if (keys.contains (getID (bus, schema::trackID)))
             return true;
 
-        for (const auto& child : bus)
-            if (child.hasType (schema::SEND) && sendGoesOn (bus, child))
+        for (const auto& send : getSendsOf (bus))
+            if (sendGoesOn (bus, send))
                 return true;
 
         return false;
@@ -2246,10 +2248,9 @@ void SongPlayer::updateAudibility()
             continue;
 
         // A track plays on, its devices too, whether it is heard or not; each of its sends as it goes on.
-        for (const auto& child : state)
-            if (child.hasType (schema::SEND))
-                if (const auto found = sendLevels.find (getID (child, schema::sendID)); found != sendLevels.end())
-                    found->second->setCut (! sendGoesOn (state, child));
+        for (const auto& send : getSendsOf (state))
+            if (const auto found = sendLevels.find ((std::int64_t) send.id.getRaw()); found != sendLevels.end())
+                found->second->setCut (! sendGoesOn (state, send));
 
         strip->getChannel().setAudible (isHeard (state) || playsForListener (state));
     }

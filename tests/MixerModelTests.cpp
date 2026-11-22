@@ -28,6 +28,7 @@
 #include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
+#include <functional>
 #include <iterator>
 
 namespace
@@ -472,37 +473,62 @@ TEST_CASE ("A send is the song's, to a return by its track, with its level and i
     auto& song = *tracks.song;
     const auto a = tracks.a;
     const auto reverb = phazite::addReturnWith (context, a, tracks.find ("phaziteReverb"));
-    const auto track = phazite::findTrackState (song, a);
-    const auto element = track.getChildWithName (schema::SEND);
     const auto sends = phazite::getSends (context, a);
 
+    // The send as the song writes it: the SEND of the track's element in the song whole (as a save takes it).
+    const auto written = [&song, a]
+    {
+        juce::ValueTree found;
+        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& parent)
+        {
+            for (const auto& child : parent)
+            {
+                if (child.hasType (schema::TRACK) && phazite::readID (child[schema::trackID]) == a.getRaw())
+                    found = child.getChildWithName (schema::SEND);
+                else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+                    visit (child);
+            }
+        };
+
+        visit (phazite::test::copyWholeSong (song));
+        return found;
+    };
+
     // The song's: to the return, by its track, at -6 dB, after the fader.
-    REQUIRE (element.isValid());
     REQUIRE (sends.size() == 1);
-    CHECK ((juce::int64) element[schema::sendID] == (juce::int64) sends[0].id.getRaw());
-    CHECK ((juce::int64) element[schema::sendTo] == (juce::int64) reverb.getRaw());
-    CHECK ((double) element[schema::sendLevel] == doctest::Approx (-6.0));
-    CHECK_FALSE (element.hasProperty (schema::sendPreFader));
+    const auto value = phazite::getSendValue (song, sends[0].id);
+    REQUIRE (value.has_value());
+    CHECK (value->from == a);
+    CHECK (value->to == reverb);
+    CHECK (value->level == doctest::Approx (-6.0f));
+    CHECK_FALSE (value->preFader);
+    REQUIRE (written().isValid());
+    CHECK ((juce::int64) written()[schema::sendID] == (juce::int64) sends[0].id.getRaw());
+    CHECK ((juce::int64) written()[schema::sendTo] == (juce::int64) reverb.getRaw());
+    CHECK ((double) written()[schema::sendLevel] == doctest::Approx (-6.0));
+    CHECK_FALSE (written().hasProperty (schema::sendPreFader));
     CHECK (phazite::getSendTarget (song, sends[0].id) == reverb);
+    CHECK (phazite::getSendTrack (song, sends[0].id) == a);
     REQUIRE (phazite::getSendTargets (context, a).size() == 1);
     CHECK (phazite::getSendTargets (context, a)[0].send.has_value());
 
     // Its level and its place before the fader are the song's; an undo takes the place back.
     phazite::getSendLevel (context, sends[0].id).setValue (phazite::decibelsToFaderPosition (-12.0f));
-    CHECK ((double) element[schema::sendLevel] == doctest::Approx (-12.0));
+    CHECK ((double) written()[schema::sendLevel] == doctest::Approx (-12.0));
     CHECK (phazite::getSendLevel (song, sends[0].id) == doctest::Approx (-12.0f).epsilon (0.01));
     CHECK_FALSE (phazite::isPreFader (song, sends[0].id));
     phazite::setPreFader (context, sends[0].id, true);
-    CHECK ((bool) element[schema::sendPreFader]);
+    CHECK ((bool) written()[schema::sendPreFader]);
     CHECK (phazite::isPreFader (song, sends[0].id));
     phazite::undo (song);
-    CHECK_FALSE (element.hasProperty (schema::sendPreFader));
+    CHECK_FALSE (written().hasProperty (schema::sendPreFader));
     CHECK_FALSE (phazite::isPreFader (song, sends[0].id));
 
     // Removed, the song's goes.
     phazite::removeSend (context, phazite::getSends (context, a)[0].id);
-    CHECK_FALSE (track.getChildWithName (schema::SEND).isValid());
+    CHECK_FALSE (written().isValid());
     CHECK (phazite::getSends (song, a).empty());
+    CHECK_FALSE (phazite::getSendValue (song, sends[0].id).has_value());
 }
 
 TEST_CASE ("A device's channel, its handle for an editor, and whether its controls open in a window of their own")

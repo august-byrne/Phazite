@@ -7,6 +7,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
@@ -156,8 +157,10 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
         return {};
     }
 
-    if (const auto send = findSendState (song, ref.device); send.isValid())
-        return ref.parameter == schema::sendLevelParameter ? found (ref, ParameterSource::send, send) : std::nullopt;
+    // A send's level, by the send's value: its element the send's track's, as a fader's is its channel's.
+    if (const auto send = getSendValue (song, ref.device))
+        return ref.parameter == schema::sendLevelParameter ? found (ref, ParameterSource::send, findTrackState (song, send->from))
+                                                           : std::nullopt;
 
     // A container's chain's volume and pan, and a band's crossover.
     if (const auto chain = findContainerChain (song, ref.device); chain.isValid())
@@ -212,7 +215,7 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
         case ParameterSource::pan:
             return readID (parameter.state, schema::channelFader) == id || readID (parameter.state, schema::channelVCA) == id;
         case ParameterSource::send:
-            return readID (parameter.state, schema::sendID) == id;
+            return findTrackSend (parameter.state, parameter.ref.device).has_value(); // on the track it was found on, one look
         case ParameterSource::modulator:
         case ParameterSource::macro:
             return readID (parameter.state, schema::modulatorID) == id;
@@ -372,7 +375,10 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
             return (float) state.getProperty (schema::channelPan, 0.0f);
 
         case ParameterSource::send:
-            return engine::decibelsToFaderPosition ((float) state.getProperty (schema::sendLevel, 0.0f));
+        {
+            const auto send = findTrackSend (state, parameter.ref.device); // on the track it was found on, one look
+            return engine::decibelsToFaderPosition (send.has_value() ? send->level : 0.0f);
+        }
 
         case ParameterSource::macro:
         {

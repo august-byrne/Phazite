@@ -41,10 +41,12 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/EngineContext.h"
@@ -69,6 +71,7 @@
 #include "model/versions/internal/VersionStore.h"
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
+#include "ui/components/Controls.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/playlist/TrackHeader.h"
@@ -689,6 +692,70 @@ TEST_CASE ("Performance gate: a device changed on one channel among many brings 
     }
 
     setSong (context, nullptr);
+}
+
+TEST_CASE ("Performance gate: a tick of a send's level control reads as many sends however many tracks and sends the song has")
+{
+    // A send's knob shows its level at each of the display ticker's ticks. Its handle, having found the send's level once,
+    // checks that the send is still on the track it found it on and reads its level there, one look among that track's sends
+    // each (model/devices/internal/Parameters.h: FoundParameter), never a walk of the song's tracks; a strip's knob, whose
+    // send may not be there yet, also finds it among its track's sends first (model/mixer/MixerModel.h: getSendLevelTo()).
+    // Counted as sends read into values (SendsValue.h: countSendsRead()), on songs of 4 tracks and of 40, each sending to 4
+    // returns, for the last track's send to the third return: a strip's knob and a knob of the send by its ID.
+    const auto countFor = [] (int numTracks)
+    {
+        auto song = phazite::createSong();
+        const auto tracks = phazite::ensureTracks (*song, numTracks);
+        std::vector<phazite::TrackID> returns;
+
+        for (const auto* name : { "A", "B", "C", "D" })
+            returns.push_back (phazite::addReturnTrack (*song, name, nullptr));
+
+        std::vector<phazite::DeviceID> lastSends;
+
+        for (const auto track : tracks)
+        {
+            lastSends.clear();
+
+            for (const auto returnTrack : returns)
+                lastSends.push_back (phazite::addSend (*song, track, returnTrack, false));
+        }
+
+        REQUIRE (lastSends.size() == 4);
+        REQUIRE (lastSends[2].isValid());
+        phazite::ProjectContext context { phazite::test::getEngineContext() };
+        setSong (context, song.get());
+
+        const auto countTick = [] (phazite::ParameterHandle handle)
+        {
+            REQUIRE (handle.isValid());
+            phazite::ui::Knob knob ("Send level", 0.0);
+            phazite::ui::ParameterAttachment attachment (knob);
+            attachment.setParameter (std::move (handle));
+            attachment.update(); // its first tick finds the send's level
+            const auto before = phazite::countSendsRead();
+            attachment.update();
+            return phazite::countSendsRead() - before;
+        };
+
+        const auto counts = std::pair (countTick (phazite::getSendLevelTo (context, tracks.back(), returns[2])),
+                                       countTick (phazite::getSendLevel (context, lastSends[2])));
+        setSong (context, nullptr);
+        return counts;
+    };
+
+    const auto [smallStrip, smallByID] = countFor (4);
+    const auto [bigStrip, bigByID] = countFor (40);
+    MESSAGE ("Sends read by a tick: a strip's knob " << smallStrip << " (4 tracks), " << bigStrip << " (40 tracks); by its ID " << smallByID
+                                                     << ", " << bigByID);
+    CHECK (bigStrip == smallStrip);
+    CHECK (bigByID == smallByID);
+
+    // Measured 2026-11-22: a tick asks for its parameter four times (ParameterAttachment::update()), each a look for the send
+    // on its track (one send read), and reads its level once (one more): 5 by its ID; a strip's knob also finds its send among
+    // its track's four at each ask (16 more): 21.
+    CHECK (smallStrip <= 21);
+    CHECK (smallByID <= 5);
 }
 
 TEST_CASE ("Performance gate: what an edit repaints in the playlist")

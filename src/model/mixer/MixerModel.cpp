@@ -22,6 +22,8 @@
 #include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
+#include <optional>
+#include <vector>
 
 namespace phazite
 {
@@ -65,21 +67,27 @@ namespace
         juce::StringArray names;
 
         for (const auto track : getTrackIDs (song))
-            for (const auto send : getSends (song, track))
-                if (getSendTarget (song, send) == returnTrack)
+            for (const auto& send : getSendValues (song, track))
+                if (send.to == returnTrack)
                     names.addIfNotAlreadyThere (getTrackName (song, track));
 
         return names;
     }
 
-    // A track's send to a return, or none.
-    DeviceID findSendTo (const Song& song, TrackID from, TrackID returnTrack)
+    // A track's send to a return (its first), or none.
+    std::optional<SendValue> findSendValueTo (const Song& song, TrackID from, TrackID returnTrack)
     {
-        for (const auto send : getSends (song, from))
-            if (getSendTarget (song, send) == returnTrack)
+        for (const auto& send : getSendValues (song, from))
+            if (send.to == returnTrack)
                 return send;
 
-        return {};
+        return std::nullopt;
+    }
+
+    DeviceID findSendTo (const Song& song, TrackID from, TrackID returnTrack)
+    {
+        const auto send = findSendValueTo (song, from, returnTrack);
+        return send.has_value() ? send->id : DeviceID();
     }
 
     // Whether one channel's sound reaches another's: through a send to a return, or by being in a bus folder.
@@ -545,8 +553,8 @@ std::vector<Send> getSends (const ProjectContext& context, TrackID id)
     std::vector<Send> sends;
 
     if (auto* song = findSong (context))
-        for (const auto send : getSends (*song, id))
-            sends.push_back ({ send, getTrackName (*song, getSendTarget (*song, send)), isPreFader (*song, send) });
+        for (const auto& send : getSendValues (*song, id))
+            sends.push_back ({ send.id, getTrackName (*song, send.to), send.preFader });
 
     return sends;
 }
@@ -607,8 +615,8 @@ std::vector<SendTarget> getSendTargets (const ProjectContext& context, TrackID i
 
         SendTarget target { returnTrack, getTrackName (*song, returnTrack), std::nullopt };
 
-        if (const auto send = findSendTo (*song, id, returnTrack); send.isValid())
-            target.send = Send { send, getTrackName (*song, returnTrack), isPreFader (*song, send) };
+        if (const auto send = findSendValueTo (*song, id, returnTrack); send.has_value() && send->id.isValid())
+            target.send = Send { send->id, getTrackName (*song, returnTrack), send->preFader };
 
         targets.push_back (target);
     }
@@ -775,9 +783,9 @@ std::vector<Connection> getConnections (const ProjectContext& context)
         if (! isFolder (*song, track) || isBus (*song, track))
             connections.push_back ({ Connection::Kind::output, track, getOutputBus (*song, track), {} });
 
-        for (const auto send : getSends (*song, track))
-            if (const auto target = getSendTarget (*song, send); isReturnTrack (*song, target))
-                connections.push_back ({ Connection::Kind::send, track, target, send });
+        for (const auto& send : getSendValues (*song, track))
+            if (isReturnTrack (*song, send.to))
+                connections.push_back ({ Connection::Kind::send, track, send.to, send.id });
 
         for (const auto device : getDevices (*song, track))
             if (hearsSidechain (*song, device))

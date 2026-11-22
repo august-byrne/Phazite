@@ -6,6 +6,7 @@
 #include "model/base/internal/NotesArea.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsArea.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongValues.h"
 
 #include <algorithm>
@@ -17,6 +18,10 @@ namespace
     // Whether the song holds its modulators and macros beside its tree: not yet (modulation's first piece, roadmap step
     // S5.20: the tree is their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
     constexpr bool modulationHeldBesideTheTree = false;
+
+    // Whether the song holds its sends beside its tree: not yet (the sends' first piece, roadmap step S5.20: the tree is
+    // their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
+    constexpr bool sendsHeldBesideTheTree = false;
 } // namespace
 
 std::uint64_t findLargestIDHeld (const Song& song)
@@ -40,11 +45,17 @@ void forEachNameableIDHeld (const Song& song, const std::function<void (std::uin
     // modulator's and macro's: ModulationValue.h) only once the song holds it beside its tree: until then the tree holds
     // them, which the caller's walk of the tree finds (Schema.h: holdsID() of a MODULATOR and a MACRO), and reading them
     // again here would cost every removal a read of the song's whole modulation. Modulation's switch (its third piece)
-    // turns modulationHeldBesideTheTree on and reads the area's value in place of the tree's.
+    // turns modulationHeldBesideTheTree on and reads the area's value in place of the tree's. The sends' (each send's ID:
+    // SendsValue.h, what a curve, a MIDI link and a modulation name a send's level by) the same: until their switch the tree
+    // holds them (holdsID() of a SEND), and the sends' switch turns sendsHeldBesideTheTree on, getSendsValue() then reading
+    // the area's value.
+    juce::ignoreUnused (song, each);
+
     if constexpr (modulationHeldBesideTheTree)
         forEachIDHeld (readModulationValue (song.getState()), each);
-    else
-        juce::ignoreUnused (song, each);
+
+    if constexpr (sendsHeldBesideTheTree)
+        forEachIDHeld (getSendsValue (song), each);
 }
 
 std::uint64_t countHeldID (std::uint64_t largest, std::uint64_t held) noexcept
