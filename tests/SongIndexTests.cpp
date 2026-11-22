@@ -31,7 +31,7 @@ using phazite::test::lasting;
 
 namespace
 {
-// Whether a note is found in its clip by its ID: in the clip's value (SongValues.h).
+// Whether a note is found in its clip by its ID: in the clip's value (ClipNotesValue.h).
 bool findsNote (const phazite::Song& song, const phazite::NoteRef& ref)
 {
     return phazite::hasNote (song, ref);

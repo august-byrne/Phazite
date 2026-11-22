@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "VersionsModel.h"
 #include "internal/ApplySong.h"
+#include "internal/AreaClashes.h"
 #include "internal/SongMerge.h"
 #include "internal/VersionHistory.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -2092,109 +2093,6 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
 
 namespace
 {
-    // Whether a path in the song (SongMerge.h: findByPath()) ends at a clip or goes through one.
-    bool isPathThroughClip (const juce::StringArray& path)
-    {
-        const auto clipStep = schema::CLIP.toString() + ":";
-        return std::any_of (path.begin(), path.end(), [&clipStep] (const juce::String& step) { return step.startsWith (clipStep); });
-    }
-
-    // The clip a path ends at, by the ID its last step names ("CLIP:<id>"), on the track the path names before it, as the song
-    // holds it now: none for a path that ends elsewhere, or a clip the song hasn't there.
-    std::optional<ClipID> findClipOnPath (const Song& song, const juce::StringArray& path)
-    {
-        const auto clipStep = schema::CLIP.toString() + ":";
-
-        if (path.size() < 2 || ! path[path.size() - 1].startsWith (clipStep))
-            return std::nullopt;
-
-        const auto clip = ClipID::fromRaw ((std::uint64_t) path[path.size() - 1].substring (clipStep.length()).getLargeIntValue());
-        auto trackPath = path;
-        trackPath.remove (trackPath.size() - 1);
-        const auto track = findByPath (song.getState(), trackPath);
-
-        if (! clip.isValid() || ! track.hasType (schema::TRACK) || getClipTrack (song, clip) != getTrackID (track))
-            return std::nullopt;
-
-        return clip;
-    }
-
-    // Whether a path in the song goes into its tempo map: its first step the song's TEMPOMAP, which the song holds as a value
-    // beside its tree (model/base/internal/SongValues.h), its tree's element an empty place.
-    bool isPathInTempoMap (const juce::StringArray& path)
-    {
-        return ! path.isEmpty() && path[0].startsWith (schema::TEMPOMAP.toString() + ":");
-    }
-
-    // A clash in the song's tempo map, chosen through its value (model/base/internal/TempoMapValue.h), as the clash's
-    // property or element is chosen elsewhere in the song: an entry (the path's last step, "TEMPO:16.000000") given the
-    // property's value chosen, or taken out where the side chosen held no entry there (a property of a tempo both lines
-    // added, chosen as what was before: known bug 239's tempo map), or put back as that side holds it where an earlier
-    // choice took it out; an entry one side added or took away made as the side chosen holds it, or taken out. Refused
-    // (false, nothing written) for a clash on the TEMPOMAP itself, which holds nothing of its own, for an element that
-    // isn't an entry of the kind its step names, and where the map would not hold what was chosen as the song holds a map
-    // (isHeldAsTheSongHoldsIt(): a kind left without an entry, a number out of its range), which a merge of two songs
-    // Phazite holds never makes, but a commit's song may come from anyone (tests/FuzzTests.cpp chooses every clash of a
-    // damaged merge). Through the tempo map's one setter, in the choice's step.
-    bool chooseTempoMapClash (Song& song, const VersionHistory::Merge& merging, const MergeClash& clash, int value)
-    {
-        auto* values = song.getValues();
-
-        if (values == nullptr || clash.path.size() != 2)
-            return false;
-
-        const auto& step = clash.path[1];
-        const auto& held = values->tempoMap.get();
-        std::optional<TempoMapValue> next;
-
-        if (clash.property.isValid())
-        {
-            // The side chosen's map (each side a whole song: the parting's, this line's before the merge, the other line's; one
-            // without a TEMPOMAP reads as the map a song without one plays), where that song could be read.
-            const juce::ValueTree* sides[] = { &merging.base, &merging.before, &merging.theirs };
-            const auto& side = *sides[value];
-            const auto canRead = side.hasType (schema::PHAZITE);
-            const auto sideMap = readTempoMapValue (side.getChildWithName (schema::TEMPOMAP));
-            const juce::var* chosen[] = { &clash.base, &clash.ours, &clash.theirs };
-
-            if (canRead && ! holdsEntryAt (sideMap, step))
-            {
-                next = withEntryAt (held, step, sideMap); // none there on that side: taken out
-            }
-            else
-            {
-                auto set = held;
-
-                // None there in the song (an earlier choice took it out): the side's, as it holds it, first.
-                if (! setTempoMapProperty (set, step, clash.property, *chosen[value]))
-                {
-                    const auto put = canRead ? withEntryAt (held, step, sideMap) : std::nullopt;
-
-                    if (! put.has_value())
-                        return false;
-
-                    set = *put;
-
-                    if (! setTempoMapProperty (set, step, clash.property, *chosen[value]))
-                        return false;
-                }
-
-                next = set;
-            }
-        }
-        else
-        {
-            const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
-            next = withEntryAt (held, step, *elements[value]);
-        }
-
-        if (! next.has_value() || ! isHeldAsTheSongHoldsIt (*next))
-            return false;
-
-        values->setTempoMap (song, std::move (*next));
-        return true;
-    }
-
     // The tempo map's choices set its value, never leaving its entries to the keeper of the song's values (SongValues.h: its
     // safety net): checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp).
     struct NoTempoMapTakenIn
@@ -2218,6 +2116,67 @@ namespace
 
         JUCE_DECLARE_NON_COPYABLE (NoTempoMapTakenIn)
     };
+
+    // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
+    // this order: the tempo map (a path into the song's TEMPOMAP), a note (a note's property: its path goes through its clip,
+    // so before the clip's), a clip (a clip's property, or any other path through a clip, refused). What the first whose path
+    // it is did with it; none of them (notTheArea) for a clash in the song's tree.
+    AreaChoice chooseInAreas (Song& song, const MergeClash& clash, int value, const MergeSides& sides)
+    {
+        if (const auto choice = chooseTempoMapClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice;
+
+        if (const auto choice = chooseNoteClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice;
+
+        if (const auto choice = chooseClipClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice;
+
+        return AreaChoice::notTheArea;
+    }
+
+    // A clash in the song's tree (no area's: chooseInAreas()), chosen in it, in the history of the choice's step: a property
+    // given the value chosen, or taken away where that side had none; an element replaced whole by the side chosen's, in its
+    // place, or taken out where that side had none. Whether it was chosen (false for a path that names nothing in the song).
+    bool chooseInTree (Song& song, const MergeClash& clash, int value)
+    {
+        auto* undo = &song.getUndoManager();
+
+        if (clash.property.isValid())
+        {
+            const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+            auto element = findByPath (song.getState(), clash.path);
+
+            if (! element.isValid())
+                return false;
+
+            if (values[value]->isVoid())
+                element.removeProperty (clash.property, undo);
+            else
+                element.setProperty (clash.property, *values[value], undo);
+
+            return true;
+        }
+
+        auto parentPath = clash.path;
+        parentPath.remove (parentPath.size() - 1);
+        auto parent = findByPath (song.getState(), parentPath);
+
+        if (! parent.isValid())
+            return false;
+
+        const auto existing = findByPath (song.getState(), clash.path);
+        const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+        const auto place = existing.isValid() ? parent.indexOf (existing) : -1;
+
+        if (existing.isValid())
+            parent.removeChild (existing, undo);
+
+        if (elements[value]->isValid())
+            parent.addChild (elements[value]->createCopy(), place, undo);
+
+        return true;
+    }
 } // namespace
 
 bool chooseClash (ProjectContext& context, int index, int value)
@@ -2239,138 +2198,14 @@ bool chooseClash (ProjectContext& context, int index, int value)
     const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
     const NoTempoMapTakenIn byTheValueAlone (*song);
 
-    if (isPathInTempoMap (clash.path))
-    {
-        if (! chooseTempoMapClash (*song, merging, clash, value))
-            return false;
-    }
-    else if (clash.property.isValid())
-    {
-        const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
-        const auto noteStep = schema::NOTE.toString() + ":";
+    // Each area the song holds as a value beside its tree asked first; a clash none of them has, in the song's tree.
+    const auto inAreas = chooseInAreas (*song, clash, value, { merging.base, merging.before, merging.theirs });
 
-        // A note's value (its path's last step its type and ID, in a clip), which the merge reported once, for its alias
-        // group's keeper (SongMerge.h): set through the notes' code, which gives it to every clip of the group, as the group
-        // holds the same notes.
-        if (auto clipPath = clash.path; clipPath.size() > 1 && clash.path[clash.path.size() - 1].startsWith (noteStep))
-        {
-            clipPath.remove (clipPath.size() - 1);
+    if (inAreas == AreaChoice::refused)
+        return false;
 
-            // The clip by the ID its step names ("CLIP:<id>"), on the track the path names before it, as the song holds it now.
-            const auto clipStep = schema::CLIP.toString() + ":";
-            const auto& last = clipPath[clipPath.size() - 1];
-            const auto clip = last.startsWith (clipStep)
-                                  ? ClipID::fromRaw ((std::uint64_t) last.substring (clipStep.length()).getLargeIntValue())
-                                  : ClipID();
-            auto trackPath = clipPath;
-            trackPath.remove (trackPath.size() - 1);
-
-            if (const auto track = findByPath (song->getState(), trackPath);
-                clip.isValid() && track.hasType (schema::TRACK) && getClipTrack (*song, clip) == getTrackID (track))
-            {
-                const auto note =
-                    NoteID::fromRaw ((std::uint64_t) clash.path[clash.path.size() - 1].substring (noteStep.length()).getLargeIntValue());
-
-                if (! setNoteValue (*song, { clip, note }, clash.property, *values[value]))
-                    return false;
-            }
-            else
-            {
-                return false; // no clip there, so no note
-            }
-        }
-        else if (const auto clip = findClipOnPath (*song, clash.path); clip.has_value())
-        {
-            // A clip's own property (its path's last step its type and ID, on the track the path names before it), set
-            // through the clips' code; what the audio clips of an alias group share (AudioClips.h: shareTheSound()), which
-            // the merge reported once, for the group's keeper, in every clip of the group, as an edit through one of them
-            // sets it. Never its ID or its kind, which name and make it; nor a property that isn't a clip's.
-            const auto held = getClipValue (*song, *clip);
-
-            // Refused: a clash on a clip's ID or its kind, on a property that isn't a clip's, or (below) on an element inside a
-            // clip other than a note. A merge of two songs Phazite holds makes none of them (a clip's ID names it and its kind
-            // makes it; what a clip holds besides its notes merges as lists), but this is no assertion: a commit's song may come
-            // from anyone who shares the Versions folder, and the fuzz test chooses every clash of a damaged merge
-            // (tests/FuzzTests.cpp). The caller sees false, and the choice stays as it was.
-            if (! held.has_value() || clash.property == schema::clipID || clash.property == schema::clipKind)
-                return false;
-
-            if (auto chosen = *held; ! setClipProperty (chosen, clash.property, *values[value]))
-                return false;
-
-            const auto shared = held->isAudio() && isSharedInAliasGroup (clash.property);
-            std::vector<ClipValue> chosen;
-
-            for (const auto each : shared ? getAliasClips (*song, *clip) : std::vector<ClipID> { *clip })
-            {
-                auto given = getClipValue (*song, each);
-
-                if (! given.has_value())
-                    continue;
-
-                setClipProperty (*given, clash.property, *values[value]);
-
-                // Nothing written where a clip wouldn't hold the value chosen as it is (a start before the song's, a MIDI
-                // clip's length under the shortest, a property of the other kind of clip's: Clips.h, getClipValueAsSet()):
-                // what it would hold compared with it, set again, as the value compares (a number exactly, text exactly),
-                // its length too, which an audio clip's value doesn't compare. The choice stays as it was.
-                const auto asSet = getClipValueAsSet (*song, *given);
-
-                if (! asSet.has_value())
-                    return false;
-
-                auto again = *asSet;
-                setClipProperty (again, clash.property, *values[value]);
-
-                if (! (again == *asSet) || again.length != asSet->length)
-                    return false;
-
-                chosen.push_back (*given);
-            }
-
-            for (const auto& each : chosen)
-                setClip (*song, each);
-        }
-        else
-        {
-            auto element = findByPath (song->getState(), clash.path);
-
-            // Nothing inside a clip but its notes has a property a merge reports (its markers and controllers' values merge
-            // as lists): a path through one names nothing to set, refused as a clash on a clip's ID is (above).
-            if (! element.isValid() || isPathThroughClip (clash.path))
-                return false;
-
-            if (values[value]->isVoid())
-                element.removeProperty (clash.property, undo);
-            else
-                element.setProperty (clash.property, *values[value], undo);
-        }
-    }
-    else
-    {
-        auto parentPath = clash.path;
-        parentPath.remove (parentPath.size() - 1);
-
-        // A whole element in a clip, which no merge reports (what is merged whole is a curve, the chord lane, the key set
-        // last and a MIDI link, none of them a clip's): none to replace, refused as a clash on a clip's ID is (above).
-        if (isPathThroughClip (clash.path))
-            return false;
-
-        auto parent = findByPath (song->getState(), parentPath);
-
-        if (! parent.isValid())
-            return false;
-
-        const auto existing = findByPath (song->getState(), clash.path);
-        const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
-        const auto place = existing.isValid() ? parent.indexOf (existing) : -1;
-
-        if (existing.isValid())
-            parent.removeChild (existing, undo);
-
-        if (elements[value]->isValid())
-            parent.addChild (elements[value]->createCopy(), place, undo);
-    }
+    if (inAreas == AreaChoice::notTheArea && ! chooseInTree (*song, clash, value))
+        return false;
 
     // What the value chosen names that the song took away since (a send to a return deleted here, a sidechain from a track
     // gone), as the merge itself did; and which value it has, which Undo puts back with the song's.

@@ -15,6 +15,7 @@
 #include "model/devices/internal/DrumKit.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
+#include "model/versions/internal/AreaClashes.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -186,7 +187,7 @@ namespace
     }
 
     // The MIDI clips that an edit, or a reading of many notes, names: each found in the song's clips' area by its ID, without a
-    // copy (SongValues.h: SongClips), the area as it was as this was made held meanwhile, so that what is found stays valid
+    // copy (ClipsValue.h: SongClips), the area as it was as this was made held meanwhile, so that what is found stays valid
     // while the edit changes the song; a clip's place, length, offset and alias group read from there once for all of its
     // notes, not once for each. What grows a clip it found (growToHold()) reads it again (readAgain()).
     class MidiClips
@@ -241,7 +242,7 @@ namespace
     }
 
     //==============================================================================
-    // The song's notes: each clip's value (SongValues.h: ClipNotes), the same in each of its aliases, which the song holds
+    // The song's notes: each clip's value (ClipNotesValue.h: ClipNotes), the same in each of its aliases, which the song holds
     // beside its tree (getClipNotesValue(), setClipNotesValue()); one note alone is found in its clip's value by its ID.
 
     std::uint64_t notesRead = 0; // message thread
@@ -2620,5 +2621,36 @@ void addNoteCommands (CommandRegistry& registry, Selection& selection, std::func
                     .isEnabled = [&selection] { return hasSelectedNotes (selection); },
                     .undoTarget = undoTarget,
                     .keyPriority = Command::notePriority });
+}
+
+//==============================================================================
+AreaChoice chooseNoteClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
+{
+    const auto noteStep = schema::NOTE.toString() + ":";
+
+    // A note's value (its path's last step its type and ID, in a clip), which the merge reported once, for its alias
+    // group's keeper (SongMerge.h): set through the notes' code, which gives it to every clip of the group, as the group
+    // holds the same notes.
+    if (! clash.property.isValid() || clash.path.size() <= 1 || ! clash.path[clash.path.size() - 1].startsWith (noteStep))
+        return AreaChoice::notTheArea;
+
+    const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+    auto clipPath = clash.path;
+    clipPath.remove (clipPath.size() - 1);
+
+    // The clip by the ID its step names ("CLIP:<id>"), on the track the path names before it, as the song holds it now.
+    const auto clipStep = schema::CLIP.toString() + ":";
+    const auto& last = clipPath[clipPath.size() - 1];
+    const auto clip =
+        last.startsWith (clipStep) ? ClipID::fromRaw ((std::uint64_t) last.substring (clipStep.length()).getLargeIntValue()) : ClipID();
+    auto trackPath = clipPath;
+    trackPath.remove (trackPath.size() - 1);
+
+    if (const auto track = findByPath (song.getState(), trackPath);
+        ! clip.isValid() || ! track.hasType (schema::TRACK) || getClipTrack (song, clip) != getTrackID (track))
+        return AreaChoice::refused; // no clip there, so no note
+
+    const auto note = NoteID::fromRaw ((std::uint64_t) clash.path[clash.path.size() - 1].substring (noteStep.length()).getLargeIntValue());
+    return setNoteValue (song, { clip, note }, clash.property, *values[value]) ? AreaChoice::chosen : AreaChoice::refused;
 }
 } // namespace phazite

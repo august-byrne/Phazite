@@ -638,6 +638,191 @@ std::vector<std::string> findSongProblems (const Song& song, const schema::Table
     return checker.problems;
 }
 
+namespace
+{
+    std::string clipText (std::uint64_t id)
+    {
+        return "values: clip " + std::to_string (id);
+    }
+
+    // The clips' area: no clip in the song's tree (its clips are the area's); the area's lists agree with its clips, and no
+    // alias group is of one clip; each clip on a track of the song that can hold it; and the audio clips of an alias group
+    // hold ONE sound (the same, not two alike).
+    void checkClipsValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const auto& clips = values.clips.get();
+
+        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::CLIP))
+                    problems.push_back (clipText ((std::uint64_t) (juce::int64) child[schema::clipID])
+                                        + " is an element in the song's tree");
+
+                visit (child);
+            }
+        };
+
+        visit (song.getState());
+
+        if (! holdsItsLists (clips))
+            problems.push_back ("values: the clips' lists (each track's, each alias group's) don't hold the clips the area holds");
+
+        if (hasGroupsOfOne (clips))
+            problems.push_back ("values: an alias group holds one clip alone");
+
+        std::map<std::uint64_t, ClipID> firstOfGroups;
+
+        for (const auto& [id, clip] : clips.clips)
+        {
+            if (const auto track = findTrackState (song, clip.track);
+                ! track.hasType (schema::TRACK) || isFolderState (track) || isReturnState (track))
+                problems.push_back (clipText (id) + " is on track " + std::to_string (clip.track.getRaw())
+                                    + ", which isn't a track of the song's that holds clips");
+
+            if (clip.link == 0)
+                continue;
+
+            const auto [first, isFirst] = firstOfGroups.try_emplace (clip.link, clip.id);
+
+            if (isFirst)
+                continue;
+
+            const auto* other = clips.find (first->second);
+
+            if (other == nullptr || other->kind != clip.kind || clip.isMidi())
+                continue; // the alias rule says it of the whole copy; a MIDI group's notes are the notes' rule's
+
+            if (! clip.sound.isSameAs (other->sound))
+                problems.push_back (clipText (id) + " of alias group " + std::to_string (clip.link) + " holds "
+                                    + (clip.sound == other->sound ? "a sound alike" : "another sound") + ", not clip "
+                                    + std::to_string (other->id.getRaw()) + "'s");
+        }
+    }
+
+    // The notes' area: a MIDI clip with its notes, an audio clip without; the MIDI clips of an alias group hold ONE value of
+    // notes (the same, not two alike); and the area holds the MIDI clips' values alone.
+    void checkNotesValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const auto& clips = values.clips.get();
+        const auto& notes = values.notes.get();
+        std::map<std::uint64_t, ClipID> firstOfGroups;
+
+        for (const auto& [id, clip] : clips.clips)
+        {
+            const auto* value = notes.find (clip.id);
+
+            if (clip.isAudio() && value != nullptr)
+                problems.push_back (clipText (id) + ", an audio clip, has a value of notes");
+
+            if (clip.isMidi() && value == nullptr)
+                problems.push_back (clipText (id) + ", a MIDI clip, has no value of notes");
+
+            if (clip.link == 0)
+                continue;
+
+            const auto [first, isFirst] = firstOfGroups.try_emplace (clip.link, clip.id);
+
+            if (isFirst)
+                continue;
+
+            const auto* other = clips.find (first->second);
+
+            if (other == nullptr || other->kind != clip.kind || ! clip.isMidi())
+                continue; // the alias rule says it of the whole copy; an audio group's sound is the clips' rule's
+
+            if (const auto* firstValue = notes.find (other->id);
+                firstValue != nullptr && value != nullptr && ! firstValue->isSameAs (*value))
+                problems.push_back (clipText (id) + " of alias group " + std::to_string (clip.link) + " holds "
+                                    + (*firstValue == *value ? "a value alike" : "another value") + ", not clip "
+                                    + std::to_string (other->id.getRaw()) + "'s");
+        }
+
+        for (const auto& entry : notes.clips)
+        {
+            const auto* clip = clips.find (ClipID::fromRaw (entry.first));
+
+            if (clip == nullptr || ! clip->isMidi())
+                problems.push_back ("values: a value of notes for clip " + std::to_string (entry.first)
+                                    + ", which isn't a MIDI clip of the song's");
+        }
+    }
+
+    // The tempo map's area: no entry of it in the song's tree, its TEMPOMAP there an empty place for it; each kind not empty
+    // and in the order of its beats; every number within its description's range (Schema.h), read here from the description.
+    void checkTempoMapValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> findEntries = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::TEMPO) || child.hasType (schema::TIMESIGNATURE))
+                    problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
+
+                findEntries (child);
+            }
+        };
+
+        findEntries (song.getState());
+
+        if (const auto map = song.getState().getChildWithName (schema::TEMPOMAP);
+            ! map.isValid() || map.getNumChildren() > 0 || map.getNumProperties() > 0)
+            problems.push_back ("values: the song's tree has no empty TEMPOMAP to write its tempo map in");
+
+        const auto& tempoMap = values.tempoMap.get();
+        const auto isWithin = [] (double number, const schema::PropertyDescription& property)
+        {
+            const auto& range = property.getRange();
+
+            if (! std::isfinite (number) || ! range.has_value())
+                return std::isfinite (number);
+
+            if (number < range->low || number > range->high || (range->whole && ! juce::exactlyEqual (std::round (number), number)))
+                return false;
+
+            return ! range->powersOfTwo || juce::exactlyEqual (std::exp2 (std::round (std::log2 (number))), number);
+        };
+
+        const auto checkKind = [&problems] (const auto& entries, const char* kind, const auto& isKept)
+        {
+            if (entries.empty())
+                problems.push_back (std::string ("values: the tempo map holds no ") + kind);
+
+            std::optional<BeatPosition> last;
+            size_t place = 0;
+
+            for (const auto& entry : entries)
+            {
+                if (last.has_value() && entry.beat < *last)
+                    problems.push_back (std::string ("values: the tempo map's ") + kind + " " + std::to_string (place)
+                                        + " is before the one before it");
+
+                if (! isKept (entry))
+                    problems.push_back (std::string ("values: the tempo map's ") + kind + " " + std::to_string (place)
+                                        + " holds a number outside its description's range");
+
+                last = entry.beat;
+                ++place;
+            }
+        };
+
+        checkKind (tempoMap.tempos, "tempo",
+                   [&isWithin] (const TempoEntry& tempo)
+                   {
+                       return isWithin (tempo.beat.inBeats(), schema::mapBeat) && isWithin (tempo.bpm, schema::bpm)
+                              && isWithin ((double) tempo.curve, schema::tempoCurve);
+                   });
+        checkKind (tempoMap.signatures, "time signature",
+                   [&isWithin] (const SignatureEntry& signature)
+                   {
+                       return isWithin (signature.beat.inBeats(), schema::mapBeat)
+                              && isWithin ((double) signature.numerator, schema::numerator)
+                              && isWithin ((double) signature.denominator, schema::denominator);
+                   });
+    }
+} // namespace
+
 std::vector<std::string> findValueProblems (const Song& song)
 {
     std::vector<std::string> problems;
@@ -646,158 +831,10 @@ std::vector<std::string> findValueProblems (const Song& song)
     if (values == nullptr)
         return problems;
 
-    const auto& clips = values->clips.get();
-    const auto& notes = values->notes.get();
-    const auto clipText = [] (std::uint64_t id) { return "values: clip " + std::to_string (id); };
-
-    // No clip in the song's tree: its clips are the area's.
-    const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
-    {
-        for (const auto& child : element)
-        {
-            if (child.hasType (schema::CLIP))
-                problems.push_back (clipText ((std::uint64_t) (juce::int64) child[schema::clipID]) + " is an element in the song's tree");
-
-            visit (child);
-        }
-    };
-
-    visit (song.getState());
-
-    // The area's lists agree with its clips, and no alias group is of one clip.
-    if (! holdsItsLists (clips))
-        problems.push_back ("values: the clips' lists (each track's, each alias group's) don't hold the clips the area holds");
-
-    if (hasGroupsOfOne (clips))
-        problems.push_back ("values: an alias group holds one clip alone");
-
-    // Each clip on a track of the song that can hold it; a MIDI clip with its notes, an audio clip without; and the clips of an
-    // alias group hold ONE value of notes (the same, not two alike), or audio clips one sound.
-    std::map<std::uint64_t, ClipID> firstOfGroups;
-
-    for (const auto& [id, clip] : clips.clips)
-    {
-        if (const auto track = findTrackState (song, clip.track);
-            ! track.hasType (schema::TRACK) || isFolderState (track) || isReturnState (track))
-            problems.push_back (clipText (id) + " is on track " + std::to_string (clip.track.getRaw())
-                                + ", which isn't a track of the song's that holds clips");
-
-        const auto* value = notes.find (clip.id);
-
-        if (clip.isAudio() && value != nullptr)
-            problems.push_back (clipText (id) + ", an audio clip, has a value of notes");
-
-        if (clip.isMidi() && value == nullptr)
-            problems.push_back (clipText (id) + ", a MIDI clip, has no value of notes");
-
-        if (clip.link == 0)
-            continue;
-
-        const auto [first, isFirst] = firstOfGroups.try_emplace (clip.link, clip.id);
-
-        if (isFirst)
-            continue;
-
-        const auto* other = clips.find (first->second);
-
-        if (other == nullptr || other->kind != clip.kind)
-            continue; // the alias rule says it of the whole copy
-
-        const auto group = " of alias group " + std::to_string (clip.link);
-
-        if (clip.isMidi())
-        {
-            if (const auto* firstValue = notes.find (other->id);
-                firstValue != nullptr && value != nullptr && ! firstValue->isSameAs (*value))
-                problems.push_back (clipText (id) + group + " holds " + (*firstValue == *value ? "a value alike" : "another value")
-                                    + ", not clip " + std::to_string (other->id.getRaw()) + "'s");
-        }
-        else if (! clip.sound.isSameAs (other->sound))
-        {
-            problems.push_back (clipText (id) + group + " holds " + (clip.sound == other->sound ? "a sound alike" : "another sound")
-                                + ", not clip " + std::to_string (other->id.getRaw()) + "'s");
-        }
-    }
-
-    // The notes' area holds the MIDI clips' values alone.
-    for (const auto& entry : notes.clips)
-    {
-        const auto* clip = clips.find (ClipID::fromRaw (entry.first));
-
-        if (clip == nullptr || ! clip->isMidi())
-            problems.push_back ("values: a value of notes for clip " + std::to_string (entry.first)
-                                + ", which isn't a MIDI clip of the song's");
-    }
-
-    // The tempo map's: no entry of it in the song's tree, its TEMPOMAP there an empty place for it; each kind not empty and
-    // in the order of its beats; every number within its description's range (Schema.h), read here from the description.
-    const std::function<void (const juce::ValueTree&)> findEntries = [&] (const juce::ValueTree& element)
-    {
-        for (const auto& child : element)
-        {
-            if (child.hasType (schema::TEMPO) || child.hasType (schema::TIMESIGNATURE))
-                problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
-
-            findEntries (child);
-        }
-    };
-
-    findEntries (song.getState());
-
-    if (const auto map = song.getState().getChildWithName (schema::TEMPOMAP);
-        ! map.isValid() || map.getNumChildren() > 0 || map.getNumProperties() > 0)
-        problems.push_back ("values: the song's tree has no empty TEMPOMAP to write its tempo map in");
-
-    const auto& tempoMap = values->tempoMap.get();
-    const auto isWithin = [] (double number, const schema::PropertyDescription& property)
-    {
-        const auto& range = property.getRange();
-
-        if (! std::isfinite (number) || ! range.has_value())
-            return std::isfinite (number);
-
-        if (number < range->low || number > range->high || (range->whole && ! juce::exactlyEqual (std::round (number), number)))
-            return false;
-
-        return ! range->powersOfTwo || juce::exactlyEqual (std::exp2 (std::round (std::log2 (number))), number);
-    };
-
-    const auto checkKind = [&problems] (const auto& entries, const char* kind, const auto& isKept)
-    {
-        if (entries.empty())
-            problems.push_back (std::string ("values: the tempo map holds no ") + kind);
-
-        std::optional<BeatPosition> last;
-        size_t place = 0;
-
-        for (const auto& entry : entries)
-        {
-            if (last.has_value() && entry.beat < *last)
-                problems.push_back (std::string ("values: the tempo map's ") + kind + " " + std::to_string (place)
-                                    + " is before the one before it");
-
-            if (! isKept (entry))
-                problems.push_back (std::string ("values: the tempo map's ") + kind + " " + std::to_string (place)
-                                    + " holds a number outside its description's range");
-
-            last = entry.beat;
-            ++place;
-        }
-    };
-
-    checkKind (tempoMap.tempos, "tempo",
-               [&isWithin] (const TempoEntry& tempo)
-               {
-                   return isWithin (tempo.beat.inBeats(), schema::mapBeat) && isWithin (tempo.bpm, schema::bpm)
-                          && isWithin ((double) tempo.curve, schema::tempoCurve);
-               });
-    checkKind (tempoMap.signatures, "time signature",
-               [&isWithin] (const SignatureEntry& signature)
-               {
-                   return isWithin (signature.beat.inBeats(), schema::mapBeat) && isWithin ((double) signature.numerator, schema::numerator)
-                          && isWithin ((double) signature.denominator, schema::denominator);
-               });
-
+    // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map.
+    checkClipsValue (song, *values, problems);
+    checkNotesValue (song, *values, problems);
+    checkTempoMapValue (song, *values, problems);
     return problems;
 }
 

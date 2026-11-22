@@ -8,6 +8,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
+#include "model/versions/internal/AreaClashes.h"
 
 #include <juce_events/juce_events.h>
 
@@ -737,5 +738,93 @@ void addTempoCommands (CommandRegistry& registry, Selection& selection)
                     .perform = withSong (selection, removeTempoChanges),
                     .isEnabled = ifSong (selection, hasTempoChanges),
                     .undoTarget = undoTarget });
+}
+
+//==============================================================================
+namespace
+{
+    // Whether a path in the song goes into its tempo map: its first step the song's TEMPOMAP, which the song holds as a value
+    // beside its tree (model/base/internal/SongValues.h), its tree's element an empty place.
+    bool isPathInTempoMap (const juce::StringArray& path)
+    {
+        return ! path.isEmpty() && path[0].startsWith (schema::TEMPOMAP.toString() + ":");
+    }
+
+    // A clash in the song's tempo map, chosen through its value (model/base/internal/TempoMapValue.h), as the clash's
+    // property or element is chosen elsewhere in the song: an entry (the path's last step, "TEMPO:16.000000") given the
+    // property's value chosen, or taken out where the side chosen held no entry there (a property of a tempo both lines
+    // added, chosen as what was before: known bug 239's tempo map), or put back as that side holds it where an earlier
+    // choice took it out; an entry one side added or took away made as the side chosen holds it, or taken out. Refused
+    // (false, nothing written) for a clash on the TEMPOMAP itself, which holds nothing of its own, for an element that
+    // isn't an entry of the kind its step names, and where the map would not hold what was chosen as the song holds a map
+    // (isHeldAsTheSongHoldsIt(): a kind left without an entry, a number out of its range), which a merge of two songs
+    // Phazite holds never makes, but a commit's song may come from anyone (tests/FuzzTests.cpp chooses every clash of a
+    // damaged merge). Through the tempo map's one setter, in the choice's step.
+    bool chooseInTempoMap (Song& song, const MergeSides& merging, const MergeClash& clash, int value)
+    {
+        auto* values = song.getValues();
+
+        if (values == nullptr || clash.path.size() != 2)
+            return false;
+
+        const auto& step = clash.path[1];
+        const auto& held = values->tempoMap.get();
+        std::optional<TempoMapValue> next;
+
+        if (clash.property.isValid())
+        {
+            // The side chosen's map (each side a whole song: the parting's, this line's before the merge, the other line's; one
+            // without a TEMPOMAP reads as the map a song without one plays), where that song could be read.
+            const juce::ValueTree* sides[] = { &merging.base, &merging.before, &merging.theirs };
+            const auto& side = *sides[value];
+            const auto canRead = side.hasType (schema::PHAZITE);
+            const auto sideMap = readTempoMapValue (side.getChildWithName (schema::TEMPOMAP));
+            const juce::var* chosen[] = { &clash.base, &clash.ours, &clash.theirs };
+
+            if (canRead && ! holdsEntryAt (sideMap, step))
+            {
+                next = withEntryAt (held, step, sideMap); // none there on that side: taken out
+            }
+            else
+            {
+                auto set = held;
+
+                // None there in the song (an earlier choice took it out): the side's, as it holds it, first.
+                if (! setTempoMapProperty (set, step, clash.property, *chosen[value]))
+                {
+                    const auto put = canRead ? withEntryAt (held, step, sideMap) : std::nullopt;
+
+                    if (! put.has_value())
+                        return false;
+
+                    set = *put;
+
+                    if (! setTempoMapProperty (set, step, clash.property, *chosen[value]))
+                        return false;
+                }
+
+                next = set;
+            }
+        }
+        else
+        {
+            const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+            next = withEntryAt (held, step, *elements[value]);
+        }
+
+        if (! next.has_value() || ! isHeldAsTheSongHoldsIt (*next))
+            return false;
+
+        values->setTempoMap (song, std::move (*next));
+        return true;
+    }
+} // namespace
+
+AreaChoice chooseTempoMapClash (Song& song, const MergeClash& clash, int value, const MergeSides& sides)
+{
+    if (! isPathInTempoMap (clash.path))
+        return AreaChoice::notTheArea;
+
+    return chooseInTempoMap (song, sides, clash, value) ? AreaChoice::chosen : AreaChoice::refused;
 }
 } // namespace phazite

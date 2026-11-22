@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What a MIDI clip holds, its notes and its controllers' values, as the notes' code (Notes.h), what plays them
 // (model/playback/internal/SongPlayer.h) and the playlist's read of their shapes walk them: a clip's value
-// (model/base/internal/SongValues.h: ClipNotes, which Notes.h's getClipNotesValue() gives), in Phazite's own types. The
+// (model/base/internal/ClipNotesValue.h: ClipNotes, which Notes.h's getClipNotesValue() gives), in Phazite's own types. The
 // conversion between the value and the clip's element, the one place that reads and writes NOTE and CONTROL by their names,
-// is in SongValues.h too.
+// is in ClipNotesValue.h too.
 #pragma once
 
 #include "model/base/internal/SongValues.h"

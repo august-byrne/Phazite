@@ -388,6 +388,12 @@ private:
     bool tempoToCompare = false;
     void tempoMapChanged() override;
 
+    // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
+    // where nothing of it was marked.
+    bool areNotesAsSaved() const;
+    bool areClipsAsSaved() const;
+    bool isTempoMapAsSaved() const;
+
     // Whether a clip of the song is as savedState holds it, all it holds (its properties, its track, its warp markers, its
     // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's
     // values against savedState.values, by their IDs (WholeState.h: holdSameClip(), holdSameTrackClips()). A clip gone, or on

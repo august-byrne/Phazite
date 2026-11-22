@@ -336,6 +336,9 @@ target_sources(phazite_core PRIVATE
     src/model/base/BackgroundJobs.h
     src/model/base/Beats.h
     src/model/base/ChordLaneValue.cpp
+    src/model/base/ClipNotesValue.cpp
+    src/model/base/ClipsArea.cpp
+    src/model/base/ClipsValue.cpp
     src/model/base/ControlKinds.h
     src/model/base/CurveValues.cpp
     src/model/base/IDs.h
@@ -344,6 +347,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/Json.h
     src/model/base/KeptByAge.h
     src/model/base/MidiLinksValue.cpp
+    src/model/base/NotesArea.cpp
     src/model/base/Numbers.h
     src/model/base/SectionsValue.cpp
     src/model/base/Selection.cpp
@@ -353,16 +357,21 @@ target_sources(phazite_core PRIVATE
     src/model/base/SongIndex.cpp
     src/model/base/SongText.cpp
     src/model/base/SongValues.cpp
+    src/model/base/TempoMapArea.cpp
     src/model/base/TempoMapValue.cpp
     src/model/base/Toggles.h
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
     src/model/base/WholeState.cpp
     src/model/base/internal/ChordLaneValue.h
+    src/model/base/internal/ClipNotesValue.h
+    src/model/base/internal/ClipsArea.h
+    src/model/base/internal/ClipsValue.h
     src/model/base/internal/CurveValues.h
     src/model/base/internal/IDsHeld.h
     src/model/base/internal/Immer.h
     src/model/base/internal/MidiLinksValue.h
+    src/model/base/internal/NotesArea.h
     src/model/base/internal/Schema.h
     src/model/base/internal/SchemaDescription.h
     src/model/base/internal/SectionsValue.h
@@ -370,6 +379,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/SongIndex.h
     src/model/base/internal/SongValues.h
     src/model/base/internal/SongText.h
+    src/model/base/internal/TempoMapArea.h
     src/model/base/internal/TempoMapValue.h
     src/model/base/internal/ValueArea.h
     src/model/base/internal/WholeState.h
@@ -558,6 +568,7 @@ target_sources(phazite_core PRIVATE
     src/model/versions/VersionsModel.cpp
     src/model/versions/VersionsModel.h
     src/model/versions/internal/ApplySong.h
+    src/model/versions/internal/AreaClashes.h
     src/model/versions/internal/ChangesWorker.h
     src/model/versions/internal/PieceStore.h
     src/model/versions/internal/SongDiff.h

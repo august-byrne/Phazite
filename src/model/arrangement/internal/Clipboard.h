@@ -37,9 +37,9 @@ struct Clipboard
         range // a time range's clips, cut to it
     };
 
-    // A clip as it was: its value and, a MIDI clip's, its notes and controllers' values (model/base/internal/SongValues.h),
-    // where it was in the song, and its track's place from the first of the copy's tracks, counting those that hold clips in
-    // the playlist's order.
+    // A clip as it was: its value and, a MIDI clip's, its notes and controllers' values (model/base/internal/ClipsValue.h,
+    // ClipNotesValue.h), where it was in the song, and its track's place from the first of the copy's tracks, counting those
+    // that hold clips in the playlist's order.
     struct CopiedClip
     {
         ClipValue clip;

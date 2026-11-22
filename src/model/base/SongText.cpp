@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongText.h"
+#include "internal/SchemaDescription.h"
 
 #include <algorithm>
 #include <array>
@@ -181,6 +182,22 @@ std::optional<double> readValueNumber (const juce::var& value)
         return read (text);
 
     return read (string.trim().toStdString());
+}
+
+double readDescribed (const juce::var& held, const schema::PropertyDescription& property)
+{
+    const auto& range = property.getRange();
+    const auto number = readValueNumber (held);
+
+    if (! number.has_value() || ! std::isfinite (*number))
+        return range.has_value() ? range->fallback.value_or (0.0) : 0.0;
+
+    return range.has_value() ? juce::jlimit (range->low, range->high, *number) : *number;
+}
+
+double readDescribed (const juce::ValueTree& element, const schema::PropertyDescription& property)
+{
+    return readDescribed (element[property], property);
 }
 
 bool isSameValue (const juce::var& a, const juce::var& b)

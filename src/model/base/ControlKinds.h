@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The kinds of a controller's value a MIDI clip holds beside its notes, as MIDI has them, below the notes' code: the song's
-// values (model/base/internal/SongValues.h) hold them, and the notes' code (model/notes/NoteValues.h, which includes this)
+// values (model/base/internal/ClipNotesValue.h) hold them, and the notes' code (model/notes/NoteValues.h, which includes this)
 // edits and names them.
 #pragma once
 

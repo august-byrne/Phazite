@@ -166,7 +166,7 @@ TEST_CASE ("A track's volume beyond any fader's opens at the top of its range, a
 TEST_CASE ("A note's and a controller's MIDI channel open within 1 to 16, one in it as it was")
 {
     // Channel 0 opens on 1, 40 on 16, one that is no number on 1, and 9 as it is; the first channel written as none, as a
-    // clip's value writes it (model/base/internal/SongValues.h).
+    // clip's value writes it (model/base/internal/ClipNotesValue.h).
     Edited edited;
     const auto project = edited.open (
         [] (juce::XmlElement& song)
@@ -205,7 +205,7 @@ TEST_CASE ("A note's and a controller's MIDI channel open within 1 to 16, one in
 TEST_CASE ("A note that lacks a pitch, a start, a length or a velocity opens with the one its description gives")
 {
     // A file from others can hold a note without a property Phazite always writes. In the tree such a note stayed
-    // without it, and read as 0; a clip's notes are a value now (model/base/internal/SongValues.h), which always holds
+    // without it, and read as 0; a clip's notes are a value now (model/base/internal/ClipNotesValue.h), which always holds
     // each, so the note opens with what the description gives for a value that is no number: a velocity of 100, a
     // pitch of 60, a length of a beat, a start at its clip's own. CI's fuzzer found a velocity of 0 written back.
     for (const auto* missing : { "pitch", "start", "length", "velocity" })
@@ -240,9 +240,9 @@ TEST_CASE ("A clip that lacks a number its description gives a range, or holds o
 {
     // A file from others can hold a clip without a property Phazite writes, or with one that is no number (which the loader
     // takes away where its description gives no fallback). The song holds its clips as values (model/base/internal/
-    // SongValues.h: ClipValue), which always hold each, so the clip opens with what its description gives (Schema.h): a
+    // ClipsValue.h: ClipValue), which always hold each, so the clip opens with what its description gives (Schema.h): a
     // start at 0, a MIDI clip 4 beats long, its take the first; else none (an offset, a part of its file, a tempo, a pitch, a
-    // gain, fades and their bends, takes of 0). Phazite writes a property only while it isn't its default (SongValues.h:
+    // gain, fades and their bends, takes of 0). Phazite writes a property only while it isn't its default (ClipsValue.h:
     // writeClipElement()), so where the clips saved hold one at its default, the clip is first given a value that is written
     // (give), and the file is required to hold it before it is taken away.
     struct Case
@@ -395,7 +395,7 @@ TEST_CASE ("A clip anywhere but on a track, in an element Phazite doesn't know t
 {
     // The loader takes a CLIP out of every element it knows that holds none (a device here), but leaves the insides of an
     // element of a kind it doesn't know as they are (Project.cpp, makeConsistent()): the song, which holds its clips as
-    // values, takes those out of its tree as it opens (SongValues.cpp, adopt()), so that its tree holds no CLIP at all.
+    // values, takes those out of its tree as it opens (ClipsArea.cpp, adopt()), so that its tree holds no CLIP at all.
     Edited edited;
     const auto project = edited.open (
         [] (juce::XmlElement& song)
@@ -425,7 +425,7 @@ TEST_CASE ("A clip whose properties don't hold together opens as the clips' own 
 {
     // Each property within its range, as the loader keeps it, but not with the others: a file's end before its start, a MIDI
     // clip shorter than the shortest, a take past its count of takes, a take without takes. The song takes each in as the
-    // clips' setters keep a value (SongValues.h: keepWithinClip()), so what it holds is a clip's value, which a save writes
+    // clips' setters keep a value (ClipsValue.h: keepWithinClip()), so what it holds is a clip's value, which a save writes
     // and an open reads back as it was.
     struct Case
     {

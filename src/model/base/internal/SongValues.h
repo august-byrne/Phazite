@@ -1,18 +1,116 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's values: what the song moves from its juce::ValueTree into immutable values held beside it (the immer library;
-// roadmap step S5.20, model/base/internal/ValueArea.h), one area at a time. The areas are the song's clips (SongClips: each
-// clip's properties and warp markers as a ClipValue, each track's clips in their order, each alias group's clips), which the
-// clips' code (model/arrangement/internal/Clips.h, AudioClips.h) computes each edit on; a MIDI clip's notes and its
-// controllers' values (ClipNotes), which the notes' code (model/notes/internal/Notes.h) computes each edit on, from one value
-// to the next; and the song's tempo map (TempoMapValue.h: its tempos and time signatures), which the tempo map's code
-// (model/transport/internal/Tempo.h) computes each edit on. All as plain values in Phazite's own types.
+// roadmap step S5.20, model/base/internal/ValueArea.h), one area at a time. The areas are the song's clips (ClipsValue.h:
+// SongClips, each clip's properties and warp markers as a ClipValue, each track's clips in their order, each alias group's
+// clips), which the clips' code (model/arrangement/internal/Clips.h, AudioClips.h) computes each edit on; a MIDI clip's notes
+// and its controllers' values (ClipNotesValue.h: ClipNotes, every clip's in NotesByClip), which the notes' code
+// (model/notes/internal/Notes.h) computes each edit on, from one value to the next; and the song's tempo map
+// (TempoMapValue.h: its tempos and time signatures), which the tempo map's code (model/transport/internal/Tempo.h) computes
+// each edit on. All as plain values in Phazite's own types.
 //
 // The values are the storage: the song holds an area of each (SongValues) in its one undo history, and the song's tree holds
 // no CLIP element (nor a clip's NOTE, CONTROL or WARP elements), and no TEMPO or TIMESIGNATURE element: its TEMPOMAP element
-// stays, empty, the place a whole copy writes the map in. The conversion below (and TempoMapValue.h's, for the tempo map) is
-// the one place that reads and writes those elements by their names: what a file's clip or tempo map (or any that comes into
-// the song as an element: a version's track, a track pasted) is read into, and what a whole copy of the song is written from
-// (WholeState.h).
+// stays, empty, the place a whole copy writes the map in. Each area's value header holds the conversion between its elements
+// and its value, the one place that reads and writes those elements by their names: what a file's clip or tempo map (or any
+// that comes into the song as an element: a version's track, a track pasted) is read into, and what a whole copy of the song
+// is written from (WholeState.h).
+//
+// An area's parts. Each area has its own files, and each list that asks every area asks it in a line of its own; nothing
+// generic joins them (no table, no registration): plain functions, called in a list in a fixed order, which each list states
+// with its reason. What an area provides, the lists it joins, what reaches it and what it must not do, in the steps a builder
+// of the next area follows (<Area> is its name, as TempoMap; <area> its member's, as tempoMap; its element <AREA>, as
+// TEMPOMAP, the song's empty place for it where it keeps one):
+//   1. Its value: internal/<Area>Value.h, with its .cpp in model/base/ (as TempoMapValue.h): the value's types, each with
+//      isSameAs() (ValueArea.h) and ==, the helpers that alone write it, its invariants as a function the check calls
+//      (TempoMapValue.h: isHeldAsTheSongHoldsIt(); ClipsValue.h: holdsItsLists()), and the conversion of its elements by
+//      name (read<Area>Value(), write<Area>(), a merge's property set on the value).
+//   2. Its area: internal/<Area>Area.h and model/base/<Area>Area.cpp (as TempoMapArea.h), including this header: its teller
+//      (struct SongValues::<Area>Teller, a ValueArea listener that adds itself to the area and tells Listener of a change of
+//      its value); its part of the keeper (struct SongValues::<Area>Keeper: childAdded() and, where it acts there,
+//      childRemoved(), asked for every element that comes into the song's tree or leaves it, whoever's it is, each returning
+//      at once for what is not the area's, and for what is, reading the area and setting it through its setter in the mode
+//      of the moment; its refusal of a lone element of the area (step 13); and a static adopt() that takes what the loaded
+//      tree holds of it in, outside the history); its setter, a member of SongValues defined there; its whole state's part
+//      (leadsTo<Area>(), write<Area>In()); its comparison of two kept values (holdSame<Area>(), declared in WholeState.h) and
+//      of two elements with their kept values (holdSame<Area>Of(), is<Area>Place()); and, if it holds IDs,
+//      findLargestIDIn (const <Area>Value&) (IDsHeld.h). Each new file listed in CMakeLists.txt (phazite_core) and in
+//      src/model/README.md.
+//   3. Here, in SongValues: its area as a member (ValueArea<<Area>Value> <area>, after the others); its setter (set<Area>());
+//      a virtual <area>Changed() in Listener, empty by default; struct <Area>Teller and <Area>Keeper among the declarations
+//      below, and a std::unique_ptr<<Area>Teller> after the others; a count of what its keeper took in, if it takes any in
+//      (countTempoMapAdopted()); and isHeardAs<Area>(), below, from the listener's piece on (steps 12 and 14).
+//   4. SongValues.cpp: its area header included; its area in the constructor's initialiser list after the others
+//      (<area> (song.getUndoManager(), its empty value)), and its teller after the others' (<area>Teller
+//      (std::make_unique<<Area>Teller> (<area>, listeners))); the destructor lets go of its teller after the keeper and
+//      before the others' (the reverse of their making); its keeper part a member of the Keeper, made in the Keeper's
+//      list, and called in a line of each callback it acts in: every area's part is called, all of them, in the order the
+//      callback states (a part never stops the others); its adopt() a line of SongValues::adopt().
+//   5. WholeState.h and WholeState.cpp: a member of ValuesKept and a line of keepValues(); a line of writeIn() (its
+//      write<Area>In()) and of leadsToKept() (its leadsTo<Area>()); a line of holdSameKeptOf() and of isPlaceOfKept(); its
+//      holdSame<Area>() declared with the others.
+//   6. IDsHeld.cpp: a line of findLargestIDHeld(), if it holds IDs.
+//   7. tests/SongCheck.cpp: its rule as a function of its own (check<Area>Value(): no element of it in the song's tree, its
+//      place there empty, its invariants), a line of findValueProblems().
+//   8. model/versions/internal/AreaClashes.h: choose<Area>Clash(), declared there and defined with the area's model code
+//      (as chooseTempoMapClash() in model/transport/Tempo.cpp), a line of chooseInAreas() in model/versions/VersionsModel.cpp.
+//   9. model/versions/ApplySong.cpp: its pass (make<Area>Like(), through its setter) and a line of makeValuesLike(); its part
+//      of each line's pass beside the whole song's, where that line holds it: a track's, makeTrackLikeIn() (as its
+//      ClipPass), and the song's own, makeSongOwnLikeIn() (as its makeTempoMapLike()); its elements left out of every pass
+//      over elements that names the areas' in its conditions: copyForSong(), isPlaced() (with isTempoMaps()),
+//      findPlaces(), findHolder() and sendItemsHome(); and its keeper's count (step 3) added to NothingTakenIn::count().
+//  10. Each SongValues::Listener: its <area>Changed() override, which only marks (step 13); one that follows nothing of the
+//      area says so in a comment beside its overrides. They are:
+//      - ClipRenders (model/arrangement/ClipRenders.cpp, internal/ClipRenders.h): rendersMayChange() where the area holds
+//        what a clip's render is made of (the clips', the tempo map's; not the notes').
+//      - FreezeKeeper (model/mixer/Freeze.cpp, internal/Freeze.h): marks the frozen tracks whose file holds what changed
+//        (all of them for the tempo map) and compares them at its later moment. What a frozen track's file holds of an area is
+//        in its Holds (parts: copies of its elements, getWhatTheFreezeHolds(); values: ValuesKept; tempos), compared in
+//        holdsWhatWasFrozen(): an area held in parts moves to its value there at its switch.
+//      - PlaybackSession (model/playback/internal/PlaybackSession.h): a new plan (triggerAsyncUpdate()).
+//      - SongPlayer (model/playback/SongPlayer.cpp, internal/SongPlayer.h): marks what its next compile reads again (its
+//        changes: the tracks' notes and audio, the tempo).
+//      - Project (model/project/Project.cpp, internal/Project.h): counts the change and marks what to compare (a member of
+//        its own, as tempoToCompare, cleared in clearToCompare()); its quick check, a line of compareWithSavedState()'s list
+//        (as isTempoMapAsSaved()); and its whole comparison, holdTheSameProject(), through holdSameKeptOf() (step 5), which
+//        the quick check agrees with.
+//      - ProjectContext's SongWatcher (model/project/ProjectContext.cpp): names what changed and adds it to its group of
+//        SongChanges (ProjectContext.h; a group of its own where the views need one).
+//      - VersionHistory (model/versions/VersionHistory.cpp, internal/VersionHistory.h): counts the song's change
+//        (songChanges, edited()), marks the lines it is in (markTrack(), markSongOwn()) and calls changesMayDiffer().
+//  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
+//      copyWholeSong(), copyWhole(), keepValues(), or a part's own whole copy, as copyWholeClip()): the changes' worker
+//      (model/versions/ChangesWorker.cpp: take(), makeSkeleton()); the saved copy (model/project/Project.cpp: savedState,
+//      the tree with keepValues(), written with copyWhole()); the clipboard (model/arrangement/Clipboard.cpp); an export
+//      (model/project/Export.cpp, DawProject.cpp).
+//  12. The tree's listeners: from the listener's piece (step 14) to the switch, the tree is still the area's storage, the
+//      keeper feeds <area>Changed() from the tree's callbacks under the area's elements, and each listener of step 10 leaves
+//      those elements alone in its tree callbacks with isHeardAs<Area>() (as isHeardAsTempoMap()'s calls in ClipRenders.cpp,
+//      Freeze.cpp, internal/Freeze.h, PlaybackSession.cpp, SongPlayer.cpp, Project.cpp, internal/Project.h,
+//      ProjectContext.cpp, VersionHistory.cpp and internal/VersionHistory.h). At the switch the feed goes (the teller tells),
+//      and those calls go with it where the tree then holds nothing of the area (the clips' went so); they stay where the
+//      area keeps a place in the tree that the keeper's safety net writes (the tempo map's TEMPOMAP).
+//  13. What an area must not do: no tree callback reads any area, directly or through what reads it (the root's listeners
+//      have no order among them, and an Undo puts the tree back before the areas: below); a listener told of an area's
+//      change only marks; a set equal to what is held makes no undo step (nothing, or ValueArea.h's setWithoutStep() where
+//      only identity differs); a number an element holds as text is read through readValueNumber() or readDescribed()
+//      (SongText.h), never a cast; what is written outside the undo history (view state, mute and solo) never lives in an
+//      area's undoable value; entries without identity (a tempo map's) are never written into elements by what differs:
+//      their writers move with the storage, in the switch; a lone element of the area added to a live song in an undo
+//      step is refused by its keeper part (a JUCE assertion, as a lone CLIP is: JUCE workaround W62
+//      (docs/juce-workarounds.md)).
+//  14. The pieces an area is moved in, in this order, each with its tests: (a) its value and conversion (step 1), with the
+//      readers on them, the tree still the storage: the round trip of every golden project's entries and of damaged ones
+//      (tests/InconsistentProjectTests.cpp), and a test for every reader of the live tree that would silently find nothing
+//      once the tree holds nothing (the changes' worker, an export: step 11); (b) the listener (steps 10 and 12), fed from
+//      the tree: its case (as tests/SongValuesTempoTests.cpp's: each edit tells once, its Undo and its Redo too) written to
+//      pass unchanged across the switch; (c) the writers, through the setter, and the versions' pass and clash (steps 8
+//      and 9), but where step 13 keeps them for the switch; (d) the switch (steps 2 to 7, the adoption, the tree emptied):
+//      the keeper's cases with Undo and Redo (UndoCheck), the check's rule, whole state, the unsaved check agreeing with the
+//      whole comparison (tests/ProjectTests.cpp), and a speed gate (tests/PerformanceGateTests.cpp) where a reader is on a
+//      per-frame path.
+//  15. The docs it updates: CLAUDE.md's paragraph on the song's values; src/model/README.md; tests/README.md's nets;
+//      docs/design/engine.md; docs/project-format.md; docs/juce-workarounds.md's W62; docs/roadmap.md's sentence on where
+//      S5.20 stands; and docs/performance.md after a measurement.
 //
 // immer is the model's alone (tools/check-architecture.sh: immer-outside-model): nothing outside src/model includes this.
 #pragma once
@@ -21,6 +119,8 @@
 #include "model/base/Beats.h"
 #include "model/base/ControlKinds.h"
 #include "model/base/IDs.h"
+#include "model/base/internal/ClipNotesValue.h"
+#include "model/base/internal/ClipsValue.h"
 #include "model/base/internal/Immer.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/ValueArea.h"
@@ -39,323 +139,6 @@ namespace phazite
 {
 class Song;
 
-// A note as its clip holds it. Its start counts from its clip's content start, as every note's of the clip does: the song
-// beat is that start plus this (model/arrangement/internal/Clips.h: getContentStart()).
-struct NoteValues
-{
-    NoteID id {};
-    int pitch = 60;
-    BeatPosition start {}; // among the clip's notes
-    BeatDuration length = BeatDuration::fromBeats (1.0);
-    int velocity = 100;
-    bool muted = false, slide = false, portamento = false;
-    int channel = 1; // from 1 to 16
-
-    bool operator== (const NoteValues&) const = default; // the beats compare as Beats.h says, never with a double's ==
-};
-
-// A controller's value as its clip holds it (ControlKinds.h). Its beat counts from the clip's content start, as a note's
-// start does.
-struct ControlValues
-{
-    ControlKind kind = ControlKind::controller;
-    int number = 0; // a controller's and a note's pressure's; the other kinds have none
-    double beat = 0.0;
-    int value = 0;
-    int channel = 1; // from 1 to 16
-
-    // Written out, not defaulted: a defaulted one would compare the beat with a double's ==, which GCC's -Wfloat-equal refuses.
-    bool operator== (const ControlValues& other) const noexcept
-    {
-        return kind == other.kind && number == other.number && juce::exactlyEqual (beat, other.beat) && value == other.value
-               && channel == other.channel;
-    }
-};
-
-// A MIDI channel kept within 1 to 16, as a note's or a controller's value holds it: what every place that gives a value its
-// channel keeps it with (the conversion below, as it reads an element; the notes' edits, as they make a note or set its
-// channel; keepWithinKind()), so that the value holds none beyond them, whatever writes or stores it.
-int keepChannel (int channel) noexcept;
-
-// A value as a clip would hold it, kept within what its kind takes: its number from 0 to 127 where its kind has one (0
-// where it hasn't), its beat not before the clip's content start, its value within its kind's range, its channel from 1 to 16.
-ControlValues keepWithinKind (ControlValues);
-
-//==============================================================================
-// One clip's notes and controllers' values: those of each clip of an alias group, which hold the same (Schema.h: clipLink).
-// Copies are cheap and share what they hold.
-struct ClipNotes
-{
-    immer::flex_vector<NoteValues> notes;            // in the clip's order
-    immer::map<std::uint64_t, std::uint32_t> places; // a note's ID to its place in notes
-    immer::flex_vector<ControlValues> controls;      // in their order
-
-    // A note by its ID: none for one the clip hasn't.
-    const NoteValues* find (NoteID) const;
-
-    // The same value without a look inside: all three shared (ValueArea.h). And the same notes and values, compared.
-    bool isSameAs (const ClipNotes&) const noexcept;
-    bool operator== (const ClipNotes&) const;
-
-    // Whether places holds the place of each note, and nothing else: what the helpers below keep, for the tests and the
-    // assertions where it is cheap.
-    bool holdsItsPlaces() const;
-};
-
-// A clip's notes and values made from these, in their order: each note's ID once.
-ClipNotes makeClipNotes (const std::vector<NoteValues>& notes, const std::vector<ControlValues>& controls = {});
-
-// The notes with these IDs (those the clip has, each once) each changed by change (NoteValues&), in one batch. A change keeps
-// the note's ID: the places stay as they are.
-template <typename Change>
-ClipNotes withNotesChanged (const ClipNotes& clip, const std::vector<NoteID>& ids, Change&& change)
-{
-    auto notes = clip.notes.transient();
-
-    for (const auto id : ids)
-    {
-        if (const auto* place = clip.places.find (id.getRaw()))
-        {
-            notes.update (*place,
-                          [&change, id] (NoteValues note)
-                          {
-                              change (note);
-                              jassert (note.id == id);
-                              juce::ignoreUnused (id);
-                              return note;
-                          });
-        }
-    }
-
-    return { notes.persistent(), clip.places, clip.controls };
-}
-
-// Each note changed by change (NoteValues&), and each controller's value by changeControl (ControlValues&): a note keeps its ID.
-template <typename ChangeNote, typename ChangeControl>
-ClipNotes withEachChanged (const ClipNotes& clip, ChangeNote&& changeNote, ChangeControl&& changeControl)
-{
-    auto notes = immer::flex_vector<NoteValues>().transient();
-    auto controls = immer::flex_vector<ControlValues>().transient();
-
-    immer::for_each (clip.notes,
-                     [&] (NoteValues note)
-                     {
-                         [[maybe_unused]] const auto id = note.id;
-                         changeNote (note);
-                         jassert (note.id == id);
-                         notes.push_back (note);
-                     });
-
-    immer::for_each (clip.controls,
-                     [&] (ControlValues control)
-                     {
-                         changeControl (control);
-                         controls.push_back (control);
-                     });
-
-    return { notes.persistent(), clip.places, controls.persistent() };
-}
-
-// The notes for which gone (const NoteValues&) is true taken out, the places of those after them made anew.
-template <typename Gone>
-ClipNotes withoutNotes (const ClipNotes& clip, Gone&& gone)
-{
-    auto notes = immer::flex_vector<NoteValues>().transient();
-    auto places = immer::map<std::uint64_t, std::uint32_t>().transient();
-    auto any = false;
-
-    immer::for_each (clip.notes,
-                     [&] (const NoteValues& note)
-                     {
-                         if (gone (note))
-                         {
-                             any = true;
-                             return;
-                         }
-
-                         places.set (note.id.getRaw(), (std::uint32_t) notes.size());
-                         notes.push_back (note);
-                     });
-
-    if (! any)
-        return clip;
-
-    ClipNotes result { notes.persistent(), places.persistent(), clip.controls };
-    jassert (result.places.size() == result.notes.size());
-    return result;
-}
-
-// A note added after the clip's others: its ID none of them has.
-ClipNotes withNoteAdded (const ClipNotes&, const NoteValues&);
-
-// The controllers' values for which gone (size_t place, const ControlValues&) is true taken out; and values added after the
-// clip's others, in their order.
-template <typename Gone>
-ClipNotes withoutControls (const ClipNotes& clip, Gone&& gone)
-{
-    auto controls = immer::flex_vector<ControlValues>().transient();
-    size_t place = 0;
-    auto any = false;
-
-    immer::for_each (clip.controls,
-                     [&] (const ControlValues& control)
-                     {
-                         if (gone (place++, control))
-                             any = true;
-                         else
-                             controls.push_back (control);
-                     });
-
-    if (! any)
-        return clip;
-
-    return { clip.notes, clip.places, controls.persistent() };
-}
-
-ClipNotes withControlsAdded (const ClipNotes&, const std::vector<ControlValues>&);
-
-//==============================================================================
-// Every MIDI clip's notes and values in a song, by the clip's ID: the clips of an alias group (Schema.h: clipLink) hold ONE
-// value, the same ClipNotes under each one's ID. An area of the song (ValueArea.h): the same map without a look inside.
-struct NotesByClip
-{
-    immer::map<std::uint64_t, ClipNotes> clips;
-
-    const ClipNotes* find (ClipID clip) const { return clips.find (clip.getRaw()); }
-    bool isSameAs (const NotesByClip& other) const noexcept { return clips.identity() == other.clips.identity(); }
-};
-
-//==============================================================================
-// A clip as a value (roadmap step S5.20, the clips' area): what each property of its CLIP element (Schema.h, "On CLIP") and
-// its WARP children hold, in Phazite's own types. The song holds its clips as these (SongClips, below), which the clips' code
-// (model/arrangement/internal/Clips.h, AudioClips.h) reads (getClipValue()) and sets for the code outside it, by their IDs.
-
-// A warp marker as an audio clip holds it (Schema.h: WARP): a time of its file as recorded, and where that time plays, as a
-// time of the file played straight at the clip's tempo, both in seconds.
-struct WarpValue
-{
-    double time = 0.0, playsAt = 0.0;
-
-    bool operator== (const WarpValue& other) const noexcept
-    {
-        return juce::exactlyEqual (time, other.time) && juce::exactlyEqual (playsAt, other.playsAt);
-    }
-};
-
-// A fade as an audio clip holds it (Schema.h: clipFadeIn, clipFadeInShape, clipFadeInBend and the fade-out's): how long it
-// is, in seconds; whether its shape is an S-curve (Schema.h: fadeIsSCurve) or a curve; and how far it bends, from -1 to 1.
-struct ClipFade
-{
-    double seconds = 0.0;
-    bool sCurve = false;
-    float bend = 0.0f;
-
-    bool operator== (const ClipFade& other) const noexcept
-    {
-        return juce::exactlyEqual (seconds, other.seconds) && sCurve == other.sCurve && juce::exactlyEqual (bend, other.bend);
-    }
-};
-
-// What the audio clips of an alias group share (Schema.h: clipLink): the file, its tempo while the clip follows the song's,
-// its pitch, its direction and its warp markers, in their order. The clips of a group are to hold the same value, its
-// markers one vector, shared, as a group's notes are one ClipNotes under each clip's ID.
-struct ClipSound
-{
-    juce::String file;                   // clipFile, as the song holds it: a path relative to the project, or a full one
-    double tempo = 0.0;                  // clipTempo: 0 for none (it plays at the file's own speed)
-    float pitch = 0.0f;                  // clipPitch, in semitones
-    bool reversed = false;               // clipReversed
-    immer::flex_vector<WarpValue> warps; // WARP, in the order the clip holds them (the song holds none while tempo is 0)
-
-    // The same markers without a look inside (one vector, shared) and the rest alike; and alike, compared.
-    bool isSameAs (const ClipSound&) const noexcept;
-    bool operator== (const ClipSound&) const;
-};
-
-// A clip as the song holds it: each property of its CLIP element as a plain value. What a clip's element hasn't (a property
-// written only while it is set, or one a damaged file left out) holds its default here: its description's (Schema.h).
-struct ClipValue
-{
-    // What it holds (Schema.h: clipKind): notes (clipIsMidi) or a part of an audio file (clipIsAudio). Its own name, as the
-    // ClipID's tag (model/base/IDs.h) is phazite::ClipKind.
-    enum class Kind : std::uint8_t
-    {
-        midi,
-        audio
-    };
-
-    ClipID id;              // clipID
-    Kind kind = Kind::midi; // clipKind
-    TrackID track;          // the track it is on: none for a clip on none (a copy)
-    juce::String name;      // clipName: empty for none (it is called after its track)
-    BeatPosition start;     // clipStart
-
-    // clipLength: a MIDI clip's. An audio clip has none (its range follows from its part of its file and its tempo:
-    // AudioClips.h), so readClipValue() gives it 0, and == leaves it out of an audio clip's value, whatever it holds.
-    // A MIDI clip whose element has none holds the description's 4 beats.
-    BeatDuration length = BeatDuration::fromBeats (4.0);
-
-    BeatDuration offset;                   // clipOffset: how far into its notes a MIDI clip starts
-    bool muted = false;                    // clipMute
-    std::uint64_t link = 0;                // clipLink: its alias group, 0 for none (the loader takes a link of 0 away: Project.cpp)
-    ClipSound sound;                       // an audio clip's file and how it plays it
-    double fileStart = 0.0, fileEnd = 0.0; // clipFileStart, clipFileEnd: the part of its file, in seconds
-    float gain = 0.0f;                     // clipGain, in decibels
-    ClipFade fadeIn, fadeOut;              // clipFadeIn, clipFadeInShape, clipFadeInBend and the fade-out's
-    int takes = 0;                         // clipTakes: 0 for none (a clip recorded round a loop has 2 or more)
-    int take = 1;                          // clipTake: the one it plays, from 1
-    double takeLength = 0.0;               // clipTakeLength, in seconds
-
-    bool isMidi() const noexcept { return kind == Kind::midi; }
-    bool isAudio() const noexcept { return kind == Kind::audio; }
-
-    // Written out, not defaulted: a defaulted one would compare doubles with ==, which GCC's -Wfloat-equal refuses.
-    bool operator== (const ClipValue&) const;
-};
-
-// The shortest a MIDI clip is: what the clips' code keeps a clip's length to (keepWithinClip()).
-inline constexpr double shortestClipBeats = 1.0 / 64.0;
-
-// Every clip of a song, as the clips' area holds them: the clips by their IDs, each track's clips in their order (what a
-// track's clips are written in, first among its elements, in a whole copy of the song: WholeState.h; a track without clips
-// has no entry), and each alias group's clips (by its link) in the order they joined it (a clip in none is in none). The
-// helpers below are the only writers of the three, and keep them in step: holdsItsLists() says whether they are.
-struct SongClips
-{
-    immer::map<std::uint64_t, ClipValue> clips;
-    immer::map<std::uint64_t, immer::flex_vector<ClipID>> tracks;
-    immer::map<std::uint64_t, immer::flex_vector<ClipID>> groups;
-
-    const ClipValue* find (ClipID id) const { return clips.find (id.getRaw()); }
-
-    // The same three without a look inside: what an area compares (ValueArea.h).
-    bool isSameAs (const SongClips& other) const noexcept
-    {
-        return clips.identity() == other.clips.identity() && tracks.identity() == other.tracks.identity()
-               && groups.identity() == other.groups.identity();
-    }
-};
-
-// A clip added, at a place in its track's list (from 0, or -1 for after the others there), or one of them changed: on another
-// track, it leaves its old track's list for the new one's (at the place given, or at its end); in another alias group, it
-// leaves its old group's list for the end of the new one's. A clip that stays on its track keeps its place there.
-SongClips withClip (const SongClips&, ClipValue, int index = -1);
-
-// A clip taken out, of its track's list and its group's too (nothing for one that isn't there).
-SongClips withoutClip (const SongClips&, ClipID);
-
-// A track's clips put in another order: the same clips (else nothing changes).
-SongClips withTrackOrder (const SongClips&, TrackID, immer::flex_vector<ClipID> order);
-
-// Whether the three agree: each clip once in its track's list and, in an alias group, once in its group's; each list
-// holding clips of that track or group alone, and none of them empty. For the tests, and the assertions where it is cheap.
-// A group of one clip is a group to these (the helpers leave what the caller makes): hasGroupsOfOne() says whether any is.
-bool holdsItsLists (const SongClips&);
-
-// Whether an alias group holds one clip alone, which the model never leaves (the last clip of a group leaves it as the
-// next-to-last goes: Clips.h, eraseClip()); what a song's consistency check is to say there is none of.
-bool hasGroupsOfOne (const SongClips&);
-
 //==============================================================================
 // The song's values, which the song holds once its tree is consistent (Song::holdValues(), as model/project/internal/
 // Project.h's makeSong() makes a song): the clips' area, the notes' area and the tempo map's, in the song's one undo history,
@@ -369,7 +152,8 @@ bool hasGroupsOfOne (const SongClips&);
 // tempo map as it holds its values (holdValues(): TempoMapValue.h, readHeldTempoMap()), and empties its TEMPOMAP element,
 // properties and children Phazite doesn't know too. A MIDI clip that joins an alias group takes the group's notes, and one
 // that leaves it keeps those it holds (setClip()). Everything else that changes the tree is heard by the keeper, a listener
-// of the song's root: a track taken
+// of the song's root (each area's part of it in the area's file: ClipsArea.h, TempoMapArea.h), which asks every area for
+// every element that comes into the tree or leaves it, each doing nothing for what is not its own: a track taken
 // out of the song (alone, in a folder, the track list) has its clips (their values, their order and their notes) remembered
 // with its element and erased from both areas; the same element put back (JUCE moves a track by taking it out and putting it
 // in again) gets them back; and a track that comes into the song's tree with its clips' elements in it (a track pasted or
@@ -424,7 +208,7 @@ public:
     // asked. In the song's undo history (the step in progress), or outside it while the song is written outside it
     // (Song::isWritingOutsideHistory()). A value equal to the one the clip holds is no change, and makes no action in the
     // history: nothing, or, where only its sound is another value alike (an alias group's clips share one: ClipSound), that
-    // value without a step of its own (ValueArea.h: setWithoutStep()).
+    // value without a step of its own (ValueArea.h: setWithoutStep()). In ClipsArea.cpp, as the next two are.
     void setClip (Song&, ClipValue, int index = -1, const ClipNotes* notes = nullptr);
 
     // A clip taken out of the song, its notes with it; and a track's clips put in another order (the same clips), the same way:
@@ -434,13 +218,13 @@ public:
 
     // Gives a MIDI clip of the song and each MIDI clip of its alias group this value of notes, as setClip() sets: the one way
     // to change a clip's notes. Notes equal to those each holds are no change, and make no action in the history: nothing
-    // where they hold one value, else this one without a step of its own (a group holds one value).
+    // where they hold one value, else this one without a step of its own (a group holds one value). In NotesArea.cpp.
     void setClipNotes (Song&, ClipID, ClipNotes);
 
     // Gives the song this tempo map, the tempo map's code's one way to change it (model/transport/internal/Tempo.h): in the
     // song's undo history (the step in progress), or outside it while the song is written outside it. A map equal to the one
     // the song holds is no change, and writes nothing: no step, the value the song holds kept (an entry has no identity of
-    // its own to keep, nor a value of the map's anything else shares, so nothing is lost).
+    // its own to keep, nor a value of the map's anything else shares, so nothing is lost). In TempoMapArea.cpp.
     void setTempoMap (Song&, TempoMapValue);
 
     // The tempo map as Phazite's engine plays it (engine/core/TempoMap.h), made of the tempo map's value at a sample rate,
@@ -518,19 +302,22 @@ public:
 private:
     friend class Song;
 
-    struct NotesTeller;
-    struct ClipsTeller;
-    struct TempoMapTeller;
-    struct Keeper;
+    // Each area's parts, each in its area's own file (the recipe, above), and the keeper, which asks them in turn.
+    struct ClipsTeller;                             // ClipsArea.h
+    struct NotesTeller;                             // NotesArea.h
+    struct TempoMapTeller;                          // TempoMapArea.h
+    struct ClipsKeeper;                             // ClipsArea.h: the clips', with their notes
+    struct TempoMapKeeper;                          // TempoMapArea.h
+    struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
-    std::unique_ptr<NotesTeller> notesTeller;
     std::unique_ptr<ClipsTeller> clipsTeller;
+    std::unique_ptr<NotesTeller> notesTeller;
     std::unique_ptr<TempoMapTeller> tempoMapTeller;
     std::unique_ptr<Keeper> keeper;
     int adopted = 0, tempoMapAdopted = 0;
 
     // In the history, or outside it, as the song is written now; and a value alike to the area's, without a step of its own
-    // (ValueArea.h: setWithoutStep()).
+    // (ValueArea.h: setWithoutStep()). Each with its area's setters.
     void setAll (Song&, SongClips next);
     void setAll (Song&, NotesByClip next);
     void setWithoutStep (Song&, SongClips next);
@@ -548,79 +335,7 @@ private:
 // or an element in it. And whether a child added to an element or taken out of it is: the TEMPOMAP itself, added to the
 // song or taken out, or a child of an element that is. A child moved is the tempo map's where the element it moved in is.
 // The song's TEMPOMAP is an empty placeholder (the map is its area's), so the tree tells of it only what the keeper takes
-// in (its safety net, above), which the area tells.
+// in (its safety net, above), which the area tells. In TempoMapArea.cpp.
 bool isHeardAsTempoMap (const juce::ValueTree& element);
 bool isHeardAsTempoMap (const juce::ValueTree& parent, const juce::ValueTree& child);
-
-//==============================================================================
-// The conversion between a clip's element and its value: the one place that reads and writes NOTE and CONTROL by name.
-
-// A MIDI channel as a note's or a controller's element holds it (schema::noteChannel, controlChannel), from 1 to 16: 1 where
-// none is written, and one beyond them kept within them. And written so, as nothing for the first.
-int readChannel (const juce::ValueTree& element, const juce::Identifier& property);
-void writeChannel (juce::ValueTree& element, const juce::Identifier& property, int channel, juce::UndoManager*);
-
-// A clip's notes and controllers' values, read from its NOTE and CONTROL children, each kind in its order, whatever the order
-// of the two kinds among each other: each number read as the loader reads it (SongText.h: readValueNumber(), the same number
-// for the same text wherever it is read) and kept within its description's range (Schema.h), one that is absent or no finite
-// number as its description's fallback, else 0 (the channel, 1; the flags, off). A property Phazite doesn't know on a NOTE
-// or a CONTROL is no part of the value, nor is a CONTROL of a kind Phazite doesn't know (which the loader takes out of a
-// song: model/project/Project.cpp).
-ClipNotes readClipNotes (const juce::ValueTree& clipState);
-
-// The same of NOTE and CONTROL elements on no clip (a MIDI file's read for an import), in their order.
-ClipNotes readClipNotes (const std::vector<juce::ValueTree>& events);
-
-// One note's values, read from its NOTE element, as readClipNotes() reads it.
-NoteValues readNoteValues (const juce::ValueTree& noteState);
-
-// Appends a clip's value to its element (a copy of the clip, outside any song: WholeState.h), its NOTE elements first, then
-// its CONTROL elements, each kind in its order, each written as the song has always written one: a note's ID, pitch, start,
-// length and velocity always, its flags only while they are on, and its channel only if it isn't the first; a value's kind,
-// its number only where its kind has one, its beat and value, and its channel only if it isn't the first.
-void writeClipNotes (const ClipNotes&, juce::ValueTree& clipCopy);
-
-// A note's values with one of its properties (by its name in the song: schema::notePitch, noteMute...) given a value as the
-// song would read it from the element, or taken away (a void value: as if the element hadn't it): a merge's clash on a note's
-// value, chosen. Whether the property is a note's.
-bool setNoteProperty (NoteValues&, const juce::Identifier& property, const juce::var& value);
-
-// Gives a clip (to) another's notes and controllers' values (from's, its alias group's keeper), in the same order and with
-// the same IDs, where its own were: an alias group's clips hold the same (Schema.h: clipLink). Only what differs is written.
-// For a copy of the song, its elements whole (a merge's: model/versions/internal/SongMerge.h), in the undo history given, or
-// outside any.
-void giveClipEvents (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager*);
-
-//==============================================================================
-// The conversion between a clip's element and its value: the one place that reads and writes a CLIP's properties and its
-// WARP children by name.
-
-// A clip's value, read from its CLIP element and its WARP children: each number as its description reads it (Schema.h: one
-// that is absent reads as its fallback, or else as none: a MIDI clip's length 4 beats, its start 0, its take 1, its tempo
-// none; one outside its range kept within it), nothing of the other kind of clip's (an audio clip's length and offset 0, a
-// MIDI clip's file, part, gain, fades and takes at their defaults, whatever its element holds), the markers in the order
-// the element holds them. Its track is the TRACK the element is on (none for an element on none). Its NOTE and
-// CONTROL children are its notes' value's (readClipNotes()), and a property or a child Phazite doesn't know is no part of
-// it: the song keeps none of them (Schema.h, CLIP).
-ClipValue readClipValue (const juce::ValueTree& clip);
-
-// A clip's element as a whole copy of the song writes it (WholeState.h), new: each property of its kind only while it is set
-// (its ID, kind and start always; a name while it isn't empty; a MIDI clip's length always and its offset while more than 0;
-// its mute, link, an audio clip's tempo, pitch, direction, gain, fades and takes while they aren't their defaults; an audio
-// clip's file and its part always), so that a property another program's file held at its default is not written again;
-// then an audio clip's WARP elements, in their order; then its notes (writeClipNotes()), where given. Its value as it is:
-// what keeps it within what a clip holds is the clips' code's (keepWithinClip()). Its track is where the element goes.
-juce::ValueTree writeClipElement (const ClipValue&, const ClipNotes* notes = nullptr);
-
-// A clip's value kept within what a clip holds, as the clips' code keeps what it sets, and as the song takes in a clip read
-// from its element (Song::holdValues(), and the keeper's safety net): nothing of the other kind of clip's properties (each
-// at its default, as readClipValue() reads them), its start at 0 or later, a MIDI clip's length at least shortestClipBeats,
-// the part of its file starting at 0 or later and ending at its start or later, its fades' bends within -1 to 1, and its
-// takes either none (0 takes, the first take, no take's length) or a count with the take it plays one of them.
-ClipValue keepWithinClip (ClipValue);
-
-// A clip's value with one of its properties (by its name in the song: schema::clipStart, clipMute...) given a value as the
-// value would read it from an element that held it, or taken away (a void value: as if the element hadn't it): a merge's
-// clash on a clip's property, chosen. Whether the property is a clip's.
-bool setClipProperty (ClipValue&, const juce::Identifier& property, const juce::var& value);
 } // namespace phazite

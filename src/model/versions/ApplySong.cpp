@@ -915,7 +915,7 @@ namespace
                 if (stored == nullptr || ! groups.insert (value.link).second)
                     continue;
 
-                // The very sound the clip holds, so that the group holds one (SongValues.h: ClipSound).
+                // The very sound the clip holds, so that the group holds one (ClipsValue.h: ClipSound).
                 const auto sound = stored->sound;
 
                 for (const auto member : getAliasClips (song, value.id))
@@ -995,6 +995,16 @@ namespace
         ClipPass clips (song, other, ClipPass::Elsewhere::leftForItsTrack, standInsStay);
         clips.addEveryTrack();
         return clips.run();
+    }
+
+    // The areas the song holds as values beside its tree made like the other's, once the rest of the song is, each through
+    // its pass, a line each, in this order: the clips with their notes (makeClipsLike()), then the tempo map
+    // (makeTempoMapLike()), neither of which reads the other's. How many writes they made (the tempo map's one, where it wrote).
+    int makeValuesLike (Song& song, const juce::ValueTree& other, bool standInsStay)
+    {
+        auto writes = makeClipsLike (song, other, standInsStay);
+        writes += makeTempoMapLike (song, other) ? 1 : 0;
+        return writes;
     }
 
     // The song's count of IDs brought past every ID it holds now and past the other's count: what it took from the other
@@ -1086,8 +1096,7 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
     const auto standIns = findStandIns (other);
     removeMovedItems (song.getState(), findPlaces (other), undo, standIns);
     makeLike (song, song.getState(), other, undo, true, Taken::counted, standIns);
-    makeClipsLike (song, other, true);
-    makeTempoMapLike (song, other);
+    makeValuesLike (song, other, true);
     countIDsPast (song, other);
 }
 
@@ -1102,8 +1111,7 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     const auto next = std::max (findNextID (song), findNextID (other));
     removeMovedItems (song.getState(), findPlaces (other), nullptr);
     makeLike (song, song.getState(), other, nullptr, true, Taken::everything);
-    makeClipsLike (song, other, false);
-    makeTempoMapLike (song, other);
+    makeValuesLike (song, other, false);
     song.getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
     song.getUndoManager().clearUndoHistory();
 }
@@ -1118,10 +1126,8 @@ void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
     // its tempo map among what the history holds: every change of a clip or of the tempo map is an undo step, so none differs
     // (an Undo of a step below would lose what was written of one here: ValueArea.h).
     makeLike (song, song.getState(), copy, nullptr, true, Taken::everything);
-    [[maybe_unused]] const auto clipWrites = makeClipsLike (song, copy, false);
-    jassert (clipWrites == 0);
-    [[maybe_unused]] const auto tempoMapWritten = makeTempoMapLike (song, copy);
-    jassert (! tempoMapWritten);
+    [[maybe_unused]] const auto valueWrites = makeValuesLike (song, copy, false);
+    jassert (valueWrites == 0);
     song.getState().setProperty (schema::nextID, copy[schema::nextID], nullptr);
 }
 

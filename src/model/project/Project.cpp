@@ -2852,30 +2852,11 @@ void Project::compareWithSavedState()
 
     auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
 
-    // The clips whose notes changed, each in the song now: its value against the saved one, the same value or one alike.
-    if (same && ! notesToCompare.empty())
-    {
-        const auto now = keepValues (*song);
-        same = std::all_of (notesToCompare.begin(), notesToCompare.end(), [this, &now] (ClipID clip)
-                            { return ! getClipTrack (*song, clip).isValid() || holdSameNotes (now, savedState.values, clip); });
-    }
-
-    // The tracks whose clips were added, taken out or moved, and the clips changed in place, each against the saved copy's.
-    if (same && (! tracksToCompare.empty() || ! clipsToCompare.empty()))
-    {
-        const auto now = keepValues (*song);
-        same = std::all_of (tracksToCompare.begin(), tracksToCompare.end(),
-                            [this, &now] (TrackID track) { return holdSameTrackClips (track, now); })
-               && std::all_of (clipsToCompare.begin(), clipsToCompare.end(),
-                               [this, &now] (const auto& entry) { return holdSameClip (entry.first, now); });
-    }
-
-    // The tempo map, against the saved copy's, as one value.
-    if (same && tempoToCompare)
-    {
-        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-        same = holdSameTempoMap (song->getState(), keepValues (*song), savedState.tree, savedState.values);
-    }
+    // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
+    // turn, a line each, in this order (the notes, the clips, the tempo map), each asked only while all before it compare.
+    same = same && areNotesAsSaved();
+    same = same && areClipsAsSaved();
+    same = same && isTempoMapAsSaved();
 
     clearToCompare();
 
@@ -3148,6 +3129,40 @@ bool Project::isComparedWhole (const juce::ValueTree& element) const
                         { return entry.property.isNull() && (entry.element == element || element.isAChildOf (entry.element)); });
 }
 
+bool Project::areNotesAsSaved() const
+{
+    if (notesToCompare.empty())
+        return true;
+
+    // The clips whose notes changed, each in the song now: its value against the saved one, the same value or one alike.
+    const auto now = keepValues (*song);
+    return std::all_of (notesToCompare.begin(), notesToCompare.end(), [this, &now] (ClipID clip)
+                        { return ! getClipTrack (*song, clip).isValid() || holdSameNotes (now, savedState.values, clip); });
+}
+
+bool Project::areClipsAsSaved() const
+{
+    if (tracksToCompare.empty() && clipsToCompare.empty())
+        return true;
+
+    // The tracks whose clips were added, taken out or moved, and the clips changed in place, each against the saved copy's.
+    const auto now = keepValues (*song);
+    return std::all_of (tracksToCompare.begin(), tracksToCompare.end(),
+                        [this, &now] (TrackID track) { return holdSameTrackClips (track, now); })
+           && std::all_of (clipsToCompare.begin(), clipsToCompare.end(),
+                           [this, &now] (const auto& entry) { return holdSameClip (entry.first, now); });
+}
+
+bool Project::isTempoMapAsSaved() const
+{
+    if (! tempoToCompare)
+        return true;
+
+    // The tempo map, against the saved copy's, as one value.
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+    return holdSameTempoMap (song->getState(), keepValues (*song), savedState.tree, savedState.values);
+}
+
 bool Project::holdSameClip (ClipID clip, const ValuesKept& now) const
 {
     const auto* value = now.clips.find (clip);
@@ -3205,20 +3220,15 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const ValuesKept& aV
     if (numCounted != 0)
         return false;
 
-    // A track's clips, with their notes and controllers' values, as each song keeps them beside its tree.
-    if (a.hasType (schema::TRACK)
-        && ! phazite::holdSameTrackClips (aValues, bValues, TrackID::fromRaw ((std::uint64_t) (juce::int64) a[schema::trackID])))
-        return false;
-
-    // The tempo map as one value, as the quick comparison compares it (compareWithSavedState()), so that the two agree: its
-    // elements' order, and what reads as its default, are no difference. Its element is left out of the elements below.
-    const auto hasTempoMap = [] (const juce::ValueTree& element) { return element.getChildWithName (schema::TEMPOMAP).isValid(); };
-
-    if ((hasTempoMap (a) || hasTempoMap (b)) && ! phazite::holdSameTempoMap (a, aValues, b, bValues))
+    // What each song keeps beside its tree of the element (WholeState.h: holdSameKeptOf(), each area in turn): a track's
+    // clips, with their notes and controllers' values; the tempo map as one value, as the quick comparison compares it
+    // (compareWithSavedState()), so that the two agree: its elements' order, and what reads as its default, are no
+    // difference. The places of what is kept (the TEMPOMAP) are left out of the elements below.
+    if (! holdSameKeptOf (a, aValues, b, bValues))
         return false;
 
     const auto isSkipped = [] (const juce::ValueTree& parent, const juce::ValueTree& child)
-    { return schema::isUncountedElement (parent, child) || child.hasType (schema::TEMPOMAP); };
+    { return schema::isUncountedElement (parent, child) || isPlaceOfKept (parent, child); };
 
     // The counted elements, in the same order, holding the same.
     for (int i = 0, j = 0;; ++i, ++j)

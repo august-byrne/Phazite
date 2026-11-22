@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Audio clips' own settings, as the audio clip editor and the clip commands change them (AudioClipModel.h says what each
 // does to what is heard), and where a clip's whole audio file plays in the song. The song holds each audio clip as a value
-// (SongValues.h: ClipValue; Schema.h: an audio CLIP): its file, the part of the file it plays, in the file's own seconds,
+// (ClipsValue.h: ClipValue; Schema.h: an audio CLIP): its file, the part of the file it plays, in the file's own seconds,
 // where it starts, in beats, and how it plays the part: following the song's tempo from its own, pitched, backwards. How
 // long it lasts follows from those and the tempo. What plays it plays the file as it is, or else a render of it that
 // Phazite makes (roadmap step 2.18; ClipRenders.h). None of these begins an undo step: their changes join the caller's.
@@ -200,7 +200,7 @@ void setClipTempo (Song&, ClipID, double bpm);
 // writes the path found into every clip that plays the old one); their tempo (clipTempo), pitch (clipPitch) and direction
 // (clipReversed), which setClipPitch(), setClipReversed(), setClipFollowsTempo() and setClipTempo() write into each clip of
 // the group; and their warp markers (WARP, times in that one file), which the markers' edits write into each; the rest of a
-// clip is its own. Each of those edits gives every clip of the group the same value of all of them (SongValues.h:
+// clip is its own. Each of those edits gives every clip of the group the same value of all of them (ClipsValue.h:
 // ClipSound). Whether a property is one of those; whether two audio clips' elements share them, compared as values,
 // each property as read (its default where it has none: no tempo, no pitch, forwards) and the markers in their order, each as
 // juce::ValueTree::isEquivalentTo() compares elements, the first's against the other's: as the loader (makeConsistent())

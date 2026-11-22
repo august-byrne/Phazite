@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Notes in MIDI clips, as the piano roll edits them (docs/design.md, section 7): the song's side of NoteValues.h, which
 // holds notes as plain values with the transforms, keys, chords and drums' names. A clip's notes and its controllers' values
-// are a value (model/base/internal/SongValues.h: ClipNotes), the same in each of the clip's aliases; each note in it by its
+// are a value (model/base/internal/ClipNotesValue.h: ClipNotes), the same in each of the clip's aliases; each note in it by its
 // ID. Each edit below takes the value of each clip it names (getClipNotesValue()), computes the next as a batch, and sets it
 // once for each alias group (setClipNotesValue()). Positions are song beats (the clip's content start plus the note's own
 // beat), so the notes of several clips line up.

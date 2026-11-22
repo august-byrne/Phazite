@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The tempo map's area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): its parts, each
+// of which a list of SongValues.h's or WholeState.h's asks in turn, a line for each area. Its value and the conversion of its
+// elements are TempoMapValue.h's. It holds no IDs (IDsHeld.h). Message thread, but for whole state's parts, which read only
+// the values they are given.
+#pragma once
+
+#include "model/base/internal/SongValues.h"
+#include "model/base/internal/TempoMapValue.h"
+#include "model/base/internal/WholeState.h"
+
+#include <juce_data_structures/juce_data_structures.h>
+
+namespace phazite
+{
+class Song;
+
+// What the values' listeners are told of the tempo map (Listener::tempoMapChanged()): once for each change of its value. It
+// listens to the tempo map's area from its making to its end.
+struct SongValues::TempoMapTeller final : ValueArea<TempoMapValue>::Listener
+{
+    TempoMapTeller (ValueArea<TempoMapValue>&, juce::ListenerList<SongValues::Listener>&);
+    ~TempoMapTeller() override;
+
+    ValueArea<TempoMapValue>& area;
+    juce::ListenerList<SongValues::Listener>& listeners;
+
+    void valueAreaChanged (const TempoMapValue& before, const TempoMapValue& after) override;
+
+    JUCE_DECLARE_NON_COPYABLE (TempoMapTeller)
+};
+
+// The tempo map's part of the keeper (SongValues.h), its safety net: a TEMPOMAP that comes into the song with entries in it
+// has them read in as the song's map, and is emptied as the adoption empties the song's own (what Phazite doesn't know of it
+// goes too); an entry added to the song's TEMPOMAP by itself is read into the map and taken out again while the song is
+// written outside the history, and refused in a step. Nothing when one of its elements leaves the tree. And the tempo map's
+// adoption from the loaded tree, which the song's holdValues() asks.
+struct SongValues::TempoMapKeeper
+{
+    TempoMapKeeper (SongValues&, Song&);
+
+    // A child added to an element of the song's tree (the keeper's callback, but while the history undoes or redoes, for
+    // every element, whoever's it is): nothing, at once, but for what is the tempo map's (isHeardAsTempoMap()).
+    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
+
+    // The tempo map the loader made consistent into its area, outside the history, and its element emptied
+    // (SongValues.cpp: adopt()).
+    static void adopt (SongValues& into, Song& loaded);
+
+    SongValues& values;
+    Song& song;
+    juce::ValueTree state;
+
+    JUCE_DECLARE_NON_COPYABLE (TempoMapKeeper)
+};
+
+// The tempo map's part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song is the
+// song's TEMPOMAP (the child of its PHAZITE element); and a copy's TEMPOMAP given the map kept (TempoMapValue.h:
+// writeTempoMap(): tempos then time signatures, each kind by beat), where one is kept (a song that keeps everything in its
+// tree keeps none: its TEMPOMAP holds its entries). Nothing for an element that isn't a TEMPOMAP.
+bool leadsToTempoMap (const juce::ValueTree& parent, const juce::ValueTree& child);
+void writeTempoMapIn (juce::ValueTree& element, const ValuesKept&);
+
+// The tempo map's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
+// either holds a TEMPOMAP, the same map (holdSameTempoMap()); and whether a child is the place of the map, which the
+// comparison of the elements in them leaves out (a TEMPOMAP).
+bool holdSameTempoMapOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool isTempoMapPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
+} // namespace phazite

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's clips and a MIDI clip's notes and controllers' values as values (model/base/internal/SongValues.h: ClipValue,
-// SongClips, ClipNotes), which the song holds beside its tree: the conversion between the values and a clip's element (the one
-// place that reads and writes CLIP, WARP, NOTE and CONTROL by name), and the keeper, which keeps the song's values and its
-// tree together for every change of the tree: a track taken out has its clips remembered with its element and given back if
-// the same element comes back (a move); a track or a clip that comes into the song as an element with its clips' elements has
-// them read into the values and taken out of the tree; a clip that joins an alias group takes the group's one value of notes.
-// Each rule through the tree and through the model's functions, with its Undo and Redo (UndoCheck.h), the song's values
-// checked after each (SongCheck.h: values).
+// The song's clips and a MIDI clip's notes and controllers' values as values (model/base/internal/ClipsValue.h: ClipValue,
+// SongClips; ClipNotesValue.h: ClipNotes), which the song holds beside its tree: the conversion between the values and a
+// clip's element (the one place that reads and writes CLIP, WARP, NOTE and CONTROL by name), and the keeper, which keeps
+// the song's values and its tree together for every change of the tree: a track taken out has its clips remembered with its
+// element and given back if the same element comes back (a move); a track or a clip that comes into the song as an element
+// with its clips' elements has them read into the values and taken out of the tree; a clip that joins an alias group takes
+// the group's one value of notes. Each rule through the tree and through the model's functions, with its Undo and Redo
+// (UndoCheck.h), the song's values checked after each (SongCheck.h: values).
 //   phazite_tests.exe --test-case="Song values*"
 #include "GoldenFiles.h"
 #include "SongCheck.h"
@@ -648,7 +648,7 @@ TEST_CASE ("Song values: its listeners are told the clips whose values changed, 
 }
 
 //==============================================================================
-// A clip as a value (SongValues.h: ClipValue), which the song holds in its clips' area: the conversion between it and a CLIP
+// A clip as a value (ClipsValue.h: ClipValue), which the song holds in its clips' area: the conversion between it and a CLIP
 // element.
 namespace
 {
@@ -1042,7 +1042,7 @@ TEST_CASE ("Song values: every clip of a song by its ID, its track's list and it
     CHECK (phazite::holdsItsLists (clips));
 
     {
-        const phazite::test::ExpectedAssertion refused ("SongValues.cpp");
+        const phazite::test::ExpectedAssertion refused ("ClipsValue.cpp");
         const auto track = phazite::TrackID::fromRaw (1);
         CHECK (phazite::withTrackOrder (clips, track, { ClipID::fromRaw (13), ClipID::fromRaw (10) }).isSameAs (clips));
         CHECK (phazite::withTrackOrder (clips, track,

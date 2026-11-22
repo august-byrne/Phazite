@@ -626,7 +626,7 @@ namespace
             const auto start = clip.start.inBeats();
             const auto from = clip.fileStart;
             // Where its part ends, as Phazite plays it: one whose end is 0 (an empty file's, a part set to nothing, or a damaged
-            // file's clip without one, which the song holds as its description's 0: SongValues.h, readClipValue()) plays nothing.
+            // file's clip without one, which the song holds as its description's 0: ClipsValue.h, readClipValue()) plays nothing.
             const auto to = clip.fileEnd;
             const auto end = tempo.toBeats (tempo.toSamples (start) + (to - from));
 

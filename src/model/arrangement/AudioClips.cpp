@@ -20,9 +20,9 @@
 
 namespace phazite
 {
-// Every edit here works on clips' values (SongValues.h: ClipValue): it reads each clip it changes once (Clips.h:
+// Every edit here works on clips' values (ClipsValue.h: ClipValue): it reads each clip it changes once (Clips.h:
 // getClipValue()), works the next value out, and sets it (Clips.h: setClip()); what an alias group's audio clips share, their
-// sound (SongValues.h: ClipSound), is given to each of them as one value. The functions that take a clip's element read it
+// sound (ClipsValue.h: ClipSound), is given to each of them as one value. The functions that take a clip's element read it
 // into a value and ask the value's.
 namespace
 {
@@ -57,7 +57,7 @@ namespace
     }
 
     // Gives a clip and each other clip of its alias group (which play the same audio) one sound, the same value in each
-    // (SongValues.h: ClipSound), keeping their starts and the parts of their files they play.
+    // (ClipsValue.h: ClipSound), keeping their starts and the parts of their files they play.
     void giveSound (Song& song, const ClipValue& clip, const ClipSound& sound)
     {
         for (const auto alias : getAliasClips (song, clip.id))
@@ -641,7 +641,7 @@ namespace
     // The properties an alias group's audio clips share, each with its value where a clip has none (the clips' code writes
     // none for it; every audio clip names its file, as the loader keeps it). The file's path is compared as the song holds it
     // (Schema.h: clipFile), whether the file is there or not. For the elements of a whole copy of a song (the loader's, a
-    // merge's): the clips' own edits give a group's clips one value (SongValues.h: ClipSound).
+    // merge's): the clips' own edits give a group's clips one value (ClipsValue.h: ClipSound).
     struct SharedProperty
     {
         juce::Identifier name;

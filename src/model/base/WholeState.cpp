@@ -1,51 +1,40 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/WholeState.h"
 #include "Song.h"
+#include "internal/ClipsArea.h"
 #include "internal/Schema.h"
-#include "internal/TempoMapValue.h"
+#include "internal/TempoMapArea.h"
 
 namespace phazite
 {
 namespace
 {
-    // The clips of a copy's tracks written in (only tracks hold clips: Schema.h), found where tracks are, in the song's element,
-    // its track list and its folders: under each track, its clips from the values kept, first among its elements, in the
-    // track's order, each with its notes (SongValues.h: writeClipElement()). And the tempo map in the song's TEMPOMAP, the
-    // place the song keeps for it (TempoMapValue.h: writeTempoMap(): tempos then time signatures, each kind by beat).
+    // Whether a child of an element in a copy of the song leads to what an area keeps beside the tree: each area asked in
+    // turn, a line each (the track list, a track or a folder's tracks, for the clips; the song's TEMPOMAP, for the tempo map).
+    bool leadsToKept (const juce::ValueTree& parent, const juce::ValueTree& child)
+    {
+        if (leadsToClips (parent, child))
+            return true;
+
+        if (leadsToTempoMap (parent, child))
+            return true;
+
+        return false;
+    }
+
+    // What the areas keep of a copy's element written in, each area in turn, a line each (a track's clips, first among its
+    // elements, in the track's order, each with its notes: ClipsArea.h; the tempo map in the song's TEMPOMAP, the place the
+    // song keeps for it: TempoMapArea.h), each of an element of its own, so that their order is no matter; then the same of
+    // each element in it that leads to what an area keeps, found where the areas' elements are (the song's element, its
+    // track list and its folders, its TEMPOMAP).
     void writeIn (juce::ValueTree element, const ValuesKept& kept)
     {
-        // Kept of a song that holds its values, which holds at least one of each kind (none kept of one that keeps everything in
-        // its tree, whose TEMPOMAP holds its entries).
-        if (element.hasType (schema::TEMPOMAP))
-        {
-            if (! kept.tempoMap.tempos.empty())
-            {
-                jassert (element.getNumChildren() == 0); // the song's tree holds none of its entries (SongValues.h)
-                writeTempoMap (kept.tempoMap, element);
-            }
+        writeClipsIn (element, kept);
+        writeTempoMapIn (element, kept);
 
-            return;
-        }
-
-        if (element.hasType (schema::TRACK))
-        {
-            const auto track = (std::uint64_t) (juce::int64) element[schema::trackID];
-
-            if (const auto* list = kept.clips.tracks.find (track))
-            {
-                int place = 0;
-
-                for (const auto id : *list)
-                    if (const auto* clip = kept.clips.find (id))
-                        element.addChild (writeClipElement (*clip, kept.notes.find (id)), place++, nullptr);
-            }
-        }
-
-        if (element.hasType (schema::PHAZITE) || element.hasType (schema::TRACKS) || element.hasType (schema::TRACK))
-            for (auto child : element)
-                if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK)
-                    || (child.hasType (schema::TEMPOMAP) && element.hasType (schema::PHAZITE)))
-                    writeIn (child, kept);
+        for (auto child : element)
+            if (leadsToKept (element, child))
+                writeIn (child, kept);
     }
 } // namespace
 
@@ -77,11 +66,17 @@ juce::ValueTree copyWholeClip (const Song& song, ClipID clip)
 ValuesKept keepValues (const Song& song)
 {
     JUCE_ASSERT_MESSAGE_THREAD
+    ValuesKept kept;
 
+    // Each area's value as it is now, a line each.
     if (const auto* values = song.getValues())
-        return { values->notes.get(), values->clips.get(), values->tempoMap.get() };
+    {
+        kept.notes = values->notes.get();
+        kept.clips = values->clips.get();
+        kept.tempoMap = values->tempoMap.get();
+    }
 
-    return {};
+    return kept;
 }
 
 juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const ValuesKept& kept)
@@ -91,52 +86,27 @@ juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const ValuesKept& ke
     return copy;
 }
 
-bool holdSameNotes (const ValuesKept& a, const ValuesKept& b, ClipID clip)
+bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
+                     const ValuesKept& otherKept)
 {
-    const auto* first = a.notes.find (clip);
-    const auto* second = b.notes.find (clip);
-
-    if (first == nullptr || second == nullptr)
-        return first == second;
-
-    return *first == *second;
-}
-
-bool holdSameClip (const ValuesKept& a, const ValuesKept& b, ClipID clip)
-{
-    const auto* first = a.clips.find (clip);
-    const auto* second = b.clips.find (clip);
-
-    if (first == nullptr || second == nullptr)
-        return first == second;
-
-    return *first == *second && holdSameNotes (a, b, clip);
-}
-
-bool holdSameTrackClips (const ValuesKept& a, const ValuesKept& b, TrackID track)
-{
-    const auto* first = a.clips.tracks.find (track.getRaw());
-    const auto* second = b.clips.tracks.find (track.getRaw());
-
-    if (first == nullptr || second == nullptr)
-        return first == second;
-
-    if (first->identity() != second->identity() && ! (*first == *second))
+    // Each area in turn, a line each, in this order (a track's clips, then the tempo map), as each is compared once the
+    // element's own properties are.
+    if (! holdSameClipsOf (element, kept, otherElement, otherKept))
         return false;
 
-    for (const auto clip : *first)
-        if (! holdSameClip (a, b, clip))
-            return false;
+    if (! holdSameTempoMapOf (element, kept, otherElement, otherKept))
+        return false;
 
     return true;
 }
 
-bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept& kept, const juce::ValueTree& otherSong, const ValuesKept& otherKept)
+bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    // The values kept, each tree's TEMPOMAP the place of its map alone.
-    if (song.getChildWithName (schema::TEMPOMAP).isValid() != otherSong.getChildWithName (schema::TEMPOMAP).isValid())
-        return false;
+    // Each area whose place in the tree is an element of its own, a line each: the tempo map's TEMPOMAP. The clips' are
+    // none: the copy's tree holds none of them.
+    if (isTempoMapPlace (parent, child))
+        return true;
 
-    return kept.tempoMap.isSameAs (otherKept.tempoMap) || kept.tempoMap == otherKept.tempoMap;
+    return false;
 }
 } // namespace phazite

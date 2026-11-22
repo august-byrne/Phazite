@@ -4,7 +4,7 @@
 // immer-outside-model), and the tests'.
 //
 // MSVC's optimizer warns C4702 ("unreachable code") at immer/detail/rbts/operations.hpp, in concat_inners_mut(), as it
-// generates the release build's code for a transient flex_vector's concatenation (concat_trees_mut(), which SongValues.cpp's
+// generates the release build's code for a transient flex_vector's concatenation (concat_trees_mut(), which ClipsValue.cpp's
 // helpers instantiate). The warning is immer's code, not Phazite's, but the SYSTEM mark on immer's folder (CMakeLists.txt,
 // /external:W0) doesn't reach it: that mark quiets what the compiler's front end finds as it reads a header, and C4702 comes
 // later, from the code generator, which looks at the warning state the pragmas left at the header's lines. So it is turned off

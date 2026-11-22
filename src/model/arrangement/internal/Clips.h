@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes. The song holds its
-// clips as values beside its tree, in its clips' area (model/base/internal/SongValues.h: SongClips), each track's in their
+// clips as values beside its tree, in its clips' area (model/base/internal/ClipsValue.h: SongClips), each track's in their
 // order: where each is, in beats, its name, mute and alias group, and a MIDI clip's notes (model/notes/internal/Notes.h) or
 // an audio clip's part of its file (AudioClips.h), by their IDs.
 #pragma once
@@ -20,7 +20,7 @@
 namespace phazite
 {
 //==============================================================================
-// The song's clips by their IDs, as plain values (model/base/internal/SongValues.h: ClipValue), read from the song's clips'
+// The song's clips by their IDs, as plain values (model/base/internal/ClipsValue.h: ClipValue), read from the song's clips'
 // area: a lookup in a map, a copy of a small value. What reads many clips often without a copy finds them in the area itself
 // (SongValues::findClip()). A song that holds no values (one made to be read or checked: Song::getValues()) has no clips here.
 
@@ -101,7 +101,7 @@ ClipValue makeMidiClip (Song&, const juce::String& name, BeatRange);
 // docs/known-bugs.md); every other caller asks before it calls.
 ClipID addClip (Song&, ClipValue, const ClipNotes* notes = nullptr, int index = -1);
 
-// Gives a clip of the song (by its value's ID) the value's properties, kept within what a clip holds (SongValues.h:
+// Gives a clip of the song (by its value's ID) the value's properties, kept within what a clip holds (ClipsValue.h:
 // keepWithinClip()), changing only what differs from what it holds: on another track, it moves to the end of that one's
 // clips (one that holds no clips isn't one it goes on). A MIDI clip that joins an alias group takes the group's notes; one
 // that leaves keeps those it holds. Nothing for a clip that isn't the song's.
@@ -118,7 +118,7 @@ void setClip (Song&, const ClipValue& held, const ClipValue& next);
 void eraseClip (Song&, ClipID);
 
 // The value a clip of the song would hold were setClip() to give it this one, changing nothing: what a clip takes of it
-// (SongValues.h, keepWithinClip(): a start at 0 or later, a MIDI clip's length at least shortestClipBeats, a file's part
+// (ClipsValue.h, keepWithinClip(): a start at 0 or later, a MIDI clip's length at least shortestClipBeats, a file's part
 // ending at its start or later; nothing of the other kind of clip's properties), as getClipValue() would read it after.
 // None for a clip that isn't the song's.
 std::optional<ClipValue> getClipValueAsSet (const Song&, const ClipValue&);

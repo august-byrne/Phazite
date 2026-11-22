@@ -2,7 +2,8 @@
 // Where a song's tracks are, by their IDs (Schema.h: trackID), and in what order: what the model's functions that take IDs
 // find tracks by, so that none looks through the song for each ID (known bug 122: a drag of 500 notes in a clip of 5,000
 // looked through every track for each note several times). Each song keeps one (Song::getIndex()). A clip and a note are
-// found in the song's values by their IDs (model/base/internal/SongValues.h: SongClips, ClipNotes), which need no index.
+// found in the song's values by their IDs (model/base/internal/ClipsValue.h: SongClips; ClipNotesValue.h: ClipNotes), which
+// need no index.
 //
 // The song's tree stays the only truth of its tracks. The index is made from it as it is first asked (one walk through the
 // tracks), kept exact by the tree's own notifications of what was added, removed or moved (an

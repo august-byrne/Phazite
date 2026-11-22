@@ -940,7 +940,7 @@ inline const Property<int> chordInversion { "inversion", on (CHORD), whole (0.0,
 // Child of a TRACK that holds clips (trackIsTrack): a clip on it. A track's clips have an order, its list of them; a file's
 // CLIP elements under a TRACK are read in their order, which becomes the list's, and written first among the track's
 // children, in the list's order. A song's clips are values beside its tree while it is open (model/base/internal/
-// SongValues.h: ClipValue), each property below as its description reads it and the whole kept within what a clip holds
+// ClipsValue.h: ClipValue), each property below as its description reads it and the whole kept within what a clip holds
 // (keepWithinClip(): a file's end not before its start, a MIDI clip at least shortestClipBeats long, a take among its
 // takes), so the song keeps no property or element Phazite doesn't know on a CLIP, nor one of the other kind of clip's (a
 // length on an audio clip, a file on a MIDI clip), nor a CLIP anywhere but directly on such a TRACK, and writes each

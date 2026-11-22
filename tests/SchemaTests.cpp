@@ -141,7 +141,7 @@ juce::ValueTree findFirst (const juce::ValueTree& tree, const juce::Identifier& 
 
 // The first element of a type that a property can be checked on as a song opened holds it: for a clip's, the first clip of
 // the kind that holds the property (an audio clip's file, part, sound, gain, fades; one recorded round a loop's takes), as
-// the song holds a clip of each kind's own properties alone (SongValues.h: ClipValue); else the first of the type.
+// the song holds a clip of each kind's own properties alone (ClipsValue.h: ClipValue); else the first of the type.
 juce::ValueTree findFirstFor (const juce::ValueTree& tree, const juce::Identifier& type, const juce::Identifier& property)
 {
     if (type != schema::CLIP)
@@ -395,7 +395,7 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                         const auto held = opened.hasProperty (*property) ? opened[*property] : property->getDefault();
 
                         // A clip's own property as what the loader kept is then kept with the clip's others, as the song
-                        // takes a clip in (SongValues.h: keepWithinClip(): a MIDI clip no shorter than the shortest, a take
+                        // takes a clip in (ClipsValue.h: keepWithinClip(): a MIDI clip no shorter than the shortest, a take
                         // among its takes): what the loader kept, held by a clip's value.
                         auto wanted = *expected;
 

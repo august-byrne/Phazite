@@ -2015,7 +2015,7 @@ TEST_CASE ("A version in which a track is in another folder brings it back there
 // An audio clip the version holds without a name of its own (renamed to nothing, which takes the property away), deleted
 // and brought back: the song is the version, the clip holding no name. When the song's tree held its clips, the writer of a
 // new audio clip's element gave it an empty name, which the comparison with the version counted as a change; a clip's
-// value writes its name only while it is set (SongValues.h: writeClipElement()).
+// value writes its name only while it is set (ClipsValue.h: writeClipElement()).
 TEST_CASE ("An audio clip a version holds without a name comes back as the version's, without one")
 {
     const TemporaryFolder temporary;
@@ -2053,9 +2053,9 @@ TEST_CASE ("An audio clip a version holds without a name comes back as the versi
 TEST_CASE ("Bring Back of the version the song is, and a clip or its notes set to what they hold, make no undo step, alias "
            "groups of MIDI and audio clips too")
 {
-    // An alias group's clips hold one value of what they share (SongValues.h: ClipSound, and one ClipNotes): a value alike in
-    // another value is no change of the song's, which an area gives them without a step of its own; in the tree, a step
-    // without actions was none (JUCE drops it).
+    // An alias group's clips hold one value of what they share (ClipsValue.h: ClipSound; and one ClipNotes,
+    // ClipNotesValue.h): a value alike in another value is no change of the song's, which an area gives them without a step
+    // of its own; in the tree, a step without actions was none (JUCE drops it).
     const TemporaryFolder temporary;
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 2);

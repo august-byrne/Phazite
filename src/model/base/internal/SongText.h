@@ -13,6 +13,11 @@
 
 namespace phazite
 {
+namespace schema
+{
+    class PropertyDescription; // SchemaDescription.h
+}
+
 // A value's text. A string as it is, without the characters XML 1.0 can't hold (the controls below 32 but tab, line feed
 // and carriage return); true and false as 1 and 0; a whole number below 10^15 in its digits, without ".0", whatever type
 // holds it; a float's value in the fewest digits that read back as that float ("0.3", not "0.300000011920929"); and any
@@ -26,12 +31,22 @@ bool isSameValue (const juce::var&, const juce::var&);
 
 // A value's number as the song reads one, the one reading of a number an element holds, the same wherever the song reads
 // one: the loader's (model/project/internal/Project.h: makeConsistent()), and every reader of an element's numbers into the
-// song's values (SongValues.h, TempoMapValue.h, CurveValues.h). A number's own value (a switch's as 1 or 0); text that is a
-// number and nothing else, trimmed, as std::from_chars reads it, which reads every double's text as that double (a
-// subnormal's too, "1e-321", which juce::String::getDoubleValue() reads as 0), "nan" and "inf" as those; infinity for text
-// that is a number past what a double holds or too near 0 for one ("1e999", "1e-400"); none for anything else ("0x10",
-// "4abc", an empty text). What is no finite number each reader then takes as its description's fallback.
+// song's values (ClipsValue.h, ClipNotesValue.h, TempoMapValue.h, CurveValues.h). A number's own value (a switch's as 1 or
+// 0); text that is a number and nothing else, trimmed, as std::from_chars reads it, which reads every double's text as that
+// double (a subnormal's too, "1e-321", which juce::String::getDoubleValue() reads as 0), "nan" and "inf" as those; infinity
+// for text that is a number past what a double holds or too near 0 for one ("1e999", "1e-400"); none for anything else
+// ("0x10", "4abc", an empty text). What is no finite number each reader then takes as its description's fallback.
 std::optional<double> readValueNumber (const juce::var&);
+
+// A number of an element (a note's, a controller's value's, a clip's, a warp marker's) as its value holds it: the
+// property's own, read as the loader reads it (readValueNumber(), so that a text reads as the same number wherever it is
+// read: "1e-321" as that subnormal, never as 0), kept within what its description gives (model/base/internal/Schema.h); and
+// where the element has none, or what it has is no finite number, what the description gives for one that is no number (a
+// velocity of 100, a pitch of 60, a length of a beat), else 0. In the tree a note without a velocity stayed without one; a
+// value always has one, which the loader left to this (a file from others: tests/FuzzTests.cpp found one). What the notes'
+// and the clips' conversions read their numbers with (ClipNotesValue.h, ClipsValue.h).
+double readDescribed (const juce::var& held, const schema::PropertyDescription&);
+double readDescribed (const juce::ValueTree& element, const schema::PropertyDescription&);
 
 // Bytes as text, in base 64 as RFC 4648 has it (with "=" to fill the last group); and back, nothing for text that isn't
 // base 64 of some bytes.

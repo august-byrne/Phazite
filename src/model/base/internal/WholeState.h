@@ -5,7 +5,7 @@
 // model/base/internal/SongValues.h): its clips, a MIDI clip's notes and its controllers' values, and its tempo map, which its
 // tree doesn't hold. These write what is kept beside the tree back in, so that what asks gets the tree a song that kept
 // everything in its tree would give: under each track, its clips first among its elements, in the track's order, each
-// written as SongValues.h's writeClipElement() writes it (each property only while it is set; an audio clip's warp markers;
+// written as ClipsValue.h's writeClipElement() writes it (each property only while it is set; an audio clip's warp markers;
 // a MIDI clip's NOTE elements, then its CONTROL elements, each kind in its order); and in the song's TEMPOMAP element, which
 // the tree keeps empty for it, its tempos then its time signatures, each kind by beat, each written as TempoMapValue.h's
 // writeTempoMap() writes it (a tempo's curve only while it isn't 1).
@@ -35,7 +35,8 @@ juce::ValueTree copyWholeClip (const Song&, ClipID);
 // What the song keeps beside its tree, as it is now: kept for nothing (values share what they hold), for what must write or
 // compare the song later than it copies it (a save in the background, the copy a project compares itself with: model/
 // project/internal/Project.h; what a frozen track's file holds: model/mixer/internal/Freeze.h). Together with a copy of the
-// tree taken at the same moment it gives the whole state then. Any thread may read one once kept.
+// tree taken at the same moment it gives the whole state then. Any thread may read one once kept. A member for each area
+// (SongValues.h's recipe), which keepValues() keeps, a line each.
 struct ValuesKept
 {
     NotesByClip notes;
@@ -50,7 +51,8 @@ ValuesKept keepValues (const Song&); // message thread
 juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const ValuesKept&);
 
 // The halves of a comparison of the song with a copy of it that the trees don't hold (Project's holdTheSameProject(), the
-// frozen tracks' FreezeKeeper), compared as values (the same value, or two alike), or none in either. Any thread.
+// frozen tracks' FreezeKeeper), compared as values (the same value, or two alike), or none in either. Any thread. Each
+// area's, defined in its area's file (NotesArea.cpp, ClipsArea.cpp, TempoMapArea.cpp), a line each:
 //   - whether two kept values hold the same notes and controllers' values for a clip (by its ID);
 //   - the same clip (by its ID): its value (its track among it) and its notes;
 //   - the same clips on a track (by its ID): the same in the same order, each the same clip.
@@ -65,4 +67,13 @@ bool holdSameTrackClips (const ValuesKept&, const ValuesKept&, TrackID);
 // saved copy compare the tempo map with it (the quick one, and the whole song's: holdTheSameProject()), so that the two
 // agree. Any thread.
 bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
+
+// Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
+// what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips
+// (holdSameTrackClips()), then the tempo map of an element either of which holds a TEMPOMAP (holdSameTempoMap()). What
+// Project's comparison of an element whole asks once the element's own properties compare (holdTheSameProject()). And
+// whether a child of an element is the place of what an area keeps (the song's TEMPOMAP), which that comparison leaves out of
+// the elements it compares one by one. Any thread.
+bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite
