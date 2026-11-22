@@ -2,11 +2,13 @@
 // The song whole, or a part of it whole: what needs the song or a part of it with everything it holds (a save, a version's
 // pieces, a comparison, a merge, the clipboard, a duplicate, an export) asks these, never the song's tree alone
 // (Song::getState().createCopy()). The song keeps areas of itself as values beside its tree (roadmap step S5.20;
-// model/base/internal/SongValues.h): its clips, and a MIDI clip's notes and its controllers' values, which its tree doesn't
-// hold. These write what is kept beside the tree back in, so that what asks gets the tree a song that kept everything in its
-// tree would give: under each track, its clips first among its elements, in the track's order, each written as
-// SongValues.h's writeClipElement() writes it (each property only while it is set; an audio clip's warp markers; a MIDI
-// clip's NOTE elements, then its CONTROL elements, each kind in its order).
+// model/base/internal/SongValues.h): its clips, a MIDI clip's notes and its controllers' values, and its tempo map, which its
+// tree doesn't hold. These write what is kept beside the tree back in, so that what asks gets the tree a song that kept
+// everything in its tree would give: under each track, its clips first among its elements, in the track's order, each
+// written as SongValues.h's writeClipElement() writes it (each property only while it is set; an audio clip's warp markers;
+// a MIDI clip's NOTE elements, then its CONTROL elements, each kind in its order); and in the song's TEMPOMAP element, which
+// the tree keeps empty for it, its tempos then its time signatures, each kind by beat, each written as TempoMapValue.h's
+// writeTempoMap() writes it (a tempo's curve only while it isn't 1).
 #pragma once
 
 #include "model/base/IDs.h"
@@ -18,8 +20,9 @@ namespace phazite
 {
 class Song;
 
-// The song's tree, or a part of it (a TRACK, the track list, any element of the song), as a copy that holds everything the
-// song holds of it: what is kept beside the tree written back in (each track's clips, with their notes). A part that isn't
+// The song's tree, or a part of it (a TRACK, the track list, the TEMPOMAP, any element of the song), as a copy that holds
+// everything the song holds of it: what is kept beside the tree written back in (each track's clips, with their notes; the
+// tempo map, in the song's or its TEMPOMAP's copy). A part that isn't
 // the song's, and any part of a song that keeps everything in its tree (one that holds no values: Song::getValues()), is
 // copied as it is. A copy no one else holds, which any thread may then read. Message thread.
 juce::ValueTree copyWholeSong (const Song&);
@@ -37,6 +40,7 @@ struct ValuesKept
 {
     NotesByClip notes;
     SongClips clips;
+    TempoMapValue tempoMap; // none (no entry of either kind) kept of a song that holds no values
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -56,9 +60,9 @@ bool holdSameTrackClips (const ValuesKept&, const ValuesKept&, TrackID);
 
 // Whether two songs, each a tree with its kept values (the song's own and its kept values now, a copy and those kept with it),
 // hold the same tempo map, as one value (TempoMapValue.h: the same tempos and time signatures, each kind by beat): so that a
-// tempo changed and changed back compares as the same, whatever order the elements of a file came in. While the song's tree
-// holds its tempo map (roadmap step S5.20: the tempo map's switch is to come) the trees' TEMPOMAP elements are read; a tree
-// with one and a tree without hold different maps. Both of Project's comparisons with the saved copy compare the tempo map
-// with it (the quick one, and the whole song's: holdTheSameProject()), so that the two agree. Any thread.
+// tempo changed and changed back compares as the same. The values kept are compared, the trees' TEMPOMAP elements being the
+// places of the maps alone: a tree with one and a tree without hold different maps. Both of Project's comparisons with the
+// saved copy compare the tempo map with it (the quick one, and the whole song's: holdTheSameProject()), so that the two
+// agree. Any thread.
 bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
 } // namespace phazite

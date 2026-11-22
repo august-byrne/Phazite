@@ -8,7 +8,9 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <system_error>
 
 namespace phazite
 {
@@ -144,6 +146,41 @@ juce::String writeValue (const juce::var& value)
         return juce::String (written->data(), written->size());
 
     return withoutForbidden (value.toString());
+}
+
+std::optional<double> readValueNumber (const juce::var& value)
+{
+    if (value.isInt() || value.isInt64() || value.isDouble() || value.isBool())
+        return (double) value;
+
+    if (! value.isString())
+        return std::nullopt;
+
+    const auto read = [] (std::string_view text) -> std::optional<double>
+    {
+        double number = 0.0;
+        const auto result = std::from_chars (text.data(), text.data() + text.size(), number);
+
+        if (result.ec == std::errc::result_out_of_range)
+            return std::numeric_limits<double>::infinity();
+
+        if (text.empty() || result.ec != std::errc() || result.ptr != text.data() + text.size())
+            return std::nullopt;
+
+        return number;
+    };
+
+    const auto string = value.toString();
+    const auto isVisible = [] (char c) { return c > ' ' && c < 127; };
+
+    // Its own UTF-8 where trimming takes nothing off (it starts and ends with a visible ASCII character), as nearly every
+    // number does: no copy made for each of a song's numbers. Its bytes as they are, up to their end: a text from a file
+    // anyone wrote needn't be UTF-8, and the count JUCE works out from its characters (getNumBytesAsUTF8()) is then not the
+    // count it holds.
+    if (const std::string_view text (string.toRawUTF8()); ! text.empty() && isVisible (text.front()) && isVisible (text.back()))
+        return read (text);
+
+    return read (string.trim().toStdString());
 }
 
 bool isSameValue (const juce::var& a, const juce::var& b)

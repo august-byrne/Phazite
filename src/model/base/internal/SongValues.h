@@ -1,30 +1,37 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's values: what the song moves from its juce::ValueTree into immutable values held beside it (the immer library;
-// roadmap step S5.20, model/base/internal/ValueArea.h), one area at a time. The first two areas are the song's clips
-// (SongClips: each clip's properties and warp markers as a ClipValue, each track's clips in their order, each alias group's
-// clips), which the clips' code (model/arrangement/internal/Clips.h, AudioClips.h) computes each edit on; and a MIDI clip's
-// notes and its controllers' values (ClipNotes), which the notes' code (model/notes/internal/Notes.h) computes each edit on,
-// from one value to the next. Both as plain values in Phazite's own types.
+// roadmap step S5.20, model/base/internal/ValueArea.h), one area at a time. The areas are the song's clips (SongClips: each
+// clip's properties and warp markers as a ClipValue, each track's clips in their order, each alias group's clips), which the
+// clips' code (model/arrangement/internal/Clips.h, AudioClips.h) computes each edit on; a MIDI clip's notes and its
+// controllers' values (ClipNotes), which the notes' code (model/notes/internal/Notes.h) computes each edit on, from one value
+// to the next; and the song's tempo map (TempoMapValue.h: its tempos and time signatures), which the tempo map's code
+// (model/transport/internal/Tempo.h) computes each edit on. All as plain values in Phazite's own types.
 //
 // The values are the storage: the song holds an area of each (SongValues) in its one undo history, and the song's tree holds
-// no CLIP element (nor a clip's NOTE, CONTROL or WARP elements). The conversion below is the one place that reads and writes
-// those elements by their names: what a file's clip (or any clip that comes into the song as an element: a version's track,
-// a track pasted) is read into, and what a whole copy of the song is written from (WholeState.h).
+// no CLIP element (nor a clip's NOTE, CONTROL or WARP elements), and no TEMPO or TIMESIGNATURE element: its TEMPOMAP element
+// stays, empty, the place a whole copy writes the map in. The conversion below (and TempoMapValue.h's, for the tempo map) is
+// the one place that reads and writes those elements by their names: what a file's clip or tempo map (or any that comes into
+// the song as an element: a version's track, a track pasted) is read into, and what a whole copy of the song is written from
+// (WholeState.h).
 //
 // immer is the model's alone (tools/check-architecture.sh: immer-outside-model): nothing outside src/model includes this.
 #pragma once
 
+#include "engine/core/TempoMap.h"
 #include "model/base/Beats.h"
 #include "model/base/ControlKinds.h"
 #include "model/base/IDs.h"
 #include "model/base/internal/Immer.h"
+#include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/ValueArea.h"
 
 #include <juce_core/juce_core.h>
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -351,25 +358,34 @@ bool hasGroupsOfOne (const SongClips&);
 
 //==============================================================================
 // The song's values, which the song holds once its tree is consistent (Song::holdValues(), as model/project/internal/
-// Project.h's makeSong() makes a song): the clips' area and the notes' area, in the song's one undo history, and what keeps
-// them and the tree together. Message thread only, as the song's tree is: nothing on the audio thread reads it (what plays
-// gets what the model compiles of it), and what runs on another thread gets a copy (WholeState.h: copyWholeSong(),
-// keepValues()).
+// Project.h's makeSong() makes a song): the clips' area, the notes' area and the tempo map's, in the song's one undo history,
+// and what keeps them and the tree together. Message thread only, as the song's tree is: nothing on the audio thread reads it
+// (what plays gets what the model compiles of it), and what runs on another thread gets a copy (WholeState.h:
+// copyWholeSong(), keepValues()).
 //
 // Who changes the values: the clips' code (Clips.h: addClip(), setClip(), eraseClip() and the rest, through setClip(),
-// eraseClip() and setTrackClipOrder() below), and the notes' code (Notes.h: setClipNotesValue(), which is setClipNotes()
-// below). A MIDI clip that joins an alias group takes the group's notes, and one that leaves it keeps those it holds
-// (setClip()). Everything else that changes the tree is heard by the keeper, a listener of the song's root: a track taken
+// eraseClip() and setTrackClipOrder() below), the notes' code (Notes.h: setClipNotesValue(), which is setClipNotes() below),
+// and the tempo map's code (Tempo.h: every edit of the tempo map, through setTempoMap() below). The song takes in its file's
+// tempo map as it holds its values (holdValues(): TempoMapValue.h, readHeldTempoMap()), and empties its TEMPOMAP element,
+// properties and children Phazite doesn't know too. A MIDI clip that joins an alias group takes the group's notes, and one
+// that leaves it keeps those it holds (setClip()). Everything else that changes the tree is heard by the keeper, a listener
+// of the song's root: a track taken
 // out of the song (alone, in a folder, the track list) has its clips (their values, their order and their notes) remembered
 // with its element and erased from both areas; the same element put back (JUCE moves a track by taking it out and putting it
 // in again) gets them back; and a track that comes into the song's tree with its clips' elements in it (a track pasted or
 // applied so: a safety net, which the versions don't use: model/versions/ApplySong.cpp) has them read into both areas and
 // taken out of the tree. A CLIP element added to a track of the song by itself is no clip of the song's (a JUCE assertion:
-// the clips' functions add a clip), as the step that adds it can't take it out again (its Undo would find it gone). Each
-// in the mode of the moment: in the history's step in progress, or outside the history while the song is written outside
-// it (Song::OutsideHistory). Nothing while the history undoes or redoes a step: the areas' own actions move them. The
-// keeper performs its changes from inside JUCE's action for the tree's, which JUCE adds to the step before the tree's own:
-// so an undo puts the tree back first and the clips after (JUCE workaround W62 (docs/juce-workarounds.md)).
+// the clips' functions add a clip), as the step that adds it can't take it out again (its Undo would find it gone). The
+// same safety net for the tempo map, which the versions don't use either (model/versions/ApplySong.cpp, VersionsModel.cpp):
+// a TEMPOMAP that comes into the song with TEMPO or TIMESIGNATURE elements in it has them read into the tempo map's area,
+// as its whole map, and is emptied as holdValues() empties the song's own (what Phazite doesn't know of it goes too); and
+// a TEMPO or a TIMESIGNATURE added to the song's TEMPOMAP by itself while the song is written outside the history is read
+// into the map (TempoMapValue.h: withEntryTaken()) and taken out again. One
+// added by itself in a step is refused as a lone CLIP is, for the same reason (a JUCE assertion: the tempo map's functions
+// change the map). Each in the mode of the moment: in the history's step in progress, or outside the history while the song
+// is written outside it (Song::OutsideHistory). Nothing while the history undoes or redoes a step: the areas' own actions
+// move them. The keeper performs its changes from inside JUCE's action for the tree's, which JUCE adds to the step before
+// the tree's own: so an undo puts the tree back first and the clips after (JUCE workaround W62 (docs/juce-workarounds.md)).
 //
 // The rule for what listens to the song's tree, with no exception: a tree callback never reads the clips' area (nor the
 // notes'), directly or through anything that reads them (the clips' functions, Clips.h, AudioClips.h; the notes', Notes.h;
@@ -378,10 +394,9 @@ bool hasGroupsOfOne (const SongClips&);
 // change after the listener that reads, which then finds a track moved (JUCE moves one by taking it out and putting it in
 // again) without its clips; and during an undo the tree is back before the clips are. What reads the clips does it at its
 // listener's later moment: a plan's next compile, the next turn of the message loop (Song::PendingWriter), or as the values'
-// listener (Listener) is told. The keeper is also what tells the values' listeners of the tempo map, from the tree's
-// notifications under its TEMPOMAP element, while the tree holds it (Listener::tempoMapChanged()). What the keeper can't
-// see: a track added or taken out with no undo manager outside an OutsideHistory scope is written into the step in
-// progress (if any) as if it had one; nothing in Phazite does that to a song that holds its values (the loader does it
+// listener (Listener) is told. What the keeper can't see: a track added or taken out with no undo manager outside an
+// OutsideHistory scope is written into the step in progress (if any) as if it had one, and a tempo map's entry added so is
+// refused as one added in a step; nothing in Phazite does either to a song that holds its values (the loader does it
 // before: makeSong()).
 class SongValues final
 {
@@ -391,6 +406,7 @@ public:
 
     ValueArea<SongClips> clips;
     ValueArea<NotesByClip> notes;
+    ValueArea<TempoMapValue> tempoMap; // each kind by beat, at least one of each (TempoMapValue.h)
 
     // A clip's value: none for a clip that isn't the song's. A pointer into the area's value as it is now, valid until the
     // area's next change; to read the same value on past changes, keep a copy of the area's value (cheap: it shares what it
@@ -420,6 +436,27 @@ public:
     // to change a clip's notes. Notes equal to those each holds are no change, and make no action in the history: nothing
     // where they hold one value, else this one without a step of its own (a group holds one value).
     void setClipNotes (Song&, ClipID, ClipNotes);
+
+    // Gives the song this tempo map, the tempo map's code's one way to change it (model/transport/internal/Tempo.h): in the
+    // song's undo history (the step in progress), or outside it while the song is written outside it. A map equal to the one
+    // the song holds is no change, and writes nothing: no step, the value the song holds kept (an entry has no identity of
+    // its own to keep, nor a value of the map's anything else shares, so nothing is lost).
+    void setTempoMap (Song&, TempoMapValue);
+
+    // The tempo map as Phazite's engine plays it (engine/core/TempoMap.h), made of the tempo map's value at a sample rate,
+    // kept for the tempo map's code (model/transport/Tempo.cpp: getTempoMap()), so that it is made once for each change of
+    // the value and each sample rate asked, not at every call (each conversion of a beat to seconds, each audio clip read):
+    // the last two asked, each with the value it was made of, compared by identity. Message thread only, as the area is: what
+    // plays gets a copy (a plan's), and nothing on the audio thread reaches these.
+    struct PlayedTempoMap
+    {
+        TempoMapValue madeOf;
+        double sampleRate = 0.0;
+        engine::TempoMap map;
+    };
+
+    mutable std::array<std::optional<PlayedTempoMap>, 2> playedTempoMaps;
+    mutable size_t nextPlayedTempoMap = 0; // which of them is made next
 
     // A clip that changed, with the track it was on before and the one it is on after: none before for a clip added, none
     // after for one taken out (erased), the same track twice for a change in place.
@@ -454,13 +491,10 @@ public:
             juce::ignoreUnused (clips, reordered);
         }
 
-        // The song's tempo map (TempoMapValue.h): its tempos or its time signatures, any of them. While the song's tree holds
-        // the map, the keeper tells it for each of the tree's notifications under its TEMPOMAP element (a property of an
-        // element in it, a child added to it, taken out of it or moved in it; the TEMPOMAP itself added to the song or taken
-        // out), a step's, an undo's, a redo's and a write's outside the history alike, in the order they come, and what
-        // listens to the song's root hears none of those from the tree (isHeardAsTempoMap(), below), so that nothing hears a
-        // change twice. Once the song holds the map as a value (roadmap step S5.20, the tempo map's switch) the area tells it,
-        // once for each change of its value.
+        // The song's tempo map (TempoMapValue.h): its tempos or its time signatures, any of them. The tempo map's area tells it,
+        // once for each change of its value: a step's, an undo's or a redo's whole step, a write outside the history. What
+        // listens to the song's root leaves what its tree tells under its TEMPOMAP element alone (isHeardAsTempoMap(),
+        // below): what the keeper takes in there (its safety net) is told here, once.
         virtual void tempoMapChanged() {}
     };
 
@@ -476,17 +510,24 @@ public:
     bool remembers (const juce::ValueTree& track) const;
     std::vector<TrackID> getRemembered() const;
 
+    // How many TEMPO and TIMESIGNATURE elements the keeper took into the tempo map's area from the song's tree since the song
+    // held its values (the safety net, above): what the versions, which give the song its tempo map through setTempoMap(),
+    // check they never leave to it.
+    int countTempoMapAdopted() const noexcept { return tempoMapAdopted; }
+
 private:
     friend class Song;
 
     struct NotesTeller;
     struct ClipsTeller;
+    struct TempoMapTeller;
     struct Keeper;
-    mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers and the keeper (addListener())
+    mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
     std::unique_ptr<NotesTeller> notesTeller;
     std::unique_ptr<ClipsTeller> clipsTeller;
+    std::unique_ptr<TempoMapTeller> tempoMapTeller;
     std::unique_ptr<Keeper> keeper;
-    int adopted = 0;
+    int adopted = 0, tempoMapAdopted = 0;
 
     // In the history, or outside it, as the song is written now; and a value alike to the area's, without a step of its own
     // (ValueArea.h: setWithoutStep()).
@@ -506,6 +547,8 @@ private:
 // tempoMapChanged()) and leaves alone in its tree callbacks: the song's TEMPOMAP element (the child of its PHAZITE element),
 // or an element in it. And whether a child added to an element or taken out of it is: the TEMPOMAP itself, added to the
 // song or taken out, or a child of an element that is. A child moved is the tempo map's where the element it moved in is.
+// The song's TEMPOMAP is an empty placeholder (the map is its area's), so the tree tells of it only what the keeper takes
+// in (its safety net, above), which the area tells.
 bool isHeardAsTempoMap (const juce::ValueTree& element);
 bool isHeardAsTempoMap (const juce::ValueTree& parent, const juce::ValueTree& child);
 
@@ -518,9 +561,11 @@ int readChannel (const juce::ValueTree& element, const juce::Identifier& propert
 void writeChannel (juce::ValueTree& element, const juce::Identifier& property, int channel, juce::UndoManager*);
 
 // A clip's notes and controllers' values, read from its NOTE and CONTROL children, each kind in its order, whatever the order
-// of the two kinds among each other: each property as the song has always read it (a property that is absent reads as 0,
-// but the channel, 1, and the flags, off). A property Phazite doesn't know on a NOTE or a CONTROL is no part of the value,
-// nor is a CONTROL of a kind Phazite doesn't know (which the loader takes out of a song: model/project/Project.cpp).
+// of the two kinds among each other: each number read as the loader reads it (SongText.h: readValueNumber(), the same number
+// for the same text wherever it is read) and kept within its description's range (Schema.h), one that is absent or no finite
+// number as its description's fallback, else 0 (the channel, 1; the flags, off). A property Phazite doesn't know on a NOTE
+// or a CONTROL is no part of the value, nor is a CONTROL of a kind Phazite doesn't know (which the loader takes out of a
+// song: model/project/Project.cpp).
 ClipNotes readClipNotes (const juce::ValueTree& clipState);
 
 // The same of NOTE and CONTROL elements on no clip (a MIDI file's read for an import), in their order.

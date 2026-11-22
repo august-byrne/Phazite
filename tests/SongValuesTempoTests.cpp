@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's tempo map change hears it from one place (model/base/internal/SongValues.h:
-// Listener::tempoMapChanged()), which the song's keeper tells from the tree's notifications while the tree holds the map,
-// and the tempo map's area once it holds it as a value (roadmap step S5.20). For each edit of the tempo map made through the
-// model, its Undo and its Redo, the listener is told, and told nothing of the clips or their notes; another area's change
-// tells it nothing; and what listens to the song's root hears each change once: the project's count of changes and the
-// versions' count of the song's changes go up by what the listener was told, and by nothing else; and an edit of one
-// property or one entry tells it as often as it changed, no more.
+// Listener::tempoMapChanged()), which the tempo map's area tells (roadmap step S5.20). For each edit of the tempo map made
+// through the model, its Undo and its Redo, the listener is told, and told nothing of the clips or their notes; another
+// area's change tells it nothing; and what listens to the song's root hears each change once: the project's count of
+// changes and the versions' count of the song's changes go up by what the listener was told, and by nothing else; and an
+// edit of one property or one entry tells it once, for its one change of the area's value.
 //   phazite_tests.exe --test-case="Song values' tempo map*"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "UndoCheck.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TempoMapValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -144,11 +146,13 @@ TEST_CASE ("Song values' tempo map: each edit through the model tells the tempo 
     auto& song = w.song;
 
     // How often the listener is told for an edit that writes one property of the tempo map, or adds or takes out one of its
-    // entries, and for its Undo and its Redo: while the song's tree holds the map, once for each of the tree's notifications
-    // under its element, which the root's listener counts (so that the keeper telling twice for one shows). THE ONE PLACE TO
-    // CHANGE once the tempo map's area holds it as a value (roadmap step S5.20, the tempo map's switch), where each tells
-    // once: return 1.
-    const auto toldForOneWrite = [] (const Watched::Heard& heard) { return heard.tempoMap; };
+    // entries, and for its Undo and its Redo: the tempo map's area tells once for each change of its value, and the tree,
+    // whose TEMPOMAP is an empty place for the map, tells nothing under it.
+    const auto toldForOneWrite = [] (const Watched::Heard& heard)
+    {
+        CHECK (heard.tempoMap == 0);
+        return 1;
+    };
 
     const auto check = [&w, &toldForOneWrite] (const juce::String& name, const std::function<void()>& change, bool isOneWrite)
     {
@@ -229,4 +233,104 @@ TEST_CASE ("Song values' tempo map: another area's change tells nothing of the t
     check ("Rename Track", [&] { phazite::setTrackName (song, track, "Renamed"); });
     check ("Add Effect", [&] { w.s.addEffect (track, phazite::devices::Equalizer::typeID); });
     check ("Add Track", [&] { CHECK (phazite::insertTrack (song, track, nullptr).isValid()); });
+}
+
+TEST_CASE ("Song values' tempo map: the keeper takes in a TEMPOMAP that comes into the song with entries, and an entry added outside "
+           "the history, and nothing while the history undoes or redoes")
+{
+    // Its safety net (SongValues.h), which the versions never leave anything to (ApplySong.cpp, VersionsModel.cpp).
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    auto& values = *song.getValues();
+    song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (song);
+    const auto adoptedBefore = values.countTempoMapAdopted();
+
+    // A TEMPOMAP with entries in the place of the song's, in a step: its entries the song's map, its element empty.
+    undo.check (
+        "Take In a Tempo Map",
+        [&]
+        {
+            const phazite::UndoStep step (song, "Take In a Tempo Map");
+            auto state = song.getState();
+            state.removeChild (state.getChildWithName (phazite::schema::TEMPOMAP), &song.getUndoManager());
+            juce::ValueTree map (phazite::schema::TEMPOMAP);
+            map.appendChild (
+                juce::ValueTree (phazite::schema::TEMPO, { { phazite::schema::mapBeat, 8.0 }, { phazite::schema::bpm, 140.0 } }), nullptr);
+            map.appendChild (
+                juce::ValueTree (phazite::schema::TEMPO, { { phazite::schema::mapBeat, 0.0 }, { phazite::schema::bpm, 90.0 } }), nullptr);
+            map.appendChild (juce::ValueTree (phazite::schema::TIMESIGNATURE, { { phazite::schema::mapBeat, 0.0 },
+                                                                                { phazite::schema::numerator, 3 },
+                                                                                { phazite::schema::denominator, 4 } }),
+                             nullptr);
+
+            // What Phazite doesn't know of a map goes with its entries, as holdValues() takes it out of the song's own.
+            map.setProperty ("unknownToPhazite", 1, nullptr);
+            map.appendChild (juce::ValueTree ("UNKNOWNTOPHAZITE"), nullptr);
+            state.appendChild (map, &song.getUndoManager());
+        });
+
+    const auto tempos = phazite::getTempoChanges (song);
+    REQUIRE (tempos.size() == 2);
+    CHECK (tempos[0].bpm == doctest::Approx (90.0));
+    CHECK (tempos[1].bpm == doctest::Approx (140.0));
+    CHECK (phazite::getTimeSignature (song) == phazite::TimeSignature { 3, 4 });
+    CHECK (song.getState().getChildWithName (phazite::schema::TEMPOMAP).getNumChildren() == 0);
+    CHECK (song.getState().getChildWithName (phazite::schema::TEMPOMAP).getNumProperties() == 0);
+    CHECK (values.countTempoMapAdopted() == adoptedBefore + 3);
+    phazite::test::checkSong (song);
+
+    // Undone and redone: the area's own action, nothing taken in again.
+    phazite::undo (song);
+    CHECK (phazite::getTempoChanges (song).size() == 1);
+    CHECK (phazite::getTempo (song) == doctest::Approx (120.0));
+    phazite::redo (song);
+    CHECK (phazite::getTempoChanges (song).size() == 2);
+    CHECK (values.countTempoMapAdopted() == adoptedBefore + 3);
+    phazite::test::checkSong (song);
+
+    // An entry added to the song's TEMPOMAP outside the history: in its place by its beat, taken out again.
+    {
+        const phazite::Song::OutsideHistory outside (song);
+        song.getState()
+            .getChildWithName (phazite::schema::TEMPOMAP)
+            .appendChild (juce::ValueTree (phazite::schema::TEMPO, { { phazite::schema::mapBeat, 12.0 }, { phazite::schema::bpm, 150.0 } }),
+                          nullptr);
+    }
+
+    const auto taken = phazite::getTempoChanges (song);
+    REQUIRE (taken.size() == 3);
+    CHECK (taken[1].bpm == doctest::Approx (140.0));
+    CHECK (taken[2].beat == phazite::test::at (12.0));
+    CHECK (taken[2].bpm == doctest::Approx (150.0));
+    CHECK (song.getState().getChildWithName (phazite::schema::TEMPOMAP).getNumChildren() == 0);
+    CHECK (values.countTempoMapAdopted() == adoptedBefore + 4);
+    phazite::test::checkSong (song);
+}
+
+TEST_CASE ("Song values' tempo map: a map set equal to the one the song holds makes no undo step, tells nothing and keeps the value held")
+{
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    phazite::addTempoChange (song, at (8.0), 140.0);
+    auto& values = *song.getValues();
+    const auto held = values.tempoMap.get();
+    const auto steps = song.getUndoManager().getUndoDescriptions().size();
+    Told told;
+    values.addListener (&told);
+
+    // The same entries in new vectors: alike, not the same value.
+    const phazite::TempoMapValue alike { immer::flex_vector<phazite::TempoEntry> (held.tempos.begin(), held.tempos.end()),
+                                         immer::flex_vector<phazite::SignatureEntry> (held.signatures.begin(), held.signatures.end()) };
+    REQUIRE_FALSE (alike.isSameAs (held));
+
+    {
+        const phazite::UndoStep step (song, "Nothing");
+        values.setTempoMap (song, alike);
+    }
+
+    CHECK (song.getUndoManager().getUndoDescriptions().size() == steps);
+    CHECK (told.tempo == 0);
+    CHECK (values.tempoMap.get().isSameAs (held));
+    values.removeListener (&told);
 }

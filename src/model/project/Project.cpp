@@ -626,41 +626,11 @@ namespace
             return value.isString() && schema::isVersionsID (value.toString(), digits);
         }
 
-        // A value as a number: a number's own, or text that is a number and nothing else; none for anything else, and
-        // infinity for text too large for one.
+        // A value as a number, as every reader of the song's numbers reads one (SongText.h): a number's own, or text that is a
+        // number and nothing else; none for anything else, and infinity for text too large for one.
         std::optional<double> readNumber (const juce::var& value)
         {
-            if (value.isInt() || value.isInt64() || value.isDouble() || value.isBool())
-                return (double) value;
-
-            if (! value.isString())
-                return std::nullopt;
-
-            // Its own UTF-8 where trimming takes nothing off (it starts and ends with a visible ASCII character), as nearly
-            // every number does: no copy made for each of a song's numbers.
-            const auto read = [] (std::string_view text) -> std::optional<double>
-            {
-                double number = 0.0;
-                const auto result = std::from_chars (text.data(), text.data() + text.size(), number);
-
-                if (result.ec == std::errc::result_out_of_range)
-                    return std::numeric_limits<double>::infinity();
-
-                if (text.empty() || result.ec != std::errc() || result.ptr != text.data() + text.size())
-                    return std::nullopt;
-
-                return number;
-            };
-
-            const auto string = value.toString();
-            const auto isVisible = [] (char c) { return c > ' ' && c < 127; };
-
-            // Its bytes as they are, up to their end: a text from a file anyone wrote needn't be UTF-8, and the count JUCE works
-            // out from its characters (getNumBytesAsUTF8()) is then not the count it holds.
-            if (const std::string_view text (string.toRawUTF8()); ! text.empty() && isVisible (text.front()) && isVisible (text.back()))
-                return read (text);
-
-            return read (string.trim().toStdString());
+            return readValueNumber (value);
         }
 
         // Whether a number's text is the one Phazite writes for the number it reads as (SongText.h: writeValue()), told from
@@ -675,7 +645,7 @@ namespace
                 return false;
 
             const auto string = value.toString();
-            const std::string_view text (string.toRawUTF8()); // its bytes as they are (readNumber())
+            const std::string_view text (string.toRawUTF8()); // its bytes as they are (readValueNumber())
             const auto isDigit = [] (char c) { return c >= '0' && c <= '9'; };
             size_t i = text.starts_with ('-') ? 1 : 0;
             const auto wholeStart = i;
@@ -1791,11 +1761,6 @@ void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal)
 void makeExponentsReadable (juce::ValueTree song)
 {
     consistent::keepTexts (std::move (song), true, schema::getTables());
-}
-
-std::optional<double> readLoadedNumber (const juce::var& value)
-{
-    return consistent::readNumber (value);
 }
 
 bool isNumberWrittenAsPhazite (const juce::var& value)

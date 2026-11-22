@@ -16,6 +16,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
@@ -35,6 +36,7 @@
 #include "model/versions/internal/SongPieces.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <set>
@@ -1172,6 +1174,246 @@ TEST_CASE ("A tempo of zero opens at the slowest tempo, one that is no number at
     const auto signature = phazite::getTimeSignature (song);
     CHECK (signature.numerator == 1);
     CHECK (signature.denominator == 4);
+}
+
+namespace
+{
+// A song's tempo map as its value holds it (TempoMapValue.h), each entry as text: a tempo's beat, bpm and curve, a time
+// signature's beat, numerator and denominator.
+std::vector<juce::String> describeTempoMap (const phazite::Song& song)
+{
+    std::vector<juce::String> entries;
+    const auto& map = phazite::getTempoMapValue (song);
+
+    for (const auto& tempo : map.tempos)
+        entries.push_back ("tempo " + juce::String (tempo.beat.inBeats(), 2) + " " + juce::String (tempo.bpm, 2) + " "
+                           + juce::String (tempo.curve, 2));
+
+    for (const auto& signature : map.signatures)
+        entries.push_back ("signature " + juce::String (signature.beat.inBeats(), 2) + " " + juce::String (signature.numerator) + "/"
+                           + juce::String (signature.denominator));
+
+    return entries;
+}
+} // namespace
+
+TEST_CASE ("A damaged tempo map opens as a whole value, each entry as its description reads it, saved and opened again the same")
+{
+    // The song takes in its file's tempo map as it opens (Song::holdValues(): TempoMapValue.h, readHeldTempoMap()): an entry
+    // without a bpm or a beat, with a number that is none, a map with no entry, one without a time signature, and what Phazite
+    // doesn't know on the map and its entries. Each opens holding together (the check, in Edited::open()), holds what its
+    // description reads, and is the same once saved and opened again, its TEMPOMAP written tempos first, then time
+    // signatures, without what Phazite doesn't know.
+    struct Case
+    {
+        const char* about;
+        std::function<void (juce::XmlElement&)> edit;
+        std::vector<juce::String> expected;
+    };
+
+    const auto mapOf = [] (juce::XmlElement& song) -> juce::XmlElement&
+    {
+        auto* map = song.getChildByName ("TEMPOMAP");
+        REQUIRE (map != nullptr);
+        return *map;
+    };
+
+    const Case cases[] = {
+        { "a tempo without a bpm",
+          [&mapOf] (juce::XmlElement& song)
+          {
+              auto* tempo = mapOf (song).createNewChildElement ("TEMPO");
+              tempo->setAttribute ("beat", "8");
+          },
+          { "tempo 0.00 120.00 1.00", "tempo 8.00 120.00 1.00", "signature 0.00 4/4" } },
+        { "a tempo without a beat",
+          [&mapOf] (juce::XmlElement& song)
+          {
+              auto* tempo = mapOf (song).getChildByName ("TEMPO");
+              tempo->removeAttribute ("beat");
+              tempo->setAttribute ("bpm", "100");
+          },
+          { "tempo 0.00 100.00 1.00", "signature 0.00 4/4" } },
+        { "a bpm that is no number",
+          [&mapOf] (juce::XmlElement& song) { mapOf (song).getChildByName ("TEMPO")->setAttribute ("bpm", "fast"); },
+          { "tempo 0.00 120.00 1.00", "signature 0.00 4/4" } },
+        { "a map with no entry",
+          [&mapOf] (juce::XmlElement& song) { mapOf (song).deleteAllChildElements(); },
+          { "tempo 0.00 120.00 1.00", "signature 0.00 4/4" } },
+        { "a map without a time signature",
+          [&mapOf] (juce::XmlElement& song)
+          {
+              auto& map = mapOf (song);
+              map.getChildByName ("TEMPO")->setAttribute ("bpm", "90");
+              map.removeChildElement (map.getChildByName ("TIMESIGNATURE"), true);
+          },
+          { "tempo 0.00 90.00 1.00", "signature 0.00 4/4" } },
+        { "what Phazite doesn't know, and a time signature before a tempo",
+          [&mapOf] (juce::XmlElement& song)
+          {
+              auto& map = mapOf (song);
+              map.setAttribute ("colour", "red");
+              map.getChildByName ("TEMPO")->setAttribute ("swing", "0.2");
+              map.createNewChildElement ("LINE");
+              auto* signature = new juce::XmlElement ("TIMESIGNATURE");
+              signature->setAttribute ("beat", "16");
+              signature->setAttribute ("numerator", "3");
+              signature->setAttribute ("denominator", "4");
+              map.prependChildElement (signature);
+          },
+          { "tempo 0.00 120.00 1.00", "signature 0.00 4/4", "signature 16.00 3/4" } },
+    };
+
+    for (const auto& each : cases)
+    {
+        INFO (juce::String (each.about));
+        Edited edited;
+        const auto project = edited.open (each.edit);
+        REQUIRE (project != nullptr);
+        CHECK (describeTempoMap (project->getSong()) == each.expected);
+
+        const auto map = phazite::test::copyWholeSong (project->getSong()).getChildWithName (schema::TEMPOMAP);
+        CHECK (map.getNumProperties() == 0);
+
+        for (const auto& child : map)
+        {
+            CHECK ((child.hasType (schema::TEMPO) || child.hasType (schema::TIMESIGNATURE)));
+            CHECK_FALSE (child.hasProperty ("swing"));
+        }
+
+        REQUIRE (project->save().wasOk());
+        juce::String error;
+        const auto again = phazite::Project::open (edited.file, false, error);
+        REQUIRE_MESSAGE (again != nullptr, error.toStdString());
+        checkSong (again->getSong());
+        CHECK (describeTempoMap (again->getSong()) == each.expected);
+        CHECK (phazite::test::copyWholeSong (again->getSong()).getChildWithName (schema::TEMPOMAP).isEquivalentTo (map));
+    }
+}
+
+TEST_CASE ("A number written as text reads as the same number wherever the song reads it: a project saved, opened and saved again "
+           "is the same file")
+{
+    // The loader read "1e-321" as that subnormal and the readers of the song's values read the text Phazite writes for it
+    // ("9.98012604599318e-322") as 0 (juce::String::getDoubleValue()), so the second save wrote "0" (the fuzzer found it for
+    // the tempo map). Every reader of an element's number into a value reads text as the loader does (SongText.h:
+    // readValueNumber()). Each text below in a MIDI clip's start, its note's start, a controller's value's position, an
+    // audio clip's warp marker's time and an automation point's beat. What each reads as, the loader's rule: a number's text
+    // as that number ("1e-321" as that subnormal where the library reads one, " 4 " trimmed as 4); what is no finite number
+    // as each property's fallback, 0 for all of these: "1e-400" (too near 0 for a double: out of range, as infinity), "0x10"
+    // and "4abc" (not a number and nothing else: none), "nan" and "inf" (no finite number).
+    using phazite::readValueNumber;
+    CHECK (readValueNumber (juce::var ("1e-321")).value_or (0.0) > 0.0);
+    CHECK (std::isinf (readValueNumber (juce::var ("1e-400")).value_or (0.0)));
+    CHECK_FALSE (readValueNumber (juce::var ("0x10")).has_value());
+    CHECK (juce::exactlyEqual (readValueNumber (juce::var (" 4 ")).value_or (0.0), 4.0));
+    CHECK_FALSE (readValueNumber (juce::var ("4abc")).has_value());
+    CHECK (std::isnan (readValueNumber (juce::var ("nan")).value_or (0.0)));
+    CHECK (std::isinf (readValueNumber (juce::var ("inf")).value_or (0.0)));
+
+    // The numbers of the song's values, as its whole copy writes them (from the values, as doubles).
+    const auto readNumbers = [] (const phazite::Song& song)
+    {
+        const auto whole = phazite::test::copyWholeSong (song);
+        std::vector<double> numbers;
+        const auto first = [&whole] (const juce::Identifier& type, const juce::Identifier& parentType, const juce::String& kind)
+        {
+            for (const auto& element : findAll (whole, type))
+                if (element.getParent().hasType (parentType)
+                    && (kind.isEmpty() || element.getParent()[schema::clipKind].toString() == kind))
+                    return element;
+
+            return juce::ValueTree();
+        };
+
+        for (const auto& clip : findAll (whole, schema::CLIP))
+            if (clip[schema::clipKind].toString() == schema::clipIsMidi)
+                numbers.push_back ((double) clip[schema::clipStart]);
+
+        numbers.push_back ((double) first (schema::NOTE, schema::CLIP, {})[schema::noteStart]);
+        numbers.push_back ((double) first (schema::CONTROL, schema::CLIP, {})[schema::controlBeat]);
+        numbers.push_back ((double) first (schema::WARP, schema::CLIP, schema::clipIsAudio)[schema::warpTime]);
+        // A curve's points are its tree's yet (roadmap step S5.20 moves them next), which keeps a number's text as the file
+        // wrote it: read as the song's values read one.
+        numbers.push_back (readValueNumber (first (schema::POINT, schema::CURVE, {})[schema::pointBeat]).value_or (-1.0));
+        return numbers;
+    };
+
+    const char* const names[] = { "the MIDI clip's start", "the note's start", "the controller's value's position",
+                                  "the warp marker's time", "the automation point's beat" };
+
+    for (const auto* text : { "1e-321", "1e-400", "0x10", " 4 ", "4abc", "nan", "inf" })
+    {
+        const auto quoted = juce::String ("the text \"") + text + "\"";
+        INFO (quoted);
+        const auto read = readValueNumber (juce::var (text));
+        const auto expected = read.has_value() && std::isfinite (*read) ? *read : 0.0;
+
+        Edited edited;
+        const auto project = edited.open (
+            [text] (juce::XmlElement& song)
+            {
+                auto* midi = Edited::findTrack (song, "Lead")->getChildByName ("CLIP");
+                REQUIRE (midi != nullptr);
+                midi->setAttribute ("start", text);
+                midi->getChildByName ("NOTE")->setAttribute ("start", text);
+                auto* control = midi->createNewChildElement ("CONTROL");
+                control->setAttribute ("kind", schema::controlIsController);
+                control->setAttribute ("number", 1);
+                control->setAttribute ("beat", text);
+                control->setAttribute ("value", 64);
+
+                auto* sound = Edited::findTrack (song, "Audio")->getChildByName ("CLIP");
+                REQUIRE (sound != nullptr);
+                auto* warp = sound->createNewChildElement ("WARP");
+                warp->setAttribute ("time", text);
+                warp->setAttribute ("playsAt", 0);
+
+                auto* automation = song.getChildByName ("AUTOMATION");
+                REQUIRE (automation != nullptr);
+                automation->getChildByName ("CURVE")->getChildByName ("POINT")->setAttribute ("beat", text);
+            });
+        REQUIRE (project != nullptr);
+
+        const auto numbers = readNumbers (project->getSong());
+        REQUIRE (numbers.size() == 5);
+
+        for (size_t i = 0; i < numbers.size(); ++i)
+            CHECK_MESSAGE (juce::exactlyEqual (numbers[i], expected), juce::String (names[i]) << " reads as " << numbers[i]);
+
+        REQUIRE (project->save().wasOk());
+        const auto firstSave = edited.file.loadFileAsString();
+
+        juce::String error;
+        const auto again = phazite::Project::open (edited.file, false, error);
+        REQUIRE_MESSAGE (again != nullptr, error.toStdString());
+        checkSong (again->getSong());
+
+        const auto reopened = readNumbers (again->getSong());
+        REQUIRE (reopened.size() == 5);
+
+        for (size_t i = 0; i < reopened.size(); ++i)
+            CHECK_MESSAGE (juce::exactlyEqual (reopened[i], expected), juce::String (names[i])
+                                                                           << " reads as " << reopened[i] << " opened again");
+
+        REQUIRE (again->save().wasOk());
+        CHECK (edited.file.loadFileAsString() == firstSave);
+    }
+
+    // The tempo map as the versions read one (TempoMapValue.h: readTempoMapValue(), which keeps nothing within a range): the
+    // same number for the same text.
+    for (const auto* text : { "1e-321", "1e-400", "0x10", " 4 ", "4abc", "nan", "inf" })
+    {
+        const auto quoted = juce::String ("the text \"") + text + "\"";
+        INFO (quoted);
+        const auto read = readValueNumber (juce::var (text));
+        juce::ValueTree map (schema::TEMPOMAP);
+        map.appendChild (juce::ValueTree (schema::TEMPO, { { schema::mapBeat, 0.0 }, { schema::bpm, 120.0 } }), nullptr);
+        map.appendChild (juce::ValueTree (schema::TEMPO, { { schema::mapBeat, text }, { schema::bpm, 130.0 } }), nullptr);
+        const auto tempos = phazite::readTempoMapValue (map).tempos;
+        REQUIRE (tempos.size() == 2);
+        CHECK (juce::exactlyEqual (tempos.back().beat.inBeats(), read.has_value() && std::isfinite (*read) ? *read : 0.0));
+    }
 }
 
 TEST_CASE (

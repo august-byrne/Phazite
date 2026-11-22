@@ -9,6 +9,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TempoMapValue.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
@@ -727,6 +728,75 @@ std::vector<std::string> findValueProblems (const Song& song)
             problems.push_back ("values: a value of notes for clip " + std::to_string (entry.first)
                                 + ", which isn't a MIDI clip of the song's");
     }
+
+    // The tempo map's: no entry of it in the song's tree, its TEMPOMAP there an empty place for it; each kind not empty and
+    // in the order of its beats; every number within its description's range (Schema.h), read here from the description.
+    const std::function<void (const juce::ValueTree&)> findEntries = [&] (const juce::ValueTree& element)
+    {
+        for (const auto& child : element)
+        {
+            if (child.hasType (schema::TEMPO) || child.hasType (schema::TIMESIGNATURE))
+                problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
+
+            findEntries (child);
+        }
+    };
+
+    findEntries (song.getState());
+
+    if (const auto map = song.getState().getChildWithName (schema::TEMPOMAP);
+        ! map.isValid() || map.getNumChildren() > 0 || map.getNumProperties() > 0)
+        problems.push_back ("values: the song's tree has no empty TEMPOMAP to write its tempo map in");
+
+    const auto& tempoMap = values->tempoMap.get();
+    const auto isWithin = [] (double number, const schema::PropertyDescription& property)
+    {
+        const auto& range = property.getRange();
+
+        if (! std::isfinite (number) || ! range.has_value())
+            return std::isfinite (number);
+
+        if (number < range->low || number > range->high || (range->whole && ! juce::exactlyEqual (std::round (number), number)))
+            return false;
+
+        return ! range->powersOfTwo || juce::exactlyEqual (std::exp2 (std::round (std::log2 (number))), number);
+    };
+
+    const auto checkKind = [&problems] (const auto& entries, const char* kind, const auto& isKept)
+    {
+        if (entries.empty())
+            problems.push_back (std::string ("values: the tempo map holds no ") + kind);
+
+        std::optional<BeatPosition> last;
+        size_t place = 0;
+
+        for (const auto& entry : entries)
+        {
+            if (last.has_value() && entry.beat < *last)
+                problems.push_back (std::string ("values: the tempo map's ") + kind + " " + std::to_string (place)
+                                    + " is before the one before it");
+
+            if (! isKept (entry))
+                problems.push_back (std::string ("values: the tempo map's ") + kind + " " + std::to_string (place)
+                                    + " holds a number outside its description's range");
+
+            last = entry.beat;
+            ++place;
+        }
+    };
+
+    checkKind (tempoMap.tempos, "tempo",
+               [&isWithin] (const TempoEntry& tempo)
+               {
+                   return isWithin (tempo.beat.inBeats(), schema::mapBeat) && isWithin (tempo.bpm, schema::bpm)
+                          && isWithin ((double) tempo.curve, schema::tempoCurve);
+               });
+    checkKind (tempoMap.signatures, "time signature",
+               [&isWithin] (const SignatureEntry& signature)
+               {
+                   return isWithin (signature.beat.inBeats(), schema::mapBeat) && isWithin ((double) signature.numerator, schema::numerator)
+                          && isWithin ((double) signature.denominator, schema::denominator);
+               });
 
     return problems;
 }

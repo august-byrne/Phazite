@@ -1454,7 +1454,11 @@ TEST_CASE ("A take keeps at most one value a millisecond of each note's pressure
     CAPTURE (sent);
     CHECK (kept >= 4 * blocks * 3 / 4); // what was played is kept, in time: about a value a block for each note (two that
                                         // came less than a millisecond apart across blocks of a loaded machine, one)
-    CHECK (kept <= 4 * blocks + 8);
+
+    // And thinned: of the four sent a block for each note, one where the block's four come within a millisecond, as they do
+    // on a machine that plays faster than real time; two at most where a slow one (CI's AddressSanitizer build kept 758 of
+    // 2,992 where 756 were allowed) lets a millisecond pass inside a block now and then. Never most of what was sent.
+    CHECK (kept <= 2 * 4 * blocks);
     CHECK (kept <= 4 * (1000 + 2)); // a second of it: a thousand values for each note at most
 }
 

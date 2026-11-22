@@ -99,13 +99,11 @@ const std::vector<SwitchProperty>& getSwitchProperties();
 // stays as it is. What makeConsistent() does first; and what the versions' pieces get as they are joined into a song.
 void makeExponentsReadable (juce::ValueTree song);
 
-// The loader's reading of a number (makeConsistent()): a number's own value, or text that is a number and nothing else
-// (trimmed), infinity for text too large for one; none for anything else. And whether a text is the one Phazite writes for
-// the number it reads as (SongText.h: writeValue()), told from the text alone: a whole number's digits (up to 15, no
-// leading zero, not "-0"), or a decimal from 0.001 up of up to six significant digits, without an exponent or a leading or
-// trailing zero. False for anything else, which the loader compares by writing the number (isSameValue()). For the loader
-// and its tests.
-std::optional<double> readLoadedNumber (const juce::var&);
+// Whether a text is the one Phazite writes for the number it reads as (model/base/internal/SongText.h: writeValue(), the
+// number as readValueNumber() reads it, the loader's reading of a number as every reader's), told from the text alone: a
+// whole number's digits (up to 15, no leading zero, not "-0"), or a decimal from 0.001 up of up to six significant digits,
+// without an exponent or a leading or trailing zero. False for anything else, which the loader compares by writing the
+// number (isSameValue()). For the loader and its tests.
 bool isNumberWrittenAsPhazite (const juce::var&);
 
 // Whether an entry of a project's folders is a link that leads elsewhere, which a copy of the project leaves out with what

@@ -3,44 +3,45 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
 
+#include <juce_events/juce_events.h>
+
 #include <algorithm>
 #include <cmath>
+#include <iterator>
+#include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite
 {
 namespace
 {
-    juce::ValueTree findTempoMap (const Song& song)
+    // The song's tempo map made the next value: its area's, in the step in progress, or outside the history while the song
+    // is written outside it (SongValues.h: setTempoMap(), which writes nothing for the map the song holds already). Every
+    // edit below computes the next value from the one the song holds and sets it once.
+    void setMap (Song& song, TempoMapValue next)
     {
-        return song.getState().getChildWithName (schema::TEMPOMAP);
+        if (auto* values = song.getValues())
+            values->setTempoMap (song, std::move (next));
+        else
+            jassertfalse; // the tempo map's edits are a song's that holds its values (model/project/internal/Project.h: makeSong())
     }
 
-    // A tempo map's tempos or time signatures (their type), in the song's order.
-    std::vector<juce::ValueTree> getEntries (const juce::ValueTree& map, const juce::Identifier& type)
+    // The map with one tempo (by its place in getTempoChanges()) changed in place: its bpm or its curve, never its beat.
+    template <typename Change>
+    TempoMapValue withTempoChanged (const TempoMapValue& map, size_t index, Change&& change)
     {
-        std::vector<juce::ValueTree> entries;
-
-        for (const auto& entry : map)
-            if (entry.hasType (type))
-                entries.push_back (entry);
-
-        std::stable_sort (entries.begin(), entries.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
-                          { return (double) a[schema::mapBeat] < (double) b[schema::mapBeat]; });
-        return entries;
-    }
-
-    // The song's tempo or time signature (the first of its type, at the song's start), to change: the tempo map gets
-    // them first if it has none.
-    juce::ValueTree getFirstOfMap (Song& song, const juce::Identifier& type)
-    {
-        ensureTempoMap (song);
-        return getEntries (findTempoMap (song), type).front();
+        auto next = map;
+        auto tempo = map.tempos[index];
+        change (tempo);
+        next.tempos = map.tempos.set (index, tempo);
+        return next;
     }
 
     // Keeps the song's patterns at their speed while the tempo changes, when the song says so (doPatternsFollowTempo()).
@@ -88,30 +89,20 @@ namespace
 } // namespace
 
 //==============================================================================
-TempoMapValue getTempoMapValue (const Song& song)
+const TempoMapValue& getTempoMapValue (const Song& song)
 {
-    return readTempoMapValue (findTempoMap (song));
+    if (const auto* values = song.getValues())
+        return values->tempoMap.get();
+
+    // A song that holds no values (one made to be read or checked keeps everything in its tree, which nothing reads the tempo
+    // map of: Song::getValues()).
+    static const auto none = makeDefaultTempoMap();
+    return none;
 }
-
-namespace
-{
-    // One kind of the song's tempo map: getTempoMapValue()'s, of which the tree, while it holds the map, is read for that
-    // kind alone, so that a reader of one kind (the tempo, the bars) reads no more than it did (the tempo map's switch makes
-    // these getTempoMapValue (song).tempos and .signatures).
-    immer::flex_vector<TempoEntry> getTempos (const Song& song)
-    {
-        return readTempoEntries (findTempoMap (song));
-    }
-
-    immer::flex_vector<SignatureEntry> getSignatures (const Song& song)
-    {
-        return readSignatureEntries (findTempoMap (song));
-    }
-} // namespace
 
 std::vector<TempoChange> getTempoChanges (const Song& song)
 {
-    const auto tempos = getTempos (song);
+    const auto& tempos = getTempoMapValue (song).tempos;
     std::vector<TempoChange> changes;
     changes.reserve (tempos.size());
 
@@ -123,7 +114,7 @@ std::vector<TempoChange> getTempoChanges (const Song& song)
 
 std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song& song)
 {
-    const auto signatures = getSignatures (song);
+    const auto& signatures = getTempoMapValue (song).signatures;
     std::vector<TimeSignatureChange> changes;
     changes.reserve (signatures.size());
 
@@ -138,9 +129,44 @@ Bars getBars (const Song& song)
     return Bars (getTimeSignatureChanges (song));
 }
 
+namespace
+{
+    // The song's tempo map as the engine plays it at a sample rate, as the song keeps it for the value it holds now
+    // (SongValues.h: PlayedTempoMap): made once for each change of the value, not at every call. None for a song that holds no
+    // values, or on another thread than the message thread, where the map is made for the call.
+    const engine::TempoMap* findPlayedTempoMap (const Song& song, double sampleRate)
+    {
+        const auto* values = song.getValues();
+
+        if (values == nullptr || ! juce::MessageManager::existsAndIsCurrentThread())
+            return nullptr;
+
+        const auto& value = values->tempoMap.get();
+
+        for (const auto& kept : values->playedTempoMaps)
+            if (kept.has_value() && kept->madeOf.isSameAs (value) && juce::exactlyEqual (kept->sampleRate, sampleRate))
+                return &kept->map;
+
+        auto& slot = values->playedTempoMaps[values->nextPlayedTempoMap];
+        values->nextPlayedTempoMap = (values->nextPlayedTempoMap + 1) % values->playedTempoMaps.size();
+        slot = SongValues::PlayedTempoMap { value, sampleRate, getTempoMap (value, sampleRate) };
+        return &slot->map;
+    }
+
+    // What a read of the engine's map gives, from the map kept, or one made for it.
+    template <typename Read>
+    auto readPlayed (const Song& song, double sampleRate, Read&& read)
+    {
+        if (const auto* kept = findPlayedTempoMap (song, sampleRate))
+            return read (*kept);
+
+        return read (getTempoMap (getTempoMapValue (song), sampleRate));
+    }
+} // namespace
+
 engine::TempoMap getTempoMap (const Song& song, double sampleRate)
 {
-    return getTempoMap (getTempoMapValue (song), sampleRate);
+    return readPlayed (song, sampleRate, [] (const engine::TempoMap& map) { return map; });
 }
 
 engine::TempoMap getTempoMap (const TempoMapValue& value, double sampleRate)
@@ -166,21 +192,26 @@ engine::TempoMap getTempoMap (const juce::ValueTree& songState, double sampleRat
 
 double toSeconds (const Song& song, BeatPosition beat)
 {
-    return getTempoMap (song).toSamples (beat.inBeats());
+    return readPlayed (song, 1.0, [beat] (const engine::TempoMap& map) { return map.toSamples (beat.inBeats()); });
 }
 
 BeatPosition toBeats (const Song& song, double seconds)
 {
-    return BeatPosition::fromBeats (getTempoMap (song).toBeats (seconds));
+    return readPlayed (song, 1.0, [seconds] (const engine::TempoMap& map) { return BeatPosition::fromBeats (map.toBeats (seconds)); });
 }
 
 double getTempoAt (const Song& song, BeatPosition beat)
 {
-    return getTempoMap (song).getTempoAt (beat.inBeats());
+    return readPlayed (song, 1.0, [beat] (const engine::TempoMap& map) { return map.getTempoAt (beat.inBeats()); });
 }
 
 void ensureTempoMap (Song& song)
 {
+    // A song that holds its values holds its map whole in its area, at least one of each kind (SongValues.h), and its TEMPOMAP
+    // element stays, the empty place a whole copy writes the map in: nothing to make.
+    if (song.getValues() != nullptr)
+        return;
+
     auto phazite = song.getState();
     auto map = phazite.getChildWithName (schema::TEMPOMAP);
 
@@ -190,71 +221,78 @@ void ensureTempoMap (Song& song)
         phazite.appendChild (map, nullptr);
     }
 
-    if (getEntries (map, schema::TEMPO).empty())
+    if (! map.getChildWithName (schema::TEMPO).isValid())
         map.appendChild (juce::ValueTree (schema::TEMPO, { { schema::mapBeat, 0.0 }, { schema::bpm, 120.0 } }), nullptr);
 
-    if (getEntries (map, schema::TIMESIGNATURE).empty())
+    if (! map.getChildWithName (schema::TIMESIGNATURE).isValid())
         map.appendChild (
             juce::ValueTree (schema::TIMESIGNATURE, { { schema::mapBeat, 0.0 }, { schema::numerator, 4 }, { schema::denominator, 4 } }),
             nullptr);
 }
 
-void insertTempoMapTime (Song& song, BeatPosition at, BeatDuration length)
+namespace
 {
-    for (auto entry : findTempoMap (song))
-        if (const auto beat = (double) entry[schema::mapBeat]; beat > 0.0 && beat >= at.inBeats())
-            entry.setProperty (schema::mapBeat, beat + length.inBeats(), &song.getUndoManager());
-}
-
-void removeTempoMapTime (Song& song, BeatRange range)
-{
-    // Of each kind, tempos and time signatures, what played after the range plays from its start, as the chord lane's keys
-    // do: the last change in the range moves to its start (unless one starts where it ends, which moves there too); the
-    // others in it go, and those after it move back. One that lands on the song's start gives the first its values.
-    auto map = findTempoMap (song);
-    auto* undo = &song.getUndoManager();
-    const auto start = range.getStart().inBeats(), end = range.getEnd().inBeats(), length = range.getLength().inBeats();
-
-    for (const auto& type : { schema::TEMPO.getName(), schema::TIMESIGNATURE.getName() })
+    // One kind of the map with the entries after a beat moved later by a length (insertTempoMapTime()): those at the song's
+    // start stay. Their order stays: those that move all move by the same length, past every one that stays.
+    template <typename Entry>
+    immer::flex_vector<Entry> insertTime (const immer::flex_vector<Entry>& entries, BeatPosition at, BeatDuration length)
     {
-        const auto entries = getEntries (map, type);
-        juce::ValueTree last, first;
+        auto next = entries;
+
+        for (size_t i = 0; i < entries.size(); ++i)
+        {
+            if (const auto beat = entries[i].beat.inBeats(); beat > 0.0 && beat >= at.inBeats())
+            {
+                auto moved = entries[i];
+                moved.beat = BeatPosition::fromBeats (beat + length.inBeats());
+                next = next.set (i, moved);
+            }
+        }
+
+        return next;
+    }
+
+    // One kind of the map with a range taken out (removeTempoMapTime()), entry by entry in the kind's order: what played after
+    // the range plays from its start; the last in the range moves to its start (unless one starts where it ends, which moves
+    // there too); the others in it go, and those after it move back; one that lands on the song's start gives the first its
+    // values (takeValues (first, from)). Then the kind in order by beat again, stably: two at one beat in the order they were
+    // in (as the map's elements, in the kind's order, were read again by their beats).
+    template <typename Entry, typename TakeValues>
+    immer::flex_vector<Entry> removeTime (const immer::flex_vector<Entry>& entries, BeatRange range, TakeValues&& takeValues)
+    {
+        const auto start = range.getStart().inBeats(), end = range.getEnd().inBeats(), length = range.getLength().inBeats();
+        std::vector<Entry> kept (entries.begin(), entries.end());
+        std::vector<bool> gone (kept.size(), false);
+        std::optional<size_t> last, first;
         auto oneAtEnd = false;
 
-        for (const auto& entry : entries)
+        for (size_t i = 0; i < kept.size(); ++i)
         {
-            const auto beat = (double) entry[schema::mapBeat];
+            const auto beat = kept[i].beat.inBeats();
 
             if (beat <= 0.0)
-                first = entry;
-            else if (beat >= start && beat < end && (! last.isValid() || beat > (double) last[schema::mapBeat]))
-                last = entry;
+                first = i;
+            else if (beat >= start && beat < end && (! last.has_value() || beat > kept[*last].beat.inBeats()))
+                last = i;
             else if (juce::approximatelyEqual (beat, end))
                 oneAtEnd = true;
         }
 
-        const auto moveToStart = [&] (juce::ValueTree entry)
+        const auto moveToStart = [&] (size_t i)
         {
-            if (start > 0.0 || ! first.isValid())
+            if (start > 0.0 || ! first.has_value())
             {
-                entry.setProperty (schema::mapBeat, start, undo);
+                kept[i].beat = BeatPosition::fromBeats (start);
                 return;
             }
 
-            for (int p = 0; p < entry.getNumProperties(); ++p)
-                if (const auto name = entry.getPropertyName (p); name != schema::mapBeat)
-                    first.setProperty (name, entry[name], undo);
-
-            for (int p = first.getNumProperties(); --p >= 0;)
-                if (const auto name = first.getPropertyName (p); name != schema::mapBeat && ! entry.hasProperty (name))
-                    first.removeProperty (name, undo);
-
-            map.removeChild (entry, undo);
+            takeValues (kept[*first], kept[i]);
+            gone[i] = true;
         };
 
-        for (auto entry : entries)
+        for (size_t i = 0; i < kept.size(); ++i)
         {
-            const auto beat = (double) entry[schema::mapBeat];
+            const auto beat = kept[i].beat.inBeats();
 
             if (beat <= 0.0 || beat < start)
                 continue;
@@ -262,26 +300,60 @@ void removeTempoMapTime (Song& song, BeatRange range)
             if (beat >= end)
             {
                 if (juce::approximatelyEqual (beat, end))
-                    moveToStart (entry);
+                    moveToStart (i);
                 else
-                    entry.setProperty (schema::mapBeat, beat - length, undo);
+                    kept[i].beat = BeatPosition::fromBeats (beat - length);
             }
-            else if (entry == last && ! oneAtEnd)
+            else if (last == i && ! oneAtEnd)
             {
-                moveToStart (entry);
+                moveToStart (i);
             }
             else
             {
-                map.removeChild (entry, undo);
+                gone[i] = true;
             }
         }
+
+        std::vector<Entry> left;
+
+        for (size_t i = 0; i < kept.size(); ++i)
+            if (! gone[i])
+                left.push_back (kept[i]);
+
+        std::stable_sort (left.begin(), left.end(), [] (const Entry& a, const Entry& b) { return a.beat < b.beat; });
+        return immer::flex_vector<Entry> (left.begin(), left.end());
     }
+} // namespace
+
+void insertTempoMapTime (Song& song, BeatPosition at, BeatDuration length)
+{
+    const auto map = getTempoMapValue (song);
+    setMap (song, { insertTime (map.tempos, at, length), insertTime (map.signatures, at, length) });
+}
+
+void removeTempoMapTime (Song& song, BeatRange range)
+{
+    // Of each kind, tempos and time signatures, what played after the range plays from its start, as the chord lane's keys
+    // do (removeTime()).
+    const auto map = getTempoMapValue (song);
+    setMap (song, { removeTime (map.tempos, range,
+                                [] (TempoEntry& first, const TempoEntry& from)
+                                {
+                                    first.bpm = from.bpm;
+                                    first.curve = from.curve;
+                                }),
+                    removeTime (map.signatures, range,
+                                [] (SignatureEntry& first, const SignatureEntry& from)
+                                {
+                                    first.numerator = from.numerator;
+                                    first.denominator = from.denominator;
+                                }) });
 }
 
 //==============================================================================
 double getTempo (const Song& song)
 {
-    return getTempoChanges (song).front().bpm;
+    return getTempoMapValue (song).tempos.front().bpm;
 }
 
 void setTempo (Song& song, double bpm)
@@ -296,7 +368,7 @@ void setTempo (Song& song, double bpm)
 
     const UndoStep step (song, "Change Tempo");
     const PatternsKeepTheirSpeed keepPatterns (song); // unless they follow it
-    getFirstOfMap (song, schema::TEMPO).setProperty (schema::bpm, rounded, &song.getUndoManager());
+    setMap (song, withTempoChanged (getTempoMapValue (song), 0, [rounded] (TempoEntry& tempo) { tempo.bpm = rounded; }));
 }
 
 //==============================================================================
@@ -306,22 +378,6 @@ namespace
     {
         // What is no number at all: the slowest.
         return std::isfinite (bpm) ? std::round (juce::jlimit (minTempo, maxTempo, bpm) * 100.0) / 100.0 : minTempo;
-    }
-
-    // The song's tempos' elements, in getTempoChanges()'s order, the tempo map made first if it has none.
-    std::vector<juce::ValueTree> getTempoEntries (Song& song)
-    {
-        ensureTempoMap (song);
-        return getEntries (findTempoMap (song), schema::TEMPO);
-    }
-
-    // What isn't written is a step, as tempos start.
-    void writeCurve (Song& song, juce::ValueTree entry, float curve)
-    {
-        if (const auto bounded = juce::jlimit (-1.0f, 1.0f, curve); juce::exactlyEqual (bounded, tempoJump))
-            entry.removeProperty (schema::tempoCurve, &song.getUndoManager());
-        else
-            entry.setProperty (schema::tempoCurve, bounded, &song.getUndoManager());
     }
 
     // The place of the tempo in effect at a beat: the last at or before it.
@@ -359,37 +415,45 @@ void setTempoAt (Song& song, BeatPosition beat, double bpm)
         return;
 
     const UndoStep step (song, "Change Tempo");
-    getTempoEntries (song)[(size_t) index].setProperty (schema::bpm, rounded, &song.getUndoManager());
+    setMap (song, withTempoChanged (getTempoMapValue (song), (size_t) index, [rounded] (TempoEntry& tempo) { tempo.bpm = rounded; }));
 }
 
 bool hasTempoChanges (const Song& song)
 {
-    return getTempoChanges (song).size() > 1;
+    return getTempoMapValue (song).tempos.size() > 1;
 }
 
 std::vector<double> getTempoValues (const Song& song, BeatRange range, int count)
 {
-    const auto map = getTempoMap (song);
     count = std::max (2, count);
-    std::vector<double> values;
-    values.reserve ((size_t) count);
 
-    for (int i = 0; i < count; ++i)
-        values.push_back (map.getTempoAt (range.getStart().inBeats() + range.getLength().inBeats() * i / (count - 1)));
+    return readPlayed (song, 1.0,
+                       [range, count] (const engine::TempoMap& map)
+                       {
+                           std::vector<double> values;
+                           values.reserve ((size_t) count);
 
-    return values;
+                           for (int i = 0; i < count; ++i)
+                               values.push_back (
+                                   map.getTempoAt (range.getStart().inBeats() + range.getLength().inBeats() * i / (count - 1)));
+
+                           return values;
+                       });
 }
 
 std::vector<double> getTempoValues (const Song& song, const std::vector<BeatPosition>& beats)
 {
-    const auto map = getTempoMap (song);
-    std::vector<double> values;
-    values.reserve (beats.size());
+    return readPlayed (song, 1.0,
+                       [&beats] (const engine::TempoMap& map)
+                       {
+                           std::vector<double> values;
+                           values.reserve (beats.size());
 
-    for (const auto beat : beats)
-        values.push_back (map.getTempoAt (beat.inBeats()));
+                           for (const auto beat : beats)
+                               values.push_back (map.getTempoAt (beat.inBeats()));
 
-    return values;
+                           return values;
+                       });
 }
 
 int addTempoChange (Song& song, BeatPosition beat, std::optional<double> bpm)
@@ -399,19 +463,23 @@ int addTempoChange (Song& song, BeatPosition beat, std::optional<double> bpm)
     const auto index = findTempoAt (changes, at);
     const auto value = roundTempo (bpm.value_or (getTempoAt (song, at)));
     const UndoStep step (song, "Add Tempo Change");
-    auto entries = getTempoEntries (song);
+    const auto map = getTempoMapValue (song);
 
     // A tempo already there takes the value.
     if (isSameBeat (changes[(size_t) index].beat, at))
     {
-        entries[(size_t) index].setProperty (schema::bpm, value, &song.getUndoManager());
+        setMap (song, withTempoChanged (map, (size_t) index, [value] (TempoEntry& tempo) { tempo.bpm = value; }));
         return index;
     }
 
-    // The line it is on goes on through it: a step stays a step, and a ramp ramps on from it.
-    juce::ValueTree entry (schema::TEMPO, { { schema::mapBeat, at.inBeats() }, { schema::bpm, value } });
-    findTempoMap (song).appendChild (entry, &song.getUndoManager());
-    writeCurve (song, entry, changes[(size_t) index].curve);
+    // The line it is on goes on through it: a step stays a step, and a ramp ramps on from it. After any already at its beat,
+    // as one appended to the map's elements was read.
+    const TempoEntry added { at, value, juce::jlimit (-1.0f, 1.0f, changes[(size_t) index].curve) };
+    const auto place = std::upper_bound (map.tempos.begin(), map.tempos.end(), added,
+                                         [] (const TempoEntry& a, const TempoEntry& b) { return a.beat < b.beat; });
+    auto next = map;
+    next.tempos = map.tempos.insert ((size_t) std::distance (map.tempos.begin(), place), added);
+    setMap (song, std::move (next));
     return findTempoAt (getTempoChanges (song), at);
 }
 
@@ -422,69 +490,73 @@ void addTempoChangeAtPlayhead (Song& song)
 
 int moveTempoChange (Song& song, int index, BeatPosition beat, double bpm)
 {
-    auto entries = getTempoEntries (song);
+    const auto map = getTempoMapValue (song);
 
-    if (! juce::isPositiveAndBelow (index, (int) entries.size()))
+    if (! juce::isPositiveAndBelow (index, (int) map.tempos.size()))
         return -1;
 
-    auto entry = entries[(size_t) index];
+    auto entry = map.tempos[(size_t) index];
     const auto at = index == 0 ? BeatPosition() : std::max (BeatPosition(), beat);
     const auto rounded = roundTempo (bpm);
 
-    if (isSameBeat (BeatPosition::fromBeats (entry[schema::mapBeat]), at)
-        && juce::approximatelyEqual ((double) entry[schema::bpm], rounded))
+    if (isSameBeat (entry.beat, at) && juce::approximatelyEqual (entry.bpm, rounded))
         return index;
 
+    // Where its element would be read with its new beat (TempoMapValue.h: placeByBeat()): moved later, before any already at
+    // its new beat; moved earlier, after them.
     const UndoStep step (song, "Move Tempo Change");
-    entry.setProperty (schema::mapBeat, at.inBeats(), &song.getUndoManager());
-    entry.setProperty (schema::bpm, rounded, &song.getUndoManager());
-
-    const auto moved = getTempoEntries (song);
-    const auto found = std::find (moved.begin(), moved.end(), entry);
-    return found != moved.end() ? (int) std::distance (moved.begin(), found) : -1;
+    entry.beat = at;
+    entry.bpm = rounded;
+    size_t place = 0;
+    auto next = map;
+    next.tempos = placeByBeat (map.tempos, (size_t) index, entry, place);
+    setMap (song, std::move (next));
+    return (int) place;
 }
 
 void setTempoCurve (Song& song, int index, float curve)
 {
-    auto entries = getTempoEntries (song);
+    const auto map = getTempoMapValue (song);
 
-    if (! juce::isPositiveAndBelow (index, (int) entries.size()))
+    if (! juce::isPositiveAndBelow (index, (int) map.tempos.size()))
         return;
 
     const auto bounded = juce::jlimit (-1.0f, 1.0f, curve);
 
-    if (juce::exactlyEqual ((float) entries[(size_t) index].getProperty (schema::tempoCurve, tempoJump), bounded))
+    if (juce::exactlyEqual (map.tempos[(size_t) index].curve, bounded))
         return;
 
     const UndoStep step (song, "Change Tempo Ramp");
-    writeCurve (song, entries[(size_t) index], bounded);
+    setMap (song, withTempoChanged (map, (size_t) index, [bounded] (TempoEntry& tempo) { tempo.curve = bounded; }));
 }
 
 void deleteTempoChange (Song& song, int index)
 {
-    auto entries = getTempoEntries (song);
+    const auto map = getTempoMapValue (song);
 
-    if (index <= 0 || index >= (int) entries.size())
+    if (index <= 0 || index >= (int) map.tempos.size())
         return;
 
     const UndoStep step (song, "Delete Tempo Change");
-    findTempoMap (song).removeChild (entries[(size_t) index], &song.getUndoManager());
+    auto next = map;
+    next.tempos = map.tempos.erase ((size_t) index);
+    setMap (song, std::move (next));
 }
 
 void removeTempoChanges (Song& song)
 {
-    auto entries = getTempoEntries (song);
+    const auto map = getTempoMapValue (song);
 
-    if (entries.size() <= 1 && ! entries.front().hasProperty (schema::tempoCurve))
+    if (map.tempos.size() <= 1 && juce::exactlyEqual (map.tempos.front().curve, tempoJump))
         return;
 
+    // The first alone, held all the way through.
     const UndoStep step (song, "Remove Tempo Changes");
-    auto map = findTempoMap (song);
-
-    for (size_t i = 1; i < entries.size(); ++i)
-        map.removeChild (entries[i], &song.getUndoManager());
-
-    writeCurve (song, entries.front(), tempoJump);
+    auto first = map.tempos.front();
+    first.curve = tempoJump;
+    auto next = map;
+    next.tempos = immer::flex_vector<TempoEntry> { first };
+    setMap (song, std::move (next));
 }
 
 void takeTempoChanges (Song& song, const std::vector<TempoChange>& tempos, BeatPosition from)
@@ -566,7 +638,8 @@ void togglePatternsFollowTempo (Song& song)
 
 TimeSignature getTimeSignature (const Song& song)
 {
-    return getTimeSignatureChanges (song).front().signature;
+    const auto& first = getTempoMapValue (song).signatures.front();
+    return { first.numerator, first.denominator };
 }
 
 void setTimeSignature (Song& song, TimeSignature timeSignature)
@@ -575,9 +648,13 @@ void setTimeSignature (Song& song, TimeSignature timeSignature)
         return;
 
     const UndoStep step (song, "Change Time Signature");
-    auto first = getFirstOfMap (song, schema::TIMESIGNATURE);
-    first.setProperty (schema::numerator, timeSignature.numerator, &song.getUndoManager());
-    first.setProperty (schema::denominator, timeSignature.denominator, &song.getUndoManager());
+    const auto map = getTempoMapValue (song);
+    auto first = map.signatures.front();
+    first.numerator = timeSignature.numerator;
+    first.denominator = timeSignature.denominator;
+    auto next = map;
+    next.signatures = map.signatures.set (0, first);
+    setMap (song, std::move (next));
 }
 
 void setTimeSignatureChanges (Song& song, const std::vector<TimeSignatureChange>& changes)
@@ -602,36 +679,16 @@ void setTimeSignatureChanges (Song& song, const std::vector<TimeSignatureChange>
     if (std::equal (sorted.begin(), sorted.end(), held.begin(), held.end(), isHeld))
         return;
 
-    // Each as setTimeSignature() writes the first: the map's elements, in its order, given the values in turn, then those
-    // left over added or taken away.
+    // The map's time signatures these, in their order.
     const UndoStep step (song, "Change Time Signatures");
-    auto* undo = &song.getUndoManager();
-    ensureTempoMap (song);
-    auto map = findTempoMap (song);
-    const auto elements = getEntries (map, schema::TIMESIGNATURE);
+    auto signatures = immer::flex_vector<SignatureEntry>().transient();
 
-    for (size_t i = 0; i < sorted.size(); ++i)
-    {
-        const auto& change = sorted[i];
+    for (const auto& change : sorted)
+        signatures.push_back ({ change.beat, change.signature.numerator, change.signature.denominator });
 
-        if (i < elements.size())
-        {
-            auto element = elements[i];
-            element.setProperty (schema::mapBeat, change.beat.inBeats(), undo);
-            element.setProperty (schema::numerator, change.signature.numerator, undo);
-            element.setProperty (schema::denominator, change.signature.denominator, undo);
-        }
-        else
-        {
-            map.appendChild (juce::ValueTree (schema::TIMESIGNATURE, { { schema::mapBeat, change.beat.inBeats() },
-                                                                       { schema::numerator, change.signature.numerator },
-                                                                       { schema::denominator, change.signature.denominator } }),
-                             undo);
-        }
-    }
-
-    for (auto i = sorted.size(); i < elements.size(); ++i)
-        map.removeChild (elements[i], undo);
+    auto next = getTempoMapValue (song);
+    next.signatures = signatures.persistent();
+    setMap (song, std::move (next));
 }
 
 void addTempoCommands (CommandRegistry& registry, Selection& selection)

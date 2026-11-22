@@ -88,10 +88,19 @@ namespace
         return none;
     }
 
+    // Whether an element is the tempo map's: the song's TEMPOMAP, or an element in it. The song holds its tempo map as a value
+    // (model/base/internal/SongValues.h), its TEMPOMAP an empty place for whole copies, which the tempo pass makes like the
+    // other's (makeTempoMapLike(), below), never the passes over elements.
+    bool isTempoMaps (const juce::ValueTree& parent, const juce::ValueTree& child)
+    {
+        return parent.hasType (schema::TEMPOMAP) || (child.hasType (schema::TEMPOMAP) && parent.hasType (schema::PHAZITE));
+    }
+
     // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read
     // (the stand-ins, and the elements that stand in for themselves: a clip a run of whose notes was lost), and without its
-    // tracks' clips, which the clip pass gives them (ClipPass, below). The song hasn't the stand-ins, so what they held stays
-    // as it is now: not there. A stand-in is never part of a song (Schema.h: schema::versions::missing).
+    // tracks' clips, which the clip pass gives them (ClipPass, below), nor the tempo map's entries, which the tempo pass
+    // gives the song (makeTempoMapLike()). The song hasn't the stand-ins, so what they held stays as it is now: not there. A
+    // stand-in is never part of a song (Schema.h: schema::versions::missing).
     juce::ValueTree copyForSong (const juce::ValueTree& element)
     {
         auto copy = element.createCopy();
@@ -99,7 +108,7 @@ namespace
         {
             for (int i = tree.getNumChildren(); --i >= 0;)
             {
-                if (auto child = tree.getChild (i); isStandIn (child) || child.hasType (schema::CLIP))
+                if (auto child = tree.getChild (i); isStandIn (child) || child.hasType (schema::CLIP) || tree.hasType (schema::TEMPOMAP))
                     tree.removeChild (i, nullptr);
                 else
                     strip (child);
@@ -111,10 +120,11 @@ namespace
     }
 
     // Whether makeLike() places a child among the element's: taken, a track only withTracks, never a clip (a track's clips are
-    // the clip pass's: ClipPass, below).
+    // the clip pass's: ClipPass, below), nor the song's TEMPOMAP or what is in it (the tempo pass's: makeTempoMapLike()).
     bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, bool withTracks, Taken taken)
     {
-        return isTaken (taken, element, child) && (withTracks || ! child.hasType (schema::TRACK)) && ! child.hasType (schema::CLIP);
+        return isTaken (taken, element, child) && (withTracks || ! child.hasType (schema::TRACK)) && ! child.hasType (schema::CLIP)
+               && ! isTempoMaps (element, child);
     }
 
     std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true, Taken taken = Taken::counted)
@@ -931,31 +941,53 @@ namespace
         }
     };
 
-    // What gives the song's tracks their clips here is the clip pass alone, never the keeper of the song's values, which takes
-    // in the clips' elements of a track that comes into the song's tree with them (SongValues.h: a safety net): every copy
-    // added to the song is without its tracks' clips (copyForSong()). Checked in Debug builds, as each of the functions below
-    // ends.
-    struct NoClipsTakenIn
+    // What gives the song's tracks their clips here is the clip pass alone, and the song its tempo map the tempo pass alone,
+    // never the keeper of the song's values, which takes in the clips' elements of a track that comes into the song's tree
+    // with them, and the tempo map's entries that come into its TEMPOMAP (SongValues.h: a safety net): every copy added to
+    // the song is without its tracks' clips and the tempo map's entries (copyForSong()). Checked in Debug builds, as each of
+    // the functions below ends.
+    struct NothingTakenIn
     {
-        explicit NoClipsTakenIn (const Song& s)
+        explicit NothingTakenIn (const Song& s)
             : song (s),
               before (count (s))
         {
         }
 
-        ~NoClipsTakenIn() { jassert (count (song) == before); }
+        ~NothingTakenIn() { jassert (count (song) == before); }
 
         static int count (const Song& s)
         {
             const auto* values = s.getValues();
-            return values != nullptr ? values->countAdopted() : 0;
+            return values != nullptr ? values->countAdopted() + values->countTempoMapAdopted() : 0;
         }
 
         const Song& song;
         const int before;
 
-        JUCE_DECLARE_NON_COPYABLE (NoClipsTakenIn)
+        JUCE_DECLARE_NON_COPYABLE (NothingTakenIn)
     };
+
+    // The song's tempo map made the other song's (its TEMPOMAP's, read as a value: TempoMapValue.h, readTempoMapValue(); the
+    // map a song without one plays, 120 BPM in 4/4, where it has none), through the tempo map's one setter, in the mode of the
+    // moment (SongValues.h: setTempoMap(), which writes nothing for the map the song holds already). The rule for what the
+    // other's version couldn't read (a stand-in: the TEMPOMAP or an entry of it, which only a piece that isn't Phazite's can
+    // make): a map that holds what could not be read is left as the song has it, whole. One stand-in entry keeps the whole
+    // map from being applied, where the generic pass kept the stand-in elements and applied the rest: a map's entries have no
+    // identity of their own (two at one beat are told apart only by their order), so there is no entry of the song's to keep
+    // in the stand-in's place, nor a place to put the rest around it. Whether it wrote.
+    bool makeTempoMapLike (Song& song, const juce::ValueTree& other)
+    {
+        auto* values = song.getValues();
+        const auto then = other.getChildWithName (schema::TEMPOMAP);
+
+        if (values == nullptr || (then.isValid() && (isStandIn (then) || ! findStandIns (then).empty())))
+            return false;
+
+        const auto before = values->tempoMap.get();
+        values->setTempoMap (song, readTempoMapValue (then));
+        return ! values->tempoMap.get().isSameAs (before);
+    }
 
     // Every track's clips made like the other's, once the rest of the song is: how many writes it made.
     int makeClipsLike (Song& song, const juce::ValueTree& other, bool standInsStay)
@@ -1062,18 +1094,19 @@ namespace
 
 void makeSongLike (Song& song, const juce::ValueTree& other)
 {
-    const NoClipsTakenIn byThePassAlone (song);
+    const NothingTakenIn byThePassesAlone (song);
     auto* undo = &song.getUndoManager();
     const auto standIns = findStandIns (other);
     removeMovedItems (song.getState(), findPlaces (other), undo, standIns);
     makeLike (song, song.getState(), other, undo, true, Taken::counted, standIns);
     makeClipsLike (song, other, true);
+    makeTempoMapLike (song, other);
     countIDsPast (song, other);
 }
 
 void makeSongTheSame (Song& song, const juce::ValueTree& other)
 {
-    const NoClipsTakenIn byThePassAlone (song);
+    const NothingTakenIn byThePassesAlone (song);
 
     // Outside the history, as what the song keeps beside its tree is written too (Song::OutsideHistory).
     const Song::OutsideHistory outside (song);
@@ -1083,22 +1116,25 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     removeMovedItems (song.getState(), findPlaces (other), nullptr);
     makeLike (song, song.getState(), other, nullptr, true, Taken::everything);
     makeClipsLike (song, other, false);
+    makeTempoMapLike (song, other);
     song.getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
     song.getUndoManager().clearUndoHistory();
 }
 
 void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
 {
-    const NoClipsTakenIn byThePassAlone (song);
+    const NothingTakenIn byThePassesAlone (song);
     const Song::OutsideHistory outside (song);
 
     // Everything, outside the history, and its count of IDs as the copy's: what the history holds is the copy's already, so
-    // that only what changed without it differs (a property set without a step, view state, the count of IDs). Its clips
-    // among what the history holds: every change of a clip is an undo step, so none differs (an Undo of a step below would
-    // lose what was written of one here: ValueArea.h).
+    // that only what changed without it differs (a property set without a step, view state, the count of IDs). Its clips and
+    // its tempo map among what the history holds: every change of a clip or of the tempo map is an undo step, so none differs
+    // (an Undo of a step below would lose what was written of one here: ValueArea.h).
     makeLike (song, song.getState(), copy, nullptr, true, Taken::everything);
     [[maybe_unused]] const auto clipWrites = makeClipsLike (song, copy, false);
     jassert (clipWrites == 0);
+    [[maybe_unused]] const auto tempoMapWritten = makeTempoMapLike (song, copy);
+    jassert (! tempoMapWritten);
     song.getState().setProperty (schema::nextID, copy[schema::nextID], nullptr);
 }
 
@@ -1212,8 +1248,11 @@ namespace
                 if (const auto* value = state.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
                     state.setProperty (name, other[name], undo);
 
-        // Its tempo map, sections, chord lane and the key set last: each as the other has it, or none.
-        for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
+        // Its tempo map, through the tempo pass; its sections, chord lane and the key set last: each as the other has it, or
+        // none.
+        makeTempoMapLike (song, other);
+
+        for (const auto* type : { &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
         {
             auto live = state.getChildWithName (*type);
             const auto then = other.getChildWithName (*type);
@@ -1272,7 +1311,7 @@ namespace
 
 bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
 {
-    const NoClipsTakenIn byThePassAlone (song);
+    const NothingTakenIn byThePassesAlone (song);
     const auto done = makeTrackLikeIn (song, song.getState(), id, other, &song.getUndoManager());
     countIDsPast (song, other);
     return done;
@@ -1280,7 +1319,7 @@ bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
 
 void makeSongOwnLike (Song& song, const juce::ValueTree& other)
 {
-    const NoClipsTakenIn byThePassAlone (song);
+    const NothingTakenIn byThePassesAlone (song);
     makeSongOwnLikeIn (song, song.getState(), other, &song.getUndoManager());
     countIDsPast (song, other);
 }

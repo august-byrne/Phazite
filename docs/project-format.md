@@ -57,7 +57,14 @@ out as it opens the file (section 7).
 ## 3. The song
 
 `PHAZITE` holds, among others (Schema.h names every one):
-- `TEMPOMAP`: the tempos and time signatures, each from its beat;
+- `TEMPOMAP`: the tempos (`TEMPO`: `beat`, `bpm`, and `curve`, written only while it isn't 1, a step) and time
+  signatures (`TIMESIGNATURE`: `beat`, `numerator`, `denominator`), each from its beat. Read in any order, each kind
+  by beat, one of a kind for a beat (a tempo's or a time signature's key is its beat: of two at one beat the first
+  stays, as "References" below says; the open song can come to hold two at one beat, known bug 240 in
+  [known-bugs.md](known-bugs.md)); a number that is absent or none reads as its description says (a
+  `bpm` of 120, a `numerator` and a `denominator` of 4, a `beat` of 0, a `curve` of 1), a kind with none holds one
+  from the song's start, and a property or an element Phazite doesn't know on the map or an entry isn't kept. Phazite
+  writes the tempos first, then the time signatures, each kind by beat;
 - `TRACKS`: the tracks top to bottom, a folder's tracks inside it, each with its clips (first among its elements, in
   the track's order of them), its devices, its sends and its channel; and `MASTER`, the master's channel and devices;
 - `AUTOMATION`: the curves, each a parameter's by its device's ID and the parameter's ID, with its points in beats,

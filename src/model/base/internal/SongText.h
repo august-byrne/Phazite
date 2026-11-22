@@ -24,6 +24,15 @@ juce::String writeValue (const juce::var&);
 // same value, and so are two numbers that differ only past what is written.
 bool isSameValue (const juce::var&, const juce::var&);
 
+// A value's number as the song reads one, the one reading of a number an element holds, the same wherever the song reads
+// one: the loader's (model/project/internal/Project.h: makeConsistent()), and every reader of an element's numbers into the
+// song's values (SongValues.h, TempoMapValue.h, CurveValues.h). A number's own value (a switch's as 1 or 0); text that is a
+// number and nothing else, trimmed, as std::from_chars reads it, which reads every double's text as that double (a
+// subnormal's too, "1e-321", which juce::String::getDoubleValue() reads as 0), "nan" and "inf" as those; infinity for text
+// that is a number past what a double holds or too near 0 for one ("1e999", "1e-400"); none for anything else ("0x10",
+// "4abc", an empty text). What is no finite number each reader then takes as its description's fallback.
+std::optional<double> readValueNumber (const juce::var&);
+
 // Bytes as text, in base 64 as RFC 4648 has it (with "=" to fill the last group); and back, nothing for text that isn't
 // base 64 of some bytes.
 juce::String writeBytes (const juce::MemoryBlock&);

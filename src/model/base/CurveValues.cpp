@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "model/base/internal/CurveValues.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace phazite
@@ -12,10 +15,19 @@ namespace
     // A point's bend where its element has none: a straight line.
     constexpr float straight = 0.0f;
 
+    // A point's number as the song reads one (SongText.h: readValueNumber(), the loader's reading, so that a text reads as the
+    // same number wherever it is read), or what the value holds where the element has none, or what it has is no finite
+    // number.
+    double readOr (const juce::var& held, double absent)
+    {
+        const auto number = readValueNumber (held);
+        return number.has_value() && std::isfinite (*number) ? *number : absent;
+    }
+
     PointValue readPoint (const juce::ValueTree& point)
     {
-        return { BeatPosition::fromBeats (point[schema::pointBeat]), (float) point[schema::pointValue],
-                 (float) point.getProperty (schema::pointCurve, straight) };
+        return { BeatPosition::fromBeats (readOr (point[schema::pointBeat], 0.0)), toFloat (readOr (point[schema::pointValue], 0.0)),
+                 toFloat (readOr (point[schema::pointCurve], straight)) };
     }
 
     // A POINT child that is a point: one with a value (the loader takes one without out as the song opens).

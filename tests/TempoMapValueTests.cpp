@@ -265,16 +265,20 @@ TEST_CASE ("Tempo map value: reading the song's tempo map through the value allo
         return;
     }
 
-    // What every clip and plan asks (Tempo.h: getTempoMap(), getTempoChanges(), getTimeSignatureChanges()), with the tree
-    // holding the map, against the tree read as it was before the value (makeMapAsBefore(), which makes less than the code
-    // before did: no TempoChange between the tree and the engine's map).
+    // What every clip and plan asks (Tempo.h: getTempoMap(), getTempoChanges(), getTimeSignatureChanges()), with the song
+    // holding the map as a value, against its whole state's map read as the tree was read before the value
+    // (makeMapAsBefore(), which makes less than the code before did: no TempoChange between the tree and the engine's map).
     const auto songPtr = phazite::createSong();
     auto& song = *songPtr;
     phazite::addTempoChange (song, phazite::BeatPosition::fromBeats (8.0), 140.0);
-    const auto map = song.getState().getChildWithName (schema::TEMPOMAP);
+    const auto map = phazite::test::copyWholeSong (song).getChildWithName (schema::TEMPOMAP);
 
     const auto count = [] (const std::function<void()>& read) { return phazite::test::countAllocations (read).value_or (0); };
+    // The song makes its engine's map once for each change of its tempo map, and keeps it (SongValues.h: PlayedTempoMap): the
+    // first call after the change makes it (as a map is made from the value: fromValue) and copies it, those after it copy it.
     const auto before = count ([&map] { juce::ignoreUnused (makeMapAsBefore (map, 1.0)); });
+    const auto fromValue = count ([&song] { juce::ignoreUnused (phazite::getTempoMap (phazite::getTempoMapValue (song), 1.0)); });
+    const auto made = count ([&song] { juce::ignoreUnused (phazite::getTempoMap (song)); });
     const auto now = count ([&song] { juce::ignoreUnused (phazite::getTempoMap (song)); });
     const auto changesBefore = count (
         [&map]
@@ -292,9 +296,14 @@ TEST_CASE ("Tempo map value: reading the song's tempo map through the value allo
         });
     const auto changesNow = count ([&song] { juce::ignoreUnused (phazite::getTempoChanges (song)); });
 
-    MESSAGE ("Allocations, the engine's map: " << before << " from the tree, " << now << " through the value; the tempos: " << changesBefore
-                                               << " from the tree, " << changesNow << " through the value");
-    CHECK (now <= before);
+    MESSAGE ("Allocations, the engine's map: " << before << " from the tree, " << fromValue << " from the value, " << made
+                                               << " made and kept once for the change (and copied), " << now
+                                               << " copied from the one kept; the tempos: " << changesBefore << " from the tree, "
+                                               << changesNow << " through the value");
+
+    // The map made from the value costs no more than from the tree; a read of the one kept, no more again.
+    CHECK (fromValue <= before);
+    CHECK (now <= fromValue);
     CHECK (changesNow <= changesBefore);
 }
 

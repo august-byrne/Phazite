@@ -141,7 +141,7 @@ TEST_CASE ("A decimal of up to six significant digits from 0.001 up is written a
 TEST_CASE ("The loader takes a number's text as Phazite's own only where Phazite writes that text for the number it reads as")
 {
     // isNumberWrittenAsPhazite() is how makeConsistent() leaves a number as it is without writing it: every text it takes
-    // must be what writeValue() writes for the number the loader reads from it (readLoadedNumber()).
+    // must be what writeValue() writes for the number the loader reads from it (readValueNumber()).
     using phazite::isNumberWrittenAsPhazite;
 
     const auto holds = [] (const juce::var& value)
@@ -149,7 +149,7 @@ TEST_CASE ("The loader takes a number's text as Phazite's own only where Phazite
         if (! isNumberWrittenAsPhazite (value))
             return true;
 
-        const auto number = phazite::readLoadedNumber (value);
+        const auto number = phazite::readValueNumber (value);
         return value.isString() && number.has_value() && phazite::writeValue (*number) == value.toString();
     };
 

@@ -4,7 +4,8 @@
 // beat on, held until the next or ramping to it, straight or bent (TempoChange, TempoValues.h). For now a song has one time
 // signature, from its start. Clips stay on their beats when the tempo changes, as the playlist's time line is in beats:
 // those that follow the tempo stretch with it, along its changes too, the others keep their speed (TempoStretch,
-// TempoValues.h). The song holds them in its tempo map (schema::TEMPOMAP), which Phazite's engine plays (getTempoMap()).
+// TempoValues.h). The song holds them in its tempo map, a value beside its tree (getTempoMapValue()), which Phazite's engine
+// plays (getTempoMap()).
 #pragma once
 
 #include "engine/core/TempoMap.h"
@@ -23,10 +24,10 @@ class CommandRegistry;
 
 //==============================================================================
 // The song's tempo map as a value (model/base/internal/TempoMapValue.h), what the readers below read it from: each kind by
-// beat, at least one of each. The song's tree holds the map still (roadmap step S5.20: the tempo map's switch is to come), so
-// this reads it from the song's TEMPOMAP element at each call and returns it by value; once the song holds the value, it
-// returns a reference to it.
-TempoMapValue getTempoMapValue (const Song&);
+// beat, at least one of each. The song holds it in an area of its values (SongValues.h), which this refers to, valid until
+// its next change; the edits below compute the next value from it and set it once (SongValues::setTempoMap()). A song that
+// holds no values (one made to be read or checked: Song::getValues()) reads as makeDefaultTempoMap()'s.
+const TempoMapValue& getTempoMapValue (const Song&);
 
 // The song's tempo map (TempoValues.h), and its bars.
 std::vector<TempoChange> getTempoChanges (const Song&);
@@ -34,8 +35,10 @@ std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song&);
 Bars getBars (const Song&);
 
 // The song's tempo map as Phazite's engine plays it (engine/core/TempoMap.h), at a sample rate: at one sample a second, its
-// beats in seconds, which audio clips, fades, recordings and renders count in. And the same of a tempo map's value, and of a
-// song's state, which needn't be open (a version's: model/versions/), read with readTempoMapValue().
+// beats in seconds, which audio clips, fades, recordings and renders count in. The song keeps the map made of its value for
+// the last two sample rates asked, so that it is made once for each change of the tempo map (SongValues.h: PlayedTempoMap),
+// and the readers below read it there; this returns a copy. And the same of a tempo map's value, and of a song's state,
+// which needn't be open (a version's: model/versions/), read with readTempoMapValue().
 engine::TempoMap getTempoMap (const Song&, double sampleRate = 1.0);
 engine::TempoMap getTempoMap (const TempoMapValue&, double sampleRate);
 engine::TempoMap getTempoMap (const juce::ValueTree& songState, double sampleRate);
@@ -46,7 +49,8 @@ BeatPosition toBeats (const Song&, double seconds);
 double getTempoAt (const Song&, BeatPosition);
 
 // What every project's tempo map holds when it has none yet: a tempo of 120 BPM and 4/4 from the song's start, as a new
-// song is. Not an undo step: Project adds it as a project opens.
+// song is, written into its tree's TEMPOMAP before the song holds its values (model/project/internal/Project.h: makeSong(),
+// makeNewSong()). Not an undo step. Nothing for a song that holds its values, whose map is whole in its area.
 void ensureTempoMap (Song&);
 
 // The time edits (model/arrangement/internal/Arrangement.h): the tempos and time signatures after a beat move later by a

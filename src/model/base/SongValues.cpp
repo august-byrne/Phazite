@@ -2,8 +2,10 @@
 #include "internal/SongValues.h"
 #include "Song.h"
 #include "internal/Schema.h"
+#include "internal/SongText.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -222,6 +224,15 @@ namespace
 
         clips = withClip (withoutClip (clips, id), std::move (value), index);
     }
+
+    // The song's TEMPOMAP element once what it held is read into the song's map (holdValues() and the keeper's safety net
+    // alike): emptied, the place a whole copy writes the map in, its properties and children Phazite doesn't know taken out
+    // too (Schema.h, TEMPOMAP).
+    void emptyTempoMapElement (juce::ValueTree& map, juce::UndoManager* undo)
+    {
+        map.removeAllChildren (undo);
+        map.removeAllProperties (undo);
+    }
 } // namespace
 
 //==============================================================================
@@ -323,6 +334,24 @@ struct SongValues::ClipsTeller final : ValueArea<SongClips>::Listener
 };
 
 //==============================================================================
+// What the values' listeners are told of the tempo map (Listener::tempoMapChanged()): once for each change of its value.
+struct SongValues::TempoMapTeller final : ValueArea<TempoMapValue>::Listener
+{
+    explicit TempoMapTeller (juce::ListenerList<SongValues::Listener>& l)
+        : listeners (l)
+    {
+    }
+
+    juce::ListenerList<SongValues::Listener>& listeners;
+
+    void valueAreaChanged (const TempoMapValue& before, const TempoMapValue& after) override
+    {
+        if (! before.isSameAs (after))
+            listeners.call ([] (SongValues::Listener& listener) { listener.tempoMapChanged(); });
+    }
+};
+
+//==============================================================================
 // What keeps the areas and the tree together for every change of the tree (SongValues.h). It changes the areas and the tree
 // through the song's undo manager from inside the tree's callbacks, which run inside the perform() of the tree's own action:
 // JUCE refuses that only while it undoes or redoes (when the keeper does nothing), and adds the inner actions to the step
@@ -389,34 +418,57 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     }
 
     //==============================================================================
-    // The tempo map, while the tree holds it: what the values' listeners are told (Listener::tempoMapChanged()), for each
-    // notification under its TEMPOMAP element (isHeardAsTempoMap()), whatever the history does (an undo's and a redo's too).
-    // Nothing of the song is read: the listeners only mark.
-    void tellTempoMap() const
+    // The tempo map's safety net (SongValues.h): a TEMPOMAP that comes into the song with entries in it has them read in as the
+    // song's map, and is emptied as holdValues() empties the song's own (emptyTempoMapElement(): what Phazite doesn't know of
+    // it goes too); an entry added to the song's TEMPOMAP by itself is read into the map and taken out again
+    // while the song is written outside the history, and refused in a step, whose Undo, taking the tree's change back first,
+    // would find it gone (JUCE workaround W62 (docs/juce-workarounds.md)). Either in the mode of the moment.
+    void takeTempoMapIn (juce::ValueTree& parent, juce::ValueTree& child)
     {
-        values.listeners.call ([] (SongValues::Listener& listener) { listener.tempoMapChanged(); });
-    }
+        const auto isEntry = [] (const juce::ValueTree& element)
+        { return element.hasType (schema::TEMPO) || element.hasType (schema::TIMESIGNATURE); };
 
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override
-    {
-        if (isHeardAsTempoMap (tree))
-            tellTempoMap();
-    }
+        auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
 
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
-    {
-        if (isHeardAsTempoMap (parent))
-            tellTempoMap();
+        if (child.hasType (schema::TEMPOMAP) && parent == state)
+        {
+            std::vector<juce::ValueTree> entries;
+
+            for (const auto& element : child)
+                if (isEntry (element))
+                    entries.push_back (element);
+
+            if (entries.empty())
+                return;
+
+            values.tempoMapAdopted += (int) entries.size();
+            values.setTempoMap (song, readHeldTempoMap (child));
+            emptyTempoMapElement (child, undo);
+            return;
+        }
+
+        if (! isEntry (child) || ! parent.hasType (schema::TEMPOMAP) || parent.getParent() != state)
+            return;
+
+        if (undo != nullptr)
+        {
+            jassertfalse; // an entry added to the song's tempo map: the tempo map's functions change it (Tempo.h)
+            return;
+        }
+
+        ++values.tempoMapAdopted;
+        values.setTempoMap (song, withEntryTaken (values.tempoMap.get(), child));
+        parent.removeChild (child, nullptr);
     }
 
     //==============================================================================
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
-        if (isHeardAsTempoMap (parent, child))
-            return tellTempoMap(); // nothing of a clip in it
-
         if (isUndoingOrRedoing())
             return;
+
+        if (isHeardAsTempoMap (parent, child))
+            return takeTempoMapIn (parent, child); // nothing of a clip in it
 
         // A track (or what holds tracks) put in the song's track list: each remembered one's clips back; and every CLIP element
         // on a track that came with its clips' elements, taken in (one on a folder or a return, which holds no clips, only
@@ -488,9 +540,6 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
 
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        if (isHeardAsTempoMap (parent, child))
-            return tellTempoMap();
-
         if (isUndoingOrRedoing() || ! isInTrackList (parent, child))
             return;
 
@@ -544,8 +593,10 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
 SongValues::SongValues (Song& song)
     : clips (song.getUndoManager(), {}),
       notes (song.getUndoManager(), {}),
+      tempoMap (song.getUndoManager(), makeDefaultTempoMap()),
       notesTeller (std::make_unique<NotesTeller> (listeners)),
-      clipsTeller (std::make_unique<ClipsTeller> (listeners))
+      clipsTeller (std::make_unique<ClipsTeller> (listeners)),
+      tempoMapTeller (std::make_unique<TempoMapTeller> (listeners))
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -555,16 +606,35 @@ SongValues::SongValues (Song& song)
     areaOfClips.addListener (clipsTeller.get());
     auto& areaOfNotes = notes;
     areaOfNotes.addListener (notesTeller.get());
+    auto& areaOfTempos = tempoMap;
+    areaOfTempos.addListener (tempoMapTeller.get());
 }
 
 SongValues::~SongValues()
 {
     JUCE_ASSERT_MESSAGE_THREAD
     keeper = nullptr;
+    auto& areaOfTempos = tempoMap;
+    areaOfTempos.removeListener (tempoMapTeller.get());
     auto& areaOfNotes = notes;
     areaOfNotes.removeListener (notesTeller.get());
     auto& areaOfClips = clips;
     areaOfClips.removeListener (clipsTeller.get());
+}
+
+void SongValues::setTempoMap (Song& song, TempoMapValue next)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+    jassert (! next.tempos.empty() && ! next.signatures.empty()); // at least one of each (TempoMapValue.h)
+
+    if (next.tempos.empty() || next.signatures.empty() || next == tempoMap.get())
+        return;
+
+    if (song.isWritingOutsideHistory())
+        tempoMap.setOutsideHistory (std::move (next));
+    else
+        tempoMap.set (std::move (next));
 }
 
 void SongValues::setAll (Song& song, SongClips next)
@@ -790,6 +860,22 @@ void SongValues::adopt (Song& song)
     dropClipElements (song.getState());
     clips.setOutsideHistory (std::move (nextClips));
     notes.setOutsideHistory (std::move (nextNotes));
+
+    // The tempo map the loader made consistent (and makeSong() made whole: Tempo.h, ensureTempoMap()) into its area, outside
+    // the history, each entry as the song reads one (TempoMapValue.h: readHeldTempoMap()); then its element emptied
+    // (emptyTempoMapElement()).
+    auto state = song.getState();
+    auto map = state.getChildWithName (schema::TEMPOMAP);
+
+    if (! map.isValid())
+    {
+        map = juce::ValueTree (schema::TEMPOMAP);
+        state.appendChild (map, nullptr);
+    }
+
+    tempoMap.setOutsideHistory (readHeldTempoMap (map));
+    emptyTempoMapElement (map, nullptr);
+
     keeper = std::make_unique<Keeper> (*this, song);
 }
 
@@ -806,9 +892,42 @@ void Song::holdValues()
 }
 
 //==============================================================================
+namespace
+{
+    // A number of an element (a note's, a controller's value's, a clip's, a warp marker's) as its value holds it: the
+    // property's own, read as the loader reads it (SongText.h: readValueNumber(), so that a text reads as the same number
+    // wherever it is read: "1e-321" as that subnormal, never as 0), kept within what its description gives
+    // (model/base/internal/Schema.h); and where the element has none, or what it has is no finite number, what the
+    // description gives for one that is no number (a velocity of 100, a pitch of 60, a length of a beat), else 0. In the
+    // tree a note without a velocity stayed without one; a value always has one, which the loader left to this (a file from
+    // others: tests/FuzzTests.cpp found one).
+    double readDescribed (const juce::var& held, const schema::PropertyDescription& property)
+    {
+        const auto& range = property.getRange();
+        const auto number = readValueNumber (held);
+
+        if (! number.has_value() || ! std::isfinite (*number))
+            return range.has_value() ? range->fallback.value_or (0.0) : 0.0;
+
+        return range.has_value() ? juce::jlimit (range->low, range->high, *number) : *number;
+    }
+
+    double readDescribed (const juce::ValueTree& element, const schema::PropertyDescription& property)
+    {
+        return readDescribed (element[property], property);
+    }
+
+    // A channel as a value holds it: read as readDescribed() reads a number, whole (as the loader makes it), 1 for none.
+    int readChannelNumber (const juce::var& held)
+    {
+        const auto number = readValueNumber (held);
+        return number.has_value() && std::isfinite (*number) ? keepChannel ((int) juce::jlimit (1.0, 16.0, std::round (*number))) : 1;
+    }
+} // namespace
+
 int readChannel (const juce::ValueTree& element, const juce::Identifier& property)
 {
-    return keepChannel ((int) element.getProperty (property, 1));
+    return readChannelNumber (element[property]);
 }
 
 void writeChannel (juce::ValueTree& element, const juce::Identifier& property, int channel, juce::UndoManager* undo)
@@ -863,8 +982,8 @@ namespace
         if (! kind.has_value())
             return std::nullopt;
 
-        return ControlValues { *kind, (int) control[schema::controlNumber], (double) control[schema::controlBeat],
-                               (int) control[schema::controlValue], readChannel (control, schema::controlChannel) };
+        return ControlValues { *kind, (int) readDescribed (control, schema::controlNumber), readDescribed (control, schema::controlBeat),
+                               (int) readDescribed (control, schema::controlValue), readChannel (control, schema::controlChannel) };
     }
 
     // A new note's element: its ID, pitch, start, length and velocity always, its flags while they are on and its channel if it
@@ -905,29 +1024,6 @@ namespace
         control.setProperty (schema::controlValue, values.value, nullptr);
         writeChannel (control, schema::controlChannel, values.channel, nullptr);
         return control;
-    }
-} // namespace
-
-namespace
-{
-    // A number of a note's element as its value holds it: the property's own, kept within what its description gives
-    // (model/base/internal/Schema.h), and where the element has none, what the description gives for one that is no number
-    // (a velocity of 100, a pitch of 60, a length of a beat). In the tree a note without a velocity stayed without one; a
-    // value always has one, which the loader left to this (a file from others: tests/FuzzTests.cpp found one).
-    double readDescribed (const juce::var& held, const schema::PropertyDescription& property)
-    {
-        const auto& range = property.getRange();
-
-        if (held.isVoid())
-            return range.has_value() ? range->fallback.value_or (0.0) : 0.0;
-
-        const auto number = (double) held;
-        return range.has_value() ? juce::jlimit (range->low, range->high, number) : number;
-    }
-
-    double readDescribed (const juce::ValueTree& element, const schema::PropertyDescription& property)
-    {
-        return readDescribed (element[property], property);
     }
 } // namespace
 
@@ -1008,7 +1104,7 @@ bool setNoteProperty (NoteValues& note, const juce::Identifier& property, const 
     else if (property == schema::notePortamento)
         note.portamento = (bool) value;
     else if (property == schema::noteChannel)
-        note.channel = keepChannel (value.isVoid() ? 1 : (int) value);
+        note.channel = readChannelNumber (value);
     else
         return false;
 

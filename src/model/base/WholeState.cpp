@@ -10,9 +10,23 @@ namespace
 {
     // The clips of a copy's tracks written in (only tracks hold clips: Schema.h), found where tracks are, in the song's element,
     // its track list and its folders: under each track, its clips from the values kept, first among its elements, in the
-    // track's order, each with its notes (SongValues.h: writeClipElement()).
+    // track's order, each with its notes (SongValues.h: writeClipElement()). And the tempo map in the song's TEMPOMAP, the
+    // place the song keeps for it (TempoMapValue.h: writeTempoMap(): tempos then time signatures, each kind by beat).
     void writeIn (juce::ValueTree element, const ValuesKept& kept)
     {
+        // Kept of a song that holds its values, which holds at least one of each kind (none kept of one that keeps everything in
+        // its tree, whose TEMPOMAP holds its entries).
+        if (element.hasType (schema::TEMPOMAP))
+        {
+            if (! kept.tempoMap.tempos.empty())
+            {
+                jassert (element.getNumChildren() == 0); // the song's tree holds none of its entries (SongValues.h)
+                writeTempoMap (kept.tempoMap, element);
+            }
+
+            return;
+        }
+
         if (element.hasType (schema::TRACK))
         {
             const auto track = (std::uint64_t) (juce::int64) element[schema::trackID];
@@ -29,7 +43,8 @@ namespace
 
         if (element.hasType (schema::PHAZITE) || element.hasType (schema::TRACKS) || element.hasType (schema::TRACK))
             for (auto child : element)
-                if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+                if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK)
+                    || (child.hasType (schema::TEMPOMAP) && element.hasType (schema::PHAZITE)))
                     writeIn (child, kept);
     }
 } // namespace
@@ -64,7 +79,7 @@ ValuesKept keepValues (const Song& song)
     JUCE_ASSERT_MESSAGE_THREAD
 
     if (const auto* values = song.getValues())
-        return { values->notes.get(), values->clips.get() };
+        return { values->notes.get(), values->clips.get(), values->tempoMap.get() };
 
     return {};
 }
@@ -116,15 +131,12 @@ bool holdSameTrackClips (const ValuesKept& a, const ValuesKept& b, TrackID track
     return true;
 }
 
-bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&)
+bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept& kept, const juce::ValueTree& otherSong, const ValuesKept& otherKept)
 {
-    // The trees hold the maps still: each read into its value. (The tempo map's switch compares the values kept.)
-    const auto map = song.getChildWithName (schema::TEMPOMAP);
-    const auto other = otherSong.getChildWithName (schema::TEMPOMAP);
-
-    if (map.isValid() != other.isValid())
+    // The values kept, each tree's TEMPOMAP the place of its map alone.
+    if (song.getChildWithName (schema::TEMPOMAP).isValid() != otherSong.getChildWithName (schema::TEMPOMAP).isValid())
         return false;
 
-    return readTempoMapValue (map) == readTempoMapValue (other);
+    return kept.tempoMap.isSameAs (otherKept.tempoMap) || kept.tempoMap == otherKept.tempoMap;
 }
 } // namespace phazite

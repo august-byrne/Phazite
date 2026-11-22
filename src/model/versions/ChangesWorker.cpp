@@ -52,7 +52,8 @@ namespace
     // The song's own parts (its properties, tempo map, sections and chord lane) and its tracks' order and names: each track
     // with its ID, kind and name in its folder, and the master's ID. What the song's own line and the lines' names and order
     // are worked out from, without copying any track's parts. Each of the song's own parts whole (WholeState.h), as the song
-    // holds it, beside its tree too (roadmap step S5.20: the tempo map is to leave the tree).
+    // holds it, beside its tree too (roadmap step S5.20: the tempo map is a value beside it, its TEMPOMAP an empty place that
+    // copyWhole() fills).
     juce::ValueTree makeSkeleton (const Song& whole)
     {
         const auto song = whole.getState();

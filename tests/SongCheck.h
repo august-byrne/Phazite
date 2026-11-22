@@ -30,7 +30,9 @@
 //           no alias group is of one clip; each clip on a track of the song that holds clips (not a folder or a return);
 //           every MIDI clip has a value of notes, an audio clip none, and no value belongs to a clip that isn't a MIDI clip
 //           of the song's; and the clips of an alias group hold ONE value of notes, or audio clips ONE sound (the same, not
-//           two alike)
+//           two alike); and of its tempo map (TempoMapValue.h): no TEMPO or TIMESIGNATURE element in its tree, whose
+//           TEMPOMAP is there and empty; each kind of the value not empty and in the order of its beats; every number within
+//           its description's range (Schema.h)
 #pragma once
 
 #include "TestHelpers.h"

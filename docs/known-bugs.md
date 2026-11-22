@@ -21,7 +21,10 @@ suspects, or would make faster, is in the [backlog](backlog.md). 230 was found b
 roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 235 was found by reading while
 the clips' writers were reviewed (2026-11-21), as 237 was, and 236 is a test that failed once on CI that day. 238 was
 found by reading while the automation's curves were made values (2026-11-22), and waits for the owner. 239 was found by
-the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is to be fixed with the tempo map's switch.
+the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
+side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
+the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
+onto another's beat does.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -185,13 +188,18 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Was Before on the clash leaves a tempo change at that beat without a bpm, which reads and plays as 120 BPM and is
   saved so. Why: the merge keys a TEMPO by its beat, so the two are one element; the clash is on its `bpm`, with no
   value before (the line they parted from had no such element), and `chooseClash()`
-  (`src/model/versions/VersionsModel.cpp`) removes a property whose chosen value is none. Any keyed element both lines
-  added with a clashing property is likely the same (a time signature, a chord, a section's property). Found by the
+  (`src/model/versions/VersionsModel.cpp`) removes a property whose chosen value is none. Fixed for the tempo map
+  (roadmap step S5.20, the tempo map's switch, 2026-11-22): a clash in it is chosen through its value, and what was
+  before takes away an entry the parting's song held none of at the clash's step (and a later choice puts it back as
+  that side holds it). What is left of it for the tempo map: where the side before can't be read (its song isn't a
+  `PHAZITE` element: `canRead` false in `chooseTempoMapClash()`), what was before still takes the bpm away, which
+  reads as 120. Any other keyed element both lines added with a clashing property is likely the same (a chord, a
+  chord lane's key, a section's property, a MIDI link). Found by the
   review of roadmap step S5.20's tempo map listener (2026-11-22). To fix: where the parting had no element at the
   clash's path, what was before removes the element: the merge reports such a clash as one on the whole element, or
-  `chooseClash()` is told that the parting held none; for the tempo map through its value once it is one (roadmap step
-  S5.20). `tests/VersionsMergeWaitingTests.cpp` pins today's result (the case of a conflict on a tempo's bpm, ramp and a
-  tempo both branches added, "chosen each way"), which the fix changes.
+  `chooseClash()` is told that the parting held none; the tempo map does it through its value (`chooseTempoMapClash()`),
+  and each other area can as it becomes a value (roadmap step S5.20). `tests/VersionsMergeWaitingTests.cpp` checks the
+  tempo map's (the case of a conflict on a tempo's bpm, ramp and a tempo both branches added, "chosen each way").
 
 ## Devices and playback
 
@@ -214,6 +222,20 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   and an export that leaves to the background threads the renders they are already making.
 
 ## Notes and clips
+
+- **240. Two tempo changes can sit on one beat, and only the first comes back when the project is opened again.** A
+  tempo change dragged onto another's beat on the tempo lane (`moveTempoChange()`, `src/model/transport/Tempo.cpp`:
+  the grid makes that easy), or one that is not the first moved to the song's start, leaves two at one beat; the song
+  plays them as the last of them says. The file's rule is one `TEMPO` for a beat (a tempo's key is its beat: the
+  merge's key, and the check's `key` rule, `tests/SongCheck.cpp`), and as a song opens the loader keeps the first of
+  each key (`makeConsistent()`; `docs/project-format.md`, "References"), so the tempo that played is the one that is
+  lost on the next opening. Older than the tempo map's move to a value (the tree did the same). Found by the review of
+  the tempo map's switch (roadmap step S5.20, 2026-11-22). To fix: what a tempo change moved onto another's beat does
+  is the owner's to decide; this entry recommends that the move takes the place of the one there when the drag ends
+  (not while it passes over it), as adding a tempo change at a beat that has one changes that one, with a test of a
+  drag across a neighbour and one that ends on it in `tests/TempoTests.cpp`; then `checkSong()`'s `key` rule holds for
+  every song the model makes, and the case "A tempo moved onto another's beat..." there checks the whole song, not
+  its values alone.
 
 - **235. A DAWproject import can put MIDI clips and audio clips on one track.** Audio and notes don't share a track
   in Phazite (a model function that puts a clip on a track asks `canTrackHold()`), and the import's reader

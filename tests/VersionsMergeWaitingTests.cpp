@@ -2354,12 +2354,10 @@ TEST_CASE ("A conflict on a tempo's bpm and on a tempo's ramp, and on a tempo bo
         }
         else
         {
-            // What was before had no tempo there, and the conflict is on its bpm alone: the tempo stays, without one, and
-            // reads as the description's fallback (Schema.h: bpm), as its element would. This pins today's result, which is
-            // known bug 239 (docs/known-bugs.md): what was before should take the tempo away; its fix changes this.
-            REQUIRE (now.size() == 3);
-            CHECK (now[2].beat.inBeats() == doctest::Approx (16.0));
-            CHECK (now[2].bpm == doctest::Approx (120.0));
+            // What was before had no tempo there, and the conflict is on its bpm alone: what was before takes the tempo away
+            // (known bug 239, fixed for the tempo map: the tempo stayed, without a bpm, at 120); the next choice of this
+            // branch's or the other's puts it back as that side holds it.
+            CHECK (now.size() == 2);
         }
 
         checkSong (song);

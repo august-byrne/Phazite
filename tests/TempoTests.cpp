@@ -949,3 +949,77 @@ TEST_CASE ("Every edit of the tempo map is one exact undo step, with a loop that
     phazite::test::checkSong (song);
     phazite::setSong (context, nullptr);
 }
+
+TEST_CASE ("A tempo moved onto another's beat lands before those there from before it and after them from after it, each move one "
+           "exact undo step")
+{
+    // As the map's elements were read by their beats, those at one beat in their order (TempoMapValue.h: placeByBeat()).
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    phazite::addTempoChange (song, phazite::test::at (8.0), 140.0);
+    phazite::addTempoChange (song, phazite::test::at (16.0), 150.0);
+    phazite::addTempoChange (song, phazite::test::at (24.0), 90.0);
+    song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (song);
+
+    const auto bpms = [&song]
+    {
+        std::vector<double> held;
+
+        for (const auto& tempo : phazite::getTempoChanges (song))
+            held.push_back (tempo.bpm);
+
+        return held;
+    };
+
+    undo.check ("Move Tempo Change", [&] { CHECK (phazite::moveTempoChange (song, 1, phazite::test::at (16.0), 145.0) == 1); });
+    CHECK (bpms() == std::vector<double> { 120.0, 145.0, 150.0, 90.0 });
+
+    undo.check ("Move Tempo Change", [&] { CHECK (phazite::moveTempoChange (song, 3, phazite::test::at (16.0), 95.0) == 3); });
+    CHECK (bpms() == std::vector<double> { 120.0, 145.0, 150.0, 95.0 });
+
+    for (const auto& tempo : phazite::getTempoChanges (song))
+        CHECK ((tempo.beat == phazite::BeatPosition() || tempo.beat == phazite::test::at (16.0)));
+
+    // Three at one beat, which the tempo lane's drags can leave and a file can't keep (the loader keeps the first of each key:
+    // SongCheck.h, the rule key), so the one that played is lost: known bug 240 (docs/known-bugs.md). The song's values
+    // checked, not the song as it would open.
+    undo.walkBackAndForth();
+    phazite::test::checkValues (song);
+}
+
+TEST_CASE ("Time taken out from the song's start gives the first tempo the values of the one that lands on it, one exact undo step")
+{
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    phazite::addTempoChange (song, phazite::test::at (4.0), 100.0);
+    phazite::addTempoChange (song, phazite::test::at (8.0), 140.0);
+    phazite::setTempoCurve (song, 2, phazite::tempoRamp);
+    phazite::addTempoChange (song, phazite::test::at (12.0), 160.0);
+    phazite::setTimeSignatureChanges (song, { { phazite::BeatPosition(), { 4, 4 } }, { phazite::test::at (8.0), { 3, 4 } } });
+    song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (song);
+
+    undo.check ("Remove Time",
+                [&]
+                {
+                    const phazite::UndoStep step (song, "Remove Time");
+                    phazite::removeTempoMapTime (song, { phazite::test::at (0.0), phazite::test::at (8.0) });
+                });
+
+    // The tempo at 8, at the range's end, landed on the start: the first took its bpm and its ramp; the one in the range went;
+    // the one after moved back. And the same of the time signatures.
+    const auto tempos = phazite::getTempoChanges (song);
+    REQUIRE (tempos.size() == 2);
+    CHECK (tempos[0].beat == phazite::BeatPosition());
+    CHECK (tempos[0].bpm == doctest::Approx (140.0));
+    CHECK (juce::exactlyEqual (tempos[0].curve, phazite::tempoRamp));
+    CHECK (tempos[1].beat == phazite::test::at (4.0));
+    CHECK (tempos[1].bpm == doctest::Approx (160.0));
+    const auto signatures = phazite::getTimeSignatureChanges (song);
+    REQUIRE (signatures.size() == 1);
+    CHECK (signatures[0].signature == phazite::TimeSignature { 3, 4 });
+
+    undo.walkBackAndForth();
+    phazite::test::checkSong (song);
+}

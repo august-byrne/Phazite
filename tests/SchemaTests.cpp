@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
 #include "model/project/internal/Project.h"
@@ -177,7 +178,7 @@ std::vector<juce::String> findWrongValues (const schema::Range& range)
 // Whether two values a file or whole state holds are the same: as numbers where both are, else as text.
 bool isSameSaved (const juce::var& a, const juce::var& b)
 {
-    const auto x = phazite::readLoadedNumber (a), y = phazite::readLoadedNumber (b);
+    const auto x = phazite::readValueNumber (a), y = phazite::readValueNumber (b);
     return x.has_value() && y.has_value() ? juce::exactlyEqual (*x, *y) : a.toString() == b.toString();
 }
 
@@ -207,14 +208,18 @@ struct Changed
         const phazite::Song rawSong { raw.createCopy() };
         problemsBefore = findSongProblems (rawSong, tables);
 
-        // A clip, its warp marker, its note or its controller's value: the loader's part alone (makeConsistent()), on a song
-        // that keeps everything in its tree, since a song made by makeSong() holds its clips and their notes as values beside it
-        // (Song::holdValues()); and the song opened, whose values findOpened() reads back through whole state.
+        // A clip, its warp marker, its note or its controller's value, or a tempo or a time signature: the loader's part alone
+        // (makeConsistent()), on a song that keeps everything in its tree, since a song made by makeSong() holds its clips,
+        // their notes and its tempo map as values beside it (Song::holdValues()); and the song opened, whose values
+        // findOpened() reads back through whole state.
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
-            || element.hasType (schema::CONTROL))
+            || element.hasType (schema::CONTROL) || isTempoMapEntry (element))
         {
-            const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
-            clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
+            if (! isTempoMapEntry (element))
+            {
+                const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
+                clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
+            }
 
             if (&tables == &schema::getTables())
             {
@@ -246,12 +251,19 @@ struct Changed
         return loadedElement[property];
     }
 
+    static bool isTempoMapEntry (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::TEMPO) || element.hasType (schema::TIMESIGNATURE);
+    }
+
     // The opened song's element in its clip's whole state (WholeState.h), as it holds its values: the clip itself, a note by
-    // its ID, a warp marker or a controller's value by every property but the one changed; none if the loader took it out.
+    // its ID, a warp marker or a controller's value by every property but the one changed; a tempo or a time signature in
+    // its tempo map's whole state, the same way; none if the loader took it out.
     juce::ValueTree findOpened() const
     {
         REQUIRE (opened != nullptr);
-        const auto clipState = phazite::copyWholeClip (*opened, clip);
+        const auto clipState = isTempoMapEntry (original) ? phazite::copyWholeSong (*opened).getChildWithName (schema::TEMPOMAP)
+                                                          : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))
             return clipState;
@@ -303,12 +315,12 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                 INFO (describeProblems (changed.problemsBefore));
                 CHECK (hasProblem (changed.problemsBefore, "range", property->toString()));
 
-                const auto expected = findKept (range, phazite::readLoadedNumber (value));
+                const auto expected = findKept (range, phazite::readValueNumber (value));
                 const auto loaded = changed.getLoaded (*property);
                 REQUIRE (loaded.has_value() == expected.has_value());
 
                 if (expected.has_value())
-                    CHECK (juce::exactlyEqual (phazite::readLoadedNumber (*loaded).value_or (-1.0e300), *expected));
+                    CHECK (juce::exactlyEqual (phazite::readValueNumber (*loaded).value_or (-1.0e300), *expected));
 
                 checkSong (*changed.loaded);
 
@@ -334,11 +346,11 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                             REQUIRE (changed.loadedElement.isValid());
                             const auto kept =
                                 phazite::writeClipElement (phazite::keepWithinClip (phazite::readClipValue (changed.loadedElement)));
-                            wanted = phazite::readLoadedNumber (kept.hasProperty (*property) ? kept[*property] : property->getDefault())
+                            wanted = phazite::readValueNumber (kept.hasProperty (*property) ? kept[*property] : property->getDefault())
                                          .value_or (-1.0e300);
                         }
 
-                        CHECK (juce::exactlyEqual (phazite::readLoadedNumber (held).value_or (-1.0e300), wanted));
+                        CHECK (juce::exactlyEqual (phazite::readValueNumber (held).value_or (-1.0e300), wanted));
                     }
                     else if (property == &schema::clipTake)
                     {
@@ -384,7 +396,7 @@ TEST_CASE ("Every list of numbers the description gives a range keeps each numbe
             juce::StringArray expected;
 
             for (const auto& token : tokens)
-                if (const auto kept = findKept (range, phazite::readLoadedNumber (token)))
+                if (const auto kept = findKept (range, phazite::readValueNumber (token)))
                     expected.add (juce::String (*kept, 6));
 
             const auto loaded = changed.getLoaded (*property);
@@ -392,7 +404,7 @@ TEST_CASE ("Every list of numbers the description gives a range keeps each numbe
             juce::StringArray read;
 
             for (const auto& token : juce::StringArray::fromTokens (loaded->toString(), " ", {}))
-                read.add (juce::String (phazite::readLoadedNumber (token).value_or (-1.0e300), 6));
+                read.add (juce::String (phazite::readValueNumber (token).value_or (-1.0e300), 6));
 
             CHECK (read == expected);
             checkSong (*changed.loaded);

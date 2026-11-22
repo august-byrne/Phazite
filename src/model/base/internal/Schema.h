@@ -136,7 +136,13 @@ inline const Property<juce::String> notes { "notes", on (PHAZITE), Kind::song };
 // ramping to it; for now a song has one time signature, from its start. song
 
 // Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tempos (TEMPO) and time
-// signatures (TIMESIGNATURE), in no particular order. Without one, the song is at 120 BPM in 4/4.
+// signatures (TIMESIGNATURE), read in any order, each kind sorted by beat, one of a kind for a beat as a song opens (an
+// entry's key is its beat: of two at one beat the loader keeps the first; the open song can come to hold two at one beat,
+// known bug 240 in docs/known-bugs.md), and written tempos first, then time signatures, each kind by beat. Without one,
+// the song is at 120 BPM in 4/4. A song's tempo map is a value beside its tree while it is open
+// (model/base/internal/TempoMapValue.h), each property below as its description reads it, at least one of each kind, and
+// its tree's TEMPOMAP an empty place for it: so the song keeps no property or element Phazite doesn't know on a TEMPOMAP,
+// a TEMPO or a TIMESIGNATURE, and writes a tempo's curve only while it isn't 1.
 // (TEMPOMAP, with the elements above.)
 
 // Child of TEMPOMAP: a tempo, from where it starts (mapBeat) to the next one's start, in quarter notes per minute (bpm, 20..300,
