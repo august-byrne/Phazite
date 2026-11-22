@@ -2707,6 +2707,7 @@ void Project::clearToCompare()
     notesToCompare.clear();
     clipsToCompare.clear();
     tracksToCompare.clear();
+    clearCurvesToCompare();
 }
 
 void Project::setSavedState (SongCopy copy)
@@ -2854,12 +2855,13 @@ void Project::compareWithSavedState()
     auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
-    // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane), each asked only while all before
-    // it compare.
+    // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves), each asked only while
+    // all before it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
     same = same && isChordLaneAsSaved();
+    same = same && areCurvesAsSaved();
 
     clearToCompare();
 
@@ -3056,7 +3058,7 @@ void Project::clipNotesChanged (const std::vector<ClipID>& clips)
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged().
+    // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged().
     if (! schema::isUncountedElement (parent, child) && ! isHeardAsKept (parent, child))
         markChanged (parent);
 }
@@ -3097,6 +3099,63 @@ void Project::chordLaneChanged()
 
     mayHaveChanged = true;
     chordLaneToCompare = true;
+}
+
+void Project::curvesChanged (const std::vector<ParameterRef>& parameters)
+{
+    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare curves, all of
+    // them.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+
+    for (const auto& parameter : parameters)
+        if (! comparingCurvesWhole && std::find (curvesToCompare.begin(), curvesToCompare.end(), parameter) == curvesToCompare.end())
+            curvesToCompare.push_back (parameter);
+
+    if (curvesToCompare.size() > mostToCompare)
+        comparingCurvesWhole = true;
+}
+
+void Project::clearCurvesToCompare()
+{
+    curvesToCompare.clear();
+    comparingCurvesWhole = false;
+}
+
+bool Project::areCurvesAsSaved() const
+{
+    if (curvesToCompare.empty())
+        return true;
+
+    // The curves' order, then each curve that changed, against the saved copy's, as values: or every curve, past
+    // mostToCompare of them.
+    const auto state = song->getState();
+    const auto now = keepValues (*song);
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+
+    if (comparingCurvesWhole)
+        return holdSameCurves (state, now, savedState.tree, savedState.values);
+
+    if (! holdSameCurveOrder (state, now, savedState.tree, savedState.values))
+        return false;
+
+    return std::all_of (curvesToCompare.begin(), curvesToCompare.end(),
+                        [this, &state, &now] (const ParameterRef& parameter)
+                        {
+                            elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+                            return holdSameCurve (state, now, savedState.tree, savedState.values, parameter);
+                        });
 }
 
 void Project::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>& reordered)
@@ -3256,7 +3315,8 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const ValuesKept& aV
     // What each song keeps beside its tree of the element (WholeState.h: holdSameKeptOf(), each area in turn): a track's
     // clips, with their notes and controllers' values; the tempo map as one value, as the quick comparison compares it
     // (compareWithSavedState()), so that the two agree: its elements' order, and what reads as its default, are no
-    // difference. The places of what is kept (the TEMPOMAP) are left out of the elements below.
+    // difference; the chord lane as one value, with whether each has one; the curves as values, in their order. The places
+    // of what is kept (the TEMPOMAP, the CHORDLANE, an AUTOMATION's CURVEs) are left out of the elements below.
     if (! holdSameKeptOf (a, aValues, b, bValues))
         return false;
 

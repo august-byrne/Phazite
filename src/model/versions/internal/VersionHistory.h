@@ -957,6 +957,9 @@ private:
     // The chord lane (SongValues.h), what is in whose CHORDLANE the tree's callbacks below leave alone (isHeardAsKept()):
     // the song's own line, as a change of its element was. The element's own coming and going they mark as any element's.
     void chordLaneChanged() override;
+
+    // The curves (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): each one's.
+    void curvesChanged (const std::vector<ParameterRef>&) override;
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();
@@ -984,7 +987,7 @@ private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
         if (isHeardAsKept (parent, child))
-            return; // the areas': tempoMapChanged(), chordLaneChanged()
+            return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
 
         ++songChanges;
         markChildChanged (parent, child);
@@ -993,7 +996,7 @@ private:
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
         if (isHeardAsKept (parent, child))
-            return; // the areas': tempoMapChanged(), chordLaneChanged()
+            return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
 
         ++songChanges;
         markChildChanged (parent, child);

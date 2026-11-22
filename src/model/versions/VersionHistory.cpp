@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
@@ -3024,20 +3025,10 @@ void VersionHistory::markChanged (const juce::ValueTree& tree, const juce::Ident
 
     edited();
 
-    // The automation curve, the track (or the master) it is in, nearest first, or else the song's own.
+    // The track (or the master) it is in, nearest first, or else the song's own; the song's AUTOMATION itself (its curves:
+    // curvesChanged()), every one.
     for (auto element = tree; element.isValid(); element = element.getParent())
     {
-        if (element.hasType (schema::CURVE) && element.getParent().hasType (schema::AUTOMATION))
-        {
-            // One whose device or parameter changed is another curve: every one compared again.
-            if (element == tree && (property == schema::curveDevice || property == schema::curveParameter))
-                markAllChanged();
-            else
-                markCurve (schema::getElementKey (element));
-
-            return;
-        }
-
         if (element.hasType (schema::AUTOMATION))
         {
             markAllChanged();
@@ -3080,12 +3071,6 @@ void VersionHistory::markChildChanged (const juce::ValueTree& parent, const juce
     if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER) || child.hasType (schema::AUTOMATION))
     {
         markAllChanged();
-        return;
-    }
-
-    if (child.hasType (schema::CURVE) && parent.hasType (schema::AUTOMATION))
-    {
-        markCurve (schema::getElementKey (child));
         return;
     }
 
@@ -3160,6 +3145,17 @@ void VersionHistory::chordLaneChanged()
     markSongOwn();
 }
 
+void VersionHistory::curvesChanged (const std::vector<ParameterRef>& parameters)
+{
+    // A change of the song as its tree's are, in its automation: each curve, by the key the changes name it by (a curve given
+    // another parameter by both, the one it had and the one it has, each compared).
+    ++songChanges;
+    edited();
+
+    for (const auto& parameter : parameters)
+        markCurve (getCurveKeyText (parameter));
+}
+
 void VersionHistory::markNotesHeard()
 {
     // A clip gone since was taken off its track, which marked it.
@@ -3192,7 +3188,7 @@ void VersionHistory::markOrder()
 void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     if (isHeardAsKept (tree))
-        return; // the areas': tempoMapChanged(), chordLaneChanged()
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
 
     ++songChanges;
 
@@ -3224,7 +3220,7 @@ void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce
 void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex)
 {
     if (isHeardAsKept (parent))
-        return; // the areas': tempoMapChanged(), chordLaneChanged()
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
 
     ++songChanges;
 

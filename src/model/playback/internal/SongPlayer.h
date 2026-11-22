@@ -249,11 +249,11 @@ private:
         // that the order the song's listeners hear a change in (the player's own, the session's) doesn't matter.
         std::set<std::int64_t> sounds, soundsSet, soundsTaken;
         std::set<CurveKey> curves;
-        bool allNotes = false, allChannels = false, allCurves = false, tempo = false;
+        bool allNotes = false, allChannels = false, tempo = false;
 
         bool hasNotes (std::int64_t track) const { return allNotes || notes.contains (track); }
         bool hasChannel (std::int64_t channel) const { return allChannels || channels.contains (channel); }
-        bool hasCurve (const CurveKey& key) const { return allCurves || curves.contains (key); }
+        bool hasCurve (const CurveKey& key) const { return curves.contains (key); }
     };
 
     Changes changes, compiling;
@@ -277,6 +277,9 @@ private:
 
     // The chord lane (SongValues.h: chordLaneChanged()): nothing, as nothing a plan holds reads chords or keys; its tree
     // callbacks leave what is in the song's CHORDLANE alone (isHeardAsKept()).
+
+    // The curves that changed (SongValues.h), each read again by the next compile.
+    void curvesChanged (const std::vector<ParameterRef>&) override;
 
     // Whether a part kept from the plan before is checked against the song now (setChecking()): all of them while the
     // player plays few devices, a share otherwise, one part in every so many, its phase moving on with each plan.

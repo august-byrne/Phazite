@@ -197,6 +197,9 @@ private:
     // and, unlike the other listeners, the CHORDLANE's own coming and going too (isChordLanePlaceholder()).
     static bool isChordLanePlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child);
 
+    // Not the curves (SongValues.h: curvesChanged()): no render holds automation, and the tree's callbacks above leave the
+    // curves' elements alone (isHeardAsKept(), through isHeardAsCurves()).
+
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };
 } // namespace phazite

@@ -3,6 +3,7 @@
 #include "Song.h"
 #include "internal/ChordLaneArea.h"
 #include "internal/ClipsArea.h"
+#include "internal/CurvesArea.h"
 #include "internal/Schema.h"
 #include "internal/TempoMapArea.h"
 
@@ -96,8 +97,8 @@ juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const ValuesKept& ke
 bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
                      const ValuesKept& otherKept)
 {
-    // Each area in turn, a line each, in this order (a track's clips, then the tempo map, then the chord lane), as each is
-    // compared once the element's own properties are.
+    // Each area in turn, a line each, in this order (a track's clips, then the tempo map, then the chord lane, then the
+    // curves), as each is compared once the element's own properties are.
     if (! holdSameClipsOf (element, kept, otherElement, otherKept))
         return false;
 
@@ -107,17 +108,24 @@ bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, con
     if (! holdSameChordLaneOf (element, kept, otherElement, otherKept))
         return false;
 
+    if (! holdSameCurvesOf (element, kept, otherElement, otherKept))
+        return false;
+
     return true;
 }
 
 bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
     // Each area whose place in the tree is an element of its own, a line each: the tempo map's TEMPOMAP, the chord lane's
-    // CHORDLANE. The clips' are none: the copy's tree holds none of them.
+    // CHORDLANE; a curve's CURVE in an AUTOMATION, compared as the curves' values (holdSameCurvesOf()). The clips' are none:
+    // the copy's tree holds none of them.
     if (isTempoMapPlace (parent, child))
         return true;
 
     if (isChordLanePlace (parent, child))
+        return true;
+
+    if (isCurvesPlace (parent, child))
         return true;
 
     return false;

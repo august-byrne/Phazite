@@ -126,39 +126,59 @@ namespace
         return true;
     }
 
-    // What a frozen track's file holds, as the song's tree has it: its frozen devices, its modulators and macros, which can
-    // move them, and the frozen devices' automation (of the devices in its frozen containers too). Its clips, with their
-    // notes, are the song's values' (Holds::values), and the song's tempos, which put its notes and clips where they are in
-    // seconds, its tempo map's (Holds::tempos).
+    // What a frozen track's file holds, as the song's tree has it: its frozen devices, and its modulators and macros, which
+    // can move them. Its clips, with their notes, are the song's values' (Holds::values), the song's tempos, which put its
+    // notes and clips where they are in seconds, its tempo map's (Holds::tempos), and its frozen devices' automation the
+    // song's curves (Holds::curves: getFrozenCurves()).
     std::vector<juce::ValueTree> getWhatTheFreezeHolds (const Song& song, TrackID track)
     {
         std::vector<juce::ValueTree> parts;
         const auto state = findTrackState (song, track);
-        std::set<DeviceID> devices;
 
         for (const auto id : getFrozenDevices (song, track))
-        {
-            const auto device = findDeviceState (song, id);
-            parts.push_back (device);
-            devices.insert (id);
-
-            for (const auto& inside : getDeviceStates (device))
-                devices.insert (getDeviceID (inside));
-
-            // A container's chains, whose volume, pan and crossover are automated by their IDs.
-            for (const auto& chain : getChainStates (device))
-                devices.insert (DeviceID::fromRaw ((std::uint64_t) (juce::int64) chain[schema::chainID]));
-        }
+            parts.push_back (findDeviceState (song, id));
 
         for (const auto& child : state)
             if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
                 parts.push_back (child);
 
-        for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
-            if (devices.contains (DeviceID::fromRaw ((std::uint64_t) (juce::int64) curve[schema::curveDevice])))
-                parts.push_back (curve);
-
         return parts;
+    }
+
+    // What a frozen track's file plays the automation of, by the IDs its curves name (Automation.h): its frozen devices, the
+    // devices in its frozen containers, and their chains, whose volume, pan and crossover are automated by their IDs.
+    std::set<DeviceID> getFrozenCurveOwners (const Song& song, TrackID track)
+    {
+        std::set<DeviceID> devices;
+
+        for (const auto id : getFrozenDevices (song, track))
+        {
+            const auto device = findDeviceState (song, id);
+            devices.insert (id);
+
+            for (const auto& inside : getDeviceStates (device))
+                devices.insert (getDeviceID (inside));
+
+            for (const auto& chain : getChainStates (device))
+                devices.insert (DeviceID::fromRaw ((std::uint64_t) (juce::int64) chain[schema::chainID]));
+        }
+
+        return devices;
+    }
+
+    // The curves of what a frozen track's file plays the automation of, as values (Automation.h: getCurveValue()), in the
+    // song's order of its curves.
+    SongCurves getFrozenCurves (const Song& song, TrackID track)
+    {
+        const auto owners = getFrozenCurveOwners (song, track);
+        SongCurves curves;
+
+        for (const auto& parameter : getCurveKeys (song))
+            if (owners.contains (parameter.device))
+                if (auto curve = getCurveValue (song, parameter))
+                    curves = withCurve (curves, parameter, std::move (*curve));
+
+        return curves;
     }
 
     FreezeKeeper::Holds copyWhatTheFreezeHolds (const Song& song, TrackID track)
@@ -168,10 +188,12 @@ namespace
         for (const auto& part : getWhatTheFreezeHolds (song, track))
             copy.appendChild (part.createCopy(), nullptr);
 
-        return { copy, keepValues (song), getTempoMapValue (song).tempos };
+        return { copy, keepValues (song), getTempoMapValue (song).tempos, getFrozenCurves (song, track) };
     }
 
-    bool holdsWhatWasFrozen (const Song& song, TrackID track, const FreezeKeeper::Holds& frozen)
+    // Whether a frozen track's file holds what it plays now; its curves left out where they are known to (compareCurves
+    // false: FreezeKeeper::curvesAsFrozen).
+    bool holdsWhatWasFrozen (const Song& song, TrackID track, const FreezeKeeper::Holds& frozen, bool compareCurves)
     {
         const auto parts = getWhatTheFreezeHolds (song, track);
 
@@ -179,14 +201,19 @@ namespace
             return false;
 
         // Each as it is in the song, against its copy as copyWhatTheFreezeHolds() made it: in place, since this runs at every
-        // change in a frozen track (a fader dragged); its clips with their notes as values, the same values or ones alike; and
-        // the song's tempos, the same value or one alike (a tempo changed and changed back compares as the same).
+        // change in a frozen track (a fader dragged); its clips with their notes as values, the same values or ones alike; the
+        // song's tempos, the same value or one alike (a tempo changed and changed back compares as the same); and its frozen
+        // devices' curves, the same curves in the same order, each alike, read into values only where asked. Its parts first:
+        // what its curves are of (getFrozenCurveOwners()) is in them, so curves left out are of the same owners as before.
         for (int i = 0; i < (int) parts.size(); ++i)
             if (! isSameSound (parts[(size_t) i], frozen.parts.getChild (i)))
                 return false;
 
         if (const auto tempos = getTempoMapValue (song).tempos;
             tempos.identity() != frozen.tempos.identity() && ! (tempos == frozen.tempos))
+            return false;
+
+        if (compareCurves && ! (getFrozenCurves (song, track) == frozen.curves))
             return false;
 
         return holdSameTrackClips (keepValues (song), frozen.values, track);
@@ -441,6 +468,20 @@ void FreezeKeeper::tempoMapChanged()
     triggerAsyncUpdate();
 }
 
+void FreezeKeeper::curvesChanged (const std::vector<ParameterRef>& parameters)
+{
+    // The devices the curves are of: which frozen tracks' files hold them is worked out at the later moment (compareMarked()),
+    // which reads the song. But what this changes itself (unfreezing) and what keepThrough() compares as it applies, and
+    // anything while no track is frozen.
+    if (checking || frozen.empty())
+        return;
+
+    for (const auto& parameter : parameters)
+        curveOwners.insert (parameter.device);
+
+    triggerAsyncUpdate();
+}
+
 void FreezeKeeper::compareMarked()
 {
     if (checking)
@@ -449,7 +490,8 @@ void FreezeKeeper::compareMarked()
     auto wait = std::exchange (waiting, {});
     auto tracks = std::exchange (wait.tracks, {});
 
-    if (! wait.takeTracks && ! wait.all && tracks.empty() && notesChanged.empty() && clipTracks.empty() && toTake.empty())
+    if (! wait.takeTracks && ! wait.all && tracks.empty() && notesChanged.empty() && clipTracks.empty() && toTake.empty()
+        && curveOwners.empty())
         return;
 
     const juce::ScopedValueSetter<bool> busy (checking, true);
@@ -463,6 +505,7 @@ void FreezeKeeper::compareMarked()
         const auto holds = copyWhatTheFreezeHolds (song, track);
         frozen[track] = holds;
         files[track] = holds;
+        curvesAsFrozen.erase (track);
     }
 
     // A track frozen or played live again, or tracks added, removed or moved by the undo or the redo (as check() takes them).
@@ -481,6 +524,20 @@ void FreezeKeeper::compareMarked()
     tracks.merge (clipTracks);
     clipTracks.clear();
 
+    // Each frozen track whose file plays the automation of a device whose curve changed: its curves compared too.
+    if (const auto owners = std::exchange (curveOwners, {}); ! owners.empty())
+    {
+        for (const auto& entry : frozen)
+        {
+            if (const auto held = getFrozenCurveOwners (song, entry.first);
+                std::any_of (owners.begin(), owners.end(), [&held] (DeviceID device) { return held.contains (device); }))
+            {
+                tracks.insert (entry.first);
+                curvesAsFrozen.erase (entry.first);
+            }
+        }
+    }
+
     if (wait.all)
         for (const auto& entry : frozen)
             tracks.insert (entry.first);
@@ -494,6 +551,7 @@ void FreezeKeeper::forgetMarked()
     notesChanged.clear();
     clipTracks.clear();
     toTake.clear();
+    curveOwners.clear();
     waiting = {};
 }
 
@@ -505,13 +563,14 @@ void FreezeKeeper::noteFrozenTracks (bool cameIn)
     // place, by freezeFromFile(), which has it taken at once, or by a version applied) waits for the later moment to take
     // what it holds.
     std::map<TrackID, Holds> now;
-    std::set<TrackID> later;
+    std::set<TrackID> later, known;
 
     for (const auto track : getFrozenTracks (song))
     {
-        if (const auto known = frozen.find (track); known != frozen.end())
+        if (const auto kept = frozen.find (track); kept != frozen.end())
         {
-            now[track] = known->second;
+            now[track] = kept->second;
+            known.insert (track);
         }
         else if (const auto file = files.find (track); cameIn && ! toTake.contains (track) && file != files.end())
         {
@@ -526,9 +585,16 @@ void FreezeKeeper::noteFrozenTracks (bool cameIn)
 
     frozen = std::move (now);
     toTake = std::move (later);
+    keepCurvesAsFrozen (known);
 
     for (const auto& [track, holds] : frozen)
         files[track] = holds;
+}
+
+void FreezeKeeper::keepCurvesAsFrozen (const std::set<TrackID>& known)
+{
+    // A track whose holdings were taken again (from its file, or anew) is compared whole at its next comparison.
+    std::erase_if (curvesAsFrozen, [&known] (TrackID track) { return ! known.contains (track); });
 }
 
 std::vector<TrackID> FreezeKeeper::takeFrozenTracks (bool fromFiles)
@@ -537,11 +603,15 @@ std::vector<TrackID> FreezeKeeper::takeFrozenTracks (bool fromFiles)
     // since, a copy of what it holds now, or (fromFiles) what its file was kept with, if it was: those returned.
     std::map<TrackID, Holds> now;
     std::vector<TrackID> fromFile;
+    std::set<TrackID> known;
 
     for (const auto track : getFrozenTracks (song))
     {
-        if (const auto known = frozen.find (track); known != frozen.end())
-            now[track] = known->second;
+        if (const auto kept = frozen.find (track); kept != frozen.end())
+        {
+            now[track] = kept->second;
+            known.insert (track);
+        }
         else if (const auto file = files.find (track); fromFiles && file != files.end())
         {
             now[track] = file->second;
@@ -552,6 +622,7 @@ std::vector<TrackID> FreezeKeeper::takeFrozenTracks (bool fromFiles)
     }
 
     frozen = std::move (now);
+    keepCurvesAsFrozen (known);
 
     for (const auto& [track, holds] : frozen)
         files[track] = holds;
@@ -570,16 +641,23 @@ bool FreezeKeeper::keepThrough (const std::function<bool()>& apply)
 
     forgetMarked(); // what apply changed: compared below
 
-    // A frozen track stays frozen where its file holds what it plays now.
+    // A frozen track stays frozen where its file holds what it plays now, its curves compared too (what apply changed of
+    // them was told while this checked nothing).
     frozen.clear();
+    curvesAsFrozen.clear();
 
     for (const auto track : getFrozenTracks (song))
     {
         if (const auto file = files.find (track);
-            file != files.end() && getFrozenFile (song, track).existsAsFile() && holdsWhatWasFrozen (song, track, file->second))
+            file != files.end() && getFrozenFile (song, track).existsAsFile() && holdsWhatWasFrozen (song, track, file->second, true))
+        {
             frozen[track] = file->second;
+            curvesAsFrozen.insert (track);
+        }
         else
+        {
             unfreeze (song, track);
+        }
     }
 
     return true;
@@ -588,20 +666,30 @@ bool FreezeKeeper::keepThrough (const std::function<bool()>& apply)
 void FreezeKeeper::compare (TrackID track)
 {
     // What the freeze holds changed, or its file is gone (a Redo of Bounce in Place after the cache let go of it): the track
-    // plays it live again.
-    if (const auto known = frozen.find (track);
-        known != frozen.end() && (! getFrozenFile (song, track).existsAsFile() || ! holdsWhatWasFrozen (song, track, known->second)))
+    // plays it live again. Its curves are read and compared only where they may differ from its file's: at its first
+    // comparison with these holdings, or once one of them was told changed since (curvesAsFrozen); else they are as they
+    // compared last, a fader dragged on it reading none of them.
+    const auto known = frozen.find (track);
+
+    if (known == frozen.end())
+        return;
+
+    if (getFrozenFile (song, track).existsAsFile() && holdsWhatWasFrozen (song, track, known->second, ! curvesAsFrozen.contains (track)))
     {
-        frozen.erase (known);
-        unfreeze (song, track);
+        curvesAsFrozen.insert (track);
+        return;
     }
+
+    frozen.erase (known);
+    curvesAsFrozen.erase (track);
+    unfreeze (song, track);
 }
 
 void FreezeKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     // How tracks show and where windows were change nothing that plays; nor does the song's count of IDs, which every new
     // ID moves, or how it plays and its grid, on its root. The areas' of the song's values (isHeardAsKept()): the tempo map's,
-    // tempoMapChanged(); the chord lane's, which no frozen file holds.
+    // tempoMapChanged(); the chord lane's, which no frozen file holds; the curves', curvesChanged().
     if ((tree == state && schema::isUncountedProperty (tree, property)) || isHeardAsKept (tree))
         return;
 
@@ -644,12 +732,8 @@ void FreezeKeeper::check (const juce::ValueTree& changed, bool cameIn)
         return;
     }
 
-    // A curve of a device whose sound no frozen file holds changes none of them.
-    if (const auto curve = findEnclosing (changed, schema::CURVE);
-        curve.isValid() && ! isFrozenDevice (song, DeviceID::fromRaw ((std::uint64_t) (juce::int64) curve[schema::curveDevice])))
-        return;
-
-    // The song's automation, which any frozen track's file may hold (its tempos: tempoMapChanged()).
+    // The song's element, or its AUTOMATION's own (any frozen track's file may hold its curves): every frozen track. Its
+    // tempos: tempoMapChanged(); its curves: curvesChanged().
     if (changed == state || findEnclosing (changed, schema::AUTOMATION).isValid())
         waiting.all = true;
 }

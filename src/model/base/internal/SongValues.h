@@ -79,14 +79,15 @@
 //  10. Each SongValues::Listener: its <area>Changed() override, which only marks (step 13); one that follows nothing of the
 //      area says so in a comment beside its overrides. They are:
 //      - ClipRenders (model/arrangement/ClipRenders.cpp, internal/ClipRenders.h): rendersMayChange() where the area holds
-//        what a clip's render is made of (the clips', the tempo map's; not the notes').
+//        what a clip's render is made of (the clips', the tempo map's; not the notes', nor the curves': no render holds
+//        automation).
 //      - FreezeKeeper (model/mixer/Freeze.cpp, internal/Freeze.h): marks the frozen tracks whose file holds what changed
 //        (all of them for the tempo map) and compares them at its later moment. What a frozen track's file holds of an area is
 //        in its Holds (parts: copies of its elements, getWhatTheFreezeHolds(); values: ValuesKept; tempos), compared in
 //        holdsWhatWasFrozen(): an area held in parts moves to its value there at its switch.
 //      - PlaybackSession (model/playback/internal/PlaybackSession.h): a new plan (triggerAsyncUpdate()).
 //      - SongPlayer (model/playback/SongPlayer.cpp, internal/SongPlayer.h): marks what its next compile reads again (its
-//        changes: the tracks' notes and audio, the tempo).
+//        changes: the tracks' notes and audio, the tempo, the curves by their parameters).
 //      - Project (model/project/Project.cpp, internal/Project.h): counts the change and marks what to compare (a member of
 //        its own, as tempoToCompare, cleared in clearToCompare()); its quick check, a line of compareWithSavedState()'s list
 //        (as isTempoMapAsSaved()); and its whole comparison, holdTheSameProject(), through holdSameKeptOf() (step 5), which
@@ -146,6 +147,7 @@
 #include "model/base/internal/Immer.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/ValueArea.h"
+#include "model/devices/ParameterRef.h"
 
 #include <juce_core/juce_core.h>
 #include <juce_data_structures/juce_data_structures.h>
@@ -322,6 +324,17 @@ public:
         // as it always did: so a step that makes the lane (its first chord or key) is heard twice, its element added by the
         // tree and its first key here, and only marks twice.
         virtual void chordLaneChanged() {}
+
+        // The song's automation (CurveValues.h): the parameters whose curves changed (a point added, taken out, moved or bent,
+        // a curve added or taken out, given another parameter: the one it had and the one it has), each once, in one call.
+        // While the song's tree holds the curves (Schema.h: AUTOMATION), the keeper tells it for each of the tree's
+        // notifications under them (CurvesArea.h: CurvesKeeper; the song's AUTOMATION added or taken out, each of its curves),
+        // a step's, an undo's, a redo's and a write's outside the history alike, in the order they come, and what listens to
+        // the song's root leaves those notifications alone in its tree callbacks (isHeardAsKept(), below, through
+        // isHeardAsCurves()), so that nothing hears a change twice; the song's AUTOMATION itself (added, taken out, its own
+        // properties, its children in another order) is the tree's. Once the song holds its curves as values (roadmap step
+        // S5.20, automation's switch) the area tells it, once for each change of its value.
+        virtual void curvesChanged (const std::vector<ParameterRef>& parameters) { juce::ignoreUnused (parameters); }
     };
 
     void addListener (Listener*) const;
@@ -357,6 +370,7 @@ private:
     struct TempoMapKeeper;                          // TempoMapArea.h
     struct ChordLaneTeller;                         // ChordLaneArea.h
     struct ChordLaneKeeper;                         // ChordLaneArea.h
+    struct CurvesKeeper;                            // CurvesArea.h: the curves' listener told from the tree
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
     std::unique_ptr<ClipsTeller> clipsTeller;
@@ -400,12 +414,23 @@ bool isHeardAsTempoMap (const juce::ValueTree& parent, const juce::ValueTree& ch
 bool isHeardAsChordLane (const juce::ValueTree& element);
 bool isHeardAsChordLane (const juce::ValueTree& parent, const juce::ValueTree& child);
 
+// Whether what the song's tree tells of an element (a property changed, a child added, taken out or moved in it) is the
+// curves', which a listener of the song's root hears from the values' listener alone (SongValues::Listener::
+// curvesChanged()) and leaves alone in its tree callbacks: a CURVE of the song's AUTOMATION (the child of its PHAZITE
+// element), or an element in one. And whether a child added to an element or taken out of it is: a CURVE added to the
+// song's AUTOMATION or taken out, or a child of an element that is the curves'. The song's AUTOMATION itself is the tree's
+// (added or taken out, its own properties, a child of it that is no CURVE, its children in another order), and what
+// listens to the root hears it so; the values' listener is told the curves an AUTOMATION added or taken out holds. In
+// CurvesArea.cpp.
+bool isHeardAsCurves (const juce::ValueTree& element);
+bool isHeardAsCurves (const juce::ValueTree& parent, const juce::ValueTree& child);
+
 // Whether what the song's tree tells is any area's of the song's values, which a listener of the song's root hears from the
 // values' listener alone (SongValues::Listener) and leaves alone in its tree callbacks: of an element (a property changed in
 // it, a child moved in it), and of a child added to an element or taken out of it. Each the OR of the areas' own functions
-// above (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, then the chord lane's. What every
-// listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12, above): a new
-// area adds its line here, not a line in each listener. In SongValues.cpp.
+// above (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, then the curves'.
+// What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12,
+// above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
 bool isHeardAsKept (const juce::ValueTree& element);
 bool isHeardAsKept (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

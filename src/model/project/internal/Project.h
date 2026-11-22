@@ -395,12 +395,22 @@ private:
     bool chordLaneToCompare = false;
     void chordLaneChanged() override;
 
+    // The curves that changed, by their parameters (SongValues.h: Listener::curvesChanged(); the tree's callbacks below leave
+    // the curves' elements alone, isHeardAsKept()): compared with savedState's when asked, each as a value, and the curves'
+    // order with it (WholeState.h: holdSameCurve(), holdSameCurveOrder()), so that a point moved and moved back is saved
+    // again. Bounded as toCompare is: past mostToCompare of them, every curve (holdSameCurves()).
+    std::vector<ParameterRef> curvesToCompare;
+    bool comparingCurvesWhole = false;
+    void curvesChanged (const std::vector<ParameterRef>&) override;
+    void clearCurvesToCompare(); // clearToCompare()'s
+
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
     // where nothing of it was marked.
     bool areNotesAsSaved() const;
     bool areClipsAsSaved() const;
     bool isTempoMapAsSaved() const;
     bool isChordLaneAsSaved() const;
+    bool areCurvesAsSaved() const;
 
     // Whether a clip of the song is as savedState holds it, all it holds (its properties, its track, its warp markers, its
     // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's
@@ -468,7 +478,9 @@ private:
     // its next ID) is left out of notifications and of the comparison with savedState alike. A plug-in's own change (its
     // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()). Each
     // element with what its song kept beside its tree (a track's clips and their notes: holdSameTrackClips()). The tempo map
-    // as one value, as compareWithSavedState() compares it (holdSameTempoMap()), not its elements in their order.
+    // as one value, as compareWithSavedState() compares it (holdSameTempoMap()), not its elements in their order; the chord
+    // lane likewise, with whether each has one (holdSameChordLane()); and the curves as values, in their order
+    // (holdSameCurves()), not their elements.
     static bool holdTheSameProject (const juce::ValueTree&, const ValuesKept&, const juce::ValueTree&, const ValuesKept&);
 
 public:
@@ -487,7 +499,7 @@ public:
 private:
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
     {
-        if (! isHeardAsKept (tree)) // the areas': tempoMapChanged(), chordLaneChanged()
+        if (! isHeardAsKept (tree)) // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
             markChanged (tree, property);
     }
 
@@ -496,7 +508,7 @@ private:
 
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
     {
-        if (! isHeardAsKept (parent)) // the areas': tempoMapChanged(), chordLaneChanged()
+        if (! isHeardAsKept (parent)) // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
             markChanged (parent);
     }
 

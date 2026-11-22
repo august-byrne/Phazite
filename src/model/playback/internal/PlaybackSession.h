@@ -202,8 +202,9 @@ private:
     void timerCallback() override;
     void jump (BeatPosition, bool keepsPlace); // locate() and returnTo()
 
-    // A change of the song, but of view state (how it shows), which no plan holds: a new plan. Not the tempo map's, which
-    // the song's values tell, nor the chord lane's (tempoMapChanged(), chordLaneChanged(); SongValues.h: isHeardAsKept()).
+    // A change of the song, but of view state (how it shows), which no plan holds: a new plan. Not the tempo map's, the chord
+    // lane's nor the curves', which the song's values tell (tempoMapChanged(), chordLaneChanged(), curvesChanged();
+    // SongValues.h: isHeardAsKept()).
     void changed (const juce::ValueTree& parent, const juce::ValueTree& child);
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
@@ -212,8 +213,8 @@ private:
 
     void handleAsyncUpdate() override { update(); }
 
-    // A clip's notes changed, or clips, or the tempo map (SongValues.h): a new plan, as a change in the song's tree makes one.
-    // What plays it hears which itself.
+    // A clip's notes changed, or clips, or the tempo map, or curves (SongValues.h): a new plan, as a change in the song's tree
+    // makes one. What plays it hears which itself.
     void clipNotesChanged (const std::vector<ClipID>&) override { triggerAsyncUpdate(); }
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override { triggerAsyncUpdate(); }
     void tempoMapChanged() override { triggerAsyncUpdate(); }
@@ -222,6 +223,8 @@ private:
     // new plan, as a change in its element made one, though no plan holds chords (kept so until a piece lowers the counts of
     // plans on purpose, roadmap step S5.20).
     void chordLaneChanged() override { triggerAsyncUpdate(); }
+
+    void curvesChanged (const std::vector<ParameterRef>&) override { triggerAsyncUpdate(); } // the curves: a new plan, as above
 
     // A value set by hand (a plug-in's, by a control or in its window, plays at once), and one a program the song set set (a
     // plug-in's, which plays at once too); a plug-in's own window's gestures; and its latency, which needs a new plan.

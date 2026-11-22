@@ -341,6 +341,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/ClipsArea.cpp
     src/model/base/ClipsValue.cpp
     src/model/base/ControlKinds.h
+    src/model/base/CurvesArea.cpp
     src/model/base/CurveValues.cpp
     src/model/base/IDs.h
     src/model/base/IDsHeld.cpp
@@ -370,6 +371,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/ClipsArea.h
     src/model/base/internal/ClipsValue.h
     src/model/base/internal/CurveValues.h
+    src/model/base/internal/CurvesArea.h
     src/model/base/internal/IDsHeld.h
     src/model/base/internal/Immer.h
     src/model/base/internal/MidiLinksValue.h
@@ -1510,6 +1512,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongTextTests.cpp
         tests/SongValuesChordsTests.cpp
         tests/SongValuesClipsTests.cpp
+        tests/SongValuesCurvesTests.cpp
         tests/SongValuesTempoTests.cpp
         tests/SongValuesTests.cpp
         tests/SoundKeyTests.cpp

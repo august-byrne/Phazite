@@ -14,6 +14,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
@@ -368,6 +369,115 @@ TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when t
     phazite::undo (model);
     CHECK_FALSE (phazite::hasTempoChanges (model));
     unfreezes();
+}
+
+TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when a curve of one of its frozen devices changes, by an "
+           "undo too, and stays frozen when another track's curve or its own fader's changes, or its device's changes and changes "
+           "back within one turn")
+{
+    // The curves are heard from the song's values (SongValues.h: Listener::curvesChanged()), by their parameters: the frozen
+    // tracks whose files play the automation of one of their devices are compared at the next turn with the curves each file
+    // was made with (Freeze.h: FreezeKeeper::Holds::curves), as values.
+    using phazite::test::at;
+    Song song;
+    auto& model = song.getSong();
+    const auto gain = phazite::ParameterRef { song.stereo, "gain" };
+    const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
+    const auto unfreezes = [&isFrozen]
+    {
+        CHECK (isFrozen()); // not within the edit
+        CHECK (phazite::test::dispatchMessagesUntil ([&isFrozen] { return ! isFrozen(); }));
+    };
+
+    const auto edit = [&model] (const juce::String& name, const std::function<void()>& change)
+    {
+        const phazite::UndoStep step (model, name);
+        change();
+    };
+
+    edit ("Automate Gain", [&] { phazite::addPoint (model, gain, { at (0.0), 0.5f, 0.0f }); });
+
+    // Another track's curve, the track's own fader's (which plays after its file), and its device's changed and changed back
+    // in one turn: still frozen.
+    song.freeze();
+    const auto volumeOf = [&model] (TrackID track)
+    { return phazite::ParameterRef { phazite::getFader (model, track), phazite::getVolumeParameterID (model, track) }; };
+
+    edit ("Automate the Reverb", [&] { phazite::addPoint (model, volumeOf (song.reverb), { at (1.0), 0.4f }); });
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+    edit ("Automate the Bass's Volume", [&] { phazite::addPoint (model, volumeOf (song.bass), { at (1.0), 0.4f }); });
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+    edit ("Bend Gain", [&] { phazite::setCurve (model, gain, 0, 0.5f); });
+    edit ("Straighten Gain", [&] { phazite::setCurve (model, gain, 0, 0.0f); });
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFrozen());
+
+    // Its device's curve changed: unfrozen.
+    edit ("Automate Gain", [&] { phazite::addPoint (model, gain, { at (2.0), 0.8f, 0.0f }); });
+    unfreezes();
+
+    // An undo of a curve's change made before the freeze: unfrozen.
+    song.freeze();
+    phazite::undo (model);
+    CHECK (phazite::getPoints (model, gain).size() == 1);
+    unfreezes();
+
+    // The device's curve's points all taken out, its curve with them: unfrozen.
+    song.freeze();
+    edit ("Clear Gain", [&] { phazite::deletePoints (model, gain, { 0 }); });
+    CHECK_FALSE (phazite::getCurveValue (model, gain).has_value());
+    unfreezes();
+}
+
+TEST_CASE ("A frozen track's fader moved by hand is compared without reading its curves, which are read once one of them "
+           "changes")
+{
+    // What a frozen track's file plays the automation of is compared as values (Freeze.h: FreezeKeeper::Holds::curves), read
+    // only where one of its curves was told changed since its last comparison (Freeze.cpp: FreezeKeeper::compare()), not at
+    // every turn of a fader dragged on it. Counted as the points read into values (CurveValues.h: countCurvePointsRead()).
+    using phazite::test::at;
+    Song song;
+    auto& model = song.getSong();
+    const auto gain = phazite::ParameterRef { song.stereo, "gain" };
+    const auto isFrozen = [&song] { return phazite::isFrozen (song.context, song.bass); };
+
+    {
+        const phazite::UndoStep step (model, "Automate Gain");
+        phazite::addPoint (model, gain, { at (0.0), 0.5f, 0.0f });
+        phazite::addPoint (model, gain, { at (1.0), 0.25f, 0.0f });
+    }
+
+    song.freeze();
+    phazite::test::dispatchPendingMessages();
+
+    // Each move of its fader, and its comparison at once (Song::writePending(), as a save or a plan's compile asks): none of
+    // its curves read, and still frozen.
+    for (const auto volume : { -3.0f, -4.0f, -5.0f })
+    {
+        const auto before = phazite::countCurvePointsRead();
+
+        {
+            const phazite::UndoStep step (model, "Change Volume");
+            phazite::setChannelVolume (model, song.bass, volume);
+        }
+
+        model.writePending();
+        CHECK (phazite::countCurvePointsRead() == before);
+        CHECK (isFrozen());
+    }
+
+    // Gain's curve bent: its comparison reads the curves, and finds them changed.
+    {
+        const phazite::UndoStep step (model, "Bend Gain");
+        phazite::setCurve (model, gain, 0, 0.5f);
+    }
+
+    const auto before = phazite::countCurvePointsRead();
+    model.writePending();
+    CHECK (phazite::countCurvePointsRead() > before);
+    CHECK_FALSE (isFrozen());
 }
 
 TEST_CASE ("A frozen track whose clip changed plays live in what is saved, and in the plan compiled, before the next turn of the "

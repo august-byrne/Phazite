@@ -125,7 +125,7 @@ AudioIO& PlaybackSession::getAudioIO() const noexcept
 void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
     if (isHeardAsKept (parent, child))
-        return; // the areas': tempoMapChanged(), chordLaneChanged()
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
 
     // The MIDI links, which no plan holds: what the MIDI tap takes.
     if (isInMidiLinks (parent) || child.hasType (schema::MIDILINKS))
@@ -143,7 +143,7 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     if (isHeardAsKept (tree))
-        return; // the areas': tempoMapChanged(), chordLaneChanged()
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
 
     if (isInMidiLinks (tree))
     {

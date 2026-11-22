@@ -1381,6 +1381,152 @@ TEST_CASE ("A chord lane edited through the model is an unsaved change, which it
     CHECK (project->hasUnsavedChanges());
 }
 
+TEST_CASE ("Automation edited through the model is an unsaved change, which its Undo takes back, and one changed back is saved "
+           "again, as the whole song's comparison says")
+{
+    // The curves are heard from the song's values (SongValues.h: Listener::curvesChanged()), compared with the saved copy's
+    // curve by curve, as values, with their order (WholeState.h: holdSameCurve(), holdSameCurveOrder()), as the whole song's
+    // comparison compares them (holdSameCurves()). A project found unsaved stays so until it is saved: so each change is
+    // undone before anything asks (as saved), then redone (unsaved), undone and saved again.
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Automation");
+    auto& song = project->getSong();
+    const auto tracks = phazite::ensureTracks (song, 1);
+    const auto volume = phazite::ParameterRef { phazite::getFader (song, tracks[0]), phazite::getVolumeParameterID (song, tracks[0]) };
+    const auto pan = phazite::ParameterRef { phazite::getFader (song, tracks[0]), phazite::getPanParameterID (song, tracks[0]) };
+
+    {
+        const phazite::UndoStep step (song, "Automation");
+        phazite::addPoint (song, volume, { beats (0.0), 0.5f });
+        phazite::addPoint (song, volume, { beats (4.0), 0.25f });
+        phazite::addPoint (song, volume, { beats (8.0), 0.75f });
+        phazite::addPoint (song, pan, { beats (2.0), 0.5f });
+    }
+
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    const auto check = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        INFO (name.toStdString());
+
+        {
+            const phazite::UndoStep step (song, name);
+            change();
+        }
+
+        CHECK_FALSE (project->isWholeAsSaved());
+        phazite::undo (song);
+        CHECK (project->isWholeAsSaved());
+        CHECK_FALSE (project->hasUnsavedChanges());
+        phazite::redo (song);
+        CHECK (project->hasUnsavedChanges());
+        phazite::undo (song);
+        REQUIRE (project->save().wasOk());
+        REQUIRE_FALSE (project->hasUnsavedChanges());
+    };
+
+    const auto all = [&song] (const phazite::ParameterRef& parameter)
+    {
+        std::vector<int> indices;
+
+        for (int i = 0; i < (int) phazite::getPoints (song, parameter).size(); ++i)
+            indices.push_back (i);
+
+        return indices;
+    };
+
+    check ("Add Automation Point", [&] { phazite::addPoint (song, volume, { beats (6.0), 0.1f }); });
+    check ("Move Automation Point", [&] { phazite::movePoints (song, volume, { 1 }, phazite::BeatDuration::fromBeats (1.0), 0.0f); });
+    check ("Bend Automation", [&] { phazite::setCurve (song, volume, 0, 0.5f); });
+    check ("Delete Automation Point", [&] { phazite::deletePoints (song, volume, { 2 }); });
+    check ("Draw Automation", [&] { phazite::replacePoints (song, volume, { beats (1.0), beats (5.0) }, { { beats (3.0), 0.9f } }); });
+    check ("Clear Automation", [&] { phazite::deletePoints (song, pan, all (pan)); });
+    check ("Automate the Pan Again", [&] { phazite::addPoint (song, pan, { beats (12.0), 0.3f }); });
+
+    // Changed and changed back before anything asked: as saved. A point moved and moved back, bent and straightened, taken out
+    // and put back; and the last curve's points all taken out and put back, which makes the curve again, last as it was.
+    const auto changedBack = [&] (const juce::String& name, const std::function<void()>& change, const std::function<void()>& back)
+    {
+        INFO (name.toStdString());
+
+        {
+            const phazite::UndoStep step (song, name);
+            change();
+        }
+
+        {
+            const phazite::UndoStep step (song, name + " Back");
+            back();
+        }
+
+        CHECK (project->isWholeAsSaved());
+        CHECK_FALSE (project->hasUnsavedChanges());
+    };
+
+    changedBack (
+        "a point moved", [&] { phazite::movePoints (song, volume, { 1 }, phazite::BeatDuration::fromBeats (1.0), 0.0f); },
+        [&] { phazite::movePoints (song, volume, { 1 }, phazite::BeatDuration::fromBeats (-1.0), 0.0f); });
+    changedBack ("a point bent", [&] { phazite::setCurve (song, volume, 0, 0.5f); }, [&] { phazite::setCurve (song, volume, 0, 0.0f); });
+    changedBack (
+        "a point taken out", [&] { phazite::deletePoints (song, volume, { 1 }); },
+        [&] { phazite::addPoint (song, volume, { beats (4.0), 0.25f }); });
+    changedBack (
+        "the last curve's points taken out", [&] { phazite::deletePoints (song, pan, all (pan)); },
+        [&] { phazite::addPoint (song, pan, { beats (2.0), 0.5f }); });
+
+    // A curve before another taken out and made again goes after it: the song's curves in another order, as the file holds
+    // them, which is a change, as the whole song's comparison says.
+    {
+        const phazite::UndoStep step (song, "Clear Automation");
+        phazite::deletePoints (song, volume, all (volume));
+    }
+
+    {
+        const phazite::UndoStep step (song, "Automate Again");
+
+        for (const auto& point :
+             std::initializer_list<phazite::AutomationPoint> { { beats (0.0), 0.5f }, { beats (4.0), 0.25f }, { beats (8.0), 0.75f } })
+            phazite::addPoint (song, volume, point);
+    }
+
+    CHECK (phazite::getCurveKeys (song).back() == volume);
+    CHECK_FALSE (project->isWholeAsSaved());
+    CHECK (project->hasUnsavedChanges());
+    REQUIRE (project->save().wasOk());
+
+    // More curves changed than are compared one by one (every curve compared then): changed back, as saved; all but one
+    // changed back, unsaved.
+    const auto many = phazite::ensureTracks (song, (int) phazite::Project::mostToCompare + 2);
+    std::vector<phazite::ParameterRef> curves;
+
+    for (const auto track : many)
+    {
+        curves.push_back ({ phazite::getFader (song, track), phazite::getVolumeParameterID (song, track) });
+        phazite::addPoint (song, curves.back(), { beats (0.0), 0.5f });
+    }
+
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (project->save().wasOk());
+
+    const auto bendAll = [&] (float bend, size_t from)
+    {
+        for (size_t i = from; i < curves.size(); ++i)
+            phazite::setCurve (song, curves[i], 0, bend);
+    };
+
+    bendAll (0.5f, 0);
+    bendAll (0.0f, 0);
+    CHECK (project->isWholeAsSaved());
+    CHECK_FALSE (project->hasUnsavedChanges());
+
+    bendAll (0.5f, 0);
+    bendAll (0.0f, 1);
+    CHECK_FALSE (project->isWholeAsSaved());
+    CHECK (project->hasUnsavedChanges());
+}
+
 TEST_CASE ("The check for unsaved changes says what the whole song's comparison says: notes swapped, a delete undone, a clip "
            "and a track moved and back, with few notifications or many")
 {

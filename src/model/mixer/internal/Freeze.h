@@ -8,6 +8,7 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/WholeState.h"
@@ -66,9 +67,9 @@ void purgeCache (Song&);
 // leave it frozen, and so do changes of what plays after the file: the track's fader, its sends, its name.
 //
 // Every change is compared at the next turn of the message loop, or as the song is stored or a plan of it compiled, whichever
-// comes first (Song::PendingWriter): a change the song's tree tells (a frozen device's value, its automation), as a tree's
-// callback reads none of the song's clips (model/base/internal/SongValues.h: during an undo the tree is back before the clips
-// are); and the clips, their notes and the tempo map, heard from the song's values (SongValues::Listener). A frozen track
+// comes first (Song::PendingWriter): a change the song's tree tells (a frozen device's value), as a tree's callback reads
+// none of the song's clips (model/base/internal/SongValues.h: during an undo the tree is back before the clips are); and the
+// clips, their notes, the tempo map and the curves, heard from the song's values (SongValues::Listener). A frozen track
 // whose clip changed plays live from then, and no save, version or plan takes it frozen meanwhile. A track frozen keeps a
 // copy of what it holds as it is frozen, which freezeFromFile() has this take at once (Song::writePending()), and else the
 // later moment takes; one that came back frozen (by an undo or a redo, or moved: JUCE takes a track out and puts it in
@@ -90,13 +91,16 @@ public:
     bool keepThrough (const std::function<bool()>& apply);
 
     // What a frozen track's file holds, as the song held it then: a copy of its parts' elements, the song's values
-    // (model/base/internal/WholeState.h), its clips and their notes among them, and the song's tempos (TempoMapValue.h), which
-    // put its notes and clips where they are in seconds (its time signatures put nothing there).
+    // (model/base/internal/WholeState.h), its clips and their notes among them, the song's tempos (TempoMapValue.h), which
+    // put its notes and clips where they are in seconds (its time signatures put nothing there), and the curves of what it
+    // plays the automation of (its frozen devices', those in its frozen containers and their chains': CurveValues.h), in the
+    // song's order of its curves.
     struct Holds
     {
         juce::ValueTree parts;
         ValuesKept values;
         immer::flex_vector<TempoEntry> tempos;
+        SongCurves curves;
     };
 
 private:
@@ -107,7 +111,12 @@ private:
     std::vector<ClipID> notesChanged; // the clips whose notes changed, compared at the next turn of the message loop
     std::set<TrackID> clipTracks;     // the frozen tracks whose clips changed, the same
     std::set<TrackID> toTake;         // the tracks frozen since, whose holdings the later moment takes (noteFrozenTracks())
+    std::set<DeviceID> curveOwners;   // what the curves that changed are of, the tracks that hold them compared the same
     bool checking = false;
+
+    // The frozen tracks whose curves compared the same as their files' at their last comparison, with the same holdings, and
+    // none of whose curves was told changed since (curvesChanged()): compared without reading their curves (compare()).
+    std::set<TrackID> curvesAsFrozen;
 
     // What the tree told (check()), for the next turn: the frozen tracks taken again (after an undo or a redo), these tracks
     // compared, every frozen track compared.
@@ -120,7 +129,8 @@ private:
     Waiting waiting;
 
     std::vector<TrackID> takeFrozenTracks (bool fromFiles = false);
-    void noteFrozenTracks (bool cameIn); // the same from a tree's callback, which reads nothing of the song's clips
+    void noteFrozenTracks (bool cameIn);                      // the same from a tree's callback, which reads nothing of the song's clips
+    void keepCurvesAsFrozen (const std::set<TrackID>& known); // of curvesAsFrozen, those whose holdings were kept
     void compare (TrackID);
     void check (const juce::ValueTree& changed, bool cameIn);
     void compareMarked(); // what waits: the clips', and what the tree told during an undo or a redo
@@ -133,6 +143,10 @@ private:
     void clipNotesChanged (const std::vector<ClipID>&) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
     void tempoMapChanged() override;
+
+    // The curves that changed (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): their devices
+    // marked, and the frozen tracks whose files play the automation of any of them compared at the later moment.
+    void curvesChanged (const std::vector<ParameterRef>&) override;
 
     void handleAsyncUpdate() override { compareMarked(); }
     void writePending() override; // what is marked compared now, but during an undo or a redo (Song.h)

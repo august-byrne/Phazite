@@ -296,6 +296,65 @@ TEST_CASE ("A curve edited and nothing else changes its device's track's line al
     checkChangesAreWhole (s.context, "the point's Redo");
 }
 
+TEST_CASE ("A curve's edits, its points all taken out and its curve given to another fader, name the line of the track it is on, "
+           "as the whole songs compared do")
+{
+    // The curves are heard from the song's values (SongValues.h: Listener::curvesChanged()), by their parameters, each marked
+    // by its key (VersionHistory.cpp: markCurve()); a curve given another parameter (a folder made a plain one, its volume's
+    // curve given to its VCA: Buses.cpp) by both, the one it had and the one it has.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto keys = s.addTrack ("Keys");
+    const auto bus = s.addBus ("Bus", { keys });
+    auto& song = *phazite::findSong (s.context);
+    phazite::addAutomationPoint (s.context, s.getVolumeParameter (bass), { at (0.0), 0.5f });
+    phazite::addAutomationPoint (s.context, s.getVolumeParameter (bus), { at (0.0), 0.5f });
+    phazite::addAutomationPoint (s.context, s.getVolumeParameter (bus), { at (4.0), 0.25f });
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    const auto edit = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        {
+            const phazite::UndoStep step (song, name);
+            change();
+        }
+
+        checkChangesAreWhole (s.context, name);
+    };
+
+    const auto linesOf = [&s]
+    {
+        std::vector<phazite::TrackID> tracks;
+
+        for (const auto& line : phazite::getChangesSinceLastVersion (withChangesIn (s.context)))
+            tracks.push_back (line.track);
+
+        return tracks;
+    };
+
+    edit ("the bus's curve bent", [&] { phazite::setAutomationCurve (s.context, s.getVolumeParameter (bus), 0, 0.5f); });
+    CHECK (linesOf() == std::vector<phazite::TrackID> { bus });
+    phazite::undo (song);
+    checkChangesAreWhole (s.context, "Undo of the bend");
+    CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    edit ("the bus made a plain folder", [&] { phazite::makePlainFolder (song, bus); });
+    CHECK (linesOf() == std::vector<phazite::TrackID> { bus });
+    phazite::undo (song);
+    checkChangesAreWhole (s.context, "Undo of the plain folder");
+    CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+    phazite::redo (song);
+    checkChangesAreWhole (s.context, "Redo of the plain folder");
+    phazite::undo (song);
+
+    edit ("the Bass's curve cleared", [&] { phazite::deleteAutomationPoints (s.context, s.getVolumeParameter (bass), { 0 }); });
+    CHECK (linesOf() == std::vector<phazite::TrackID> { bass });
+    phazite::undo (song);
+    checkChangesAreWhole (s.context, "Undo of the clear");
+    CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+}
+
 TEST_CASE ("The changes follow an edit once worked out in the background, the listeners told as they come in")
 {
     TestSong s;
