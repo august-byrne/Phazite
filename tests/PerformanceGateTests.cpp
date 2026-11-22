@@ -1262,6 +1262,80 @@ TEST_CASE ("Performance gate: removing an effect allocates no more for a song of
     CHECK (*many.allocations <= *few.allocations + 8); // 127 and 127, measured 2026-11-22
 }
 
+TEST_CASE ("Performance gate: a macro turned and a modulator's value set read none of it whole, and a track duplicated no more "
+           "for a song of many modulators")
+{
+    // A control's drag sets a macro's value or a modulator's parameter at the mouse's rate, through its handle, which found the
+    // parameter once (ParameterHandle.h): modulation's code finds the element once and reads and writes that one value
+    // (Modulation.h: setMacroValue(), setModulatorValueSetByHand()), reading none of it whole: what reads it whole is the song's
+    // keeper as it hears the change (ModulationArea.h) and the automation's watcher of the parameter touched last, which finds
+    // the parameter to leave a modulator's alone (Automation.h: AutomationWatcher). And a duplicated track's copy holds its
+    // modulators while the song's tree holds modulation, which its copy (Modulation.h: copyModulation()) finds without reading
+    // any of the song's whole: counted as the modulators read (ModulationValue.h: countModulatorsRead()), on a song of 4
+    // tracks of one modulator each and of 40.
+    struct Counts
+    {
+        std::uint64_t macro = 0, modulator = 0, duplicate = 0;
+    };
+
+    const auto countsFor = [] (int numTracks)
+    {
+        phazite::test::TestSong s;
+        std::vector<phazite::TrackID> tracks { s.firstTrack };
+
+        while (tracks.size() < (size_t) numTracks)
+            tracks.push_back (s.addTrack ("Track"));
+
+        const auto macro = s.addModulator (tracks[0], phazite::ModulatorType::macro);
+        const auto lfo = s.addModulator (tracks[1], phazite::ModulatorType::lfo);
+
+        for (size_t i = 2; i < tracks.size(); ++i)
+            s.addModulator (tracks[i], phazite::ModulatorType::random);
+
+        auto turned = phazite::getModulatorParameter (s.context, macro, phazite::getModulatorParameters (s.context, macro).front().id);
+        auto rate = phazite::getModulatorParameter (s.context, lfo, "rate");
+        REQUIRE (turned.exists());
+        REQUIRE (rate.exists());
+        Counts counts;
+
+        // A step of each one's drag, the gesture begun and its parameter found by its first move.
+        for (const auto& [handle, first, next, count] :
+             { std::tuple { &turned, 0.25f, 0.5f, &counts.macro }, std::tuple { &rate, 2.0f, 3.0f, &counts.modulator } })
+        {
+            handle->beginGesture();
+            handle->setValue (first);
+            const auto before = phazite::countModulatorsRead();
+            handle->setValue (next);
+            *count = phazite::countModulatorsRead() - before;
+            handle->endGesture();
+        }
+
+        auto& song = *phazite::findSong (s.context);
+        const auto beforeCopy = phazite::countModulatorsRead();
+
+        {
+            const phazite::UndoStep step (song, "Duplicate Track");
+            REQUIRE (phazite::duplicateTracks (song, { tracks[1] }, nullptr).size() == 1);
+        }
+
+        counts.duplicate = phazite::countModulatorsRead() - beforeCopy;
+        return counts;
+    };
+
+    // Measured 2026-11-22: 2, 2 and 1 for both songs (for a value the keeper's reading and the watcher's, for the copy the
+    // keeper's). Before, as counted from the code: each value's set read its modulator whole twice more (4 and 4), and the
+    // copy read the song's modulation whole (5 for 4 tracks, 41 for 40).
+    const auto small = countsFor (4), large = countsFor (40);
+    INFO ("4 tracks: " << small.macro << ", " << small.modulator << ", " << small.duplicate << "; 40: " << large.macro << ", "
+                       << large.modulator << ", " << large.duplicate);
+    CHECK (small.macro <= 2);
+    CHECK (large.macro == small.macro);
+    CHECK (small.modulator <= 2);
+    CHECK (large.modulator == small.modulator);
+    CHECK (small.duplicate <= 1);
+    CHECK (large.duplicate == small.duplicate);
+}
+
 TEST_CASE ("Performance gate: an edit of a section and the playlist's paint that follows build one list of the sections for each "
            "part that draws them")
 {

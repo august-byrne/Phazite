@@ -334,7 +334,9 @@ TEST_CASE ("A container is the song's, with its name, mix, devices and macros")
     CHECK (devicesIn() == std::vector<DeviceID> { eq, reverb });
     CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
 
-    // A container the song gains shows on its channel, with its chain's devices and its macros.
+    // A container the song gains shows on its channel, with its chain's devices and its macros: written outside the song's
+    // history, as what isn't an undo step is (Song::OutsideHistory), whose keeper takes its macros in from modulation's switch.
+    const phazite::Song::OutsideHistory outside (song);
     juce::ValueTree made (schema::CONTAINER), chain (schema::CHAIN), delay (schema::DEVICE), macro (schema::MACRO);
     const auto madeID = DeviceID::fromRaw (song.makeID());
     made.setProperty (schema::deviceID, (juce::int64) madeID.getRaw(), nullptr);

@@ -157,9 +157,31 @@ std::optional<ModulatorValue> readModulatorValue (const juce::ValueTree& element
 // to 1, to a ten-thousandth (0 for what is no finite number), at most devices::Modulator::maxSteps, without the zeros at
 // the end; a macro's value by its description (SongText.h: readDescribed(), 0 to 1, 0 for none); its modulations each of a
 // parameter it names (a device's ID and a parameter's), its amount by its description and to a ten-thousandth, one of each
-// parameter (the first stays). What else the element holds (a property or a child Phazite doesn't know) is no part of it.
-// Counted (countModulatorsRead()).
+// parameter (the first stays). A choice written as anything but one of its names' texts (its number as text: "2") is none, as
+// the loader leaves none (makeConsistent()). What else the element holds (a property or a child Phazite doesn't know) is no
+// part of it. Counted (countModulatorsRead()).
 std::optional<ModulatorValue> readHeldModulator (const juce::ValueTree& element, const ModulatorPlace&);
+
+// A MODULATOR's or a MACRO's element of a song's tree made to hold what the song holds of it, as Phazite writes that: where
+// it holds anything else than writeModulatorElement() writes of what readHeldModulator() reads of it (a value at its
+// default, a step or an amount finer than a ten-thousandth, zeros at the end of its steps or steps past
+// devices::Modulator::maxSteps, a second modulation of one parameter, one of no parameter, a choice written as its number's
+// text, a number written otherwise than Phazite writes it, a property or a child Phazite doesn't know, its MODULATES before
+// its VALUES), its properties and children are replaced by those, each property compared as text (SongText.h:
+// isSameValue()). Nothing for one that holds nothing else, or that readHeldModulator() reads none of. Whether it changed.
+// The loader's, for every modulator and macro (model/project/internal/Project.h: makeConsistent()), so that each of a song
+// that went through it reads the same as readModulatorValue() reads it and as readHeldModulator() does, and no setter
+// writes it where nothing differs (model/modulation/internal/Modulation.h). Counted (countModulatorsRead()).
+bool keepModulatorAsHeld (juce::ValueTree element);
+
+// One of a modulator's or a macro's own values read from its element as readModulatorValue() reads it, without reading the
+// rest (none counted: countModulatorsRead()): a macro's value (0 for none, and for what is no finite number); a modulator's
+// value set by hand of a parameter of its kind (its VALUES' property of the parameter's ID, as SavedValues.h's
+// readSavedValue() reads it), none where it holds none. What a control's drag compares the value it sets with
+// (model/modulation/internal/Modulation.h: setMacroValue(), setModulatorValueSetByHand()) while the song's tree is
+// modulation's storage.
+float readMacroValue (const juce::ValueTree& macro);
+std::optional<float> readModulatorValueSetByHand (const juce::ValueTree& modulator, const devices::ParameterInfo&);
 
 // A modulator's or a macro's element, new, as Phazite's writers write one (model/modulation/Modulation.cpp,
 // model/devices/Parameters.cpp, model/mixer/Containers.cpp, model/presets/Presets.cpp): its ID always; a modulator's type

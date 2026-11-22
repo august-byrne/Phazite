@@ -429,7 +429,14 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                 INFO (describeProblems (changed.problemsBefore));
                 CHECK (hasProblem (changed.problemsBefore, "range", property->toString()));
 
-                const auto expected = findKept (range, phazite::readValueNumber (value));
+                auto expected = findKept (range, phazite::readValueNumber (value));
+
+                // A macro's value kept at 0, its default, is written as none, as the song holds a macro (ModulationValue.h:
+                // keepModulatorAsHeld()).
+                if (expected.has_value() && type == &schema::MACRO && property == &schema::macroValue
+                    && juce::exactlyEqual (*expected, 0.0))
+                    expected.reset();
+
                 const auto loaded = changed.getLoaded (*property);
                 REQUIRE (loaded.has_value() == expected.has_value());
 
@@ -547,6 +554,12 @@ TEST_CASE ("Every list of numbers the description gives a range keeps each numbe
             for (const auto& token : tokens)
                 if (const auto kept = findKept (range, phazite::readValueNumber (token)))
                     expected.add (juce::String (*kept, 6));
+
+            // A step sequencer's steps without the zeros at the end, as the song holds a modulator (ModulationValue.h:
+            // keepModulatorAsHeld()).
+            if (type == &schema::MODULATOR && property == &schema::modulatorSteps)
+                while (! expected.isEmpty() && expected[expected.size() - 1] == juce::String (0.0, 6))
+                    expected.remove (expected.size() - 1);
 
             const auto loaded = changed.getLoaded (*property);
             REQUIRE (loaded.has_value());

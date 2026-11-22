@@ -2116,6 +2116,9 @@ namespace
             if (values == nullptr)
                 return 0;
 
+            // Modulation's joins at its switch (roadmap step S5.20), with the keeper that takes in what comes into the song's
+            // tree; its choices set the values (chooseModulationClash()), but a track or a container chosen whole in the tree
+            // comes with its modulators or macros, as with its clips.
             return values->countTempoMapAdopted()    // the tempo map's
                    + values->countChordLaneAdopted() // the chord lane's
                    + values->countMidiLinksAdopted() // the MIDI links'
@@ -2130,7 +2133,8 @@ namespace
     };
 
     // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
-    // this order: the tempo map (a path into the song's TEMPOMAP), the chord lane (a path into the song's CHORDLANE), a curve
+    // this order: the tempo map (a path into the song's TEMPOMAP), the chord lane (a path into the song's CHORDLANE), the MIDI
+    // links, the sections, modulation (a path through a modulator or a macro), a curve
     // (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a
     // note's property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path
     // through a clip, refused). What the first whose path it is did with it; none of them (notTheArea) for a clash in the
@@ -2148,6 +2152,9 @@ namespace
 
         if (const auto choice = chooseSectionClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice; // a path into the song's SECTIONS
+
+        if (const auto choice = chooseModulationClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice; // a path through a MODULATOR or a MACRO
 
         if (const auto choice = chooseCurveClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;

@@ -4,9 +4,11 @@
 // kept frozen while only its mixer changes and unfrozen when what it froze changes, opened frozen, and cancelled without
 // a trace; and a bounce onto a new audio track under the original, as one undo step.
 #include "PerformanceCounts.h"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/stereo/Stereo.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -39,6 +41,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace
@@ -1189,6 +1192,20 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     CHECK (ofMacro[0].amount == doctest::Approx (-0.5f));
     CHECK (phazite::getModulators (model, song.bass).size() == 3);
     CHECK (phazite::getModulations (model, lfo).size() == 2);
+
+    // Each copy set as its original is, but for its ID, its place and what it modulates (modulation's setters:
+    // Modulation.h, copyModulators()).
+    for (const auto& [original, copy] : { std::pair { lfo, modulators[0] }, std::pair { macro, modulators[1] } })
+    {
+        auto expected = *phazite::getModulatorValue (model, original);
+        const auto copied = phazite::getModulatorValue (model, copy);
+        REQUIRE (copied.has_value());
+        expected.id = copied->id;
+        expected.place = copied->place;
+        expected.modulations = copied->modulations;
+        CHECK (*copied == expected);
+        CHECK (copied->place == phazite::ModulatorPlace { .track = bounced });
+    }
     CHECK (phazite::getModulations (model, macro).empty());
 
     // All of it in the bounce's one undo step, the send and its modulation back on the original.
@@ -1201,6 +1218,63 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     CHECK (samePoints (phazite::getPoints (model, level), levelPoints));
     CHECK (phazite::getModulations (model, macro).size() == 1);
     CHECK_FALSE (phazite::canUndo (model));
+}
+
+TEST_CASE ("Bounce in Place gives a macro copied onto the new track its original's automation, under the copy's own ID")
+{
+    // A macro's value is named by the macro's own ID (Parameters.h): the curves were copied before the modulators, whose
+    // copies' IDs the copied IDs didn't hold yet, so the copied macro that moved the new track's fader kept no automation,
+    // and stood where the original's curve had moved it.
+    Song song;
+    auto& model = song.getSong();
+    const auto fader = phazite::getFader (model, song.bass);
+    const phazite::ParameterRef volume { fader, phazite::getVolumeParameterID (model, song.bass) };
+    const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+    const auto macro = phazite::addModulator (model, song.bass, phazite::ModulatorType::macro);
+    REQUIRE (macro.isValid());
+    phazite::setModulation (model, macro, volume, 0.5f);
+    const auto valueOf = [] (phazite::ModulatorID id)
+    { return phazite::ParameterRef { DeviceID::fromRaw (id.getRaw()), juce::String (id.getRaw()) }; };
+    phazite::addPoint (model, valueOf (macro), { at (0.0), 0.2f, 0.0f });
+    phazite::addPoint (model, valueOf (macro), { at (4.0), 0.8f, 0.5f });
+    model.getUndoManager().clearUndoHistory();
+    const auto curve = phazite::getCurveValue (model, valueOf (macro));
+    REQUIRE (curve.has_value());
+    phazite::test::UndoCheck undo (song.context);
+
+    undo.check ("Bounce in Place",
+                [&]
+                {
+                    phazite::bounceSelectedTrack (song.context, song.host);
+                    REQUIRE (song.host.render != nullptr);
+                    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }));
+                    REQUIRE (song.host.finished == juce::StringArray { "Bouncing Bass: ok" });
+                });
+
+    const auto tracks = phazite::getTrackIDs (model);
+    REQUIRE (tracks.size() == 3);
+    const auto bounced = tracks[1];
+    const auto modulators = phazite::getModulators (model, bounced);
+    REQUIRE (modulators.size() == 1);
+    const auto copy = modulators[0];
+    CHECK (copy != macro);
+    const auto ofCopy = phazite::getModulations (model, copy);
+    REQUIRE (ofCopy.size() == 1);
+    CHECK (ofCopy[0].parameter == phazite::ParameterRef { phazite::getFader (model, bounced), volume.parameter });
+
+    // The copy's value automated as the original's is; the original's as it was.
+    const auto copiedCurve = phazite::getCurveValue (model, valueOf (copy));
+    REQUIRE (copiedCurve.has_value());
+    CHECK (*copiedCurve == *curve);
+    CHECK (phazite::getCurveValue (model, valueOf (macro)) == curve);
+    phazite::test::checkSong (model);
+
+    // Undone, the copy and its curve gone with the step; redone, both back.
+    phazite::undo (model);
+    CHECK_FALSE (phazite::getCurveValue (model, valueOf (copy)).has_value());
+    phazite::redo (model);
+    CHECK (phazite::getCurveValue (model, valueOf (copy)) == curve);
+    undo.walkBackAndForth();
 }
 
 namespace

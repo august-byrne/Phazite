@@ -125,17 +125,23 @@ namespace
         return immer::flex_vector<float> (steps.begin(), steps.end());
     }
 
-    // A modulator's parameter's value set by hand as the song holds it, from its saved form: a choice by a name it has or by
-    // its number, any other by its number, brought within its range and to its steps; none for none, and for what is no
-    // finite number.
+    // A modulator's parameter's value set by hand as the song holds it, from its saved form: a choice by a name it has, or by
+    // its number where it is held as a number (not as text), any other by its number, brought within its range and to its
+    // steps; none for none, and for what is no finite number.
     std::optional<float> readHeldParameterValue (const devices::ParameterInfo& info, const juce::var& saved)
     {
         if (saved.isVoid())
             return std::nullopt;
 
+        // A choice written as text by one of its names alone, as the loader keeps one (Project.cpp: keepValuesSetByHand()):
+        // its number's text ("2") is none.
         if (info.unit == devices::Unit::choice && saved.isString())
+        {
             if (const auto choice = devices::findChoice (info, saved.toString().toStdString()))
                 return devices::constrain (info, info.minimum + (float) *choice);
+
+            return std::nullopt;
+        }
 
         const auto number = readValueNumber (saved);
 
@@ -265,6 +271,30 @@ namespace
         value.place = place;
         modulatorsRead.fetch_add (1, std::memory_order_relaxed);
         return value;
+    }
+
+    // Whether an element holds what another does, written as text: the same type, the same properties, each written the
+    // same (SongText.h: isSameValue()), and the same children in the same order, each so.
+    bool isWrittenAs (const juce::ValueTree& element, const juce::ValueTree& written)
+    {
+        if (element.getType() != written.getType() || element.getNumProperties() != written.getNumProperties()
+            || element.getNumChildren() != written.getNumChildren())
+            return false;
+
+        for (int i = 0; i < written.getNumProperties(); ++i)
+        {
+            const auto name = written.getPropertyName (i);
+            const auto* held = element.getPropertyPointer (name);
+
+            if (held == nullptr || ! isSameValue (*held, written[name]))
+                return false;
+        }
+
+        for (int i = 0; i < written.getNumChildren(); ++i)
+            if (! isWrittenAs (element.getChild (i), written.getChild (i)))
+                return false;
+
+        return true;
     }
 } // namespace
 
@@ -460,7 +490,7 @@ std::optional<ModulatorValue> readModulatorValue (const juce::ValueTree& element
     if (value->isMacro())
     {
         value->name = element[schema::macroName].toString();
-        value->value = toFloat (readNumber (element[schema::macroValue], 0.0));
+        value->value = readMacroValue (element);
     }
     else
     {
@@ -575,6 +605,34 @@ juce::ValueTree writeModulatorElement (const ModulatorValue& value)
     }
 
     return element;
+}
+
+bool keepModulatorAsHeld (juce::ValueTree element)
+{
+    const auto held = readHeldModulator (element, readModulatorPlace (element));
+
+    if (! held.has_value())
+        return false;
+
+    const auto written = writeModulatorElement (*held);
+
+    if (isWrittenAs (element, written))
+        return false;
+
+    element.copyPropertiesAndChildrenFrom (written, nullptr);
+    return true;
+}
+
+float readMacroValue (const juce::ValueTree& macro)
+{
+    return toFloat (readNumber (macro[schema::macroValue], 0.0));
+}
+
+std::optional<float> readModulatorValueSetByHand (const juce::ValueTree& modulator, const devices::ParameterInfo& info)
+{
+    const auto saved = modulator.getChildWithName (schema::VALUES);
+    const juce::Identifier name (toString (info.id));
+    return saved.hasProperty (name) ? std::optional<float> (readSavedValue (info, saved[name])) : std::nullopt;
 }
 
 SongModulation readModulationValue (const juce::ValueTree& song)

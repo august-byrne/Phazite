@@ -55,6 +55,12 @@ AreaChoice chooseMidiLinkClash (Song&, const MergeClash&, int value, const Merge
 // section's property, or a whole section, through the sections' value.
 AreaChoice chooseSectionClash (Song&, const MergeClash&, int value, const MergeSides&);
 
+// Modulation's (model/modulation/Modulation.cpp): a path through a MODULATOR or a MACRO of a channel or a container, which
+// merge as items by their IDs: a property of one, one whole, or a property of what is in one (a modulation's amount, a
+// value set by hand) or what is in one whole, through modulation's setters by the modulator's ID; a modulation both lines
+// made, whose amount's clash has no value before, taken away for what was before (known bug 239's shape).
+AreaChoice chooseModulationClash (Song&, const MergeClash&, int value, const MergeSides&);
+
 AreaChoice chooseCurveClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseNoteClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSides&);

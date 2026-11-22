@@ -1471,6 +1471,27 @@ namespace
             }
 
             //==============================================================================
+            // Each modulator and macro (a channel's, a container's) as the song holds it, written as Phazite writes that
+            // (ModulationValue.h: keepModulatorAsHeld(), the one rule, the held reader's), once what names what isn't there
+            // is gone and one modulation of each parameter is left (keepNames(), keepKeys()): no value at its default nor a
+            // choice written as its number's text, steps and amounts to a ten-thousandth, no zeros at the end of the steps
+            // nor steps past the most a step sequencer has, one modulation of a parameter, of a parameter it names, nothing
+            // Phazite doesn't know, its VALUES before its MODULATES. Where it is (a macro on a folder) and what it modulates
+            // (another channel's device) are its as the file has them. Only through what can hold an owner of them (the
+            // tracks, the master, containers and their chains), never through a clip's notes.
+            void keepModulators (juce::ValueTree tree)
+            {
+                for (auto child : tree)
+                {
+                    if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
+                        keepModulatorAsHeld (child);
+                    else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK) || child.hasType (schema::MASTER)
+                             || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
+                        keepModulators (child);
+                }
+            }
+
+            //==============================================================================
             // Each curve's points at positions along the control's travel, 0 to 1, one without a position, or with one that is no
             // number, left out (0 would be silence on a volume's lane), and a curve that had points and is left without gone;
             // a curve's children of a type Phazite doesn't know left out, so that a curve's points are its children, counted
@@ -1740,6 +1761,7 @@ namespace
                 keepNames (state, items);
                 forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
                 keepKeys (state);
+                keepModulators (state);
                 keepCurves();
                 keepMidiLinks();
                 keepPaths (state);

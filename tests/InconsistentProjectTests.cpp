@@ -10,11 +10,13 @@
 #include "UndoCheck.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
+#include "devices/modulation/Modulators.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/ChordLaneValue.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SongText.h"
@@ -1100,7 +1102,7 @@ TEST_CASE ("A macro, and the master's fader and VCA, past the mark, are given an
     // which no Phazite makes, goes as every song opens: Automation.h, forgetCurvesOfGoneDevices().)
     Edited edited;
     auto& made = *phazite::findSong (edited.s.context);
-    const auto macro = phazite::addMacro (made, phazite::findTrackState (made, edited.lead), "Macro");
+    const auto macro = phazite::addMacro (made, edited.lead, "Macro");
     REQUIRE (macro.isValid());
     const auto master = phazite::getMasterID (made);
     REQUIRE (
@@ -2032,6 +2034,123 @@ TEST_CASE ("A send to a return the song hasn't is left out, with what modulated 
     CHECK (findAll (whole, schema::SEND).empty());                        // the song whole holds none
     CHECK (findAll (whole, schema::MODULATES).empty());
     CHECK (findAll (whole, schema::MODULATOR).size() == 1);
+}
+
+TEST_CASE ("Modulators and macros open as the song holds them, written as Phazite writes that, the same at every opening")
+{
+    // The loader kept what the song's held reading drops or rounds (ModulationValue.h: readHeldModulator()), so a song read
+    // a modulator one way and the versions' pass and a merge's choice another, and wrote it at every apply. Now each is made
+    // as the song holds it (keepModulatorAsHeld()): a value at its default goes, and so does a choice written as its
+    // number's text; steps and amounts are rounded to a ten-thousandth, zeros at the end of the steps go and steps past the
+    // most a step sequencer has are cut; one modulation of a parameter stays, and none of no parameter; what Phazite
+    // doesn't know goes; and its VALUES come before its MODULATES.
+    Edited edited;
+    const auto device = juce::String (edited.synth.getRaw());
+    juce::StringArray manySteps;
+
+    for (int i = 0; i < phazite::devices::Modulator::maxSteps + 6; ++i)
+        manySteps.add ("0.5");
+
+    auto project = edited.open (
+        [&] (juce::XmlElement& song)
+        {
+            auto* lead = Edited::findTrack (song, "Lead");
+            auto* lfo = lead->createNewChildElement ("MODULATOR");
+            lfo->setAttribute ("id", "880001");
+            lfo->setAttribute ("type", "lfo");
+            lfo->setAttribute ("shape", "round"); // a property Phazite doesn't know
+
+            for (const auto* parameter : { "cutoff", "cutoff", "" }) // a second of one parameter, one of none
+            {
+                auto* modulates = lfo->createNewChildElement ("MODULATES");
+                modulates->setAttribute ("device", device);
+                modulates->setAttribute ("parameter", parameter);
+                modulates->setAttribute ("amount", "0.123456");
+            }
+
+            auto* values = lfo->createNewChildElement ("VALUES");
+            values->setAttribute ("rate", "1"); // its default
+            values->setAttribute ("depth", "0.5");
+            values->setAttribute ("bipolar", "Bipolar");
+            values->setAttribute ("wave", "2"); // a choice by its number's text
+            lfo->createNewChildElement ("OTHER");
+
+            auto* steps = lead->createNewChildElement ("MODULATOR");
+            steps->setAttribute ("id", "880002");
+            steps->setAttribute ("type", "steps");
+            steps->setAttribute ("steps", "0.123456 0.5 0 0");
+
+            auto* many = lead->createNewChildElement ("MODULATOR");
+            many->setAttribute ("id", "880003");
+            many->setAttribute ("type", "steps");
+            many->setAttribute ("steps", manySteps.joinIntoString (" "));
+
+            auto* macro = lead->createNewChildElement ("MACRO");
+            macro->setAttribute ("id", "880004");
+            macro->setAttribute ("name", "Air");
+            macro->setAttribute ("value", "0.30");
+        });
+
+    REQUIRE (project != nullptr);
+    const auto whole = phazite::test::copyWholeSong (project->getSong()); // its modulators as its file holds them
+    const auto find = [&whole] (std::uint64_t id)
+    {
+        for (const auto* type : { &schema::MODULATOR, &schema::MACRO })
+            for (const auto& each : findAll (whole, *type))
+                if (phazite::readID (each[schema::modulatorID]) == id)
+                    return each;
+
+        return juce::ValueTree();
+    };
+
+    const auto lfo = find (880001);
+    REQUIRE (lfo.isValid());
+    CHECK_FALSE (lfo.hasProperty ("shape"));
+    REQUIRE (lfo.getNumChildren() == 2);
+    const auto values = lfo.getChild (0);
+    REQUIRE (values.hasType (schema::VALUES));
+    CHECK_FALSE (values.hasProperty ("rate"));
+    CHECK_FALSE (values.hasProperty ("wave"));
+    CHECK (values["depth"].toString() == "0.5");
+    CHECK (values["bipolar"].toString() == "Bipolar");
+    const auto modulates = lfo.getChild (1);
+    REQUIRE (modulates.hasType (schema::MODULATES));
+    CHECK (modulates[schema::modulatesParameter].toString() == "cutoff");
+    CHECK (modulates[schema::modulatesAmount].toString() == "0.1235");
+
+    CHECK (find (880002)[schema::modulatorSteps].toString() == "0.1235 0.5");
+    CHECK (juce::StringArray::fromTokens (find (880003)[schema::modulatorSteps].toString(), " ", {}).size()
+           == phazite::devices::Modulator::maxSteps);
+    CHECK (find (880004)[schema::macroValue].toString() == "0.3");
+
+    // Each read as the song's code reads it the same as the song holds it.
+    const std::uint64_t ids[] = { 880001, 880002, 880003, 880004 };
+
+    for (const auto id : ids)
+    {
+        const auto element = find (id);
+        REQUIRE (element.isValid());
+        const auto place = phazite::readModulatorPlace (element);
+        const auto held = phazite::readHeldModulator (element, place);
+        REQUIRE (held.has_value());
+        CHECK (phazite::readModulatorValue (element, place) == held);
+    }
+
+    // Saved, and opened and saved again, twice: the same text each time.
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+    const auto saved = file.loadFileAsString();
+
+    for (int opening = 0; opening < 2; ++opening)
+    {
+        juce::String error;
+        const auto reopened = phazite::Project::open (file, false, error);
+        REQUIRE (reopened != nullptr);
+        checkSong (reopened->getSong());
+        REQUIRE (reopened->save().wasOk());
+        CHECK (file.loadFileAsString() == saved);
+    }
 }
 
 TEST_CASE ("A track preset's volume beyond any fader's loads at the top of its range, and its sounds that aren't audio files stay out")

@@ -12,6 +12,7 @@
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/midi/internal/MidiLinks.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
 
@@ -454,13 +455,8 @@ void forgetWhatNamesTheGone (Song& song)
         send.getParent().removeChild (send, undo);
     }
 
-    // A modulation of a parameter of what is gone, a send's among them.
-    std::vector<juce::ValueTree> modulations;
-    findAll (song.getState(), schema::MODULATES, modulations);
-
-    for (auto& modulates : modulations)
-        if (! ids.contains (readID (modulates[schema::modulatesDevice])))
-            modulates.getParent().removeChild (modulates, undo);
+    // A modulation of a parameter of what is gone, a send's among them, through modulation's code.
+    forgetModulationsOf (song, [&ids] (DeviceID device) { return ! ids.contains (device.getRaw()); });
 
     // A MIDI link of a parameter of what is gone.
     forgetMidiLinksOfTheGone (song, ids);

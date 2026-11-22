@@ -1061,9 +1061,10 @@ namespace
 
             // The render is the track before its fader: what moves its fader and its sends along the song, their automation
             // and the track's modulators and macros that modulate them, goes on moving the new track's, which plays in its
-            // place.
-            copyCurves (bouncedSong, copied);
+            // place. The modulators first, with their copies' IDs among the copied: a copied macro's automated value is named
+            // by the copy's ID, which the curves' copies then follow.
             copyModulators (bouncedSong, track, bounced, copied);
+            copyCurves (bouncedSong, copied);
 
             // The sends move to the new track, with their lanes and modulation: the original is muted, but a muted track's
             // sends before its fader go on, and with a copy of each on the new track the return played the sound twice (known

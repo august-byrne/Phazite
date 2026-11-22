@@ -480,7 +480,11 @@ inline const Property<bool> sendPreFader { "preFader", on (SEND), byDefault (fal
 // ("lfo"); and deviceOff, true when it is switched off. Its parameters' values set by hand are its VALUES, by their IDs in
 // its description (devices/modulation/Modulators.h: "rate"), as a device's are, none for one never set; a step sequencer's
 // steps are modulatorSteps: each step's value, -1 to 1, to a ten-thousandth, separated by spaces, without the zeros at the
-// end. The model reads and writes them through their values (model/base/internal/ModulationValue.h).
+// end. The model reads and writes them through their values (model/base/internal/ModulationValue.h). A song holds each
+// modulator and macro as its value holds it, its element written as Phazite writes that value (its VALUES before its
+// MODULATES), from the moment it opens (the loader's keepModulatorAsHeld()): so the song keeps no property or element
+// Phazite doesn't know on a MODULATOR, a MACRO, their MODULATES or a MODULATOR's VALUES, nor a value at its default, nor a
+// choice written as its number's text.
 // (MODULATOR, with the elements above.)
 inline constexpr const char* modulatorIsLfo = "lfo";
 inline constexpr const char* modulatorIsEnvelopeFollower = "envelopeFollower";

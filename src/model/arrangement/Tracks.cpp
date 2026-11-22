@@ -12,6 +12,7 @@
 #include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 
 #include <algorithm>
@@ -896,7 +897,7 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         // its own automation, right after the original. A frozen track's copy plays live: the frozen file is the original's.
         song.storeDeviceStates (track.getRaw());
         auto copy = original.createCopy();
-        const auto copied = giveNewIDs (song, copy);
+        auto copied = giveNewIDs (song, copy);
 
         std::vector<juce::ValueTree> inside { copy };
         collectTrackStates (copy, inside);
@@ -920,6 +921,9 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
             if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
                 copyTrackClips (song, TrackID::fromRaw (found->second), getTrackID (state), copied, true);
 
+        // Its modulators and its containers' macros, through modulation's code, with their new IDs among the copied before the
+        // curves are copied, which name a macro's copy by its ID.
+        copyModulation (song, copied);
         copyCurves (song, copied);
         copies.push_back (getTrackID (copy));
     }

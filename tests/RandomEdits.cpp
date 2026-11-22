@@ -636,8 +636,7 @@ void RandomEdits::edit()
         case 17: // a modulator, and what it modulates
         case 18: // a macro of the track's, and what it modulates
         {
-            const auto modulator =
-                kind == 17 ? addModulator (song, track, (ModulatorType) draw (6)) : addMacro (song, findTrackState (song, track), "Macro");
+            const auto modulator = kind == 17 ? addModulator (song, track, (ModulatorType) draw (6)) : addMacro (song, track, "Macro");
             const auto devices = getDevices (song, track);
 
             if (! modulator.isValid() || devices.empty())

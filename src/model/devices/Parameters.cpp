@@ -433,9 +433,9 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
 
         case ParameterSource::modulator:
         {
-            // Nothing moves a modulator's parameters: no curve of one point follows them.
+            // Nothing moves a modulator's parameters: no curve of one point follows them. Its value, through modulation's code.
             told = devices::constrain (*parameter.info, value);
-            keepValueSetByHand (state, *parameter.info, told, undo);
+            setModulatorValueSetByHand (song, ModulatorID::fromRaw (ref.device.getRaw()), *parameter.info, told);
             break;
         }
 
@@ -503,11 +503,8 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
 
         case ParameterSource::macro:
         {
-            if (told = juce::jlimit (0.0f, 1.0f, value); juce::exactlyEqual (told, 0.0f))
-                state.removeProperty (schema::macroValue, undo);
-            else
-                state.setProperty (schema::macroValue, told, undo);
-
+            told = juce::jlimit (0.0f, 1.0f, value);
+            setMacroValue (song, ModulatorID::fromRaw (ref.device.getRaw()), told);
             break;
         }
 

@@ -1436,6 +1436,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ModelFuzzTests.cpp
         tests/ModulationModelTests.cpp
         tests/ModulationValueTests.cpp
+        tests/ModulationWritersTests.cpp
         tests/ModulationUiTests.cpp
         tests/MixerModelTests.cpp
         tests/MixerTests.cpp

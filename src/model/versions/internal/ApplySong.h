@@ -8,7 +8,9 @@
 // own once the rest is made like the other's, by their IDs and values through the clips' functions
 // (model/arrangement/internal/Clips.h), whatever stores them, each track's in the other's order; and the song's curves, in a
 // pass of their own, by their parameters through automation's functions (model/automation/internal/Automation.h: setCurveValue(),
-// eraseCurve()), a curve's points by their places, the whole song's in the other's order. No ID is in the song twice
+// eraseCurve()), a curve's points by their places, the whole song's in the other's order; and the song's modulators and
+// macros, in a pass of their own, by their IDs through modulation's setters (model/modulation/internal/Modulation.h:
+// setModulator(), eraseModulator(), setModulatorOrder()), each owner's in the other's order. No ID is in the song twice
 // after: what the other has in another place than the song (a clip on another track, a track in another folder) is taken
 // from where the song has it. And the song's count of IDs ends past every ID it holds and past the other's count, so that
 // what it took, from a song that counted further than it did, keeps its IDs to itself.

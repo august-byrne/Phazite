@@ -119,7 +119,8 @@ void setLaneCollapsed (Song&, TrackID, const ParameterRef&, bool);
 
 // After a part of the song was copied with new IDs (giveNewIDs(), Schema.h): each copied device gets its original's
 // automation (setCurveValue(), below), in the caller's undo step, after the song's other curves, in their order; a copied device
-// that has a curve of the parameter already keeps its own.
+// that has a curve of the parameter already keeps its own. A copied macro's value (named by the macro's own ID) is its copy's,
+// named by the copy's: so the copied IDs hold the macros' (Modulation.h: copyModulation()).
 void copyCurves (Song&, const CopiedIDs&);
 
 // A track's write mode, the song's (Schema.h: trackAutomationMode): set without an undo step.

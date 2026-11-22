@@ -754,6 +754,10 @@ juce::ValueTree makeContainerState (Song& song, bool instrument)
 
     container.appendChild (makeChainState (song, 1), nullptr);
 
+    // Its eight macros as MACRO elements of its own, made with it before it is the song's: with a container preset's
+    // (model/presets/Presets.cpp), the one maker of modulation's elements beside modulation's setters
+    // (model/modulation/internal/Modulation.h), until the devices' area (roadmap step S5.20); from modulation's switch, the
+    // keeper of the song's values takes them in as the container comes into the song.
     for (int number = 1; number <= macrosPerContainer; ++number)
     {
         juce::ValueTree macro (schema::MACRO);

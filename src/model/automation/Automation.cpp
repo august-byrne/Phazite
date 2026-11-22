@@ -8,6 +8,7 @@
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/transport/internal/Tempo.h"
@@ -1610,8 +1611,15 @@ void copyCurves (Song& song, const CopiedIDs& copied)
         if (found == copied.end())
             continue;
 
+        // A macro's value is named by the macro's own ID (Parameters.h): its copy's by the copy's (else a duplicated track's
+        // macro kept its automation as a curve named by the original's ID, a parameter the song hasn't).
+        const auto isMacroValue =
+            parameter.parameter == juce::String (parameter.device.getRaw()) && isMacro (song, ModulatorID::fromRaw (found->second));
+        const ParameterRef copiedRef { DeviceID::fromRaw (found->second),
+                                       isMacroValue ? juce::String (found->second) : parameter.parameter };
+
         // The original's value copied before the set (which moves the area on), its points given new keys there.
-        if (const ParameterRef copiedRef { DeviceID::fromRaw (found->second), parameter.parameter }; findCurve (song, copiedRef) == nullptr)
+        if (findCurve (song, copiedRef) == nullptr)
             if (const auto curve = getCurveValue (song, parameter))
                 setCurveValue (song, copiedRef, *curve);
     }

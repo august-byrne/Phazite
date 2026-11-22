@@ -508,7 +508,10 @@ namespace
         }
 
         // Its eight macros, as a new container's (Containers.h: makeContainerState()), named and set as the preset's, with
-        // what they modulate in it.
+        // what they modulate in it: MACRO elements of the container's, made with it before it is the song's, the one maker
+        // of modulation's elements beside modulation's setters (model/modulation/internal/Modulation.h), as a new
+        // container's are, until the devices' area (roadmap step S5.20); from modulation's switch, the keeper of the song's
+        // values takes them in as the container comes into the song.
         const auto* macros = saved[keys::macros].getArray();
 
         for (int i = 0; i < macrosPerContainer; ++i)
@@ -1219,8 +1222,7 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
         for (const auto& macro : *macros)
         {
             const auto name = macro[keys::name].toString().trim();
-            const auto added =
-                name.isNotEmpty() ? addMacro (song, findTrackState (song, track), name) : addModulator (song, track, ModulatorType::macro);
+            const auto added = name.isNotEmpty() ? addMacro (song, track, name) : addModulator (song, track, ModulatorType::macro);
 
             if (! added.isValid())
                 continue;

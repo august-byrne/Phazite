@@ -201,7 +201,7 @@ isn't XML, or whose element isn't `PHAZITE`, is refused with a reason. Any other
 (`makeConsistent()`, in [`src/model/project/Project.cpp`](../src/model/project/Project.cpp)), with no undo step; a
 file Phazite wrote is consistent already and comes through unchanged, and so does what Phazite doesn't know:
 - **Places and kinds:** an element Phazite knows, where `Schema.h` doesn't put it, or a device or modulator of a type
-  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element of a type Phazite doesn't know stays where it is, untouched, but in a `CURVE`, which holds its points alone; a property that should be one of a set of words
+  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element of a type Phazite doesn't know stays where it is, untouched, but in a `CURVE`, which holds its points alone, and in a `MODULATOR` or a `MACRO` (below); a property that should be one of a set of words
   (a track's kind, a clip's) and isn't is left out, a track without a kind becoming a track or a folder; text between
   tags is dropped.
 - **Numbers:** each number `Schema.h` gives a range is brought within it, made whole where it is an integer, and one
@@ -237,6 +237,14 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   would hear its own track's sound round a loop (on a drum sampler's track, listening to one of its own pads' tracks, say).
   Of two elements of one parent with one key (two curves of one
   parameter, two tempos on one beat), the first stays.
+- **Modulators and macros:** each `MODULATOR` and `MACRO` is written as Phazite writes what the song holds of it,
+  where it holds anything else: a value set by hand at its parameter's default is left out (and a `VALUES` left empty
+  with it), and so is a choice written as its number's text ("2" rather than its name); its steps and each modulation's
+  amount are rounded to a ten-thousandth, zeros at the end of its steps are left out and steps past the 64 a step
+  sequencer has are cut; one modulation of each parameter stays (the first), and one that names no parameter goes; a
+  property or an element Phazite doesn't know in it goes; and its `VALUES` comes before its `MODULATES`, so a file
+  that held them the other way round has them in that order from its first save. Where it is and what it modulates
+  stay as the file has them (a macro on a folder, a modulation of another channel's device, which plays nothing).
 - **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values, and its audio clips play
   one file alike: they share their `file` (the path as written, compared as text, whether the file is there or not),
   `tempo`, `pitch`, `reversed` and `WARP` markers. Each keeps its own place, the part of the file it plays (`fileStart`,
