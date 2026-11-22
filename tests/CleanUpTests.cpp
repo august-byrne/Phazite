@@ -277,24 +277,43 @@ TEST_CASE ("Clean Up and an import keep every file the song plays: each clip's b
     };
 
     // What a look offers of the Audio folder. A render Phazite made for a clip in the background (the Generated folder) and
-    // no longer uses is offered too, sooner or later as the machine has it: that is another case's subject. And a look
-    // offers nothing while a version can't be read whole (what it plays is unknown), which is what CI's release build saw
-    // here after the reopen: the automatic save that the save before it began may still be on its way to the disk. So it
-    // looks until every version reads; what it offered and what it couldn't read are in a failure's message.
-    std::string offered, unreadable;
+    // no longer uses is offered too, sooner or later as the machine has it: that is another case's subject. And while the
+    // project's history is busy (just after a reopen, as CI's release build met it here) Clean Up doesn't look (a version
+    // or an automatic save is being written: find() is refused and finds nothing) or looks and offers nothing (a version
+    // can't be read whole yet, so what it plays is unknown). So this looks again until Clean Up can look and every version
+    // reads; why it couldn't, what it couldn't read and what it offered are in a failure's message.
+    std::string offered, unreadable, refused;
     CAPTURE (offered);
     CAPTURE (unreadable);
-    const auto lookInAudioFolder = [&s, &offered, &unreadable]
+    CAPTURE (refused);
+    const auto lookInAudioFolder = [&s, &offered, &unreadable, &refused]
     {
-        phazite::UnusedAudio found;
-        const auto readsEveryVersion = [&s, &found, &unreadable]
+        phazite::UnusedAudioFinder finder (s.context);
+        bool asked = false;
+        const auto readsEveryVersion = [&s, &finder, &asked, &unreadable, &refused]
         {
-            found = lookForUnused (s.context);
-            unreadable = found.unreadable.joinIntoString ("; ").toStdString();
-            return found.unreadable.isEmpty();
+            if (finder.isLooking())
+                return false;
+
+            if (asked && finder.getFound().has_value())
+            {
+                unreadable = finder.getFound()->unreadable.joinIntoString ("; ").toStdString();
+
+                if (finder.getFound()->unreadable.isEmpty())
+                    return true;
+            }
+
+            // Not looked yet, refused, or a version unread: again, once Clean Up can.
+            refused = phazite::getWhyNotCleanUpAudio (s.context).toStdString();
+            asked = refused.empty();
+
+            if (asked)
+                finder.find();
+
+            return false;
         };
         CHECK (dispatchMessagesUntil (readsEveryVersion));
-        const auto all = getNames (found);
+        const auto all = finder.getFound().has_value() ? getNames (*finder.getFound()) : juce::StringArray();
         offered = all.joinIntoString (", ").toStdString();
         juce::StringArray inAudio;
 

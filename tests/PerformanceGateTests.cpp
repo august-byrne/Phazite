@@ -70,9 +70,11 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -808,21 +810,37 @@ TEST_CASE ("Performance gate: a note added to one clip among thousands shows tha
             return;
         }
 
+        // Three notes added one after the other, each counted, and the least of the three taken: what making the song left
+        // for later (a timer that waits for quiet, the rest of the playlist's components) runs inside one of them at most, as
+        // the machine has it, and isn't an edit's work (CI's Clang job once counted 5,134 for the big song where the others
+        // count a few hundred). All three are in the message, so that work every edit does shows as three large counts.
+        std::string counted;
+
         const auto countFor = [&] (int numTracks)
         {
             phazite::test::PlaylistScreen screen;
             const auto clips = playlistOf (screen, numTracks);
-            return phazite::test::countAllocations (
-                       [&]
-                       {
-                           phazite::addNote (screen.context, clips[1][1], 72, at (2.5), lasting (0.25), 100);
-                           phazite::test::deliverChanges();
-                       })
-                .value_or (0);
+            int least = std::numeric_limits<int>::max();
+
+            for (int i = 0; i < 3; ++i)
+            {
+                const auto count = phazite::test::countAllocations (
+                                       [&]
+                                       {
+                                           phazite::addNote (screen.context, clips[1][1], 72 + i, at (2.5), lasting (0.25), 100);
+                                           phazite::test::deliverChanges();
+                                       })
+                                       .value_or (0);
+                counted += (counted.empty() ? "" : ", ") + std::to_string (numTracks) + " tracks: " + std::to_string (count);
+                least = std::min (least, count);
+            }
+
+            return least;
         };
 
         const auto small = countFor (20), big = countFor (200);
-        MESSAGE ("Allocations, a note added, 20 tracks / 200 tracks of 24 clips: " << small << " / " << big);
+        CAPTURE (counted);
+        MESSAGE ("Allocations, a note added, 20 tracks / 200 tracks of 24 clips: " << small << " / " << big << " (" << counted << ")");
 
         // Ten times the clips: about the same work.
         CHECK (big < small * 2);
