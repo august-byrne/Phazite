@@ -52,6 +52,11 @@ std::vector<float> getPositions (const Song&, const ParameterRef&, const std::ve
 int addPoint (Song&, const ParameterRef&, AutomationPoint);
 BeatDuration movePoints (Song&, const ParameterRef&, const std::vector<int>& indices, BeatDuration, float positionChange);
 void setCurve (Song&, const ParameterRef&, int index, float curve);
+
+// The same bend given to several points of a curve, in the order given (an index the curve hasn't is left out), the curve
+// read and written once, however many they are: the same changes as setCurve() for each, one after another.
+void setCurves (Song&, const ParameterRef&, const std::vector<int>& indices, float curve);
+
 void deletePoints (Song&, const ParameterRef&, const std::vector<int>& indices);
 void replacePoints (Song&, const ParameterRef&, BeatRange, const std::vector<AutomationPoint>&);
 

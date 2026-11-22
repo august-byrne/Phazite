@@ -36,6 +36,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/Selection.h"
@@ -960,6 +961,45 @@ TEST_CASE ("Performance gate: selected automation points are found by their beat
     const auto small = comparisonsFor (1000), large = comparisonsFor (10000);
     INFO ("1,000 points: " << small << " comparisons; 10,000: " << large);
     CHECK (large < small * 20);
+}
+
+TEST_CASE ("Performance gate: bending several selected points of a curve reads the curve as often however many they are")
+{
+    // An edit of a curve reads it into a value (Automation.cpp: SongCurve): one for each point bent read the whole curve for
+    // each, 1,000 points of a curve of 10,000 bent reading 10,000,000 points. Counted as the points read into values
+    // (CurveValues.h: countCurvePointsRead()).
+    constexpr auto numPoints = 1000;
+
+    const auto pointsReadFor = [] (int numBent)
+    {
+        phazite::test::TestSong song;
+        auto& document = *phazite::findSong (song.context);
+        const auto volume = song.getVolumeParameter (song.firstTrack);
+        std::vector<phazite::ParameterPoint> points;
+
+        for (int i = 0; i < numPoints; ++i)
+            points.push_back ({ volume, { phazite::BeatPosition::fromBeats (i * 0.25), (float) (i % 2) * 0.5f } });
+
+        phazite::addAutomationPoints (document, points);
+        std::vector<int> bent;
+
+        for (int i = 0; i < numBent; ++i)
+            bent.push_back (i * 10);
+
+        const auto before = phazite::countCurvePointsRead();
+        phazite::setAutomationCurves (song.context, volume, bent, 0.5f);
+        const auto read = phazite::countCurvePointsRead() - before;
+        const auto after = phazite::getPoints (document, volume);
+        REQUIRE (after.size() == (size_t) numPoints);
+        CHECK (after[(size_t) bent.back()].curve == doctest::Approx (0.5f));
+        return read;
+    };
+
+    // The curve read once by the edit (and once more by Debug's check of what it wrote), whether 4 points are bent or 40.
+    const auto small = pointsReadFor (4), large = pointsReadFor (40);
+    INFO ("4 points bent: " << small << " points read; 40: " << large);
+    CHECK (large == small);
+    CHECK (small <= (std::uint64_t) numPoints * 2);
 }
 
 TEST_CASE ("Performance gate: asking whether each selected section is selected reads no value of the song's sections for each")

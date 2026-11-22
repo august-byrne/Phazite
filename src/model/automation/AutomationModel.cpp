@@ -338,9 +338,7 @@ void setAutomationCurves (ProjectContext& context, const ParameterRef& parameter
     if (auto* song = findSong (context); song != nullptr && locateParameter (*song, parameter).has_value())
     {
         const UndoStep step (*song, "Bend Automation");
-
-        for (const auto index : indices)
-            setCurve (*song, parameter, index, bend);
+        setCurves (*song, parameter, indices, bend); // the curve read once, however many points
     }
 }
 

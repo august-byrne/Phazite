@@ -19,6 +19,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -101,6 +102,11 @@ ParameterRef readCurveParameter (const juce::ValueTree& curve);
 // without a value is no point, and is left out (the loader takes one out as the song opens). A property Phazite doesn't
 // know is no part of it, nor a child (the loader takes such a child out as the song opens).
 CurveValue readCurveValue (const juce::ValueTree& curve);
+
+// How many points were read into curves' values (readCurveValue()) since Phazite started, on any thread: for the test that
+// an edit of several points of a curve reads the curve once, however many they are (tests/PerformanceGateTests.cpp).
+// Allocations can't tell it: immer takes its nodes from lists of freed ones.
+std::uint64_t countCurvePointsRead() noexcept;
 
 // Whether a CURVE element holds a point readCurveValue() would read, without reading them all.
 bool holdsPoints (const juce::ValueTree& curve);

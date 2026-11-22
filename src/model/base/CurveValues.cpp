@@ -5,7 +5,9 @@
 #include "model/base/internal/SongText.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace phazite
@@ -14,6 +16,8 @@ namespace
 {
     // A point's bend where its element has none: a straight line.
     constexpr float straight = 0.0f;
+
+    std::atomic<std::uint64_t> pointsRead { 0 }; // countCurvePointsRead(): a count alone, which orders nothing
 
     // A point's number as the song reads one (SongText.h: readValueNumber(), the loader's reading, so that a text reads as the
     // same number wherever it is read), or what the value holds where the element has none, or what it has is no finite
@@ -182,7 +186,13 @@ CurveValue readCurveValue (const juce::ValueTree& curve)
         if (isPoint (child))
             points.push_back (readPoint (child));
 
+    pointsRead.fetch_add (points.size(), std::memory_order_relaxed);
     return { points.persistent() };
+}
+
+std::uint64_t countCurvePointsRead() noexcept
+{
+    return pointsRead.load (std::memory_order_relaxed);
 }
 
 bool holdsPoints (const juce::ValueTree& curve)
