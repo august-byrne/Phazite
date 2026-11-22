@@ -2,7 +2,7 @@
 // The song's automation as values (model/base/internal/CurveValues.h; roadmap step S5.20, automation's first piece): the
 // conversion between the values and the AUTOMATION element (the one place that reads and writes CURVE and POINT by name),
 // round trip through every curve of the golden files and through damaged ones, in their order; the values' helpers; and what
-// reads the song's curves (model/automation/internal/Automation.h: getCurveKeys(), getCurveValue(), getPlayedCurves()...),
+// reads the song's curves (model/automation/internal/Automation.h: getCurveKeys(), getCurveValue(), findCurve()...),
 // the same as what the tree held, read as automation's code read it before the values came.
 //   phazite_tests.exe --test-case="Curve values*"
 #include "GoldenFiles.h"
@@ -12,9 +12,12 @@
 #include "model/base/Song.h"
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
+#include "model/base/internal/WholeState.h"
 #include "model/project/internal/Project.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -243,8 +246,6 @@ TEST_CASE ("Curve values: the golden projects opened, their curves read through 
         CHECK (all == phazite::readCurvesValue (automation));
 
         // Each curve: its value, its points, whether it has any, its positions, as played, and whole.
-        const auto played = phazite::getPlayedCurves (song, keys);
-        REQUIRE (played.size() == keys.size());
         std::vector<phazite::BeatPosition> beats;
 
         for (int i = -2; i < 80; ++i)
@@ -261,7 +262,7 @@ TEST_CASE ("Curve values: the golden projects opened, their curves read through 
             CHECK (*value == phazite::readCurveValue (element));
             CHECK (isSame (phazite::getPoints (song, key), readPointsAsBefore (element)));
             CHECK (phazite::hasPoints (song, key) == (element.getNumChildren() > 0));
-            CHECK (isSame (toEnginePoints (played[i]), readPlayedAsBefore (element)));
+            CHECK (isSame (toEnginePoints (*phazite::findCurve (song, key)), readPlayedAsBefore (element)));
             CHECK (phazite::copyWholeCurve (song, key).isEquivalentTo (element));
 
             const phazite::engine::Curve before (readPlayedAsBefore (element));
@@ -278,7 +279,7 @@ TEST_CASE ("Curve values: the golden projects opened, their curves read through 
         CHECK (phazite::getPoints (song, none).empty());
         CHECK_FALSE (phazite::hasPoints (song, none));
         CHECK (phazite::getPositions (song, none, beats).empty());
-        CHECK (phazite::getPlayedCurves (song, { none }).front().points.empty());
+        CHECK (phazite::findCurve (song, none) == nullptr);
         CHECK_FALSE (phazite::copyWholeCurve (song, none).isValid());
     }
 }
@@ -505,6 +506,27 @@ TEST_CASE ("Curve values: the song's curves keep the order they were made in thr
     CHECK_FALSE (curve.isSameAs (*curves.find (b)));
     CHECK (curve == *curves.find (b));
 
+    // Their points' keys aside, which no file holds: a point, a curve and the song's curves keyed otherwise the same, and so
+    // to the comparisons of what songs keep (WholeState.h); a point's content still compared.
+    auto keyed = curve.points[0];
+    keyed.key = 77;
+    CHECK (keyed == curve.points[0]);
+    auto otherKeys = *curves.find (b);
+    otherKeys.points = otherKeys.points.set (0, keyed);
+    CHECK (otherKeys == *curves.find (b));
+    const auto keyedCurves = withCurve (curves, b, otherKeys);
+    CHECK_FALSE (keyedCurves.isSameAs (curves));
+    CHECK (keyedCurves == curves);
+    const phazite::ValuesKept kept { {}, {}, {}, {}, {}, curves }, keptKeyed { {}, {}, {}, {}, {}, keyedCurves };
+    CHECK (phazite::holdSameCurve (kept, keptKeyed, b));
+    CHECK (phazite::holdSameCurves (kept, keptKeyed));
+    CHECK (phazite::holdSameCurveOrder (kept, keptKeyed));
+    keyed.position = 0.25f;
+    CHECK_FALSE (keyed == curve.points[0]);
+    const phazite::ValuesKept keptMoved { {}, {}, {}, {}, {}, withCurve (curves, b, { otherKeys.points.set (0, keyed) }) };
+    CHECK_FALSE (phazite::holdSameCurve (kept, keptMoved, b));
+    CHECK_FALSE (phazite::holdSameCurves (kept, keptMoved));
+
     // The key text the versions name a curve by, and the parameter it names.
     CHECK (phazite::getCurveKeyText (a) == "3/cutoff");
     CHECK (phazite::readCurveKeyText ("3/cutoff") == a);
@@ -517,33 +539,41 @@ TEST_CASE ("Curve values: the song's curves keep the order they were made in thr
     CHECK (phazite::readCurveKeyText (schema::getElementKey (element)) == a);
 }
 
-TEST_CASE ("Curve values: a tree not made consistent that holds two curves of one parameter lists it once, its first curve, and "
-           "plays the last with points")
+TEST_CASE ("Curve values: a song opened holds its curves in its values, each point with a key of its own that no file holds, its "
+           "AUTOMATION an empty place")
 {
-    // Only a tree the loader hasn't made consistent holds two curves of one parameter (the loader keeps the first:
-    // makeConsistent()), so this is a song made of such a tree alone, which holds no values, not a song opened. Its readers
-    // (Automation.h) list the parameter once and give its first curve (getCurveKeys(), getCurveValue()), and play the last of
-    // its curves with points (getPlayedCurves()), as Phazite's engine always played them; the switch of roadmap step S5.20,
-    // whose area holds one curve for a parameter, takes both rules away.
-    auto state = phazite::test::copyWholeSong (*phazite::createSong());
-    auto automation = state.getOrCreateChildWithName (schema::AUTOMATION, nullptr);
-    automation.appendChild (parse (R"(<CURVE device="5" parameter="cutoff"/>)"), nullptr);
-    automation.appendChild (parse (R"(<CURVE device="5" parameter="cutoff"><POINT beat="0" value="0.25"/></CURVE>)"), nullptr);
-    automation.appendChild (parse (R"(<CURVE device="5" parameter="cutoff"><POINT beat="2" value="0.75"/></CURVE>)"), nullptr);
-    automation.appendChild (parse (R"(<CURVE device="5" parameter="cutoff"/>)"), nullptr);
-    const phazite::Song song (state);
-    REQUIRE (song.getValues() == nullptr);
+    // Roadmap step S5.20, automation's switch (CurvesArea.h): the song takes its file's curves in as it opens, each point given
+    // a key from the song's count (SongValues.h: givePointKey()), which a whole copy never writes.
+    phazite::test::TemporaryFolder temporary;
+    const auto project = openGolden (temporary, "projects/representative.xml");
+    auto& song = project->getSong();
+    const auto& curves = phazite::getCurvesValue (song);
+    REQUIRE (! curves.order.empty());
+    std::vector<std::uint64_t> keys;
 
-    const ParameterRef cutoff { phazite::DeviceID::fromRaw (5), "cutoff" };
-    CHECK (phazite::getCurveKeys (song) == std::vector { cutoff });
-    CHECK (phazite::getCurveValue (song, cutoff)->points.empty());
-
-    const auto played = phazite::getPlayedCurves (song, { cutoff, cutoff });
-    REQUIRE (played.size() == 2);
-
-    for (const auto& each : played)
+    for (const auto& parameter : curves.order)
     {
-        REQUIRE (each.points.size() == 1);
-        CHECK (juce::exactlyEqual (each.points[0].position, 0.75f));
+        REQUIRE (curves.find (parameter) != nullptr);
+        CHECK (phazite::findCurve (song, parameter) == curves.find (parameter)); // in place
+
+        for (const auto& point : curves.find (parameter)->points)
+            keys.push_back (point.key);
     }
+
+    std::sort (keys.begin(), keys.end());
+    REQUIRE (! keys.empty());
+    CHECK (keys.front() > 0);
+    CHECK (keys.back() < song.getValues()->getNextPointKey());
+    CHECK (std::adjacent_find (keys.begin(), keys.end()) == keys.end());
+
+    const auto automation = song.getState().getChildWithName (schema::AUTOMATION);
+    REQUIRE (automation.isValid());
+    CHECK (automation.getNumChildren() == 0);
+    CHECK (automation.getNumProperties() == 0);
+
+    // Written as before: beat, value, and a bend that isn't 0, no key.
+    for (const auto& curve : phazite::test::copyWholeSong (song).getChildWithName (schema::AUTOMATION))
+        for (const auto& point : curve)
+            for (int i = 0; i < point.getNumProperties(); ++i)
+                CHECK (juce::StringArray { "beat", "value", "curve" }.contains (point.getPropertyName (i).toString()));
 }

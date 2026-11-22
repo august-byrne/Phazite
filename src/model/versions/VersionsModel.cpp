@@ -2116,9 +2116,10 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            return values->countTempoMapAdopted()     // the tempo map's
-                   + values->countChordLaneAdopted()  // the chord lane's
-                   + values->countMidiLinksAdopted(); // the MIDI links'
+            return values->countTempoMapAdopted()    // the tempo map's
+                   + values->countChordLaneAdopted() // the chord lane's
+                   + values->countMidiLinksAdopted() // the MIDI links'
+                   + values->countCurvesAdopted();   // the curves'
         }
 
         const Song& song;

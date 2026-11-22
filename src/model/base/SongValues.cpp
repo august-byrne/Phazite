@@ -28,8 +28,8 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
           clips (v, s),
           tempoMap (v, s),
           chordLane (v, s),
-          curves (v, s),
-          midiLinks (v, s)
+          midiLinks (v, s),
+          curves (v, s)
     {
         state.addListener (this);
     }
@@ -43,47 +43,35 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     ClipsKeeper clips;
     TempoMapKeeper tempoMap;
     ChordLaneKeeper chordLane;
-    CurvesKeeper curves; // tells the curves' listener from the tree, in an undo and a redo too
     MidiLinksKeeper midiLinks;
+    CurvesKeeper curves;
 
     bool isUndoingOrRedoing() const { return song.getUndoManager().isPerformingUndoRedo(); }
-
-    // A property changed, and children in another order: the curves' alone, while the tree holds them (CurvesArea.h).
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
-    {
-        curves.propertyChanged (tree, property);
-    }
-
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { curves.childOrderChanged (parent); }
 
     // A child added: every area asked in turn, each doing nothing (and returning at once) for what is not its own, so that an
     // area whose elements sit inside another's (a track's, say) sees them come in with it. The tempo map's first (the song's
     // TEMPOMAP, or one in it, which holds nothing of a clip's: the clips' part finds no track there), then the chord lane's
     // (the song's CHORDLANE, or one in it, which holds nothing of the tempo map's or a clip's), then the MIDI links' (the
-    // song's MIDILINKS, or one in it, which holds nothing of another area's), then the clips' (a track, what holds tracks, a
-    // CLIP, in the song's track list: none of them the tempo map's, the chord lane's or the MIDI links').
+    // song's MIDILINKS, or one in it, which holds nothing of another area's), then the curves' (the song's AUTOMATION, or one
+    // in it, which holds nothing of another area's), then the clips' (a track, what holds tracks, a CLIP, in the song's track
+    // list: none of them the tempo map's, the chord lane's, the MIDI links' or the curves').
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
-        // Before them the curves', in an undo and a redo too (a CURVE, a POINT in one, the AUTOMATION: none another area's).
-        curves.childAdded (parent, child);
-
         if (isUndoingOrRedoing())
             return;
 
         tempoMap.childAdded (parent, child);
         chordLane.childAdded (parent, child);
         midiLinks.childAdded (parent, child);
+        curves.childAdded (parent, child);
         clips.childAdded (parent, child);
     }
 
     // A child taken out: every area that acts there asked in turn, each doing nothing for what is not its own. The clips'
-    // alone (a track, or what holds tracks): the tempo map, the chord lane and the MIDI links do nothing as their elements
-    // leave.
+    // alone (a track, or what holds tracks): the tempo map, the chord lane, the MIDI links and the curves do nothing as their
+    // elements leave.
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        // Before them the curves', in an undo and a redo too (a CURVE, or a POINT in one, taken out: none another area's).
-        curves.childRemoved (parent, child);
-
         if (isUndoingOrRedoing())
             return;
 
@@ -98,11 +86,13 @@ SongValues::SongValues (Song& song)
       tempoMap (song.getUndoManager(), makeDefaultTempoMap()),
       chordLane (song.getUndoManager(), {}),
       midiLinks (song.getUndoManager(), {}),
+      curves (song.getUndoManager(), {}),
       clipsTeller (std::make_unique<ClipsTeller> (clips, listeners)),
       notesTeller (std::make_unique<NotesTeller> (notes, listeners)),
       tempoMapTeller (std::make_unique<TempoMapTeller> (tempoMap, listeners)),
       chordLaneTeller (std::make_unique<ChordLaneTeller> (chordLane, listeners)),
-      midiLinksTeller (std::make_unique<MidiLinksTeller> (midiLinks, listeners))
+      midiLinksTeller (std::make_unique<MidiLinksTeller> (midiLinks, listeners)),
+      curvesTeller (std::make_unique<CurvesTeller> (curves, listeners))
 {
     // Each area with its teller, in the order of the areas; the keeper comes once the tree is consistent (adopt()). The
     // macro's statement ended again here, so that the formatter reads a body that holds nothing else.
@@ -115,6 +105,7 @@ SongValues::~SongValues()
 
     // The keeper first, then each area's teller, in the reverse of their making.
     keeper = nullptr;
+    curvesTeller = nullptr;
     midiLinksTeller = nullptr;
     chordLaneTeller = nullptr;
     tempoMapTeller = nullptr;
@@ -144,20 +135,16 @@ std::vector<TrackID> SongValues::getRemembered() const
     return keeper != nullptr ? keeper->clips.getRemembered() : std::vector<TrackID>();
 }
 
-SongValues::CurvesKeeper* SongValues::findCurvesKeeper() noexcept
-{
-    return keeper != nullptr ? &keeper->curves : nullptr;
-}
-
 void SongValues::adopt (Song& song)
 {
     // What the tree the loader made consistent holds of each area, into the area, outside the history, and out of the tree:
     // each area in turn, in this order (the clips with their notes, then the tempo map, then the chord lane, then the MIDI
-    // links: none reads another's); then the keeper, from here on.
+    // links, then the curves: none reads another's); then the keeper, from here on.
     ClipsKeeper::adopt (*this, song);
     TempoMapKeeper::adopt (*this, song);
     ChordLaneKeeper::adopt (*this, song);
     MidiLinksKeeper::adopt (*this, song);
+    CurvesKeeper::adopt (*this, song);
     keeper = std::make_unique<Keeper> (*this, song);
 }
 
@@ -179,7 +166,7 @@ bool isHeardAsKept (const juce::ValueTree& element)
 {
     return isHeardAsTempoMap (element)      // the song's TEMPOMAP, or an element in it
            || isHeardAsChordLane (element)  // the song's CHORDLANE, or an element in it
-           || isHeardAsCurves (element)     // a CURVE of the song's AUTOMATION, or an element in one
+           || isHeardAsCurves (element)     // the song's AUTOMATION, or an element in it
            || isHeardAsMidiLinks (element); // the song's MIDILINKS, or an element in it
 }
 
@@ -187,7 +174,7 @@ bool isHeardAsKept (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
     return isHeardAsTempoMap (parent, child)      // the TEMPOMAP itself, or a child of an element in it
            || isHeardAsChordLane (parent, child)  // a child of the CHORDLANE or of an element in it (not the CHORDLANE itself)
-           || isHeardAsCurves (parent, child)     // a CURVE added to the AUTOMATION or taken out, or a child of one's element
+           || isHeardAsCurves (parent, child)     // the AUTOMATION itself, or a child of an element in it
            || isHeardAsMidiLinks (parent, child); // a child of the MIDILINKS or of an element in it (not the MIDILINKS itself)
 }
 } // namespace phazite

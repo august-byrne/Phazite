@@ -212,9 +212,6 @@ namespace
         {
             for (auto element = changed; element.isValid(); element = element.getParent())
             {
-                if (element.hasType (schema::AUTOMATION))
-                    return add (pending.automation);
-
                 if (element.hasType (schema::MIDILINKS))
                     return add (pending.midiLinks);
 
@@ -267,9 +264,7 @@ namespace
         // A child that is gone has no parent to say where it was: its own type does, or else its old parent's.
         void markRemoved (const juce::ValueTree& parent, const juce::ValueTree& child)
         {
-            if (child.hasType (schema::AUTOMATION))
-                add (pending.automation);
-            else if (child.hasType (schema::MIDILINKS))
+            if (child.hasType (schema::MIDILINKS))
                 add (pending.midiLinks);
             else if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO) || child.hasType (schema::MODULATES))
                 add (pending.modulation);

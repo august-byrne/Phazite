@@ -3,7 +3,6 @@
 #include "engine/automation/Curve.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
@@ -16,8 +15,8 @@
 #include "model/versions/internal/SongPieces.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
-#include <numeric>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -49,7 +48,7 @@ namespace
         return engine::Curve (std::move (points));
     }
 
-    // A device's ID as a lane or a curve keeps it, and the other way.
+    // A device's ID as a lane keeps it, and the other way.
     DeviceID readDeviceID (const juce::var& id)
     {
         return DeviceID::fromRaw ((std::uint64_t) (juce::int64) id);
@@ -200,91 +199,7 @@ namespace
     }
 
     //==========================================================================
-    // The song's curves (Schema.h: AUTOMATION).
-
-    // A parameter's curve among the song's, the first should there be two, by its parameter as the values read it
-    // (CurveValues.h: readCurveParameter()), so that what finds a curve by its parameter finds the one the values hold for it.
-    juce::ValueTree findCurveIn (const juce::ValueTree& automation, const ParameterRef& ref)
-    {
-        for (const auto& curve : automation)
-            if (curve.hasType (schema::CURVE) && curve[schema::curveParameter].toString() == ref.parameter
-                && readCurveParameter (curve) == ref)
-                return curve;
-
-        return {};
-    }
-
-    // The song's tree written as the song is written now: in the step in progress, or outside the history.
-    juce::UndoManager* getTreeUndo (Song& song)
-    {
-        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-    }
-
-    // A point's element made to hold a point as automation's code writes one (Automation.h: setCurveValue()): its beat and value,
-    // and its bend only while it isn't 0, each written only where it would write another text. Whether it wrote.
-    bool writePoint (juce::ValueTree element, const PointValue& point, juce::UndoManager* undo)
-    {
-        auto wrote = false;
-        const auto write = [&] (const juce::Identifier& property, const juce::var& value)
-        {
-            if (const auto* held = element.getPropertyPointer (property); held == nullptr || ! isSameValue (*held, value))
-            {
-                element.setProperty (property, value, undo);
-                wrote = true;
-            }
-        };
-
-        write (schema::pointBeat, point.beat.inBeats());
-        write (schema::pointValue, point.position);
-
-        if (! juce::exactlyEqual (point.curve, 0.0f))
-            write (schema::pointCurve, point.curve);
-        else if (element.hasProperty (schema::pointCurve))
-        {
-            element.removeProperty (schema::pointCurve, undo);
-            wrote = true;
-        }
-
-        return wrote;
-    }
-
-    // The song's curves on its tree, each parameter's once (the first), in their order, and whether each holds points: what
-    // getCurveKeys() and getCurveKeysWithPoints() read until the switch (roadmap step S5.20) gives them the area's order.
-    // Each parameter once only for a tree not made consistent, which holds two curves of one (tests/CurveValuesTests.cpp):
-    // the switch, whose area holds one curve for a parameter, removes the rule.
-    struct CurveKey
-    {
-        ParameterRef parameter;
-        bool hasPoints = false;
-    };
-
-    std::vector<CurveKey> readCurveKeys (const Song& song)
-    {
-        std::vector<CurveKey> keys;
-        std::vector<size_t> byParameter; // the keys' places, sorted by their parameters: each parameter once
-        const auto isBefore = [&keys] (size_t a, const ParameterRef& b)
-        {
-            const auto& first = keys[a].parameter;
-            return first.device.getRaw() != b.device.getRaw() ? first.device.getRaw() < b.device.getRaw() : first.parameter < b.parameter;
-        };
-
-        for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
-        {
-            if (! curve.hasType (schema::CURVE))
-                continue;
-
-            const auto parameter = readCurveParameter (curve);
-            const auto place = std::lower_bound (byParameter.begin(), byParameter.end(), parameter, isBefore);
-
-            if (place != byParameter.end() && keys[*place].parameter == parameter)
-                continue;
-
-            byParameter.insert (place, keys.size());
-            keys.push_back ({ parameter, holdsPoints (curve) });
-        }
-
-        return keys;
-    }
+    // The song's curves (SongValues.h: SongValues::curves).
 
 #if JUCE_DEBUG
     // The curves a SongCurve edits now, on this thread: one at a time for a parameter of a song.
@@ -295,16 +210,14 @@ namespace
     }
 #endif
 
-    // A parameter's curve in the song, edited point by point, in beats: an edit of its value (CurveValues.h), read once as
-    // the edit is made, which commit() writes into the song once, with the song's undo manager, and which every edit commits
+    // A parameter's curve in the song, edited point by point, in beats: an edit of its value (CurveValues.h), taken from the
+    // curves' area as the edit is made, which commit() gives the area once (SongValues.h: setCurves(), in the mode of the
+    // moment: one value for the whole edit, which the step's one action of the area holds), and which every edit commits
     // before it ends. Points keep time order, one added at a beat that has points going after them; a curve left without
-    // points goes, and a point added to a parameter without a curve makes one, after the song's others. One at a time for a
-    // parameter (asserted): each holds the curve as it found it.
-    //
-    // While the song's tree holds the curves (until the switch of roadmap step S5.20 gives them the curves' area), commit()
-    // writes the curve's element by what the edit did, in the order it did it (its log), each change as the element's own
-    // change: a point the edit keeps keeps its element, which the selection of points holds (Selection: getPoints()), and the
-    // undo step holds the actions those changes make, one for each, none for a property set to what it holds.
+    // points goes, and a point added to a parameter without a curve makes one, after the song's others (one emptied and
+    // filled again in one edit too, as its element once went and came back). A point the edit keeps keeps its key, which the
+    // selection of points holds (Selection: getPointKeys()); one it makes gets a new one (SongValues.h: givePointKey()). One
+    // at a time for a parameter (asserted): each holds the curve as it found it.
     class SongCurve
     {
     public:
@@ -312,10 +225,10 @@ namespace
             : song (s),
               ref (r)
         {
-            if (auto found = getCurveValue (song, ref))
+            if (const auto* found = findCurve (song, ref))
             {
-                value = std::move (*found);
-                inSong = true;
+                value = *found;
+                inSong = wasInSong = true;
             }
 
 #if JUCE_DEBUG
@@ -328,7 +241,7 @@ namespace
 
         ~SongCurve()
         {
-            jassert (log.empty()); // every edit commits what it did
+            jassert (! edited); // every edit commits what it did
 
 #if JUCE_DEBUG
             auto& open = getCurvesOpen();
@@ -411,10 +324,11 @@ namespace
             if (! ref.isValid())
                 return -1;
 
+            // A curve gone in this edit made again: after the song's others, as a curve the song hasn't is made.
             if (! inSong)
             {
                 inSong = true;
-                log.push_back ({ Change::made, -1, {} });
+                madeAgain = wasInSong;
             }
 
             // After those at or before its beat: where the first point after it is.
@@ -428,29 +342,29 @@ namespace
                 ++index;
             }
 
-            const PointValue point { BeatPosition::fromBeats (std::max (0.0, beat.inBeats())), position, readCurve (curve) };
+            auto* values = song.getValues();
+            const PointValue point { BeatPosition::fromBeats (std::max (0.0, beat.inBeats())), position, readCurve (curve),
+                                     values != nullptr ? values->givePointKey() : std::uint64_t { 0 } };
             value.points = value.points.insert (index, point);
-            log.push_back ({ Change::added, (int) index, point });
+            edited = true;
             return (int) index;
         }
 
-        // An index the curve hasn't (asserted) changes nothing, as the element's missing child did.
+        // An index the curve hasn't (asserted) changes nothing.
         void removePoint (int index)
         {
             if (! hasPoint (index))
                 return;
 
             value.points = value.points.erase ((size_t) index);
-            log.push_back ({ Change::removed, index, {} });
+            edited = true;
 
             // A curve without points goes.
             if (value.points.empty())
-            {
                 inSong = false;
-                log.push_back ({ Change::erased, -1, {} });
-            }
         }
 
+        // A point moved or bent keeps its key.
         void setPoint (int index, BeatPosition beat, float position)
         {
             if (! hasPoint (index))
@@ -460,7 +374,7 @@ namespace
             point.beat = BeatPosition::fromBeats (std::max (0.0, beat.inBeats()));
             point.position = position;
             value.points = value.points.set ((size_t) index, point);
-            log.push_back ({ Change::moved, index, point });
+            edited = true;
         }
 
         void setCurve (int index, float curve)
@@ -471,82 +385,34 @@ namespace
             auto point = value.points[(size_t) index];
             point.curve = readCurve (curve);
             value.points = value.points.set ((size_t) index, point);
-            log.push_back ({ Change::bent, index, point });
+            edited = true;
         }
 
-        // What the edit did, written into the song (above): each change in its order, on the curve's element.
+        // What the edit did, given the song's curves' area (above): the curve as the edit has it, in its place, or after the
+        // others where it is new or was made again, or taken out where it is gone; nothing where nothing was edited, and no
+        // step where the curve is as it was (SongValues.h: setCurves()). A song that holds no values has no curves to edit.
         void commit()
         {
-            if (log.empty())
+            if (! std::exchange (edited, false))
                 return;
 
-            auto* undo = &song.getUndoManager();
-            auto element = findCurveState (song, ref);
+            auto* values = song.getValues();
+            jassert (values != nullptr);
 
-            // The log's indices are the value's, which are the element's children's as long as every child of the CURVE is a
-            // POINT with a value (readCurveValue() leaves out any other): the loader makes it so as the song opens
-            // (model/project/Project.cpp: keepCurves()), and the read-back below checks it in Debug.
-            for (const auto& change : log)
-            {
-                switch (change.kind)
-                {
-                    case Change::made:
-                    {
-                        auto automation = song.getState().getOrCreateChildWithName (schema::AUTOMATION, undo);
-                        element = juce::ValueTree (schema::CURVE);
-                        element.setProperty (schema::curveDevice, writeDeviceID (ref.device), nullptr);
-                        element.setProperty (schema::curveParameter, ref.parameter, nullptr);
-                        automation.appendChild (element, undo);
-                        break;
-                    }
+            if (values == nullptr)
+                return;
 
-                    case Change::erased:
-                        element.getParent().removeChild (element, undo);
-                        element = {};
-                        break;
+            const auto& curves = values->curves.get();
 
-                    case Change::added:
-                    {
-                        juce::ValueTree point (schema::POINT);
-                        point.setProperty (schema::pointBeat, change.point.beat.inBeats(), nullptr);
-                        point.setProperty (schema::pointValue, change.point.position, nullptr);
+            if (! inSong)
+                values->setCurves (song, withoutCurve (curves, ref));
+            else if (madeAgain)
+                values->setCurves (song, withCurve (withoutCurve (curves, ref), ref, value));
+            else
+                values->setCurves (song, withCurve (curves, ref, value));
 
-                        if (! juce::exactlyEqual (change.point.curve, 0.0f))
-                            point.setProperty (schema::pointCurve, change.point.curve, nullptr);
-
-                        element.addChild (point, change.index, undo);
-                        break;
-                    }
-
-                    case Change::removed:
-                        element.removeChild (change.index, undo);
-                        break;
-
-                    case Change::moved:
-                    {
-                        auto point = element.getChild (change.index);
-                        point.setProperty (schema::pointBeat, change.point.beat.inBeats(), undo);
-                        point.setProperty (schema::pointValue, change.point.position, undo);
-                        break;
-                    }
-
-                    case Change::bent:
-                    {
-                        if (auto point = element.getChild (change.index); juce::exactlyEqual (change.point.curve, 0.0f))
-                            point.removeProperty (schema::pointCurve, undo);
-                        else
-                            point.setProperty (schema::pointCurve, change.point.curve, undo);
-
-                        break;
-                    }
-                }
-            }
-
-            log.clear();
-
-            // The element holds what the value does, its points read back.
-            jassert (element.isValid() == inSong);
-            jassert (! inSong || readCurveValue (element) == value);
+            wasInSong = inSong;
+            madeAgain = false;
         }
 
         // The points in a range that change nothing: those whose neighbours have the same value, or the next of which is
@@ -582,32 +448,15 @@ namespace
         }
 
     private:
-        // A change the edit made, by the point's index as it was made: the curve made, or erased; a point added (with its
-        // values), removed, moved (its beat and value set) or bent (its curve set).
-        struct Change
-        {
-            enum Kind
-            {
-                made,
-                erased,
-                added,
-                removed,
-                moved,
-                bent
-            };
-
-            Kind kind;
-            int index = -1;
-            PointValue point {};
-        };
-
         Song& song;
         const ParameterRef ref;
-        CurveValue value;    // the curve as the edit has it now
-        bool inSong = false; // whether the song has a curve for the parameter, as the edit has it now
-        std::vector<Change> log;
+        CurveValue value;       // the curve as the edit has it now
+        bool inSong = false;    // whether the song has a curve for the parameter, as the edit has it now
+        bool wasInSong = false; // whether it had one as the edit found it, or as it last committed
+        bool madeAgain = false; // gone and made again since: after the song's others
+        bool edited = false;    // since it last committed
 
-        // A bend as the element holds it: 0, straight, written as none, reads as 0.
+        // A bend as a file holds it: 0, straight, written as none, reads as 0.
         static float readCurve (float curve) { return juce::exactlyEqual (curve, 0.0f) ? 0.0f : curve; }
 
         // Whether the curve has a point at an index; an edit asks only of those it has (asserted).
@@ -1036,7 +885,7 @@ std::vector<AutomationPoint> getPoints (const Song& song, const ParameterRef& pa
 {
     std::vector<AutomationPoint> points;
 
-    if (const auto curve = getCurveValue (song, parameter))
+    if (const auto* curve = findCurve (song, parameter))
     {
         points.reserve (curve->points.size());
 
@@ -1049,9 +898,8 @@ std::vector<AutomationPoint> getPoints (const Song& song, const ParameterRef& pa
 
 bool hasPoints (const Song& song, const ParameterRef& parameter)
 {
-    // Without its points read: on the tree, whether its element holds one (CurveValues.h: holdsPoints()); once the area holds
-    // the curves (roadmap step S5.20), whether its value has any.
-    return holdsPoints (findCurveState (song, parameter));
+    const auto* curve = findCurve (song, parameter);
+    return curve != nullptr && ! curve->points.empty();
 }
 
 std::vector<float> getPositions (const Song& song, const ParameterRef& parameter, BeatRange range, int numValues)
@@ -1070,9 +918,9 @@ std::vector<float> getPositions (const Song& song, const ParameterRef& parameter
 {
     // As Phazite's engine plays the song's points.
     std::vector<float> positions;
-    const auto value = beats.empty() ? std::nullopt : getCurveValue (song, parameter);
+    const auto* value = beats.empty() ? nullptr : findCurve (song, parameter);
 
-    if (! value.has_value() || value->points.empty())
+    if (value == nullptr || value->points.empty())
         return positions;
 
     const auto curve = makeEngineCurve (*value);
@@ -1239,9 +1087,8 @@ void moveOnlyPoint (Song& song, const ParameterRef& parameter, float value)
     if (auto* session = findSession (song); session != nullptr && session->getWriter().isWriting (parameter))
         return;
 
-    // Every value set by hand comes here: a curve of many points isn't read into a value for each, while the tree holds the
-    // curves (its element's points counted; once the area holds them, its value is there without a read).
-    if (findCurveState (song, parameter).getNumChildren() != 1)
+    // Every value set by hand comes here: its curve looked at in place, its points counted.
+    if (const auto* held = findCurve (song, parameter); held == nullptr || held->points.size() != 1)
         return;
 
     SongCurve curve (song, parameter);
@@ -1394,150 +1241,28 @@ void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, Bea
 }
 
 //==============================================================================
-juce::ValueTree findCurveState (const Song& song, const ParameterRef& parameter)
-{
-    if (! parameter.isValid())
-        return {};
-
-    return findCurveIn (song.getState().getChildWithName (schema::AUTOMATION), parameter);
-}
-
-ParameterRef getCurveParameter (const juce::ValueTree& curve)
-{
-    return readCurveParameter (curve);
-}
-
 bool setCurveValue (Song& song, const ParameterRef& parameter, const CurveValue& value)
 {
-    if (! parameter.isValid())
-        return false;
-
-    auto* undo = getTreeUndo (song);
-    auto curve = findCurveState (song, parameter);
-
-    // One the song hasn't: made whole, then added after the others, in one action (the song's AUTOMATION first where it has
-    // none, in one of its own).
-    if (! curve.isValid())
-    {
-        juce::ValueTree made (schema::CURVE);
-        made.setProperty (schema::curveDevice, writeDeviceID (parameter.device), nullptr);
-        made.setProperty (schema::curveParameter, parameter.parameter, nullptr);
-
-        for (const auto& point : value.points)
-        {
-            juce::ValueTree element (schema::POINT);
-            writePoint (element, point, nullptr);
-            made.appendChild (element, nullptr);
-        }
-
-        song.getState().getOrCreateChildWithName (schema::AUTOMATION, undo).appendChild (made, undo);
-        return true;
-    }
-
-    // One it has, by its points' places: those past the value's last out, the last first; those at a place both have made
-    // the value's, each on its element; the value's past the curve's last added. (Its children are its points: the loader
-    // takes any other out as the song opens, and every writer here writes points alone.)
-    const auto numPoints = (int) value.points.size();
-    auto wrote = false;
-
-    for (auto i = curve.getNumChildren(); --i >= numPoints;)
-    {
-        curve.removeChild (i, undo);
-        wrote = true;
-    }
-
-    for (int i = 0; i < numPoints; ++i)
-    {
-        const auto& point = value.points[(size_t) i];
-
-        if (i < curve.getNumChildren())
-        {
-            wrote = writePoint (curve.getChild (i), point, undo) || wrote;
-            continue;
-        }
-
-        juce::ValueTree element (schema::POINT);
-        writePoint (element, point, nullptr);
-        curve.appendChild (element, undo);
-        wrote = true;
-    }
-
-    return wrote;
+    auto* values = song.getValues();
+    return values != nullptr && parameter.isValid() && values->setCurve (song, parameter, value);
 }
 
 bool eraseCurve (Song& song, const ParameterRef& parameter)
 {
-    auto curve = findCurveState (song, parameter);
-
-    if (! curve.isValid())
-        return false;
-
-    curve.getParent().removeChild (curve, getTreeUndo (song));
-    return true;
+    auto* values = song.getValues();
+    return values != nullptr && values->eraseCurve (song, parameter);
 }
 
 void renameCurve (Song& song, const ParameterRef& from, const ParameterRef& to)
 {
-    // What hears the curves change told both at once, through the song's values.
     if (auto* values = song.getValues())
-        return values->renameCurve (song, from, to);
-
-    // A song that holds no values (a copy's: none hears its curves' parameters): its element's device and parameter written.
-    auto curve = findCurveState (song, from);
-    const auto taken = findCurveState (song, to).isValid();
-    jassert (from == to || ! taken);
-
-    if (! curve.isValid() || from == to || taken)
-        return;
-
-    auto* undo = getTreeUndo (song);
-    curve.setProperty (schema::curveDevice, writeDeviceID (to.device), undo);
-    curve.setProperty (schema::curveParameter, to.parameter, undo);
+        values->renameCurve (song, from, to);
 }
 
 bool setCurveOrder (Song& song, const std::vector<ParameterRef>& order)
 {
-    // Each moved to the next place a curve is in (among the AUTOMATION's children, those that are no curve stay where they
-    // are), as a version's order is made the song's (model/versions/ApplySong.cpp).
-    auto automation = song.getState().getChildWithName (schema::AUTOMATION);
-    auto* undo = getTreeUndo (song);
-    auto place = 0;
-    auto wrote = false;
-
-    for (const auto& parameter : order)
-    {
-        const auto curve = findCurveIn (automation, parameter);
-
-        if (! curve.isValid() || automation.indexOf (curve) < place)
-            continue; // none, or put in its place already (a parameter named twice)
-
-        while (place < automation.getNumChildren() && ! automation.getChild (place).hasType (schema::CURVE))
-            ++place;
-
-        if (const auto index = automation.indexOf (curve); index != place)
-        {
-            automation.moveChild (index, place, undo);
-            wrote = true;
-        }
-
-        ++place;
-    }
-
-    return wrote;
-}
-
-bool eraseAutomation (Song& song)
-{
-    // In one action, its curves with it: what hears the curves change is told every one's parameter at once, as the element
-    // goes and as an Undo brings it back (CurvesArea.cpp: the keeper's childRemoved() and childAdded()).
-    auto state = song.getState();
-    const auto automation = state.getChildWithName (schema::AUTOMATION);
-
-    if (! automation.isValid())
-        return false;
-
-    state.removeChild (automation, getTreeUndo (song));
-    return true;
+    auto* values = song.getValues();
+    return values != nullptr && values->setCurveOrder (song, order);
 }
 
 AreaChoice chooseCurveClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
@@ -1547,18 +1272,19 @@ AreaChoice chooseCurveClash (Song& song, const MergeClash& clash, int value, con
     // curve made the song's by its parameter (setCurveValue(), read as the song holds a curve: CurveValues.h,
     // readHeldCurve()), or taken out where that side had none (eraseCurve()), in the choice's step. Refused (nothing written)
     // for any other clash through a curve, which a merge of two songs Phazite holds never makes, but a commit's song may come
-    // from anyone: a property, an element in it, an element of another type or of another parameter, one that stands in for
-    // what its version couldn't read (SongPieces.h: holdsStandIn()), and a song without automation to choose it in (as the
-    // tree's choice found no place for it).
-    if (clash.path.size() < 2 || ! clash.path[0].startsWith (schema::AUTOMATION.toString() + ":")
-        || ! clash.path[1].startsWith (schema::CURVE.toString() + ":"))
+    // from anyone: a property, the AUTOMATION itself (the curves' place, which every song that holds its values has), an
+    // element in a curve, an element of another type or of another parameter, one that stands in for what its version
+    // couldn't read (SongPieces.h: holdsStandIn()), and a song that holds no values to choose it in.
+    if (clash.path.isEmpty() || ! clash.path[0].startsWith (schema::AUTOMATION.toString() + ":"))
         return AreaChoice::notTheArea;
+
+    if (clash.path.size() != 2 || ! clash.path[1].startsWith (schema::CURVE.toString() + ":"))
+        return AreaChoice::refused;
 
     const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
     const auto parameter = readCurveKeyText (clash.path[1].fromFirstOccurrenceOf (":", false, false));
 
-    if (clash.property.isValid() || clash.path.size() != 2 || ! juce::isPositiveAndBelow (value, 3) || ! parameter.has_value()
-        || ! song.getState().getChildWithName (schema::AUTOMATION).isValid())
+    if (clash.property.isValid() || ! juce::isPositiveAndBelow (value, 3) || ! parameter.has_value() || song.getValues() == nullptr)
         return AreaChoice::refused;
 
     const auto& chosen = *elements[value];
@@ -1574,78 +1300,71 @@ AreaChoice chooseCurveClash (Song& song, const MergeClash& clash, int value, con
     return AreaChoice::chosen;
 }
 
-SongCurves getCurvesValue (const Song& song)
+const SongCurves& getCurvesValue (const Song& song)
 {
-    return readCurvesValue (song.getState().getChildWithName (schema::AUTOMATION));
+    static const SongCurves none;
+    const auto* values = song.getValues();
+    return values != nullptr ? values->curves.get() : none;
+}
+
+const CurveValue* findCurve (const Song& song, const ParameterRef& parameter)
+{
+    return getCurvesValue (song).find (parameter);
 }
 
 std::vector<ParameterRef> getCurveKeys (const Song& song)
 {
-    std::vector<ParameterRef> parameters;
-
-    for (const auto& key : readCurveKeys (song))
-        parameters.push_back (key.parameter);
-
-    return parameters;
+    const auto& order = getCurvesValue (song).order;
+    return { order.begin(), order.end() };
 }
 
 std::vector<ParameterRef> getCurveKeysWithPoints (const Song& song)
 {
+    const auto& curves = getCurvesValue (song);
     std::vector<ParameterRef> parameters;
 
-    for (const auto& key : readCurveKeys (song))
-        if (key.hasPoints)
-            parameters.push_back (key.parameter);
+    for (const auto& parameter : curves.order)
+        if (const auto* curve = curves.find (parameter); curve != nullptr && ! curve->points.empty())
+            parameters.push_back (parameter);
 
     return parameters;
 }
 
 std::optional<CurveValue> getCurveValue (const Song& song, const ParameterRef& parameter)
 {
-    if (const auto curve = findCurveState (song, parameter); curve.isValid())
-        return readCurveValue (curve);
+    if (const auto* curve = findCurve (song, parameter))
+        return *curve;
 
     return std::nullopt;
 }
 
-std::vector<CurveValue> getPlayedCurves (const Song& song, const std::vector<ParameterRef>& parameters)
+std::vector<std::uint64_t> getPointKeys (const Song& song, const ParameterRef& parameter)
 {
-    std::vector<CurveValue> played (parameters.size());
+    std::vector<std::uint64_t> keys;
 
-    if (parameters.empty())
-        return played;
-
-    // Their places by their parameters, so that each curve of the song finds its own in one look.
-    std::vector<size_t> byParameter (parameters.size());
-    std::iota (byParameter.begin(), byParameter.end(), size_t { 0 });
-    const auto isBefore = [] (const ParameterRef& a, const ParameterRef& b)
-    { return a.device.getRaw() != b.device.getRaw() ? a.device.getRaw() < b.device.getRaw() : a.parameter < b.parameter; };
-    std::sort (byParameter.begin(), byParameter.end(), [&] (size_t a, size_t b) { return isBefore (parameters[a], parameters[b]); });
-
-    for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+    if (const auto* curve = findCurve (song, parameter))
     {
-        if (! curve.hasType (schema::CURVE))
-            continue;
+        keys.reserve (curve->points.size());
 
-        const auto parameter = readCurveParameter (curve);
-        const auto place = std::lower_bound (byParameter.begin(), byParameter.end(), parameter,
-                                             [&] (size_t a, const ParameterRef& b) { return isBefore (parameters[a], b); });
-
-        // Each place of that parameter (a parameter asked for twice gets it twice): the last of its curves with points, which
-        // only a tree not made consistent holds more than one of (tests/CurveValuesTests.cpp); the switch of roadmap step
-        // S5.20, whose area holds one curve for a parameter, removes the rule.
-        for (auto each = place; each != byParameter.end() && parameters[*each] == parameter; ++each)
-            if (auto value = readCurveValue (curve); ! value.points.empty())
-                played[*each] = std::move (value);
+        for (const auto& point : curve->points)
+            keys.push_back (point.key);
     }
 
-    return played;
+    return keys;
 }
 
 juce::ValueTree copyWholeCurve (const Song& song, const ParameterRef& parameter)
 {
-    const auto curve = findCurveState (song, parameter);
-    return curve.isValid() ? curve.createCopy() : juce::ValueTree();
+    const auto* curve = findCurve (song, parameter);
+
+    if (curve == nullptr)
+        return {};
+
+    juce::ValueTree automation (schema::AUTOMATION);
+    writeCurveElement (parameter, *curve, automation);
+    auto element = automation.getChild (0);
+    automation.removeChild (element, nullptr);
+    return element;
 }
 
 void insertAutomationTime (Song& song, BeatPosition at, BeatDuration length)
@@ -1776,7 +1495,7 @@ void forgetCurvesOfGoneDevices (Song& song)
     auto automation = song.getState().getChildWithName (schema::AUTOMATION);
 
     for (auto i = automation.getNumChildren(); --i >= 0;)
-        if (! isCurveOwnerThere (song, getCurveParameter (automation.getChild (i)).device))
+        if (! isCurveOwnerThere (song, readCurveParameter (automation.getChild (i)).device))
             automation.removeChild (i, nullptr);
 }
 
@@ -1893,8 +1612,8 @@ void copyCurves (Song& song, const CopiedIDs& copied)
         if (found == copied.end())
             continue;
 
-        if (const ParameterRef copiedRef { DeviceID::fromRaw (found->second), parameter.parameter };
-            ! findCurveState (song, copiedRef).isValid())
+        // The original's value copied before the set (which moves the area on), its points given new keys there.
+        if (const ParameterRef copiedRef { DeviceID::fromRaw (found->second), parameter.parameter }; findCurve (song, copiedRef) == nullptr)
             if (const auto curve = getCurveValue (song, parameter))
                 setCurveValue (song, copiedRef, *curve);
     }
@@ -1948,57 +1667,24 @@ std::optional<PointSelection> getSelectedPoints (const Selection& selection)
     if (song == nullptr || ! parameter.isValid() || ! isCurveOwnerThere (*song, parameter.device))
         return {};
 
-    // Where each selected point is in its curve now: one that is gone (removed, or its curve with it) is left out. Found
-    // by its beat, as the curve keeps its points in time order, then among those at that beat: not by looking through the
-    // whole curve for each.
-    const auto curve = findCurveState (*song, parameter);
-    const auto numPoints = curve.getNumChildren();
-    const auto beatOf = [&curve] (int index) { return (double) curve.getChild (index)[schema::pointBeat]; };
-    std::uint64_t comparisons = 0;
+    // Where each selected point is in its curve now, by its key: the curve looked up once, and its points walked once, each
+    // looked for among the selected keys (Selection: isPointSelected()); one that is gone (removed, or its curve with it) is
+    // left out. In the curve's order, each once.
+    const auto* curve = findCurve (*song, parameter);
+
+    if (curve == nullptr)
+        return {};
+
     std::vector<int> indices;
+    auto index = 0;
 
-    for (const auto& point : selection.getPoints())
+    for (const auto& point : curve->points)
     {
-        if (! curve.isValid() || point.getParent() != curve)
-            continue;
+        if (selection.isPointSelected (point.key))
+            indices.push_back (index);
 
-        const auto beat = (double) point[schema::pointBeat];
-        auto low = 0, high = numPoints;
-
-        while (low < high)
-        {
-            ++comparisons;
-            const auto middle = low + (high - low) / 2;
-
-            if (beatOf (middle) < beat)
-                low = middle + 1;
-            else
-                high = middle;
-        }
-
-        auto found = -1;
-
-        for (auto index = low; index < numPoints && found < 0 && juce::exactlyEqual (beatOf (index), beat); ++index)
-        {
-            ++comparisons;
-
-            if (curve.getChild (index) == point)
-                found = index;
-        }
-
-        // In its curve, yet not where its beat puts it: points out of their order, which the model doesn't leave them in.
-        if (found < 0)
-        {
-            comparisons += (std::uint64_t) numPoints;
-            found = curve.indexOf (point);
-        }
-
-        indices.push_back (found);
+        ++index;
     }
-
-    Selection::countPointComparisons (comparisons);
-    std::sort (indices.begin(), indices.end());
-    indices.erase (std::unique (indices.begin(), indices.end()), indices.end());
 
     if (indices.empty())
         return {};
@@ -2013,13 +1699,15 @@ void selectPoints (Selection& selection, const ParameterRef& parameter, const st
     if (song == nullptr)
         return;
 
-    const auto curve = findCurveState (*song, parameter);
-    std::vector<juce::ValueTree> points;
+    // The points at those places in the curve now, by their keys.
+    const auto* curve = findCurve (*song, parameter);
+    std::vector<std::uint64_t> keys;
 
-    for (const auto index : getValidIndices (curve.getNumChildren(), indices))
-        points.push_back (curve.getChild (index));
+    if (curve != nullptr)
+        for (const auto index : getValidIndices ((int) curve->points.size(), indices))
+            keys.push_back (curve->points[(size_t) index].key);
 
-    selection.selectPoints (parameter, points);
+    selection.selectPoints (parameter, keys);
 }
 
 //==============================================================================

@@ -49,7 +49,14 @@ bool PointValue::operator== (const PointValue& other) const noexcept
 
 bool CurveValue::operator== (const CurveValue& other) const
 {
-    return isSameAs (other) || points == other.points;
+    if (isSameAs (other))
+        return true;
+
+    if (points.size() != other.points.size())
+        return false;
+
+    pointsRead.fetch_add (points.size(), std::memory_order_relaxed);
+    return points == other.points;
 }
 
 std::size_t ParameterRefHash::operator() (const ParameterRef& parameter) const noexcept
@@ -138,6 +145,27 @@ SongCurves withCurveRenamed (const SongCurves& curves, const ParameterRef& from,
     return changed;
 }
 
+SongCurves withCurveOrder (const SongCurves& curves, const std::vector<ParameterRef>& first)
+{
+    std::vector<ParameterRef> order;
+    order.reserve (curves.order.size());
+
+    for (const auto& parameter : first)
+        if (curves.find (parameter) != nullptr && std::find (order.begin(), order.end(), parameter) == order.end())
+            order.push_back (parameter);
+
+    for (const auto& parameter : curves.order)
+        if (std::find (order.begin(), order.end(), parameter) == order.end())
+            order.push_back (parameter);
+
+    if (std::equal (order.begin(), order.end(), curves.order.begin(), curves.order.end()))
+        return curves;
+
+    auto changed = curves;
+    changed.order = immer::flex_vector<ParameterRef> (order.begin(), order.end());
+    return changed;
+}
+
 bool holdsItsOrder (const SongCurves& curves)
 {
     if (curves.order.size() != curves.curves.size())
@@ -190,7 +218,7 @@ CurveValue readCurveValue (const juce::ValueTree& curve)
     return { points.persistent() };
 }
 
-CurveValue readHeldCurve (const juce::ValueTree& curve)
+CurveValue readHeldCurve (const juce::ValueTree& curve, std::uint64_t* nextKey)
 {
     auto points = immer::flex_vector<PointValue>().transient();
 
@@ -204,10 +232,35 @@ CurveValue readHeldCurve (const juce::ValueTree& curve)
             continue;
 
         points.push_back ({ BeatPosition::fromBeats (readDescribed (child, schema::pointBeat)),
-                            toFloat (readDescribed (child, schema::pointValue)), toFloat (readDescribed (child, schema::pointCurve)) });
+                            toFloat (readDescribed (child, schema::pointValue)), toFloat (readDescribed (child, schema::pointCurve)),
+                            nextKey != nullptr ? (*nextKey)++ : std::uint64_t { 0 } });
     }
 
+    pointsRead.fetch_add (points.size(), std::memory_order_relaxed);
     return { points.persistent() };
+}
+
+SongCurves readHeldCurves (const juce::ValueTree& automation, std::uint64_t& nextKey)
+{
+    SongCurves read;
+    auto curves = read.curves.transient();
+    auto order = read.order.transient();
+
+    for (const auto& child : automation)
+    {
+        if (! child.hasType (schema::CURVE))
+            continue;
+
+        if (const auto parameter = readCurveParameter (child); curves.find (parameter) == nullptr)
+        {
+            curves.set (parameter, readHeldCurve (child, &nextKey));
+            order.push_back (parameter);
+        }
+    }
+
+    read.curves = curves.persistent();
+    read.order = order.persistent();
+    return read;
 }
 
 std::uint64_t countCurvePointsRead() noexcept

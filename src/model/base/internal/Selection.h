@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What is selected in the open project (roadmap A5, 2026-10-30): tracks, clips, sections and devices by their IDs, in the
 // order they were selected; or notes of the clips an editor shows, by their references (a clip's ID and the note's); or
-// automation points of one parameter, by their elements in the song, which a project saves without IDs. One kind of thing
+// automation points of one parameter, by their keys in the song's values, which a project saves without IDs. One kind of thing
 // at a time, as the commands act on one: selecting devices deselects anything else and the other way round, and notes and
 // points are each all that is selected while they are. What is gone (an item, a note, a point) is left out. The model's commands act on what it names in its song (the project context's), and the UI reaches it by IDs
 // (model/arrangement/SongSelection.h). It tells its listeners after each change, on the message thread. Message thread
@@ -11,6 +11,7 @@
 #include "model/base/Song.h"
 #include "model/devices/ParameterRef.h"
 
+#include <cstdint>
 #include <vector>
 
 namespace phazite
@@ -72,16 +73,18 @@ public:
     void selectNotes (const std::vector<NoteRef>&, bool addToSelection = false); // of the note clips
 
     //==============================================================================
-    // Automation points of one parameter, by their elements in the song (Schema.h: POINT), which stay the same while points
-    // are added or removed around them, moved, or undone and redone around them, so that the selection follows them where
-    // indices would go stale; the elements' order and which are still there are the curve's to say
-    // (automation/internal/Automation.h: getSelectedPoints()). Selecting anything else deselects them.
-    const ParameterRef& getPointsParameter() const noexcept { return pointsParameter; }       // invalid while none are selected
-    const std::vector<juce::ValueTree>& getPoints() const noexcept { return points; }         // as selected: some may be gone
-    void selectPoints (const ParameterRef&, const std::vector<juce::ValueTree>& pointStates); // each once, by their beats
+    // Automation points of one parameter, by their keys in the song's curves (CurveValues.h: PointValue), which stay the same
+    // while points are added or removed around them, moved, or undone and redone around them, so that the selection follows
+    // them where indices would go stale; the points' order and which are still there are the curve's to say
+    // (automation/internal/Automation.h: getSelectedPoints()). Selecting anything else deselects them. Whether a key is
+    // selected is looked for among them sorted, not compared with each.
+    const ParameterRef& getPointsParameter() const noexcept { return pointsParameter; }   // invalid while none are selected
+    const std::vector<std::uint64_t>& getPointKeys() const noexcept { return pointKeys; } // as selected: some may be gone
+    bool isPointSelected (std::uint64_t key) const;
+    void selectPoints (const ParameterRef&, const std::vector<std::uint64_t>& keys); // each once (a key of 0 is none)
 
-    // How many times points have been compared with each other or looked for by their beats, here and by
-    // getSelectedPoints(), since Phazite started: for the test that this grows with the points selected, not with their
+    // How many times point keys have been compared with each other, here and as getSelectedPoints() asks
+    // isPointSelected(), since Phazite started: for the test that this grows with the points selected, not with their
     // square. Message thread only.
     static std::uint64_t getPointComparisons() noexcept;
     static void countPointComparisons (std::uint64_t) noexcept;
@@ -109,7 +112,7 @@ public:
         std::vector<ClipID> noteClips;
         std::vector<NoteRef> notes;
         ParameterRef pointsParameter;
-        std::vector<juce::ValueTree> points;
+        std::vector<std::uint64_t> pointKeys;
     };
 
     Kept keep() const;
@@ -122,7 +125,7 @@ private:
     std::vector<ClipID> noteClips;
     std::vector<NoteRef> notes;
     ParameterRef pointsParameter;
-    std::vector<juce::ValueTree> points;
+    std::vector<std::uint64_t> pointKeys, sortedPointKeys; // as selected, and the same sorted (isPointSelected())
 
     bool isThere (Item) const; // whether the song holds it
     bool isThere (SectionID) const;

@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/ChordLaneValue.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -949,6 +951,89 @@ namespace
         if (! holdsOneLinkEach (links))
             problems.push_back ("values: the MIDI links hold two of one controller or of one parameter");
     }
+
+    // The curves' area: no CURVE nor POINT in the song's tree, its AUTOMATION there, one, an empty place (every song that holds
+    // its values has one); the curves' order holding each parameter once, the map the same parameters (CurveValues.h:
+    // holdsItsOrder()), each naming a parameter (a device's ID and a text); every point's numbers within their descriptions'
+    // ranges (Schema.h), read here from the descriptions; and every point's key one the song gave (none is 0, each below the
+    // song's next), each once in the song. Points out of time order are no problem (a file from others may hold them so, and
+    // they are kept). That each names a parameter the song has is the rule above, on the song whole (checkValues()'s POINT).
+    void checkCurvesValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> findCurves = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::CURVE) || child.hasType (schema::POINT))
+                    problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
+
+                findCurves (child);
+            }
+        };
+
+        findCurves (song.getState());
+
+        if (const auto element = song.getState().getChildWithName (schema::AUTOMATION); ! element.isValid())
+            problems.push_back ("values: the song has no AUTOMATION, the place of its curves");
+        else if (element.getNumChildren() > 0 || element.getNumProperties() > 0)
+            problems.push_back ("values: the song's AUTOMATION isn't an empty place for its curves");
+
+        // One place: a second would have the curves written into it too (the keeper refuses one: CurvesArea.cpp).
+        auto numAutomations = 0;
+
+        for (const auto& child : song.getState())
+            numAutomations += child.hasType (schema::AUTOMATION) ? 1 : 0;
+
+        if (numAutomations > 1)
+            problems.push_back ("values: the song has more than one AUTOMATION");
+
+        const auto& curves = values.curves.get();
+
+        if (! holdsItsOrder (curves))
+            problems.push_back ("values: the curves' order and their map don't hold the same parameters, each once");
+
+        const auto isWithin = [] (double number, const schema::PropertyDescription& property)
+        {
+            const auto& range = property.getRange();
+            return std::isfinite (number) && (! range.has_value() || (number >= range->low && number <= range->high));
+        };
+
+        std::vector<std::uint64_t> keys;
+
+        for (const auto& parameter : curves.order)
+        {
+            const auto* curve = curves.find (parameter);
+            const auto name = getCurveKeyText (parameter).toStdString();
+
+            if (! parameter.device.isValid() || parameter.parameter.isEmpty())
+                problems.push_back ("values: the curve " + name + " names no parameter");
+
+            if (curve == nullptr)
+                continue;
+
+            size_t place = 0;
+
+            for (const auto& point : curve->points)
+            {
+                if (! isWithin (point.beat.inBeats(), schema::pointBeat) || ! isWithin ((double) point.position, schema::pointValue)
+                    || ! isWithin ((double) point.curve, schema::pointCurve))
+                    problems.push_back ("values: the curve " + name + "'s point " + std::to_string (place)
+                                        + " holds a number outside its description's range");
+
+                if (point.key == 0 || point.key >= values.getNextPointKey())
+                    problems.push_back ("values: the curve " + name + "'s point " + std::to_string (place)
+                                        + " holds a key the song didn't give");
+
+                keys.push_back (point.key);
+                ++place;
+            }
+        }
+
+        std::sort (keys.begin(), keys.end());
+
+        if (std::adjacent_find (keys.begin(), keys.end()) != keys.end())
+            problems.push_back ("values: two of the song's points hold one key");
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -960,12 +1045,13 @@ std::vector<std::string> findValueProblems (const Song& song)
         return problems;
 
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
-    // lane, the MIDI links.
+    // lane, the MIDI links, the curves.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
     checkChordLaneValue (song, *values, problems);
     checkMidiLinksValue (song, *values, problems);
+    checkCurvesValue (song, *values, problems);
     return problems;
 }
 
@@ -994,6 +1080,10 @@ Song::Ptr copyAsOpened (const Song& song)
 {
     Song::Ptr copy (new Song (phazite::test::copyWholeSong (song)));
     forgetCurvesOfGoneDevices (*copy);
+
+    // A song left without curves is written without an AUTOMATION (CurvesArea.h: writeCurvesIn()), as the song opened is.
+    if (auto automation = copy->getState().getChildWithName (schema::AUTOMATION); automation.isValid() && automation.getNumChildren() == 0)
+        copy->getState().removeChild (automation, nullptr);
     copy->getState().removeProperty (schema::playStart, nullptr);
     std::set<std::uint64_t> items;
     findIDProblems (copy->getState(), &items);

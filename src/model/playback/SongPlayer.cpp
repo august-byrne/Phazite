@@ -332,18 +332,15 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
     // The clips and their notes are values beside the tree, heard by clipsChanged() and clipNotesChanged(); the tempo map is
     // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsKept()), which marks
     // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats); the curves by
-    // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter, and the song's AUTOMATION itself
-    // changes nothing that plays. In a channel (a track, a folder, a return or the master), its devices' values are read
-    // again only for what can change them: a change at or under a device, a container, a chain or a modulator, or an element
-    // of the channel added, removed or moved; not the channel's own properties (its height, mute, solo, volume, pan), which no
-    // device reads, nor a plug-in's own values (VALUE), which the plug-in keeps, the engine reading none.
+    // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter. In a channel (a track, a folder, a
+    // return or the master), its devices' values are read again only for what can change them: a change at or under a
+    // device, a container, a chain or a modulator, or an element of the channel added, removed or moved; not the channel's
+    // own properties (its height, mute, solo, volume, pan), which no device reads, nor a plug-in's own values (VALUE), which
+    // the plug-in keeps, the engine reading none.
     auto inDevice = structure;
 
     for (auto element = changed; element.isValid(); element = element.getParent())
     {
-        if (element.hasType (schema::AUTOMATION))
-            return;
-
         // A device's sounds (a pad's, an oscillator's table, a sampler's): loaded again by a kept node (getDevice()); one set by
         // hand (a property of the SOUNDS element), unless its session loaded it at once (takeValue()).
         if (element.hasType (schema::SOUNDS) && element.getParent().hasType (schema::DEVICE))
@@ -398,7 +395,6 @@ void SongPlayer::markTracksIn (const juce::ValueTree& element)
     if (element.hasType (schema::MASTER))
         changes.channels.insert (0);
 
-    // (The curves of an AUTOMATION added: curvesChanged().)
     if (element.hasType (schema::TRACK) || element.hasType (schema::TRACKS) || element.hasType (schema::PHAZITE))
         for (const auto& child : element)
             if (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
@@ -415,8 +411,7 @@ void SongPlayer::markSoundsIn (const juce::ValueTree& element)
         changes.sounds.insert (getID (element, schema::deviceID));
 
     for (const auto& child : element)
-        if (! child.hasType (schema::AUTOMATION))
-            markSoundsIn (child);
+        markSoundsIn (child);
 }
 
 void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
@@ -1879,9 +1874,8 @@ bool SongPlayer::isMoved (const ParameterRef& parameter) const
 void SongPlayer::readCurves()
 {
     // Each parameter's curve kept from the plan before while nothing of it changed (known bug 124: every plan read all the
-    // song's automation again), the others read from the song's curves as values (Automation.h: getCurveKeys(), then
-    // getPlayedCurves() for those it reads, at once). Should a song hold two curves for one parameter (a file from others,
-    // before it is made consistent), the last with points plays, kept or read alike.
+    // song's automation again), the others read from the song's curves as values, in place (Automation.h: getCurvesValue(),
+    // which holds one curve for a parameter).
     using Points = std::vector<engine::CurvePoint>;
 
     const auto toPoints = [] (const CurveValue& curve)
@@ -1895,9 +1889,10 @@ void SongPlayer::readCurves()
         return points;
     };
 
-    std::map<CurveKey, ParameterRef> parameters; // the song's curves by their parameters
+    const auto& songCurves = getCurvesValue (song); // nothing sets it while the plan is compiled
+    std::map<CurveKey, ParameterRef> parameters;    // the song's curves by their parameters
 
-    for (const auto& parameter : getCurveKeys (song))
+    for (const auto& parameter : songCurves.order)
         parameters.emplace (CurveKey { parameter.device.getRaw(), parameter.parameter }, parameter);
 
     auto before = std::exchange (curves, {});
@@ -1913,7 +1908,7 @@ void SongPlayer::readCurves()
     };
 
     std::vector<Reading> readings;
-    std::vector<ParameterRef> toRead;
+    std::vector<CurveValue> values; // those read, each a copy that shares its points
     readings.reserve (parameters.size());
 
     for (const auto& [key, parameter] : parameters)
@@ -1924,14 +1919,14 @@ void SongPlayer::readCurves()
 
         if (! reading.kept || reading.checked)
         {
-            reading.read = toRead.size();
-            toRead.push_back (parameter);
+            reading.read = values.size();
+            const auto* curve = songCurves.find (parameter);
+            values.push_back (curve != nullptr ? *curve : CurveValue());
         }
 
         readings.push_back (reading);
     }
 
-    const auto values = getPlayedCurves (song, toRead);
     auto reading = readings.begin();
 
     for (const auto& entry : parameters)

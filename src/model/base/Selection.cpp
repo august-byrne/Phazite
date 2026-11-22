@@ -165,7 +165,8 @@ bool Selection::clearNotesAndPoints()
     const auto had = ! notes.empty() || pointsParameter.isValid();
     notes.clear();
     pointsParameter = {};
-    points.clear();
+    pointKeys.clear();
+    sortedPointKeys.clear();
     return had;
 }
 
@@ -225,7 +226,7 @@ void Selection::deselectAll()
 
 Selection::Kept Selection::keep() const
 {
-    return { items, sections, noteClips, notes, pointsParameter, points };
+    return { items, sections, noteClips, notes, pointsParameter, pointKeys };
 }
 
 void Selection::putBack (const Kept& kept)
@@ -235,7 +236,9 @@ void Selection::putBack (const Kept& kept)
     noteClips = kept.noteClips;
     notes = kept.notes;
     pointsParameter = kept.pointsParameter;
-    points = kept.points;
+    pointKeys = kept.pointKeys;
+    sortedPointKeys = pointKeys;
+    std::sort (sortedPointKeys.begin(), sortedPointKeys.end());
     changed();
 }
 
@@ -255,18 +258,15 @@ int Selection::getNumObjectsSelected() const
         count += countNotesThere (*song, noteClips, notes);
 
     // Points still in the parameter's curve, of a device the song holds, as getSelectedPoints() (automation/internal/
-    // Automation.h) finds them.
-    if (auto* song = getSong(); song != nullptr && ! points.empty())
+    // Automation.h) finds them: the curve's points walked once, each key looked for among those selected.
+    if (auto* song = getSong(); song != nullptr && ! pointKeys.empty())
     {
-        // The points are elements still (the selection follows them through edits and undo until the curves are the area's,
-        // roadmap step S5.20), each curve's parameter read as the values read it (CurveValues.h: readCurveParameter()).
-        const auto automation = song->getState().getChildWithName (schema::AUTOMATION);
-        const auto isTheCurve = [&] (const juce::ValueTree& curve)
-        { return curve.hasType (schema::CURVE) && curve.getParent() == automation && readCurveParameter (curve) == pointsParameter; };
+        const auto* values = song->getValues();
+        const auto* curve = values != nullptr ? values->findCurve (pointsParameter) : nullptr;
 
-        if (holdsCurveOwner (song->getState(), pointsParameter.device.getRaw()))
-            for (const auto& point : points)
-                if (isTheCurve (point.getParent()))
+        if (curve != nullptr && holdsCurveOwner (song->getState(), pointsParameter.device.getRaw()))
+            for (const auto& point : curve->points)
+                if (isPointSelected (point.key))
                     ++count;
     }
 
@@ -379,73 +379,94 @@ void Selection::selectNotes (const std::vector<NoteRef>& refs, bool addToSelecti
 
     clearItems();
     pointsParameter = {};
-    points.clear();
+    pointKeys.clear();
+    sortedPointKeys.clear();
     notes = std::move (chosen);
     changed();
 }
 
 //==============================================================================
-void Selection::selectPoints (const ParameterRef& parameter, const std::vector<juce::ValueTree>& pointStates)
+bool Selection::isPointSelected (std::uint64_t key) const
 {
-    // Each once, in the order given: sorted by beat first, so that only points at one beat are compared with each other.
-    std::vector<size_t> order;
+    // Among the keys sorted, by a binary search, its comparisons counted.
+    std::uint64_t comparisons = 1;
+    const auto found = std::lower_bound (sortedPointKeys.begin(), sortedPointKeys.end(), key,
+                                         [&comparisons] (std::uint64_t a, std::uint64_t b)
+                                         {
+                                             ++comparisons;
+                                             return a < b;
+                                         });
+    countPointComparisons (comparisons);
+    return key != 0 && found != sortedPointKeys.end() && *found == key;
+}
 
-    for (size_t i = 0; i < pointStates.size(); ++i)
-        if (pointStates[i].isValid())
-            order.push_back (i);
-
-    const auto beatOf = [&pointStates] (size_t i) { return (double) pointStates[i][schema::pointBeat]; };
+void Selection::selectPoints (const ParameterRef& parameter, const std::vector<std::uint64_t>& keys)
+{
+    // Each once, in the order given: sorted aside, so that a key is compared with its neighbours alone, and the later of two
+    // alike left out.
     std::uint64_t comparisons = 0;
-    std::stable_sort (order.begin(), order.end(),
-                      [&] (size_t a, size_t b)
-                      {
-                          ++comparisons;
-                          return beatOf (a) < beatOf (b);
-                      });
+    std::vector<std::uint64_t> sorted;
+    sorted.reserve (keys.size());
 
-    std::vector<bool> repeated (pointStates.size(), false);
+    for (const auto key : keys)
+        if (key != 0)
+            sorted.push_back (key);
 
-    for (size_t run = 0; run < order.size();)
+    std::sort (sorted.begin(), sorted.end(),
+               [&comparisons] (std::uint64_t a, std::uint64_t b)
+               {
+                   ++comparisons;
+                   return a < b;
+               });
+    sorted.erase (std::unique (sorted.begin(), sorted.end()), sorted.end());
+
+    std::vector<std::uint64_t> chosen;
+    chosen.reserve (sorted.size());
+    std::vector<bool> taken (sorted.size(), false);
+
+    for (const auto key : keys)
     {
-        auto end = run + 1;
+        if (key == 0)
+            continue;
 
-        while (end < order.size() && juce::exactlyEqual (beatOf (order[end]), beatOf (order[run])))
-            ++end;
+        const auto place = (size_t) (std::lower_bound (sorted.begin(), sorted.end(), key,
+                                                       [&comparisons] (std::uint64_t a, std::uint64_t b)
+                                                       {
+                                                           ++comparisons;
+                                                           return a < b;
+                                                       })
+                                     - sorted.begin());
 
-        for (auto i = run + 1; i < end; ++i)
-            for (auto j = run; j < i && ! repeated[order[i]]; ++j)
-                if (++comparisons; ! repeated[order[j]] && pointStates[order[i]] == pointStates[order[j]])
-                    repeated[order[i]] = true; // stable: the later of the two as given
-
-        run = end;
+        if (! taken[place])
+        {
+            taken[place] = true;
+            chosen.push_back (key);
+        }
     }
 
     countPointComparisons (comparisons);
-    std::vector<juce::ValueTree> chosen;
-
-    for (size_t i = 0; i < pointStates.size(); ++i)
-        if (pointStates[i].isValid() && ! repeated[i])
-            chosen.push_back (pointStates[i]);
 
     if (! parameter.isValid() || chosen.empty())
     {
         if (pointsParameter.isValid())
         {
             pointsParameter = {};
-            points.clear();
+            pointKeys.clear();
+            sortedPointKeys.clear();
             changed();
         }
 
         return;
     }
 
-    if (parameter == pointsParameter && chosen == points && items.empty() && sections.empty() && notes.empty())
+    if (parameter == pointsParameter && chosen == pointKeys && items.empty() && sections.empty() && notes.empty())
         return;
 
     clearItems();
     notes.clear();
     pointsParameter = parameter;
-    points = std::move (chosen);
+    pointKeys = std::move (chosen);
+    sortedPointKeys = std::move (sorted);
     changed();
 }
 } // namespace phazite

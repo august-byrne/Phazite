@@ -497,14 +497,17 @@ inline const Property<float> modulatesAmount { "amount", on (MODULATES), within 
 // The song's automation (model/automation/internal/Automation.h): each automated parameter's curve, by its device and its
 // own ID, with its points in beats. song
 
-// Child of PHAZITE, added with the first curve: the curves (CURVE), in no particular order. A curve whose device the song
-// hasn't any more stays while an undo could bring the device back, and goes as the project opens.
+// Child of PHAZITE: the curves (CURVE), in the order the song made them (a curve made goes after the others). Written
+// while the song has a curve. A curve whose device the song hasn't any more stays while an undo could bring the device back,
+// and goes as the project opens. The song holds its curves as values beside its tree (model/base/internal/SongValues.h:
+// the curves' area), its AUTOMATION an empty place every song that holds its values has; what Phazite doesn't know on it, a
+// curve or a point (a property, a child of another type) goes as the song opens.
 // (AUTOMATION, with the elements above.)
 
 // Child of AUTOMATION: a parameter's curve, with its points (POINT) in time order, two at one beat in the order they go (a
 // jump), and nothing else: a child of another type goes as the song loads (model/project/Project.cpp), so that its points
-// are its children. On CURVE: the device, by its ID written as text (DeviceID: "1042"); and the parameter, by its ID in its
-// device, as a lane names them (laneDevice, laneParameter).
+// are its children; one curve of a parameter, the first. On CURVE: the device, by its ID written as text (DeviceID:
+// "1042"); and the parameter, by its ID in its device, as a lane names them (laneDevice, laneParameter).
 // (CURVE, with the elements above.)
 inline const Property<juce::String> curveDevice { "device", on (CURVE), Form::idName, Kind::song };
 inline const Property<juce::String> curveParameter { "parameter", on (CURVE), Kind::song };

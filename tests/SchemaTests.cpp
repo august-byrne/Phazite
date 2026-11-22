@@ -241,6 +241,13 @@ bool isSameSaved (const juce::var& a, const juce::var& b)
     return x.has_value() && y.has_value() ? juce::exactlyEqual (*x, *y) : a.toString() == b.toString();
 }
 
+// The same, of numbers a value holds as floats: each read as one.
+bool isSameSavedFloat (const juce::var& a, const juce::var& b)
+{
+    const auto x = phazite::readValueNumber (a), y = phazite::readValueNumber (b);
+    return x.has_value() && y.has_value() ? juce::exactlyEqual ((float) *x, (float) *y) : a.toString() == b.toString();
+}
+
 // A song of the representative project with one value changed, checked as it is and after the loader; and what the
 // loader made of it, or none if it took it out (or the element it was on). For a clip, its warp marker, its note or its
 // controller's value, also the song opened as a project opens it (makeSong()), which holds its clips and their notes as
@@ -252,6 +259,7 @@ struct Changed
     phazite::Song::Ptr loaded, opened;
     juce::ValueTree loadedElement;
     phazite::ClipID clip;
+    juce::String curveKey; // of a curve changed, or of the one a point changed is in
     juce::Identifier changedProperty;
 
     Changed (const schema::Element& type, const juce::Identifier& property, const juce::var& value,
@@ -267,14 +275,19 @@ struct Changed
         const phazite::Song rawSong { raw.createCopy() };
         problemsBefore = findSongProblems (rawSong, tables);
 
-        // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, a chord or a key change, or a
-        // MIDI link: the loader's part alone (makeConsistent()), on a song that keeps everything in its tree, since a song made
-        // by makeSong() holds its clips, their notes, its tempo map, its chord lane and its MIDI links as values beside it
-        // (Song::holdValues()); and the song opened, whose values findOpened() reads back through whole state.
+        // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, a chord or a key change, a
+        // MIDI link, or a curve or its point: the loader's part alone (makeConsistent()), on a song that keeps everything in its
+        // tree, since a song made by makeSong() holds its clips, their notes, its tempo map, its chord lane, its MIDI links and
+        // its curves as values beside it (Song::holdValues()); and the song opened, whose values findOpened() reads back through
+        // whole state.
+        if (isCurveElement (element))
+            curveKey = schema::getElementKey (element.hasType (schema::CURVE) ? element : element.getParent());
+
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
-            || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element))
+            || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element)
+            || isCurveElement (element))
         {
-            if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element))
+            if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element) && ! isCurveElement (element))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -322,16 +335,38 @@ struct Changed
 
     static bool isMidiLink (const juce::ValueTree& element) { return element.hasType (schema::MIDILINK); }
 
+    static bool isCurveElement (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::CURVE) || element.hasType (schema::POINT);
+    }
+
+    // A curve's in the whole state of the opened song: the song's automation for a curve, its curve (by the key the curve
+    // changed or the one its point is in had) for a point.
+    juce::ValueTree findCurveState() const
+    {
+        const auto automation = phazite::copyWholeSong (*opened).getChildWithName (schema::AUTOMATION);
+
+        if (original.hasType (schema::CURVE))
+            return automation;
+
+        for (const auto& curve : automation)
+            if (schema::getElementKey (curve) == curveKey)
+                return curve;
+
+        return {};
+    }
+
     // The opened song's element in its clip's whole state (WholeState.h), as it holds its values: the clip itself, a note by
     // its ID, a warp marker or a controller's value by every property but the one changed; a tempo or a time signature in
-    // its tempo map's whole state, a chord or a key change in its chord lane's, and a MIDI link in its links', the same way;
-    // none if the loader took it out.
+    // its tempo map's whole state, a chord or a key change in its chord lane's, a MIDI link in its links', and a curve or a
+    // point in its automation's, the same way; none if the loader took it out.
     juce::ValueTree findOpened() const
     {
         REQUIRE (opened != nullptr);
         const auto clipState = isTempoMapEntry (original)    ? phazite::copyWholeSong (*opened).getChildWithName (schema::TEMPOMAP)
                                : isChordLaneEntry (original) ? phazite::copyWholeSong (*opened).getChildWithName (schema::CHORDLANE)
                                : isMidiLink (original)       ? phazite::copyWholeSong (*opened).getChildWithName (schema::MIDILINKS)
+                               : isCurveElement (original)   ? findCurveState()
                                                              : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))
@@ -352,9 +387,16 @@ struct Changed
 
             auto same = true;
 
+            // A point's numbers as the song holds them (CurveValues.h, PointValue: its position and its bend are floats, read
+            // from its file's text as one; its beat a double, as every other number here).
+            const auto isHeldAsFloat = [this] (const juce::Identifier& name)
+            { return original.hasType (schema::POINT) && (name == schema::pointValue || name == schema::pointCurve); };
+
             for (int i = 0; i < original.getNumProperties(); ++i)
                 if (const auto name = original.getPropertyName (i); name != changedProperty)
-                    same = same && isSameSaved (child[name], original[name]);
+                    same = same
+                           && (isHeldAsFloat (name) ? isSameSavedFloat (child[name], original[name])
+                                                    : isSameSaved (child[name], original[name]));
 
             if (same)
                 return child;

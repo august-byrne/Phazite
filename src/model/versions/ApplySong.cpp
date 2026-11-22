@@ -117,21 +117,13 @@ namespace
         return parent.hasType (schema::MIDILINKS) || (child.hasType (schema::MIDILINKS) && parent.hasType (schema::PHAZITE));
     }
 
-    // Whether an element is a curve of the song's: a CURVE of its AUTOMATION. The song's curves are made like the other's by
-    // the curves pass (makeCurvesLike(), below), through automation's functions by their parameters, never by the passes over
-    // elements. The AUTOMATION itself is theirs (added, without its curves, where the song has none, and made like the other's),
-    // taken out through automation's function where the other has none (isSongAutomation()).
+    // Whether an element is the curves': the song's AUTOMATION, or an element in it. The song holds its curves as a value
+    // (model/base/internal/SongValues.h), its AUTOMATION an empty place every song that holds its values has, whatever the
+    // other has; the curves pass makes the curves like the other's (makeCurvesLike(), below), through automation's functions
+    // by their parameters, never the passes over elements.
     bool isCurves (const juce::ValueTree& parent, const juce::ValueTree& child)
     {
-        return parent.hasType (schema::AUTOMATION) && child.hasType (schema::CURVE);
-    }
-
-    // The song's AUTOMATION (the child of its PHAZITE element), which the pass over the song's elements takes out where the
-    // other has none through automation's function, its curves with it (Automation.h: eraseAutomation()), before it puts the
-    // song's elements in the other's order.
-    bool isSongAutomation (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return parent.hasType (schema::PHAZITE) && child.hasType (schema::AUTOMATION);
+        return parent.hasType (schema::AUTOMATION) || (child.hasType (schema::AUTOMATION) && parent.hasType (schema::PHAZITE));
     }
 
     // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read
@@ -150,7 +142,7 @@ namespace
             {
                 if (auto child = tree.getChild (i); isStandIn (child) || child.hasType (schema::CLIP) || tree.hasType (schema::TEMPOMAP)
                                                     || tree.hasType (schema::CHORDLANE) || tree.hasType (schema::MIDILINKS)
-                                                    || isCurves (tree, child))
+                                                    || tree.hasType (schema::AUTOMATION))
                     tree.removeChild (i, nullptr);
                 else
                     strip (child);
@@ -164,7 +156,7 @@ namespace
     // Whether makeLike() places a child among the element's: taken, a track only withTracks, never a clip (a track's clips are
     // the clip pass's: ClipPass, below), nor the song's TEMPOMAP or what is in it (the tempo pass's: makeTempoMapLike()), nor
     // its CHORDLANE or what is in it (the lane pass's: makeChordLaneLike()), nor its MIDILINKS or what is in it (the links
-    // pass's: makeMidiLinksLike()), nor a curve (the curves pass's: makeCurvesLike()).
+    // pass's: makeMidiLinksLike()), nor its AUTOMATION or what is in it (the curves pass's: makeCurvesLike()).
     bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, bool withTracks, Taken taken)
     {
         return isTaken (taken, element, child) && (withTracks || ! child.hasType (schema::TRACK)) && ! child.hasType (schema::CLIP)
@@ -232,15 +224,8 @@ namespace
 
         for (const auto& child : getCountedChildren (live, withTracks, taken))
         {
-            // The song's AUTOMATION, which the other hasn't, taken out with its curves through automation's function, in one
-            // action, before the children are put in the other's order (isSongAutomation()).
             if (wantedNames.count (child.name) == 0 && standIns.count (child.name) == 0)
-            {
-                if (isSongAutomation (live, child.tree))
-                    eraseAutomation (song);
-                else
-                    live.removeChild (child.tree, undo);
-            }
+                live.removeChild (child.tree, undo);
             else if (wantedNames.count (child.name) > 0)
             {
                 kept.emplace (child.name, child.tree);
@@ -1019,10 +1004,11 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            return values->countAdopted()             // the clips', with their notes
-                   + values->countTempoMapAdopted()   // the tempo map's
-                   + values->countChordLaneAdopted()  // the chord lane's
-                   + values->countMidiLinksAdopted(); // the MIDI links'
+            return values->countAdopted()            // the clips', with their notes
+                   + values->countTempoMapAdopted()  // the tempo map's
+                   + values->countChordLaneAdopted() // the chord lane's
+                   + values->countMidiLinksAdopted() // the MIDI links'
+                   + values->countCurvesAdopted();   // the curves'
         }
 
         const Song& song;
@@ -1115,30 +1101,21 @@ namespace
     // Which of the song's curves a curves pass makes like the other's, by the parameters they automate.
     using CurvesTaken = std::function<bool (const ParameterRef&)>;
 
-    // The song's curves that which takes made like the other song's, through automation's functions by their parameters
-    // (model/automation/internal/Automation.h), in the mode of the moment: each the song has that the other hasn't taken out
-    // (eraseCurve()); each the other has made the song's (setCurveValue(), read as the song holds a curve: CurveValues.h,
-    // readHeldCurve()), one the song has keeping its place and its points' elements by their places, one it hasn't added
-    // after the others; what the other's version couldn't read (a curve that stands in for itself, a run of its points lost,
-    // or the other's AUTOMATION a stand-in) left as the song has it, there or not. The whole song's (wholeSong): then its
-    // curves in the other's order (setCurveOrder()); where the other has no AUTOMATION, nothing, the pass over the song's
-    // elements having taken the song's out with its curves (eraseAutomation(): isSongAutomation()). A line's: the curves
-    // the song has keep their places, those it hasn't are added in the order of their key texts (Schema.h:
-    // getElementKey(): "1042/cutoff"), as they always were. How many writes it made.
+    // The song's curves that which takes made like the other song's, by their parameters, in one set of the curves' area, in
+    // the mode of the moment (SongValues.h: setCurves()): each the song has that the other hasn't taken out (all of them where
+    // the other has no AUTOMATION); each the other has made the song's (read as the song holds a curve: CurveValues.h,
+    // readHeldCurve()), one the song has keeping its place and its points' keys by their places, one it hasn't added after
+    // the others; what the other's version couldn't read (a curve that stands in for itself, a run of its points lost, or the
+    // other's AUTOMATION a stand-in) left as the song has it, there or not. The whole song's (wholeSong): then its curves in
+    // the other's order. A line's: the curves the song has keep their places, those it hasn't are added in the order of their
+    // key texts (Schema.h: getElementKey(): "1042/cutoff"), as they always were. How many writes it made: one, or none for
+    // curves alike to the song's.
     int makeCurvesLike (Song& song, const juce::ValueTree& other, const CurvesTaken& which, bool wholeSong)
     {
         const auto otherAutomation = other.getChildWithName (schema::AUTOMATION);
 
         if (otherAutomation.isValid() && isStandIn (otherAutomation))
             return 0;
-
-        // The whole song's, where the other has no AUTOMATION: the song's taken out with its curves already, by the pass over
-        // its elements (isSongAutomation()).
-        if (wholeSong && ! otherAutomation.isValid())
-        {
-            jassert (! song.getState().getChildWithName (schema::AUTOMATION).isValid());
-            return 0;
-        }
 
         // The other's curves which takes, each parameter's once (the first), in its order.
         std::vector<std::pair<ParameterRef, juce::ValueTree>> theirs;
@@ -1150,11 +1127,20 @@ namespace
                 if (const auto parameter = readCurveParameter (curve); which (parameter) && ! isTheirs (parameter))
                     theirs.emplace_back (parameter, curve);
 
-        auto writes = 0;
+        // The song's curves worked out whole, then set once (SongValues.h: setCurves(), which writes nothing for curves alike to
+        // those the song holds): those it has that the other hasn't taken out; the other's given the keys of the song's points
+        // by their places (keyByPlace()), in place or after the others; for the whole song, in the other's order.
+        auto* values = song.getValues();
 
-        for (const auto& parameter : getCurveKeys (song))
-            if (which (parameter) && ! isTheirs (parameter) && eraseCurve (song, parameter))
-                ++writes;
+        if (values == nullptr)
+            return 0;
+
+        const auto before = values->curves.get();
+        auto next = before;
+
+        for (const auto& parameter : before.order)
+            if (which (parameter) && ! isTheirs (parameter))
+                next = withoutCurve (next, parameter);
 
         auto given = theirs;
 
@@ -1162,9 +1148,18 @@ namespace
             std::stable_sort (given.begin(), given.end(), [] (const auto& a, const auto& b)
                               { return schema::getElementKey (a.second) < schema::getElementKey (b.second); });
 
+        // A curve alike to the song's (keys aside) left as the song holds it, so that what hears the curves change hears of
+        // those that changed alone.
         for (const auto& [parameter, curve] : given)
-            if (! isStandIn (curve) && setCurveValue (song, parameter, readHeldCurve (curve)))
-                ++writes;
+        {
+            if (isStandIn (curve))
+                continue;
+
+            const auto* held = before.find (parameter);
+
+            if (auto read = readHeldCurve (curve); held == nullptr || ! (read == *held))
+                next = withCurve (next, parameter, values->keyByPlace (held, std::move (read)));
+        }
 
         if (wholeSong)
         {
@@ -1173,10 +1168,11 @@ namespace
             for (const auto& each : theirs)
                 order.push_back (each.first);
 
-            writes += setCurveOrder (song, order) ? 1 : 0;
+            next = withCurveOrder (next, order);
         }
 
-        return writes;
+        values->setCurves (song, std::move (next));
+        return values->curves.get().isSameAs (before) ? 0 : 1;
     }
 
     // Every curve of the song made like the other's (makeCurvesLike()), once the rest of the song is: how many writes it made.
@@ -1195,9 +1191,9 @@ namespace
 
     // The areas the song holds as values beside its tree made like the other's, once the rest of the song is, each through
     // its pass, a line each, in this order: the clips with their notes (makeClipsLike()), then the tempo map
-    // (makeTempoMapLike()), then the chord lane (makeChordLaneLike()), then the curves (makeAllCurvesLike(): the song's tree
-    // holds them still), none of which reads another's. How many writes they made (the tempo map's one, where it wrote; the
-    // chord lane's one, where it wrote).
+    // (makeTempoMapLike()), then the chord lane (makeChordLaneLike()), then the MIDI links (makeMidiLinksLike()), then the
+    // curves (makeAllCurvesLike()), none of which reads another's. How many writes they made (the tempo map's one, where it
+    // wrote; the chord lane's one, where it wrote).
     int makeValuesLike (Song& song, const juce::ValueTree& other, bool standInsStay)
     {
         auto writes = makeClipsLike (song, other, standInsStay);

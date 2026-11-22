@@ -3161,21 +3161,20 @@ bool Project::areCurvesAsSaved() const
 
     // The curves' order, then each curve that changed, against the saved copy's, as values: or every curve, past
     // mostToCompare of them.
-    const auto state = song->getState();
     const auto now = keepValues (*song);
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
     if (comparingCurvesWhole)
-        return holdSameCurves (state, now, savedState.tree, savedState.values);
+        return holdSameCurves (now, savedState.values);
 
-    if (! holdSameCurveOrder (state, now, savedState.tree, savedState.values))
+    if (! holdSameCurveOrder (now, savedState.values))
         return false;
 
     return std::all_of (curvesToCompare.begin(), curvesToCompare.end(),
-                        [this, &state, &now] (const ParameterRef& parameter)
+                        [this, &now] (const ParameterRef& parameter)
                         {
                             elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-                            return holdSameCurve (state, now, savedState.tree, savedState.values, parameter);
+                            return holdSameCurve (now, savedState.values, parameter);
                         });
 }
 
@@ -3347,8 +3346,8 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const ValuesKept& aV
     // clips, with their notes and controllers' values; the tempo map as one value, as the quick comparison compares it
     // (compareWithSavedState()), so that the two agree: its elements' order, and what reads as its default, are no
     // difference; the chord lane as one value, with whether each has one; the curves as values, in their order; the MIDI
-    // links as one value, with whether each has a MIDILINKS. The places of what is kept (the TEMPOMAP, the CHORDLANE, an
-    // AUTOMATION's CURVEs, the MIDILINKS) are left out of the elements below.
+    // links as one value, with whether each has a MIDILINKS. The places of what is kept (the TEMPOMAP, the CHORDLANE, the
+    // AUTOMATION, the MIDILINKS) are left out of the elements below.
     if (! holdSameKeptOf (a, aValues, b, bValues))
         return false;
 

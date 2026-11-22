@@ -14,6 +14,7 @@
 
 #include <juce_events/juce_events.h>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <vector>
@@ -126,10 +127,11 @@ AutomationMode getAutomationMode (const Song&, TrackID);
 void setAutomationMode (Song&, TrackID, AutomationMode);
 
 //==============================================================================
-// Automation points selected: one parameter's, in the selection (Selection: getPoints(), which holds the points' elements,
-// so that it follows them as points are added or removed before them and as undo and redo change the curve), so that
-// selecting anything else deselects them, and the selection commands (arrangement/internal/Selection.h) find them; by
-// their indices in the curve as it is now.
+// Automation points selected: one parameter's, in the selection (Selection: getPointKeys(), which holds the points' keys,
+// CurveValues.h, so that it follows them as points are added or removed before them, as they move, and as undo and redo
+// change the curve), so that selecting anything else deselects them, and the selection commands
+// (arrangement/internal/Selection.h) find them; by their indices in the curve as it is now. Each finds the curve once and
+// walks its points once.
 struct PointSelection
 {
     ParameterRef parameter;
@@ -142,61 +144,50 @@ std::optional<PointSelection> getSelectedPoints (const Selection&);
 void selectPoints (Selection&, const ParameterRef&, const std::vector<int>& indices);
 
 //==============================================================================
-// The song's curves as values (model/base/internal/CurveValues.h), which is how everything outside the writers below reads
-// them: every one, by its parameter and in the order the song made them (the file's order, and the order a plug-in's
-// parameters' lanes show in: getLanes()); the parameters they automate, in that order, without their points; those of the
-// curves with points; and a parameter's curve, none for one without. The song's tree holds the curves still (Schema.h:
-// AUTOMATION), which these read at each call, a curve's points converted only where its value is asked for; the switch of
-// roadmap step S5.20 makes them the area's, which they then give without a read. A parameter has one curve: the loader keeps
-// the first of a file's curves of one parameter, its device's ID read as a number however it is written ("14", "0014"), and
-// a curve's points alone (makeConsistent()); these read the first should a tree not made consistent hold two.
-SongCurves getCurvesValue (const Song&);
+// The song's curves as values (model/base/internal/CurveValues.h), the curves' area's (SongValues.h: SongValues::curves),
+// which is how everything outside the writers below reads them: every one, by its parameter and in the order the song made
+// them (the file's order, and the order a plug-in's parameters' lanes show in: getLanes()), in place, as the area holds them
+// (a reference valid until the area's next change: none is kept across a set); a parameter's curve in place, none for one
+// without; the parameters they automate, in that order; those of the curves with points; a parameter's curve as a copy
+// (cheap: it shares what it holds), none for one without; and its points' keys, in its order (CurveValues.h: PointValue).
+// A song that holds no values (one made of a tree alone, as a check's copy) has none. A parameter has one curve: the loader
+// keeps the first of a file's curves of one parameter, its device's ID read as a number however it is written ("14",
+// "0014"), and the song's area holds one of each.
+const SongCurves& getCurvesValue (const Song&);
+const CurveValue* findCurve (const Song&, const ParameterRef&);
 std::vector<ParameterRef> getCurveKeys (const Song&);
 std::vector<ParameterRef> getCurveKeysWithPoints (const Song&);
 std::optional<CurveValue> getCurveValue (const Song&, const ParameterRef&);
-
-// The curves of the parameters given as Phazite's engine plays them (model/playback/SongPlayer.cpp: readCurves()), each in
-// its place, without points for one the song has no curve for: read in one walk of the song's curves, each of those asked
-// for converted, not a walk for each. Should the tree hold two curves of one parameter (a file from others before it is made
-// consistent), the last with points plays, as it always has; once the area holds the curves, a parameter has one.
-std::vector<CurveValue> getPlayedCurves (const Song&, const std::vector<ParameterRef>&);
+std::vector<std::uint64_t> getPointKeys (const Song&, const ParameterRef&);
 
 // A parameter's curve as a CURVE element that holds everything the song holds of it, an invalid tree for one without: what
-// compares a curve as a file holds it (the versions' changes: model/versions/internal/ChangesWorker.h). On the tree, a copy of
-// its element. Message thread.
+// compares a curve as a file holds it (the versions' changes: model/versions/internal/ChangesWorker.h), written from its
+// value as whole state writes it (CurveValues.h: writeCurveElement()). Message thread.
 juce::ValueTree copyWholeCurve (const Song&, const ParameterRef&);
-
-// The song's curves as their elements, which automation's writers here change until they change the values (roadmap step
-// S5.20): a parameter's, invalid for one without; and the parameter one is for (CurveValues.h: readCurveParameter()), for
-// what hears the tree change.
-juce::ValueTree findCurveState (const Song&, const ParameterRef&);
-ParameterRef getCurveParameter (const juce::ValueTree& curveState);
 
 //==============================================================================
 // A parameter's whole curve, by its parameter: what makes, takes out, renames, copies or moves a whole curve does it through
 // these (a copy's curves: copyCurves(); a folder made a bus and back: model/mixer/Buses.cpp; a version applied:
 // model/versions/ApplySong.cpp; a merge's choice: chooseCurveClash()), the point edits above through their own (a curve made
-// by its first point, gone with its last). Each joins the caller's undo step, as the song is written now: in the history's
-// step in progress, or outside it while the song is written outside it (Song::OutsideHistory). Whether it wrote.
+// by its first point, gone with its last). Each sets the curves' area (SongValues.h: setCurve(), eraseCurve(),
+// renameCurve(), setCurveOrder()), joining the caller's undo step, as the song is written now: in the history's step in
+// progress, or outside it while the song is written outside it (Song::OutsideHistory). Whether it wrote. Nothing for a song
+// that holds no values.
 //   - setCurveValue(): the parameter's whole curve made this value, where setCurve() (above) bends one point of it. One the
-//     song hasn't is added after the others (the song's AUTOMATION added first where it has none). One it has keeps its
-//     place, and its points are made the value's by their places, as a version's are: a point at a place both have keeps
-//     its element (which the selection of points holds), its beat, value and bend written where they would write another
-//     text (SongText.h: isSameValue(); a bend of 0 is none); those past the value's last taken out, the value's past the
-//     curve's last added. A curve as the value is writes nothing.
-//   - eraseCurve(): the parameter's curve taken out (the song's AUTOMATION stays, as when its last point goes).
-//   - renameCurve(): the curve of one parameter given to another, in its place (a folder's fader's curve given to the
-//     fader that takes its place), what hears the curves change told both at once (SongValues.h: renameCurve()). Nothing for
-//     a parameter without a curve, or for one that has a curve already (asserted).
+//     song hasn't is added after the others. One it has keeps its place, and its points are made the value's by their
+//     places, as a version's are: a point at a place both have keeps its key (which the selection of points holds), those
+//     past the value's last taken out, the value's past the curve's last given new keys. The value's own keys are no
+//     matter (a copy's curve gets keys of its own). A curve as the value is (its points alike, keys aside) writes nothing.
+//   - eraseCurve(): the parameter's curve taken out.
+//   - renameCurve(): the curve of one parameter given to another, in its place, its points' keys kept (a folder's fader's
+//     curve given to the fader that takes its place), what hears the curves change told both at once. Nothing for a
+//     parameter without a curve, or for one that has a curve already (asserted).
 //   - setCurveOrder(): the song's curves of these parameters (each once) put first, in this order, the others after them
 //     in theirs (a version's order: model/versions/ApplySong.cpp); a parameter without a curve left out.
-//   - eraseAutomation(): the song's AUTOMATION taken out with every curve in it, in one action (a version without automation
-//     applied), what hears the curves change told all their parameters at once.
 bool setCurveValue (Song&, const ParameterRef&, const CurveValue&);
 bool eraseCurve (Song&, const ParameterRef&);
 void renameCurve (Song&, const ParameterRef& from, const ParameterRef& to);
 bool setCurveOrder (Song&, const std::vector<ParameterRef>& order);
-bool eraseAutomation (Song&);
 
 // The time edits' automation (model/arrangement/internal/Arrangement.h), on every automated parameter of the song: room
 // made at a beat, the points from there on moving later and the line holding its value at the beat across the room; a
@@ -219,9 +210,9 @@ void addAutomationPoints (Song&, const std::vector<ParameterPoint>&);
 
 // Forgets the curves of devices the song hasn't any more (the song keeps them while an undo can bring the device back), and
 // any child of its AUTOMATION that is no curve, as a project opens: without an undo step, on the tree of a song that holds
-// no values yet (model/project/internal/Project.h: makeSong(), before it holds them; asserted), which no one else hears. A
-// device keeps those of parameters it hasn't, as a plug-in that isn't installed. A song that holds its values forgets them
-// through the form below.
+// no values yet (model/project/internal/Project.h: makeSong(), before it holds them; asserted), which no one else hears,
+// whose AUTOMATION holds its curves as its file does. A device keeps those of parameters it hasn't, as a plug-in that isn't
+// installed. A song that holds its values forgets them through the form below.
 void forgetCurvesOfGoneDevices (Song&);
 
 // The same through eraseCurve(), in the caller's undo step, of the curves which says alone, by their parameters: those a song

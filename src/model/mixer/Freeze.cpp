@@ -732,9 +732,8 @@ void FreezeKeeper::check (const juce::ValueTree& changed, bool cameIn)
         return;
     }
 
-    // The song's element, or its AUTOMATION's own (any frozen track's file may hold its curves): every frozen track. Its
-    // tempos: tempoMapChanged(); its curves: curvesChanged().
-    if (changed == state || findEnclosing (changed, schema::AUTOMATION).isValid())
+    // The song's element: every frozen track. Its tempos: tempoMapChanged(); its curves: curvesChanged().
+    if (changed == state)
         waiting.all = true;
 }
 

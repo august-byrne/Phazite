@@ -1505,8 +1505,8 @@ TEST_CASE ("A number written as text reads as the same number wherever the song 
         numbers.push_back ((double) first (schema::NOTE, schema::CLIP, {})[schema::noteStart]);
         numbers.push_back ((double) first (schema::CONTROL, schema::CLIP, {})[schema::controlBeat]);
         numbers.push_back ((double) first (schema::WARP, schema::CLIP, schema::clipIsAudio)[schema::warpTime]);
-        // A curve's points are its tree's yet (roadmap step S5.20 moves them next), which keeps a number's text as the file
-        // wrote it: read as the song's values read one.
+        // A curve's points as whole state writes them from the song's values (roadmap step S5.20): read as the song's values
+        // read one.
         numbers.push_back (readValueNumber (first (schema::POINT, schema::CURVE, {})[schema::pointBeat]).value_or (-1.0));
         return numbers;
     };

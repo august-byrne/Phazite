@@ -11,7 +11,8 @@
 // writeTempoMap() writes it (a tempo's curve only while it isn't 1); in the song's CHORDLANE, where it has one, its
 // chords then its key changes, each kind in its order, each written as ChordLaneValue.h's writeChordLane() writes it; and in
 // the song's MIDILINKS, where it has one, its MIDI links in their order, each written as MidiLinksValue.h's writeMidiLinks()
-// writes it.
+// writes it; and in the song's AUTOMATION, while it has a curve (a song without one is written without an AUTOMATION), its
+// curves in their order, each written as CurveValues.h's writeCurves() writes it.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -48,6 +49,7 @@ struct ValuesKept
     TempoMapValue tempoMap;   // none (no entry of either kind) kept of a song that holds no values
     ChordLaneValue chordLane; // empty kept of a song that holds no values, and of one without chords or keys
     MidiLinksValue midiLinks; // none kept of a song that holds no values, and of one without links
+    SongCurves curves;        // none kept of a song that holds no values, and of one without automation
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -87,28 +89,27 @@ bool holdSameChordLane (const juce::ValueTree& song, const ValuesKept&, const ju
 // Any thread. In MidiLinksArea.cpp.
 bool holdSameMidiLinks (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
 
-// Whether two songs, each a tree with its kept values, hold the same automation, as values (CurveValues.h), so that a point
-// moved and moved back, or a curve's points taken out and put back, compares as the same: a parameter's curve (none in both,
-// or the same points in both); the same curves' parameters in the same order (the order the song made them in, which a curve
-// taken out and made again changes: a difference, as it is in the file), and an AUTOMATION in both or in neither; and both
-// (holdSameCurves(): each curve the same, in the same order). Both of Project's comparisons with the saved copy compare the
-// curves so (the quick one, a parameter at a time and their order, and the whole song's: holdTheSameProject()), so that the
-// two agree. While the song's tree holds its curves (roadmap step S5.20: automation's switch is to come) the trees'
-// AUTOMATION elements are read into values. In CurvesArea.cpp. Any thread.
-bool holdSameCurve (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&,
-                    const ParameterRef&);
-bool holdSameCurveOrder (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
-bool holdSameCurves (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
+// Whether two songs' kept values hold the same automation, as values (CurveValues.h: their points' keys aside), so that a
+// point moved and moved back, or a curve's points taken out and put back, compares as the same: a parameter's curve (none in
+// both, or the same points in both); the same curves' parameters in the same order (the order the song made them in, which
+// a curve taken out and made again changes: a difference, as it is in the file); and both (holdSameCurves(): each curve the
+// same, in the same order). The trees' AUTOMATION elements are the places of the curves alone, which every song that holds
+// its values has: no matter here. Both of Project's comparisons with the saved copy compare the curves so (the quick one, a
+// parameter at a time and their order, and the whole song's: holdTheSameProject()), so that the two agree. In
+// CurvesArea.cpp. Any thread.
+bool holdSameCurve (const ValuesKept&, const ValuesKept&, const ParameterRef&);
+bool holdSameCurveOrder (const ValuesKept&, const ValuesKept&);
+bool holdSameCurves (const ValuesKept&, const ValuesKept&);
 
 // Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
 // what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips
 // (holdSameTrackClips()), then the tempo map of an element either of which holds a TEMPOMAP (holdSameTempoMap()), then the
-// chord lane of a song's element either of which holds a CHORDLANE (holdSameChordLane()), then the curves of two AUTOMATION
+// chord lane of a song's element either of which holds a CHORDLANE (holdSameChordLane()), then the curves of two songs'
 // elements (holdSameCurves()), then the MIDI links of a song's element either of which holds a MIDILINKS
 // (holdSameMidiLinks()). What Project's comparison of an element whole asks once the element's own properties compare
 // (holdTheSameProject()). And whether a child of an element is the place of what an area keeps (the song's TEMPOMAP, its
-// CHORDLANE, its MIDILINKS; a CURVE in an AUTOMATION), which that comparison leaves out of the elements it compares one by
-// one. Any thread.
+// CHORDLANE, its MIDILINKS, its AUTOMATION), which that comparison leaves out of the elements it compares one by one. Any
+// thread.
 bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
 bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

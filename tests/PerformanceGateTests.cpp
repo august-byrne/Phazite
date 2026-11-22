@@ -922,10 +922,12 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
     CHECK (big.save * 4 < big.text * 7);
 }
 
-TEST_CASE ("Performance gate: selected automation points are found by their beats, the work growing with the points, not with their square")
+TEST_CASE ("Performance gate: selecting automation points and finding them by their keys compares keys as often as the points, not "
+           "their square")
 {
     // Each selected point was looked for through the whole curve, and selecting them compared each with every other: a
-    // drawn lane of 10,000 points selected cost about 10^8 comparisons each time a lane painted.
+    // drawn lane of 10,000 points selected cost about 10^8 comparisons each time a lane painted. Counted as the selected
+    // points' keys compared (Selection.h: getPointComparisons()), as they are selected and found again in their curve.
     const auto comparisonsFor = [] (int numPoints)
     {
         phazite::test::TestSong song;
@@ -965,9 +967,10 @@ TEST_CASE ("Performance gate: selected automation points are found by their beat
 
 TEST_CASE ("Performance gate: bending several selected points of a curve reads the curve as often however many they are")
 {
-    // An edit of a curve reads it into a value (Automation.cpp: SongCurve): one for each point bent read the whole curve for
-    // each, 1,000 points of a curve of 10,000 bent reading 10,000,000 points. Counted as the points read into values
-    // (CurveValues.h: countCurvePointsRead()).
+    // An edit of a curve takes its value from the curves' area (Automation.cpp: SongCurve): one for each point bent read the
+    // whole curve for each, 1,000 points of a curve of 10,000 bent reading 10,000,000 points. Counted as the points read into
+    // values or compared one by one (CurveValues.h: countCurvePointsRead()): the area's setter compares the curve once with
+    // the one it held, to know whether it changed.
     constexpr auto numPoints = 1000;
 
     const auto pointsReadFor = [] (int numBent)
@@ -995,11 +998,12 @@ TEST_CASE ("Performance gate: bending several selected points of a curve reads t
         return read;
     };
 
-    // The curve read once by the edit (and once more by Debug's check of what it wrote), whether 4 points are bent or 40.
+    // The curve compared once by the edit's set, whether 4 points are bent or 40 (twice before the curves were values: read
+    // by the edit, and read back by Debug's check of what it wrote).
     const auto small = pointsReadFor (4), large = pointsReadFor (40);
     INFO ("4 points bent: " << small << " points read; 40: " << large);
     CHECK (large == small);
-    CHECK (small <= (std::uint64_t) numPoints * 2);
+    CHECK (small <= (std::uint64_t) numPoints);
 }
 
 TEST_CASE ("Performance gate: asking whether each selected section is selected reads no value of the song's sections for each")
@@ -1790,6 +1794,39 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
     juce::MemoryOutputStream after;
     phazite::writeProjectText (after, phazite::test::copyWholeSong (song));
     CHECK (after.toString() == text.toString());
+}
+
+TEST_CASE ("Performance gate: a drawn lane of 10,000 points taken into the song's values as it opens makes far fewer allocations "
+           "than points")
+{
+    // Roadmap step S5.20, automation's switch: the song takes its file's curves into the curves' area as it holds its values
+    // (Song::holdValues(): CurvesArea.h, readHeldCurves()), each point given a key, the points put into the value's leaves
+    // many at a time.
+    constexpr auto numPoints = 10000;
+    auto state = phazite::test::copyWholeSong (*phazite::createSong());
+    const phazite::ParameterRef volume { phazite::DeviceID::fromRaw (2), "master volume" };
+    juce::ValueTree curve (phazite::schema::CURVE,
+                           { { phazite::schema::curveDevice, "2" }, { phazite::schema::curveParameter, volume.parameter } });
+
+    for (int i = 0; i < numPoints; ++i)
+        curve.appendChild (juce::ValueTree (phazite::schema::POINT, { { phazite::schema::pointBeat, i * 0.25 },
+                                                                      { phazite::schema::pointValue, (float) (i % 2) * 0.5f } }),
+                           nullptr);
+
+    juce::ValueTree automation (phazite::schema::AUTOMATION);
+    automation.appendChild (curve, nullptr);
+    state.appendChild (automation, nullptr);
+    phazite::Song song (state);
+    const auto allocations = phazite::test::countAllocations ([&song] { song.holdValues(); });
+    REQUIRE (phazite::getPoints (song, volume).size() == (size_t) numPoints);
+
+    if (! allocations.has_value())
+        return; // nothing counted on this build
+
+    // Measured (2026-11-22, Windows, Debug): 1,338 allocations for 10,000 points (the value's leaves and nodes, the elements
+    // taken out of the tree, the other areas' adoption): fewer than one for five points.
+    MESSAGE ("Allocations: " << *allocations << " for " << numPoints << " points");
+    CHECK (*allocations * 5 < numPoints);
 }
 
 TEST_CASE ("Performance gate: an import, Normalize and Quantize Audio read none of the audio on the message thread")

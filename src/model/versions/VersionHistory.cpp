@@ -3025,16 +3025,9 @@ void VersionHistory::markChanged (const juce::ValueTree& tree, const juce::Ident
 
     edited();
 
-    // The track (or the master) it is in, nearest first, or else the song's own; the song's AUTOMATION itself (its curves:
-    // curvesChanged()), every one.
+    // The track (or the master) it is in, nearest first, or else the song's own (its curves: curvesChanged()).
     for (auto element = tree; element.isValid(); element = element.getParent())
     {
-        if (element.hasType (schema::AUTOMATION))
-        {
-            markAllChanged();
-            return;
-        }
-
         if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
         {
             markTrack (element, false);
@@ -3068,7 +3061,7 @@ void VersionHistory::markChildChanged (const juce::ValueTree& parent, const juce
         return;
     }
 
-    if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER) || child.hasType (schema::AUTOMATION))
+    if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
     {
         markAllChanged();
         return;

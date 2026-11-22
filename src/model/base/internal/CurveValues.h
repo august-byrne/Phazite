@@ -2,9 +2,9 @@
 // The song's automation as values (roadmap step S5.20, automation's area): a point of a parameter's curve, a curve with its
 // points in their order, and the song's curves by the parameter each automates, in the order the song made them; and the
 // conversion between those values and the AUTOMATION element with its CURVE and POINT children (Schema.h), the one place
-// that reads and writes those by name. The song doesn't hold these values yet: its curves are still its tree's elements,
-// which automation's code (model/automation/internal/Automation.h: getCurvesValue(), getCurveKeys(), getCurveValue())
-// reads into them, so that what reads the song's automation reads it as values, whatever stores it.
+// that reads and writes those by name. The song holds its curves as one such value in an area of its values (SongValues.h:
+// SongValues::curves), its tree's AUTOMATION an empty place a whole copy writes them in (CurvesArea.h); automation's code
+// (model/automation/internal/Automation.h) reads and changes them.
 //
 // Its own header, beside SongValues.h and TempoMapValue.h (one header for each area's values): the model's base includes no
 // other area, but a parameter by its IDs (model/devices/ParameterRef.h), as Selection.h does. immer is the model's alone
@@ -27,15 +27,22 @@ namespace phazite
 {
 // A point as a curve holds it (Schema.h: POINT): its beat, its position along its parameter's control's travel (0 to 1,
 // model/automation/AutomationValues.h: AutomationPoint), and the bend of the line to the next (-1 to 1, 0 straight: what a
-// POINT without a curve holds).
+// POINT without a curve holds); and its key, which tells it from every other point of the song while the song is open, so
+// that the selection of points follows it through edits, undo and redo (model/base/internal/Selection.h). A key is never
+// saved nor written into an element, and comes from the song's values (SongValues.h: givePointKey()), outside the undo
+// history: each point the song takes in or makes gets a new one, and an edit that keeps a point keeps its key
+// (model/automation/Automation.cpp). 0 is none: a point read for reading alone (a version's, a file's), which no song holds.
 struct PointValue
 {
     BeatPosition beat;
     float position = 0.0f;
     float curve = 0.0f;
+    std::uint64_t key = 0;
 
-    // Written out, not defaulted: a defaulted one would compare the floats with a floating-point ==, which GCC's -Wfloat-equal
-    // refuses.
+    // The same point as saved: its beat, its position and its bend, each exactly; its key aside, which is no part of what the
+    // song holds as content (two curves alike are alike whatever their points' keys, as a file would hold them). Written
+    // out, not defaulted: a defaulted one would compare the floats with a floating-point ==, which GCC's -Wfloat-equal
+    // refuses, and the keys too.
     bool operator== (const PointValue&) const noexcept;
 };
 
@@ -46,7 +53,8 @@ struct CurveValue
 {
     immer::flex_vector<PointValue> points;
 
-    // The same value without a look inside: its points shared (ValueArea.h). And the same points, compared.
+    // The same value without a look inside: its points shared (ValueArea.h). And the same points, compared as saved (their
+    // keys aside: PointValue's ==), counted (countCurvePointsRead()) where they aren't shared.
     bool isSameAs (const CurveValue& other) const noexcept { return points.identity() == other.points.identity(); }
     bool operator== (const CurveValue&) const;
 };
@@ -80,6 +88,10 @@ SongCurves withoutCurve (const SongCurves&, const ParameterRef&);
 // place: model/mixer/Buses.cpp). The other parameter has no curve of its own (asserted).
 SongCurves withCurveRenamed (const SongCurves&, const ParameterRef& from, const ParameterRef& to);
 
+// The song's curves with the curves of these parameters (each once) first in the order, in this order, the others after them
+// in theirs; a parameter without a curve left out. The same value where that is their order already.
+SongCurves withCurveOrder (const SongCurves&, const std::vector<ParameterRef>& first);
+
 // Whether the order holds each parameter once, and the map the same parameters: for assertions and tests.
 bool holdsItsOrder (const SongCurves&);
 
@@ -105,14 +117,24 @@ CurveValue readCurveValue (const juce::ValueTree& curve);
 
 // The same as the song holds a curve (Schema.h's descriptions: SongText.h, readDescribed()): each point's beat within 0 and
 // the longest song (0 where it has none), its value within 0 and 1, its bend within -1 and 1 (0 where it has none), in the
-// element's order; a point without a value that is a finite number left out. What enters the song's curves from another
-// song reads a curve so: a version's (model/versions/ApplySong.cpp: makeCurvesLike()) and a merge's choice
-// (model/automation/internal/Automation.h: chooseCurveClash()).
-CurveValue readHeldCurve (const juce::ValueTree& curve);
+// element's order; a point without a value that is a finite number left out; what Phazite doesn't know of the curve and its
+// points (a property, a child that is no point) no part of it. Each point given the next key from nextKey where it is given
+// (SongValues.h: the song's point keys, which the song's adoption and its keeper give: CurvesArea.h), else none. What
+// enters the song's curves reads a curve so: the song's own as it opens (Song::holdValues()), a version's
+// (model/versions/ApplySong.cpp: makeCurvesLike()) and a merge's choice (model/automation/internal/Automation.h:
+// chooseCurveClash()).
+CurveValue readHeldCurve (const juce::ValueTree& curve, std::uint64_t* nextKey = nullptr);
 
-// How many points were read into curves' values (readCurveValue()) since Phazite started, on any thread: for the test that
-// an edit of several points of a curve reads the curve once, however many they are (tests/PerformanceGateTests.cpp).
-// Allocations can't tell it: immer takes its nodes from lists of freed ones.
+// The song's curves read from its AUTOMATION as the song holds them (readHeldCurve()), each CURVE child in the element's
+// order, one for each parameter (the first; the loader keeps the first: makeConsistent()), each point given a key from
+// nextKey; a child of another type no curve.
+SongCurves readHeldCurves (const juce::ValueTree& automation, std::uint64_t& nextKey);
+
+// How many points were read into curves' values (readCurveValue(), readHeldCurve()) or compared one by one with another
+// curve's (CurveValue's ==, where the two aren't shared) since Phazite started, on any thread: for the tests that an edit of
+// several points of a curve reads the curve once, however many they are (tests/PerformanceGateTests.cpp), and that a frozen
+// track's curves are compared only where one changed (tests/FreezeTests.cpp). Allocations can't tell it: immer takes its
+// nodes from lists of freed ones.
 std::uint64_t countCurvePointsRead() noexcept;
 
 // Whether a CURVE element holds a point readCurveValue() would read, without reading them all.
@@ -125,7 +147,7 @@ SongCurves readCurvesValue (const juce::ValueTree& automation);
 
 // A curve appended to an AUTOMATION element (a copy of the song's, emptied, outside any song: WholeState.h) as a CURVE, as
 // automation's code writes one: its device's ID as text ("1042") and its parameter; then its POINTs, each with its beat
-// and value, and its curve only while it isn't 0. And the song's curves, each so, in their order.
+// and value, and its curve only while it isn't 0 (a point's key never). And the song's curves, each so, in their order.
 void writeCurveElement (const ParameterRef&, const CurveValue&, juce::ValueTree& automationCopy);
 void writeCurves (const SongCurves&, juce::ValueTree& automationCopy);
 } // namespace phazite
