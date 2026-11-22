@@ -4261,6 +4261,9 @@ TEST_CASE ("A close and a save that wait on a slow plug-in each go on once, for 
     // whose state is then older than its own, as the notice says.
     auto* instance = phazite::findPluginInstance (session.getProject()->getSong(), slow);
     REQUIRE (instance != nullptr);
+    // Why the plug-in's load ended, where it ended without the plug-in (known bug 191: its helper never started, so it has no
+    // parameters and the save below waits for nothing).
+    INFO ("Test Slow: " << phazite::getPluginError (session.getProject()->getSong(), slow).toStdString());
     instance->setParameterValue (instance->findParameter ("60"), 0.5f);
 
     {
