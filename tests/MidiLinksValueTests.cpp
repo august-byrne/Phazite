@@ -95,6 +95,41 @@ TEST_CASE ("MIDI links value: damaged links read as the links' code read them, i
     CHECK (phazite::readMidiLinksValue ({}).links.empty());
 }
 
+TEST_CASE ("MIDI links value: links read as the song holds them keep what their descriptions keep, one of each controller and of "
+           "each parameter, in the element's order")
+{
+    // What enters the song's links (MidiLinksValue.h: readHeldMidiLinks(), withLinkTaken()): a link without its controller, or
+    // with one that is no number or outside its range (which brought within it would be another), goes, as the loader takes
+    // it away; so does one that names no parameter; numbers written as text, or not whole, read as the loader reads them; a
+    // second link of a controller or of a parameter goes, the first staying.
+    const auto links = parse (R"(<MIDILINKS colour="red"><MIDILINK device="12" parameter="cutoff"/>)"
+                              R"(<MIDILINK channel="17" number="3" device="12" parameter="gain"/>)"
+                              R"(<MIDILINK channel="2" number="120" device="12" parameter="gain"/>)"
+                              R"(<MIDILINK channel="nan" number="3" device="12" parameter="gain"/>)"
+                              R"(<MIDILINK channel="2" number="3" parameter="gain"/>)"
+                              R"(<MIDILINK channel="2" number="3" device="12"/>)"
+                              R"(<MIDILINK channel=" 2 " number="6.6" device="0012" parameter="gain" colour="red"/><OTHER/>)"
+                              R"(<MIDILINK channel="2" number="7" device="12" parameter="drive"/>)"
+                              R"(<MIDILINK channel="3" number="1" device="12" parameter="gain"/>)"
+                              R"(<MIDILINK channel="16" number="119" device="13" parameter="value"/></MIDILINKS>)");
+
+    const auto value = phazite::readHeldMidiLinks (links);
+    REQUIRE (value.links.size() == 2);
+    CHECK (value.links[0] == MidiLinkEntry { 2, 7, 12, "gain" });
+    CHECK (value.links[1] == MidiLinkEntry { 16, 119, 13, "value" });
+    CHECK (phazite::holdsOneLinkEach (value));
+    CHECK_FALSE (phazite::holdsOneLinkEach ({ value.links.push_back ({ 2, 7, 14, "cutoff" }) }));
+    CHECK_FALSE (phazite::readHeldMidiLink (links.getChild (0)).has_value());
+    CHECK_FALSE (phazite::readHeldMidiLink (links.getChild (7)).has_value()); // not a link
+
+    // A link taken in after the others: kept where it is the first of its controller and its parameter.
+    const auto taken = phazite::withLinkTaken (value, phazite::writeMidiLinkElement ({ 4, 4, 12, "cutoff" }));
+    REQUIRE (taken.links.size() == 3);
+    CHECK (taken.links[2] == MidiLinkEntry { 4, 4, 12, "cutoff" });
+    CHECK (phazite::withLinkTaken (value, phazite::writeMidiLinkElement ({ 2, 7, 12, "cutoff" })) == value);
+    CHECK (phazite::withLinkTaken (value, juce::ValueTree ("OTHER")).isSameAs (value));
+}
+
 TEST_CASE ("MIDI links value: the song's links read through the value are the links its elements hold, a macro's by its ID")
 {
     phazite::test::TestSong s;

@@ -28,9 +28,9 @@ struct MidiLink
     ParameterRef parameter;
 };
 
-// The song's links as a value (model/base/internal/MidiLinksValue.h), in the song's order. The song's tree holds them still
-// (roadmap step S5.20: the MIDI links' switch is to come), so this reads them from its MIDILINKS element at each call, by
-// value; the switch makes it the area's value, which it then gives without a read.
+// The song's links as a value (model/base/internal/MidiLinksValue.h), in the song's order: its area's (model/base/internal/
+// SongValues.h), without a read, which shares what it holds; a song that keeps everything in its tree (one that holds no
+// values: Song::getValues()) has them read from its MIDILINKS element.
 MidiLinksValue getMidiLinksValue (const Song&);
 
 // The parameter a link names, as the song names it elsewhere (ParameterRef.h): a macro's link holds the word
@@ -44,19 +44,35 @@ std::vector<MidiLink> getMidiLinks (const Song&);
 std::optional<MidiController> findMidiLink (const Song&, const ParameterRef&);
 std::optional<ParameterRef> findLinkedParameter (const Song&, MidiController);
 
-// Links a controller to a parameter in the caller's step: the controller's link, if it had one, moves here, and the
-// parameter's own, if it had one, goes. The parameter the controller turned before, if it was another.
+// The writers of the song's links, each in the caller's step (or outside the history while the song is written outside it),
+// each reading the links' value, working the next one out and setting it once (SongValues.h: setMidiLinks(), which writes
+// nothing for the links the song holds already). Each of a song that holds its values (model/project/internal/Project.h:
+// makeSong()): a song without them is written nothing.
+//
+// Links a controller to a parameter: the controller's link, if it had one, and the parameter's own, if it had one, go, and
+// the link is put after the others; the song's MIDILINKS, its place, added first where it has none (an action of the tree's,
+// before the value's: so Undo takes the value back first, then the element), as it was always added with the first link.
+// The parameter the controller turned before, if it was another.
 std::optional<ParameterRef> linkMidiController (Song&, MidiController, const ParameterRef&);
 void unlinkMidiController (Song&, MidiController);
 
 // The links of what is gone: those whose device, chain, send, fader, modulator or macro isn't among the song's items (by
-// their IDs, as forgetWhatNamesTheGone() finds them, model/mixer/internal/Mixer.h), in the caller's step.
+// their IDs, as forgetWhatNamesTheGone() finds them, model/mixer/internal/Mixer.h); and of the links that stay one of each
+// controller and one of each parameter (MidiLinksValue.h: keepOneLinkEach()), as after a merge or an applied song, which can
+// take one side's link of a parameter beside the other's.
 void forgetMidiLinksOfTheGone (Song&, const std::set<std::uint64_t>& items);
 
-// One link of each controller and one of each parameter: of two, the first in the song's order stays, the other goes, through
-// undo (the caller's step), or none (the loader: makeConsistent()). forgetMidiLinksOfTheGone() does it too, after a merge or
-// an applied song, which can take one side's link of a parameter beside the other's.
-void keepOneMidiLinkEach (Song&, juce::UndoManager* undo);
+// One link of each controller and one of each parameter in the MIDILINKS element of a song that keeps its links in its tree
+// (the loader's, makeConsistent(), before the song holds its values; a version's song read in part): of two, the first in the
+// element's order stays, the other goes, as MidiLinksValue.h's keepOneLinkEach() keeps them, outside any history. Nothing for
+// a song that holds its values, whose MIDILINKS is empty.
+void keepOneMidiLinkEach (Song&);
+
+// The song's links made those of a MIDILINKS element (another song's: a version's, a merge's), read as the song holds links
+// (MidiLinksValue.h: readHeldMidiLinks()), or none for an invalid tree, with its MIDILINKS as the other has one: added first
+// where it comes, taken away last where it goes (the value never says more than the element), in the mode of the moment.
+// What the versions' links pass gives the song (model/versions/ApplySong.cpp). Whether it wrote anything.
+bool makeMidiLinksAs (Song&, const juce::ValueTree& midiLinksElement);
 
 // The value a controller's position (0 to 127) sets a parameter to: along its control's travel (getControlTravel()), as an
 // automation point's position is, 127 all the way; a parameter that steps (a switch, a choice) in steps that share the travel

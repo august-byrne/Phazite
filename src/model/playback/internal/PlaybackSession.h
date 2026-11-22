@@ -152,6 +152,14 @@ public:
     void setMidiLearning (bool);
     std::function<void (int channel, int number, int value)> onMidiController;
 
+    // What the MIDI tap diverts brought up to date with the song's links now, where they changed since it was last (and,
+    // while the engine plays this project, the tap taken for it). The session follows a change of the links by itself at the
+    // next turn of the message loop (midiLinksChanged(), which only marks: a listener of the song's values reads nothing as it
+    // is told), and as it gives the engine the song (update()); what makes a link that must be diverted before it goes on asks
+    // at once (MidiLinker::learn(), before learning ends, so that the knob that made the link never reaches the instrument).
+    // Message thread, at a moment that is no callback of the song's tree: it reads the links' area.
+    void followMidiLinks();
+
     // The piano roll's guide notes into a track, on a MIDI channel (1 to 16), and a preset's tried in the browser; and their
     // ends, each on its channel. Neither Capture nor a take records them (Engine::playLive()'s recordable).
     void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity, int channel = 1);
@@ -180,8 +188,27 @@ private:
 
     TrackID liveTrack;
     bool liveTrackRecords = true;
-    bool midiLearning = false, midiLinksChanged = true;
-    void followMidiLinks(); // what the MIDI tap takes, told while the engine plays this project
+    bool midiLearning = false, linksToFollow = true; // linksToFollow: the links changed since the tap was told them
+
+    // What follows the links' changes at the next turn of the message loop (followMidiLinks()), apart from the session's own
+    // update, which makes a plan, and no plan holds links.
+    struct LinksFollower final : juce::AsyncUpdater
+    {
+        explicit LinksFollower (PlaybackSession& s)
+            : session (s)
+        {
+        }
+
+        ~LinksFollower() override { cancelPendingUpdate(); }
+
+        void handleAsyncUpdate() override { session.followMidiLinks(); }
+
+        PlaybackSession& session;
+
+        JUCE_DECLARE_NON_COPYABLE (LinksFollower)
+    };
+
+    LinksFollower linksFollower { *this };
     void takeMidiControllers();
     void letGoOfMidiTap();
     struct GuideNote
@@ -225,6 +252,15 @@ private:
     void chordLaneChanged() override { triggerAsyncUpdate(); }
 
     void curvesChanged (const std::vector<ParameterRef>&) override { triggerAsyncUpdate(); } // the curves: a new plan, as above
+
+    // The MIDI links (SongValues.h; its tree callbacks above leave what is in the song's MIDILINKS alone, isHeardAsKept(), and
+    // the MIDILINKS's own coming and going too): no plan, as no plan holds them, but what the MIDI tap diverts, marked and
+    // followed at the next turn of the message loop (followMidiLinks(), which reads them: never as a listener is told).
+    void midiLinksChanged() override
+    {
+        linksToFollow = true;
+        linksFollower.triggerAsyncUpdate();
+    }
 
     // A value set by hand (a plug-in's, by a control or in its window, plays at once), and one a program the song set set (a
     // plug-in's, which plays at once too); a plug-in's own window's gestures; and its latency, which needs a new plan.

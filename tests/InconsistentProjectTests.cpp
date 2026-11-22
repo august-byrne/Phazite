@@ -2419,6 +2419,90 @@ TEST_CASE ("A MIDI link to what the song hasn't, a controller's or a parameter's
     CHECK (links[0].parameter == "cutoff");
 }
 
+TEST_CASE ("Damaged MIDI links open as a whole value, each link as its description reads it, saved and opened again the same file")
+{
+    // The song takes in its file's links as it opens (Song::holdValues(): MidiLinksValue.h, readHeldMidiLinks()): numbers
+    // written as text, or not whole, a device's ID as a number, what Phazite doesn't know on the MIDILINKS and a link, a child
+    // of another type, a second link of one parameter (the first stays), and an empty MIDILINKS. Each opens holding together
+    // (the check, in Edited::open()), holds what its description reads, in the file's order, and is the same once saved and
+    // opened again, its MIDILINKS written without what Phazite doesn't know, and the same file saved twice. An empty MIDILINKS
+    // stays one.
+    struct Case
+    {
+        const char* about;
+        const char* links; // "SYNTH" stands for the synth's ID
+        std::vector<juce::String> expected;
+    };
+
+    const auto describe = [] (const phazite::Song& song)
+    {
+        std::vector<juce::String> lines;
+
+        if (! song.getState().getChildWithName (schema::MIDILINKS).isValid())
+            return lines;
+
+        lines.push_back ("links");
+
+        for (const auto& link : phazite::getMidiLinksValue (song).links)
+            lines.push_back (juce::String (link.channel) + " " + juce::String (link.number) + " " + link.parameter);
+
+        return lines;
+    };
+
+    const Case cases[] = {
+        { "numbers as text, and not whole",
+          R"(<MIDILINKS><MIDILINK channel=" 2 " number="7.4" device="SYNTH" parameter="cutoff"/></MIDILINKS>)",
+          { "links", "2 7 cutoff" } },
+        { "what Phazite doesn't know",
+          R"(<MIDILINKS colour="red"><LINE/><MIDILINK channel="1" number="21" device="SYNTH" parameter="drive" swing="0.2"/>)"
+          R"(</MIDILINKS>)",
+          { "links", "1 21 drive" } },
+        { "a second link of one parameter, after another of another, in the file's order",
+          R"(<MIDILINKS><MIDILINK channel="3" number="3" device="SYNTH" parameter="resonance"/>)"
+          R"(<MIDILINK channel="1" number="1" device="SYNTH" parameter="cutoff"/>)"
+          R"(<MIDILINK channel="1" number="2" device="SYNTH" parameter="resonance"/></MIDILINKS>)",
+          { "links", "3 3 resonance", "1 1 cutoff" } },
+        { "an empty MIDILINKS", R"(<MIDILINKS/>)", { "links" } },
+    };
+
+    for (const auto& each : cases)
+    {
+        INFO (juce::String (each.about));
+        Edited edited;
+        const auto synth = juce::String ((juce::int64) edited.synth.getRaw());
+        const auto project = edited.open (
+            [&each, &synth] (juce::XmlElement& song)
+            {
+                auto links = juce::parseXML (juce::String (each.links).replace ("SYNTH", synth));
+                REQUIRE (links != nullptr);
+                song.addChildElement (links.release());
+            });
+        REQUIRE (project != nullptr);
+        CHECK (describe (project->getSong()) == each.expected);
+
+        const auto links = phazite::test::copyWholeSong (project->getSong()).getChildWithName (schema::MIDILINKS);
+        REQUIRE (links.isValid());
+        CHECK (links.getNumProperties() == 0);
+
+        for (const auto& child : links)
+        {
+            CHECK (child.hasType (schema::MIDILINK));
+            CHECK (child.getNumProperties() == 4);
+        }
+
+        REQUIRE (project->save().wasOk());
+        const auto firstSave = edited.file.loadFileAsString();
+        juce::String error;
+        const auto again = phazite::Project::open (edited.file, false, error);
+        REQUIRE_MESSAGE (again != nullptr, error.toStdString());
+        checkSong (again->getSong());
+        CHECK (describe (again->getSong()) == each.expected);
+        CHECK (phazite::test::copyWholeSong (again->getSong()).getChildWithName (schema::MIDILINKS).isEquivalentTo (links));
+        REQUIRE (again->save().wasOk());
+        CHECK (edited.file.loadFileAsString() == firstSave);
+    }
+}
+
 namespace
 {
 // An alias group of three MIDI clips on the Lead's track, written into a project's file: the Lead's clip (800001, from beat 0)

@@ -2117,7 +2117,8 @@ namespace
                 return 0;
 
             return values->countTempoMapAdopted()     // the tempo map's
-                   + values->countChordLaneAdopted(); // the chord lane's
+                   + values->countChordLaneAdopted()  // the chord lane's
+                   + values->countMidiLinksAdopted(); // the MIDI links'
         }
 
         const Song& song;
@@ -2138,6 +2139,9 @@ namespace
 
         if (const auto choice = chooseChordLaneClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;
+
+        if (const auto choice = chooseMidiLinkClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice; // a path into the song's MIDILINKS
 
         if (const auto choice = chooseNoteClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;

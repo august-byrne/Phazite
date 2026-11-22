@@ -138,8 +138,9 @@ private:
 
     // The notes of a frozen track's clip, its clips, and the tempo map (every frozen track's), heard as the song's values
     // change: marked, and compared once the step is whole (a listener of the values reads nothing of the song as it is told:
-    // SongValues.h). The chord lane (chordLaneChanged()): nothing, as no frozen track's file holds anything of chords or keys.
-    // The tree's callbacks below leave what the areas tell alone (isHeardAsKept()).
+    // SongValues.h). The chord lane (chordLaneChanged()): nothing, as no frozen track's file holds anything of chords or keys;
+    // nor the MIDI links (midiLinksChanged()), which turn parameters live and are nothing a frozen file plays. The tree's
+    // callbacks below leave what the areas tell alone (isHeardAsKept()).
     void clipNotesChanged (const std::vector<ClipID>&) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
     void tempoMapChanged() override;

@@ -276,7 +276,9 @@ private:
     void tempoMapChanged() override { changes.tempo = true; } // every track's audio, which plays in seconds
 
     // The chord lane (SongValues.h: chordLaneChanged()): nothing, as nothing a plan holds reads chords or keys; its tree
-    // callbacks leave what is in the song's CHORDLANE alone (isHeardAsKept()).
+    // callbacks leave what is in the song's CHORDLANE alone (isHeardAsKept()). Nor the MIDI links (midiLinksChanged()), which
+    // no plan holds (the session gives the MIDI tap them: PlaybackSession.h); its tree callbacks leave what is in the song's
+    // MIDILINKS alone too.
 
     // The curves that changed (SongValues.h), each read again by the next compile.
     void curvesChanged (const std::vector<ParameterRef>&) override;

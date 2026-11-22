@@ -1565,7 +1565,7 @@ namespace
                     ++i;
                 }
 
-                keepOneMidiLinkEach (song, nullptr);
+                keepOneMidiLinkEach (song);
             }
 
             //==============================================================================
@@ -2703,6 +2703,7 @@ void Project::clearToCompare()
 {
     mayHaveChanged = comparingWhole = comparingClipsWhole = tempoToCompare = false;
     chordLaneToCompare = false;
+    midiLinksToCompare = false;
     toCompare.clear();
     notesToCompare.clear();
     clipsToCompare.clear();
@@ -2855,13 +2856,14 @@ void Project::compareWithSavedState()
     auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
-    // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves), each asked only while
-    // all before it compare.
+    // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links), each
+    // asked only while all before it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
     same = same && isChordLaneAsSaved();
     same = same && areCurvesAsSaved();
+    same = same && areMidiLinksAsSaved();
 
     clearToCompare();
 
@@ -3058,7 +3060,7 @@ void Project::clipNotesChanged (const std::vector<ClipID>& clips)
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged().
+    // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged().
     if (! schema::isUncountedElement (parent, child) && ! isHeardAsKept (parent, child))
         markChanged (parent);
 }
@@ -3099,6 +3101,25 @@ void Project::chordLaneChanged()
 
     mayHaveChanged = true;
     chordLaneToCompare = true;
+}
+
+void Project::midiLinksChanged()
+{
+    // As markChanged() marks an element of the song: counted, and compared when asked.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+    midiLinksToCompare = true;
 }
 
 void Project::curvesChanged (const std::vector<ParameterRef>& parameters)
@@ -3255,6 +3276,16 @@ bool Project::isChordLaneAsSaved() const
     return holdSameChordLane (song->getState(), keepValues (*song), savedState.tree, savedState.values);
 }
 
+bool Project::areMidiLinksAsSaved() const
+{
+    if (! midiLinksToCompare)
+        return true;
+
+    // The MIDI links, against the saved copy's, as one value, and whether each has a MIDILINKS.
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+    return holdSameMidiLinks (song->getState(), keepValues (*song), savedState.tree, savedState.values);
+}
+
 bool Project::holdSameClip (ClipID clip, const ValuesKept& now) const
 {
     const auto* value = now.clips.find (clip);
@@ -3315,8 +3346,9 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const ValuesKept& aV
     // What each song keeps beside its tree of the element (WholeState.h: holdSameKeptOf(), each area in turn): a track's
     // clips, with their notes and controllers' values; the tempo map as one value, as the quick comparison compares it
     // (compareWithSavedState()), so that the two agree: its elements' order, and what reads as its default, are no
-    // difference; the chord lane as one value, with whether each has one; the curves as values, in their order. The places
-    // of what is kept (the TEMPOMAP, the CHORDLANE, an AUTOMATION's CURVEs) are left out of the elements below.
+    // difference; the chord lane as one value, with whether each has one; the curves as values, in their order; the MIDI
+    // links as one value, with whether each has a MIDILINKS. The places of what is kept (the TEMPOMAP, the CHORDLANE, an
+    // AUTOMATION's CURVEs, the MIDILINKS) are left out of the elements below.
     if (! holdSameKeptOf (a, aValues, b, bValues))
         return false;
 

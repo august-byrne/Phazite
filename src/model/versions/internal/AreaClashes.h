@@ -35,6 +35,8 @@ struct MergeSides
 //   - the tempo map's (model/transport/Tempo.cpp): a path into the song's TEMPOMAP, through the tempo map's value;
 //   - the chord lane's (model/chords/Chords.cpp): a path into the song's CHORDLANE, which merges whole, through the chord
 //     lane's code (its element and its value);
+//   - a MIDI link's (model/midi/MidiLinks.cpp): a path to a MIDILINK in the song's MIDILINKS, which merges whole, through
+//     the links' code;
 //   - a note's (model/notes/Notes.cpp): a note's property (a path that ends at a NOTE, in a clip), through the notes' code;
 //   - a clip's (model/arrangement/Clips.cpp): a clip's own property (a path that ends at a clip on the track the path names),
 //     through the clips' code; and any other clash whose path goes through a clip, refused (nothing else inside a clip has a
@@ -42,6 +44,10 @@ struct MergeSides
 // A note's path goes through its clip: its chooser is asked before the clip's.
 AreaChoice chooseTempoMapClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseChordLaneClash (Song&, const MergeClash&, int value, const MergeSides&);
+
+// The MIDI links' (model/midi/MidiLinks.cpp): a path into the song's MIDILINKS, whose links merge whole, each by its
+// controller, through the MIDI links' value.
+AreaChoice chooseMidiLinkClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseNoteClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSides&);
 } // namespace phazite

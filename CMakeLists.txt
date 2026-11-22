@@ -348,6 +348,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/Json.cpp
     src/model/base/Json.h
     src/model/base/KeptByAge.h
+    src/model/base/MidiLinksArea.cpp
     src/model/base/MidiLinksValue.cpp
     src/model/base/NotesArea.cpp
     src/model/base/Numbers.h
@@ -374,6 +375,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/CurvesArea.h
     src/model/base/internal/IDsHeld.h
     src/model/base/internal/Immer.h
+    src/model/base/internal/MidiLinksArea.h
     src/model/base/internal/MidiLinksValue.h
     src/model/base/internal/NotesArea.h
     src/model/base/internal/Schema.h
@@ -1513,6 +1515,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongValuesChordsTests.cpp
         tests/SongValuesClipsTests.cpp
         tests/SongValuesCurvesTests.cpp
+        tests/SongValuesMidiLinksTests.cpp
         tests/SongValuesTempoTests.cpp
         tests/SongValuesTests.cpp
         tests/SoundKeyTests.cpp

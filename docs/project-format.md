@@ -76,7 +76,10 @@ out as it opens the file (section 7).
   and `number` (0 to 119; a link with another goes as the song opens), and the parameter it turns, by its `device`'s ID
   and its `parameter`'s ID as a curve names them (a modulator's parameter by its name; a macro by its ID as `device` and
   the word `value` as `parameter`, so that the link names the macro's ID once); one link of a controller and one of a
-  parameter, the first kept as the song opens;
+  parameter, the first kept as the song opens; a `channel` or a `number` written as text reads as the loader reads a
+  number, made whole, and a property or an element Phazite doesn't know on `MIDILINKS` or a link isn't kept. Written
+  in the song's order (a link made goes after the others), each link's four properties, its `device`'s ID as text; the
+  element is written once the first link is made, and stays, empty, once the last goes;
 - `SECTIONS`: the song's parts;
 - `CHORDLANE`, once the song has a chord lane (without one, its keys are the key set last, `LASTKEY`): its chords
   (`CHORD`: `start`, `length`, `degree`, `type`, and `accidental` and `inversion`, each written only while it isn't 0)

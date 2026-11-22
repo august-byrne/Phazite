@@ -198,7 +198,8 @@ private:
     static bool isChordLanePlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child);
 
     // Not the curves (SongValues.h: curvesChanged()): no render holds automation, and the tree's callbacks above leave the
-    // curves' elements alone (isHeardAsKept(), through isHeardAsCurves()).
+    // curves' elements alone (isHeardAsKept(), through isHeardAsCurves()). Nor the MIDI links (midiLinksChanged()): no render
+    // is made of them, and the tree's callbacks above leave what is in the song's MIDILINKS alone (isHeardAsMidiLinks()).
 
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };

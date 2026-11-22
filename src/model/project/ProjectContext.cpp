@@ -128,6 +128,11 @@ namespace
         // (isHeardAsKept()); the song's AUTOMATION itself is theirs (mark()).
         void curvesChanged (const std::vector<ParameterRef>&) override { add (pending.automation); }
 
+        // The MIDI links (SongValues.h): their group, as a change in their element always was. Its tree callbacks below leave
+        // what is in the song's MIDILINKS alone (isHeardAsKept()); the element's own coming and going they mark as before
+        // (mark(), markRemoved()).
+        void midiLinksChanged() override { add (pending.midiLinks); }
+
         // Each clip whose notes changed named, on its track, as the song holds it now (a listener of the values reads nothing
         // of the song as it is told: this is later); one gone since was named as it was taken off its track.
         void nameNotesChanged()
@@ -264,7 +269,7 @@ namespace
         {
             if (child.hasType (schema::AUTOMATION))
                 add (pending.automation);
-            else if (child.hasType (schema::MIDILINKS) || child.hasType (schema::MIDILINK))
+            else if (child.hasType (schema::MIDILINKS))
                 add (pending.midiLinks);
             else if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO) || child.hasType (schema::MODULATES))
                 add (pending.modulation);
@@ -325,7 +330,7 @@ namespace
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
             if (isHeardAsKept (tree))
-                return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
+                return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
 
             // A device's value that turns what its sidechain hears on or off (a compressor's mode) changes what the mixer
             // shows of it.
@@ -376,7 +381,7 @@ namespace
         {
             // A device's first value set by hand, as its other values, is no change that views show; nor its last one set back
             // to its default, which takes its VALUES away (keepValueSetByHand()). The areas' (isHeardAsKept()):
-            // tempoMapChanged(), chordLaneChanged(), curvesChanged().
+            // tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged().
             if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE) || isHeardAsKept (parent, child))
                 return;
 

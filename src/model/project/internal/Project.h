@@ -404,6 +404,13 @@ private:
     void curvesChanged (const std::vector<ParameterRef>&) override;
     void clearCurvesToCompare(); // clearToCompare()'s
 
+    // The MIDI links changed (SongValues.h: Listener::midiLinksChanged(); the tree's callbacks below leave what is in its
+    // MIDILINKS alone, isHeardAsKept(), and mark the element's own coming and going as any element's): compared with
+    // savedState's when asked, as one value with whether each has a MIDILINKS (WholeState.h: holdSameMidiLinks()), so that a
+    // link taken away and made again as it was is saved again.
+    bool midiLinksToCompare = false;
+    void midiLinksChanged() override;
+
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
     // where nothing of it was marked.
     bool areNotesAsSaved() const;
@@ -411,6 +418,7 @@ private:
     bool isTempoMapAsSaved() const;
     bool isChordLaneAsSaved() const;
     bool areCurvesAsSaved() const;
+    bool areMidiLinksAsSaved() const;
 
     // Whether a clip of the song is as savedState holds it, all it holds (its properties, its track, its warp markers, its
     // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's
@@ -479,8 +487,9 @@ private:
     // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()). Each
     // element with what its song kept beside its tree (a track's clips and their notes: holdSameTrackClips()). The tempo map
     // as one value, as compareWithSavedState() compares it (holdSameTempoMap()), not its elements in their order; the chord
-    // lane likewise, with whether each has one (holdSameChordLane()); and the curves as values, in their order
-    // (holdSameCurves()), not their elements.
+    // lane likewise, with whether each has one (holdSameChordLane()); the curves as values, in their order
+    // (holdSameCurves()), not their elements; and the MIDI links as one value, with whether each has a MIDILINKS
+    // (holdSameMidiLinks()).
     static bool holdTheSameProject (const juce::ValueTree&, const ValuesKept&, const juce::ValueTree&, const ValuesKept&);
 
 public:
@@ -499,7 +508,7 @@ public:
 private:
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
     {
-        if (! isHeardAsKept (tree)) // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
+        if (! isHeardAsKept (tree)) // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
             markChanged (tree, property);
     }
 
@@ -508,7 +517,7 @@ private:
 
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
     {
-        if (! isHeardAsKept (parent)) // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
+        if (! isHeardAsKept (parent)) // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
             markChanged (parent);
     }
 

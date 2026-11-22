@@ -53,12 +53,6 @@ namespace
     {
         return (child.isValid() && schema::isUncountedElement (parent, child)) || isInViewElement (parent);
     }
-
-    // The song's MIDI links, or one of them.
-    bool isInMidiLinks (const juce::ValueTree& tree)
-    {
-        return tree.hasType (schema::MIDILINKS) || (tree.hasType (schema::MIDILINK) && tree.getParent().hasType (schema::MIDILINKS));
-    }
 } // namespace
 
 PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
@@ -91,6 +85,7 @@ PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
 PlaybackSession::~PlaybackSession()
 {
     stopTimer();
+    linksFollower.cancelPendingUpdate();
     take = nullptr; // a take not finished keeps nothing
     Gesture::forget (this);
     onProblem = nullptr; // what owns the reporter may be going too
@@ -125,15 +120,12 @@ AudioIO& PlaybackSession::getAudioIO() const noexcept
 void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
     if (isHeardAsKept (parent, child))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
 
-    // The MIDI links, which no plan holds: what the MIDI tap takes.
-    if (isInMidiLinks (parent) || child.hasType (schema::MIDILINKS))
-    {
-        midiLinksChanged = true;
-        followMidiLinks();
+    // The song's MIDILINKS added or taken out, the place of its links (with the first link, or a version's): no plan holds
+    // them, and the links in it are the area's to tell (midiLinksChanged()).
+    if (child.hasType (schema::MIDILINKS))
         return;
-    }
 
     // An element of view state added, removed or moved (a piano roll's, a track's lanes), or one in it: no new plan.
     if (! isViewElement (parent, child))
@@ -143,14 +135,7 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     if (isHeardAsKept (tree))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
-
-    if (isInMidiLinks (tree))
-    {
-        midiLinksChanged = true;
-        followMidiLinks();
-        return;
-    }
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
 
     // Where playback starts is the transport's (movePlayhead() locates the engine itself), view state is how the song shows,
     // and where the song stands in its versions is the versions': nothing a plan holds.
@@ -509,12 +494,12 @@ void PlaybackSession::followMidiLinks()
         tap.clear();
         tap.takenBy = this;
         tap.onArrived = [this] { takeMidiControllers(); };
-        midiLinksChanged = true;
+        linksToFollow = true;
     }
 
     tap.setLearning (midiLearning);
 
-    if (! std::exchange (midiLinksChanged, false))
+    if (! std::exchange (linksToFollow, false))
         return;
 
     // The song's links' controllers, as the MIDI links' code gives them (MidiLinks.h).

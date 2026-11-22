@@ -524,9 +524,12 @@ inline const Property<float> pointCurve { "curve", on (POINT), within (-1.0, 1.0
 // The song's MIDI links (model/midi/internal/MidiLinks.h): a hardware controller linked to the parameter it turns (MIDI
 // learn). song
 
-// Child of PHAZITE, added with the first link: the links (MIDILINK), in no particular order. A link of a device, a chain, a
-// send, a fader, a modulator or a macro that goes leaves with it, in its step (model/mixer/internal/Mixer.h:
-// forgetWhatNamesTheGone()).
+// Child of PHAZITE, added with the first link: the links (MIDILINK), in the song's order (of two of one controller or one
+// parameter, the first stays). A link of a device, a chain, a send, a fader, a modulator or a macro that goes leaves with it,
+// in its step (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()). A song's links are a value beside its tree while it is
+// open (model/base/internal/MidiLinksValue.h), each property below as its description reads it, and its tree's MIDILINKS
+// an empty placeholder, kept where the song has one: so the song keeps no property or element Phazite doesn't know on a
+// MIDILINKS or a MIDILINK.
 // (MIDILINKS, with the elements above.)
 
 // Child of MIDILINKS: a link. On MIDILINK: the controller, by its channel (int 1..16) and its number (int 0..119: 120 to

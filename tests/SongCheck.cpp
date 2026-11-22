@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/ChordLaneValue.h"
+#include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
@@ -893,6 +894,61 @@ namespace
             ++place;
         }
     }
+
+    // The MIDI links' area: no MIDILINK in the song's tree, its MIDILINKS there (where the song has one) an empty
+    // placeholder, and no link held without one (a whole copy writes the links in it); every number within its description's
+    // range (Schema.h), read here from the description, and a parameter named (a device's ID and a text); and one link of each
+    // controller and one of each parameter (MidiLinksValue.h: holdsOneLinkEach()). That each names a parameter the song has
+    // is the rule above, on the song whole (checkValues()'s MIDILINK).
+    void checkMidiLinksValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> findLinks = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::MIDILINK))
+                    problems.push_back ("values: a MIDILINK is an element in the song's tree");
+
+                findLinks (child);
+            }
+        };
+
+        findLinks (song.getState());
+        const auto& links = values.midiLinks.get();
+
+        if (const auto element = song.getState().getChildWithName (schema::MIDILINKS); ! element.isValid())
+        {
+            if (! links.links.empty())
+                problems.push_back ("values: the song holds MIDI links but has no MIDILINKS, the place of its links");
+        }
+        else if (element.getNumChildren() > 0 || element.getNumProperties() > 0)
+        {
+            problems.push_back ("values: the song's MIDILINKS isn't an empty placeholder for its MIDI links");
+        }
+
+        const auto isWithin = [] (int number, const schema::PropertyDescription& property)
+        {
+            const auto& range = property.getRange();
+            return range.has_value() && (double) number >= range->low && (double) number <= range->high;
+        };
+
+        size_t place = 0;
+
+        for (const auto& link : links.links)
+        {
+            if (! isWithin (link.channel, schema::midiLinkChannel) || ! isWithin (link.number, schema::midiLinkNumber))
+                problems.push_back ("values: the MIDI link " + std::to_string (place)
+                                    + " holds a controller outside its description's range");
+
+            if (link.device == 0 || link.parameter.isEmpty())
+                problems.push_back ("values: the MIDI link " + std::to_string (place) + " names no parameter");
+
+            ++place;
+        }
+
+        if (! holdsOneLinkEach (links))
+            problems.push_back ("values: the MIDI links hold two of one controller or of one parameter");
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -904,11 +960,12 @@ std::vector<std::string> findValueProblems (const Song& song)
         return problems;
 
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
-    // lane.
+    // lane, the MIDI links.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
     checkChordLaneValue (song, *values, problems);
+    checkMidiLinksValue (song, *values, problems);
     return problems;
 }
 

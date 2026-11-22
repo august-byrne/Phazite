@@ -6,7 +6,9 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/WholeState.h"
 #include "model/chords/internal/Chords.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
@@ -105,10 +107,19 @@ namespace
         return parent.hasType (schema::CHORDLANE) || (child.hasType (schema::CHORDLANE) && parent.hasType (schema::PHAZITE));
     }
 
+    // Whether an element is the MIDI links': the song's MIDILINKS, or an element in it. The song holds its links as a value
+    // (model/base/internal/SongValues.h), its MIDILINKS an empty placeholder written into its file, which the links pass
+    // makes like the other's, the placeholder too (makeMidiLinksLike(), below), never the passes over elements.
+    bool isMidiLinks (const juce::ValueTree& parent, const juce::ValueTree& child)
+    {
+        return parent.hasType (schema::MIDILINKS) || (child.hasType (schema::MIDILINKS) && parent.hasType (schema::PHAZITE));
+    }
+
     // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read
     // (the stand-ins, and the elements that stand in for themselves: a clip a run of whose notes was lost), and without its
     // tracks' clips, which the clip pass gives them (ClipPass, below), nor the tempo map's entries, which the tempo pass
-    // gives the song (makeTempoMapLike()), nor the chord lane's, which the lane pass gives it (makeChordLaneLike()). The song
+    // gives the song (makeTempoMapLike()), nor the chord lane's, which the lane pass gives it (makeChordLaneLike()), nor the MIDI links, which the links
+    // pass gives it (makeMidiLinksLike()). The song
     // hasn't the stand-ins, so what they held stays as it is now: not there. A stand-in is never part of a song (Schema.h:
     // schema::versions::missing).
     juce::ValueTree copyForSong (const juce::ValueTree& element)
@@ -119,7 +130,7 @@ namespace
             for (int i = tree.getNumChildren(); --i >= 0;)
             {
                 if (auto child = tree.getChild (i); isStandIn (child) || child.hasType (schema::CLIP) || tree.hasType (schema::TEMPOMAP)
-                                                    || tree.hasType (schema::CHORDLANE))
+                                                    || tree.hasType (schema::CHORDLANE) || tree.hasType (schema::MIDILINKS))
                     tree.removeChild (i, nullptr);
                 else
                     strip (child);
@@ -132,11 +143,12 @@ namespace
 
     // Whether makeLike() places a child among the element's: taken, a track only withTracks, never a clip (a track's clips are
     // the clip pass's: ClipPass, below), nor the song's TEMPOMAP or what is in it (the tempo pass's: makeTempoMapLike()), nor
-    // its CHORDLANE or what is in it (the lane pass's: makeChordLaneLike()).
+    // its CHORDLANE or what is in it (the lane pass's: makeChordLaneLike()), nor its MIDILINKS or what is in it (the links
+    // pass's: makeMidiLinksLike()).
     bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, bool withTracks, Taken taken)
     {
         return isTaken (taken, element, child) && (withTracks || ! child.hasType (schema::TRACK)) && ! child.hasType (schema::CLIP)
-               && ! isTempoMaps (element, child) && ! isChordLanes (element, child);
+               && ! isTempoMaps (element, child) && ! isChordLanes (element, child) && ! isMidiLinks (element, child);
     }
 
     std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true, Taken taken = Taken::counted)
@@ -979,7 +991,8 @@ namespace
 
             return values->countAdopted()             // the clips', with their notes
                    + values->countTempoMapAdopted()   // the tempo map's
-                   + values->countChordLaneAdopted(); // the chord lane's
+                   + values->countChordLaneAdopted()  // the chord lane's
+                   + values->countMidiLinksAdopted(); // the MIDI links'
         }
 
         const Song& song;
@@ -1025,6 +1038,50 @@ namespace
         return makeChordLaneAs (song, then);
     }
 
+    // The song's MIDI links made the other song's: links or none, as the other has a MIDILINKS (read as the song holds links:
+    // MidiLinksValue.h, readHeldMidiLinks()), through the MIDI links' code, which adds or takes away the song's MIDILINKS and
+    // sets its value, in the mode of the moment (model/midi/internal/MidiLinks.h: makeMidiLinksAs(), which writes nothing for
+    // the links the song holds already). The rule for what the other's version couldn't read, as the passes over elements had
+    // it: a MIDILINKS that stands in for what could not be read is left as the song has it, whole, its being there too; a link
+    // that does keeps the song's link of its controller (a link's key) in its place, or none where the song has none, and the
+    // rest are the other's. Whether it wrote. Only for the whole song (makeSongLike(), makeSongTheSame(), makeSongAsCopied()):
+    // no line's restore gives the song another's links (makeSongOwnLikeIn() and makeTrackLikeIn() never did).
+    bool makeMidiLinksLike (Song& song, const juce::ValueTree& other)
+    {
+        auto then = other.getChildWithName (schema::MIDILINKS);
+
+        if (song.getValues() == nullptr || (then.isValid() && isStandIn (then)))
+            return false;
+
+        if (then.isValid() && ! findStandIns (then).empty())
+        {
+            const auto live = copyWhole (song, song.getState().getChildWithName (schema::MIDILINKS));
+            then = then.createCopy();
+
+            for (int i = then.getNumChildren(); --i >= 0;)
+            {
+                const auto child = then.getChild (i);
+
+                if (! isStandIn (child))
+                    continue;
+
+                const auto name = nameOf (child);
+                then.removeChild (i, nullptr);
+
+                for (const auto& link : live)
+                {
+                    if (nameOf (link) == name)
+                    {
+                        then.addChild (link.createCopy(), i, nullptr);
+                        break;
+                    }
+                }
+            }
+        }
+
+        return makeMidiLinksAs (song, then);
+    }
+
     // Every track's clips made like the other's, once the rest of the song is: how many writes it made.
     int makeClipsLike (Song& song, const juce::ValueTree& other, bool standInsStay)
     {
@@ -1042,6 +1099,7 @@ namespace
         auto writes = makeClipsLike (song, other, standInsStay);
         writes += makeTempoMapLike (song, other) ? 1 : 0;
         writes += makeChordLaneLike (song, other) ? 1 : 0;
+        writes += makeMidiLinksLike (song, other) ? 1 : 0; // the MIDI links' one, where it wrote
         return writes;
     }
 

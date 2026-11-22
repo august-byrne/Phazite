@@ -4,10 +4,12 @@
 #include "model/automation/AutomationValues.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/versions/internal/AreaClashes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,20 +18,63 @@ namespace phazite
 {
 namespace
 {
-    MidiController readController (const juce::ValueTree& link)
+    juce::ValueTree findLinksState (const Song& song)
     {
-        return { (int) link[schema::midiLinkChannel], (int) link[schema::midiLinkNumber] };
+        return song.getState().getChildWithName (schema::MIDILINKS);
     }
 
-    std::vector<juce::ValueTree> getLinkStates (const Song& song)
+    // The song's tree written as the song is written now: in the step in progress, or outside the history.
+    juce::UndoManager* getTreeUndo (Song& song)
     {
-        std::vector<juce::ValueTree> links;
+        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+    }
 
-        for (const auto& link : song.getState().getChildWithName (schema::MIDILINKS))
-            if (link.hasType (schema::MIDILINK))
-                links.push_back (link);
+    // The song's links made the next value: their area's, in the step in progress, or outside the history while the song is
+    // written outside it (SongValues.h: setMidiLinks(), which writes nothing for the links the song holds already).
+    void setLinks (Song& song, MidiLinksValue next)
+    {
+        if (auto* values = song.getValues())
+            values->setMidiLinks (song, std::move (next));
+        else
+            jassertfalse; // the MIDI links' edits are a song's that holds its values (internal/Project.h: makeSong())
+    }
 
-        return links;
+    // The links without those that one asks to take away, in their order: the same value where it takes none.
+    template <typename TakesAway>
+    MidiLinksValue without (const MidiLinksValue& value, TakesAway&& takesAway)
+    {
+        auto kept = immer::flex_vector<MidiLinkEntry>().transient();
+        auto took = false;
+
+        for (const auto& link : value.links)
+        {
+            if (takesAway (link))
+                took = true;
+            else
+                kept.push_back (link);
+        }
+
+        return took ? MidiLinksValue { kept.persistent() } : value;
+    }
+
+    // Whether an element of another song's, or anything in it, stands in for what that song's version couldn't read
+    // (Schema.h: schema::versions::missing).
+    bool holdsStandIn (const juce::ValueTree& element)
+    {
+        if (element.hasProperty (schema::versions::missing))
+            return true;
+
+        for (const auto& child : element)
+            if (holdsStandIn (child))
+                return true;
+
+        return false;
+    }
+
+    // How a merge names a link in its clash's path (SongMerge.cpp: keyOf()): its type and its key, its controller.
+    juce::String nameInPath (const MidiLinkEntry& link)
+    {
+        return schema::MIDILINK.toString() + ":" + schema::getElementKey (writeMidiLinkElement (link));
     }
 
     // How a moved controller's link is told: "CC 21 on channel 1 now turns Cutoff, instead of Volume."
@@ -50,7 +95,10 @@ namespace
 //==============================================================================
 MidiLinksValue getMidiLinksValue (const Song& song)
 {
-    return readMidiLinksValue (song.getState().getChildWithName (schema::MIDILINKS));
+    if (const auto* values = song.getValues())
+        return values->midiLinks.get();
+
+    return readMidiLinksValue (findLinksState (song));
 }
 
 ParameterRef readMidiLinkParameter (const Song& song, const MidiLinkEntry& link)
@@ -110,65 +158,149 @@ std::optional<ParameterRef> linkMidiController (Song& song, MidiController contr
     if (! controller.isValid() || ! parameter.isValid())
         return {};
 
-    auto* undo = &song.getUndoManager();
+    if (song.getValues() == nullptr)
+    {
+        jassertfalse; // the MIDI links' edits are a song's that holds its values (model/project/internal/Project.h: makeSong())
+        return {};
+    }
+
     const auto before = findLinkedParameter (song, controller);
 
-    // The controller's link moves here, and the parameter's own goes: one link of each.
-    for (auto link : getLinkStates (song))
-        if (readController (link) == controller || readMidiLinkParameter (song, link) == parameter)
-            link.getParent().removeChild (link, undo);
-
+    // The controller's link moves here, and the parameter's own goes: one link of each, the new one after the others.
     const auto found = locateParameter (song, parameter);
     const auto isMacro = found.has_value() && found->source == ParameterSource::macro;
+    const auto next =
+        without (getMidiLinksValue (song), [&] (const MidiLinkEntry& link)
+                 { return MidiController { link.channel, link.number } == controller || readMidiLinkParameter (song, link) == parameter; });
 
-    juce::ValueTree link (schema::MIDILINK);
-    link.setProperty (schema::midiLinkChannel, controller.channel, nullptr);
-    link.setProperty (schema::midiLinkNumber, controller.number, nullptr);
-    link.setProperty (schema::midiLinkDevice, juce::String ((juce::int64) parameter.device.getRaw()), nullptr);
-    link.setProperty (schema::midiLinkParameter, isMacro ? juce::String (schema::midiLinkMacroValue) : parameter.parameter, nullptr);
-    song.getState().getOrCreateChildWithName (schema::MIDILINKS, undo).appendChild (link, undo);
+    // The song's MIDILINKS first, where it has none: the place of its links, added with the first.
+    if (! findLinksState (song).isValid())
+        song.getState().appendChild (juce::ValueTree (schema::MIDILINKS), getTreeUndo (song));
+
+    setLinks (song, { next.links.push_back ({ controller.channel, controller.number, parameter.device.getRaw(),
+                                              isMacro ? juce::String (schema::midiLinkMacroValue) : parameter.parameter }) });
 
     return before.has_value() && *before != parameter ? before : std::nullopt;
 }
 
 void unlinkMidiController (Song& song, MidiController controller)
 {
-    for (auto link : getLinkStates (song))
-        if (readController (link) == controller)
-            link.getParent().removeChild (link, &song.getUndoManager());
+    setLinks (song, without (getMidiLinksValue (song), [controller] (const MidiLinkEntry& link)
+                             { return MidiController { link.channel, link.number } == controller; }));
 }
 
 void forgetMidiLinksOfTheGone (Song& song, const std::set<std::uint64_t>& items)
 {
-    for (auto link : getLinkStates (song))
-        if (! items.contains (readID (link[schema::midiLinkDevice])))
-            link.getParent().removeChild (link, &song.getUndoManager());
-
-    keepOneMidiLinkEach (song, &song.getUndoManager());
+    setLinks (song, keepOneLinkEach (without (getMidiLinksValue (song),
+                                              [&items] (const MidiLinkEntry& link) { return ! items.contains (link.device); })));
 }
 
-void keepOneMidiLinkEach (Song& song, juce::UndoManager* undo)
+void keepOneMidiLinkEach (Song& song)
 {
-    // By what the elements hold, as the loader reads them before anything else does.
-    std::set<std::pair<int, int>> controllers;
-    std::set<std::pair<std::uint64_t, juce::String>> parameters;
+    // The rule the song's value keeps (MidiLinksValue.h: keepOneLinkEach()), on the elements as the loader reads them before
+    // anything else does: those the rule keeps are those it reads, in their order, less those it lets go (a link equal to one
+    // kept before it went: so each kept is the first element alike that is left). A song that holds its values keeps the rule
+    // in its value, its MIDILINKS empty: nothing.
+    auto links = findLinksState (song);
+    const auto kept = keepOneLinkEach (readMidiLinksValue (links));
+    size_t next = 0;
 
-    for (auto link : getLinkStates (song))
+    for (int i = 0; i < links.getNumChildren();)
     {
-        const auto controller = readController (link);
-        const std::pair<int, int> byController { controller.channel, controller.number };
-        const std::pair<std::uint64_t, juce::String> byParameter { readID (link[schema::midiLinkDevice]),
-                                                                   link[schema::midiLinkParameter].toString() };
-
-        if (controllers.contains (byController) || parameters.contains (byParameter))
+        if (const auto link = links.getChild (i); link.hasType (schema::MIDILINK))
         {
-            link.getParent().removeChild (link, undo);
-            continue;
+            if (next < kept.links.size() && readMidiLinkEntry (link) == kept.links[next])
+            {
+                ++next;
+            }
+            else
+            {
+                links.removeChild (i, nullptr);
+                continue;
+            }
         }
 
-        controllers.insert (byController);
-        parameters.insert (byParameter);
+        ++i;
     }
+}
+
+bool makeMidiLinksAs (Song& song, const juce::ValueTree& links)
+{
+    auto* values = song.getValues();
+
+    if (values == nullptr || (links.isValid() && ! links.hasType (schema::MIDILINKS)))
+        return false;
+
+    // Its element first where it comes, its value, then its element away where it goes: the value never says more than the
+    // element does (a song without a MIDILINKS holds no links).
+    auto state = song.getState();
+    const auto live = findLinksState (song);
+    const auto before = values->midiLinks.get();
+    auto wrote = false;
+
+    if (links.isValid() && ! live.isValid())
+    {
+        state.appendChild (juce::ValueTree (schema::MIDILINKS), getTreeUndo (song));
+        wrote = true;
+    }
+
+    values->setMidiLinks (song, links.isValid() ? readHeldMidiLinks (links) : MidiLinksValue {});
+    wrote = wrote || ! values->midiLinks.get().isSameAs (before);
+
+    if (! links.isValid() && live.isValid())
+    {
+        state.removeChild (live, getTreeUndo (song));
+        wrote = true;
+    }
+
+    return wrote;
+}
+
+AreaChoice chooseMidiLinkClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
+{
+    // A path into the song's MIDILINKS, whose links the song holds as a value beside its tree (model/base/internal/
+    // SongValues.h), its tree's element an empty placeholder: a link merges whole (SongMerge.cpp: mergesWhole()), so its clash
+    // is the whole link's, by its controller, the path's second step. The side chosen's link put in the place of the song's
+    // link of that controller, or after the others where it has none; or the song's taken away where that side had none: as
+    // the song's tree had it chosen, in the choice's step (VersionsModel.cpp: chooseClash(), which then keeps one link of
+    // each parameter: forgetWhatNamesTheGone()). Refused (nothing written) for any other clash on its path, which a merge of
+    // two songs Phazite holds never makes, but a commit's song may come from anyone (tests/FuzzTests.cpp chooses every clash
+    // of a damaged merge): a property, the MIDILINKS itself, an element of another type, a link the song can't hold, one that
+    // stands in for what its version couldn't read, and a song without a MIDILINKS (where the tree had no place to choose in).
+    if (clash.path.isEmpty() || ! clash.path[0].startsWith (schema::MIDILINKS.toString() + ":"))
+        return AreaChoice::notTheArea;
+
+    const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+
+    if (clash.property.isValid() || clash.path.size() != 2 || ! clash.path[1].startsWith (schema::MIDILINK.toString() + ":")
+        || ! juce::isPositiveAndBelow (value, 3) || song.getValues() == nullptr || ! findLinksState (song).isValid())
+        return AreaChoice::refused;
+
+    const auto& chosen = *elements[value];
+    const auto link = chosen.isValid() ? readHeldMidiLink (chosen) : std::nullopt;
+
+    if (chosen.isValid() && (! link.has_value() || holdsStandIn (chosen)))
+        return AreaChoice::refused;
+
+    const auto links = getMidiLinksValue (song);
+    auto place = links.links.size();
+
+    for (size_t i = 0; i < links.links.size(); ++i)
+    {
+        if (nameInPath (links.links[i]) == clash.path[1])
+        {
+            place = i;
+            break;
+        }
+    }
+
+    auto next = place < links.links.size() ? links.links.erase (place) : links.links;
+
+    if (link.has_value())
+        next = next.insert (juce::jmin (place, next.size()), *link);
+
+    setLinks (song, { next });
+    return AreaChoice::chosen;
 }
 
 std::optional<float> getValueAtControllerPosition (const Song& song, const ParameterRef& parameter, int position)
@@ -274,11 +406,15 @@ void MidiLinker::learn (MidiController controller)
     const auto beforeName = before.has_value() && *before != parameter ? getParameterName (*song, *before) : juce::String();
 
     // Linked before learning ends, which the window hears: the controller is diverted from the link's step on (the session
-    // hears the song change), so that what the knob sends meanwhile turns the parameter, never the instrument.
+    // follows the song's links at once, not at the next turn of the message loop, as it does for any other change of them:
+    // PlaybackSession.h, followMidiLinks()), so that what the knob sends meanwhile turns the parameter, never the instrument.
     {
         const UndoStep step (*song, "Link MIDI Controller");
         linkMidiController (*song, controller, parameter);
     }
+
+    if (auto* session = findSession (*song))
+        session->followMidiLinks();
 
     linkMade = describeLinkMade (controller, turns, beforeName);
     setLearning (std::nullopt);
@@ -402,7 +538,9 @@ void MidiLinker::timerCallback()
 
 void MidiLinker::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
 {
-    // Learning ends as its parameter goes.
+    // Learning ends as its parameter goes: a device, a chain, a send, a fader, a modulator or a macro, each still an element of
+    // the song's tree, so the linker stays a listener of the tree for them (the links themselves are a value: MidiLinks.h).
+    // It reads no area of the song's values here (locateParameter() reads the tree's elements).
     if (learning.has_value() && ! locateParameter (*song, *learning).has_value())
         setLearning (std::nullopt);
 }

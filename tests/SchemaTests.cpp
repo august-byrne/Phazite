@@ -267,14 +267,14 @@ struct Changed
         const phazite::Song rawSong { raw.createCopy() };
         problemsBefore = findSongProblems (rawSong, tables);
 
-        // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, or a chord or a key change:
-        // the loader's part alone (makeConsistent()), on a song that keeps everything in its tree, since a song made by
-        // makeSong() holds its clips, their notes, its tempo map and its chord lane as values beside it (Song::holdValues());
-        // and the song opened, whose values findOpened() reads back through whole state.
+        // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, a chord or a key change, or a
+        // MIDI link: the loader's part alone (makeConsistent()), on a song that keeps everything in its tree, since a song made
+        // by makeSong() holds its clips, their notes, its tempo map, its chord lane and its MIDI links as values beside it
+        // (Song::holdValues()); and the song opened, whose values findOpened() reads back through whole state.
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
-            || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element))
+            || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element))
         {
-            if (! isTempoMapEntry (element) && ! isChordLaneEntry (element))
+            if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -320,15 +320,18 @@ struct Changed
         return element.hasType (schema::CHORD) || element.hasType (schema::CHORDKEY);
     }
 
+    static bool isMidiLink (const juce::ValueTree& element) { return element.hasType (schema::MIDILINK); }
+
     // The opened song's element in its clip's whole state (WholeState.h), as it holds its values: the clip itself, a note by
     // its ID, a warp marker or a controller's value by every property but the one changed; a tempo or a time signature in
-    // its tempo map's whole state, and a chord or a key change in its chord lane's, the same way; none if the loader took it
-    // out.
+    // its tempo map's whole state, a chord or a key change in its chord lane's, and a MIDI link in its links', the same way;
+    // none if the loader took it out.
     juce::ValueTree findOpened() const
     {
         REQUIRE (opened != nullptr);
         const auto clipState = isTempoMapEntry (original)    ? phazite::copyWholeSong (*opened).getChildWithName (schema::TEMPOMAP)
                                : isChordLaneEntry (original) ? phazite::copyWholeSong (*opened).getChildWithName (schema::CHORDLANE)
+                               : isMidiLink (original)       ? phazite::copyWholeSong (*opened).getChildWithName (schema::MIDILINKS)
                                                              : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))

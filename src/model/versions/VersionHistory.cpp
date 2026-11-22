@@ -3156,6 +3156,14 @@ void VersionHistory::curvesChanged (const std::vector<ParameterRef>& parameters)
         markCurve (getCurveKeyText (parameter));
 }
 
+void VersionHistory::midiLinksChanged()
+{
+    // A change of the song as its tree's are, in its MIDI links: the song's own line (as markChanged() marks it).
+    ++songChanges;
+    edited();
+    markSongOwn();
+}
+
 void VersionHistory::markNotesHeard()
 {
     // A clip gone since was taken off its track, which marked it.
@@ -3188,7 +3196,7 @@ void VersionHistory::markOrder()
 void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     if (isHeardAsKept (tree))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
 
     ++songChanges;
 
@@ -3220,7 +3228,7 @@ void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce
 void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex)
 {
     if (isHeardAsKept (parent))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged()
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
 
     ++songChanges;
 
