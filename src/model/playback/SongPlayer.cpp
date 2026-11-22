@@ -1879,52 +1879,72 @@ bool SongPlayer::isMoved (const ParameterRef& parameter) const
 void SongPlayer::readCurves()
 {
     // Each parameter's curve kept from the plan before while nothing of it changed (known bug 124: every plan read all the
-    // song's automation again), the others read from the song. Should a song hold two curves for one parameter (a file
-    // from others, before it is made consistent), the last with points plays, kept or read alike.
+    // song's automation again), the others read from the song's curves as values (Automation.h: getCurveKeys(), then
+    // getPlayedCurves() for those it reads, at once). Should a song hold two curves for one parameter (a file from others,
+    // before it is made consistent), the last with points plays, kept or read alike.
     using Points = std::vector<engine::CurvePoint>;
 
-    const auto read = [] (const std::vector<juce::ValueTree>& states)
+    const auto toPoints = [] (const CurveValue& curve)
     {
-        Points last;
+        Points points;
+        points.reserve (curve.points.size());
 
-        for (const auto& state : states)
-        {
-            Points points;
+        for (const auto& point : curve.points)
+            points.push_back ({ point.beat.inBeats(), point.position, point.curve });
 
-            for (const auto& point : state)
-                if (point.hasType (schema::POINT))
-                    points.push_back ({ (double) point[schema::pointBeat], (float) point[schema::pointValue],
-                                        (float) point.getProperty (schema::pointCurve, 0.0f) });
-
-            if (! points.empty())
-                last = std::move (points);
-        }
-
-        return last;
+        return points;
     };
 
-    std::map<std::pair<std::uint64_t, juce::String>, std::vector<juce::ValueTree>> states; // by parameter, in the song's order
+    std::map<CurveKey, ParameterRef> parameters; // the song's curves by their parameters
 
-    for (const auto& state : getCurveStates (song))
-    {
-        const auto parameter = getCurveParameter (state);
-        states[{ parameter.device.getRaw(), parameter.parameter }].push_back (state);
-    }
+    for (const auto& parameter : getCurveKeys (song))
+        parameters.emplace (CurveKey { parameter.device.getRaw(), parameter.parameter }, parameter);
 
     auto before = std::exchange (curves, {});
     const auto emptyBefore = std::exchange (emptyCurves, {});
     const auto withoutTravelBefore = std::exchange (curvesWithoutTravel, {});
     faders.clear();
 
-    for (const auto& [key, ofKey] : states)
+    // Which are kept and which of those checked, by their keys' order; the points of the others and of those checked, read.
+    struct Reading
     {
+        bool kept = false, checked = false;
+        size_t read = 0; // its place among those read
+    };
+
+    std::vector<Reading> readings;
+    std::vector<ParameterRef> toRead;
+    readings.reserve (parameters.size());
+
+    for (const auto& [key, parameter] : parameters)
+    {
+        Reading reading;
+        reading.kept = ! compiling.hasCurve (key) && (before.contains (key) || emptyBefore.contains (key));
+        reading.checked = reading.kept && shouldCheck();
+
+        if (! reading.kept || reading.checked)
+        {
+            reading.read = toRead.size();
+            toRead.push_back (parameter);
+        }
+
+        readings.push_back (reading);
+    }
+
+    const auto values = getPlayedCurves (song, toRead);
+    auto reading = readings.begin();
+
+    for (const auto& entry : parameters)
+    {
+        const auto& key = entry.first;
+        const auto& [isKept, isChecked, readAt] = *reading++;
         const auto kept = before.find (key);
 
-        if (! compiling.hasCurve (key) && (kept != before.end() || emptyBefore.contains (key)))
+        if (isKept)
         {
-            if (shouldCheck())
+            if (isChecked)
             {
-                const auto points = read (ofKey);
+                const auto points = toPoints (values[readAt]);
                 const auto& keptPoints = kept != before.end() ? kept->second->getPoints() : Points();
                 [[maybe_unused]] const auto same = std::equal (points.begin(), points.end(), keptPoints.begin(), keptPoints.end(),
                                                                [] (const engine::CurvePoint& a, const engine::CurvePoint& b)
@@ -1963,7 +1983,7 @@ void SongPlayer::readCurves()
         // Its points are positions along its parameter's control's travel, which the engine turns into the parameter's
         // units (engine/automation/Curve.h). One of a parameter the song hasn't (a device's that is gone, kept for an undo)
         // plays from 0 to 1 until it has, which each plan looks for again.
-        if (auto points = read (ofKey); ! points.empty())
+        if (auto points = toPoints (values[readAt]); ! points.empty())
         {
             const auto travel = getControlTravel (song, { DeviceID::fromRaw (key.first), key.second });
 

@@ -948,9 +948,9 @@ void RandomEdits::edit()
         }
 
         case 41: // an automation point moved or taken away
-            if (const auto curves = getCurveStates (song); ! curves.empty())
+            if (const auto curves = getCurveKeys (song); ! curves.empty())
             {
-                const auto parameter = getCurveParameter (pick (curves));
+                const auto parameter = pick (curves);
                 const auto points = getPoints (song, parameter);
 
                 if (points.empty())

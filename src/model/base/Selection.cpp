@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Selection.h"
+#include "internal/CurveValues.h"
 #include "internal/Schema.h"
 #include "internal/SongIndex.h"
 #include "internal/SongValues.h"
@@ -258,13 +259,11 @@ int Selection::getNumObjectsSelected() const
     // Automation.h) finds them.
     if (auto* song = getSong(); song != nullptr && ! points.empty())
     {
+        // The points are elements still (the selection follows them through edits and undo until the curves are the area's,
+        // roadmap step S5.20), each curve's parameter read as the values read it (CurveValues.h: readCurveParameter()).
         const auto automation = song->getState().getChildWithName (schema::AUTOMATION);
-        const auto device = juce::String ((juce::int64) pointsParameter.device.getRaw());
         const auto isTheCurve = [&] (const juce::ValueTree& curve)
-        {
-            return curve.hasType (schema::CURVE) && curve.getParent() == automation && curve[schema::curveDevice].toString() == device
-                   && curve[schema::curveParameter].toString() == pointsParameter.parameter;
-        };
+        { return curve.hasType (schema::CURVE) && curve.getParent() == automation && readCurveParameter (curve) == pointsParameter; };
 
         if (holdsCurveOwner (song->getState(), pointsParameter.device.getRaw()))
             for (const auto& point : points)

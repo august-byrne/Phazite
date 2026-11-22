@@ -6,6 +6,7 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
@@ -196,6 +197,37 @@ TEST_CASE ("A tempo change and nothing else changes the song's own line alone, a
     phazite::setTempo (song, tempo);
     CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
     checkChangesAreWhole (s.context, "the tempo set back");
+}
+
+TEST_CASE ("A curve edited and nothing else changes its device's track's line alone, and the edit undone leaves no change")
+{
+    // What the changes are worked out from takes each curve that changed from the song whole (ChangesWorker.cpp: take(),
+    // Automation.h: copyWholeCurve()): a curve it didn't find there would count as gone, so that the track's line would name
+    // its automation as changed with the curve back as the version has it.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto keys = s.addTrack ("Keys");
+    auto& song = *phazite::findSong (s.context);
+    const auto volume = s.getVolumeParameter (bass);
+    phazite::addAutomationPoint (s.context, volume, { at (0.0), 0.5f });
+    phazite::addAutomationPoint (s.context, s.getVolumeParameter (keys), { at (0.0), 0.5f });
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    phazite::addAutomationPoint (s.context, volume, { at (4.0), 0.25f });
+    const auto lines = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
+    REQUIRE (lines.size() == 1);
+    CHECK (lines.front().track == bass);
+    CHECK_FALSE (lines.front().isSong);
+    checkChangesAreWhole (s.context, "a point added");
+
+    phazite::undo (song);
+    CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+    checkChangesAreWhole (s.context, "the point's Undo");
+
+    phazite::redo (song);
+    REQUIRE (phazite::getChangesSinceLastVersion (withChangesIn (s.context)).size() == 1);
+    checkChangesAreWhole (s.context, "the point's Redo");
 }
 
 TEST_CASE ("The changes follow an edit once worked out in the background, the listeners told as they come in")

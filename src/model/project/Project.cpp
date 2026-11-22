@@ -1447,6 +1447,27 @@ namespace
             }
 
             //==============================================================================
+            // The key no two of a parent's elements may share: the versions' (schema::getElementKey()), but with the device a
+            // curve, a lane or a modulation names read as a number, as readID() reads it, so that one device written two ways
+            // ("14", "0014") is one parameter. keepTexts() writes most such IDs as Phazite does before this, not one it can't read
+            // as an ID, which a song read in part keeps. The versions key their pieces by the text (their test vectors).
+            juce::String readLoadedKey (const juce::ValueTree& element)
+            {
+                const auto byDevice = [&element] (const juce::Identifier& device, const juce::Identifier& parameter)
+                { return juce::String ((juce::int64) readID (element[device])) + "/" + element[parameter].toString(); };
+
+                if (element.hasType (schema::CURVE))
+                    return byDevice (schema::curveDevice, schema::curveParameter);
+
+                if (element.hasType (schema::LANE))
+                    return byDevice (schema::laneDevice, schema::laneParameter);
+
+                if (element.hasType (schema::MODULATES))
+                    return byDevice (schema::modulatesDevice, schema::modulatesParameter);
+
+                return schema::getElementKey (element);
+            }
+
             // No two of a parent's elements with one key (items aside, whose IDs keepIDs() made their own): the first stays.
             void keepKeys (juce::ValueTree tree)
             {
@@ -1466,7 +1487,7 @@ namespace
                     }
 
                     if (! schema::holdsID (child, schema::trackID))
-                        if (const auto key = schema::getElementKey (child);
+                        if (const auto key = readLoadedKey (child);
                             key.isNotEmpty() && ! keys.insert (child.getType().toString() + "/" + key).second)
                         {
                             tree.removeChild (i, nullptr);
@@ -1480,8 +1501,10 @@ namespace
 
             //==============================================================================
             // Each curve's points at positions along the control's travel, 0 to 1, one without a position, or with one that is no
-            // number, left out (0 would be silence on a volume's lane), and a curve that had points and is left without gone (one
-            // holding only what Phazite doesn't know stays); and no curve of a parameter its device hasn't. A plug-in tells its
+            // number, left out (0 would be silence on a volume's lane), and a curve that had points and is left without gone;
+            // a curve's children of a type Phazite doesn't know left out, so that a curve's points are its children, counted
+            // alike by what reads and what edits them (one that held only those stays, without points, as one that never had
+            // any); and no curve of a parameter its device hasn't. A plug-in tells its
             // parameters only once it plays: its curves are kept, as its element says it is one, never asked of its instance (a
             // song that belongs to no session, one read from the versions on the history's thread, has none). A chain's crossover is
             // kept while its container isn't split into bands, or while it is the first chain, which have none for now
@@ -1517,7 +1540,10 @@ namespace
                         auto point = curve.getChild (j);
 
                         if (! point.hasType (schema::POINT))
-                            continue; // one of a type Phazite doesn't know, which stays
+                        {
+                            curve.removeChild (j, nullptr); // one of a type Phazite doesn't know
+                            continue;
+                        }
 
                         hadPoints = true;
 

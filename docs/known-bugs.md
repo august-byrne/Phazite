@@ -19,9 +19,9 @@ message thread (2026-11-20) and the reviews of its fixes left: the audit's other
 ([changelog](changelog.md)); these were found by reading the code and none was measured, and what the audit only
 suspects, or would make faster, is in the [backlog](backlog.md). 230 was found by reading JUCE while
 roadmap step S5.2 was reviewed (2026-11-20), and waits to be seen with a plug-in that shows it. 235 was found by reading while
-the clips' writers were reviewed (2026-11-21), as 237 was, and 236 is a test that failed once on CI that day. 239 was
-found by the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is to be fixed with the tempo map's
-switch.
+the clips' writers were reviewed (2026-11-21), as 237 was, and 236 is a test that failed once on CI that day. 238 was
+found by reading while the automation's curves were made values (2026-11-22), and waits for the owner. 239 was found by
+the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is to be fixed with the tempo map's switch.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -91,6 +91,22 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `performEdit` on the helper's message thread) can't be told from a knob turned there, and marks the song changed
   each time. To fix: needs the parameter's read-only flag, which JUCE's VST3 host doesn't hand on; or a parameter that
   changes many times a second with no gesture begun taken for a meter.
+- **238. A plug-in's own move of a parameter whose curve has one point moves the point in the last undo step, not in a
+  step of its own** (2026-11-22, found by reading while the automation's first piece of roadmap step S5.20 was built;
+  not seen). A parameter automated by one point plays that point's value everywhere, so a value set by hand moves the
+  point (`moveOnlyPoint()`, `src/model/automation/Automation.cpp`). A control's change does it in the control's own
+  step; a value the plug-in sets itself (its own window's knob, its own preset) comes from its helper
+  (`PluginInstances::listen()`, `onParameterChanged`, `src/model/plugins/PluginInstances.cpp`), which stores the
+  plug-in's value outside the history and tells the song (`tellValueSetByHand (..., true)`), and the automation's
+  watcher then moves the point (`AutomationWatcher::valueSetByHand()`) with the song's undo manager but no step of its
+  own. JUCE's undo manager puts such a change into its current transaction, the step done last, unless a new one was
+  begun (`juce::UndoManager::perform()`). So the point's move joins whatever step was last, named for something
+  else; an Undo of that step takes the point back while the plug-in keeps its value (its lane and its sound then
+  disagree until the next move); and after an Undo, which ends with `beginNewTransaction()`, the move becomes a
+  new step with no name, and the Redo is lost (JUCE moves the steps after the current one to its stash). To fix: move the point outside the history as the
+  plug-in's value is stored (both are the plug-in's own, which the next save stores), or in a step of its own named
+  for the parameter, begun only when the point moves; then a test that turns a test plug-in's own parameter
+  (`tests/TestPlugin.h`: `setGain()`) after an Undo and checks the Redo and the steps' names.
 
 ## Versions
 

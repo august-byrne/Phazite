@@ -6,9 +6,11 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/Json.h"
 #include "model/base/Numbers.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/WholeState.h"
@@ -479,17 +481,16 @@ namespace
             // Its automated parameters, which the automation's points name.
             juce::XmlElement* parameters = nullptr;
 
-            for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+            for (const auto& curve : getCurveKeys (song))
             {
-                if (! curve.hasType (schema::CURVE) || readID (curve[schema::curveDevice]) != id)
+                if (curve.device.getRaw() != id)
                     continue;
 
                 if (parameters == nullptr)
                     parameters = plugin->createNewChildElement ("Parameters");
 
-                auto* parameter = addParameter (*parameters, "RealParameter", elementID + "p" + curve[schema::curveParameter].toString(),
-                                                curve[schema::curveParameter].toString());
-                parameter->setAttribute ("parameterID", curve[schema::curveParameter].toString().getIntValue());
+                auto* parameter = addParameter (*parameters, "RealParameter", elementID + "p" + curve.parameter, curve.parameter);
+                parameter->setAttribute ("parameterID", curve.parameter.getIntValue());
                 parameter->setAttribute ("unit", "normalized");
                 parameter->setAttribute ("min", "0");
                 parameter->setAttribute ("max", "1");
@@ -687,13 +688,11 @@ namespace
             const auto toGain = [] (float position) { return toLinear (faderPositionToDecibels (position)); };
             const auto toNormalized = [] (float position) { return (double) position; };
 
-            for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+            // The song's curves in their order, each read as a value (Automation.h) for a channel it is of.
+            for (const auto& curve : getCurveKeys (song))
             {
-                if (! curve.hasType (schema::CURVE))
-                    continue;
-
-                const auto device = readID (curve[schema::curveDevice]);
-                const auto parameter = curve[schema::curveParameter].toString();
+                const auto device = curve.device.getRaw();
+                const auto& parameter = curve.parameter;
                 juce::String target, unit;
                 std::function<double (float)> toValue;
 
@@ -726,7 +725,7 @@ namespace
                 points->setAttribute ("unit", unit);
                 points->setAttribute ("id", "q" + target);
                 points->createNewChildElement ("Target")->setAttribute ("parameter", target);
-                writePoints (*points, curve, toValue, unit == "linear");
+                writePoints (*points, getCurveValue (song, curve).value_or (CurveValue()), toValue, unit == "linear");
             }
         }
 
@@ -736,15 +735,14 @@ namespace
         // line is straight along the control's travel: on a fader's travel that is no straight line in linear gain (known bug
         // 193: another DAW played other levels between the points), and a bent line is bent in any unit. Two points at one
         // beat are a jump, written so; a line bent all the way is a hold and a jump, at its end (held) or its start.
-        static void writePoints (juce::XmlElement& points, const juce::ValueTree& curveState, const std::function<double (float)>& toValue,
+        static void writePoints (juce::XmlElement& points, const CurveValue& curve, const std::function<double (float)>& toValue,
                                  bool inDecibels)
         {
             std::vector<engine::CurvePoint> read;
+            read.reserve (curve.points.size());
 
-            for (const auto& point : curveState)
-                if (point.hasType (schema::POINT))
-                    read.push_back ({ (double) point[schema::pointBeat], (float) point[schema::pointValue],
-                                      (float) point.getProperty (schema::pointCurve, 0.0f) });
+            for (const auto& point : curve.points)
+                read.push_back ({ point.beat.inBeats(), point.position, point.curve });
 
             std::stable_sort (read.begin(), read.end(), [] (const auto& a, const auto& b) { return a.beat < b.beat; });
             const engine::Curve line (read);

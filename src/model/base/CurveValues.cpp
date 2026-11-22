@@ -1,0 +1,235 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#include "model/base/internal/CurveValues.h"
+#include "model/base/internal/Schema.h"
+
+#include <algorithm>
+#include <vector>
+
+namespace phazite
+{
+namespace
+{
+    // A point's bend where its element has none: a straight line.
+    constexpr float straight = 0.0f;
+
+    PointValue readPoint (const juce::ValueTree& point)
+    {
+        return { BeatPosition::fromBeats (point[schema::pointBeat]), (float) point[schema::pointValue],
+                 (float) point.getProperty (schema::pointCurve, straight) };
+    }
+
+    // A POINT child that is a point: one with a value (the loader takes one without out as the song opens).
+    bool isPoint (const juce::ValueTree& child)
+    {
+        return child.hasType (schema::POINT) && ! child[schema::pointValue].isVoid();
+    }
+} // namespace
+
+bool PointValue::operator== (const PointValue& other) const noexcept
+{
+    return juce::exactlyEqual (beat.inBeats(), other.beat.inBeats()) && juce::exactlyEqual (position, other.position)
+           && juce::exactlyEqual (curve, other.curve);
+}
+
+bool CurveValue::operator== (const CurveValue& other) const
+{
+    return isSameAs (other) || points == other.points;
+}
+
+std::size_t ParameterRefHash::operator() (const ParameterRef& parameter) const noexcept
+{
+    const auto device = parameter.device.getRaw();
+    return (std::size_t) (device ^ (device >> 32)) ^ (std::size_t) parameter.parameter.hash();
+}
+
+bool SongCurves::isSameAs (const SongCurves& other) const noexcept
+{
+    return curves.identity() == other.curves.identity() && order.identity() == other.order.identity();
+}
+
+bool SongCurves::operator== (const SongCurves& other) const
+{
+    if (isSameAs (other))
+        return true;
+
+    if (order != other.order)
+        return false;
+
+    for (const auto& parameter : order)
+    {
+        const auto* mine = find (parameter);
+        const auto* theirs = other.find (parameter);
+
+        if (mine == nullptr || theirs == nullptr || ! (*mine == *theirs))
+            return false;
+    }
+
+    return true;
+}
+
+SongCurves withCurve (const SongCurves& curves, const ParameterRef& parameter, CurveValue curve)
+{
+    auto changed = curves;
+
+    if (curves.find (parameter) == nullptr)
+        changed.order = changed.order.push_back (parameter);
+
+    changed.curves = changed.curves.set (parameter, std::move (curve));
+    return changed;
+}
+
+SongCurves withoutCurve (const SongCurves& curves, const ParameterRef& parameter)
+{
+    if (curves.find (parameter) == nullptr)
+        return curves;
+
+    auto changed = curves;
+    changed.curves = changed.curves.erase (parameter);
+
+    for (size_t i = 0; i < changed.order.size(); ++i)
+    {
+        if (changed.order[i] == parameter)
+        {
+            changed.order = changed.order.erase (i);
+            break;
+        }
+    }
+
+    return changed;
+}
+
+SongCurves withCurveRenamed (const SongCurves& curves, const ParameterRef& from, const ParameterRef& to)
+{
+    const auto* curve = curves.find (from);
+
+    if (curve == nullptr || from == to)
+        return curves;
+
+    jassert (curves.find (to) == nullptr); // a curve's new parameter has none of its own
+    const auto moved = *curve;
+    auto changed = curves;
+    changed.curves = changed.curves.erase (from).set (to, moved);
+
+    for (size_t i = 0; i < changed.order.size(); ++i)
+    {
+        if (changed.order[i] == from)
+        {
+            changed.order = changed.order.set (i, to);
+            break;
+        }
+    }
+
+    return changed;
+}
+
+bool holdsItsOrder (const SongCurves& curves)
+{
+    if (curves.order.size() != curves.curves.size())
+        return false;
+
+    std::vector<ParameterRef> seen;
+    seen.reserve (curves.order.size());
+
+    for (const auto& parameter : curves.order)
+    {
+        if (curves.find (parameter) == nullptr || std::find (seen.begin(), seen.end(), parameter) != seen.end())
+            return false;
+
+        seen.push_back (parameter);
+    }
+
+    return true;
+}
+
+juce::String getCurveKeyText (const ParameterRef& parameter)
+{
+    return juce::String ((juce::int64) parameter.device.getRaw()) + "/" + parameter.parameter;
+}
+
+std::optional<ParameterRef> readCurveKeyText (const juce::String& text)
+{
+    const auto split = text.indexOfChar ('/');
+
+    if (split < 0)
+        return std::nullopt;
+
+    return ParameterRef { DeviceID::fromRaw (readID (text.substring (0, split))), text.substring (split + 1) };
+}
+
+//==============================================================================
+ParameterRef readCurveParameter (const juce::ValueTree& curve)
+{
+    return { DeviceID::fromRaw (readID (curve[schema::curveDevice])), curve[schema::curveParameter].toString() };
+}
+
+CurveValue readCurveValue (const juce::ValueTree& curve)
+{
+    auto points = immer::flex_vector<PointValue>().transient();
+
+    for (const auto& child : curve)
+        if (isPoint (child))
+            points.push_back (readPoint (child));
+
+    return { points.persistent() };
+}
+
+bool holdsPoints (const juce::ValueTree& curve)
+{
+    for (const auto& child : curve)
+        if (isPoint (child))
+            return true;
+
+    return false;
+}
+
+SongCurves readCurvesValue (const juce::ValueTree& automation)
+{
+    SongCurves read;
+    auto curves = read.curves.transient();
+    auto order = read.order.transient();
+
+    for (const auto& child : automation)
+    {
+        if (! child.hasType (schema::CURVE))
+            continue;
+
+        if (const auto parameter = readCurveParameter (child); curves.find (parameter) == nullptr)
+        {
+            curves.set (parameter, readCurveValue (child));
+            order.push_back (parameter);
+        }
+    }
+
+    read.curves = curves.persistent();
+    read.order = order.persistent();
+    return read;
+}
+
+void writeCurveElement (const ParameterRef& parameter, const CurveValue& curve, juce::ValueTree& automation)
+{
+    jassert (automation.hasType (schema::AUTOMATION));
+    juce::ValueTree element (schema::CURVE, { { schema::curveDevice, juce::String ((juce::int64) parameter.device.getRaw()) },
+                                              { schema::curveParameter, parameter.parameter } });
+
+    immer::for_each (curve.points,
+                     [&element] (const PointValue& point)
+                     {
+                         juce::ValueTree written (schema::POINT,
+                                                  { { schema::pointBeat, point.beat.inBeats() }, { schema::pointValue, point.position } });
+
+                         if (! juce::exactlyEqual (point.curve, straight))
+                             written.setProperty (schema::pointCurve, point.curve, nullptr);
+
+                         element.appendChild (written, nullptr);
+                     });
+
+    automation.appendChild (element, nullptr);
+}
+
+void writeCurves (const SongCurves& curves, juce::ValueTree& automation)
+{
+    for (const auto& parameter : curves.order)
+        if (const auto* curve = curves.find (parameter))
+            writeCurveElement (parameter, *curve, automation);
+}
+} // namespace phazite

@@ -17,6 +17,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -879,8 +880,8 @@ struct Named
 
     bool hasCurve() const
     {
-        for (const auto& curve : phazite::findSong (s.context)->getState().getChildWithName (schema::AUTOMATION))
-            if (phazite::readID (curve[schema::curveDevice]) == eq.getRaw())
+        for (const auto& curve : phazite::getCurveKeys (*phazite::findSong (s.context)))
+            if (curve.device == eq)
                 return true;
 
         return false;
@@ -1011,6 +1012,50 @@ TEST_CASE (
     REQUIRE (waitForVersionHistory (n.s.context));
     CHECK (phazite::findChanges (restored, phazite::test::copyWholeSong (n.song())).empty());
     CHECK_FALSE (n.hasCurve());
+}
+
+TEST_CASE ("A line restored from a damaged commit takes away the curves it brought in of devices the song hasn't, and keeps the "
+           "song's own curve of a device removed")
+{
+    // What a restore takes away again are the curves it brought in (VersionsModel.cpp: findCurves(), by their parameters,
+    // before the song is taken in): a curve the song held before, of a device removed that an Undo can bring back, stays,
+    // as it would had nothing been restored. Had the restore found no curve before it, it would take that one away too.
+    Named n;
+    const auto lead = n.s.addTrack ("Lead");
+    const auto compressor = n.s.addEffect (lead, phazite::devices::Compressor::typeID);
+    const phazite::ParameterRef makeup { compressor, "makeup" };
+    phazite::addAutomationPoint (n.s.context, makeup, { phazite::BeatPosition::fromBeats (0.0), 0.5f });
+    const auto damaged = n.commitWithoutReturnAndEq(); // its EQ's piece lost, its curve read
+
+    phazite::removeDevice (n.s.context, n.eq);
+    n.s.reopen (false); // the EQ's curve, kept for an Undo, left out as it opens
+    REQUIRE (waitForVersionHistory (n.s.context));
+    REQUIRE_FALSE (n.hasCurve());
+
+    const auto hasMakeupCurve = [&n, &makeup]
+    {
+        const auto curves = phazite::getCurveKeys (n.song());
+        return std::find (curves.begin(), curves.end(), makeup) != curves.end();
+    };
+
+    phazite::removeDevice (n.s.context, compressor); // its curve kept for an Undo: the song's own
+    REQUIRE (hasMakeupCurve());
+
+    phazite::VersionChange line;
+    line.name = "Drums";
+    line.track = n.drums;
+    REQUIRE (finished (n.s.context, [&] { return phazite::restoreFromVersion (n.s.context, damaged, line); }));
+    CHECK_FALSE (n.hasCurve()); // of a device the song hasn't, brought in: taken away again
+    CHECK (hasMakeupCurve());   // the song's own, there before: kept
+
+    // The restore undone, then the compressor's removal: the compressor back with its curve, and the song as the check wants
+    // it (which a curve kept for an Undo, naming a device the song hasn't, isn't until then).
+    phazite::undo (n.song());
+    CHECK (hasMakeupCurve());
+    phazite::undo (n.song());
+    CHECK (phazite::findDeviceState (n.song(), compressor).isValid());
+    CHECK (phazite::getPoints (n.song(), makeup).size() == 1);
+    checkSong (n.song());
 }
 
 TEST_CASE ("The other computer's merge of the same commit, merged in after this one's went its own way, brings no item twice")
@@ -1252,8 +1297,8 @@ struct Lines
     {
         int curves = 0;
 
-        for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
-            curves += phazite::readID (curve[schema::curveDevice]) == device.getRaw() ? 1 : 0;
+        for (const auto& curve : phazite::getCurveKeys (song))
+            curves += curve.device == device ? 1 : 0;
 
         return curves;
     }

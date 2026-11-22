@@ -150,20 +150,17 @@ namespace
     // The song's curves now, before a song from the versions is taken in; and, after, those it brought in that name a device
     // the song hasn't taken away again in the same step: a song read in part (a damaged commit) keeps what names what it
     // couldn't read, which the song judges here, so that it is what its file would open as (found in review).
-    std::vector<juce::ValueTree> findCurves (const Song& song)
+    // By their parameters: what takes a song in keeps the curves it had in their places, by their parameters, and adds those
+    // it hadn't (ApplySong.h), so a curve it brought in is one of a parameter that had none.
+    std::vector<ParameterRef> findCurves (const Song& song)
     {
-        std::vector<juce::ValueTree> curves;
-
-        for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
-            curves.push_back (curve);
-
-        return curves;
+        return getCurveKeys (song);
     }
 
-    void forgetCurvesBroughtIn (Song& song, const std::vector<juce::ValueTree>& before)
+    void forgetCurvesBroughtIn (Song& song, const std::vector<ParameterRef>& before)
     {
-        forgetCurvesOfGoneDevices (song, &song.getUndoManager(), [&before] (const juce::ValueTree& curve)
-                                   { return std::find (before.begin(), before.end(), curve) == before.end(); });
+        forgetCurvesOfGoneDevices (song, &song.getUndoManager(), [&before] (const ParameterRef& parameter)
+                                   { return std::find (before.begin(), before.end(), parameter) == before.end(); });
     }
 
     // Why a restore of a commit that held an ID twice takes nothing: given anew as it was read, an item would come in as new,

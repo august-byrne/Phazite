@@ -14,6 +14,8 @@
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
+
 namespace
 {
 using phazite::test::TestPlugin;
@@ -66,7 +68,8 @@ TEST_CASE ("A song refers to a plug-in's parameters by the plug-in's own IDs, wh
     // What refers to Gain names it by the plug-in's "1": its value set by hand and its automation.
     const auto element = phazite::findDeviceState (saved.getSong(), saved.plugin);
     CHECK (element.getChildWithName (schema::VALUE)[schema::valueParameter].toString() == juce::String (TestPlugin::gainID));
-    CHECK (phazite::getCurveParameter (phazite::findCurveState (saved.getSong(), saved.gain)) == saved.gain);
+    const auto curves = phazite::getCurveKeys (saved.getSong());
+    CHECK (std::find (curves.begin(), curves.end(), saved.gain) != curves.end());
 
     // Version 2 has Tone first, then Gain, then a new Drive: Gain is second in its list now, under the same ID.
     saved.testPlugin.setVersion (2);

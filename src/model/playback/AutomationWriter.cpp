@@ -86,9 +86,9 @@ void AutomationWriter::playbackStarted()
     // by hand that go there are a step of their own, which no change before them takes along as it is undone.
     std::optional<RecordingStep> step;
 
-    for (const auto& curve : getCurveStates (song))
+    for (const auto& ref : getCurveKeys (song))
     {
-        if (const auto ref = getCurveParameter (curve); locateParameter (song, ref).has_value())
+        if (locateParameter (song, ref).has_value())
         {
             if (getModeOf (song, ref) == AutomationMode::write && findPass (ref) == nullptr)
             {

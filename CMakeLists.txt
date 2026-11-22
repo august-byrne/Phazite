@@ -336,6 +336,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/BackgroundJobs.h
     src/model/base/Beats.h
     src/model/base/ControlKinds.h
+    src/model/base/CurveValues.cpp
     src/model/base/IDs.h
     src/model/base/Json.cpp
     src/model/base/Json.h
@@ -353,6 +354,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
     src/model/base/WholeState.cpp
+    src/model/base/internal/CurveValues.h
     src/model/base/internal/Immer.h
     src/model/base/internal/Schema.h
     src/model/base/internal/SchemaDescription.h
@@ -1321,6 +1323,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ControlLaneTests.cpp
         tests/ControlsTests.cpp
         tests/ConvolutionTests.cpp
+        tests/CurveValuesTests.cpp
         tests/DawProjectTests.cpp
         tests/DelayTests.cpp
         tests/DesignTokenTests.cpp

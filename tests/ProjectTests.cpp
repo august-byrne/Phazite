@@ -940,7 +940,7 @@ TEST_CASE ("A project forgets, as it opens, the automation of devices it hasn't 
 
     // A device removed leaves its curve in the song, for an undo to bring back with it; the file keeps it too.
     phazite::removeDevice (song, eq);
-    CHECK (phazite::findCurveState (song, gainRef).isValid());
+    CHECK (phazite::getCurveValue (song, gainRef).has_value());
     REQUIRE (project->save().wasOk());
     const auto file = project->getFile();
     project = nullptr;
@@ -948,8 +948,8 @@ TEST_CASE ("A project forgets, as it opens, the automation of devices it hasn't 
     // Opened, nothing can bring the device back: its curve goes, without an unsaved change, and the volume's stays.
     project = openProject (file);
     const auto& reopened = project->getSong();
-    CHECK_FALSE (phazite::findCurveState (reopened, gainRef).isValid());
-    REQUIRE (phazite::findCurveState (reopened, volumeRef).getNumChildren() == 1);
+    CHECK_FALSE (phazite::getCurveValue (reopened, gainRef).has_value());
+    REQUIRE (phazite::getCurveValue (reopened, volumeRef).has_value());
     CHECK (phazite::getPoints (reopened, volumeRef).size() == 1);
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());

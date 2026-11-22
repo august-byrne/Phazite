@@ -50,7 +50,8 @@ its tags), but on a `CLIP`, a `WARP`, a `NOTE` or a `CONTROL`: a song's clips, t
 controllers' values are values in Phazite (each with the properties this page names), so a property or an element it
 doesn't know on one of them isn't kept, nor a property of the other kind of clip's (a `length` on an audio clip, a
 `file` on a MIDI clip). Phazite writes a clip's properties only while they are set, so one another program wrote at its
-default (`offset="0"`, `name=""`) is gone at the next save. An element it does know, where `Schema.h` doesn't put it, it leaves
+default (`offset="0"`, `name=""`) is gone at the next save. A `CURVE` holds its `POINT`s alone: an element of another
+type in one goes as the song opens. An element it does know, where `Schema.h` doesn't put it, it leaves
 out as it opens the file (section 7).
 
 ## 3. The song
@@ -121,7 +122,8 @@ vector for the song's names, types and ranges: `elements`, each with its `name`,
 `PHAZITE`), its `kind` (`song`, `view` or `state`) and whether it is `counted` as a change with everything in it; and
 `properties`, each with its `name`, the elements it is `on`, its `type` (`bool`, `int`, `int64`, `float`, `double`, `text`
 or `bytes`, in base 64), its `form` where it is more than its type (`ownID`, an item's own ID; `songID`, another ID of the
-song's it holds; `idName`, the ID of another item it names; `words`; `hexID`, so many lowercase hexadecimal `digits`;
+song's it holds; `idName`, the ID of another item it names, an `int64` or, as `text`, its decimal digits (a lane's, a
+curve's, a modulation's and a MIDI link's `device`: `"1042"`); `words`; `hexID`, so many lowercase hexadecimal `digits`;
 `colour`; `numbers`, separated by spaces), its `range` (`low`, `high`, `whole`, what a value that is no number becomes,
 whether one outside goes rather than being brought in, and `powersOfTwo`), its `words`, its `default` where it has one,
 its `kind`, and whether it is `counted` (or the elements it is `uncountedOn`). A family of names made in a loop (a drum
@@ -170,7 +172,7 @@ isn't XML, or whose element isn't `PHAZITE`, is refused with a reason. Any other
 (`makeConsistent()`, in [`src/model/project/Project.cpp`](../src/model/project/Project.cpp)), with no undo step; a
 file Phazite wrote is consistent already and comes through unchanged, and so does what Phazite doesn't know:
 - **Places and kinds:** an element Phazite knows, where `Schema.h` doesn't put it, or a device or modulator of a type
-  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element of a type Phazite doesn't know stays where it is, untouched; a property that should be one of a set of words
+  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element of a type Phazite doesn't know stays where it is, untouched, but in a `CURVE`, which holds its points alone; a property that should be one of a set of words
   (a track's kind, a clip's) and isn't is left out, a track without a kind becoming a track or a folder; text between
   tags is dropped.
 - **Numbers:** each number `Schema.h` gives a range is brought within it, made whole where it is an integer, and one

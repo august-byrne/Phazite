@@ -316,8 +316,8 @@ inline const Property<juce::String> drumHidden { "drumHidden", on (TRACK, MASTER
 // these. view
 // (LANE, with the elements above.)
 
-// On LANE: the device, by its ID (DeviceID: "1042").
-inline const Property<std::int64_t> laneDevice { "device", on (LANE), Form::idName, Kind::view };
+// On LANE: the device, by its ID written as text (DeviceID: "1042").
+inline const Property<juce::String> laneDevice { "device", on (LANE), Form::idName, Kind::view };
 
 // On LANE: the parameter, by its ID in its device, as its curve names it (curveParameter).
 inline const Property<juce::String> laneParameter { "parameter", on (LANE), Kind::view };
@@ -483,7 +483,7 @@ inline const Property<float> macroValue { "value", on (MACRO), within (0.0, 1.0)
 // by its device's ID as a curve names it (curveDevice: "1042") and its own ID; and the amount, -1 to 1, to a
 // ten-thousandth.
 // (MODULATES, with the elements above.)
-inline const Property<std::int64_t> modulatesDevice { "device", on (MODULATES), Form::idName, Kind::song };
+inline const Property<juce::String> modulatesDevice { "device", on (MODULATES), Form::idName, Kind::song };
 inline const Property<juce::String> modulatesParameter { "parameter", on (MODULATES), Kind::song };
 inline const Property<float> modulatesAmount { "amount", on (MODULATES), within (-1.0, 1.0).orElse (0.0), Kind::song };
 
@@ -496,21 +496,23 @@ inline const Property<float> modulatesAmount { "amount", on (MODULATES), within 
 // (AUTOMATION, with the elements above.)
 
 // Child of AUTOMATION: a parameter's curve, with its points (POINT) in time order, two at one beat in the order they go (a
-// jump). On CURVE: the device, by its ID (DeviceID: "1042"); and the parameter, by its ID in its device, as a lane names
-// them (laneDevice, laneParameter).
+// jump), and nothing else: a child of another type goes as the song loads (model/project/Project.cpp), so that its points
+// are its children. On CURVE: the device, by its ID written as text (DeviceID: "1042"); and the parameter, by its ID in its
+// device, as a lane names them (laneDevice, laneParameter).
 // (CURVE, with the elements above.)
-inline const Property<std::int64_t> curveDevice { "device", on (CURVE), Form::idName, Kind::song };
+inline const Property<juce::String> curveDevice { "device", on (CURVE), Form::idName, Kind::song };
 inline const Property<juce::String> curveParameter { "parameter", on (CURVE), Kind::song };
 
 // Child of CURVE: a point. On POINT: where it is, in beats from the song's start (double, 0 or more); where the parameter's
 // control is there, as a position along its travel (float 0..1, from all the way down or left to all the way up or right,
 // as its knob or fader moves, with the parameter's skew: model/automation/AutomationValues.h), so that a straight line is an
-// even turn of the knob; and how the line to the next point bends (float -1..1, 0 for straight). A point whose value is no
-// number goes as the song loads (model/project/Project.cpp), with a curve left without points.
+// even turn of the knob; and how the line to the next point bends (float -1..1, default 0: straight, written only while it
+// isn't). A point whose value is no number goes as the song loads (model/project/Project.cpp), with a curve left without
+// points.
 // (POINT, with the elements above.)
 inline const Property<double> pointBeat { "beat", on (POINT), within (0.0, maxBeats).orElse (0.0), Kind::song };
 inline const Property<float> pointValue { "value", on (POINT), within (0.0, 1.0), Kind::song };
-inline const Property<float> pointCurve { "curve", on (POINT), within (-1.0, 1.0), Kind::song };
+inline const Property<float> pointCurve { "curve", on (POINT), within (-1.0, 1.0), byDefault (0.0f), Kind::song };
 
 //==============================================================================
 // The song's MIDI links (model/midi/internal/MidiLinks.h): a hardware controller linked to the parameter it turns (MIDI
@@ -530,7 +532,7 @@ inline const Property<float> pointCurve { "curve", on (POINT), within (-1.0, 1.0
 // (MIDILINK, with the elements above.)
 inline const Property<int> midiLinkChannel { "channel", on (MIDILINK), whole (1.0, 16.0).goingOutside(), Kind::song };
 inline const Property<int> midiLinkNumber { "number", on (MIDILINK), whole (0.0, 119.0).goingOutside(), Kind::song };
-inline const Property<std::int64_t> midiLinkDevice { "device", on (MIDILINK), Form::idName, Kind::song };
+inline const Property<juce::String> midiLinkDevice { "device", on (MIDILINK), Form::idName, Kind::song };
 inline const Property<juce::String> midiLinkParameter { "parameter", on (MIDILINK), Kind::song };
 inline constexpr const char* midiLinkMacroValue = "value";
 

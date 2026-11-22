@@ -2,6 +2,8 @@
 #include "internal/ChangesWorker.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/WholeState.h"
@@ -276,18 +278,12 @@ std::shared_ptr<ChangesWorker::Request> ChangesWorker::take (const Song& song, c
             request->tracks[id] = copy;
         }
 
-        // Each curve that changed; none for one that is gone.
-        const auto automation = songState.getChildWithName (schema::AUTOMATION);
-
+        // Each curve that changed, whole, as the song holds it (Automation.h: copyWholeCurve(), by the parameter its key
+        // names); none for one that is gone.
         for (const auto& key : curves)
         {
-            juce::ValueTree copy;
-
-            for (const auto& curve : automation)
-                if (schema::getElementKey (curve) == key)
-                    copy = curve.createCopy();
-
-            request->curves[key] = copy;
+            const auto parameter = readCurveKeyText (key);
+            request->curves[key] = parameter.has_value() ? copyWholeCurve (song, *parameter) : juce::ValueTree();
         }
     }
 

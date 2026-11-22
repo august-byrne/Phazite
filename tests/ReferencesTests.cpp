@@ -38,6 +38,7 @@
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
 #include <functional>
 #include <string>
 
@@ -74,6 +75,13 @@ int countNaming (const phazite::Song& song, const juce::Identifier& type, const 
 int countModulations (const phazite::Song& song, DeviceID device)
 {
     return countNaming (song, schema::MODULATES, schema::modulatesDevice, device.getRaw());
+}
+
+// How many of the song's curves are of a device's parameters, as the song's automation holds them (Automation.h).
+int countCurves (const phazite::Song& song, DeviceID device)
+{
+    const auto curves = phazite::getCurveKeys (song);
+    return (int) std::count_if (curves.begin(), curves.end(), [device] (const ParameterRef& curve) { return curve.device == device; });
 }
 
 // A parameter's position at a beat as its curve in the song has it, as Phazite's engine plays it, whether or not its device
@@ -495,7 +503,7 @@ TEST_CASE ("A preset loaded while a track writes automation in Latch writes no a
     playback.play (0.5);
     s.run ("transport.playStop");
 
-    CHECK (countNaming (song, schema::CURVE, schema::curveDevice, synth.getRaw()) == 0);
+    CHECK (countCurves (song, synth) == 0);
     CHECK (phazite::getValueSetByHand (song, { synth, "cutoff" }) == doctest::Approx (400.0f));
 }
 
@@ -676,5 +684,5 @@ TEST_CASE ("A Latch pass that already runs writes the value a preset sets, as th
     const auto at400 = phazite::toControlPosition (phazite::getParameter (s.context, { synth, "cutoff" }).getRange(), 400.0f);
     CHECK (std::any_of (points.begin(), points.end(),
                         [&at400] (const phazite::AutomationPoint& p) { return std::abs (p.position - at400) < 0.001f; }));
-    CHECK (countNaming (song, schema::CURVE, schema::curveDevice, synth.getRaw()) == 1); // no other parameter's
+    CHECK (countCurves (song, synth) == 1); // no other parameter's
 }

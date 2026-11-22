@@ -690,20 +690,25 @@ TEST_CASE ("Automation is the song's own, in beats, undo and redo too")
 
     // A point goes into the song's curve for the parameter, in beats.
     phazite::addAutomationPoint (song.context, makeup, { beats (4), 0.25f });
-    const auto state = phazite::findCurveState (document, makeup);
-    REQUIRE (state.isValid());
-    CHECK (state.getParent().hasType (phazite::schema::AUTOMATION));
-    CHECK (phazite::getCurveParameter (state) == makeup);
-    REQUIRE (state.getNumChildren() == 1);
-    CHECK ((double) state.getChild (0)[phazite::schema::pointBeat] == doctest::Approx (4.0));
-    CHECK ((float) state.getChild (0)[phazite::schema::pointValue] == doctest::Approx (0.25f));
+    CHECK (phazite::getCurveKeys (document) == std::vector { makeup });
+    const auto curve = phazite::getCurveValue (document, makeup);
+    REQUIRE (curve.has_value());
+    REQUIRE (curve->points.size() == 1);
+    CHECK (curve->points[0].beat.inBeats() == doctest::Approx (4.0));
+    CHECK (curve->points[0].position == doctest::Approx (0.25f));
+
+    // As its file holds it: a curve of the song's automation, by its parameter.
+    const auto automation = phazite::test::copyWholeSong (document).getChildWithName (phazite::schema::AUTOMATION);
+    REQUIRE (automation.getNumChildren() == 1);
+    CHECK (phazite::readCurveParameter (automation.getChild (0)) == makeup);
+    CHECK (phazite::readCurveValue (automation.getChild (0)) == *curve);
 
     // An undo takes the song's curve away with its last point, and a redo puts it back.
     phazite::undo (document);
-    CHECK_FALSE (phazite::findCurveState (document, makeup).isValid());
+    CHECK_FALSE (phazite::getCurveValue (document, makeup).has_value());
     CHECK (phazite::getAutomationPoints (song.context, makeup).empty());
     phazite::redo (document);
-    CHECK (phazite::findCurveState (document, makeup).isValid());
+    CHECK (phazite::getCurveValue (document, makeup).has_value());
     CHECK (phazite::getAutomationPoints (song.context, makeup).size() == 1);
 }
 
@@ -760,12 +765,12 @@ TEST_CASE ("A duplicated track's automation is its own devices', and the origina
         REQUIRE (copiedPoints.size() == 1);
         CHECK (copiedPoints[0].beat.inBeats() == doctest::Approx (points[0].beat.inBeats()));
         CHECK (copiedPoints[0].position == doctest::Approx (points[0].position));
-        CHECK (phazite::findCurveState (*song.song, copied).isValid());
+        CHECK (phazite::getCurveValue (*song.song, copied).has_value());
     }
 
     // The copy's curves go with it in one undo.
     phazite::undo (*song.song);
-    CHECK_FALSE (phazite::findCurveState (*song.song, copiedMakeup).isValid());
+    CHECK_FALSE (phazite::getCurveValue (*song.song, copiedMakeup).has_value());
     CHECK (phazite::getAutomationPoints (context, song.makeup()).size() == 1);
 }
 
@@ -1037,7 +1042,7 @@ TEST_CASE ("Every edit of automation is one exact undo step, two points at one b
     undo.check ("Remove B's Compressor", [&] { phazite::removeDevice (context, makeupOfB.device); });
     CHECK_FALSE (phazite::getPoints (model, makeupOfB).empty());
     inStep ("Forget Curves of Gone Devices",
-            [&] { phazite::forgetCurvesOfGoneDevices (model, &model.getUndoManager(), [] (const juce::ValueTree&) { return true; }); });
+            [&] { phazite::forgetCurvesOfGoneDevices (model, &model.getUndoManager(), [] (const ParameterRef&) { return true; }); });
     CHECK (phazite::getPoints (model, makeupOfB).empty());
     CHECK_FALSE (phazite::getPoints (model, makeup).empty());
 

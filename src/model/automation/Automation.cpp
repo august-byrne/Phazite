@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <numeric>
+#include <optional>
 
 namespace phazite
 {
@@ -37,6 +39,17 @@ namespace
         for (const auto& point : curveState)
             points.push_back ({ (double) point[schema::pointBeat], (float) point[schema::pointValue],
                                 (float) point.getProperty (schema::pointCurve, 0.0f) });
+
+        return engine::Curve (std::move (points));
+    }
+
+    engine::Curve makeEngineCurve (const CurveValue& curve)
+    {
+        std::vector<engine::CurvePoint> points;
+        points.reserve (curve.points.size());
+
+        for (const auto& point : curve.points)
+            points.push_back ({ point.beat.inBeats(), point.position, point.curve });
 
         return engine::Curve (std::move (points));
     }
@@ -194,15 +207,52 @@ namespace
     //==========================================================================
     // The song's curves (Schema.h: AUTOMATION).
 
+    // A parameter's curve among the song's, the first should there be two, by its parameter as the values read it
+    // (CurveValues.h: readCurveParameter()), so that what finds a curve by its parameter finds the one the values hold for it.
     juce::ValueTree findCurveIn (const juce::ValueTree& automation, const ParameterRef& ref)
     {
-        const auto device = writeDeviceID (ref.device);
-
         for (const auto& curve : automation)
-            if (curve[schema::curveDevice].toString() == device && curve[schema::curveParameter].toString() == ref.parameter)
+            if (curve.hasType (schema::CURVE) && curve[schema::curveParameter].toString() == ref.parameter
+                && readCurveParameter (curve) == ref)
                 return curve;
 
         return {};
+    }
+
+    // The song's curves on its tree, each parameter's once (the first), in their order, and whether each holds points: what
+    // getCurveKeys() and getCurveKeysWithPoints() read until the switch (roadmap step S5.20) gives them the area's order.
+    struct CurveKey
+    {
+        ParameterRef parameter;
+        bool hasPoints = false;
+    };
+
+    std::vector<CurveKey> readCurveKeys (const Song& song)
+    {
+        std::vector<CurveKey> keys;
+        std::vector<size_t> byParameter; // the keys' places, sorted by their parameters: each parameter once
+        const auto isBefore = [&keys] (size_t a, const ParameterRef& b)
+        {
+            const auto& first = keys[a].parameter;
+            return first.device.getRaw() != b.device.getRaw() ? first.device.getRaw() < b.device.getRaw() : first.parameter < b.parameter;
+        };
+
+        for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+        {
+            if (! curve.hasType (schema::CURVE))
+                continue;
+
+            const auto parameter = readCurveParameter (curve);
+            const auto place = std::lower_bound (byParameter.begin(), byParameter.end(), parameter, isBefore);
+
+            if (place != byParameter.end() && keys[*place].parameter == parameter)
+                continue;
+
+            byParameter.insert (place, keys.size());
+            keys.push_back ({ parameter, holdsPoints (curve) });
+        }
+
+        return keys;
     }
 
     // A parameter's curve in the song, edited point by point, in beats, each change with the song's undo manager. Points
@@ -399,8 +449,8 @@ namespace
     {
         std::vector<ParameterRef> parameters;
 
-        for (const auto& curve : getCurveStates (song))
-            if (const auto ref = getCurveParameter (curve); curve.getNumChildren() > 0 && isCurveOwnerThere (song, ref.device))
+        for (const auto& ref : getCurveKeysWithPoints (song))
+            if (isCurveOwnerThere (song, ref.device))
                 parameters.push_back (ref);
 
         return parameters;
@@ -476,9 +526,8 @@ namespace
         std::vector<ParameterRef> automated;
         const auto devices = getLaneDevices (song, track);
 
-        for (const auto& curve : getCurveStates (song))
-            if (const auto ref = getCurveParameter (curve);
-                curve.getNumChildren() > 0 && std::find (devices.begin(), devices.end(), ref.device) != devices.end())
+        for (const auto& ref : getCurveKeysWithPoints (song))
+            if (std::find (devices.begin(), devices.end(), ref.device) != devices.end())
                 automated.push_back (ref);
 
         return automated;
@@ -798,16 +847,22 @@ std::vector<AutomationPoint> getPoints (const Song& song, const ParameterRef& pa
 {
     std::vector<AutomationPoint> points;
 
-    for (const auto& point : findCurveState (song, parameter))
-        points.push_back ({ BeatPosition::fromBeats (point[schema::pointBeat]), point[schema::pointValue],
-                            point.getProperty (schema::pointCurve, 0.0f) });
+    if (const auto curve = getCurveValue (song, parameter))
+    {
+        points.reserve (curve->points.size());
+
+        for (const auto& point : curve->points)
+            points.push_back ({ point.beat, point.position, point.curve });
+    }
 
     return points;
 }
 
 bool hasPoints (const Song& song, const ParameterRef& parameter)
 {
-    return findCurveState (song, parameter).getNumChildren() > 0;
+    // Without its points read: on the tree, whether its element holds one (CurveValues.h: holdsPoints()); once the area holds
+    // the curves (roadmap step S5.20), whether its value has any.
+    return holdsPoints (findCurveState (song, parameter));
 }
 
 std::vector<float> getPositions (const Song& song, const ParameterRef& parameter, BeatRange range, int numValues)
@@ -826,12 +881,12 @@ std::vector<float> getPositions (const Song& song, const ParameterRef& parameter
 {
     // As Phazite's engine plays the song's points.
     std::vector<float> positions;
-    const auto state = findCurveState (song, parameter);
+    const auto value = beats.empty() ? std::nullopt : getCurveValue (song, parameter);
 
-    if (! state.isValid() || state.getNumChildren() == 0 || beats.empty())
+    if (! value.has_value() || value->points.empty())
         return positions;
 
-    const auto curve = makeEngineCurve (state);
+    const auto curve = makeEngineCurve (*value);
     positions.reserve (beats.size());
 
     for (const auto beat : beats)
@@ -855,7 +910,7 @@ BeatDuration movePoints (Song& song, const ParameterRef& parameter, const std::v
     if (indices.empty())
         return {};
 
-    const auto points = getPoints (song, parameter);
+    const auto points = curve.getPoints(); // as the curve it edits holds them, by its indices
     std::vector<bool> moving (points.size(), false);
 
     for (const auto index : indices)
@@ -949,7 +1004,7 @@ std::vector<int> duplicatePoints (Song& song, const ParameterRef& parameter, con
     if (indices.empty())
         return {};
 
-    const auto points = getPoints (song, parameter);
+    const auto points = curve.getPoints(); // as the curve it edits holds them, by its indices
     const auto first = points[(size_t) indices.front()].beat, last = points[(size_t) indices.back()].beat;
     const auto span = std::max (last - first, minimumSpan);
 
@@ -1126,19 +1181,81 @@ juce::ValueTree findCurveState (const Song& song, const ParameterRef& parameter)
     return findCurveIn (song.getState().getChildWithName (schema::AUTOMATION), parameter);
 }
 
-std::vector<juce::ValueTree> getCurveStates (const Song& song)
-{
-    std::vector<juce::ValueTree> curves;
-
-    for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
-        curves.push_back (curve);
-
-    return curves;
-}
-
 ParameterRef getCurveParameter (const juce::ValueTree& curve)
 {
-    return { readDeviceID (curve[schema::curveDevice]), curve[schema::curveParameter].toString() };
+    return readCurveParameter (curve);
+}
+
+SongCurves getCurvesValue (const Song& song)
+{
+    return readCurvesValue (song.getState().getChildWithName (schema::AUTOMATION));
+}
+
+std::vector<ParameterRef> getCurveKeys (const Song& song)
+{
+    std::vector<ParameterRef> parameters;
+
+    for (const auto& key : readCurveKeys (song))
+        parameters.push_back (key.parameter);
+
+    return parameters;
+}
+
+std::vector<ParameterRef> getCurveKeysWithPoints (const Song& song)
+{
+    std::vector<ParameterRef> parameters;
+
+    for (const auto& key : readCurveKeys (song))
+        if (key.hasPoints)
+            parameters.push_back (key.parameter);
+
+    return parameters;
+}
+
+std::optional<CurveValue> getCurveValue (const Song& song, const ParameterRef& parameter)
+{
+    if (const auto curve = findCurveState (song, parameter); curve.isValid())
+        return readCurveValue (curve);
+
+    return std::nullopt;
+}
+
+std::vector<CurveValue> getPlayedCurves (const Song& song, const std::vector<ParameterRef>& parameters)
+{
+    std::vector<CurveValue> played (parameters.size());
+
+    if (parameters.empty())
+        return played;
+
+    // Their places by their parameters, so that each curve of the song finds its own in one look.
+    std::vector<size_t> byParameter (parameters.size());
+    std::iota (byParameter.begin(), byParameter.end(), size_t { 0 });
+    const auto isBefore = [] (const ParameterRef& a, const ParameterRef& b)
+    { return a.device.getRaw() != b.device.getRaw() ? a.device.getRaw() < b.device.getRaw() : a.parameter < b.parameter; };
+    std::sort (byParameter.begin(), byParameter.end(), [&] (size_t a, size_t b) { return isBefore (parameters[a], parameters[b]); });
+
+    for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+    {
+        if (! curve.hasType (schema::CURVE))
+            continue;
+
+        const auto parameter = readCurveParameter (curve);
+        const auto place = std::lower_bound (byParameter.begin(), byParameter.end(), parameter,
+                                             [&] (size_t a, const ParameterRef& b) { return isBefore (parameters[a], b); });
+
+        // Each place of that parameter (a parameter asked for twice gets it twice): the last of its curves with points.
+        for (auto each = place; each != byParameter.end() && parameters[*each] == parameter; ++each)
+            if (auto value = readCurveValue (curve); ! value.points.empty())
+                played[*each] = std::move (value);
+    }
+
+    return played;
+}
+
+juce::ValueTree copyWholeCurve (const Song& song, const ParameterRef& parameter)
+{
+    const auto curve = findCurveState (song, parameter);
+    return curve.isValid() ? curve.createCopy() : juce::ValueTree();
 }
 
 void insertAutomationTime (Song& song, BeatPosition at, BeatDuration length)
@@ -1259,13 +1376,15 @@ void forgetCurvesOfGoneDevices (Song& song)
             automation.removeChild (i, nullptr);
 }
 
-void forgetCurvesOfGoneDevices (Song& song, juce::UndoManager* undo, const std::function<bool (const juce::ValueTree&)>& which)
+void forgetCurvesOfGoneDevices (Song& song, juce::UndoManager* undo, const std::function<bool (const ParameterRef&)>& which)
 {
     auto automation = song.getState().getChildWithName (schema::AUTOMATION);
 
+    // A curve's alone: an element of a kind Phazite doesn't know names no device.
     for (auto i = automation.getNumChildren(); --i >= 0;)
-        if (const auto curve = automation.getChild (i); which (curve) && ! isCurveOwnerThere (song, getCurveParameter (curve).device))
-            automation.removeChild (i, undo);
+        if (const auto curve = automation.getChild (i); curve.hasType (schema::CURVE))
+            if (const auto parameter = getCurveParameter (curve); which (parameter) && ! isCurveOwnerThere (song, parameter.device))
+                automation.removeChild (i, undo);
 }
 
 //==============================================================================
@@ -1288,13 +1407,11 @@ std::vector<AutomationLane> getLanes (const Song& song, TrackID track)
     const auto devices = getLaneDevices (song, track);
     std::vector<std::pair<std::pair<size_t, int>, ParameterRef>> automated;
 
-    for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+    for (const auto& ref : getCurveKeysWithPoints (song))
     {
-        const auto ref = getCurveParameter (curve);
         const auto device = std::find (devices.begin(), devices.end(), ref.device);
 
-        if (device == devices.end() || curve.getNumChildren() == 0
-            || ref.parameter == juce::String (devices::mixParameterID.data(), devices::mixParameterID.size()))
+        if (device == devices.end() || ref.parameter == juce::String (devices::mixParameterID.data(), devices::mixParameterID.size()))
             continue;
 
         if (std::none_of (lanes.begin(), lanes.end(), [&ref] (const AutomationLane& lane) { return lane.parameter == ref; }))

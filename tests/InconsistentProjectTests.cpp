@@ -7,6 +7,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "UndoCheck.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/synth/Synth.h"
@@ -670,7 +671,7 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
             CHECK (phazite::readID (sends.front()[schema::sendTo]) == returned.getRaw());
             CHECK (findAll (phazite::findTrackState (again, added), schema::LANE).size() == 1);
             const phazite::ParameterRef volumeAgain { phazite::getFader (again, added), phazite::getVolumeParameterID (again, added) };
-            CHECK (phazite::findCurveState (again, volumeAgain).getNumChildren() == 1);
+            CHECK (phazite::getPoints (again, volumeAgain).size() == 1);
             CHECK (findDucker (again) == findKey (again).getRaw());
             CHECK ((std::uint64_t) (juce::int64) again.getState()[schema::nextID] < phazite::schema::maxID);
 
@@ -926,7 +927,7 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
         CHECK (findAll (added, schema::LANE).size() == 1);
         const auto addedID = phazite::TrackID::fromRaw (phazite::readID (added[schema::trackID]));
         const phazite::ParameterRef volumeAgain { phazite::getFader (again, addedID), phazite::getVolumeParameterID (again, addedID) };
-        CHECK (phazite::findCurveState (again, volumeAgain).getNumChildren() == 1);
+        CHECK (phazite::getPoints (again, volumeAgain).size() == 1);
         const auto devices = findAll (again.getState(), schema::DEVICE);
         CHECK (std::any_of (devices.begin(), devices.end(), [&drums] (const juce::ValueTree& device)
                             { return phazite::readID (device[schema::deviceSidechain]) == phazite::readID (drums[schema::trackID]); }));
@@ -1068,8 +1069,8 @@ TEST_CASE ("IDs given anew as the song opens are counted on from past what a nam
     const auto synth = findNamedTrack (song, "Lead").getChildWithName (schema::DEVICE);
     REQUIRE (synth.isValid());
 
-    for (const auto& curve : findAll (song.getState(), schema::CURVE))
-        CHECK (phazite::readID (curve[schema::curveDevice]) != phazite::readID (synth[schema::deviceID]));
+    for (const auto& curve : phazite::getCurveKeys (song))
+        CHECK (curve.device.getRaw() != phazite::readID (synth[schema::deviceID]));
 }
 
 TEST_CASE ("Every merge waiting goes from a song given its IDs anew as it opens")
@@ -1132,7 +1133,7 @@ TEST_CASE ("A macro, and the master's fader and VCA, past the mark, are given an
     const auto fader = phazite::DeviceID::fromRaw (phazite::readID (masterState[schema::channelFader])); // not its VCA
     CHECK (fader.getRaw() < phazite::schema::maxCountedID);
     CHECK (phazite::readID (masterState[schema::channelVCA]) < phazite::schema::maxCountedID);
-    CHECK (phazite::findCurveState (song, { fader, phazite::schema::masterVolume }).getNumChildren() == 1);
+    CHECK (phazite::getPoints (song, { fader, phazite::schema::masterVolume }).size() == 1);
 }
 
 TEST_CASE ("A device of a type Phazite hasn't is left out, with what names it")
@@ -1240,15 +1241,100 @@ TEST_CASE ("A curve, a lane and a sidechain of what the song hasn't are left out
             visit (song);
         });
     REQUIRE (project != nullptr);
-    const auto curves = findAll (project->getSong().getState(), schema::CURVE);
+    const auto curves = findAll (phazite::test::copyWholeSong (project->getSong()), schema::CURVE); // wherever they are
     REQUIRE (curves.size() == 1);
+    REQUIRE (curves.front().getNumChildren() > 0);
     CHECK ((float) curves.front().getChild (0)[schema::pointValue] == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("Two curves of one parameter, its device's ID written two ways, open as one, the first")
+{
+    // "14" and "0014" name one device (readID()): the lane would show the first while the engine played the last.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* automation = song.getChildByName ("AUTOMATION");
+            REQUIRE (automation != nullptr);
+            REQUIRE (automation->getNumChildElements() == 1);
+            auto* curve = automation->getFirstChildElement();
+            auto* again = new juce::XmlElement (*curve);
+            again->setAttribute ("device", "00" + curve->getStringAttribute ("device"));
+
+            for (auto* point : again->getChildIterator())
+                point->setAttribute ("value", "0.25");
+
+            automation->addChildElement (again);
+        });
+    REQUIRE (project != nullptr);
+    const auto curves = findAll (phazite::test::copyWholeSong (project->getSong()), schema::CURVE);
+    REQUIRE (curves.size() == 1);
+    REQUIRE (curves.front().getNumChildren() == 2);
+    CHECK ((float) curves.front().getChild (0)[schema::pointValue] == doctest::Approx (0.5f));
+    CHECK ((float) curves.front().getChild (1)[schema::pointValue] == doctest::Approx (0.8f));
+}
+
+TEST_CASE ("A curve's child Phazite doesn't know goes as the song opens, so that its first point is the first its edits find")
+{
+    // The readers count a curve's points, and the edits its children: with the child kept, the lane's first point was the
+    // child to a drag or a delete.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* automation = song.getChildByName ("AUTOMATION");
+            REQUIRE (automation != nullptr);
+            auto* curve = automation->getFirstChildElement();
+            REQUIRE (curve != nullptr);
+            auto* shape = new juce::XmlElement ("SHAPE");
+            shape->setAttribute ("kind", "spline");
+            curve->insertChildElement (shape, 0);
+        });
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+
+    const auto curves = findAll (phazite::test::copyWholeSong (song), schema::CURVE);
+    REQUIRE (curves.size() == 1);
+    REQUIRE (curves.front().getNumChildren() == 2);
+    CHECK (curves.front().getChild (0).hasType (schema::POINT));
+    CHECK (curves.front().getChild (1).hasType (schema::POINT));
+
+    const auto keys = phazite::getCurveKeys (song);
+    REQUIRE (keys.size() == 1);
+    const auto parameter = keys.front();
+    REQUIRE (phazite::getPoints (song, parameter).size() == 2);
+
+    phazite::test::UndoCheck undo (song);
+    const auto inStep = [&undo, &song] (const char* name, const std::function<void()>& edit)
+    {
+        undo.check (name,
+                    [&]
+                    {
+                        const phazite::UndoStep step (song, name);
+                        edit();
+                    });
+    };
+
+    inStep ("Move Point", [&] { phazite::movePoints (song, parameter, { 0 }, phazite::BeatDuration::fromBeats (1.0), 0.1f); });
+    auto points = phazite::getPoints (song, parameter);
+    REQUIRE (points.size() == 2);
+    CHECK (points[0].beat.inBeats() == doctest::Approx (1.0));
+    CHECK (points[0].position == doctest::Approx (0.6f));
+    CHECK (points[1].beat.inBeats() == doctest::Approx (4.0));
+    CHECK (points[1].position == doctest::Approx (0.8f));
+
+    inStep ("Delete Point", [&] { phazite::deletePoints (song, parameter, { 0 }); });
+    points = phazite::getPoints (song, parameter);
+    REQUIRE (points.size() == 1);
+    CHECK (points[0].beat.inBeats() == doctest::Approx (4.0));
+    CHECK (points[0].position == doctest::Approx (0.8f));
+    undo.walkBackAndForth();
 }
 
 TEST_CASE ("A point without a position, or with one that is no number, is left out, and a curve left without points goes")
 {
     // A point at 0 would be silence on a volume's lane: one that says no position is no point. A curve that held only
-    // elements Phazite doesn't know keeps them, as everything Phazite doesn't know stays.
+    // elements Phazite doesn't know stays without them, as a curve without points: a curve holds its points alone.
     const auto openWith = [] (const std::function<void (juce::XmlElement & curve)>& edit)
     {
         Edited edited;
@@ -1261,7 +1347,7 @@ TEST_CASE ("A point without a position, or with one that is no number, is left o
                 edit (*automation->getFirstChildElement());
             });
         REQUIRE (project != nullptr);
-        return findAll (project->getSong().getState(), schema::CURVE);
+        return findAll (phazite::test::copyWholeSong (project->getSong()), schema::CURVE); // as its file would hold them
     };
 
     SUBCASE ("A point without a position")
@@ -1291,7 +1377,7 @@ TEST_CASE ("A point without a position, or with one that is no number, is left o
         CHECK (curves.empty());
     }
 
-    SUBCASE ("A curve holding only what Phazite doesn't know stays, with it")
+    SUBCASE ("A curve holding only what Phazite doesn't know stays, without it")
     {
         const auto curves = openWith (
             [] (juce::XmlElement& curve)
@@ -1300,8 +1386,7 @@ TEST_CASE ("A point without a position, or with one that is no number, is left o
                 curve.createNewChildElement ("SHAPE")->setAttribute ("kind", "spline");
             });
         REQUIRE (curves.size() == 1);
-        REQUIRE (curves.front().getNumChildren() == 1);
-        CHECK (curves.front().getChild (0).hasType ("SHAPE"));
+        CHECK (curves.front().getNumChildren() == 0);
     }
 }
 

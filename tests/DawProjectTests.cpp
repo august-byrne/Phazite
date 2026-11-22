@@ -15,11 +15,13 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/DeviceType.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -314,6 +316,48 @@ TEST_CASE ("A DAWproject's automation plays Phazite's lines in another DAW: poin
     // The send's lane names the send's volume, as its channel writes it.
     const auto* channel = find (*content.project, "Track", "id", id ("t", song.bass))->getChildByName ("Channel");
     CHECK (find (*channel, "Volume", "id", id ("c", song.bass) + "s" + juce::String ((juce::int64) send.device.getRaw()) + "v") != nullptr);
+}
+
+TEST_CASE ("A DAWproject holds a plug-in's automation: the parameters its curves automate, and each curve's points")
+{
+    // What an export writes of the automation it reads from the song's curves, as values (DawProject.cpp: writePlugin(), its
+    // automated parameters; writeAutomation(), each curve's points): an export that found no curve would leave both out.
+    // A VST3 that isn't installed here: it plays nothing, but is saved, and written, as it is.
+    Song song;
+    auto& model = *phazite::findSong (song.s.context);
+    juce::PluginDescription description;
+    description.name = "Delay";
+    description.pluginFormatName = "VST3";
+    description.manufacturerName = "Elsewhere";
+    description.fileOrIdentifier = "C:/Plug-ins/Delay.vst3";
+    const auto plugin =
+        phazite::insertDeviceState (model, song.bass, phazite::makeDeviceState (model, phazite::makeDeviceType (description)));
+    REQUIRE (plugin.isValid());
+    const phazite::ParameterRef feedback { plugin, "7" };
+    phazite::addPoint (model, feedback, { phazite::BeatPosition::fromBeats (0.0), 0.25f, 0.0f });
+    phazite::addPoint (model, feedback, { phazite::BeatPosition::fromBeats (4.0), 0.75f, 0.0f });
+
+    const auto content = song.describe();
+    const auto target = "d" + juce::String ((juce::int64) plugin.getRaw()) + "p7";
+    const auto* written = find (*content.project, "Vst3Plugin", "id", "d" + juce::String ((juce::int64) plugin.getRaw()));
+    REQUIRE (written != nullptr);
+    const auto* parameters = written->getChildByName ("Parameters");
+    REQUIRE (parameters != nullptr);
+    const auto* parameter = find (*parameters, "RealParameter", "id", target);
+    REQUIRE (parameter != nullptr);
+    CHECK (parameter->getIntAttribute ("parameterID") == 7);
+
+    const auto* lanes = find (*content.project, "Lanes", "track", id ("t", song.bass));
+    REQUIRE (lanes != nullptr);
+    const auto* points = find (*lanes, "Points", "id", "q" + target);
+    REQUIRE (points != nullptr);
+    CHECK (points->getChildByName ("Target")->getStringAttribute ("parameter") == target);
+    const auto read = readPoints (*points);
+    REQUIRE (read.size() >= 2);
+    CHECK (read.front().time == doctest::Approx (0.0));
+    CHECK (read.front().value == doctest::Approx (0.25));
+    CHECK (read.back().time == doctest::Approx (4.0));
+    CHECK (read.back().value == doctest::Approx (0.75));
 }
 
 TEST_CASE ("What another DAW can't play is bounced beside it: the track muted with its notes, its sound on an audio track")

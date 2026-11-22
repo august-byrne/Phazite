@@ -40,7 +40,9 @@ enum class ValueType
 
 // What a value is, beyond its type: plain (what its type says); ownID, an item's own ID, which the song gives it
 // (Song::makeID()); songID, another ID of the song's an element holds (a channel's fader, an alias group); idName, the
-// ID of another item, which it names (a send's return, a lane's device); words, one of a list of words; hexID, lowercase
+// ID of another item, which it names (a send's return, a lane's device), as a number (std::int64_t) or written as text, its
+// decimal digits (juce::String: a lane's, a curve's, a modulation's and a MIDI link's device, "1042"), each read as readID()
+// reads an ID (Schema.h); words, one of a list of words; hexID, lowercase
 // hexadecimal digits, so many of them; colour, as juce::Colour::toString() writes it; numbers, numbers separated by
 // spaces.
 enum class Form

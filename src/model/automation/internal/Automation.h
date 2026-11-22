@@ -8,6 +8,7 @@
 
 #include "model/automation/AutomationValues.h"
 #include "model/base/Song.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 
@@ -42,8 +43,8 @@ juce::String getParameterDeviceName (const Song&, const ParameterRef&);
 
 //==============================================================================
 // A parameter's curve as points in song beats, each at a position along the parameter's control's travel
-// (AutomationValues.h), and edits of it. They change the song through its undo manager without beginning a step: they join
-// the caller's.
+// (AutomationValues.h), and edits of it. What reads it reads its value (getCurveValue(), below); the edits change the song
+// through its undo manager without beginning a step: they join the caller's.
 std::vector<AutomationPoint> getPoints (const Song&, const ParameterRef&);
 bool hasPoints (const Song&, const ParameterRef&);
 std::vector<float> getPositions (const Song&, const ParameterRef&, BeatRange, int numValues); // getAutomationPositions()
@@ -135,10 +136,34 @@ std::optional<PointSelection> getSelectedPoints (const Selection&);
 void selectPoints (Selection&, const ParameterRef&, const std::vector<int>& indices);
 
 //==============================================================================
-// The song's curves (Schema.h: AUTOMATION): a parameter's, invalid for one without; every one; and the parameter each is
-// for.
+// The song's curves as values (model/base/internal/CurveValues.h), which is how everything outside the writers below reads
+// them: every one, by its parameter and in the order the song made them (the file's order, and the order a plug-in's
+// parameters' lanes show in: getLanes()); the parameters they automate, in that order, without their points; those of the
+// curves with points; and a parameter's curve, none for one without. The song's tree holds the curves still (Schema.h:
+// AUTOMATION), which these read at each call, a curve's points converted only where its value is asked for; the switch of
+// roadmap step S5.20 makes them the area's, which they then give without a read. A parameter has one curve: the loader keeps
+// the first of a file's curves of one parameter, its device's ID read as a number however it is written ("14", "0014"), and
+// a curve's points alone (makeConsistent()); these read the first should a tree not made consistent hold two.
+SongCurves getCurvesValue (const Song&);
+std::vector<ParameterRef> getCurveKeys (const Song&);
+std::vector<ParameterRef> getCurveKeysWithPoints (const Song&);
+std::optional<CurveValue> getCurveValue (const Song&, const ParameterRef&);
+
+// The curves of the parameters given as Phazite's engine plays them (model/playback/SongPlayer.cpp: readCurves()), each in
+// its place, without points for one the song has no curve for: read in one walk of the song's curves, each of those asked
+// for converted, not a walk for each. Should the tree hold two curves of one parameter (a file from others before it is made
+// consistent), the last with points plays, as it always has; once the area holds the curves, a parameter has one.
+std::vector<CurveValue> getPlayedCurves (const Song&, const std::vector<ParameterRef>&);
+
+// A parameter's curve as a CURVE element that holds everything the song holds of it, an invalid tree for one without: what
+// compares a curve as a file holds it (the versions' changes: model/versions/internal/ChangesWorker.h). On the tree, a copy of
+// its element. Message thread.
+juce::ValueTree copyWholeCurve (const Song&, const ParameterRef&);
+
+// The song's curves as their elements, which automation's writers here and the mixer's rename of a fader's curve
+// (model/mixer/Buses.cpp) change until they change the values (roadmap step S5.20): a parameter's, invalid for one without;
+// and the parameter one is for (CurveValues.h: readCurveParameter()), for what hears the tree change.
 juce::ValueTree findCurveState (const Song&, const ParameterRef&);
-std::vector<juce::ValueTree> getCurveStates (const Song&);
 ParameterRef getCurveParameter (const juce::ValueTree& curveState);
 
 // The time edits' automation (model/arrangement/internal/Arrangement.h), on every automated parameter of the song: room
@@ -164,10 +189,10 @@ void addAutomationPoints (Song&, const std::vector<ParameterPoint>&);
 // a project opens: without an undo step. A device keeps those of parameters it hasn't, as a plug-in that isn't installed.
 void forgetCurvesOfGoneDevices (Song&);
 
-// The same in the caller's undo step (undo), of the curves which says alone: those a song taken from the versions in part
-// brought in that name a device the song hasn't (a restore from a damaged commit: model/versions/VersionsModel.cpp), so that
-// the song is what its file would open as.
-void forgetCurvesOfGoneDevices (Song&, juce::UndoManager* undo, const std::function<bool (const juce::ValueTree& curve)>& which);
+// The same in the caller's undo step (undo), of the curves which says alone, by their parameters: those a song taken from
+// the versions in part brought in that name a device the song hasn't (a restore from a damaged commit:
+// model/versions/VersionsModel.cpp), so that the song is what its file would open as.
+void forgetCurvesOfGoneDevices (Song&, juce::UndoManager* undo, const std::function<bool (const ParameterRef&)>& which);
 
 //==============================================================================
 // Watches the song's values set by hand (Song::ParameterListener): remembers the parameter changed last by hand (by a
