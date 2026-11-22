@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/ApplySong.h"
 #include "internal/SongDiff.h"
-#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <functional>
+#include <iterator>
 #include <map>
+#include <optional>
 #include <set>
+#include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -82,18 +88,18 @@ namespace
         return none;
     }
 
-    // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read:
-    // the stand-ins, and the elements that stand in for themselves (a clip a run of whose notes was lost). The song hasn't
-    // them, so what they held stays as it is now: not there. A stand-in is never part of a song (Schema.h:
-    // schema::versions::missing).
-    juce::ValueTree copyWithoutStandIns (const juce::ValueTree& element)
+    // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read
+    // (the stand-ins, and the elements that stand in for themselves: a clip a run of whose notes was lost), and without its
+    // tracks' clips, which the clip pass gives them (ClipPass, below). The song hasn't the stand-ins, so what they held stays
+    // as it is now: not there. A stand-in is never part of a song (Schema.h: schema::versions::missing).
+    juce::ValueTree copyForSong (const juce::ValueTree& element)
     {
         auto copy = element.createCopy();
         const std::function<void (juce::ValueTree)> strip = [&] (juce::ValueTree tree)
         {
             for (int i = tree.getNumChildren(); --i >= 0;)
             {
-                if (auto child = tree.getChild (i); isStandIn (child))
+                if (auto child = tree.getChild (i); isStandIn (child) || child.hasType (schema::CLIP))
                     tree.removeChild (i, nullptr);
                 else
                     strip (child);
@@ -104,37 +110,11 @@ namespace
         return copy;
     }
 
-    // A clip's notes and controllers' values, which the notes' code makes like the other's (Notes.h: makeClipNotesLike()).
-    bool isClipEvent (const juce::ValueTree& element, const juce::ValueTree& child)
-    {
-        return element.hasType (schema::CLIP) && (child.hasType (schema::NOTE) || child.hasType (schema::CONTROL));
-    }
-
-    // What the audio clips of an alias group share (AudioClips.h: shareTheSound(): file, tempo, pitch, direction, warp markers),
-    // given by each audio clip of a group in an element made like the other song's, or added from it, to every clip of its
-    // group in the song, as an edit through one of them gives it: those on other tracks too, which one track's line leaves as
-    // they were. A clip's notes reach its group through the notes' code (Notes.h: makeClipNotesLike(), and the song's keeper
-    // for a clip added, SongValues.h).
-    void giveSharedSounds (Song& song, const juce::ValueTree& element, juce::UndoManager* undo)
-    {
-        if (! element.hasType (schema::CLIP))
-        {
-            for (const auto& child : element)
-                giveSharedSounds (song, child, undo);
-
-            return;
-        }
-
-        if (isAudioState (element) && element[schema::clipLink].toString().isNotEmpty())
-            for (auto alias : getAliasStates (song, element))
-                if (alias != element)
-                    giveSharedSound (element, alias, undo);
-    }
-
-    // Whether makeLike() places a child among the element's: taken, a track only withTracks, never a clip's event.
+    // Whether makeLike() places a child among the element's: taken, a track only withTracks, never a clip (a track's clips are
+    // the clip pass's: ClipPass, below).
     bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, bool withTracks, Taken taken)
     {
-        return isTaken (taken, element, child) && (withTracks || ! child.hasType (schema::TRACK)) && ! isClipEvent (element, child);
+        return isTaken (taken, element, child) && (withTracks || ! child.hasType (schema::TRACK)) && ! child.hasType (schema::CLIP);
     }
 
     std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true, Taken taken = Taken::counted)
@@ -163,8 +143,8 @@ namespace
     }
 
     // The element made like the other, its children too, but for the tracks in it while withTracks is off (a folder's,
-    // which are things of their own). A clip's notes and controllers' values by the notes' code, in the same history (the
-    // song's, or none while the song is written outside it).
+    // which are things of their own), and a track's clips, which the clip pass makes like the other's once this is done
+    // (ClipPass, below), in the same history (the song's, or none while the song is written outside it).
     void makeLike (Song& song, juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo, bool withTracks = true,
                    Taken taken = Taken::counted, const StandIns& standIns = noStandIns())
     {
@@ -223,9 +203,7 @@ namespace
             }
             else if (! isStandIn (child.tree))
             {
-                auto added = copyWithoutStandIns (child.tree);
-                live.addChild (added, place, undo);
-                giveSharedSounds (song, added, undo);
+                live.addChild (copyForSong (child.tree), place, undo);
             }
             else
             {
@@ -234,18 +212,11 @@ namespace
 
             ++place;
         }
-
-        if (live.hasType (schema::CLIP))
-        {
-            const auto id = readID (live[schema::clipID]);
-            jassert (song.getIndex().findClip (id) == live); // the song's one clip of its ID
-            makeClipNotesLike (song, ClipID::fromRaw (id), other);
-            giveSharedSounds (song, live, undo);
-        }
     }
 
-    // Where each item is in a song, or in a part of it (its parent's type and key), by its own type and ID: notes aside,
-    // whose IDs are their clips' own, and, while withTracks is off, the tracks in it (a folder's, things of their own).
+    // Where each item is in a song, or in a part of it (its parent's type and key), by its own type and ID: notes and clips
+    // aside (the clip pass moves clips: ClipPass, below), and, while withTracks is off, the tracks in it (a folder's, things
+    // of their own).
     using Places = std::map<juce::String, juce::String>;
 
     Places findPlaces (const juce::ValueTree& tree, bool withTracks = true)
@@ -255,7 +226,7 @@ namespace
         {
             for (const auto& child : element)
             {
-                if (! withTracks && child.hasType (schema::TRACK))
+                if ((! withTracks && child.hasType (schema::TRACK)) || child.hasType (schema::CLIP))
                     continue;
 
                 if (! child.hasType (schema::NOTE) && schema::holdsID (child, schema::trackID))
@@ -271,8 +242,8 @@ namespace
     }
 
     // The song's items that are somewhere else in the other song, or in the part of it about to be taken (a track moved
-    // into a folder, a clip onto another track, a device into a container), taken away first, to be put where the other
-    // has them: no ID is in the song twice, meanwhile or after.
+    // into a folder, a device into a container), taken away first, to be put where the other has them: no ID is in the
+    // song twice, meanwhile or after. Not clips, which the clip pass moves (ClipPass, below).
     void removeMovedItems (juce::ValueTree live, const Places& otherPlaces, juce::UndoManager* undo,
                            const StandIns& standIns = noStandIns())
     {
@@ -281,6 +252,9 @@ namespace
         {
             for (const auto& child : element)
             {
+                if (child.hasType (schema::CLIP))
+                    continue;
+
                 if (! child.hasType (schema::NOTE) && schema::holdsID (child, schema::trackID) && standIns.count (nameOf (child)) == 0)
                 {
                     const auto found = otherPlaces.find (child.getType().toString() + ":" + child[schema::trackID].toString());
@@ -308,7 +282,7 @@ namespace
     {
         for (const auto& child : song)
         {
-            if (child.hasType (schema::NOTE))
+            if (child.hasType (schema::NOTE) || child.hasType (schema::CLIP))
                 continue;
 
             if (schema::holdsID (child, schema::trackID) && nameOf (child) == place)
@@ -349,10 +323,10 @@ namespace
         return -1;
     }
 
-    // What a track holds now that the other song holds somewhere else (a clip moved onto it since, from another track),
-    // sent there, as it is now, before the track is made like the other's or taken away: it would be on neither track
+    // What a track holds now that the other song holds somewhere else (a device moved since into a container on another
+    // track), sent there, as it is now, before the track is made like the other's or taken away: it would be on neither track
     // otherwise. Where the song has nothing to hold it now (the track it was on deleted since), it goes with the rest, and
-    // that track's own line brings it back.
+    // that track's own line brings it back. Not its clips, which the clip pass sends (ClipPass::sendHome()).
     void sendItemsHome (juce::ValueTree state, const juce::ValueTree& track, const juce::ValueTree& other, juce::UndoManager* undo)
     {
         const auto otherPlaces = findPlaces (other);
@@ -361,7 +335,7 @@ namespace
         {
             for (const auto& child : element)
             {
-                if (child.hasType (schema::TRACK) || child.hasType (schema::NOTE))
+                if (child.hasType (schema::TRACK) || child.hasType (schema::NOTE) || child.hasType (schema::CLIP))
                     continue;
 
                 if (schema::holdsID (child, schema::trackID))
@@ -430,13 +404,553 @@ namespace
         }
     }
 
+    //==============================================================================
+    // Whether two numbers write the same text in the song (SongText.h: isSameValue()): alike but past the digits written,
+    // which makeLike() takes for the same, so that what arithmetic leaves past them (a length of 4.000000000000001 against
+    // the other's 4) is no change.
+    bool writeAlike (double a, double b)
+    {
+        return isSameValue (juce::var (a), juce::var (b));
+    }
+
+    // What an audio clip plays as the other song holds it, each number that writes as the song's clip writes it kept as the
+    // song holds it (writeAlike()), its markers too, each by its place.
+    ClipSound keepWhatWritesAlike (const ClipSound& held, ClipSound sound)
+    {
+        if (writeAlike (held.tempo, sound.tempo))
+            sound.tempo = held.tempo;
+
+        if (writeAlike (held.pitch, sound.pitch))
+            sound.pitch = held.pitch;
+
+        auto warps = immer::flex_vector<WarpValue>().transient();
+
+        for (size_t i = 0; i < sound.warps.size(); ++i)
+        {
+            auto warp = sound.warps[i];
+
+            if (i < held.warps.size())
+            {
+                if (writeAlike (held.warps[i].time, warp.time))
+                    warp.time = held.warps[i].time;
+
+                if (writeAlike (held.warps[i].playsAt, warp.playsAt))
+                    warp.playsAt = held.warps[i].playsAt;
+            }
+
+            warps.push_back (warp);
+        }
+
+        sound.warps = warps.persistent();
+
+        if (sound.warps == held.warps)
+            sound.warps = held.warps; // the song's own, shared
+
+        return sound;
+    }
+
+    // A clip's value as the other song holds it, each number that writes as the song's clip writes it kept as the song holds
+    // it (writeAlike()).
+    ClipValue keepWhatWritesAlike (const ClipValue& held, ClipValue value)
+    {
+        const auto keepBeats = [] (const auto& heldBeats, auto& beats)
+        {
+            if (writeAlike (heldBeats.inBeats(), beats.inBeats()))
+                beats = heldBeats;
+        };
+
+        const auto keep = [] (auto heldNumber, auto& number)
+        {
+            if (writeAlike ((double) heldNumber, (double) number))
+                number = heldNumber;
+        };
+
+        keepBeats (held.start, value.start);
+        keepBeats (held.length, value.length);
+        keepBeats (held.offset, value.offset);
+        keep (held.fileStart, value.fileStart);
+        keep (held.fileEnd, value.fileEnd);
+        keep (held.gain, value.gain);
+        keep (held.fadeIn.seconds, value.fadeIn.seconds);
+        keep (held.fadeIn.bend, value.fadeIn.bend);
+        keep (held.fadeOut.seconds, value.fadeOut.seconds);
+        keep (held.fadeOut.bend, value.fadeOut.bend);
+        keep (held.takeLength, value.takeLength);
+        value.sound = keepWhatWritesAlike (held.sound, value.sound);
+        return value;
+    }
+
+    //==============================================================================
+    // The song's tracks' clips made like the other's in a pass of their own, once the rest of what is made like the other's
+    // is (the tracks there, each where the other has it), through the clips' functions (model/arrangement/internal/Clips.h)
+    // by the song and the clips' IDs and values, so that it is the same whatever stores the song's clips. For each track it
+    // makes like the other's: the clips the track holds that the other hasn't there taken away (or left for the track the
+    // other has them on, or sent there); each the other holds there set as the other holds it (one on another track now is
+    // moved, keeping what it is: its selection too) or added with its ID; and the track's clips put in the other's order.
+    // Then each alias group given its notes as one value (Notes.h: setClipNotesValue()) and its audio clips' sound, its clips
+    // on tracks the pass doesn't make like the other's too (known bug 234). What the other's version couldn't read (a stand-in)
+    // stays as the song has it. Each write only where the song differs, in the history's step in progress, or outside it while
+    // the song is written outside it (Song::OutsideHistory), as the clips' functions write (Clips.h: getUndoOf()).
+    class ClipPass
+    {
+    public:
+        // What the pass does with a clip of a track it makes like the other's that the other holds on another track: leaves it
+        // for that track, which the pass makes like the other's too (the whole song made like the other), or sends it there as
+        // it is now, among that track's clips where the other has it (one track's line, which leaves the other tracks as they
+        // are). Where the song hasn't that track, or the pass doesn't make it like the other's, it goes.
+        enum class Elsewhere
+        {
+            leftForItsTrack,
+            sentThere
+        };
+
+        // standInsStay: whether a clip the other holds as a stand-in on another track stays where the song has it (the whole
+        // song made like a version, as its other parts' stand-ins stay), or goes (another branch's song, a copy of the song).
+        ClipPass (Song& s, const juce::ValueTree& other, Elsewhere e, bool standInsStay)
+            : song (s),
+              elsewhere (e),
+              standInsStayWhereTheyAre (standInsStay)
+        {
+            // The other's tracks and clips, read once.
+            for (const auto& track : getTrackElements (other))
+            {
+                const auto id = TrackID::fromRaw (readID (track[schema::trackID]));
+                otherTracks.emplace (id.getRaw(), track);
+                otherOrder.push_back (id);
+                auto& clipsThere = otherTrackClips[id.getRaw()];
+
+                for (const auto& child : track)
+                {
+                    if (child.hasType (schema::CLIP))
+                    {
+                        const auto clip = readID (child[schema::clipID]);
+                        otherClips.emplace (clip, OtherClip { child, id, isStandIn (child) });
+                        clipsThere.push_back (ClipID::fromRaw (clip));
+                    }
+                }
+            }
+        }
+
+        // A track whose clips the pass makes like the other's: one both have, which the other's version could read.
+        void addTrack (TrackID track)
+        {
+            const auto there = otherTracks.find (track.getRaw());
+
+            if (there != otherTracks.end() && ! isStandIn (there->second) && findTrackState (song, track).isValid()
+                && passed.insert (track.getRaw()).second)
+                tracks.emplace_back (track, there->second);
+        }
+
+        // Every track both have, in the other's order.
+        void addEveryTrack()
+        {
+            for (const auto track : otherOrder)
+                addTrack (track);
+        }
+
+        // The tracks' clips made like the other's, as the class says. How many writes it made.
+        int run()
+        {
+            for (const auto& track : tracks)
+                takeAway (track.first);
+
+            putBackLinks();
+
+            for (const auto& [track, there] : tracks)
+                makeTrackClipsLike (track, there);
+
+            giveGroupsTheirNotes();
+            giveGroupsTheirSounds();
+            return writes;
+        }
+
+        // A track that is to go: its clips that the other holds on another track that the song has sent there, as they are
+        // now; the rest go with it. How many writes it made.
+        int sendHome (TrackID track)
+        {
+            for (const auto& clip : getClipValues (song, track))
+                if (const auto found = otherClips.find (clip.id.getRaw());
+                    found != otherClips.end() && found->second.track != track && holdsClips (found->second.track))
+                    sendTo (clip, found->second.track);
+
+            return writes;
+        }
+
+    private:
+        // A clip of the other song: its element there, the track it is on there, and whether it stands in for what the other's
+        // version couldn't read.
+        struct OtherClip
+        {
+            juce::ValueTree element;
+            TrackID track;
+            bool standIn = false;
+        };
+
+        // A clip the pass gave the other's value: its element there, and that value.
+        struct Given
+        {
+            juce::ValueTree element;
+            ClipValue value;
+        };
+
+        Song& song;
+        const Elsewhere elsewhere;
+        const bool standInsStayWhereTheyAre;
+        std::map<std::uint64_t, juce::ValueTree> otherTracks;         // by their IDs
+        std::vector<TrackID> otherOrder;                              // the other's tracks, as getTrackElements() gives them
+        std::map<std::uint64_t, OtherClip> otherClips;                // by their IDs
+        std::map<std::uint64_t, std::vector<ClipID>> otherTrackClips; // each of the other's tracks' clips, in its order there
+        std::vector<std::pair<TrackID, juce::ValueTree>> tracks;
+        std::set<std::uint64_t> passed; // the tracks' IDs
+        std::vector<std::pair<ClipID, std::uint64_t>> unlinked;
+        std::map<std::uint64_t, ClipID> groupMembers; // a clip of the song in each alias group the pass has seen, by its link
+        std::vector<Given> given;
+        int writes = 0;
+
+        // Whether a track of the song holds clips: a track's, not a folder's or a return's.
+        bool holdsClips (TrackID track) const
+        {
+            const auto trackState = findTrackState (song, track);
+            return trackState.hasType (schema::TRACK) && ! isFolderState (trackState) && ! isReturnState (trackState);
+        }
+
+        // Whether the pass gives a clip the other's value: one the other holds, which its version could read, on a track the
+        // pass makes like the other's.
+        bool isMadeLikeTheOthers (ClipID clip) const
+        {
+            const auto found = otherClips.find (clip.getRaw());
+            return found != otherClips.end() && ! found->second.standIn && passed.count (found->second.track.getRaw()) > 0;
+        }
+
+        void setOrder (TrackID track, const std::vector<ClipID>& order)
+        {
+            if (order != getClips (song, track))
+            {
+                setTrackClipOrder (song, track, order);
+                ++writes;
+            }
+        }
+
+        // The track's clips that the other hasn't there: gone, unless the other holds one as a stand-in (which stays where the
+        // song has it, where the other's version could read the rest: standInsStayWhereTheyAre) or on another track (where it
+        // goes: Elsewhere). Before any clip is set, so that one the pass adds to an alias group never leaves it again as the
+        // last of the group but one goes.
+        void takeAway (TrackID track)
+        {
+            for (const auto& clip : getClipValues (song, track))
+            {
+                const auto found = otherClips.find (clip.id.getRaw());
+
+                if (found != otherClips.end() && found->second.track == track)
+                {
+                    noteMember (clip);
+                    continue;
+                }
+
+                if (found == otherClips.end())
+                    erase (clip);
+                else if (elsewhere == Elsewhere::sentThere && holdsClips (found->second.track))
+                    sendTo (clip, found->second.track);
+                else if (elsewhere == Elsewhere::sentThere)
+                    erase (clip);
+                else if (found->second.standIn ? ! standInsStayWhereTheyAre : passed.count (found->second.track.getRaw()) == 0)
+                    erase (clip);
+                else
+                    noteMember (clip);
+            }
+        }
+
+        void noteMember (const ClipValue& clip)
+        {
+            if (clip.link != 0)
+                groupMembers.emplace (clip.link, clip.id);
+        }
+
+        // A clip taken out of the song. The last clip but this one of its alias group leaves the group as it goes (eraseClip()),
+        // which the other may not say: put back after, unless the pass gives that clip the other's value (putBackLinks()).
+        void erase (const ClipValue& clip)
+        {
+            if (clip.link != 0)
+                if (const auto group = getAliasClips (song, clip.id); group.size() == 2)
+                    unlinked.emplace_back (group[1], clip.link);
+
+            eraseClip (song, clip.id);
+            ++writes;
+        }
+
+        void putBackLinks()
+        {
+            for (const auto& [clip, link] : unlinked)
+            {
+                if (isMadeLikeTheOthers (clip))
+                    continue;
+
+                if (const auto held = getClipValue (song, clip); held.has_value() && held->link != link)
+                {
+                    setClipLink (song, clip, link);
+                    ++writes;
+                }
+            }
+        }
+
+        // A clip sent to the track the other holds it on, as it is now, among that track's clips in the other's order, whatever
+        // else the track holds and wherever among its elements: after the nearest clip before it there that the track holds;
+        // where there is none, before the nearest clip after it there that the track holds; where there is none either, after
+        // them all.
+        void sendTo (const ClipValue& clip, TrackID track)
+        {
+            auto moved = clip;
+            moved.track = track;
+            setClip (song, clip, moved);
+            ++writes;
+
+            auto order = getClips (song, track);
+            order.erase (std::remove (order.begin(), order.end(), clip.id), order.end());
+            std::map<ClipID, std::size_t> held; // the track's clips, by their places in its order
+            auto at = order.size();
+
+            for (std::size_t i = 0; i < order.size(); ++i)
+                held.emplace (order[i], i);
+
+            if (const auto found = otherTrackClips.find (track.getRaw()); found != otherTrackClips.end())
+            {
+                const auto& there = found->second;
+                const auto self = std::find (there.begin(), there.end(), clip.id);
+                auto placed = false;
+
+                for (auto before = self; before != there.begin() && ! placed;)
+                {
+                    if (const auto heldBefore = held.find (*--before); heldBefore != held.end())
+                    {
+                        at = heldBefore->second + 1;
+                        placed = true;
+                    }
+                }
+
+                if (self != there.end())
+                {
+                    for (auto after = std::next (self); after != there.end() && ! placed; ++after)
+                    {
+                        if (const auto heldAfter = held.find (*after); heldAfter != held.end())
+                        {
+                            at = heldAfter->second;
+                            placed = true;
+                        }
+                    }
+                }
+            }
+
+            order.insert (order.begin() + (std::ptrdiff_t) at, clip.id);
+            setOrder (track, order);
+        }
+
+        // The track's clips as the other holds them there, in its order: what its version couldn't read where the song has it,
+        // and a clip the song holds as the other kind under the other's ID taken away and the other's added in its place.
+        void makeTrackClipsLike (TrackID track, const juce::ValueTree& otherTrack)
+        {
+            std::vector<ClipID> theirs; // in the other's order
+
+            for (const auto& element : otherTrack)
+            {
+                if (! element.hasType (schema::CLIP))
+                    continue;
+
+                const auto id = ClipID::fromRaw (readID (element[schema::clipID]));
+                theirs.push_back (id);
+
+                if (isStandIn (element))
+                    continue;
+
+                auto value = readClipValue (element);
+                value.track = track;
+                jassert (value.id == id);
+
+                if (const auto held = getClipValue (song, id); held.has_value() && held->kind != value.kind)
+                    eraseForAnotherKind (*held);
+
+                if (const auto held = getClipValue (song, id))
+                {
+                    value = keepWhatWritesAlike (*held, value);
+
+                    if (! (*held == value))
+                    {
+                        setClip (song, *held, value); // on another track: moved here
+                        ++writes;
+                    }
+                }
+                else
+                {
+                    add (element, value);
+                }
+
+                if (value.link != 0)
+                    groupMembers[value.link] = id;
+
+                given.push_back ({ element, value });
+            }
+
+            // The other's order, then what else the track holds (what the other's version couldn't read of another track, or
+            // what the pass moves to another track after) in the order it holds it.
+            const auto now = getClips (song, track);
+            const std::set<ClipID> holds (now.begin(), now.end());
+            std::vector<ClipID> order;
+            std::set<ClipID> placed;
+
+            for (const auto id : theirs)
+                if (holds.count (id) > 0 && placed.insert (id).second)
+                    order.push_back (id);
+
+            for (const auto id : now)
+                if (placed.count (id) == 0)
+                    order.push_back (id);
+
+            setOrder (track, order);
+        }
+
+        // A clip of one kind in the song that the other holds as the other kind under its ID (MIDI and audio: two computers can
+        // make the same ID), taken out of the song for the other's to be added in its place, with nothing of the kind it was
+        // left on it. The clip of its alias group that is left alone keeps the group, as the other's clip would leave it.
+        void eraseForAnotherKind (const ClipValue& clip)
+        {
+            std::optional<std::pair<ClipID, std::uint64_t>> left; // the clip left alone in its group, and the link it holds
+
+            if (clip.link != 0)
+                if (const auto group = getAliasClips (song, clip.id); group.size() == 2)
+                    if (const auto other = getClipValue (song, group[1]))
+                        left.emplace (other->id, other->link);
+
+            eraseClip (song, clip.id);
+            ++writes;
+
+            if (left.has_value())
+            {
+                setClipLink (song, left->first, left->second);
+                ++writes;
+            }
+        }
+
+        // A clip the song hasn't, added with its ID; a MIDI clip with its notes and controllers' values, those of its alias
+        // group where a clip of the group in the song holds them alike, as one value.
+        void add (const juce::ValueTree& element, const ClipValue& value)
+        {
+            ClipNotes notes;
+
+            if (value.isMidi())
+            {
+                notes = readClipNotes (element);
+
+                if (const auto member = groupMembers.find (value.link); value.link != 0 && member != groupMembers.end())
+                    if (const auto held = getClipValue (song, member->second);
+                        held.has_value() && held->link == value.link && held->isMidi())
+                        if (const auto groups = getClipNotesValue (song, member->second); groups == notes)
+                            notes = groups;
+            }
+
+            [[maybe_unused]] const auto added = addClip (song, value, value.isMidi() ? &notes : nullptr);
+            jassert (added == value.id); // the song had no clip of its ID
+            ++writes;
+        }
+
+        // Each alias group's notes, and each MIDI clip's in none, the other's: one value for the group, its clips on other
+        // tracks too, the one a clip of it holds where it is the other's already (Notes.h: makeClipNotesLike() for one clip).
+        void giveGroupsTheirNotes()
+        {
+            std::set<std::uint64_t> groups;
+
+            for (const auto& [element, value] : given)
+            {
+                if (! value.isMidi() || (value.link != 0 && ! groups.insert (value.link).second))
+                    continue;
+
+                const auto notes = readClipNotes (element);
+                std::vector<ClipNotes> held;
+
+                for (const auto member : getAliasClips (song, value.id))
+                    if (isMidiClip (song, member))
+                        held.push_back (getClipNotesValue (song, member));
+
+                auto one = notes;
+
+                for (const auto& each : held)
+                {
+                    if (each == notes)
+                    {
+                        one = each;
+                        break;
+                    }
+                }
+
+                if (std::any_of (held.begin(), held.end(), [&one] (const ClipNotes& each) { return ! each.isSameAs (one); }))
+                {
+                    setClipNotesValue (song, value.id, one);
+                    ++writes;
+                }
+            }
+        }
+
+        // What each audio alias group's clips share (AudioClips.h: shareTheSound()), as a clip of it the pass gave the other's
+        // value holds it, given to every clip of the group in the song, those on other tracks too.
+        void giveGroupsTheirSounds()
+        {
+            std::set<std::uint64_t> groups;
+
+            for (const auto& [element, value] : given)
+            {
+                if (! value.isAudio() || value.link == 0 || ! groups.insert (value.link).second)
+                    continue;
+
+                for (const auto member : getAliasClips (song, value.id))
+                {
+                    if (member == value.id)
+                        continue;
+
+                    const auto held = getClipValue (song, member);
+
+                    if (! held.has_value() || ! held->isAudio())
+                        continue;
+
+                    auto next = *held;
+                    next.sound = keepWhatWritesAlike (held->sound, value.sound);
+
+                    if (! (next.sound == held->sound))
+                    {
+                        setClip (song, *held, next);
+                        ++writes;
+                    }
+                }
+            }
+        }
+    };
+
+    // Every track's clips made like the other's, once the rest of the song is: how many writes it made.
+    int makeClipsLike (Song& song, const juce::ValueTree& other, bool standInsStay)
+    {
+        ClipPass clips (song, other, ClipPass::Elsewhere::leftForItsTrack, standInsStay);
+        clips.addEveryTrack();
+        return clips.run();
+    }
+
+    // The ID the song gives next, past every ID it holds: its tree's (Schema.h: findNextID()) and its clips', wherever the
+    // song keeps them (roadmap step S5.20 moves them out of its tree).
+    std::uint64_t findSongsNextID (const Song& song)
+    {
+        auto next = findNextID (song.getState());
+
+        for (const auto clip : getAllClips (song))
+            if (clip.getRaw() < schema::maxID)
+                next = std::max (next, clip.getRaw() + 1);
+
+        return next;
+    }
+
     // The song's count of IDs brought past every ID it holds now and past the other's count: what it took from the other
     // can hold IDs past its own count (a song opened again as it was saved before they were given), and the next item it
-    // makes gets an ID that nothing of either has. Not an undo step, as the count never is.
+    // makes gets an ID that nothing of either has. The other's IDs counted in its whole tree, its clips' too. Not an undo
+    // step, as the count never is.
     void countIDsPast (Song& song, const juce::ValueTree& other)
     {
         auto state = song.getState();
-        const auto next = std::max (findNextID (state), findNextID (other));
+        const auto next = std::max (findSongsNextID (song), findNextID (other));
 
         if ((std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0) != next)
             state.setProperty (schema::nextID, (juce::int64) next, nullptr);
@@ -487,7 +1001,7 @@ namespace
 
         for (const auto& [key, curve] : wanted)
             if (! isStandIn (curve))
-                automation.appendChild (copyWithoutStandIns (curve), undo);
+                automation.appendChild (copyForSong (curve), undo);
     }
 
     // The tracks a song holds by their IDs, each with its parent's ID (0 for the track list) and its place there.
@@ -517,6 +1031,7 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
     const auto standIns = findStandIns (other);
     removeMovedItems (song.getState(), findPlaces (other), undo, standIns);
     makeLike (song, song.getState(), other, undo, true, Taken::counted, standIns);
+    makeClipsLike (song, other, true);
     countIDsPast (song, other);
 }
 
@@ -526,9 +1041,10 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     const Song::OutsideHistory outside (song);
 
     // Its count of IDs the larger of the two: what either branch made keeps an ID of its own.
-    const auto next = std::max (findNextID (song.getState()), findNextID (other));
+    const auto next = std::max (findSongsNextID (song), findNextID (other));
     removeMovedItems (song.getState(), findPlaces (other), nullptr);
     makeLike (song, song.getState(), other, nullptr, true, Taken::everything);
+    makeClipsLike (song, other, false);
     song.getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
     song.getUndoManager().clearUndoHistory();
 }
@@ -538,8 +1054,12 @@ void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
     const Song::OutsideHistory outside (song);
 
     // Everything, outside the history, and its count of IDs as the copy's: what the history holds is the copy's already, so
-    // that only what changed without it differs (a property set without a step, view state, the count of IDs).
+    // that only what changed without it differs (a property set without a step, view state, the count of IDs). Its clips
+    // among what the history holds: every change of a clip is an undo step, so none differs (an Undo of a step below would
+    // lose what was written of one here: ValueArea.h).
     makeLike (song, song.getState(), copy, nullptr, true, Taken::everything);
+    [[maybe_unused]] const auto clipWrites = makeClipsLike (song, copy, false);
+    jassert (clipWrites == 0);
     song.getState().setProperty (schema::nextID, copy[schema::nextID], nullptr);
 }
 
@@ -561,20 +1081,26 @@ namespace
         auto devices = getAutomatableIDs (live);
         devices.merge (getAutomatableIDs (then));
 
+        // Its clips, and those of the tracks that come back with it, in a pass of their own once the rest is done: what the
+        // track holds that the other song holds on another track goes there, as it is now.
+        ClipPass clips (song, other, ClipPass::Elsewhere::sentThere, true);
+
         if (live.isValid() && then.isValid())
         {
-            // What it held then that is somewhere else now (a clip moved onto another track) comes back from there, and what
-            // it holds now that the other song holds somewhere else goes there.
+            // What it held then that is somewhere else now (a device moved into a container on another track) comes back from
+            // there, and what it holds now that the other song holds somewhere else goes there.
             const auto standIns = findStandIns (then);
             removeMovedItems (state, findPlaces (then, false), undo, standIns);
             sendItemsHome (state, live, other, undo);
             makeLike (song, live, then, undo, false, Taken::counted, standIns);
+            clips.addTrack (id);
         }
         else if (live.isValid())
         {
             // Added since: taken away. The tracks in it (a folder's) are things of their own, which stay: where it was, in
             // their order, as ungrouping a folder leaves them. And what it holds that the other song holds somewhere else (a
             // clip moved onto it) goes there.
+            clips.sendHome (id);
             sendItemsHome (state, live, other, undo);
             auto parent = live.getParent();
             auto place = parent.indexOf (live) + 1;
@@ -600,7 +1126,7 @@ namespace
             // now, and what they held that is elsewhere now back from there; without what the other's version couldn't read
             // (a clip of it), which isn't in the song now either.
             auto parent = findTrackParent (state, then.getParent());
-            auto copy = copyWithoutStandIns (then);
+            auto copy = copyForSong (then);
             removeTracksHeld (copy, state);
             removeMovedItems (state, findPlaces (copy), undo);
 
@@ -616,9 +1142,21 @@ namespace
             }
 
             parent.addChild (copy, index, undo);
-            giveSharedSounds (song, copy, undo);
+
+            // Its clips, and those of the tracks in it that came back with it.
+            const std::function<void (const juce::ValueTree&)> addTracks = [&] (const juce::ValueTree& track)
+            {
+                clips.addTrack (TrackID::fromRaw (readID (track[schema::trackID])));
+
+                for (const auto& child : track)
+                    if (child.hasType (schema::TRACK))
+                        addTracks (child);
+            };
+
+            addTracks (copy);
         }
 
+        clips.run();
         makeCurvesLike (song, state, undo, devices, other);
         return true;
     }
@@ -651,7 +1189,7 @@ namespace
             else if (live.isValid())
                 state.removeChild (live, undo);
             else if (then.isValid())
-                state.appendChild (copyWithoutStandIns (then), undo);
+                state.appendChild (copyForSong (then), undo);
         }
 
         // The tracks both have, in the other's order: in its folders, and in its order there.

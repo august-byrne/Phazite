@@ -4,7 +4,9 @@
 // hasn't taken away, and the children put in its order, all through the song's undo history, in the caller's step. What
 // isn't counted (model/base/internal/Schema.h: view state, how the song plays) stays as it is. What plays follows, as it
 // does an undo: a plug-in whose state differs gets the other's (model/plugins/internal/PluginInstances.h), one whose state
-// is the same isn't touched. Elements are matched by their keys (schema::getElementKey()). No ID is in the song twice
+// is the same isn't touched. Elements are matched by their keys (schema::getElementKey()); the tracks' clips, in a pass of their
+// own once the rest is made like the other's, by their IDs and values through the clips' functions
+// (model/arrangement/internal/Clips.h), whatever stores them, each track's in the other's order. No ID is in the song twice
 // after: what the other has in another place than the song (a clip on another track, a track in another folder) is taken
 // from where the song has it. And the song's count of IDs ends past every ID it holds and past the other's count, so that
 // what it took, from a song that counted further than it did, keeps its IDs to itself.

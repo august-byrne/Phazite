@@ -826,6 +826,50 @@ void copyTrackClips (Song& song, TrackID from, TrackID to, const std::map<std::u
     }
 }
 
+void setTrackClipOrder (Song& song, TrackID track, const std::vector<ClipID>& order)
+{
+    auto trackState = findTrackState (song, track);
+    std::vector<int> places; // where the track's clips' elements are among its elements, in their order
+
+    for (int i = 0; i < trackState.getNumChildren(); ++i)
+        if (trackState.getChild (i).hasType (schema::CLIP))
+            places.push_back (i);
+
+    auto held = getClips (song, track), given = order;
+    std::sort (held.begin(), held.end());
+    std::sort (given.begin(), given.end());
+
+    if (held != given || std::adjacent_find (given.begin(), given.end()) != given.end())
+    {
+        jassertfalse; // the track's clips, each once, in another order
+        return;
+    }
+
+    // Each place filled in turn with the clip the order puts there: the two elements swapped, by two moves that leave every
+    // element between them where it was.
+    auto* undo = getUndoOf (song);
+
+    for (size_t i = 0; i < places.size(); ++i)
+    {
+        const auto place = places[i];
+
+        if (getClipID (trackState.getChild (place)) == order[i])
+            continue;
+
+        int from = -1;
+
+        for (size_t j = i + 1; j < places.size() && from < 0; ++j)
+            if (getClipID (trackState.getChild (places[j])) == order[i])
+                from = places[j];
+
+        jassert (from > place);
+        trackState.moveChild (from, place, undo); // the clip that was at place is now at place + 1
+
+        if (from > place + 1)
+            trackState.moveChild (place + 1, from, undo);
+    }
+}
+
 BeatPosition getClipsEnd (const Song& song)
 {
     // Every clip read where the song keeps it, without a list of their places: a MIDI clip's place, an audio clip's value.

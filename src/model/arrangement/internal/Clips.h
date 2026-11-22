@@ -138,6 +138,11 @@ bool setClipFiles (Song&, const juce::String& path, const juce::String& newPath)
 // track's elements, so that a copy of the track without its clips gets them back where they were.
 void copyTrackClips (Song&, TrackID from, TrackID to, const std::map<std::uint64_t, std::uint64_t>& ids, bool asAliases);
 
+// Puts a track's clips in another order (the order getClips() gives): the same clips, each once, else nothing changes. What
+// makes a track's clips like another song's (model/versions/internal/ApplySong.h) puts them in its order with. In the song's
+// tree the clips' elements change places among the places they held, the track's other elements staying where they are.
+void setTrackClipOrder (Song&, TrackID, const std::vector<ClipID>& order);
+
 // Moves a clip to start at a beat (not before the song does), on its track, playing what it did.
 void moveClipStart (Song&, ClipID, BeatPosition start);
 
