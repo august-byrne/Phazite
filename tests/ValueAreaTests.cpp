@@ -13,7 +13,15 @@
 #include "UndoCheck.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/ChordLaneValue.h"
+#include "model/base/internal/ClipNotesValue.h"
+#include "model/base/internal/ClipsValue.h"
+#include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Immer.h"
+#include "model/base/internal/MapChanges.h"
+#include "model/base/internal/MidiLinksValue.h"
+#include "model/base/internal/SectionsValue.h"
+#include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/ValueArea.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
@@ -24,8 +32,11 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <set>
+#include <utility>
 #include <vector>
 
 #if JUCE_WINDOWS
@@ -271,6 +282,179 @@ phazite::NoteData makeNoteData (phazite::ClipID clip, int pitch, double start, d
     note.start = phazite::test::at (start);
     note.length = phazite::test::lasting (length);
     return note;
+}
+
+//==============================================================================
+// A keyed value (ValueArea.h, KeyedAreaValue) of two maps, as an area of entries by their IDs will be: values by ID, and ordered
+// lists of IDs by their owners' IDs. Its Undo and Redo move only the entries their step changed.
+struct Keyed
+{
+    static constexpr bool undoesByEntry = true;
+
+    immer::map<ID, int> values {};
+    immer::map<ID, immer::flex_vector<ID>> lists {};
+};
+
+bool isSameValue (const Keyed& a, const Keyed& b)
+{
+    return a.values.identity() == b.values.identity() && a.lists.identity() == b.lists.identity();
+}
+
+struct KeyedChanges
+{
+    std::vector<phazite::MapChange<ID, int>> values {};
+    std::vector<phazite::MapChange<ID, immer::flex_vector<ID>>> lists {};
+};
+
+int keyedChangesFound = 0; // how often findChanges() below was called: what a keyed area's work costs
+
+KeyedChanges findChanges (const Keyed& before, const Keyed& after)
+{
+    ++keyedChangesFound;
+    return { phazite::findMapChanges (before.values, after.values), phazite::findMapChanges (before.lists, after.lists) };
+}
+
+Keyed withChanges (const Keyed& now, const KeyedChanges& changes, phazite::ChangeDirection direction)
+{
+    return { phazite::withMapChanges (now.values, changes.values, direction),
+             phazite::withMapChanges (now.lists, changes.lists, direction) };
+}
+
+// A value that gives the keyed functions but doesn't say it is keyed, and one that says it isn't: both plain.
+struct Unmarked
+{
+    immer::map<ID, int> values {};
+
+    bool operator== (const Unmarked&) const = default;
+};
+
+struct MarkedPlain
+{
+    static constexpr bool undoesByEntry = false;
+
+    immer::map<ID, int> values {};
+};
+
+std::vector<phazite::MapChange<ID, int>> findChanges (const Unmarked& before, const Unmarked& after)
+{
+    return phazite::findMapChanges (before.values, after.values);
+}
+
+Unmarked withChanges (const Unmarked& now, const std::vector<phazite::MapChange<ID, int>>& changes, phazite::ChangeDirection direction)
+{
+    return { phazite::withMapChanges (now.values, changes, direction) };
+}
+
+static_assert (phazite::KeyedAreaValue<Keyed>);
+static_assert (phazite::detail::GivesKeyedChanges<Unmarked>);
+static_assert (! phazite::KeyedAreaValue<Unmarked>);
+static_assert (! phazite::KeyedAreaValue<MarkedPlain>);
+static_assert (! phazite::KeyedAreaValue<NotesByClip>);
+static_assert (! phazite::KeyedAreaValue<int>);
+static_assert (! phazite::KeyedAreaValue<immer::vector<int>>);
+
+// None of the areas the song holds today is keyed: each Undo puts its whole value back. The devices' area will be the first
+// keyed one (a plug-in's parameter written outside the history by the plug-in itself).
+static_assert (! phazite::KeyedAreaValue<phazite::NotesByClip>);
+static_assert (! phazite::KeyedAreaValue<phazite::SongClips>);
+static_assert (! phazite::KeyedAreaValue<phazite::TempoMapValue>);
+static_assert (! phazite::KeyedAreaValue<phazite::ChordLaneValue>);
+static_assert (! phazite::KeyedAreaValue<phazite::MidiLinksValue>);
+static_assert (! phazite::KeyedAreaValue<phazite::SongCurves>);
+static_assert (! phazite::KeyedAreaValue<phazite::SectionsValue>);
+
+// A key of its own, with a hash of its own, as SongCurves' map has (by its parameters).
+struct OwnKey
+{
+    ID owner = 0;
+    int index = 0;
+
+    bool operator== (const OwnKey&) const = default;
+};
+
+struct OwnKeyHash
+{
+    size_t operator() (const OwnKey& key) const noexcept { return std::hash<ID>() (key.owner * 31 + (ID) key.index); }
+};
+
+// The keyed value's contents as text, each map by its keys in order: "1=10 2=20 | 7:[1,2]".
+juce::String describe (const Keyed& value)
+{
+    std::map<ID, int> values;
+    std::map<ID, immer::flex_vector<ID>> lists;
+
+    for (const auto& [id, held] : value.values)
+        values[id] = held;
+
+    for (const auto& [owner, list] : value.lists)
+        lists[owner] = list;
+
+    juce::StringArray words;
+
+    for (const auto& [id, held] : values)
+        words.add (juce::String ((juce::int64) id) + "=" + juce::String (held));
+
+    words.add ("|");
+
+    for (const auto& [owner, list] : lists)
+    {
+        juce::StringArray ids;
+
+        for (const auto id : list)
+            ids.add (juce::String ((juce::int64) id));
+
+        words.add (juce::String ((juce::int64) owner) + ":[" + ids.joinIntoString (",") + "]");
+    }
+
+    return words.joinIntoString (" ");
+}
+
+// A song's history with a keyed area in it, and the changes a test makes to the area: in the history (set()) or outside it.
+struct KeyedSong
+{
+    KeyedSong() { song->getUndoManager().clearUndoHistory(); }
+
+    juce::String now() const { return describe (area.get()); }
+
+    static Keyed withValue (const Keyed& from, ID id, std::optional<int> value)
+    {
+        return { value.has_value() ? from.values.set (id, *value) : from.values.erase (id), from.lists };
+    }
+
+    static Keyed withAppended (const Keyed& from, ID owner, ID id)
+    {
+        const auto* held = from.lists.find (owner);
+        return { from.values, from.lists.set (owner, (held != nullptr ? *held : immer::flex_vector<ID>()).push_back (id)) };
+    }
+
+    void set (ID id, std::optional<int> value) { area.set (withValue (area.get(), id, value)); }
+    void append (ID owner, ID id) { area.set (withAppended (area.get(), owner, id)); }
+    void setOutside (ID id, std::optional<int> value) { area.setOutsideHistory (withValue (area.get(), id, value)); }
+    void appendOutside (ID owner, ID id) { area.setOutsideHistory (withAppended (area.get(), owner, id)); }
+
+    void inStep (const juce::String& name, const std::function<void()>& change)
+    {
+        const phazite::UndoStep step (*song, name);
+        change();
+    }
+
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ValueArea<Keyed> area { song->getUndoManager(), Keyed() };
+};
+
+// The same contents in maps of their own, which share nothing with the value's: alike, not the same.
+Keyed rebuilt (const Keyed& value)
+{
+    auto values = immer::map<ID, int>().transient();
+    auto lists = immer::map<ID, immer::flex_vector<ID>>().transient();
+
+    for (const auto& [id, held] : value.values)
+        values.set (id, held);
+
+    for (const auto& [owner, list] : value.lists)
+        lists.set (owner, list);
+
+    return { std::move (values).persistent(), std::move (lists).persistent() };
 }
 
 double millisecondsOf (const std::function<void()>& f)
@@ -886,6 +1070,542 @@ TEST_CASE ("Value area: a value set that is the same as the area's performs noth
     phazite::undo (*mixed.song);
     CHECK (versioned.get().text == "one");
     mixed.notes.removeListener (&told);
+}
+
+//==============================================================================
+TEST_CASE ("Value area, keyed: the changes between two maps, and a map with them moved back and forth")
+{
+    const auto before = immer::map<ID, int>().set (1, 10).set (2, 20).set (3, 30);
+    const auto after = before.set (2, 21).erase (3).set (4, 40);
+    auto changes = phazite::findMapChanges (before, after);
+    std::sort (changes.begin(), changes.end(), [] (const auto& a, const auto& b) { return a.key < b.key; });
+
+    REQUIRE (changes.size() == 3);
+    CHECK ((changes[0].key == 2 && changes[0].before == 20 && changes[0].after == 21));
+    CHECK ((changes[1].key == 3 && changes[1].before == 30 && ! changes[1].after.has_value()));
+    CHECK ((changes[2].key == 4 && ! changes[2].before.has_value() && changes[2].after == 40));
+    CHECK (phazite::findMapChanges (after, after).empty());
+
+    // Moved back and forth on maps that hold other entries too: those stay, the changes' entries move.
+    const auto back = phazite::withMapChanges (after.set (9, 90), changes, phazite::ChangeDirection::back);
+    CHECK (back == before.set (9, 90));
+    const auto forth = phazite::withMapChanges (before.set (9, 90), changes, phazite::ChangeDirection::forward);
+    CHECK (forth == after.set (9, 90));
+
+    // Where each of the changes' entries is so already, the very map comes back.
+    CHECK (phazite::withMapChanges (after, changes, phazite::ChangeDirection::forward).identity() == after.identity());
+    CHECK (phazite::withMapChanges (before, changes, phazite::ChangeDirection::back).identity() == before.identity());
+
+    // A map with a hash of its own (as SongCurves' map has) is moved the same.
+    using OwnMap = immer::map<OwnKey, int, OwnKeyHash>;
+    const auto ownBefore = OwnMap().set ({ 1, 0 }, 10).set ({ 1, 1 }, 11).set ({ 2, 0 }, 20);
+    const auto ownAfter = ownBefore.set ({ 1, 1 }, 12).erase ({ 2, 0 }).set ({ 3, 0 }, 30);
+    const auto ownChanges = phazite::findMapChanges (ownBefore, ownAfter);
+    CHECK (ownChanges.size() == 3);
+    CHECK (phazite::findMapChanges (ownAfter, ownAfter).empty());
+    const OwnMap ownBack = phazite::withMapChanges (ownAfter.set ({ 9, 9 }, 99), ownChanges, phazite::ChangeDirection::back);
+    CHECK (ownBack == ownBefore.set ({ 9, 9 }, 99));
+    const OwnMap ownForth = phazite::withMapChanges (ownBefore, ownChanges, phazite::ChangeDirection::forward);
+    CHECK (ownForth == ownAfter);
+    CHECK (phazite::withMapChanges (ownAfter, ownChanges, phazite::ChangeDirection::forward).identity() == ownAfter.identity());
+}
+
+TEST_CASE ("Value area, keyed: a value that gives the keyed functions but isn't marked keyed is plain: its Undo puts the whole "
+           "value back")
+{
+    auto song = phazite::createSong();
+    song->getUndoManager().clearUndoHistory();
+    phazite::ValueArea<Unmarked> area { song->getUndoManager(), Unmarked() };
+
+    {
+        const phazite::UndoStep step (*song, "Step");
+        area.set ({ area.get().values.set (1, 10) });
+    }
+
+    area.setOutsideHistory ({ area.get().values.set (2, 20) });
+    const auto written = area.get();
+    phazite::undo (*song);
+    CHECK (area.get().values.empty()); // the write outside the history lost with the whole value, as for any plain value
+
+    // The functions it gives work; the area doesn't call them.
+    const auto changes = findChanges (Unmarked(), written);
+    CHECK (changes.size() == 2);
+    CHECK (withChanges (Unmarked(), changes, phazite::ChangeDirection::forward).values == written.values);
+}
+
+TEST_CASE ("Value area, keyed: with nothing written outside the history, Undo and Redo move to the step's very values, one "
+           "action for each step, a drag's too")
+{
+    KeyedSong keyed;
+    const auto start = keyed.area.get();
+
+    keyed.inStep ("One",
+                  [&]
+                  {
+                      keyed.set (1, 10);
+                      keyed.append (7, 1);
+                  });
+
+    const auto one = keyed.area.get();
+    CHECK (keyed.area.countActions() == 1);
+
+    {
+        phazite::Gesture gesture (*keyed.song, "Drag");
+
+        for (int move = 0; move < 20; ++move)
+        {
+            keyed.set (2, move);
+
+            if (move % 5 == 0)
+                keyed.inStep ("Joins", [&] { keyed.append (7, (ID) (100 + move)); });
+        }
+
+        gesture.commit();
+    }
+
+    const auto dragged = keyed.area.get();
+    CHECK (keyed.area.countActions() == 2);
+    CHECK (phazite::getHistorySteps (*keyed.song).done == juce::StringArray { "One", "Drag" });
+    CHECK (describe (dragged) == "1=10 2=19 | 7:[1,100,105,110,115]");
+
+    phazite::undo (*keyed.song);
+    CHECK (isSameValue (keyed.area.get(), one));
+    phazite::undo (*keyed.song);
+    CHECK (isSameValue (keyed.area.get(), start));
+    phazite::redo (*keyed.song);
+    CHECK (isSameValue (keyed.area.get(), one));
+    phazite::redo (*keyed.song);
+    CHECK (isSameValue (keyed.area.get(), dragged));
+    CHECK (keyed.area.countActions() == 2);
+}
+
+TEST_CASE ("Value area, keyed: what is written outside the history between a step and its Undo survives the Undo and the Redo, "
+           "and the step's own entries go back and forth")
+{
+    KeyedSong keyed;
+    keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 1));
+
+    keyed.inStep ("Step",
+                  [&]
+                  {
+                      keyed.set (1, 10);
+                      keyed.set (3, 30);
+                      keyed.append (7, 1);
+                  });
+
+    CHECK (keyed.now() == "1=10 3=30 | 7:[1]");
+
+    // Another value, and another owner's list in the same map as the step's list, written outside the history.
+    keyed.setOutside (2, 20);
+    keyed.appendOutside (8, 2);
+    CHECK (keyed.now() == "1=10 2=20 3=30 | 7:[1] 8:[2]");
+
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 2=20 | 8:[2]");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 3=30 | 7:[1] 8:[2]");
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 2=20 | 8:[2]");
+}
+
+TEST_CASE ("Value area, keyed: a write outside the history to an entry a step changed is lost by that step's Undo")
+{
+    KeyedSong keyed;
+    keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 1));
+    keyed.inStep ("Step", [&] { keyed.set (1, 10); });
+    keyed.setOutside (1, 99);
+    keyed.setOutside (2, 20);
+
+    // The step's value before wins, as the tree's Undo of a property puts back the value it had before the step, whatever was
+    // written into it since; the other entry written stays.
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 2=20 |");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 |");
+
+    // The same after a redo (the step no longer the history's current one): the write meets the Undo's move.
+    keyed.setOutside (1, 55);
+    keyed.setOutside (3, 30);
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 2=20 3=30 |");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 3=30 |");
+}
+
+TEST_CASE ("Value area, keyed: two steps with a write outside the history between them, undone and done again")
+{
+    // Written after a step ended, the history's current step is still that one until another begins (JUCE's transaction): the
+    // writes are taken into its action's values. Written after an undo, they meet the next undo's and redo's moves.
+    KeyedSong keyed;
+    keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 1));
+    keyed.inStep ("A", [&] { keyed.set (1, 10); });
+    keyed.setOutside (2, 20);
+    keyed.appendOutside (8, 2);
+    keyed.inStep ("B",
+                  [&]
+                  {
+                      keyed.set (3, 30);
+                      keyed.append (8, 3);
+                  });
+    keyed.setOutside (4, 40);
+
+    CHECK (keyed.now() == "1=10 2=20 3=30 4=40 | 8:[2,3]");
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 4=40 | 8:[2]");
+    keyed.setOutside (9, 90);
+    keyed.appendOutside (6, 9);
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 2=20 4=40 9=90 | 6:[9] 8:[2]");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 4=40 9=90 | 6:[9] 8:[2]");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 3=30 4=40 9=90 | 6:[9] 8:[2,3]");
+    CHECK (keyed.area.countActions() == 2);
+}
+
+TEST_CASE ("Value area, keyed: an entry a step added and that was removed outside the history, and one it removed and that was "
+           "added again")
+{
+    KeyedSong keyed;
+    keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 10));
+
+    // Added by the step, removed outside: gone after the Undo, back after the Redo.
+    keyed.inStep ("Add", [&] { keyed.set (4, 40); });
+    keyed.setOutside (4, std::nullopt);
+    keyed.setOutside (2, 20);
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 |");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 4=40 |");
+
+    // Removed by the step, added again outside with another value: the step's value before wins at its Undo, and its Redo
+    // removes it again.
+    keyed.inStep ("Remove", [&] { keyed.set (1, std::nullopt); });
+    keyed.setOutside (1, 77);
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=10 2=20 4=40 |");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "2=20 4=40 |");
+}
+
+TEST_CASE ("Value area, keyed: a write outside the history in the middle of a drag survives its Escape and its Undo, as one in "
+           "the middle of a trial survives the trial put back")
+{
+    KeyedSong keyed;
+    keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 1));
+    keyed.inStep ("Before", [&] { keyed.set (5, 5); });
+    const auto start = keyed.now();
+
+    // A drag given up: the write outside it stays, and the drag's later changes, made from the value with it, don't take it
+    // along; the write to an entry the drag changed already is lost with the drag's change, as the step's value before wins.
+    {
+        phazite::Gesture gesture (*keyed.song, "Drag");
+        keyed.set (1, 11);
+        keyed.setOutside (2, 22);
+        keyed.setOutside (1, 50);
+        keyed.set (3, 33);
+        keyed.set (1, 12);
+        CHECK (keyed.now() == "1=12 2=22 3=33 5=5 |");
+        gesture.rollBack();
+    }
+
+    CHECK (keyed.now() == "1=1 2=22 5=5 |");
+    CHECK_FALSE (phazite::canRedo (*keyed.song));
+    CHECK (keyed.area.countActions() == 1);
+
+    // A drag kept, with a write outside it in the middle: its Undo and Redo leave the write alone.
+    {
+        phazite::Gesture gesture (*keyed.song, "Drag");
+        keyed.set (1, 13);
+        keyed.appendOutside (8, 4);
+        keyed.set (1, 14);
+        gesture.commit();
+    }
+
+    CHECK (keyed.now() == "1=14 2=22 5=5 | 8:[4]");
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 2=22 5=5 | 8:[4]");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=14 2=22 5=5 | 8:[4]");
+    phazite::undo (*keyed.song);
+
+    // A trial tried from its start again and put back, with a write outside it in the middle.
+    {
+        phazite::Trial trial (*keyed.song, "Try", [] {});
+        trial.apply ([&] { keyed.set (1, 15); });
+        keyed.setOutside (3, 30);
+        trial.apply ([&] { keyed.set (1, 16); }, true);
+        CHECK (keyed.now() == "1=16 2=22 3=30 5=5 | 8:[4]");
+        trial.apply ([&] { keyed.set (6, 6); });
+        trial.putBack();
+    }
+
+    CHECK (keyed.now() == "1=1 2=22 3=30 5=5 | 8:[4]");
+
+    // And one kept, then undone and done again.
+    {
+        phazite::Trial trial (*keyed.song, "Try", [] {});
+        trial.apply ([&] { keyed.set (1, 17); });
+        keyed.setOutside (4, 40);
+        trial.apply ([&] { keyed.set (6, 6); });
+        trial.keep ("Kept");
+    }
+
+    CHECK (keyed.now() == "1=17 2=22 3=30 4=40 5=5 6=6 | 8:[4]");
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 2=22 3=30 4=40 5=5 | 8:[4]");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=17 2=22 3=30 4=40 5=5 6=6 | 8:[4]");
+    phazite::undo (*keyed.song);
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 2=22 3=30 4=40 | 8:[4]");
+    CHECK (start == "1=1 5=5 |");
+}
+
+TEST_CASE ("Value area, keyed: listeners are told once for each move, with the value left and the value come to")
+{
+    KeyedSong keyed;
+    Told<Keyed> told;
+    keyed.area.addListener (&told);
+    const auto start = keyed.area.get();
+
+    keyed.inStep ("Step",
+                  [&]
+                  {
+                      keyed.set (1, 10);
+                      keyed.set (1, 11);
+                  });
+
+    const auto step = keyed.area.get();
+    CHECK (told.count == 2);
+    CHECK (isSameValue (told.after, step));
+
+    // Undo and Redo with nothing written outside: the very values.
+    phazite::undo (*keyed.song);
+    CHECK (told.count == 3);
+    CHECK (isSameValue (told.before, step));
+    CHECK (isSameValue (told.after, start));
+    CHECK (isSameValue (keyed.area.get(), start));
+    phazite::redo (*keyed.song);
+    CHECK (told.count == 4);
+    CHECK (isSameValue (told.before, start));
+    CHECK (isSameValue (told.after, step));
+
+    // With a write outside between: the value written left, the value moved to come to.
+    keyed.setOutside (2, 20);
+    CHECK (told.count == 5);
+    const auto written = keyed.area.get();
+    phazite::undo (*keyed.song);
+    CHECK (told.count == 6);
+    CHECK (isSameValue (told.before, written));
+    CHECK (isSameValue (told.after, keyed.area.get()));
+    CHECK (describe (told.after) == "2=20 |");
+    const auto undone = keyed.area.get();
+    phazite::redo (*keyed.song);
+    CHECK (told.count == 7);
+    CHECK (isSameValue (told.before, undone));
+    CHECK (isSameValue (told.after, keyed.area.get()));
+    CHECK (describe (told.after) == "1=11 2=20 |");
+
+    // A move to what the value is already (the step's entry put back outside first) tells no one.
+    keyed.setOutside (1, std::nullopt);
+    CHECK (told.count == 8);
+    phazite::undo (*keyed.song);
+    CHECK (told.count == 8);
+    CHECK (keyed.now() == "2=20 |");
+    keyed.area.removeListener (&told);
+}
+
+TEST_CASE ("Value area, keyed: a value alike but not the same, set without a step: a part of the step's action while it is open, "
+           "and outside the history after an undo and a redo")
+{
+    KeyedSong keyed;
+    keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 1));
+    const auto start = keyed.area.get();
+    Keyed alike;
+
+    // In a step: a part of its action, so that its Redo holds the alike value.
+    keyed.inStep ("Step",
+                  [&]
+                  {
+                      keyed.set (1, 10);
+                      alike = rebuilt (keyed.area.get());
+                      keyed.area.setWithoutStep (alike);
+                  });
+
+    CHECK (isSameValue (keyed.area.get(), alike));
+    CHECK (keyed.area.countActions() == 1);
+
+    // After the step, while its action is still in the history's current step (until another begins, or an undo or a redo):
+    // a part of that action too, so that its Undo is the plain move to the very value before, and its Redo to this value.
+    const auto later = rebuilt (keyed.area.get());
+    keyed.area.setWithoutStep (later);
+    CHECK (isSameValue (keyed.area.get(), later));
+    CHECK (keyed.area.countActions() == 1);
+    phazite::undo (*keyed.song);
+    CHECK (isSameValue (keyed.area.get(), start));
+    phazite::redo (*keyed.song);
+    CHECK (isSameValue (keyed.area.get(), later));
+
+    // Outside the history (no action of the area's is open after the redo): the step's Undo, no longer finding the value it
+    // left, writes the step's entries onto the alike value, and comes to a value alike to the one before the step, not that
+    // very value; its Redo the same, to a value alike to the step's after.
+    const auto other = rebuilt (keyed.area.get());
+    keyed.area.setWithoutStep (other);
+    CHECK (isSameValue (keyed.area.get(), other));
+    CHECK (keyed.area.countActions() == 1);
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 |");
+    CHECK_FALSE (isSameValue (keyed.area.get(), start));
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=10 |");
+    CHECK_FALSE (isSameValue (keyed.area.get(), later));
+    CHECK_FALSE (isSameValue (keyed.area.get(), other));
+}
+
+TEST_CASE ("Value area, keyed: a later change in a step gives the step's value after only what it changed, so that a write "
+           "outside the history to an entry the step changed is lost the same whatever came after it")
+{
+    // The step sets entry 1, a write outside sets it again, and the step sets entry 3: in either order of the last two, Undo
+    // gives entry 1 as before the step and Redo as the step left it, as the tree's Undo and Redo of a property do.
+    for (const auto setLast : { true, false })
+    {
+        CAPTURE (setLast);
+        KeyedSong keyed;
+        keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 1));
+
+        {
+            phazite::Gesture gesture (*keyed.song, "Drag");
+            keyed.set (1, 11);
+
+            if (setLast)
+            {
+                keyed.setOutside (1, 50);
+                keyed.set (3, 33);
+            }
+            else
+            {
+                keyed.set (3, 33);
+                keyed.setOutside (1, 50);
+            }
+
+            CHECK (keyed.now() == "1=50 3=33 |");
+            gesture.commit();
+        }
+
+        CHECK (keyed.now() == "1=50 3=33 |");
+        phazite::undo (*keyed.song);
+        CHECK (keyed.now() == "1=1 |");
+        phazite::redo (*keyed.song);
+        CHECK (keyed.now() == "1=11 3=33 |");
+        phazite::undo (*keyed.song);
+        CHECK (keyed.now() == "1=1 |");
+    }
+}
+
+TEST_CASE ("Value area, keyed: writes outside the history after a step work its changes out once, and its Undo and Redo use "
+           "them")
+{
+    KeyedSong keyed;
+    keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 1));
+    keyed.inStep ("Step",
+                  [&]
+                  {
+                      keyed.set (1, 10);
+                      keyed.set (3, 30);
+                      keyed.append (7, 1);
+                  });
+
+    // Five writes outside the history while the step is the history's current one: to entries it didn't change (one added
+    // then removed again), to an entry it added, to another owner's list in the map of its list; each works out what it
+    // changed, and the step's changes are worked out once, for the first.
+    keyedChangesFound = 0;
+    keyed.setOutside (2, 20);
+    keyed.setOutside (3, 33);
+    keyed.appendOutside (8, 2);
+    keyed.setOutside (2, std::nullopt);
+    keyed.setOutside (4, 40);
+    CHECK (keyedChangesFound == 5 + 1);
+    CHECK (keyed.now() == "1=10 3=33 4=40 | 7:[1] 8:[2]");
+
+    // Undo and Redo move the step's entries by the changes kept, working out nothing again; the write to the entry the step
+    // added is lost with it.
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 4=40 | 8:[2]");
+    phazite::redo (*keyed.song);
+    CHECK (keyed.now() == "1=10 3=30 4=40 | 7:[1] 8:[2]");
+    phazite::undo (*keyed.song);
+    CHECK (keyed.now() == "1=1 4=40 | 8:[2]");
+    CHECK (keyedChangesFound == 5 + 1);
+}
+
+namespace
+{
+// An action of a test's own in a step, which writes a keyed area outside the history as it is undone and as it is redone:
+// as the store of a plug-in's states might as its parameters move back.
+struct WritesAsItMoves final : juce::UndoableAction
+{
+    WritesAsItMoves (KeyedSong& s, int undoValue, int redoValue)
+        : keyed (s),
+          onUndo (undoValue),
+          onRedo (redoValue)
+    {
+    }
+
+    bool perform() override
+    {
+        if (std::exchange (undone, false))
+            keyed.setOutside (2, onRedo);
+
+        return true;
+    }
+
+    bool undo() override
+    {
+        undone = true;
+        keyed.setOutside (2, onUndo);
+        return true;
+    }
+
+    KeyedSong& keyed;
+    int onUndo = 0, onRedo = 0;
+    bool undone = false;
+};
+} // namespace
+
+TEST_CASE ("Value area, keyed: a write outside the history while the history undoes or redoes is only a write, met by the "
+           "step's moves")
+{
+    // The other action before the area's in the step, and after it: Undo and Redo run the step's actions in opposite orders.
+    for (const auto writerFirst : { true, false })
+    {
+        CAPTURE (writerFirst);
+        KeyedSong keyed;
+        keyed.area.setOutsideHistory (KeyedSong::withValue (keyed.area.get(), 1, 1));
+
+        keyed.inStep ("Step",
+                      [&]
+                      {
+                          if (writerFirst)
+                              keyed.song->getUndoManager().perform (new WritesAsItMoves (keyed, 20, 21));
+
+                          keyed.set (1, 10);
+
+                          if (! writerFirst)
+                              keyed.song->getUndoManager().perform (new WritesAsItMoves (keyed, 20, 21));
+                      });
+
+        CHECK (keyed.now() == "1=10 |");
+        phazite::undo (*keyed.song); // the step's action still the history's current one as the Undo begins
+        CHECK (keyed.now() == "1=1 2=20 |");
+        phazite::redo (*keyed.song);
+        CHECK (keyed.now() == "1=10 2=21 |");
+        phazite::undo (*keyed.song);
+        CHECK (keyed.now() == "1=1 2=20 |");
+        phazite::redo (*keyed.song);
+        CHECK (keyed.now() == "1=10 2=21 |");
+        CHECK (keyed.area.countActions() == 1);
+    }
 }
 
 //==============================================================================

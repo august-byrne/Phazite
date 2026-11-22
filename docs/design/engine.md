@@ -55,7 +55,9 @@ sends, automation, modulators and macros, sections and the chord lane.
   each alias group's clips), and a MIDI clip's notes and controllers' values are one
   (`ClipNotes`, `ClipNotesValue.h`, by the clip's ID, one value for an alias group); the song holds them in two areas of
   values (`ValueArea.h`), in its one undo history, rather than as elements of its tree: the song's tree holds no CLIP
-  element. Every clip edit and every note edit is a function
+  element. An area's Undo puts its whole value back, except for a keyed value (entries by key, `KeyedAreaValue`), whose
+  Undo and Redo put back only the entries their step changed, so that what is written outside the history to other
+  entries survives them, as the tree undoes a property at a time. Every clip edit and every note edit is a function
   from one value to the next; a MIDI clip that joins an alias group takes the group's notes. A keeper, a listener of the
   song's tree, keeps the values and the tree together: a track taken out of the song has its clips remembered with its
   element and erased, and given back if the same element comes back (a move); a track that comes into the

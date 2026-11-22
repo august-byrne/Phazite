@@ -380,6 +380,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/CurvesArea.h
     src/model/base/internal/IDsHeld.h
     src/model/base/internal/Immer.h
+    src/model/base/internal/MapChanges.h
     src/model/base/internal/MidiLinksArea.h
     src/model/base/internal/MidiLinksValue.h
     src/model/base/internal/ModulationArea.h
