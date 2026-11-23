@@ -1796,10 +1796,58 @@ namespace
                 }
             }
 
+            // Each property an element holds, once: its first, as what reads a property by its name finds it. A file whose XML
+            // gives an attribute twice opens with the property held twice (juce::ValueTree::fromXml() adds each attribute it
+            // reads, NamedValueSet::setFromXmlAttributes()), and what then takes a property out of the element takes its
+            // first and leaves the other there (the devices' store found a plug-in's state still on its DEVICE so), and a
+            // save writes the attribute twice again. Nothing is written, and nothing allocated, for an element that holds
+            // each of its properties once. JUCE workaround 63 (docs/juce-workarounds.md)
+            static void keepPropertiesOnce (juce::ValueTree element)
+            {
+                const auto count = element.getNumProperties();
+                auto isHeldTwice = false;
+
+                if (count > 1 && count <= 24)
+                {
+                    for (int i = 1; i < count && ! isHeldTwice; ++i)
+                        for (int earlier = 0; earlier < i && ! isHeldTwice; ++earlier)
+                            isHeldTwice = element.getPropertyName (i) == element.getPropertyName (earlier);
+                }
+                else if (count > 24)
+                {
+                    std::set<juce::Identifier> names;
+
+                    for (int i = 0; i < count && ! isHeldTwice; ++i)
+                        isHeldTwice = ! names.insert (element.getPropertyName (i)).second;
+                }
+
+                if (isHeldTwice)
+                {
+                    std::vector<std::pair<juce::Identifier, juce::var>> first;
+
+                    for (int i = 0; i < count; ++i)
+                    {
+                        const auto name = element.getPropertyName (i);
+
+                        if (std::none_of (first.begin(), first.end(), [&name] (const auto& kept) { return kept.first == name; }))
+                            first.emplace_back (name, element.getProperty (name));
+                    }
+
+                    element.removeAllProperties (nullptr);
+
+                    for (const auto& [name, value] : first)
+                        element.setProperty (name, value, nullptr);
+                }
+
+                for (auto child : element)
+                    keepPropertiesOnce (child);
+            }
+
             void keep()
             {
                 auto state = song.getState();
-                keepTexts (state, false, tables); // first: before anything reads a number
+                keepPropertiesOnce (state);       // first of all: before anything reads or removes a property by its name
+                keepTexts (state, false, tables); // then: before anything reads a number
                 keepPlaces (state);
                 keepDevices (state);
                 keepNumbers (state);

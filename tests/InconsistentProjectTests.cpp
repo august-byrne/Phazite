@@ -3465,3 +3465,49 @@ TEST_CASE ("An audio clip of an alias group that plays another file than the gro
         checkSong (song);
     }
 }
+
+TEST_CASE ("A file that gives an attribute twice opens with the first alone, and its save writes it once")
+{
+    // XML may not give an attribute twice, yet a file can, and JUCE's reader then gives the element the property twice
+    // (Project.cpp: keepPropertiesOnce()): what took a property out of an element by its name left its other there, as the
+    // devices' store found for a plug-in's state, and a save wrote the attribute twice again.
+    Edited edited;
+    const auto text = edited.s.getProject().getFile().loadFileAsString();
+    REQUIRE (text.contains ("name=\"Lead\""));
+    const auto twice = text.replace ("name=\"Lead\"", "name=\"Lead\" pan=\"0.25\" name=\"Other\" pan=\"-1\" name=\"Third\"");
+    edited.file.getParentDirectory().createDirectory();
+    edited.s.getProject().getAudioFolder().copyDirectoryTo (edited.file.getSiblingFile ("Audio"));
+    REQUIRE (edited.file.replaceWithText (twice));
+
+    juce::String error;
+    auto project = phazite::Project::open (edited.file, false, error);
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    checkSong (song);
+    CHECK (phazite::getTrackName (song, edited.lead) == "Lead");
+    CHECK (phazite::getChannelPan (song, edited.lead) == doctest::Approx (0.25f));
+
+    // Each property once, in the song's element and in what it saves.
+    const auto countOf = [] (const juce::ValueTree& element, const juce::Identifier& name)
+    {
+        int count = 0;
+
+        for (int i = 0; i < element.getNumProperties(); ++i)
+            if (element.getPropertyName (i) == name)
+                ++count;
+
+        return count;
+    };
+
+    const auto track = phazite::test::copyTrack (song, edited.lead);
+    REQUIRE (track.isValid());
+    CHECK (countOf (track, schema::trackName) == 1);
+    CHECK (countOf (track, schema::channelPan) == 1);
+
+    REQUIRE (project->save().wasOk());
+    const auto saved = edited.file.loadFileAsString();
+    CHECK (saved.contains ("name=\"Lead\""));
+    CHECK_FALSE (saved.contains ("name=\"Other\""));
+    CHECK_FALSE (saved.contains ("name=\"Third\""));
+    CHECK_FALSE (saved.contains ("pan=\"-1\""));
+}
