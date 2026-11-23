@@ -3,6 +3,7 @@
 #include "devices/wavetable/FactoryWavetables.h"
 #include "internal/DeviceFiles.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
@@ -34,7 +35,7 @@ namespace
     {
         const auto device = findDeviceState (song, id);
 
-        if (! device.hasType (schema::DEVICE) || device[schema::deviceType].toString() != Synth::typeID
+        if (! device.hasType (schema::DEVICE) || readDeviceType (device) != Synth::typeID
             || ! juce::isPositiveAndBelow (osc, Synth::numOscillators))
             return {};
 
@@ -43,12 +44,13 @@ namespace
 
     juce::File getTableFile (const Song& song, const juce::ValueTree& sounds, int osc)
     {
-        return findProjectFile (song, sounds[schema::getOscillatorWavetableFile (osc)].toString());
+        return findProjectFile (song, readSoundsProperty (sounds, schema::getOscillatorWavetableFile (osc)));
     }
 
     int getFactoryTable (const juce::ValueTree& sounds, int osc)
     {
-        return std::max (0, devices::findFactoryWavetable (sounds[schema::getOscillatorWavetable (osc)].toString().toStdString()));
+        return std::max (0,
+                         devices::findFactoryWavetable (readSoundsProperty (sounds, schema::getOscillatorWavetable (osc)).toStdString()));
     }
 
     // At most this much of a sound becomes a table: 256 frames of 8192 samples.

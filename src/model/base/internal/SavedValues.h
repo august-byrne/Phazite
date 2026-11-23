@@ -10,6 +10,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include <optional>
+
 namespace phazite
 {
 // Whether a value is its parameter's default, to a millionth of the default's size (a value back from a control's range
@@ -21,4 +23,12 @@ bool isDefaultValue (const devices::ParameterInfo&, float value);
 // choice by its name, a value by its number, and the parameter's default for none. Every reader of VALUES goes through it.
 juce::var toSavedValue (const devices::ParameterInfo&, float value);
 float readSavedValue (const devices::ParameterInfo&, const juce::var& saved);
+
+// A value set by hand as the song holds it, from its saved form: a choice by a name it has, or by its number where it is held
+// as a number (not as text), any other by its number (SongText.h: readValueNumber()), brought within its range and to its
+// steps (devices::constrain()); none for none, for what is no finite number, for a choice written as text that is none of its
+// names (its number's text, "2"), which the loader leaves none of (model/project/internal/Project.h: makeConsistent()), and
+// for one at its default, which the song keeps none of. What the song's values read a device's and a modulator's values with
+// as the song holds them (DevicesValue.h: readHeldDevice(); ModulationValue.h: readHeldModulator()).
+std::optional<float> readHeldSavedValue (const devices::ParameterInfo&, const juce::var& saved);
 } // namespace phazite

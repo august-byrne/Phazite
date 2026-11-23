@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "model/base/internal/SavedValues.h"
+#include "model/base/Numbers.h"
+#include "model/base/internal/SongText.h"
 
 #include <algorithm>
 #include <cmath>
+#include <string_view>
 
 namespace phazite
 {
@@ -31,5 +34,25 @@ float readSavedValue (const devices::ParameterInfo& info, const juce::var& saved
             return info.minimum + (float) *choice;
 
     return (float) saved;
+}
+
+std::optional<float> readHeldSavedValue (const devices::ParameterInfo& info, const juce::var& saved)
+{
+    if (saved.isVoid())
+        return std::nullopt;
+
+    auto held = std::optional<float>();
+
+    if (info.unit == devices::Unit::choice && saved.isString())
+    {
+        if (const auto name = saved.toString(); const auto choice = devices::findChoice (info, std::string_view (name.toRawUTF8())))
+            held = devices::constrain (info, info.minimum + (float) *choice);
+    }
+    else if (const auto number = readValueNumber (saved); number.has_value() && std::isfinite (*number))
+    {
+        held = devices::constrain (info, toFloat (*number));
+    }
+
+    return held.has_value() && ! isDefaultValue (info, *held) ? held : std::nullopt;
 }
 } // namespace phazite

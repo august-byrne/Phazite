@@ -23,6 +23,7 @@
 #include "UiTestHelpers.h"
 #include "app/ProjectSession.h"
 #include "devices/delay/Delay.h"
+#include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
 #include "engine/nodes/NoteSequence.h"
@@ -38,7 +39,9 @@
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/ModulationValue.h"
+#include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/Selection.h"
@@ -47,11 +50,16 @@
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/DeviceHandle.h"
 #include "model/devices/ParameterHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/modulation/ModulationValues.h"
@@ -79,6 +87,8 @@
 #include "ui/playlist/TrackHeader.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -691,6 +701,240 @@ TEST_CASE ("Performance gate: a device changed on one channel among many brings 
     }
 
     setSong (context, nullptr);
+}
+
+TEST_CASE ("Performance gate: a tick of a device's knob, a chain's volume or a drum pad's field reads no device whole, nor do a "
+           "strip's slots, however many tracks the song has")
+{
+    // While the song's tree holds its devices (roadmap step S5.20, the devices' first piece), a reader of one field of one
+    // device reads that field from the device's element alone, through the conversion's readers of one field
+    // (model/base/internal/DevicesValue.h), never the device whole: a drum sampler's whole value holds thousands of entries.
+    // On songs of 4 tracks and of 40, each with an instrument and an effect, the last with a drum sampler, an equalizer, five
+    // delays and a container: a tick of the equalizer's first knob, of the container's chain's volume and of a pad's field,
+    // and the eight slots of its strip. Counted: the devices read into whole values (countDevicesReadAsValues()); the walks
+    // of the song that find a device's element (countDeviceWalks()), none at a tick, as a control's handle keeps the
+    // parameter it found (model/devices/ParameterHandle.cpp, find()), as before the devices' values; and what the value's
+    // reading allocates at a tick, none (the parameter's name taken as its reference holds it, as before).
+    using dev::DrumSampler;
+
+    struct Tick
+    {
+        std::uint64_t whole = 0, walks = 0;
+        std::optional<int> allocations {};       // the value's reading at a tick (getValueSetByHand()), where counted
+        std::optional<int> handleAllocations {}; // the handle's (ParameterHandle::getBaseValue()), the value's reading among them
+
+        bool operator== (const Tick&) const = default;
+    };
+
+    const auto countFor = [] (int numTracks)
+    {
+        auto song = phazite::createSong();
+        const auto tracks = phazite::ensureTracks (*song, numTracks);
+
+        for (const auto track : tracks)
+        {
+            phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+            phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
+        }
+
+        const auto last = tracks.back();
+        const auto drums = phazite::test::setOwnInstrument (*song, last, DrumSampler::typeID);
+        const auto equalizer = phazite::getEffects (*song, last).front();
+
+        for (int i = 0; i < 5; ++i)
+            phazite::test::addOwnDevice (*song, last, dev::Delay::typeID);
+
+        const auto container = phazite::addContainer (*song, last);
+        REQUIRE (container.isValid());
+        const auto chain = phazite::getChains (*song, container).front();
+        REQUIRE (phazite::getDevices (*song, last).size() == 8);
+
+        phazite::ProjectContext context { phazite::test::getEngineContext() };
+        setSong (context, song.get());
+
+        // A control's tick (its attachment's update()), and the value's reading alone by a handle of its own to the same
+        // parameter, which has found it once.
+        const auto countTick = [&song] (const std::function<phazite::ParameterHandle()>& makeHandle)
+        {
+            auto handle = makeHandle();
+            REQUIRE (handle.isValid());
+            phazite::ui::Knob knob ("Knob", 0.0);
+            phazite::ui::ParameterAttachment attachment (knob);
+            attachment.setParameter (std::move (handle));
+            attachment.update(); // its first tick finds the parameter
+            Tick tick;
+            const auto whole = phazite::countDevicesReadAsValues();
+            const auto walks = phazite::countDeviceWalks();
+            attachment.update();
+            tick.whole = phazite::countDevicesReadAsValues() - whole;
+            tick.walks = phazite::countDeviceWalks() - walks;
+
+            const auto reader = makeHandle();
+            auto sum = reader.getBaseValue(); // finds the parameter
+            tick.handleAllocations = phazite::test::countAllocations ([&reader, &sum] { sum += reader.getBaseValue(); });
+            const auto found = phazite::locateParameter (*song, reader.getRef());
+            REQUIRE (found.has_value());
+            tick.allocations =
+                phazite::test::countAllocations ([&song, &found, &sum] { sum += phazite::getValueSetByHand (*song, *found); });
+            CHECK (std::isfinite (sum));
+            return tick;
+        };
+
+        const auto padField = DrumSampler::info.parameters[(size_t) DrumSampler::getParameterIndex (40, (DrumSampler::Field) 1)].id;
+        const auto knob =
+            countTick ([&] { return phazite::makeDeviceHandle (*song, equalizer).getParameter (dev::Equalizer::info.parameters[0].id); });
+        const auto chainVolume = countTick ([&] { return phazite::getChainVolume (context, chain); });
+        const auto pad = countTick ([&] { return phazite::makeDeviceHandle (*song, drums).getParameter (padField); });
+
+        const auto before = phazite::countDevicesReadAsValues();
+        const auto instrument = phazite::getInstrument (context, last);
+        const auto effects = phazite::getEffects (context, last);
+        const auto slots = phazite::countDevicesReadAsValues() - before;
+        CHECK (instrument.has_value());
+        CHECK (effects.size() == 7);
+        setSong (context, nullptr);
+        Tick strip;
+        strip.whole = slots;
+        return std::array { knob, chainVolume, pad, strip };
+    };
+
+    const auto small = countFor (4);
+    const auto big = countFor (40);
+
+    const std::array<std::string, 4> names { "a knob's tick", "a chain's volume's tick", "a pad's field's tick", "a strip's eight slots" };
+
+    for (size_t i = 0; i < names.size(); ++i)
+        MESSAGE (names[i] << ": devices read whole " << small[i].whole << " (4 tracks), " << big[i].whole << " (40 tracks); walks of "
+                          << "the song " << small[i].walks << ", " << big[i].walks << "; allocations of the value's reading "
+                          << small[i].allocations.value_or (-1) << ", " << big[i].allocations.value_or (-1) << ", of the handle's "
+                          << small[i].handleAllocations.value_or (-1) << ", " << big[i].handleAllocations.value_or (-1));
+
+    CHECK (big == small);
+
+    // Measured 2026-11-22: no device read whole, each field read from the element alone; no walk of the song at a tick, as
+    // before the devices' values (the handle keeps what it found); no allocation for the value's reading, as before them
+    // (the parameter's name taken as its reference holds it, never made a text); and one for the handle's reading around
+    // it, the same for each kind of parameter, whose code the devices' values didn't change. The strip's slots read none
+    // whole either.
+    for (size_t i = 0; i < 3; ++i)
+    {
+        CHECK (small[i].whole == 0);
+        CHECK (small[i].walks == 0);
+
+        if (small[i].allocations.has_value())
+            CHECK (*small[i].allocations == 0);
+
+        if (small[i].handleAllocations.has_value())
+            CHECK (*small[i].handleAllocations <= 1);
+    }
+
+    CHECK (small[3].whole == 0);
+}
+
+TEST_CASE ("Performance gate: the loader's rule for the devices allocates nothing for a song Phazite wrote, a full drum sampler's "
+           "thousands of values among its devices")
+{
+    // The loader makes each device, container and chain hold what the song holds of it, as Phazite writes it
+    // (model/base/internal/DevicesValue.h: keepDeviceAsHeld()): it looks through an element's properties, its VALUES and
+    // its SOUNDS as they are, and reads it whole and writes it again only where one isn't as the writer writes it. A song
+    // Phazite wrote, with a drum sampler of every field and sound set (3,329 values, 1,024 sounds), 40 tracks with an
+    // instrument and an effect each, and a container: the rule over every element of it as it is read from its text.
+    using dev::DrumSampler;
+    auto made = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*made, 40);
+
+    for (const auto track : tracks)
+    {
+        phazite::test::setOwnInstrument (*made, track, dev::Synth::typeID);
+        phazite::test::addOwnDevice (*made, track, dev::Equalizer::typeID);
+    }
+
+    const auto container = phazite::addContainer (*made, tracks.front());
+    REQUIRE (container.isValid());
+    phazite::test::OwnValues values;
+
+    for (const auto& info : DrumSampler::info.parameters)
+    {
+        // A value off its default: a choice's next, a number a quarter of its range on (or back).
+        auto value =
+            dev::constrain (info, info.defaultValue + (info.unit == dev::Unit::choice ? 1.0f : 0.25f * (info.maximum - info.minimum)));
+
+        if (phazite::isDefaultValue (info, value))
+            value =
+                dev::constrain (info, info.defaultValue - (info.unit == dev::Unit::choice ? 1.0f : 0.25f * (info.maximum - info.minimum)));
+
+        values.emplace_back (juce::String (info.id.data(), info.id.size()), value);
+    }
+
+    const auto drumsTrack = phazite::insertPlainTrack (*made, tracks.back());
+    const auto drums = phazite::test::setOwnInstrument (*made, drumsTrack, DrumSampler::typeID, values);
+
+    for (int pad = 0; pad < DrumSampler::numPads; ++pad)
+    {
+        for (int layer = 0; layer < DrumSampler::numLayers; ++layer)
+        {
+            phazite::test::writeDeviceSoundByHand (*made, drums, phazite::schema::getPadSound (pad, layer), "808 Kick");
+            phazite::test::writeDeviceSoundByHand (*made, drums, phazite::schema::getPadSoundFile (pad, layer),
+                                                   "Audio/Pad " + juce::String (pad) + " " + juce::String (layer) + ".wav");
+        }
+    }
+
+    // Opened once and saved: a file Phazite wrote.
+    const auto opened = phazite::makeSong (phazite::test::copyWholeSong (*made));
+    REQUIRE (opened != nullptr);
+    juce::MemoryOutputStream text;
+    phazite::writeProjectText (text, phazite::test::copyWholeSong (*opened));
+    const auto xml = juce::parseXML (text.toString());
+    REQUIRE (xml != nullptr);
+    const auto state = juce::ValueTree::fromXml (*xml);
+
+    std::vector<juce::ValueTree> elements;
+    const std::function<void (const juce::ValueTree&)> collect = [&collect, &elements] (const juce::ValueTree& tree)
+    {
+        for (const auto& child : tree)
+        {
+            if (child.hasType (phazite::schema::CLIP) || child.hasType (phazite::schema::AUTOMATION))
+                continue;
+
+            if (child.hasType (phazite::schema::DEVICE) || child.hasType (phazite::schema::CONTAINER)
+                || child.hasType (phazite::schema::CHAIN))
+                elements.push_back (child);
+
+            collect (child);
+        }
+    };
+
+    collect (state);
+    REQUIRE (elements.size() >= 83);
+    auto changed = false;
+    const auto allocations = phazite::test::countAllocations (
+        [&elements, &changed]
+        {
+            for (const auto& element : elements)
+                changed = phazite::keepDeviceAsHeld (element) || changed;
+        });
+
+    if (! allocations.has_value())
+        return; // nothing counted on this build, and nothing run
+
+    CHECK_FALSE (changed);
+
+    // What the rule cost before it looked through an element first: every one of Phazite's own devices read whole and
+    // written again.
+    const auto before = phazite::test::countAllocations (
+        [&elements]
+        {
+            for (const auto& element : elements)
+                if (const auto held = phazite::readHeldDevice (element, phazite::readDevicePlace (element));
+                    held.has_value() && held->form == phazite::DeviceValue::Form::own)
+                    phazite::writeDeviceElement (*held);
+        });
+
+    MESSAGE ("The loader's rule over " << elements.size() << " devices, containers and chains: " << *allocations
+                                       << " allocations; read whole and written again, as before: " << before.value_or (-1));
+
+    // Measured 2026-11-22: none.
+    CHECK (*allocations == 0);
 }
 
 TEST_CASE ("Performance gate: a tick of a send's level control reads as many sends however many tracks and sends the song has")

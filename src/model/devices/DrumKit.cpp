@@ -4,6 +4,7 @@
 #include "internal/DeviceFiles.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
@@ -74,7 +75,8 @@ namespace
     // none, off the kit's sixteen pads.
     int getFactorySound (const juce::ValueTree& sounds, int pad, int layer)
     {
-        if (const auto named = devices::findFactoryDrum (sounds[schema::getPadSound (pad, layer)].toString().toStdString()); named >= 0)
+        if (const auto named = devices::findFactoryDrum (readSoundsProperty (sounds, schema::getPadSound (pad, layer)).toStdString());
+            named >= 0)
             return named;
 
         const auto inKit = pad - DrumSampler::kitFirstNote;
@@ -84,7 +86,7 @@ namespace
     // The factory sound a pad's layer's sounds name, -1 for none: what the sampler is given rather than playing its default.
     int getNamedFactorySound (const juce::ValueTree& sounds, int pad, int layer)
     {
-        return devices::findFactoryDrum (sounds[schema::getPadSound (pad, layer)].toString().toStdString());
+        return devices::findFactoryDrum (readSoundsProperty (sounds, schema::getPadSound (pad, layer)).toStdString());
     }
 
     bool isPadLayer (int pad, int layer)
@@ -101,7 +103,7 @@ namespace
 
     juce::File getPadFile (const Song& song, const juce::ValueTree& sounds, int pad, int layer)
     {
-        return findProjectFile (song, sounds[schema::getPadSoundFile (pad, layer)].toString());
+        return findProjectFile (song, readSoundsProperty (sounds, schema::getPadSoundFile (pad, layer)));
     }
 
     // "Pad 36", or "Pad 36's Layer 2".
@@ -113,7 +115,7 @@ namespace
 
 bool isDrumSampler (const juce::ValueTree& deviceState)
 {
-    return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == DrumSampler::typeID;
+    return deviceState.hasType (schema::DEVICE) && readDeviceType (deviceState) == DrumSampler::typeID;
 }
 
 bool isDrumSampler (const Song& song, DeviceID id)

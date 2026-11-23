@@ -235,7 +235,7 @@ inline const Property<bool> folderBus { "bus", on (TRACK), Kind::song };
 // track's, a return's or a bus's; a plain folder's VCA), none for 0 dB, or for the master's -3 dB, a new song's level; and
 // its pan, from -1 (left) to 1 (right), none for the centre, which a plain folder keeps for when it is a bus again.
 inline const Property<float> channelVolume { "volume", on (TRACK, MASTER, CHAIN), within (-100.0, 6.0), Kind::song };
-inline const Property<float> channelPan { "pan", on (TRACK, MASTER, CHAIN), within (-1.0, 1.0), Kind::song };
+inline const Property<float> channelPan { "pan", on (TRACK, MASTER, CHAIN), within (-1.0, 1.0), byDefault (0.0f), Kind::song };
 
 // On TRACK, and on MASTER: the device that sets the channel's volume, by its ID (DeviceID, of the song's), which the
 // automation and the modulation of its volume and pan name. A track's, a return's, a bus's (a folder that mixes its
@@ -365,7 +365,12 @@ inline const Property<int> deviceWindowY { "windowY", on (DEVICE), Kind::view, u
 // automation or a modulator moves them), each a property named by the parameter's ID in the device's description, none
 // for one that was never set (at its default); and SOUNDS, the factory sounds, files, tables and slices it plays, as
 // properties named by getPadSound(), getPadSoundFile(), getOscillatorWavetable(), getOscillatorWavetableFile(),
-// samplerSample, samplerSampleFile, samplerSlices and samplerSlicesRemoved (below).
+// samplerSample, samplerSampleFile, samplerSlices and samplerSlicesRemoved (below). Both as the song holds them from the
+// moment it opens (DevicesValue.h: keepDeviceAsHeld(), the loader's): no value at its parameter's default, no sound of a
+// property the device's type hasn't nor an empty one, no VALUES or SOUNDS left empty, nothing Phazite doesn't know in either;
+// a plug-in has neither. The devices' values (DevicesValue.h) hold them by their indices; a DEVICE's, a CONTAINER's and a
+// CHAIN's properties below are the values' too, but a plug-in's state, program, format ID and version, its VALUE children, a
+// chain's mute and solo and a window's place.
 // (VALUES and SOUNDS, with the elements above.)
 
 // On a plug-in's DEVICE: which plug-in it is, as scanning found it and a preset names it (preset::plugin):
@@ -379,10 +384,10 @@ inline const Property<juce::String> pluginMaker { "manufacturer", on (DEVICE), K
 inline const Property<juce::String> pluginIdentifier { "identifier", on (DEVICE), Kind::song };
 inline const Property<int> pluginUid { "uid", on (DEVICE), Kind::song };
 // On a plug-in's DEVICE: true for an instrument, which turns notes into sound, as its description says; none for an effect.
-inline const Property<bool> pluginInstrument { "instrument", on (DEVICE), Kind::song };
+inline const Property<bool> pluginInstrument { "instrument", on (DEVICE), byDefault (false), Kind::song };
 
 // On a plug-in's DEVICE and on a CONTAINER: its mix, 0 to 1, as setMix() sets it; none for 1.
-inline const Property<float> deviceMix { "mix", on (DEVICE, CONTAINER), within (0.0, 1.0), Kind::song };
+inline const Property<float> deviceMix { "mix", on (DEVICE, CONTAINER), within (0.0, 1.0), byDefault (1.0f), Kind::song };
 
 // On a plug-in's DEVICE: what the plug-in keeps of its own, which the project stores outside the undo history as it saves,
 // before it copies the plug-in or takes it away, and as a preset loads into it (model/plugins/internal/PluginInstances.h):
@@ -427,7 +432,7 @@ inline const Property<juce::String> containerSplit { "split", on (CONTAINER), on
 
 // On a CONTAINER. true, or none: it is an instrument container, a track's instrument, each of whose chains holds an
 // instrument first and the effects after it, and plays the notes in its ranges.
-inline const Property<bool> containerInstrument { "instrument", on (CONTAINER), Kind::song };
+inline const Property<bool> containerInstrument { "instrument", on (CONTAINER), byDefault (false), Kind::song };
 
 // Child of CONTAINER: a chain, in their order, its devices (DEVICE) its children in the order its sound goes through them. On
 // CHAIN: its ID (DeviceID, of the song's), which its parameters' curves, lanes and modulations name; its name; its volume
@@ -442,10 +447,10 @@ inline const Property<juce::String> chainName { "name", on (CHAIN), Kind::song }
 inline const Property<bool> chainMute { "mute", on (CHAIN), Kind::song };
 inline const Property<bool> chainSolo { "solo", on (CHAIN), Kind::song };
 inline const Property<float> chainCrossover { "crossover", on (CHAIN), within (20.0, 20000.0), Kind::song };
-inline const Property<int> chainLowKey { "lowKey", on (CHAIN), whole (0.0, 127.0), Kind::song };
-inline const Property<int> chainHighKey { "highKey", on (CHAIN), whole (0.0, 127.0), Kind::song };
-inline const Property<int> chainLowVelocity { "lowVelocity", on (CHAIN), whole (1.0, 127.0), Kind::song };
-inline const Property<int> chainHighVelocity { "highVelocity", on (CHAIN), whole (1.0, 127.0), Kind::song };
+inline const Property<int> chainLowKey { "lowKey", on (CHAIN), whole (0.0, 127.0), byDefault (0), Kind::song };
+inline const Property<int> chainHighKey { "highKey", on (CHAIN), whole (0.0, 127.0), byDefault (127), Kind::song };
+inline const Property<int> chainLowVelocity { "lowVelocity", on (CHAIN), whole (1.0, 127.0), byDefault (1), Kind::song };
+inline const Property<int> chainHighVelocity { "highVelocity", on (CHAIN), whole (1.0, 127.0), byDefault (127), Kind::song };
 
 // The parameters of a container's chain, by the IDs their curves, lanes and modulations name them with, the chain's ID
 // being their device's: its volume, as a fader's position from 0 to 1; its pan, from -1 to 1; and its crossover, in hertz.

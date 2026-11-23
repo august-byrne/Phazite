@@ -151,7 +151,7 @@ DeviceSlot makeDeviceSlot (const ProjectContext& context, DeviceID id)
              .hasMix = hasMix (*song, id),
              .latencySeconds = getLatencySeconds (*song, id, getPlaybackHost (getEngineContext (context))),
              .isContainer = isContainer (*song, id),
-             .isInstrument = isInstrumentState (findDeviceState (*song, id)),
+             .isInstrument = isInstrument (*song, id),
              .opensWindow = opensWindow (*song, id),
              .popsOut = popsOut (*song, id),
              .windowOpen = popsOut (*song, id) && windows != nullptr && windows->isOpen (id),
@@ -435,7 +435,7 @@ void replaceEffect (ProjectContext& context, DeviceID id, const DeviceType& type
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || type.isInstrument || ! findDeviceState (*song, id).isValid() || isInstrumentState (findDeviceState (*song, id)))
+    if (song == nullptr || type.isInstrument || ! findDeviceState (*song, id).isValid() || isInstrument (*song, id))
         return;
 
     const UndoStep step (*song, "Replace " + getDeviceName (*song, id) + " with " + type.name);

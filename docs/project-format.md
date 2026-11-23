@@ -248,6 +248,28 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   track's, the master's and a container's modulators and macros are written after its other children, in the order it
   holds them (modulators and macros together, as they were made), and before a track's sends; a file that held one
   elsewhere among them has it there from its first save.
+- **Devices, containers and chains:** each `DEVICE`, `CONTAINER` and `CHAIN` is written as Phazite writes what the song
+  holds of it, where it holds anything else, once the ranges above have brought its numbers within theirs:
+  - its own properties that the song's value of it covers (a device's `id`, `type`, `off` and `sidechain`; a plug-in's
+    `format`, `name`, `manufacturer`, `identifier`, `uid`, `instrument` and `mix`; a container's `id`, `name`, `off`,
+    `mix`, `split` and `instrument`; a chain's `id`, `name`, `volume`, `pan`, `crossover`, `lowKey`, `highKey`,
+    `lowVelocity` and `highVelocity`) are written as Phazite writes them: one at its default goes (`off="0"`,
+    `instrument="0"`, `mix="1"`, a `sidechain` of `0`, a chain's `volume` and `pan` of `0`, a range's end, and one brought
+    to it, `lowKey="-5"` as `0`); a number in more digits than its float holds is written in the fewest that read back
+    as it (`mix="0.30000001"` as `0.3`, a chain's `volume`, `pan` and `crossover` the same); a switch Phazite writes as
+    `1` is written so; and one Phazite always writes, even while empty, is added where the element lacks it (a
+    plug-in's identity, `format`, `name`, `manufacturer` and `identifier` empty and its `uid` as `0`, a container's
+    or a chain's `name` empty);
+  - a device's `VALUES` and `SOUNDS`: a value set by hand at its parameter's default is left out, a sound of a property
+    the device's type hasn't (a sampler's `pad36Sound`) or an empty one is left out, a `VALUES` or a `SOUNDS` left empty
+    goes, and a property or an element Phazite doesn't know in either goes (the two stay in their order); a
+    plug-in's `SOUNDS` goes, as its `VALUES` does (it plays neither);
+  - what the song's value doesn't cover stays as the file has it: a plug-in's `state`, `program`, `formatID` and
+    `version` and its `VALUE` children, a chain's `mute` and `solo`, a device's `windowX` and `windowY`, a `mix` on one of
+    Phazite's own devices (whose mix is its `VALUES`' `mix`), the element's other children, and a property Phazite
+    doesn't know.
+
+  A file Phazite wrote holds each of them so already, and comes through without any of them read whole.
 - **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values, and its audio clips play
   one file alike: they share their `file` (the path as written, compared as text, whether the file is there or not),
   `tempo`, `pitch`, `reversed` and `WARP` markers. Each keeps its own place, the part of the file it plays (`fileStart`,

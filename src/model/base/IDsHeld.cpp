@@ -2,6 +2,7 @@
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/Song.h"
 #include "model/base/internal/ClipsArea.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/NotesArea.h"
 #include "model/base/internal/Schema.h"
@@ -18,6 +19,10 @@ namespace
     // Whether the song holds its sends beside its tree: not yet (the sends' first piece, roadmap step S5.20: the tree is
     // their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
     constexpr bool sendsHeldBesideTheTree = false;
+
+    // Whether the song holds its devices, containers and chains beside its tree: not yet (the devices' first piece, roadmap
+    // step S5.20: the tree is their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
+    constexpr bool devicesHeldBesideTheTree = false;
 } // namespace
 
 std::uint64_t findLargestIDHeld (const Song& song)
@@ -49,6 +54,12 @@ void forEachNameableIDHeld (const Song& song, const std::function<void (std::uin
 
     if constexpr (sendsHeldBesideTheTree)
         forEachIDHeld (getSendsValue (song), each);
+
+    // The devices' (each device's, container's and chain's ID: DevicesValue.h), the same: the tree holds them until their
+    // switch (holdsID() of a DEVICE, a CONTAINER and a CHAIN), which turns devicesHeldBesideTheTree on and reads the area's
+    // value in place of the tree's.
+    if constexpr (devicesHeldBesideTheTree)
+        forEachIDHeld (readDevicesValue (song.getState()), each);
 }
 
 std::uint64_t countHeldID (std::uint64_t largest, std::uint64_t held) noexcept

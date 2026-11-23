@@ -127,32 +127,6 @@ namespace
         return immer::flex_vector<float> (steps.begin(), steps.end());
     }
 
-    // A modulator's parameter's value set by hand as the song holds it, from its saved form: a choice by a name it has, or by
-    // its number where it is held as a number (not as text), any other by its number, brought within its range and to its
-    // steps; none for none, and for what is no finite number.
-    std::optional<float> readHeldParameterValue (const devices::ParameterInfo& info, const juce::var& saved)
-    {
-        if (saved.isVoid())
-            return std::nullopt;
-
-        // A choice written as text by one of its names alone, as the loader keeps one (Project.cpp: keepValuesSetByHand()):
-        // its number's text ("2") is none.
-        if (info.unit == devices::Unit::choice && saved.isString())
-        {
-            if (const auto choice = devices::findChoice (info, saved.toString().toStdString()))
-                return devices::constrain (info, info.minimum + (float) *choice);
-
-            return std::nullopt;
-        }
-
-        const auto number = readValueNumber (saved);
-
-        if (! number.has_value() || ! std::isfinite (*number))
-            return std::nullopt;
-
-        return devices::constrain (info, toFloat (*number));
-    }
-
     // Each parameter of a kind whose value VALUES hold, by its index, as one of the readers takes it.
     template <typename Read>
     immer::map<std::uint32_t, float> readValues (const juce::ValueTree& modulator, devices::ModulatorKind kind, Read&& read)
@@ -628,12 +602,8 @@ std::optional<ModulatorValue> readHeldModulator (const juce::ValueTree& element,
     else
     {
         value->off = (bool) element[schema::deviceOff];
-        value->values = readValues (element, *value->kind,
-                                    [] (const devices::ParameterInfo& info, const juce::var& saved) -> std::optional<float>
-                                    {
-                                        const auto held = readHeldParameterValue (info, saved);
-                                        return held.has_value() && ! isDefaultValue (info, *held) ? held : std::nullopt;
-                                    });
+        // Each as the song holds it (SavedValues.h: readHeldSavedValue(), a device's alike): none at its default.
+        value->values = readValues (element, *value->kind, readHeldSavedValue);
         value->steps = toList (keepStepsHeld (readSteps (element[schema::modulatorSteps])));
     }
 
@@ -824,8 +794,7 @@ bool setModulatorProperty (ModulatorValue& value, const juce::Identifier& proper
                     continue;
 
                 if (const auto now = devices::findModulatorParameter (*kind, before[index].id); now >= 0)
-                    if (const auto read = readHeldParameterValue (after[(size_t) now], toSavedValue (before[index], was));
-                        read.has_value() && ! isDefaultValue (after[(size_t) now], *read))
+                    if (const auto read = readHeldSavedValue (after[(size_t) now], toSavedValue (before[index], was)))
                         values = values.set ((std::uint32_t) now, *read);
             }
 

@@ -3,6 +3,7 @@
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -22,7 +23,7 @@ namespace
 
     DeviceID getChainID (const juce::ValueTree& chain)
     {
-        return DeviceID::fromRaw ((std::uint64_t) (juce::int64) chain[schema::chainID]);
+        return readDeviceElementID (chain);
     }
 
     // A value of a chain's, to a ten-thousandth, none where it is the one it has without (as a channel's: Mixer.cpp).
@@ -62,7 +63,7 @@ namespace
         auto number = (int) chains.size() + 1;
 
         for (const auto& chain : chains)
-            if (const auto name = chain[schema::chainName].toString(); name.startsWith ("Chain "))
+            if (const auto name = readDeviceElementName (chain); name.startsWith ("Chain "))
                 number = std::max (number, name.fromFirstOccurrenceOf ("Chain ", false, false).getIntValue() + 1);
 
         return number;
@@ -76,16 +77,12 @@ namespace
 
     ContainerSplit readSplit (const juce::ValueTree& container)
     {
-        const auto split = container[schema::containerSplit].toString();
-        return split == schema::splitBands       ? ContainerSplit::bands
-               : split == schema::splitMidSide   ? ContainerSplit::midSide
-               : split == schema::splitLeftRight ? ContainerSplit::leftRight
-                                                 : ContainerSplit::layers;
+        return readContainerSplit (container);
     }
 
     float readCrossover (const juce::ValueTree& chain, int index, int numChains)
     {
-        return (float) chain.getProperty (schema::chainCrossover, getDefaultCrossover (index, numChains));
+        return readChainCrossover (chain).value_or (getDefaultCrossover (index, numChains));
     }
 
     bool anySoloed (const juce::ValueTree& container)
@@ -130,7 +127,7 @@ bool isContainer (const Song& song, DeviceID id)
 bool isInstrumentContainer (const Song& song, DeviceID id)
 {
     const auto state = findDeviceState (song, id);
-    return isContainerState (state) && (bool) state[schema::containerInstrument];
+    return readContainerInstrument (state);
 }
 
 std::vector<DeviceID> getContainerDevices (const Song& song, DeviceID container)
@@ -173,6 +170,7 @@ juce::ValueTree findContainerChain (const Song& song, DeviceID id)
     if (! id.isValid())
         return {};
 
+    countDeviceWalk();
     auto channels = getTrackStates (song);
     channels.push_back (findChainState (song, {}));
 
@@ -193,22 +191,13 @@ juce::ValueTree getOwningContainer (const juce::ValueTree& element)
 
 std::vector<DeviceID> getChains (const Song& song, DeviceID container)
 {
-    std::vector<DeviceID> ids;
-
-    for (const auto& chain : getChainStates (findDeviceState (song, container)))
-        ids.push_back (getChainID (chain));
-
-    return ids;
+    const auto state = findDeviceState (song, container);
+    return isContainerState (state) ? readDeviceList (state) : std::vector<DeviceID>();
 }
 
 std::vector<DeviceID> getChainDevices (const Song& song, DeviceID chain)
 {
-    std::vector<DeviceID> ids;
-
-    for (const auto& device : getDeviceStates (findContainerChain (song, chain)))
-        ids.push_back (getDeviceID (device));
-
-    return ids;
+    return readDeviceList (findContainerChain (song, chain));
 }
 
 DeviceID findChainOf (const Song& song, DeviceID device)
@@ -326,7 +315,7 @@ void moveChain (Song& song, DeviceID chain, int newIndex)
 
 juce::String getChainName (const Song& song, DeviceID chain)
 {
-    return findContainerChain (song, chain)[schema::chainName].toString();
+    return readDeviceElementName (findContainerChain (song, chain));
 }
 
 void setChainName (Song& song, DeviceID chain, const juce::String& name)
@@ -365,12 +354,12 @@ void setChainSoloed (Song& song, DeviceID chain, bool soloed)
 
 float getChainVolume (const Song& song, DeviceID chain)
 {
-    return (float) findContainerChain (song, chain).getProperty (schema::channelVolume, 0.0f);
+    return readChainVolume (findContainerChain (song, chain));
 }
 
 float getChainPan (const Song& song, DeviceID chain)
 {
-    return (float) findContainerChain (song, chain).getProperty (schema::channelPan, 0.0f);
+    return readChainPan (findContainerChain (song, chain));
 }
 
 void setChainVolume (Song& song, DeviceID chain, float decibels)
@@ -395,7 +384,7 @@ bool canSplit (const Song& song, DeviceID container, ContainerSplit split)
 {
     const auto state = findDeviceState (song, container);
 
-    if (! isContainerState (state) || (bool) state[schema::containerInstrument])
+    if (! isContainerState (state) || readContainerInstrument (state))
         return false;
 
     const auto fixed = getFixedParts (split);
@@ -525,15 +514,12 @@ void keepCrossoversInOrder (juce::ValueTree state, juce::UndoManager* undo)
 
 NoteRange getChainKeys (const Song& song, DeviceID chain)
 {
-    const auto state = findContainerChain (song, chain);
-    return { (int) state.getProperty (schema::chainLowKey, allKeys.low), (int) state.getProperty (schema::chainHighKey, allKeys.high) };
+    return readChainKeys (findContainerChain (song, chain));
 }
 
 NoteRange getChainVelocities (const Song& song, DeviceID chain)
 {
-    const auto state = findContainerChain (song, chain);
-    return { (int) state.getProperty (schema::chainLowVelocity, allVelocities.low),
-             (int) state.getProperty (schema::chainHighVelocity, allVelocities.high) };
+    return readChainVelocities (findContainerChain (song, chain));
 }
 
 void setChainKeys (Song& song, DeviceID chain, NoteRange keys)
@@ -667,8 +653,7 @@ void setContainerName (Song& song, DeviceID id, const juce::String& name)
 bool canHoldInChain (const Song& song, DeviceID chain, const juce::ValueTree& device)
 {
     const auto container = getOwningContainer (findContainerChain (song, chain));
-    return container.isValid() && device.hasType (schema::DEVICE)
-           && (! isInstrumentState (device) || (bool) container[schema::containerInstrument]);
+    return container.isValid() && device.hasType (schema::DEVICE) && (! isInstrumentState (device) || readContainerInstrument (container));
 }
 
 DeviceID insertIntoChain (Song& song, DeviceID chain, juce::ValueTree device, int index)
@@ -786,7 +771,7 @@ juce::String makeContainerName (const Song& song)
     for (const auto& chain : chains)
         for (const auto& state : getDeviceStates (chain))
             if (isContainerState (state))
-                taken.add (state[schema::containerName].toString());
+                taken.add (readDeviceElementName (state));
 
     juce::String name ("Container");
 

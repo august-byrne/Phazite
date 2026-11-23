@@ -5,6 +5,7 @@
 #include "internal/Devices.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsValue.h"
@@ -95,7 +96,7 @@ namespace
 
     bool hasCrossover (const juce::ValueTree& chain)
     {
-        return chain.getParent()[schema::containerSplit].toString() == schema::splitBands && getChainPlace (chain).first > 0;
+        return readContainerSplit (chain.getParent()) == ContainerSplit::bands && getChainPlace (chain).first > 0;
     }
 
     // A chain's crossover, its own or its place's default; and the ones it stays between: the chain's before it (the bottom,
@@ -103,7 +104,7 @@ namespace
     float getCrossover (const juce::ValueTree& chain)
     {
         const auto [index, count] = getChainPlace (chain);
-        return (float) chain.getProperty (schema::chainCrossover, getDefaultCrossover (index, count));
+        return readChainCrossover (chain).value_or (getDefaultCrossover (index, count));
     }
 
     juce::Range<float> getCrossoverRoom (const juce::ValueTree& chain)
@@ -179,7 +180,7 @@ std::optional<FoundParameter> locateParameterInTree (const Song& song, const Par
         }
 
         // One of Phazite's own (or of a type a test registered: model/devices/internal/Devices.h).
-        const auto* info = findOwnDevice (device[schema::deviceType].toString().toStdString());
+        const auto* info = findOwnDevice (readDeviceType (device).toStdString());
 
         if (info != nullptr)
             if (const auto index = devices::findParameter (*info, ref.parameter.toStdString()); index >= 0)
@@ -238,7 +239,7 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
     {
         case ParameterSource::device:
         case ParameterSource::plugin:
-            return readID (parameter.state, schema::deviceID) == id;
+            return readDeviceElementID (parameter.state).getRaw() == id;
         case ParameterSource::volume:
         case ParameterSource::pan:
             return readID (parameter.state, schema::channelFader) == id || readID (parameter.state, schema::channelVCA) == id;
@@ -249,9 +250,9 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
             break; // above
         case ParameterSource::chainVolume:
         case ParameterSource::chainPan:
-            return readID (parameter.state, schema::chainID) == id;
+            return readDeviceElementID (parameter.state).getRaw() == id;
         case ParameterSource::crossover:
-            return readID (parameter.state, schema::chainID) == id && hasCrossover (parameter.state);
+            return readDeviceElementID (parameter.state).getRaw() == id && hasCrossover (parameter.state);
     }
 
     return false;
@@ -379,8 +380,8 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
     switch (parameter.source)
     {
         case ParameterSource::device:
-            return readSavedValue (*parameter.info,
-                                   state.getChildWithName (schema::VALUES).getProperty (juce::Identifier (parameter.ref.parameter)));
+            // By the name the reference holds, which JUCE's pool of names has: no text made at each tick.
+            return readDeviceParameterValue (state, *parameter.info, juce::Identifier (parameter.ref.parameter));
 
         case ParameterSource::modulator:
         {
@@ -414,10 +415,10 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
         }
 
         case ParameterSource::chainVolume:
-            return engine::decibelsToFaderPosition ((float) state.getProperty (schema::channelVolume, 0.0f));
+            return engine::decibelsToFaderPosition (readChainVolume (state));
 
         case ParameterSource::chainPan:
-            return (float) state.getProperty (schema::channelPan, 0.0f);
+            return readChainPan (state);
 
         case ParameterSource::crossover:
             return getCrossover (state);
@@ -602,7 +603,7 @@ std::optional<devices::Travel> getControlTravel (const Song& song, const Paramet
         return {};
 
     // A plug-in's from 0 to 1, in the steps it says it has once it has loaded (describeParameter()).
-    if (isPluginState (findDeviceState (song, ref.device)))
+    if (isPlugin (song, ref.device))
     {
         const auto description = describeParameter (song, ref);
         return devices::Travel { .step = description.has_value() ? description->range.interval : 0.0f };

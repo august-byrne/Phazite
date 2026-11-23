@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Mixer.h"
+#include "internal/Containers.h"
 #include "internal/Sidechain.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -17,6 +19,7 @@
 #include "model/plugins/internal/PluginInstances.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <functional>
 #include <optional>
@@ -28,6 +31,8 @@ namespace
 {
     constexpr float newSendDb = -6.0f;
 
+    std::atomic<std::uint64_t> deviceWalks { 0 }; // countDeviceWalks(): a count alone, which orders nothing
+
     juce::UndoManager* getUndo (Song& song)
     {
         return &song.getUndoManager();
@@ -38,12 +43,22 @@ namespace
         return state.hasType (schema::DEVICE) || state.hasType (schema::CONTAINER);
     }
 
-    // The description of one of Phazite's own devices an element names; nullptr for a plug-in or a container.
+    // The description of one of Phazite's own devices an element names; nullptr for a plug-in or a container. Its type read
+    // through the devices' conversion (DevicesValue.h), as every reader below reads one field of one device.
     const devices::DeviceInfo* findOwnInfo (const juce::ValueTree& deviceState)
     {
-        return deviceState.hasType (schema::DEVICE) && ! isPluginState (deviceState)
-                   ? findOwnDevice (deviceState[schema::deviceType].toString().toStdString())
-                   : nullptr;
+        return readDeviceForm (deviceState) == DeviceValue::Form::own ? findOwnDevice (readDeviceType (deviceState).toStdString())
+                                                                      : nullptr;
+    }
+
+    // A device's, a container's or a chain's element by its ID, invalid for one the song hasn't: what findDevice() reads
+    // while the song's tree holds its devices.
+    juce::ValueTree findDeviceElement (const Song& song, DeviceID id)
+    {
+        if (auto device = findDeviceState (song, id); device.isValid())
+            return device;
+
+        return findContainerChain (song, id);
     }
 
     juce::String getOwnName (const devices::DeviceInfo& info)
@@ -239,6 +254,8 @@ juce::ValueTree findDeviceState (const Song& song, DeviceID id)
     if (! id.isValid())
         return {};
 
+    countDeviceWalk();
+
     for (const auto& track : getTrackStates (song))
         if (const auto found = findIn (track); found.isValid())
             return found;
@@ -248,12 +265,22 @@ juce::ValueTree findDeviceState (const Song& song, DeviceID id)
 
 DeviceID getDeviceID (const juce::ValueTree& deviceState)
 {
-    return DeviceID::fromRaw ((std::uint64_t) (juce::int64) deviceState[schema::deviceID]);
+    return readDeviceElementID (deviceState);
+}
+
+std::uint64_t countDeviceWalks() noexcept
+{
+    return deviceWalks.load (std::memory_order_relaxed);
+}
+
+void countDeviceWalk() noexcept
+{
+    deviceWalks.fetch_add (1, std::memory_order_relaxed);
 }
 
 bool isPluginState (const juce::ValueTree& deviceState)
 {
-    return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == schema::deviceIsPlugin;
+    return readDeviceForm (deviceState) == DeviceValue::Form::plugin;
 }
 
 bool holdsPlugin (const juce::ValueTree& tree)
@@ -278,24 +305,38 @@ bool isContainerState (const juce::ValueTree& deviceState)
 
 bool isInstrumentState (const juce::ValueTree& deviceState)
 {
-    if (isPluginState (deviceState))
-        return deviceState[schema::pluginInstrument];
+    return readIsInstrument (deviceState);
+}
 
-    if (isContainerState (deviceState))
-        return deviceState[schema::containerInstrument];
+SongDevices getDevicesValue (const Song& song)
+{
+    return readDevicesValue (song.getState());
+}
 
-    const auto* own = findOwnInfo (deviceState);
-    return own != nullptr && own->kind == devices::DeviceKind::instrument;
+std::optional<DeviceValue> findDevice (const Song& song, DeviceID id)
+{
+    const auto element = findDeviceElement (song, id);
+    return element.isValid() ? readDeviceValue (element, readDevicePlace (element)) : std::nullopt;
+}
+
+bool hasDevice (const Song& song, DeviceID id)
+{
+    return id.isValid() && findDeviceElement (song, id).isValid();
+}
+
+bool isPlugin (const Song& song, DeviceID id)
+{
+    return isPluginState (findDeviceState (song, id));
+}
+
+bool isInstrument (const Song& song, DeviceID id)
+{
+    return readIsInstrument (findDeviceState (song, id));
 }
 
 std::vector<DeviceID> getDevices (const Song& song, TrackID channel)
 {
-    std::vector<DeviceID> ids;
-
-    for (const auto& state : getDeviceStates (findChainState (song, channel)))
-        ids.push_back (getDeviceID (state));
-
-    return ids;
+    return readDeviceList (findChainState (song, channel));
 }
 
 DeviceID getInstrument (const Song& song, TrackID track)
@@ -346,10 +387,10 @@ juce::String getDeviceName (const Song& song, DeviceID id)
 juce::String getDeviceName (const juce::ValueTree& state)
 {
     if (isContainerState (state))
-        return state[schema::containerName].toString();
+        return readDeviceElementName (state);
 
     if (isPluginState (state))
-        return state[schema::pluginName].toString();
+        return readPluginIdentity (state).name;
 
     if (const auto* own = findOwnInfo (state))
         return getOwnName (*own);
@@ -359,7 +400,7 @@ juce::String getDeviceName (const juce::ValueTree& state)
 
 bool opensWindow (const Song& song, DeviceID id)
 {
-    return isPluginState (findDeviceState (song, id));
+    return isPlugin (song, id);
 }
 
 bool popsOut (const Song& song, DeviceID id)
@@ -517,7 +558,7 @@ void setDeviceOn (Song& song, DeviceID id, bool on)
 
 bool isDeviceOn (const Song& song, DeviceID id)
 {
-    return ! (bool) findDeviceState (song, id)[schema::deviceOff];
+    return ! readDeviceOff (findDeviceState (song, id));
 }
 
 void setDeviceSound (Song& song, DeviceID id, const juce::Identifier& property, const juce::String& value)
@@ -568,10 +609,10 @@ float getMix (const Song& song, DeviceID id)
     if (const auto* own = findOwnInfo (state))
     {
         const auto& mix = own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)];
-        return readValueSetByHand (state, mix);
+        return readDeviceParameterValue (state, mix);
     }
 
-    return (float) state.getProperty (schema::deviceMix, 1.0f);
+    return readDeviceMix (state);
 }
 
 float getDefaultMix (const Song& song, DeviceID id)
@@ -614,13 +655,18 @@ void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription& 
 
 juce::PluginDescription getPluginIdentity (const juce::ValueTree& device)
 {
+    return toDescription (readPluginIdentity (device));
+}
+
+juce::PluginDescription toDescription (const PluginIdentity& identity)
+{
     juce::PluginDescription description;
-    description.pluginFormatName = device[schema::pluginFormat].toString();
-    description.name = device[schema::pluginName].toString();
-    description.manufacturerName = device[schema::pluginMaker].toString();
-    description.fileOrIdentifier = device[schema::pluginIdentifier].toString();
-    description.uniqueId = (int) device[schema::pluginUid];
-    description.isInstrument = device[schema::pluginInstrument];
+    description.pluginFormatName = identity.format;
+    description.name = identity.name;
+    description.manufacturerName = identity.maker;
+    description.fileOrIdentifier = identity.identifier;
+    description.uniqueId = identity.uid;
+    description.isInstrument = identity.instrument;
     return description;
 }
 
@@ -822,7 +868,7 @@ TrackID addReturnWithEffect (Song& song, TrackID sender, juce::ValueTree effect)
     { return std::any_of (returns.begin(), returns.end(), [&] (TrackID other) { return getTrackName (song, other) == candidate; }); };
 
     const auto* own = findOwnInfo (effect);
-    const auto effectName = own != nullptr ? getOwnName (*own) : effect[schema::pluginName].toString();
+    const auto effectName = own != nullptr ? getOwnName (*own) : readPluginIdentity (effect).name;
     auto name = effectName;
 
     for (auto number = 2; isTaken (name); ++number)
@@ -1053,7 +1099,7 @@ juce::StringArray getKeyControls (const Song& song, DeviceID id, int maximum)
 
     // A plug-in's own parameters, as its instance has them; Phazite's own devices show theirs in their editors, and a
     // container shows its macros. The ID a device's mix goes by names the mix, not a parameter of the plug-in's.
-    if (! isPluginState (findDeviceState (song, id)))
+    if (! isPlugin (song, id))
         return ids;
 
     if (auto* instance = findPluginInstance (song, id))

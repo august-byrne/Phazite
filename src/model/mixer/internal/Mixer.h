@@ -10,12 +10,14 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/mixer/DeviceType.h"
 #include "model/mixer/internal/Buses.h"
 
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -29,15 +31,41 @@ class ProjectContext;
 struct DeviceSlot;
 
 //==============================================================================
-// The song's devices: the element that holds a channel's chain (its TRACK, or MASTER for the master or none); a chain's
-// devices' elements, in order (a container's chain's, given its CHAIN; or all a container's chains', in their order, given
-// its CONTAINER); a device's element, on a chain or in a container, invalid for one the song hasn't; the ID an element
-// names; and what it is.
+// The song's devices, containers and chains as values (model/base/internal/DevicesValue.h), which the devices' readers read
+// them as (roadmap step S5.20, the devices' first piece): all of them whole, read from the song's tree for every one (a walk:
+// for a pass over the song and for the plan's compile, never at each tick of a control nor for each slot of a strip); one by
+// its ID (a device, a container or a chain; none for one the song hasn't), read whole too, for what needs all of it once; and
+// whether the song holds one, whether one is a plug-in and whether one turns notes into sound (DeviceValue::isInstrument()).
+// The readers by ID below that need one field of one device read that field from the device's element alone, through the
+// conversion's readers of one field (DevicesValue.h: readDeviceOff()...), never a whole value: a drum sampler's holds
+// thousands of entries. Each reads the song's tree for now, and the area of the song's values once the devices leave it.
+// For a device of a type Phazite doesn't know, which the loader takes away as the song opens (Project.h: makeConsistent()),
+// hasDevice() is true while findDevice() gives none, as getDevicesValue() leaves it out: its element is in the tree, and
+// no value reads it.
+SongDevices getDevicesValue (const Song&);
+std::optional<DeviceValue> findDevice (const Song&, DeviceID);
+bool hasDevice (const Song&, DeviceID);
+bool isPlugin (const Song&, DeviceID);
+bool isInstrument (const Song&, DeviceID);
+
+// The song's devices' elements, for the devices' writers, the conversion's readers of one field and the readers outside
+// the devices' own code that the next piece moves (the plan's compile, presets, the DAWproject export, the selection, the
+// project's files: roadmap step S5.20, the devices' second piece); not for a new reader, which reads by ID above. The element
+// that holds a channel's chain (its TRACK, or MASTER for the master or none); a chain's devices' elements, in order (a
+// container's chain's, given its CHAIN; or all a container's chains', in their order, given its CONTAINER); a device's
+// element, on a chain or in a container, invalid for one the song hasn't; the ID an element names; and what it is.
 juce::ValueTree findChainState (const Song&, TrackID channel);
 std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
 juce::ValueTree findDeviceState (const Song&, DeviceID);
 DeviceID getDeviceID (const juce::ValueTree& deviceState);
 bool isPluginState (const juce::ValueTree& deviceState);
+
+// How many walks of the song's tree have looked for a device's, a container's or a chain's element by its ID
+// (findDeviceState(), Containers.h: findContainerChain(); findDevice() and hasDevice() through them) since Phazite started,
+// on any thread: for the tests that a control's tick walks the song no more often however many tracks it has
+// (tests/PerformanceGateTests.cpp). And one more walk counted, by those two alone.
+std::uint64_t countDeviceWalks() noexcept;
+void countDeviceWalk() noexcept;
 
 // Whether a track's element, a container's or a device's is, or holds among its devices (in containers too), a plug-in's.
 bool holdsPlugin (const juce::ValueTree&);
@@ -128,10 +156,12 @@ float getDefaultMix (const Song&, DeviceID); // its mix parameter's default (a r
 void setMix (Song&, DeviceID, float mix);
 
 // Which plug-in a device is, on its element in the song (Schema.h: pluginFormat to pluginInstrument), as its description
-// says, written outside the undo history where it differs; and the description of the plug-in an element names, as the
-// element has it.
+// says, written outside the undo history where it differs (for writers only); and the description of the plug-in an
+// element names, as the element has it (read through the conversion: DevicesValue.h, readPluginIdentity()), and of a
+// plug-in's identity as the devices' values hold it.
 void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription&);
 juce::PluginDescription getPluginIdentity (const juce::ValueTree& device);
+juce::PluginDescription toDescription (const PluginIdentity&);
 
 //==============================================================================
 // Adds a device dropped from the browser or chosen in the plug-in picker, as one named undo step. An instrument becomes a

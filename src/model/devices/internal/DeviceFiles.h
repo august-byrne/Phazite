@@ -14,7 +14,7 @@ namespace phazite
 {
 // What of one of Phazite's own devices' states names a sound file, a factory sound, a table or slices, besides its
 // parameters: a drum sampler's pads', a synth's oscillators', a sampler's (Schema.h). None for other devices.
-std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo&);
+const std::vector<juce::Identifier>& getSoundProperties (const devices::DeviceInfo&);
 
 // The path a device keeps for a file: within the project's folder, written the same on every system, or the file's full
 // path for one outside it (or while the project has no file). And the file a kept path names, or none.

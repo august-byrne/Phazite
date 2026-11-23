@@ -5,6 +5,7 @@
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 
 #include <vector>
@@ -39,40 +40,10 @@ namespace
     }
 } // namespace
 
-std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo& info)
+const std::vector<juce::Identifier>& getSoundProperties (const devices::DeviceInfo& info)
 {
-    std::vector<juce::Identifier> properties;
-
-    if (info.typeID == std::string_view (devices::DrumSampler::typeID))
-    {
-        for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-        {
-            for (int layer = 0; layer < devices::DrumSampler::numLayers; ++layer)
-            {
-                properties.push_back (schema::getPadSound (pad, layer));
-                properties.push_back (schema::getPadSoundFile (pad, layer));
-            }
-        }
-    }
-
-    if (info.typeID == std::string_view (devices::Synth::typeID))
-    {
-        for (int osc = 0; osc < devices::Synth::numOscillators; ++osc)
-        {
-            properties.push_back (schema::getOscillatorWavetable (osc));
-            properties.push_back (schema::getOscillatorWavetableFile (osc));
-        }
-    }
-
-    if (info.typeID == std::string_view (devices::Sampler::typeID))
-    {
-        properties.push_back (schema::samplerSample);
-        properties.push_back (schema::samplerSampleFile);
-        properties.push_back (schema::samplerSlices);
-        properties.push_back (schema::samplerSlicesRemoved);
-    }
-
-    return properties;
+    // The devices' values' own list (DevicesValue.h), by whose order a device's value holds its sounds.
+    return getSoundPropertiesOf (info.typeID);
 }
 
 juce::String getProjectPath (const Song& song, const juce::File& file)

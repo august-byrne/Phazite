@@ -343,6 +343,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/ControlKinds.h
     src/model/base/CurvesArea.cpp
     src/model/base/CurveValues.cpp
+    src/model/base/DevicesValue.cpp
     src/model/base/IDs.h
     src/model/base/IDsHeld.cpp
     src/model/base/Json.cpp
@@ -378,6 +379,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/ClipsArea.h
     src/model/base/internal/ClipsValue.h
     src/model/base/internal/CurveValues.h
+    src/model/base/internal/DevicesValue.h
     src/model/base/internal/CurvesArea.h
     src/model/base/internal/IDsHeld.h
     src/model/base/internal/Immer.h
@@ -1370,6 +1372,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp
         tests/DeviceStatesTests.cpp
+        tests/DevicesValueTests.cpp
         tests/DevicesViewTests.cpp
         tests/DragPointerTests.cpp
         tests/DrumRowTests.cpp

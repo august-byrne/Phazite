@@ -6,6 +6,7 @@
 #include "internal/Containers.h"
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
@@ -68,7 +69,7 @@ namespace
                         return true;
 
         for (const auto& device : getDeviceStates (state))
-            if (contains (feeding, TrackID::fromRaw ((std::uint64_t) (juce::int64) device[schema::deviceSidechain])))
+            if (contains (feeding, readDeviceSidechain (device)))
                 return true;
 
         return false;
@@ -127,7 +128,7 @@ namespace
     bool isAsMade (const juce::ValueTree& state, const devices::DeviceInfo& info, std::string_view except = {})
     {
         for (const auto& parameter : info.parameters)
-            if (parameter.id != except && std::abs (readValueSetByHand (state, parameter) - parameter.defaultValue) > 1.0e-4f)
+            if (parameter.id != except && std::abs (readDeviceParameterValue (state, parameter) - parameter.defaultValue) > 1.0e-4f)
                 return false;
 
         return true;
@@ -135,7 +136,7 @@ namespace
 
     bool isCompressor (const juce::ValueTree& state)
     {
-        return state[schema::deviceType].toString() == juce::String (devices::Compressor::typeID);
+        return readDeviceType (state) == juce::String (devices::Compressor::typeID);
     }
 
     // Phazite's compressor, still as it was made (but for its mode, set by its Duck tab first), ducks under the key chosen for
@@ -183,7 +184,7 @@ namespace
             return;
         }
 
-        if (state[schema::deviceType].toString() != juce::String (Multiband::typeID) || ! isAsMade (state, Multiband::info))
+        if (readDeviceType (state) != juce::String (Multiband::typeID) || ! isAsMade (state, Multiband::info))
             return;
 
         // Its low band's curve: 8:1 over -30 dB, its last point in the places the others leave.
@@ -214,7 +215,7 @@ namespace
         using devices::Vocoder;
         const auto state = findDeviceState (song, id);
 
-        if (state[schema::deviceType].toString() == juce::String (Vocoder::typeID))
+        if (readDeviceType (state) == juce::String (Vocoder::typeID))
             keepValueSetByHand (state, Vocoder::info.parameters[(size_t) Vocoder::carrier], (float) Vocoder::Carrier::track,
                                 &song.getUndoManager());
     }
@@ -250,7 +251,7 @@ bool hasSidechain (const Song& song, DeviceID id)
     if (! state.hasType (schema::DEVICE) || getOwningContainer (state).isValid())
         return false;
 
-    if (const auto* own = findOwnDevice (state[schema::deviceType].toString().toStdString()))
+    if (const auto* own = findOwnDevice (readDeviceType (state).toStdString()))
         return own->hasSidechain;
 
     // A plug-in's inputs, as its helper tells them while it plays: a sidechain's after its main ones.
@@ -278,7 +279,7 @@ std::vector<TrackID> getSidechainSources (const Song& song, DeviceID id)
 
 TrackID getSidechainSource (const Song& song, DeviceID id)
 {
-    const auto source = TrackID::fromRaw ((std::uint64_t) (juce::int64) findDeviceState (song, id)[schema::deviceSidechain]);
+    const auto source = readDeviceSidechain (findDeviceState (song, id));
     const auto state = findTrackState (song, source);
     return state.hasType (schema::TRACK) && hasSoundOfItsOwn (state) ? source : TrackID();
 }
@@ -291,7 +292,7 @@ bool hearsSidechain (const Song& song, DeviceID id)
     const auto state = findDeviceState (song, id);
     const auto& mode = devices::Compressor::info.parameters[(size_t) devices::Compressor::mode];
     return ! isCompressor (state)
-           || devices::Compressor::getMode (readValueSetByHand (state, mode)) != devices::Compressor::Mode::transient;
+           || devices::Compressor::getMode (readDeviceParameterValue (state, mode)) != devices::Compressor::Mode::transient;
 }
 
 bool switchesSidechain (const juce::ValueTree& values, const juce::Identifier& property)

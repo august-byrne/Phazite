@@ -10,6 +10,7 @@
 #include "model/base/Json.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
@@ -1492,6 +1493,29 @@ namespace
             }
 
             //==============================================================================
+            // Each device, container and chain as the song holds it, written as Phazite writes it (DevicesValue.h:
+            // keepDeviceAsHeld(), the one rule, the held reader's), once its numbers are within their ranges (keepNumbers()),
+            // its values of parameters it has within theirs (keepDevices()) and one VALUES and one SOUNDS are left
+            // (keepKeys()): each of its own properties the value covers in the writer's text, none at its default, none the
+            // writer leaves out; no value at its default, no sound of a property its type hasn't nor an empty one, no VALUES
+            // or SOUNDS left empty, nothing Phazite doesn't know in either (the two in their order), and no SOUNDS
+            // on a plug-in. What the value doesn't cover stays (a plug-in's state, a chain's mute and solo, a window's place, a
+            // property Phazite doesn't know). Only through what can hold a device (the tracks, the master, containers and
+            // their chains), never through a clip's notes.
+            void keepDevicesAsHeld (juce::ValueTree tree)
+            {
+                for (auto child : tree)
+                {
+                    if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
+                        keepDeviceAsHeld (child);
+
+                    if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK) || child.hasType (schema::MASTER)
+                        || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
+                        keepDevicesAsHeld (child);
+                }
+            }
+
+            //==============================================================================
             // Each curve's points at positions along the control's travel, 0 to 1, one without a position, or with one that is no
             // number, left out (0 would be silence on a volume's lane), and a curve that had points and is left without gone;
             // a curve's children of a type Phazite doesn't know left out, so that a curve's points are its children, counted
@@ -1762,6 +1786,7 @@ namespace
                 forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
                 keepKeys (state);
                 keepModulators (state);
+                keepDevicesAsHeld (state);
                 keepCurves();
                 keepMidiLinks();
                 keepPaths (state);

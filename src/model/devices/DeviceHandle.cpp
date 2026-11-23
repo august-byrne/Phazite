@@ -8,6 +8,7 @@
 #include "internal/Swap.h"
 #include "internal/Wavetables.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
@@ -42,11 +43,18 @@ namespace
 
         return nullptr;
     }
+
+    // The description of one of Phazite's own devices the song holds by an ID, read through the devices' conversion
+    // (DevicesValue.h: readDeviceType()): one look for the device; nullptr for any other, and for one the song hasn't.
+    const devices::DeviceInfo* findOwnInfo (const Song& song, DeviceID id)
+    {
+        return findOwnDevice (readDeviceType (findDeviceState (song, id)).toStdString());
+    }
 } // namespace
 
 DeviceHandle makeDeviceHandle (Song& song, DeviceID id)
 {
-    if (findOwnDevice (findDeviceState (song, id)[schema::deviceType].toString().toStdString()) == nullptr)
+    if (findOwnInfo (song, id) == nullptr)
         return {};
 
     auto impl = std::make_shared<DeviceHandle::Impl>();
@@ -67,8 +75,9 @@ bool DeviceHandle::isValid() const
 
 const devices::DeviceInfo* DeviceHandle::getInfo() const
 {
-    auto* song = songOf (impl);
-    return song != nullptr ? findOwnDevice (findDeviceState (*song, impl->id)[schema::deviceType].toString().toStdString()) : nullptr;
+    // One look for the device: none for one the song no longer holds, as songOf() would find.
+    auto* song = impl != nullptr ? impl->song.get() : nullptr;
+    return song != nullptr ? findOwnInfo (*song, impl->id) : nullptr;
 }
 
 ParameterHandle DeviceHandle::getParameter (std::string_view id, const juce::String& undoName) const

@@ -32,14 +32,20 @@ DeviceID findContainerOf (const Song&, DeviceID device);
 //==============================================================================
 // Chains (Schema.h: CHAIN). A container's chains' elements, in their order; whether an element is a chain's; a chain's
 // element by its ID, invalid for one the song hasn't; and the container's element a chain's, or a device's in a chain, is
-// in (invalid for any other).
+// in (invalid for any other). For the containers' writers, the conversion's readers of one field (model/base/internal/
+// DevicesValue.h) and the readers outside the devices' own code that the devices' next piece moves (roadmap step S5.20); a
+// new reader reads by ID below, each of which reads its fields through the conversion. The other functions here that take
+// an element (keepCrossoversInOrder(), canHoldInChain(), insertIntoChain(), makeContainerState(), makeChainState()) are the
+// writers'.
 std::vector<juce::ValueTree> getChainStates (const juce::ValueTree& container);
 bool isChainState (const juce::ValueTree&);
 juce::ValueTree findContainerChain (const Song&, DeviceID chain);
 juce::ValueTree getOwningContainer (const juce::ValueTree& chainOrDevice);
 
-// By IDs: a container's chains, in their order; a chain's devices, in theirs; the chain a device in a container is in (none
-// for one on a channel); the container a chain is in; and a chain's place among its container's.
+// By IDs: a container's chains, in their order; a chain's devices, in theirs (its DEVICEs alone: a container in a chain,
+// which no edit makes and the loader takes away, isn't listed, where the reading before the devices' values listed it); the
+// chain a device in a container is in (none for one on a channel); the container a chain is in; and a chain's place among
+// its container's.
 std::vector<DeviceID> getChains (const Song&, DeviceID container);
 std::vector<DeviceID> getChainDevices (const Song&, DeviceID chain);
 DeviceID findChainOf (const Song&, DeviceID device);

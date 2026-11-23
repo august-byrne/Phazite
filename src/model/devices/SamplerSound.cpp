@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/Json.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
@@ -58,12 +59,12 @@ namespace
 
     juce::File getSampleFile (const Song& song, const juce::ValueTree& sounds)
     {
-        return findProjectFile (song, sounds[schema::samplerSampleFile].toString());
+        return findProjectFile (song, readSoundsProperty (sounds, schema::samplerSampleFile));
     }
 
     int getFactoryIndex (const juce::ValueTree& sounds)
     {
-        return std::max (0, devices::findFactorySample (sounds[schema::samplerSample].toString().toStdString()));
+        return std::max (0, devices::findFactorySample (readSoundsProperty (sounds, schema::samplerSample).toStdString()));
     }
 
     std::vector<float> parseSlices (const juce::String& text)
@@ -91,7 +92,8 @@ namespace
 
     Sampler::ManualSlices readManualSlices (const juce::ValueTree& sounds)
     {
-        return { parseSlices (sounds[schema::samplerSlices].toString()), parseSlices (sounds[schema::samplerSlicesRemoved].toString()) };
+        return { parseSlices (readSoundsProperty (sounds, schema::samplerSlices)),
+                 parseSlices (readSoundsProperty (sounds, schema::samplerSlicesRemoved)) };
     }
 
     // The sound it plays, as loaded for it: its file's, or its factory sound.
@@ -165,7 +167,7 @@ namespace
 
 bool isSampler (const juce::ValueTree& deviceState)
 {
-    return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == Sampler::typeID;
+    return deviceState.hasType (schema::DEVICE) && readDeviceType (deviceState) == Sampler::typeID;
 }
 
 bool isSampler (const Song& song, DeviceID id)
@@ -514,7 +516,7 @@ void loadSamplerSound (Sampler& sampler, const Song& song, const juce::ValueTree
 
 void loadSamplerSlices (Sampler& sampler, const juce::ValueTree& sounds)
 {
-    if (sounds[schema::samplerSlices].toString().isEmpty() && sounds[schema::samplerSlicesRemoved].toString().isEmpty())
+    if (readSoundsProperty (sounds, schema::samplerSlices).isEmpty() && readSoundsProperty (sounds, schema::samplerSlicesRemoved).isEmpty())
     {
         sampler.setManualSlices (nullptr);
         return;

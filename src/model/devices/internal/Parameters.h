@@ -146,5 +146,8 @@ float getCurrentValue (const Song&, const FoundParameter&, bool withModulation);
 void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo&, float value, juce::UndoManager*);
 
 // The value set by hand of a parameter of an element (a device's), as its VALUES keep it, or its default.
+// For the presets' reader alone, which the devices' next piece moves (roadmap step S5.20): a device's readers read it through
+// the devices' conversion (model/base/internal/DevicesValue.h: readDeviceParameterValue()), and keepValueSetByHand() is the
+// devices' writers' until their own piece.
 float readValueSetByHand (const juce::ValueTree& element, const devices::ParameterInfo&);
 } // namespace phazite

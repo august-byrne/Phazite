@@ -7,6 +7,7 @@
 #include "TestSong.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/ChordLaneValue.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
@@ -22,6 +23,8 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <string_view>
+#include <tuple>
 
 TEST_CASE ("A song numbers its items from its own count, which goes past every ID it holds")
 {
@@ -145,6 +148,30 @@ juce::ValueTree findFirst (const juce::ValueTree& tree, const juce::Identifier& 
 // the song holds a clip of each kind's own properties alone (ClipsValue.h: ClipValue); else the first of the type.
 juce::ValueTree findFirstFor (const juce::ValueTree& tree, const juce::Identifier& type, const juce::Identifier& property)
 {
+    // A device's sounds: of a device whose type has the property, which the loader keeps no other of (DevicesValue.h:
+    // keepDeviceAsHeld()): a sampler's slices on a sampler's SOUNDS, not a drum sampler's.
+    if (type == schema::SOUNDS)
+    {
+        juce::ValueTree found;
+        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (found.isValid())
+                    return;
+
+                if (child.hasType (schema::SOUNDS)
+                    && phazite::findSoundIndex (std::string_view (element[schema::deviceType].toString().toRawUTF8()), property) >= 0)
+                    found = child;
+                else
+                    visit (child);
+            }
+        };
+
+        visit (tree);
+        return found;
+    }
+
     if (type != schema::CLIP)
         return findFirst (tree, type);
 
@@ -468,6 +495,19 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                 if (expected.has_value() && type == &schema::MACRO && property == &schema::macroValue
                     && juce::exactlyEqual (*expected, 0.0))
                     expected.reset();
+
+                // A container's or a chain's own property kept at what Phazite's writer leaves out (a container's mix at 1, a
+                // chain's volume and pan at 0, a range at its end) is written as none, as the song holds them (DevicesValue.h:
+                // keepDeviceAsHeld()).
+                for (const auto& [element, at, none] : { std::tuple (&schema::CONTAINER, &schema::deviceMix.getName(), 1.0),
+                                                         std::tuple (&schema::CHAIN, &schema::channelVolume.getName(), 0.0),
+                                                         std::tuple (&schema::CHAIN, &schema::channelPan.getName(), 0.0),
+                                                         std::tuple (&schema::CHAIN, &schema::chainLowKey.getName(), 0.0),
+                                                         std::tuple (&schema::CHAIN, &schema::chainHighKey.getName(), 127.0),
+                                                         std::tuple (&schema::CHAIN, &schema::chainLowVelocity.getName(), 1.0),
+                                                         std::tuple (&schema::CHAIN, &schema::chainHighVelocity.getName(), 127.0) })
+                    if (expected.has_value() && type == element && property->getName() == *at && juce::exactlyEqual (*expected, none))
+                        expected.reset();
 
                 const auto loaded = changed.getLoaded (*property);
                 REQUIRE (loaded.has_value() == expected.has_value());
