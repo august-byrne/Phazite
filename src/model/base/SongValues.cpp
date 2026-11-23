@@ -9,6 +9,7 @@
 #include "internal/MidiLinksArea.h"
 #include "internal/ModulationArea.h"
 #include "internal/NotesArea.h"
+#include "internal/Schema.h"
 #include "internal/SectionsArea.h"
 #include "internal/SendsArea.h"
 #include "internal/TempoMapArea.h"
@@ -189,6 +190,38 @@ bool SongValues::remembers (const juce::ValueTree& track) const
 std::vector<TrackID> SongValues::getRemembered() const
 {
     return keeper != nullptr ? keeper->clips.getRemembered() : std::vector<TrackID>();
+}
+
+int SongValues::countHoldingsLeftWithKeepers() const
+{
+    if (keeper == nullptr)
+        return 0;
+
+    // A track's element (or the master's) out of the song, or a container's that left with its channel's: one taken out of
+    // its channel alone has no parent (DeviceWriters.cpp), and is the devices' own until their switch.
+    const auto& state = keeper->state;
+    const auto isGone = [&state] (const juce::ValueTree& element)
+    {
+        if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
+            return ! element.isAChildOf (state);
+
+        const auto channel = element.getParent();
+        return element.hasType (schema::CONTAINER) && (channel.hasType (schema::TRACK) || channel.hasType (schema::MASTER))
+               && ! element.isAChildOf (state);
+    };
+
+    int count = 0;
+
+    for (const auto& each : keeper->clips.remembered)
+        count += (! each.clips.empty() || ! each.notes.empty()) && isGone (each.track) ? 1 : 0;
+
+    for (const auto& each : keeper->modulation.remembered)
+        count += ! each.modulators.empty() && isGone (each.owner) ? 1 : 0;
+
+    for (const auto& each : keeper->sends.remembered)
+        count += ! each.sends.empty() && isGone (each.track) ? 1 : 0;
+
+    return count;
 }
 
 const SongDevices* SongValues::getDevicesAsTold() const noexcept

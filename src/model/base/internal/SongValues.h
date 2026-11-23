@@ -109,8 +109,8 @@
 //      ClipPass), and the song's own, makeSongOwnLikeIn() (as its makeTempoMapLike()); its elements left out of every pass
 //      over elements that names the areas' in its conditions: copyForSong(), isPlaced() (with isTempoMaps()),
 //      findPlaces(), findHolder() and sendItemsHome(); and its keeper's count (step 3) a line of NothingTakenIn::count()
-//      and, where a merge's choice never leaves the area's elements to the keeper (not the clips', which come in with a
-//      track chosen whole), of NothingTakenInButClips::count() in model/versions/VersionsModel.cpp. An area with a
+//      there and of the one in model/versions/VersionsModel.cpp (a merge's choice leaves nothing to the keeper: a track
+//      chosen whole is given what it holds in each area by model/arrangement/Tracks.cpp, chooseTrackClash()). An area with a
 //      placeholder (step 2): its pass owns the placeholder too, adding or taking it away through the area's function (as
 //      Chords.h's makeChordLaneAs()), and isPlaced(), copyForSong() and makeSongOwnLikeIn()'s list of the song's own
 //      elements leave the element and its children alone. What the other's version couldn't read (a stand-in): an area
@@ -359,6 +359,28 @@ public:
     // the order it holds already is no change.
     void eraseClip (Song&, ClipID);
     void setTrackClipOrder (Song&, TrackID, immer::flex_vector<ClipID> order);
+
+    // Clips taken out of the song, each with its notes, in one set of each area (a clip the song hasn't left out): what goes
+    // with the tracks a function removes (model/arrangement/internal/Tracks.h: eraseTrackHoldings(), through the clips' code,
+    // Clips.h: eraseTrackClips()). Nothing more: an alias group left with one clip keeps it linked, as the keeper left it
+    // (the remover's unlinkLoneClips() follows). In ClipsArea.cpp.
+    void eraseClips (Song&, const std::vector<ClipID>&);
+
+    // The same for modulators and macros (each with what it modulates, from its owner's list too) and for sends: those of
+    // these IDs the song holds taken out in one set of the area, each list kept in step as each one's helper keeps it
+    // (ModulationValue.h: withoutModulator(); SendsValue.h: withoutSend()), so that no walk of the whole area checks it: what
+    // a track's removal takes (Modulation.h: eraseModulatorsOf(); Mixer.h: eraseTrackSends()), its cost the track's. Whether
+    // it changed the area. In ModulationArea.cpp and SendsArea.cpp.
+    bool eraseModulators (Song&, const std::vector<ModulatorID>&);
+    bool eraseSends (Song&, const std::vector<DeviceID>&);
+
+    // A test hook: how many of what the keeper remembers of a track taken out of the song (each area's part: the clips', with
+    // their notes, modulation's, the sends') holds something for an element that is not in the song: a TRACK or the MASTER
+    // not in it, or a CONTAINER that left with its channel (one taken out of its channel alone, which the devices' switch
+    // moves, is no track's). Every function that removes a track erases what it holds first (Tracks.h: eraseTrackHoldings()),
+    // so that the keeper finds nothing to remember; what is left is a remover that didn't (tests/SongCheck.cpp, checkSong(), and
+    // tests/UndoCheck.cpp check it is 0). In SongValues.cpp.
+    int countHoldingsLeftWithKeepers() const;
 
     // Gives a MIDI clip of the song and each MIDI clip of its alias group this value of notes, as setClip() sets: the one way
     // to change a clip's notes. Notes equal to those each holds are no change, and make no action in the history: nothing

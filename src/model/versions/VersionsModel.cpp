@@ -2093,22 +2093,20 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
 
 namespace
 {
-    // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net) but a track's clips,
-    // modulators and sends (and a container's macros): the tempo
-    // map's and the chord lane's choices set their values (chooseInAreas()), and no choice in the tree adds their entries;
-    // checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp: NothingTakenIn). What the
-    // keeper took in counted for every area that counts it but the clips, a line each, in the order of the areas: a track
-    // chosen whole in the tree (chooseInTree()) comes in with its clips, which the clips' keeper takes in, as it takes in a
-    // track that comes into the song any other way.
-    struct NothingTakenInButClips
+    // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net): each area's choice sets its
+    // values (chooseInAreas()), a whole track's or the master's among them (chooseTrackClash(): its clips, modulators, macros,
+    // sends and its devices' store entries through each area's code, its element added without them), and no choice in the
+    // tree adds an area's entries; checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp:
+    // NothingTakenIn). What the keeper took in counted for every area that counts it, a line each, in the order of the areas.
+    struct NothingTakenIn
     {
-        explicit NothingTakenInButClips (const Song& s)
+        explicit NothingTakenIn (const Song& s)
             : song (s),
               before (count (s))
         {
         }
 
-        ~NothingTakenInButClips() { jassert (count (song) == before); }
+        ~NothingTakenIn() { jassert (count (song) == before); }
 
         static int count (const Song& s)
         {
@@ -2117,22 +2115,24 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            // Not modulation's nor the sends', as not the clips': their choices set the values (chooseModulationClash(),
-            // chooseSendClash()), but a track or a container chosen whole in the tree comes with its modulators or macros and
-            // its sends, which the keeper takes in, as its clips. Nor the devices': their choices set them through their
-            // setters (chooseDeviceClash(), chooseDeviceStoreClash()), and their part of the keeper only tells what the tree
-            // holds, taking nothing in, until the devices' switch.
-            return values->countTempoMapAdopted()    // the tempo map's
-                   + values->countChordLaneAdopted() // the chord lane's
-                   + values->countMidiLinksAdopted() // the MIDI links'
-                   + values->countCurvesAdopted()    // the curves'
-                   + values->countSectionsAdopted(); // the sections'
+            // Not the devices': their choices set them through their setters (chooseDeviceClash()), and their part of the
+            // keeper only tells what the tree holds, taking nothing in, until the devices' switch.
+            return values->countAdopted()               // the clips', with their notes
+                   + values->countTempoMapAdopted()     // the tempo map's
+                   + values->countChordLaneAdopted()    // the chord lane's
+                   + values->countMidiLinksAdopted()    // the MIDI links'
+                   + values->countCurvesAdopted()       // the curves'
+                   + values->countSectionsAdopted()     // the sections'
+                   + values->countModulationAdopted()   // modulation's
+                   + values->countSendsAdopted()        // the sends'
+                   + values->countDeviceStoreAdopted(); // the store's: chooseDeviceStoreClash(), and a whole track's
+                                                        // (chooseTrackClash()) through the store's functions
         }
 
         const Song& song;
         const int before;
 
-        JUCE_DECLARE_NON_COPYABLE (NothingTakenInButClips)
+        JUCE_DECLARE_NON_COPYABLE (NothingTakenIn)
     };
 
     // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
@@ -2141,8 +2141,8 @@ namespace
     // the sends (a path through a send), the devices (a path through a device, a container or a chain: the store's first), a
     // curve (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a
     // note's property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path
-    // through a clip, refused). What the first whose path it is did with it; none of them (notTheArea) for a clash in the
-    // song's tree.
+    // through a clip, refused), a whole track or the master (chooseTrackClash()). What the first whose path it is did with
+    // it; none of them (notTheArea) for a clash in the song's tree.
     AreaChoice chooseInAreas (Song& song, const MergeClash& clash, int value, const MergeSides& sides)
     {
         if (const auto choice = chooseTempoMapClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
@@ -2178,13 +2178,18 @@ namespace
         if (const auto choice = chooseClipClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;
 
+        if (const auto choice = chooseTrackClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice; // a whole TRACK or the MASTER
+
         return AreaChoice::notTheArea;
     }
 
     // A clash in the song's tree (no area's: chooseInAreas()), chosen in it, in the history of the choice's step: a property
     // given the value chosen, or taken away where that side had none; an element replaced whole by the side chosen's, in its
     // place, or taken out where that side had none. Whether it was chosen (false for a path that names nothing in the song).
-    // No path through a DEVICE, a CONTAINER or a CHAIN comes here: the devices' choosers take or refuse every one.
+    // No path through a DEVICE, a CONTAINER or a CHAIN comes here: the devices' choosers take or refuse every one; nor a whole
+    // TRACK or the MASTER, which the tracks' chooser takes (chooseTrackClash()), so that no element added here holds what an
+    // area's keeper would take in.
     bool chooseInTree (Song& song, const MergeClash& clash, int value)
     {
         auto* undo = &song.getUndoManager();
@@ -2243,7 +2248,7 @@ bool chooseClash (ProjectContext& context, int index, int value)
 
     // A change of its own, one undo step, named for the choice: "Take the Other Branch's: Bass volume".
     const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
-    const NothingTakenInButClips byTheValuesAlone (*song);
+    const NothingTakenIn byTheValuesAlone (*song);
 
     // Each area the song holds as a value beside its tree asked first; a clash none of them has, in the song's tree.
     const auto inAreas = chooseInAreas (*song, clash, value, { merging.base, merging.before, merging.theirs });

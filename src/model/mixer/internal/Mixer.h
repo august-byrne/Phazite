@@ -429,6 +429,17 @@ DeviceID addSendTo (Song&, TrackID from, TrackID returnTrack);
 DeviceID addSendToNewReturn (Song&, TrackID from);
 void removeSend (Song&, DeviceID send);
 
+// What a track's removal takes of the sends (model/arrangement/internal/Tracks.h: eraseTrackHoldings()): every send on these
+// tracks, in one set of the sends' area (SongValues.h: eraseSends()), each track's list looked in alone, nothing walked of
+// the rest; whether it changed the song's sends. Not the sends to a return that goes: forgetWhatNamesTheGone()'s.
+bool eraseTrackSends (Song&, const std::vector<TrackID>&);
+
+// The sends a track's element holds (its SEND children, not those of the tracks in it) given to the song's track of its ID (a
+// merge's choice of a whole track: Tracks.h, chooseTrackClash()), as the keeper takes in those of a track that comes into the
+// song with them (model/base/internal/SendsArea.h): each read as the song holds one (SendsValue.h: readHeldSend()), in their
+// order, after the track's others, one of an ID the song holds left out.
+void takeSendsOf (Song&, const juce::ValueTree& track);
+
 // Each copied track (by the copied IDs: a duplicate's, model/arrangement/internal/Tracks.h, duplicateTracks()) given its
 // original's sends, in their order, each with a new ID of the song's, which joins the copied IDs before what names a send's
 // level is copied by them (a modulation: Modulation.h, copyModulation(); a curve: Automation.h, copyCurves()); a send to a

@@ -1706,6 +1706,12 @@ void checkSong (const Song& song)
 
     // And what finds its items by their IDs holds what it does (model/base/internal/SongIndex.h).
     CHECK (song.getIndex().isExact());
+
+    // And the keeper of its values holds nothing of a track taken out of it: whatever took one out erased what it held first
+    // (model/arrangement/internal/Tracks.h: eraseTrackHoldings()).
+    if (const auto* values = song.getValues())
+        CHECK_MESSAGE (values->countHoldingsLeftWithKeepers() == 0,
+                       "a track was taken out of the song without eraseTrackHoldings(): the keeper erased what it held");
 }
 
 Song::Ptr copyAsOpened (const Song& song)

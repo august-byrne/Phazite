@@ -96,6 +96,20 @@ bool setModulatorOrder (Song&, const ModulatorPlace& owner, const immer::flex_ve
 bool setAllModulation (Song&, SongModulation);
 std::optional<ModulatorPlace> findOwnerPlace (const Song&, const ModulatorPlace& owner);
 
+// What a track's removal takes of modulation (model/arrangement/internal/Tracks.h: eraseTrackHoldings()): every modulator and
+// macro of these owners (each a channel's place, a track's or the master's, or a container's: ModulationValue.h,
+// SongModulation::findList()), with what each modulates, in one set of the area (SongValues.h: eraseModulators()); each
+// owner's list looked in alone, nothing walked of the rest. Not the modulations of others that name what goes:
+// forgetWhatNamesTheGone()'s (Mixer.h). Whether it changed the song's modulation.
+bool eraseModulatorsOf (Song&, const std::vector<ModulatorPlace>& owners);
+
+// The modulators and macros an owner's element holds (a TRACK's, the MASTER's, a CONTAINER's on one: its MODULATOR and MACRO
+// children, not those of the containers or tracks in it) given to the song (a merge's choice of a whole track: Tracks.h,
+// chooseTrackClash()), as the keeper takes in those of an owner that comes into the song with them (model/base/internal/
+// ModulationArea.h): each read as the song holds one (readHeldModulator()) at its element's place (readModulatorPlace()), in
+// their order, after the owner's others (setModulator()), one of an ID the song holds left out.
+void takeModulatorsOf (Song&, const juce::ValueTree& owner);
+
 //==============================================================================
 // A channel's modulators, in their order, then its macros: a track's, a folder's or the master's (by its ID, or none). A
 // container's macros are its own (getContainerMacros()).

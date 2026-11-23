@@ -4,6 +4,9 @@
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
+#include "model/base/internal/ClipNotesValue.h"
+#include "model/base/internal/ClipsValue.h"
+#include "model/base/internal/NotesArea.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
@@ -750,6 +753,64 @@ void eraseClip (Song& song, ClipID clip)
             setClipLink (song, group[0] == clip ? group[1] : group[0], 0);
 
     values->eraseClip (song, clip);
+}
+
+void eraseTrackClips (Song& song, const std::vector<TrackID>& tracks)
+{
+    auto* values = song.getValues();
+
+    if (values == nullptr)
+        return;
+
+    std::vector<ClipID> gone;
+
+    for (const auto track : tracks)
+        if (const auto* list = values->clips.get().tracks.find (track.getRaw()))
+            gone.insert (gone.end(), list->begin(), list->end());
+
+    if (! gone.empty())
+        values->eraseClips (song, gone);
+}
+
+void takeClipsOf (Song& song, const juce::ValueTree& track)
+{
+    auto* values = song.getValues();
+    const auto id = getTrackID (track);
+
+    if (values == nullptr || ! track.hasType (schema::TRACK) || ! holdsClips (song, id))
+        return;
+
+    for (const auto& element : track)
+    {
+        if (! element.hasType (schema::CLIP))
+            continue;
+
+        auto value = keepWithinClip (readClipValue (element));
+        value.track = id;
+
+        if (! value.id.isValid())
+            continue;
+
+        // The sound of the audio alias group it joins, where another clip of it holds one alike: the group holds one.
+        if (value.isAudio() && value.link != 0)
+            if (const auto* members = values->clips.get().groups.find (value.link))
+                for (const auto member : *members)
+                    if (const auto* other = values->findClip (member); other != nullptr && member != value.id && other->isAudio())
+                    {
+                        if (other->sound == value.sound)
+                            value.sound = other->sound;
+
+                        break;
+                    }
+
+        // A MIDI clip's own notes, but where its group holds some (SongValues.h: setClip() gives it those).
+        std::optional<ClipNotes> own;
+
+        if (value.isMidi() && findGroupNotes (values->clips.get(), values->notes.get(), value.link, value.id) == nullptr)
+            own = readClipNotes (element);
+
+        values->setClip (song, std::move (value), -1, own.has_value() ? &*own : nullptr);
+    }
 }
 
 std::optional<ClipValue> getClipValueAsSet (const Song& song, const ClipValue& clip)

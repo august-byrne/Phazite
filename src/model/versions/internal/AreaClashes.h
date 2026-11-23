@@ -79,4 +79,14 @@ AreaChoice chooseDeviceClash (Song&, const MergeClash&, int value, const MergeSi
 AreaChoice chooseCurveClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseNoteClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSides&);
+
+// The tracks' (model/arrangement/Tracks.cpp): a whole TRACK or the MASTER (a path that ends at one, with no property), which
+// only a commit's song from anyone makes a clash of: the song's taken out with what it holds in the song's areas
+// (Tracks.h: eraseTrackHoldings()), and the side chosen's put in its place, its clips with their notes, its modulators and
+// macros, its sends and what its devices hold of the store given through each area's code as the keeper of the song's
+// values took them in, so that nothing is left to the keeper; its devices, containers and chains in its element (without
+// what the store holds of them), as the song's tree holds them until the devices'
+// switch. Asked after the clips' (a path through a TRACK to a CLIP is theirs). A track's property stays the tree's
+// (VersionsModel.cpp: chooseInTree()) until the tracks' writers move to their values.
+AreaChoice chooseTrackClash (Song&, const MergeClash&, int value, const MergeSides&);
 } // namespace phazite

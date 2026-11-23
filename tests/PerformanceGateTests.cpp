@@ -26,6 +26,7 @@
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
 #include "engine/nodes/NoteSequence.h"
 #include "model/arrangement/AudioClipModel.h"
@@ -2619,6 +2620,129 @@ TEST_CASE ("Performance gate: removing an effect allocates no more for a song of
         return; // nothing counted on this build, where the counted removal didn't run (PerformanceCounts.h)
 
     CHECK (*many.allocations <= *few.allocations + 8); // 127 and 127, measured 2026-11-22
+}
+
+TEST_CASE ("Performance gate: a track deleted erases what it holds reading as much on a song of 40 tracks as on one of 4, and "
+           "allocating no more but for the depth of the areas' maps")
+{
+    // What a track's removal takes of the song's areas beside its tree, explicitly, before its element goes
+    // (Tracks.h: eraseTrackHoldings()): its clips' list, its channel's and its containers' lists of modulators and its sends'
+    // list each looked in alone, and each area set once. No modulator or send read from an element (ModulationValue.h:
+    // countModulatorsRead(), SendsValue.h: countSendsRead()), no more looks at the sends (countSendLooks()) and no more of the
+    // song's elements visited (SongIndex.h: countElementsVisited(), which counts the clips' lists walked too) for 40 tracks of
+    // 3 clips, a modulator and a send each than for 4; and the allocations the same but for what immer's maps allocate for
+    // the depth of their trees, what hears the areas change included (the project's). Each area's part alone is stated for a
+    // song of no project, which nothing hears. The whole Delete Track allocates more for the larger song, for what names the
+    // gone (Mixer.h: forgetWhatNamesTheGone(), which gathers the song's IDs): stated, not gated here.
+    struct Counts
+    {
+        std::uint64_t modulatorsRead = 0, sendsRead = 0, sendLooks = 0, visited = 0;
+        std::optional<int> erase {}, remove {}, bareClips {}, bareModulators {}, bareSends {};
+    };
+
+    const auto countsFor = [] (int numTracks)
+    {
+        phazite::test::TestSong s;
+        auto& song = *phazite::findSong (s.context);
+        std::vector<phazite::TrackID> tracks { s.firstTrack };
+
+        while (tracks.size() < (size_t) numTracks)
+            tracks.push_back (s.addTrack ("Track"));
+
+        const auto reverb = s.addReturn (tracks[0], dev::Reverb::typeID, -6.0f);
+
+        for (const auto track : tracks)
+        {
+            for (int i = 0; i < 3; ++i)
+                s.addNote (s.addMidiClip (track, i * 4.0, 4.0), 60 + i, i * 4.0, 1.0);
+
+            s.addModulator (track, phazite::ModulatorType::lfo);
+
+            if (track != tracks[0])
+                s.addSend (track, reverb, -6.0f);
+        }
+
+        phazite::test::dispatchPendingMessages();
+        const auto victim = tracks[1];
+        Counts counts;
+
+        {
+            const phazite::UndoStep step (song, "Erase");
+            const auto modulatorsBefore = phazite::countModulatorsRead();
+            const auto sendsBefore = phazite::countSendsRead();
+            const auto looksBefore = phazite::countSendLooks();
+            const auto visitedBefore = phazite::SongIndex::countElementsVisited();
+            counts.erase = phazite::test::countAllocations ([&song, victim] { phazite::eraseTrackHoldings (song, { victim }); });
+            counts.modulatorsRead = phazite::countModulatorsRead() - modulatorsBefore;
+            counts.sendsRead = phazite::countSendsRead() - sendsBefore;
+            counts.sendLooks = phazite::countSendLooks() - looksBefore;
+            counts.visited = phazite::SongIndex::countElementsVisited() - visitedBefore;
+        }
+
+        CHECK (phazite::getClips (song, victim).empty());
+        phazite::undo (song);
+        REQUIRE (phazite::getClips (song, victim).size() == 3);
+        phazite::test::dispatchPendingMessages();
+
+        {
+            const phazite::UndoStep step (song, "Delete Track");
+            counts.remove = phazite::test::countAllocations ([&song, victim] { phazite::deleteTracks (song, { victim }, nullptr); });
+        }
+
+        // The same song's areas in a song of no project, which nothing listens to (what the views, the player and the versions
+        // do as they are told is theirs, not the erase's): each area's part alone.
+        auto bare = phazite::createSong();
+        const auto bareTracks = phazite::ensureTracks (*bare, numTracks);
+        const auto bareReturn = phazite::insertReturnTrack (*bare, "Reverb", nullptr);
+
+        for (const auto track : bareTracks)
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                const auto clip =
+                    phazite::insertMidiClip (*bare, track, { phazite::test::at (i * 4.0), phazite::test::at (i * 4.0 + 4.0) }, nullptr);
+                phazite::addNote (*bare, clip, 60 + i, phazite::test::at (i * 4.0), phazite::test::lasting (1.0), 100);
+            }
+
+            phazite::addModulator (*bare, track, phazite::ModulatorType::lfo);
+            phazite::addSend (*bare, track, bareReturn, false);
+        }
+
+        bare->getUndoManager().clearUndoHistory();
+        const auto bareVictim = bareTracks[1];
+        const phazite::UndoStep step (*bare, "Erase");
+        counts.bareClips = phazite::test::countAllocations ([&bare, bareVictim] { phazite::eraseTrackClips (*bare, { bareVictim }); });
+        counts.bareModulators = phazite::test::countAllocations (
+            [&bare, bareVictim] { phazite::eraseModulatorsOf (*bare, { phazite::ModulatorPlace { .track = bareVictim } }); });
+        counts.bareSends = phazite::test::countAllocations ([&bare, bareVictim] { phazite::eraseTrackSends (*bare, { bareVictim }); });
+        return counts;
+    };
+
+    const auto small = countsFor (4), large = countsFor (40);
+    INFO ("4 tracks: " << small.modulatorsRead << " modulators and " << small.sendsRead << " sends read, " << small.sendLooks
+                       << " looks at the sends, " << small.visited << " elements visited, " << small.erase.value_or (-1)
+                       << " allocations erasing, " << small.remove.value_or (-1) << " deleting; 40 tracks: " << large.modulatorsRead << ", "
+                       << large.sendsRead << ", " << large.sendLooks << ", " << large.visited << ", " << large.erase.value_or (-1) << ", "
+                       << large.remove.value_or (-1));
+    INFO ("Alone, of no project: 4 tracks: " << small.bareClips.value_or (-1) << " clips, " << small.bareModulators.value_or (-1)
+                                             << " modulation, " << small.bareSends.value_or (-1)
+                                             << " sends; 40 tracks: " << large.bareClips.value_or (-1) << ", "
+                                             << large.bareModulators.value_or (-1) << ", " << large.bareSends.value_or (-1));
+    CHECK (small.modulatorsRead == 0);
+    CHECK (large.modulatorsRead == 0);
+    CHECK (small.sendsRead == 0);
+    CHECK (large.sendsRead == 0);
+    CHECK (large.sendLooks == small.sendLooks);
+    CHECK (large.visited == small.visited);
+
+    if (! small.erase.has_value() || ! large.erase.has_value())
+        return; // nothing counted on this build (PerformanceCounts.h)
+
+    // Measured 2026-11-23 (Windows Debug): 79 and 92, the clips' 29 and 38, modulation's 9 and 11, the sends' 9 and 11 of
+    // them: each map a level deeper for ten times the entries. Through the whole-value setters, whose checks in Debug builds
+    // walk the area (ModulationValue.h: holdsTogether(); SendsValue.h: holdsItsLists()), 92 and 285. Delete Track whole: 188
+    // and 536 (what names the gone gathers the song's IDs).
+    CHECK (*large.erase <= *small.erase + 16);
 }
 
 TEST_CASE ("Performance gate: a macro turned and a modulator's value set read none of it whole, and a track duplicated no more "

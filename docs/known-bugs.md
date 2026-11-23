@@ -24,7 +24,8 @@ found by reading while the automation's curves were made values (2026-11-22), an
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
 the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
-onto another's beat does. 244 was found by a test the design of the tracks' values asked for (the same step, 2026-11-23).
+onto another's beat does. 244 was found by a test the design of the tracks' values asked for (the same step, 2026-11-23),
+and 245 by the review of the piece that makes what removes a track erase what it holds (the same step, 2026-11-23).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -261,6 +262,21 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `src/model/arrangement/ClipRenders.cpp`), and JUCE's `moveFileTo()` deletes the target before it moves. A compile in
   that instant finds no file. To fix: replace the file in one step (`writeWholeFile()`'s way, or a move that replaces),
   and an export that leaves to the background threads the renders they are already making.
+
+- **245. The automation of what is deleted stays in the song until the project is opened again.** After a track, a
+  device, a container, a modulator or a send is deleted, the curves of its parameters stay in the song's curves: the
+  song's check (`tests/SongCheck.cpp`) finds "a curve of a parameter the song hasn't", and a save right after writes
+  them into the file. Only the loader drops them, at the next opening (`keepCurves()` in `makeConsistent()`, and
+  `forgetCurvesOfGoneDevices()` in `makeSong()`, `src/model/project/Project.cpp`), as no change: seen with a track whose
+  fader was automated, deleted and the project saved: the file held its `CURVE`; opened again, the song had no curve
+  and no unsaved change; saved again, the file differed from the first (no `AUTOMATION`). Why:
+  neither `forgetWhatNamesTheGone()` (`src/model/mixer/Mixer.cpp`) nor `eraseTrackHoldings()`
+  (`src/model/arrangement/Tracks.cpp`) erases curves; they were kept "while an undo could bring the device back"
+  (`tests/AutomationModelTests.cpp`, "Remove B's Compressor"), a reason that no longer holds: an erase in the same step
+  comes back with its Undo. `tests/TrackHoldingsTests.cpp` lets the song's check pass over these curves after a removal
+  (`checkSongAsRemoved()`). To fix: erase the curves of what goes in the same step, in `forgetWhatNamesTheGone()` by
+  the IDs gone, through automation's code (`src/model/automation/internal/Automation.h`), so that Undo brings them
+  back; change that test's check to the curve gone, and drop the exemption.
 
 ## Notes and clips
 

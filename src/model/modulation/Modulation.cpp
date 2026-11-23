@@ -438,6 +438,38 @@ bool setAllModulation (Song& song, SongModulation next)
     return values != nullptr && values->setAllModulation (song, std::move (next));
 }
 
+bool eraseModulatorsOf (Song& song, const std::vector<ModulatorPlace>& owners)
+{
+    auto* values = song.getValues();
+
+    if (values == nullptr)
+        return false;
+
+    std::vector<ModulatorID> gone;
+
+    for (const auto& owner : owners)
+        if (const auto* list = values->modulation.get().findList (owner))
+            gone.insert (gone.end(), list->begin(), list->end());
+
+    return ! gone.empty() && values->eraseModulators (song, gone);
+}
+
+void takeModulatorsOf (Song& song, const juce::ValueTree& owner)
+{
+    if (song.getValues() == nullptr)
+        return;
+
+    for (const auto& element : owner)
+    {
+        if (! element.hasType (schema::MODULATOR) && ! element.hasType (schema::MACRO))
+            continue;
+
+        if (auto value = readHeldModulator (element, readModulatorPlace (element));
+            value.has_value() && song.getValues()->modulation.get().find (value->id) == nullptr)
+            setModulator (song, *value);
+    }
+}
+
 std::optional<ModulatorPlace> findOwnerPlace (const Song& song, const ModulatorPlace& owner)
 {
     // A container's: on the channel the devices' place of it names (Mixer.h: findContainerPlace(), read without the

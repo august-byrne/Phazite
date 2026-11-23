@@ -3,6 +3,8 @@
 #include "internal/Clips.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
+#include "model/base/internal/DeviceStoreValue.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
@@ -16,13 +18,18 @@
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/DeviceStore.h"
+#include "model/versions/internal/AreaClashes.h"
+#include "model/versions/internal/SongMerge.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -725,6 +732,8 @@ void ungroupFolder (Song& song, TrackID folder)
             ++i;
     }
 
+    // What it holds itself (a bus's modulators and sends) erased before it goes; its tracks are out of it now.
+    eraseTrackHoldings (song, { folder });
     parent.removeChild (folderState, &song.getUndoManager());
 }
 
@@ -1138,6 +1147,7 @@ void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* se
     const auto all = getTrackIDs (song);
     const auto row = (int) (std::find (all.begin(), all.end(), outermost.front()) - all.begin());
     forgetSidechainSources (song, outermost);
+    eraseTrackHoldings (song, outermost); // what they hold in the song's areas, before their elements go
 
     for (const auto track : outermost)
         if (const auto state = findTrackState (song, track); state.isValid())
@@ -1149,6 +1159,220 @@ void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* se
     if (selection != nullptr)
         if (const auto remaining = getTrackIDs (song); ! remaining.empty())
             selection->selectOnly (remaining[(size_t) juce::jmin (row, (int) remaining.size() - 1)]);
+}
+
+void eraseTrackHoldings (Song& song, const std::vector<TrackID>& tracks)
+{
+    if (song.getValues() == nullptr || tracks.empty())
+        return;
+
+    // Each track once, with the tracks in each folder among them; and each channel's place, with its containers': a
+    // container's macros are listed by its ID (ModulationValue.h: SongModulation), a device's that is none finding no list.
+    std::vector<TrackID> held;
+    std::vector<ModulatorPlace> owners;
+    std::set<std::uint64_t> seen;
+
+    const auto addChannel = [&song, &owners] (TrackID id, const ModulatorPlace& channel)
+    {
+        owners.push_back (channel);
+
+        for (const auto device : getDevices (song, id))
+        {
+            auto container = channel;
+            container.container = device;
+            owners.push_back (container);
+        }
+    };
+
+    const auto addTrack = [&held, &seen, &addChannel] (TrackID id)
+    {
+        if (! seen.insert (id.getRaw()).second)
+            return;
+
+        held.push_back (id);
+        addChannel (id, ModulatorPlace { .track = id });
+    };
+
+    for (const auto id : tracks)
+    {
+        if (isMaster (song, id))
+        {
+            if (seen.insert (id.getRaw()).second)
+                addChannel (id, ModulatorPlace { .onMaster = true });
+
+            continue;
+        }
+
+        if (! findTrackState (song, id).hasType (schema::TRACK))
+            continue;
+
+        addTrack (id);
+
+        if (isFolder (song, id))
+            for (const auto inside : getTracksInFolder (song, id))
+                addTrack (inside);
+    }
+
+    // Each area through its own code, a line each, each set once: the clips with their notes, then modulation, then the sends.
+    // Their devices, containers and chains are still the TRACK element's (and the master's) children in the song's tree, which
+    // go and come back with it: the devices' switch adds their line here, between the clips' and modulation's.
+    eraseTrackClips (song, held);
+    eraseModulatorsOf (song, owners);
+    eraseTrackSends (song, held);
+}
+
+namespace
+{
+    // The tracks of a TRACK element, itself first and then those in it, depth first, as the keeper's parts walk one that comes
+    // into the song (model/base/ClipsArea.cpp, SendsArea.cpp: collectTracks()).
+    void collectTrackElements (const juce::ValueTree& element, std::vector<juce::ValueTree>& tracks)
+    {
+        if (! element.hasType (schema::TRACK))
+            return;
+
+        tracks.push_back (element);
+
+        for (const auto& child : element)
+            collectTrackElements (child, tracks);
+    }
+
+    // The owners of modulators and macros in a channel's element, as modulation's part of the keeper walks one that comes into
+    // the song (model/base/ModulationArea.cpp: childAdded()): the channel, then each of its containers and, a folder's, each
+    // of its tracks with theirs, in its elements' order.
+    void collectModulationOwners (const juce::ValueTree& owner, std::vector<juce::ValueTree>& owners)
+    {
+        owners.push_back (owner);
+
+        if (owner.hasType (schema::CONTAINER))
+            return;
+
+        for (const auto& child : owner)
+            if (child.hasType (schema::CONTAINER)
+                || (child.hasType (schema::TRACK) && owner.hasType (schema::TRACK) && isFolderState (owner)))
+                collectModulationOwners (child, owners);
+    }
+
+    // Each DEVICE and CHAIN in an element, through what can hold one (a track, a folder's tracks, the master, a container, a
+    // chain), in the tree's order, as the store's part of the keeper walks one that comes into the song (DeviceStoreArea.cpp).
+    void collectDeviceItems (const juce::ValueTree& element, std::vector<juce::ValueTree>& items)
+    {
+        if (element.hasType (schema::DEVICE) || element.hasType (schema::CHAIN))
+            items.push_back (element);
+
+        if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER) || element.hasType (schema::CONTAINER)
+            || element.hasType (schema::CHAIN))
+            for (const auto& child : element)
+                collectDeviceItems (child, items);
+    }
+
+    // An element's children of two types taken out of it, outside any history (a copy's, before it joins the song).
+    void removeChildrenOf (juce::ValueTree element, const juce::Identifier& first, const juce::Identifier& second)
+    {
+        for (int i = element.getNumChildren(); --i >= 0;)
+            if (const auto child = element.getChild (i); child.hasType (first) || child.hasType (second))
+                element.removeChild (i, nullptr);
+    }
+} // namespace
+
+AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
+{
+    // A whole track or the master ("TRACKS:TRACKS", "TRACK:12"; "MASTER:MASTER"): a path that ends at one, with no property.
+    // A merge of two songs Phazite holds never reports one (it keeps a track taken away on one side and changed on the other,
+    // and merges the rest property by property: SongMerge.cpp); a commit's song may come from anyone.
+    if (clash.path.isEmpty() || clash.property.isValid())
+        return AreaChoice::notTheArea;
+
+    if (const auto last = clash.path[clash.path.size() - 1];
+        ! last.startsWith (schema::TRACK.toString() + ":") && ! last.startsWith (schema::MASTER.toString() + ":"))
+        return AreaChoice::notTheArea;
+
+    // Nothing written for a path whose place the song hasn't.
+    auto parentPath = clash.path;
+    parentPath.remove (parentPath.size() - 1);
+    auto parent = findByPath (song.getState(), parentPath);
+
+    if (! parent.isValid() || ! juce::isPositiveAndBelow (value, 3))
+        return AreaChoice::refused;
+
+    // The song's, in its place, with what it holds in the song's areas (eraseTrackHoldings()); then the side chosen's in that
+    // place, where it has one: its element without its tracks' clips and sends and its owners' modulators and macros, which
+    // each area's code then gives the song as the keeper took them in (Clips.h: takeClipsOf(); Modulation.h:
+    // takeModulatorsOf(); Mixer.h: takeSendsOf(); what its devices hold of the store: DeviceStore.h, setStoreEntries()), so
+    // that nothing is left to the keeper. Its devices, containers and chains come in its element still, as the song's tree
+    // holds them until the devices' switch, which gives them through the devices' setters here.
+    auto* undo = &song.getUndoManager();
+    const auto existing = findByPath (song.getState(), clash.path);
+    const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+    const auto& chosen = *elements[value];
+    const auto place = existing.isValid() ? parent.indexOf (existing) : -1;
+
+    if (existing.isValid())
+    {
+        eraseTrackHoldings (song, { getTrackID (existing) });
+        parent.removeChild (existing, undo);
+    }
+
+    // A clip on another track left the only one of its alias group (the song's track held the others, which the side's
+    // holds in no group, or not at all) leaves the group, as deleteTracks() unlinks it.
+    if (! chosen.isValid())
+    {
+        unlinkLoneClips (song);
+        return AreaChoice::chosen;
+    }
+
+    // What the keeper's parts would take out of the element as it comes (its tracks' CLIP and SEND elements, its owners'
+    // MODULATOR and MACRO elements, what its devices and chains hold of the store), taken out of a copy of it first; then what
+    // they would read of it, read from the side's element and given to the song once the copy is in it, in the order the
+    // keeper asks its parts: the clips', modulation's, the sends', the store's.
+    auto copy = chosen.createCopy();
+    std::vector<juce::ValueTree> tracks, owners, items;
+    collectTrackElements (copy, tracks);
+    collectModulationOwners (copy, owners);
+    collectDeviceItems (copy, items);
+
+    for (const auto& track : tracks)
+        removeChildrenOf (track, schema::CLIP, schema::SEND);
+
+    for (const auto& owner : owners)
+        removeChildrenOf (owner, schema::MODULATOR, schema::MACRO);
+
+    for (const auto& item : items)
+        takeStoreOutOf (item, nullptr);
+
+    parent.addChild (copy, place, undo);
+    tracks.clear();
+    owners.clear();
+    items.clear();
+    collectTrackElements (chosen, tracks);
+    collectModulationOwners (chosen, owners);
+    collectDeviceItems (chosen, items);
+
+    for (const auto& track : tracks)
+        takeClipsOf (song, track);
+
+    for (const auto& owner : owners)
+        takeModulatorsOf (song, owner);
+
+    for (const auto& track : tracks)
+        takeSendsOf (song, track);
+
+    // Each plug-in's and chain's entries made the side's, as the versions' devices pass makes a version's (ApplySong.cpp:
+    // makeDeviceStoreLike()): those the store kept of an item of the same ID (the song's track's, taken out above) replaced
+    // (model/plugins/internal/DeviceStore.h: setStoreEntries()); a device's window's place given where the side has one, as
+    // view state outside the history.
+    for (const auto& item : items)
+    {
+        const auto id = readDeviceElementID (item);
+        DeviceStore entries;
+        readHeldStoreOf (item, entries);
+        setStoreEntries (song, id, entries);
+
+        if (const auto window = item.hasType (schema::DEVICE) ? readWindowPlaceOf (item) : std::nullopt)
+            setWindowPlace (song, id, *window);
+    }
+
+    unlinkLoneClips (song);
+    return AreaChoice::chosen;
 }
 
 //==============================================================================

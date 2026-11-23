@@ -615,17 +615,32 @@ TEST_CASE ("Song values: what is written outside the history is no undo step, an
     CHECK_FALSE (k.song->getValues()->remembers (element));
     phazite::test::checkValues (*k.song);
 
-    // Deleted in a step, then the history cleared: what could bring it back is gone, and so is what was remembered, as the
-    // next changes look. While its step is still open, its clips are out of the areas already, the keeper remembering them:
-    // the check of the song's values, which allows no clip of a track outside the song, holds there too.
+    // Taken out of the tree in a step, then the history cleared: what could bring it back is gone, and so is what was
+    // remembered, as the next changes look. While its step is still open, its clips are out of the areas already, the keeper
+    // remembering them: the check of the song's values, which allows no clip of a track outside the song, holds there too.
+    // Taken out of the tree itself, as only a remover that forgot eraseTrackHoldings() would (model/arrangement/internal/
+    // Tracks.h: every remover erases what a track holds first, so that the keeper finds nothing): its safety net, which this
+    // case follows. The check's own failure for what the keeper is then left holding is the one this case expects: it must
+    // come (the guard fires), and every other failure is passed on.
+    int keeperFailures = 0;
+    k.check.onFailure = [&keeperFailures] (const juce::String& failure)
+    {
+        if (failure.contains ("eraseTrackHoldings"))
+            ++keeperFailures;
+        else
+            FAIL_CHECK (failure.toStdString());
+    };
+
     k.step ("Delete Track",
             [&]
             {
-                phazite::deleteTracks (*k.song, { k.tracks[0] }, nullptr);
+                list.removeChild (element, &k.song->getUndoManager());
                 CHECK (k.find (k.clip) == nullptr);
                 CHECK (k.song->getValues()->remembers (element));
                 phazite::test::checkValues (*k.song);
             });
+    CHECK (keeperFailures > 0);
+    k.check.onFailure = nullptr;
     element = {};
     k.song->getUndoManager().clearUndoHistory();
     const auto remembers = [&k] (phazite::TrackID track)
@@ -642,7 +657,12 @@ TEST_CASE ("Song values: what is written outside the history is no undo step, an
     {
         const auto made = phazite::addTrackAtEnd (*k.song, false, nullptr);
         REQUIRE (phazite::insertMidiClip (*k.song, made, { phazite::test::at (0.0), phazite::test::at (2.0) }, nullptr).isValid());
-        phazite::deleteTracks (*k.song, { made }, nullptr);
+
+        {
+            const phazite::UndoStep step (*k.song, "Delete Track");
+            list.removeChild (phazite::findTrackState (*k.song, made), &k.song->getUndoManager());
+        }
+
         k.song->getUndoManager().clearUndoHistory();
     }
 

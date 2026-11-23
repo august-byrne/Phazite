@@ -545,6 +545,29 @@ bool SongValues::eraseModulator (Song& song, ModulatorID id)
     return true;
 }
 
+bool SongValues::eraseModulators (Song& song, const std::vector<ModulatorID>& ids)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    auto next = modulation.get();
+    auto any = false;
+
+    for (const auto id : ids)
+    {
+        if (next.find (id) == nullptr)
+            continue;
+
+        next = withoutModulator (next, id);
+        any = true;
+    }
+
+    if (any)
+        setArea (song, modulation, std::move (next));
+
+    return any;
+}
+
 bool SongValues::setModulatorOrder (Song& song, const ModulatorPlace& owner, immer::flex_vector<ModulatorID> order)
 {
     JUCE_ASSERT_MESSAGE_THREAD

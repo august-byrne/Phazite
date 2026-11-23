@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
 #include "model/playback/internal/SongPlayer.h"
 #include "model/project/internal/ProjectContext.h"
@@ -174,6 +175,11 @@ void UndoCheck::compare (const juce::String& what, const juce::String& when, con
     // What finds the song's items by their IDs holds what the song does, after each change, undo and redo.
     if (! song.getIndex().isExact())
         fail (what + ": " + when + ": the song's index (model/base/internal/SongIndex.h) differs from a walk through the song");
+
+    // What took a track out of the song erased what it held in the song's areas first (model/arrangement/internal/Tracks.h:
+    // eraseTrackHoldings()), so that the keeper of the song's values remembers nothing of a track out of the song.
+    if (const auto* values = song.getValues(); values != nullptr && values->countHoldingsLeftWithKeepers() != 0)
+        fail (what + ": " + when + ": a track was taken out of the song without eraseTrackHoldings(), the keeper erasing what it held");
 
     if (expected == actual)
         return;

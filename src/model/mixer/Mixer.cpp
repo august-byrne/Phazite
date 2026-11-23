@@ -1381,6 +1381,36 @@ void removeSend (Song& song, DeviceID send)
     }
 }
 
+bool eraseTrackSends (Song& song, const std::vector<TrackID>& tracks)
+{
+    auto* values = song.getValues();
+
+    if (values == nullptr)
+        return false;
+
+    std::vector<DeviceID> gone;
+
+    for (const auto track : tracks)
+        if (const auto* list = values->sends.get().tracks.find (track.getRaw()))
+            gone.insert (gone.end(), list->begin(), list->end());
+
+    return ! gone.empty() && values->eraseSends (song, gone);
+}
+
+void takeSendsOf (Song& song, const juce::ValueTree& track)
+{
+    auto* values = song.getValues();
+    const auto from = getTrackID (track);
+
+    if (values == nullptr || ! track.hasType (schema::TRACK) || ! from.isValid())
+        return;
+
+    for (const auto& element : track)
+        if (element.hasType (schema::SEND))
+            if (auto value = readHeldSend (element, from); value.has_value() && values->sends.get().find (value->id) == nullptr)
+                values->setSend (song, std::move (*value));
+}
+
 void copySends (Song& song, CopiedIDs& copied)
 {
     auto* values = song.getValues();

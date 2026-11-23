@@ -278,16 +278,31 @@ namespace
             wantedNames.insert (child.name);
 
         std::map<juce::String, juce::ValueTree> kept;
+        std::vector<juce::ValueTree> gone;
 
         for (const auto& child : getCountedChildren (live, withTracks, taken))
         {
             if (wantedNames.count (child.name) == 0 && standIns.count (child.name) == 0)
-                live.removeChild (child.tree, undo);
+                gone.push_back (child.tree);
             else if (wantedNames.count (child.name) > 0)
             {
                 kept.emplace (child.name, child.tree);
             }
         }
+
+        // A track that goes takes what it holds in the song's areas out first (Tracks.h: eraseTrackHoldings()), so that the
+        // keeper of the song's values finds nothing to remember: the clip pass makes only the tracks both songs have like the
+        // other's (ClipPass), and would leave a gone track's clips to the keeper.
+        std::vector<TrackID> goneTracks;
+
+        for (const auto& child : gone)
+            if (child.hasType (schema::TRACK))
+                goneTracks.push_back (getTrackID (child));
+
+        eraseTrackHoldings (song, goneTracks);
+
+        for (const auto& child : gone)
+            live.removeChild (child, undo);
 
         int place = 0;
 
@@ -353,8 +368,10 @@ namespace
     // The song's items that are somewhere else in the other song, or in the part of it about to be taken (a track moved
     // into a folder), taken away first, to be put where the other has them: no ID is in the song twice, meanwhile or after.
     // Not clips, which the clip pass moves (ClipPass, below), nor devices, containers and chains, which the devices pass
-    // moves as the same elements (makeDevicesLike()), but where a track taken away here holds them.
-    void removeMovedItems (juce::ValueTree live, const Places& otherPlaces, juce::UndoManager* undo,
+    // moves as the same elements (makeDevicesLike()), but where a track taken away here holds them. A track taken away takes
+    // what it holds in the song's areas out first (Tracks.h: eraseTrackHoldings()), which the areas' passes give back where
+    // the other has it, as makeLike() adds it again as a copy (never the same element, which the keeper would give them back).
+    void removeMovedItems (Song& song, juce::ValueTree live, const Places& otherPlaces, juce::UndoManager* undo,
                            const StandIns& standIns = noStandIns())
     {
         std::vector<juce::ValueTree> moved;
@@ -381,6 +398,14 @@ namespace
         };
 
         visit (live);
+
+        std::vector<TrackID> tracks;
+
+        for (const auto& tree : moved)
+            if (tree.hasType (schema::TRACK))
+                tracks.push_back (getTrackID (tree));
+
+        eraseTrackHoldings (song, tracks);
 
         for (auto& tree : moved)
             tree.getParent().removeChild (tree, undo);
@@ -2428,7 +2453,7 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
     const NothingTakenIn byThePassesAlone (song);
     auto* undo = &song.getUndoManager();
     const auto standIns = findStandIns (other);
-    removeMovedItems (song.getState(), findPlaces (other), undo, standIns);
+    removeMovedItems (song, song.getState(), findPlaces (other), undo, standIns);
     makeLike (song, song.getState(), other, undo, true, Taken::counted, standIns);
     makeValuesLike (song, other, true, Taken::counted, standIns);
     placePlaceholdersLike (song, other, undo, Taken::counted);
@@ -2444,7 +2469,7 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
 
     // Its count of IDs the larger of the two: what either branch made keeps an ID of its own.
     const auto next = std::max (findNextID (song), findNextID (other));
-    removeMovedItems (song.getState(), findPlaces (other), nullptr);
+    removeMovedItems (song, song.getState(), findPlaces (other), nullptr);
     makeLike (song, song.getState(), other, nullptr, true, Taken::everything);
     makeValuesLike (song, other, false, Taken::everything, noStandIns());
     placePlaceholdersLike (song, other, nullptr, Taken::everything);
@@ -2547,7 +2572,12 @@ namespace
                 }
             }
 
+            // What it holds itself in the song's areas, its tracks out of it now, erased before it goes (Tracks.h:
+            // eraseTrackHoldings()): the keeper of the song's values finds nothing to remember. Then a clip on another track
+            // left the only one of its alias group (an alias of one of its clips) leaves the group, as deleteTracks() unlinks it.
+            eraseTrackHoldings (song, { id });
             parent.removeChild (live, undo);
+            unlinkLoneClips (song);
         }
         else
         {
@@ -2557,7 +2587,7 @@ namespace
             auto parent = findTrackParent (state, then.getParent());
             auto copy = copyForSong (then);
             removeTracksHeld (copy, state);
-            removeMovedItems (state, findPlaces (copy), undo);
+            removeMovedItems (song, state, findPlaces (copy), undo);
 
             int index = 0;
 

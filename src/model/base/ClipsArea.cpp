@@ -448,6 +448,35 @@ void SongValues::setTrackClipOrder (Song& song, TrackID track, immer::flex_vecto
     setAll (song, withTrackOrder (clips.get(), track, std::move (order)));
 }
 
+void SongValues::eraseClips (Song& song, const std::vector<ClipID>& gone)
+{
+    // Each area's next value worked out whole, then set once (each tells once), as the keeper erased a track's clips.
+    auto nextClips = clips.get();
+    auto nextNotes = notes.get();
+    auto anyClip = false, anyNotes = false;
+
+    for (const auto id : gone)
+    {
+        if (nextClips.find (id) == nullptr)
+            continue;
+
+        nextClips = withoutClip (nextClips, id);
+        anyClip = true;
+
+        if (nextNotes.find (id) != nullptr)
+        {
+            nextNotes.clips = nextNotes.clips.erase (id.getRaw());
+            anyNotes = true;
+        }
+    }
+
+    if (anyClip)
+        setAll (song, std::move (nextClips));
+
+    if (anyNotes)
+        setAll (song, std::move (nextNotes));
+}
+
 //==============================================================================
 bool leadsToClips (const juce::ValueTree& parent, const juce::ValueTree& child)
 {

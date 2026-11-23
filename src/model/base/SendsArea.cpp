@@ -415,6 +415,29 @@ bool SongValues::eraseSend (Song& song, DeviceID id)
     return true;
 }
 
+bool SongValues::eraseSends (Song& song, const std::vector<DeviceID>& ids)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    auto next = sends.get();
+    auto any = false;
+
+    for (const auto id : ids)
+    {
+        if (next.find (id) == nullptr)
+            continue;
+
+        next = withoutSend (next, id);
+        any = true;
+    }
+
+    if (any)
+        setArea (song, sends, std::move (next));
+
+    return any;
+}
+
 bool SongValues::setTrackSendOrder (Song& song, TrackID track, immer::flex_vector<DeviceID> order)
 {
     JUCE_ASSERT_MESSAGE_THREAD

@@ -270,6 +270,33 @@ void moveTracksTo (Song&, const std::vector<TrackID>& moving, TrackID target, Tr
 // Live, so the keyboard can carry on from there.
 void deleteTracks (Song&, const std::vector<TrackID>&, Selection*);
 
+// What these tracks hold in the song's areas beside its tree (and the tracks in each folder among them), erased, each area
+// through its own code, in one set of each area, in the step in progress (or outside the history while the song is written
+// outside it): their clips with their notes (Clips.h: eraseTrackClips()); their channels' modulators and macros and their
+// containers' macros, by place (Modulation.h: eraseModulatorsOf()); their sends, by the track they are on (Mixer.h:
+// eraseTrackSends()). The master's ID too: its modulators and its containers' macros (a merge's choice of the whole master).
+// Begins no step. Every function that takes a track out of the song calls it first, before the element goes, as it calls
+// forgetWhatNamesTheGone() after (Mixer.h): deleteTracks() (and through it the pad tracks forgetWhatNamesTheGone() deletes,
+// a pad brought back, the DAWproject import), ungroupFolder() (the folder alone, its tracks moved out first), a version's
+// passes over elements (model/versions/ApplySong.cpp: makeLike(), removeMovedItems(), a line's track added since:
+// makeTrackLikeIn()) and a merge's choice of a whole track (chooseTrackClash()), so that the keeper of the song's values,
+// which still erases what a track taken out holds and remembers it with the element (model/base/internal/SongValues.h),
+// finds nothing (SongValues::countHoldingsLeftWithKeepers(), which the tests' checks hold at 0). Each area's own undo action
+// brings its things back with the track's in an Undo, whatever order JUCE undoes them in: the keeper does nothing while the
+// history undoes or redoes, and no area's value is checked against the tree until the step is whole.
+//   - Not what names them: a send to a return that goes, the modulations and MIDI links of what goes, the pad tracks of a
+//     sampler that goes (forgetWhatNamesTheGone()'s). Not their curves (kept, as a deleted track's always were), nor the
+//     view, the switches or the lanes (the TRACK element's own, which go and come back with it).
+//   - Not their devices, containers and chains, nor what the devices' store holds of them (kept by ID): the song's tree still
+//     holds them under the TRACK, and they go and come back with it until the devices' switch, which adds their line here.
+//   - Not a move: a track JUCE moves to another parent (taken out and put in again, the same element) keeps what it holds by
+//     the keeper, which remembers it as it goes and gives it back as it comes, in the same step: moveTrackState() and its
+//     callers (moveTracksTo(), moveTracksAfter(), moveSelectedTracks(), moveTrackIntoFolder(), groupIntoFolder(), the tracks
+//     ungroupFolder() takes out of its folder, the clipboard's track for a paste, the mixer's setOutput()), a line's folder's
+//     tracks hoisted as it goes and the song's own line's tracks put in another folder (ApplySong.cpp: makeTrackLikeIn(),
+//     makeSongOwnLikeIn()). The tracks' switch replaces each by a change of the track's place, which no area follows.
+void eraseTrackHoldings (Song&, const std::vector<TrackID>&);
+
 // The track commands that need no window: add, select the track above or below, move, mute and solo. They act
 // on the tracks selected in the selection's song. Delete and duplicate are selection commands (Selection.h); the
 // playlist adds rename and color, and the taller and shorter commands (TrackHeights.h).
