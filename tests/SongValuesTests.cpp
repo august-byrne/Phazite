@@ -510,6 +510,31 @@ TEST_CASE ("Song values: a clip moved between tracks, or with its track into a f
     k.check.walkBackAndForth();
 }
 
+TEST_CASE ("Song values: a track deleted and brought back by Undo, whose clips are then deleted, is moved into a folder without "
+           "them")
+{
+    // The keeper remembers a deleted track's clips with its element, and an Undo (which it leaves alone) brings them back
+    // itself: what it remembered must not come back with the next move of the same element, once the clips are gone.
+    Kept k;
+    k.step ("Delete Track", [&] { phazite::deleteTracks (*k.song, { k.tracks[0] }, nullptr); });
+    k.check.stepBackOrForth ("Undo Delete Track", [&] { phazite::undo (*k.song); });
+    REQUIRE (phazite::getClipTrack (*k.song, k.clip) == k.tracks[0]);
+
+    k.step ("Delete Clip", [&] { phazite::deleteClips (*k.song, { k.clip }, false); });
+    REQUIRE_FALSE (phazite::getClipValue (*k.song, k.clip).has_value());
+
+    phazite::TrackID folder;
+    k.step ("Group Into Folder", [&] { folder = phazite::groupIntoFolder (*k.song, { k.tracks[0] }, nullptr); });
+    REQUIRE (folder.isValid());
+    CHECK_FALSE (phazite::getClipValue (*k.song, k.clip).has_value());
+    CHECK (k.find (k.clip) == nullptr);
+    phazite::test::checkSong (*k.song);
+
+    k.check.walkBackAndForth();
+    CHECK_FALSE (phazite::getClipValue (*k.song, k.clip).has_value());
+    phazite::test::checkSong (*k.song);
+}
+
 TEST_CASE ("Song values: a clip's copies share its value, an alias joins its group's one value, and one made unique keeps its "
            "own")
 {

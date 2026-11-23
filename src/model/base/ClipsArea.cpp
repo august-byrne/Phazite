@@ -275,6 +275,9 @@ void SongValues::ClipsKeeper::childRemoved (juce::ValueTree& parent, juce::Value
         return;
 
     // A track (or what holds tracks) taken out of the song's track list: its clips remembered with its element, and erased.
+    // What it may have been remembered with before (taken out, and brought back by an undo since, which gave its clips back
+    // itself) is replaced, or forgotten where it holds none now: else the next time it comes back, it would bring back
+    // clips deleted since.
     std::vector<juce::ValueTree> tracks;
     collectTracks (child, tracks);
     auto nextClips = values.clips.get();
@@ -286,7 +289,12 @@ void SongValues::ClipsKeeper::childRemoved (juce::ValueTree& parent, juce::Value
         const auto* list = nextClips.tracks.find (getTrackIDOf (track).getRaw());
 
         if (list == nullptr)
+        {
+            if (const auto found = findRemembered (track); found != remembered.end())
+                remembered.erase (found);
+
             continue;
+        }
 
         Remembered gone { track, {}, {} };
         const auto order = *list;
