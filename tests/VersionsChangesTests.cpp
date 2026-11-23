@@ -18,6 +18,9 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/DeviceStore.h"
+#include "model/plugins/internal/PluginInstances.h"
+#include "model/plugins/internal/SandboxedInstance.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
@@ -747,7 +750,21 @@ TEST_CASE ("A plug-in's change in its own window has its track compared again al
         REQUIRE (phazite::groupIntoContainer (song, { inChain }).isValid());
     }
 
+    // Each plug-in's state, as it gave it once it opened, in the song before the version is kept, so that the version holds
+    // it (as a slow machine had it: CI's linux-tsan). Kept at once, the version could hold none, the answer written into the
+    // song after it, which made the state of one in a chain differ once it said it changed, though no store had its gain:
+    // its line came only by that.
     s.waitForPlugins();
+
+    for (const auto device : { onTrack, inChain })
+    {
+        auto* instance = phazite::findPluginInstance (song, device);
+        REQUIRE (instance != nullptr);
+        REQUIRE (dispatchMessagesUntil (
+            [instance] { return ! instance->isStateUnasked() && ! instance->isAskingState() && instance->getLastState().getSize() > 0; }));
+    }
+
+    song.storeDeviceStates();
     keepVersion (s.context, "First");
     REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
 
@@ -755,7 +772,12 @@ TEST_CASE ("A plug-in's change in its own window has its track compared again al
     {
         CAPTURE (track.getRaw());
         const auto compared = phazite::ChangesWorker::countTracksCompared();
+        const auto stateBefore = phazite::getPluginState (song, device);
         phazite::test::TestPlugin::setGain (song, device, track == effects ? 0.25f : 0.5f); // in its own window
+        CHECK (phazite::getPluginState (song, device) == stateBefore);                      // no store took it into the song
+
+        // Its line, from its knobs, as the song's count of changes outside the history marks its track: one in a container's
+        // chain too, whose stored state is as the version holds it until a save stores it (SongDiff.cpp: describeMovedIn()).
         REQUIRE (dispatchMessagesUntil (
             [&s, track = track]
             {
@@ -774,5 +796,7 @@ TEST_CASE ("A plug-in's change in its own window has its track compared again al
     const auto lines = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
     REQUIRE (lines.size() == 2);
     CHECK (lines[0].track == effects);
+    CHECK (lines[0].what == juce::String::fromUTF8 ("Test Effect: Gain 100% \xe2\x86\x92 25%"));
     CHECK (lines[1].track == grouped);
+    CHECK (lines[1].what == juce::String::fromUTF8 ("Container: Test Effect: Gain 100% \xe2\x86\x92 50%"));
 }

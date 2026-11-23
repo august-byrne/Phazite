@@ -296,6 +296,31 @@ namespace
         return moved[0] + " and " + juce::String (moved.size() - 1) + " more";
     }
 
+    // The same of a device in a track's chain: a plug-in's own; a container's, those of the plug-ins in its chains (and in
+    // the containers in them), each after its plug-in's name ("Test Effect: Gain 40% → 55%"), as a knob turned in the window
+    // of one in a container moves no part of the song until its state is stored (a save), and is a change all the same.
+    juce::String describeMovedIn (const juce::ValueTree& device, const PluginValues& values)
+    {
+        if (! device.hasType (schema::CONTAINER))
+            return describeMovedParameters (readID (device[schema::deviceID]), values);
+
+        juce::StringArray moved;
+
+        for (const auto& chain : device)
+        {
+            if (! chain.hasType (schema::CHAIN))
+                continue;
+
+            for (const auto& inside : chain)
+            {
+                if (const auto knobs = describeMovedIn (inside, values); knobs.isNotEmpty())
+                    moved.add (inside.hasType (schema::CONTAINER) ? knobs : getDeviceName (inside) + ": " + knobs);
+            }
+        }
+
+        return moved.joinIntoString ("; ");
+    }
+
     void describeTrackChildren (const juce::ValueTree& before, const juce::ValueTree& after, const PluginValues& values,
                                 juce::StringArray& what)
     {
@@ -314,8 +339,7 @@ namespace
                 {
                     what.add ("+ " + getDeviceName (device));
                 }
-                else if (const auto moved = describeMovedParameters (readID (device[schema::deviceID]), values);
-                         moved.isNotEmpty() || ! holdTheSame (found->second, device))
+                else if (const auto moved = describeMovedIn (device, values); moved.isNotEmpty() || ! holdTheSame (found->second, device))
                 {
                     // An update of the plug-in that made its state, then the knobs that moved.
                     juce::StringArray details;
