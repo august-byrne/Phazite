@@ -5035,13 +5035,13 @@ std::vector<RenumberedID> crossRenumbering (const std::vector<RenumberedID>& the
                                             const std::vector<RenumberedID>& ourMergesAtParting, const juce::ValueTree& base,
                                             const juce::ValueTree& theirSong, const std::function<std::uint64_t()>& makeID)
 {
-    using Key = std::pair<juce::String, std::uint64_t>;
+    using IDKey = std::pair<juce::String, std::uint64_t>;
     const auto held = collectRecordedIDs (theirSong), inBase = collectRecordedIDs (base);
 
     // Each line's latest word for an ID, oldest first as findRenumbering() gives them; the other line's only for what its
     // song holds as that word gave it (three lines' merges of the same version, or an item that line took out since).
-    std::map<Key, std::uint64_t> theirs, ours;
-    std::set<Key> atParting;
+    std::map<IDKey, std::uint64_t> theirs, ours;
+    std::set<IDKey> atParting;
 
     for (const auto& id : theirMerges)
         theirs[{ id.clip, id.from }] = id.to;
@@ -5055,7 +5055,7 @@ std::vector<RenumberedID> crossRenumbering (const std::vector<RenumberedID>& the
     // What the translation after this one moves (findTranslation(), through this line's records at the parting, as it takes
     // them): an item the parting holds, by its ID there; a note by its clip as this line numbers it.
     std::map<std::uint64_t, std::uint64_t> partingItems;
-    std::map<Key, std::uint64_t> partingNotes;
+    std::map<IDKey, std::uint64_t> partingNotes;
 
     for (const auto& id : findLatestWords (ourMergesAtParting))
     {
@@ -5104,9 +5104,9 @@ std::vector<RenumberedID> crossRenumbering (const std::vector<RenumberedID>& the
 
     // Whether the parting holds an ID of the other line's song (a note's in its clip as the parting numbers it); and whether
     // that line's latest word gave the parting's item under it another ID (its own item holds that one then).
-    const auto inParting = [&inBase, &partingOf] (const Key& key)
+    const auto inParting = [&inBase, &partingOf] (const IDKey& key)
     { return inBase.count ({ translateGroup (key.first, partingOf), key.second }) > 0; };
-    const auto givenAway = [&theirs] (const Key& key)
+    const auto givenAway = [&theirs] (const IDKey& key)
     {
         const auto word = theirs.find (key);
         return word != theirs.end() && word->second != key.second;
@@ -5114,8 +5114,8 @@ std::vector<RenumberedID> crossRenumbering (const std::vector<RenumberedID>& the
 
     for (const auto notes : { false, true })
     {
-        const auto isOfGroup = [notes] (const Key& key) { return key.first.isNotEmpty() == notes; };
-        std::map<Key, std::uint64_t> crossings;
+        const auto isOfGroup = [notes] (const IDKey& key) { return key.first.isNotEmpty() == notes; };
+        std::map<IDKey, std::uint64_t> crossings;
 
         for (const auto& [from, to] : theirs)
         {
@@ -5133,10 +5133,10 @@ std::vector<RenumberedID> crossRenumbering (const std::vector<RenumberedID>& the
                 partingOf[to] = from.second;
         }
 
-        std::set<Key> own;
+        std::set<IDKey> own;
 
         for (const auto& [at, target] : crossings)
-            if (const Key under { at.first, target };
+            if (const IDKey under { at.first, target };
                 held.count (under) > 0 && crossings.count (under) == 0 && (! inParting (under) || givenAway (under)))
                 own.insert (under);
 
