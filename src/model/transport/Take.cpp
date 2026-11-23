@@ -39,6 +39,13 @@ namespace
 
     constexpr double sixteenthInBeats = 0.25; // as Capture quantizes (Capture.h)
 
+    // Whether a take's notes can go on a track: a track or a return, not a folder (nor the master), by its kind.
+    bool holdsTakes (const Song& song, TrackID track)
+    {
+        const auto kind = getTrackKind (song, track);
+        return kind == TrackValue::Kind::track || kind == TrackValue::Kind::returnTrack;
+    }
+
     // The waveform the playlist draws of an input while it records keeps the loudest sample of each stretch of so many
     // frames: 5 ms at 48 kHz, finer than a pixel at the zooms a recording is watched at.
     constexpr int peakFrames = 256;
@@ -482,7 +489,7 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session, Take* goesOnFrom)
         if (inputsOf.has_value() && std::find (inputsOf->begin(), inputsOf->end(), track) == inputsOf->end())
             continue; // armed since the take before started: its input isn't open yet
 
-        auto channels = getInputChannels (findTrackState (song, track)[schema::trackInput].toString());
+        auto channels = getInputChannels (getTrackInput (song, track));
 
         if (channels.empty() || channels.back() >= session.getNumInputs())
             continue;
@@ -1020,7 +1027,7 @@ void Take::placeNotes (const std::vector<PlayedNotes>& parts)
 {
     auto& song = session.getSong();
 
-    if (const auto state = findTrackState (song, midiTrack); ! state.hasType (schema::TRACK) || isFolderState (state))
+    if (! holdsTakes (song, midiTrack))
         return;
 
     const auto toBeat = [this] (std::int64_t sample) { return BeatPosition::fromBeats (tempo->toBeats ((double) sample)); };
@@ -1393,7 +1400,7 @@ std::vector<RecordingInProgress> Take::getInProgress()
 
     // The notes played into live MIDI's track, once there are any, over the parts they will be kept in: as far as recording
     // has got; round a looped range, once it has gone round, what was played before it, and all of the range.
-    if (const auto state = findTrackState (session.getSong(), midiTrack); state.hasType (schema::TRACK) && ! isFolderState (state))
+    if (holdsTakes (session.getSong(), midiTrack))
     {
         // (Once it has ended, the engine's notes played may be gone: the notes it kept.)
         const auto parts = ended.has_value() ? ended->parts : collectNotes (startSample, recording->getStartClock(), length);

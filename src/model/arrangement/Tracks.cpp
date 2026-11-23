@@ -269,6 +269,30 @@ namespace
         return false;
     }
 
+    // A channel's element: the master's by its flag, else its track's; invalid for none.
+    juce::ValueTree findChannelState (const Song& song, ChannelRef channel)
+    {
+        if (channel.onMaster)
+            return song.getState().getChildWithName (schema::MASTER);
+
+        return channel.track.isValid() ? findTrackState (song, channel.track) : juce::ValueTree();
+    }
+
+    // The master's element, added with IDs of the song's for the master and its fader if the song has none yet, without an
+    // undo step: what every song has (getTrackList()).
+    void addMaster (Song& song)
+    {
+        auto phazite = song.getState();
+
+        if (phazite.getChildWithName (schema::MASTER).isValid())
+            return;
+
+        juce::ValueTree master (schema::MASTER);
+        master.setProperty (schema::trackID, (juce::int64) song.makeID(), nullptr);
+        master.setProperty (schema::channelFader, (juce::int64) song.makeID(), nullptr);
+        phazite.appendChild (master, nullptr);
+    }
+
     // A track the song gives a key: the key set last on any of its tracks (model/notes/internal/Notes.h).
     TrackID madeWithLastKey (Song& song, TrackID id)
     {
@@ -331,31 +355,69 @@ TrackOrder getTrackOrder (const Song& song)
     return order;
 }
 
+DeviceID getChannelFader (const Song& song, ChannelRef channel)
+{
+    return readChannelFader (findChannelState (song, channel));
+}
+
+DeviceID getChannelVCA (const Song& song, ChannelRef channel)
+{
+    return readChannelVCA (findChannelState (song, channel));
+}
+
+bool isFaderOf (const Song& song, ChannelRef channel, DeviceID device)
+{
+    const auto state = findChannelState (song, channel);
+    return device.isValid() && (readChannelFader (state) == device || readChannelVCA (state) == device);
+}
+
+TrackOrder::Place getTrackPlace (const Song& song, TrackID id)
+{
+    const auto state = findTrackState (song, id);
+
+    if (! state.hasType (schema::TRACK))
+        return {};
+
+    const auto place = song.getIndex().getTrackPlace (state);
+    TrackOrder::Place found;
+    found.index = place.index;
+    found.number = place.number;
+    return found;
+}
+
+std::set<std::uint64_t> getAutomatableIDs (const Song& song, TrackID id)
+{
+    std::set<std::uint64_t> ids;
+    const auto state = findTrackState (song, id);
+
+    if (! state.isValid())
+        return ids;
+
+    for (const auto device : { readChannelFader (state), readChannelVCA (state) })
+        if (device.isValid())
+            ids.insert (device.getRaw());
+
+    for (const auto& device : getDeviceOutline (song, id))
+        ids.insert (device.id.getRaw());
+
+    for (const auto send : getSends (song, id))
+        ids.insert (send.getRaw());
+
+    const auto onMaster = state.hasType (schema::MASTER);
+    const auto modulation = getModulationValue (song);
+
+    for (const auto& entry : modulation.modulators)
+        if (const auto& place = entry.second.place; onMaster ? place.onMaster : ! place.onMaster && place.track == id)
+            ids.insert (entry.first);
+
+    return ids;
+}
+
 //==============================================================================
 juce::ValueTree getTrackList (Song& song)
 {
-    getMasterState (song);
+    addMaster (song);
     return song.getState().getOrCreateChildWithName (schema::TRACKS, nullptr);
-}
-
-juce::ValueTree findTrackList (const Song& song)
-{
-    return song.getState().getChildWithName (schema::TRACKS);
-}
-
-juce::ValueTree getMasterState (Song& song)
-{
-    auto phazite = song.getState();
-
-    if (auto master = phazite.getChildWithName (schema::MASTER); master.isValid())
-        return master;
-
-    // With IDs of the song's, for the master and its fader.
-    juce::ValueTree master (schema::MASTER);
-    master.setProperty (schema::trackID, (juce::int64) song.makeID(), nullptr);
-    master.setProperty (schema::channelFader, (juce::int64) song.makeID(), nullptr);
-    phazite.appendChild (master, nullptr);
-    return master;
 }
 
 TrackID getMasterID (const Song& song)
@@ -403,6 +465,32 @@ bool isFolderState (const juce::ValueTree& state)
 bool isReturnState (const juce::ValueTree& state)
 {
     return readTrackKind (state) == TrackValue::Kind::returnTrack;
+}
+
+std::optional<TrackValue::Kind> getTrackKind (const Song& song, TrackID id)
+{
+    return readTrackKind (findTrackState (song, id));
+}
+
+std::vector<TrackID> getTrackIDsOfKind (const Song& song, TrackValue::Kind kind)
+{
+    std::vector<TrackID> ids;
+
+    for (const auto& state : getTrackStates (song))
+        if (readTrackKind (state) == kind)
+            ids.push_back (readTrackElementID (state));
+
+    return ids;
+}
+
+juce::String getTrackInput (const Song& song, TrackID id)
+{
+    return readTrackInput (findTrackState (song, id));
+}
+
+TrackValue::Monitoring getTrackMonitoring (const Song& song, TrackID id)
+{
+    return readTrackMonitoring (findTrackState (song, id));
 }
 
 bool isFolder (const Song& song, TrackID id)
@@ -481,6 +569,32 @@ bool areAnyTracksSoloed (const Song& song)
     return std::any_of (states.begin(), states.end(), [] (const juce::ValueTree& state) { return readTrackSolo (state); });
 }
 
+bool isTrackFrozen (const Song& song, TrackID id)
+{
+    return readTrackFrozen (findTrackState (song, id));
+}
+
+std::optional<TrackPad> getTrackPad (const Song& song, TrackID id)
+{
+    const auto state = findTrackState (song, id);
+
+    if (const auto pad = readPad (state))
+        return TrackPad { .track = id, .sampler = readPadDevice (state), .pad = *pad };
+
+    return std::nullopt;
+}
+
+std::vector<TrackPad> getPadTracks (const Song& song)
+{
+    std::vector<TrackPad> pads;
+
+    for (const auto& state : getTrackStates (song))
+        if (const auto pad = readPad (state))
+            pads.push_back ({ .track = readTrackElementID (state), .sampler = readPadDevice (state), .pad = *pad });
+
+    return pads;
+}
+
 void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
 {
     if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && readTrackMute (state) != muted)
@@ -540,6 +654,11 @@ juce::Colour getTrackColour (std::optional<juce::uint32> own, int row)
 }
 
 //==============================================================================
+TrackView getTrackView (const Song& song, TrackID id)
+{
+    return readViewOf (findTrackState (song, id));
+}
+
 std::optional<int> getSavedTrackHeight (const Song& song, TrackID id)
 {
     return readSavedHeight (findTrackState (song, id));

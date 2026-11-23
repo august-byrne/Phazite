@@ -10,6 +10,7 @@
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
 
+#include <algorithm>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -235,22 +236,20 @@ void loadPadSound (DrumSampler& sampler, const Song& song, const juce::ValueTree
 
 TrackID findPadTrack (const Song& song, DeviceID id, int pad)
 {
-    for (const auto& state : getTrackStates (song))
-        if (state.hasProperty (schema::trackPad) && (int) state[schema::trackPad] == pad
-            && (juce::int64) state[schema::trackPadDevice] == (juce::int64) id.getRaw())
-            return getTrackID (state);
+    // Among the pads' own tracks, by their sampler and their note (Tracks.h: getPadTracks()).
+    for (const auto& each : getPadTracks (song))
+        if (each.pad == pad && each.sampler == id)
+            return each.track;
 
     return {};
 }
 
 std::optional<std::pair<DeviceID, int>> getPlayedPad (const Song& song, TrackID track)
 {
-    const auto state = findTrackState (song, track);
+    if (const auto played = getTrackPad (song, track))
+        return std::pair (played->sampler, played->pad);
 
-    if (! state.hasProperty (schema::trackPad))
-        return std::nullopt;
-
-    return std::pair (DeviceID::fromRaw ((std::uint64_t) (juce::int64) state[schema::trackPadDevice]), (int) state[schema::trackPad]);
+    return std::nullopt;
 }
 
 TrackID givePadItsOwnTrack (Song& song, DeviceID id, int pad)
@@ -297,11 +296,8 @@ void bringPadBack (Song& song, DeviceID id, int pad)
 
 bool hasPadsOnOwnTracks (const Song& song, TrackID track)
 {
-    for (const auto& state : getTrackStates (song))
-        if (state.hasProperty (schema::trackPad)
-            && getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) (juce::int64) state[schema::trackPadDevice])) == track)
-            return true;
-
-    return false;
+    const auto pads = getPadTracks (song);
+    return std::any_of (pads.begin(), pads.end(),
+                        [&song, track] (const TrackPad& each) { return getDeviceChannel (song, each.sampler) == track; });
 }
 } // namespace phazite

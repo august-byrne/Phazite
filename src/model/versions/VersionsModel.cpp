@@ -896,7 +896,7 @@ bool takeBack (ProjectContext& context, const VersionChange& line)
     if (line.isSong)
         makeSongOwnLike (*song, then);
     else
-        done = makeTrackLike (*song, line.track, then);
+        done = makeTrackLike (*song, line.isMaster ? getMasterID (*song) : line.track, then); // the master's by its kind
 
     removeBrokenReferences (*song);
     history->selectedChange.reset();
@@ -953,9 +953,11 @@ namespace
                 return false;
             }
 
+            // The master's line the master's piece, by its kind, whatever ID the version gave it (a version may give the master
+            // another).
             for (const auto& step : piece.path)
-                if (step == schema::TRACK.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw())
-                    || step == schema::MASTER.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw()))
+                if (line.isMaster ? step.startsWith (schema::MASTER.toString() + ":")
+                                  : step == schema::TRACK.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw()))
                     return true;
 
             return false;
@@ -995,21 +997,20 @@ namespace
             {
                 const auto id = readID (track[schema::trackID]);
                 const auto place = std::find (folders.begin(), folders.end(), id);
-                const auto couldHold = place != folders.end() || ! findTrackState (*song, TrackID::fromRaw (id)).isValid()
-                                       || isFolder (*song, TrackID::fromRaw (id));
+                const auto couldHold =
+                    place != folders.end() || ! hasTrack (*song, TrackID::fromRaw (id)) || isFolder (*song, TrackID::fromRaw (id));
 
                 if (couldHold
                     && (! holder.isValid() || place < std::find (folders.begin(), folders.end(), readID (holder[schema::trackID]))))
                     holder = track;
             }
 
-            const auto isMasterThere = readID (then.getChildWithName (schema::MASTER)[schema::trackID]) == line.track.getRaw();
-
-            if (! there.isValid() && ! isMasterThere && holder.isValid())
+            // The master's line by its kind, never by its ID, which the version may give it another of: the master is in no
+            // track, so no unreadable piece can hold it.
+            if (! there.isValid() && ! line.isMaster && holder.isValid())
             {
                 const auto id = TrackID::fromRaw (readID (holder[schema::trackID]));
-                const auto name =
-                    findTrackState (*song, id).isValid() ? "\"" + getTrackName (*song, id) + "\"" : juce::String ("a track gone since");
+                const auto name = hasTrack (*song, id) ? "\"" + getTrackName (*song, id) + "\"" : juce::String ("a track gone since");
                 history->restoreMissing.clear();
                 history->restoreRefused = "Couldn't restore " + line.name + " from \"" + getDisplayName (*version)
                                           + "\": the version's piece of " + name + ", which may hold it, can't be read.";
@@ -1027,7 +1028,7 @@ namespace
         if (line.isSong)
             makeSongOwnLike (*song, then);
         else
-            done = makeTrackLike (*song, line.track, then);
+            done = makeTrackLike (*song, line.isMaster ? getMasterID (*song) : line.track, then); // the master's by its kind
 
         removeBrokenReferences (*song);
         forgetCurvesBroughtIn (*song, curves);
@@ -2627,7 +2628,7 @@ namespace
             if (type == schema::MASTER.toString())
                 track = "Master";
             else if (type == schema::TRACK.toString())
-                track = findTrackState (song, TrackID::fromRaw ((std::uint64_t) key.getLargeIntValue())).isValid()
+                track = hasTrack (song, TrackID::fromRaw ((std::uint64_t) key.getLargeIntValue()))
                             ? getTrackName (song, TrackID::fromRaw ((std::uint64_t) key.getLargeIntValue()))
                             : juce::String ("a track gone since");
         }

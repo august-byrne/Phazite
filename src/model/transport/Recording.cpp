@@ -144,7 +144,7 @@ namespace
 
         if (auto* song = selection.getSong(); song != nullptr && findRecorder (selection) != nullptr)
             for (const auto id : selection.getTracks())
-                if (canRecordAudio (*song, id) && ! getInputChannels (findTrackState (*song, id)[schema::trackInput].toString()).empty())
+                if (canRecordAudio (*song, id) && ! getInputChannels (getTrackInput (*song, id)).empty())
                     tracks.push_back (id);
 
         return tracks;

@@ -2,10 +2,13 @@
 // The changes since the last version worked out on the history's thread (docs/design/versions.md: Off the message thread;
 // roadmap S4.5): from copies of what the song's notifications said changed, a round at a time, the last list kept until the
 // next is in, whose listeners are told then; never a list of another song's, nor an older one last.
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
+#include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
@@ -25,6 +28,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/ApplySong.h"
 #include "model/versions/internal/ChangesWorker.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/VersionHistory.h"
@@ -32,6 +36,7 @@
 #include <algorithm>
 #include <functional>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -453,6 +458,87 @@ TEST_CASE ("A change of the master's modulator, or of a macro of a container on 
 
     edit ("the master's LFO's rate", [&] { s.setModulatorParameter (lfo, "rate", 2.0f); });
     edit ("a macro of the master's container turned", [&] { s.setMacroValue (macros[3], 0.5f); });
+}
+
+TEST_CASE ("After a version gives the master another ID, the changes list the master's line as changed, as the whole songs "
+           "compared do")
+{
+    // Known bug 244: the worker keyed the master's line by its ID, so a version that gave the master another ID (one saved
+    // before a load renumbered the song's IDs) left the master listed under no line, then as added. Now the master is keyed
+    // as the master, and its line named by its ID now.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    s.addTrack ("Keys");
+    const auto equalizer = s.addEffect ({}, phazite::devices::Equalizer::typeID); // the master's
+    REQUIRE (equalizer.isValid());
+    auto& song = *phazite::findSong (s.context);
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    // A version of the song whose master has another ID, applied as a version is.
+    auto other = phazite::test::copyWholeSong (song);
+    auto otherMaster = other.getChildWithName (phazite::schema::MASTER);
+    REQUIRE (otherMaster.isValid());
+    const auto newID = song.makeID();
+    otherMaster.setProperty (phazite::schema::trackID, (juce::int64) newID, nullptr);
+
+    {
+        const phazite::UndoStep step (song, "Bring Back");
+        phazite::makeSongLike (song, other);
+        phazite::removeBrokenReferences (song);
+    }
+
+    REQUIRE (phazite::getMasterID (song).getRaw() == newID);
+    checkChangesAreWhole (s.context, "the master given another ID");
+
+    {
+        const phazite::UndoStep step (song, "Move Track");
+        phazite::moveTracksAfter (song, { bass }, phazite::getTrackIDs (song).back());
+    }
+
+    checkChangesAreWhole (s.context, "a track moved");
+
+    const auto output =
+        juce::String (std::string (phazite::devices::Equalizer::info.parameters[(size_t) phazite::devices::Equalizer::outputParameter].id));
+    const auto outputThen = phazite::getParameter (s.context, { equalizer, output }).getValue();
+    s.setParameter (equalizer, output, -6.0f);
+    REQUIRE (phazite::getParameter (s.context, { equalizer, output }).getValue() != doctest::Approx (outputThen));
+    checkChangesAreWhole (s.context, "the master's EQ turned");
+
+    // The master's line discarded, as the Source Control view's Discard Changes of a line does (VersionsModel.h: takeBack()):
+    // the master found as the master in both songs, though its IDs differ, never taken for one added since and taken away.
+    // The song keeps its master, with its EQ as the version has it, in one undo step that Undo and Redo take back and give.
+    std::optional<phazite::VersionChange> masterLine;
+
+    for (const auto& line : phazite::getListedChanges (withChangesIn (s.context)))
+        if (line.isMaster)
+            masterLine = line;
+
+    REQUIRE (masterLine.has_value());
+    CHECK (masterLine->kind == phazite::VersionChange::Kind::changed);
+    UndoCheck undo (s.context);
+    undo.check ("Discard Changes in the master", [&] { CHECK (phazite::takeBack (s.context, *masterLine)); });
+    CHECK (undo.getNumSteps() == 1);
+
+    const auto masterNow = phazite::getMasterID (song);
+    REQUIRE (masterNow.isValid());
+    const auto devices = phazite::getDevices (song, masterNow);
+    CHECK (std::find (devices.begin(), devices.end(), equalizer) != devices.end());
+    CHECK (phazite::getParameter (s.context, { equalizer, output }).getValue() == doctest::Approx (outputThen));
+    checkSong (song);
+    checkChangesAreWhole (s.context, "the master's line discarded");
+
+    for (const auto& line : phazite::getListedChanges (withChangesIn (s.context)))
+        CHECK_FALSE (line.isMaster);
+
+    phazite::undo (song);
+    REQUIRE (phazite::getMasterID (song).isValid());
+    CHECK (phazite::getParameter (s.context, { equalizer, output }).getValue() == doctest::Approx (-6.0f));
+    checkSong (song);
+    phazite::redo (song);
+    REQUIRE (phazite::getMasterID (song).isValid());
+    CHECK (phazite::getParameter (s.context, { equalizer, output }).getValue() == doctest::Approx (outputThen));
+    checkSong (song);
 }
 
 TEST_CASE ("The changes follow an edit once worked out in the background, the listeners told as they come in")

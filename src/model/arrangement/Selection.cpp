@@ -55,7 +55,7 @@ std::vector<TrackID> RangeSelection::getTracks() const
 
     if (auto* song = selection.getSong())
         for (const auto track : tracks)
-            if (findTrackState (*song, track).isValid())
+            if (hasTrack (*song, track))
                 there.push_back (track);
 
     return there;

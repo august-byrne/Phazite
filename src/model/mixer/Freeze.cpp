@@ -43,15 +43,11 @@ namespace
 {
     constexpr const char* frozenFilePrefix = "Frozen ";
 
-    bool isTrackState (const juce::ValueTree& state)
+    // A track that can be frozen or bounced: one of the playlist's with sound of its own, not a folder or a return (nor the
+    // master), by its kind (model/arrangement/internal/Tracks.h).
+    bool canRender (const Song& song, TrackID track)
     {
-        return state.hasType (schema::TRACK);
-    }
-
-    // A track that can be frozen or bounced: one of the playlist's with sound of its own, not a folder or a return.
-    bool canRender (const juce::ValueTree& state)
-    {
-        return isTrackState (state) && ! isFolderState (state) && ! isReturnState (state);
+        return getTrackKind (song, track) == TrackValue::Kind::track;
     }
 
     // Whether a device on a channel, or a device in a container on it, listens to another track through its sidechain: by
@@ -74,15 +70,15 @@ namespace
     // can.
     juce::String getWhyNotRender (const Song* song, TrackID track, const juce::String& verb, const juce::String& done)
     {
-        const auto state = song != nullptr ? findTrackState (*song, track) : juce::ValueTree();
+        const auto kind = song != nullptr ? getTrackKind (*song, track) : std::nullopt;
 
-        if (! isTrackState (state))
+        if (! kind.has_value() || *kind == TrackValue::Kind::master)
             return "Select a track to " + verb + ".";
 
-        if (isFolderState (state))
+        if (*kind == TrackValue::Kind::folder)
             return "Folders and buses can't be " + done + ": their sound is their tracks'.";
 
-        if (isReturnState (state))
+        if (*kind == TrackValue::Kind::returnTrack)
             return "Returns can't be " + done + ": their sound comes from the tracks that send to them.";
 
         if (isRecording (*song))
@@ -305,13 +301,13 @@ namespace
     {
         BeatPosition end;
 
-        for (const auto& other : getTrackStates (song))
+        for (const auto other : getTrackIDs (song))
         {
-            if (const auto id = getTrackID (other); id != track)
-                if (const auto fed = getTracksFedBy (song, id); std::find (fed.begin(), fed.end(), track) == fed.end())
+            if (other != track)
+                if (const auto fed = getTracksFedBy (song, other); std::find (fed.begin(), fed.end(), track) == fed.end())
                     continue;
 
-            for (const auto& clip : getClipValues (song, getTrackID (other)))
+            for (const auto& clip : getClipValues (song, other))
                 end = std::max (end, getLiveClipRange (song, clip).getEnd());
         }
 
@@ -345,7 +341,7 @@ namespace
     // Whether a track can be frozen through all its devices (none listens to another track): what Bounce in Place freezes.
     bool canFreezeWhole (const Song& song, TrackID track)
     {
-        if (! canRender (findTrackState (song, track)))
+        if (! canRender (song, track))
             return false;
 
         const auto outline = getDeviceOutline (song, track);
@@ -369,7 +365,7 @@ std::vector<DeviceID> getFrozenDevices (const Song& song, TrackID track)
 {
     std::vector<DeviceID> devices;
 
-    if (! canRender (findTrackState (song, track)))
+    if (! canRender (song, track))
         return devices;
 
     // Its devices and containers on its channel, by their IDs (Mixer.h: getDeviceOutline()), up to the first that listens to
@@ -397,9 +393,7 @@ juce::File getFrozenFile (const Song& song, TrackID track)
 
 void freezeFromFile (Song& song, TrackID track, const juce::File& rendered, juce::UndoManager* undo)
 {
-    auto state = findTrackState (song, track);
-
-    if (! canRender (state))
+    if (! canRender (song, track))
         return;
 
     // The rendered file takes the place of an earlier one.
@@ -409,7 +403,7 @@ void freezeFromFile (Song& song, TrackID track, const juce::File& rendered, juce
     if (rendered != file && ! rendered.moveFileTo (file) && ! rendered.copyFileTo (file))
         return;
 
-    state.setProperty (schema::trackFrozen, true, undo);
+    findTrackState (song, track).setProperty (schema::trackFrozen, true, undo);
 
     // What the track holds as it is frozen, taken here by what keeps the song's frozen tracks (FreezeKeeper, the song's
     // writer of what is pending), not in its tree callback, which reads no clip of the song's (SongValues.h): so what
@@ -419,7 +413,7 @@ void freezeFromFile (Song& song, TrackID track, const juce::File& rendered, juce
 
 void unfreeze (Song& song, TrackID track)
 {
-    if (auto state = findTrackState (song, track); isTrackState (state))
+    if (auto state = findTrackState (song, track); state.hasType (schema::TRACK))
         state.removeProperty (schema::trackFrozen, nullptr);
 }
 
@@ -427,9 +421,8 @@ bool isFrozenDevice (const Song& song, DeviceID id)
 {
     // On a frozen track's channel (not the master's), by its ID and its place there (Mixer.h: getDeviceOutline()).
     const auto channel = getDeviceChannel (song, id);
-    const auto track = findTrackState (song, channel);
 
-    if (! isTrackState (track) || ! (bool) track[schema::trackFrozen])
+    if (! isTrackFrozen (song, channel))
         return false;
 
     // A device in a container is frozen with its container.
@@ -448,9 +441,10 @@ std::vector<TrackID> getFrozenTracks (const Song& song)
 {
     std::vector<TrackID> frozen;
 
+    // Each track's switch read from the element the song's index gives it (TrackSwitchesValue.h), one walk of the order.
     for (const auto& state : getTrackStates (song))
-        if ((bool) state[schema::trackFrozen])
-            frozen.push_back (getTrackID (state));
+        if (readTrackFrozen (state))
+            frozen.push_back (readTrackElementID (state));
 
     return frozen;
 }
@@ -671,7 +665,7 @@ void FreezeKeeper::compareMarked()
     // The tracks frozen in a step since (noteFrozenTracks()), each with what it holds now, if it is still frozen.
     for (const auto track : std::exchange (toTake, {}))
     {
-        if (frozen.contains (track) || ! (bool) findTrackState (song, track)[schema::trackFrozen])
+        if (frozen.contains (track) || ! isTrackFrozen (song, track))
             continue;
 
         const auto holds = copyWhatTheFreezeHolds (song, track);
@@ -1033,7 +1027,7 @@ namespace
 
             if (result.wasOk())
             {
-                if (canRender (findTrackState (*song, track)) && rendered.existsAsFile())
+                if (canRender (*song, track) && rendered.existsAsFile())
                     result = use (rendered);
                 else
                     result = juce::Result::fail ("The track is gone, or Phazite couldn't render it.");
@@ -1076,9 +1070,7 @@ namespace
         juce::Result use (const juce::File& file) override
         {
             freezeFromFile (*song, track, file);
-            return (bool) findTrackState (*song, track)[schema::trackFrozen]
-                       ? juce::Result::ok()
-                       : juce::Result::fail ("Phazite couldn't keep the frozen file.");
+            return isTrackFrozen (*song, track) ? juce::Result::ok() : juce::Result::fail ("Phazite couldn't keep the frozen file.");
         }
     };
 
@@ -1226,7 +1218,7 @@ namespace
 
             // A frozen track plays its frozen file rather than its clips: live again first, as changing its clips would make it.
             for (const auto& part : parts)
-                if (part.audio && (bool) findTrackState (*song, part.track)[schema::trackFrozen])
+                if (part.audio && isTrackFrozen (*song, part.track))
                     unfreeze (*song, part.track);
 
             std::vector<OfflineRender::Job> jobs;
@@ -1367,7 +1359,8 @@ namespace
     juce::String getRenderTitle (const ProjectContext& context, TrackID track, const juce::String& doing)
     {
         auto* song = findSong (context);
-        const auto isTrack = song != nullptr && isTrackState (findTrackState (*song, track));
+        const auto kind = song != nullptr ? getTrackKind (*song, track) : std::nullopt;
+        const auto isTrack = kind.has_value() && *kind != TrackValue::Kind::master;
         return doing + " " + (isTrack ? getTrackName (*song, track) : juce::String ("the track"));
     }
 
@@ -1436,7 +1429,7 @@ void TrackRender::cancel()
 bool isFrozen (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
-    return song != nullptr && id.isValid() && readTrackFrozen (findTrackState (*song, id)); // TrackSwitchesValue.h
+    return song != nullptr && id.isValid() && isTrackFrozen (*song, id);
 }
 
 bool isFrozenDevice (const ProjectContext& context, DeviceID id)

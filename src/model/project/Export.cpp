@@ -110,9 +110,7 @@ namespace
     // Whether a channel has something to play: clips, a track with clips in its bus, or a send to its return.
     bool hasSomethingToPlay (const Song& song, TrackID channel)
     {
-        const auto state = findTrackState (song, channel);
-
-        if (isReturnState (state))
+        if (isReturnTrack (song, channel))
         {
             for (const auto sender : getTrackIDs (song))
                 for (const auto send : getSends (song, sender))
@@ -122,7 +120,7 @@ namespace
             return false;
         }
 
-        if (isFolderState (state))
+        if (isFolder (song, channel))
         {
             for (const auto inside : getTracksInFolder (song, channel))
                 if (hasClips (song, inside))

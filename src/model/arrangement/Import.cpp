@@ -773,7 +773,7 @@ namespace
             // the folder it left.
             const auto why = song.getFile() != projectFile ? juce::String ("The project moved to another folder while Phazite copied ")
                                                                  + describeFiles() + " into it."
-                             : target.isValid() && ! findTrackState (song, target).isValid()
+                             : target.isValid() && ! hasTrack (song, target)
                                  ? "The track " + describeFiles() + (paths.size() == 1 ? " was" : " were") + " dropped on went before "
                                        + (paths.size() == 1 ? "it was" : "they were") + " read."
                                  : juce::String();

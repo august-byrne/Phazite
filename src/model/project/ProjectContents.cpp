@@ -36,15 +36,10 @@ namespace
     {
         std::vector<Channel> channels;
 
-        for (const auto& state : getTrackStates (song))
-        {
-            const auto id = getTrackID (state);
+        for (const auto id : getTrackIDs (song))
             channels.push_back ({ id, getTrackName (song, id) });
-        }
 
-        const auto master = getMasterID (song);
-
-        if (findTrackState (song, master).isValid())
+        if (const auto master = getMasterID (song); hasTrack (song, master))
             channels.push_back ({ master, "Master" });
 
         return channels;

@@ -105,7 +105,7 @@ std::vector<ModulatorInfo> getModulators (const ProjectContext& context, TrackID
 {
     std::vector<ModulatorInfo> modulators;
 
-    if (auto* song = findSong (context); song != nullptr && id.isValid() && findTrackState (*song, id).isValid())
+    if (auto* song = findSong (context); song != nullptr && id.isValid() && hasTrack (*song, id))
         for (const auto modulator : getModulators (*song, id))
             modulators.push_back (makeInfo (*song, modulator));
 
@@ -124,7 +124,7 @@ ModulatorID addModulator (ProjectContext& context, TrackID id, ModulatorType typ
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! id.isValid() || ! findTrackState (*song, id).isValid())
+    if (song == nullptr || ! id.isValid() || ! hasTrack (*song, id))
         return {};
 
     const UndoStep step (*song, "Add " + getModulatorTypeName (type));

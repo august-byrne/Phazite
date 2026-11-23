@@ -25,13 +25,7 @@ namespace
     // clips keep their tracks' places.
     std::vector<TrackID> getTracksForClips (const Song& song)
     {
-        std::vector<TrackID> tracks;
-
-        for (const auto& state : getTrackStates (song))
-            if (! isFolderState (state) && ! isReturnState (state))
-                tracks.push_back (getTrackID (state));
-
-        return tracks;
+        return getTrackIDsOfKind (song, TrackValue::Kind::track);
     }
 
     int indexOf (const std::vector<TrackID>& tracks, TrackID track)
@@ -109,14 +103,14 @@ namespace
                 if (indexOf (tracks, track) >= 0)
                     return { track };
 
-            const auto states = getTrackStates (*song);
-            const auto from = std::find (states.begin(), states.end(), findTrackState (*song, selected.front()));
+            const auto all = getTrackIDs (*song);
+            const auto from = std::find (all.begin(), all.end(), selected.front());
 
-            for (auto state = from; state != states.end(); ++state)
-                if (const auto track = getTrackID (*state); indexOf (tracks, track) >= 0)
-                    return { track };
+            for (auto track = from; track != all.end(); ++track)
+                if (indexOf (tracks, *track) >= 0)
+                    return { *track };
 
-            if (from != states.end())
+            if (from != all.end())
                 return { {}, true };
         }
 
@@ -134,19 +128,20 @@ namespace
         TrackID last;
         TrackID firstReturn;
 
-        for (const auto& state : getTrackList (song))
+        // The list's own, not those in a folder, by their IDs.
+        for (const auto track : getTrackIDs (song))
         {
-            if (! state.hasType (schema::TRACK))
+            if (getParentFolder (song, track).isValid())
                 continue;
 
-            if (isReturnState (state))
+            if (isReturnTrack (song, track))
             {
                 if (! firstReturn.isValid())
-                    firstReturn = getTrackID (state);
+                    firstReturn = track;
             }
             else
             {
-                last = getTrackID (state);
+                last = track;
             }
         }
 

@@ -2417,13 +2417,14 @@ juce::String getDrumName (int note)
 
 bool isDrumTrack (const Song& song, TrackID track)
 {
-    const auto state = findTrackState (song, track);
-
-    if (const auto drumMode = readDrumMode (state)) // the tracks' view's conversion (TracksOutside.h)
+    // Its drum mode set by hand, the tracks' view kept in this file, through the view's conversion (TracksOutside.h): the
+    // drum rows' readers' element, which the tracks' view's piece moves (Tracks.h names it).
+    if (const auto drumMode = readDrumMode (findTrackState (song, track)))
         return *drumMode;
 
-    // As its instrument says: a drum sampler (Mixer.h: getDeviceOutline(), its devices by their IDs).
-    if (! state.isValid())
+    // Else as its instrument says, a track's the song has: a drum sampler (Mixer.h: getDeviceOutline(), its devices by their
+    // IDs, one look through its chain and no walk of the song, where its instrument's ID alone would need a walk to its type).
+    if (! hasTrack (song, track))
         return false;
 
     for (const auto& device : getDeviceOutline (song, track))
@@ -2443,7 +2444,7 @@ std::optional<std::vector<DrumRow>> getSamplerSounds (const Song& song, TrackID 
 {
     // A row for each of the drum sampler's pads that plays a sound, by their notes: the first drum sampler on the track's
     // channel, by its ID.
-    if (! findTrackState (song, track).isValid())
+    if (! hasTrack (song, track))
         return std::nullopt;
 
     for (const auto& device : getDeviceOutline (song, track))
@@ -2656,8 +2657,9 @@ AreaChoice chooseNoteClash (Song& song, const MergeClash& clash, int value, cons
     auto trackPath = clipPath;
     trackPath.remove (trackPath.size() - 1);
 
-    if (const auto track = findByPath (song.getState(), trackPath);
-        ! clip.isValid() || ! track.hasType (schema::TRACK) || getClipTrack (song, clip) != getTrackID (track))
+    // The track the path names, by its ID as the tracks' conversion reads it (TracksValue.h), none for no track there.
+    if (const auto track = readTrackElementID (findByPath (song.getState(), trackPath));
+        ! clip.isValid() || ! track.isValid() || getClipTrack (song, clip) != track)
         return AreaChoice::refused; // no clip there, so no note
 
     const auto note = NoteID::fromRaw ((std::uint64_t) clash.path[clash.path.size() - 1].substring (noteStep.length()).getLargeIntValue());

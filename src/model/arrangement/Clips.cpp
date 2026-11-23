@@ -62,8 +62,7 @@ namespace
     // Whether a track holds clips: a track's, not a folder's or a return's (Schema.h: trackKind).
     bool holdsClips (const Song& song, TrackID track)
     {
-        const auto trackState = findTrackState (song, track);
-        return trackState.hasType (schema::TRACK) && ! isFolderState (trackState) && ! isReturnState (trackState);
+        return getTrackKind (song, track) == TrackValue::Kind::track;
     }
 
     ClipPlacement toPlacement (const ClipValue& clip)
@@ -112,8 +111,8 @@ namespace
         if (clips.clips.empty())
             return;
 
-        for (const auto& trackState : getTrackStates (song))
-            if (const auto* list = clips.tracks.find (getTrackID (trackState).getRaw()))
+        for (const auto track : getTrackIDs (song))
+            if (const auto* list = clips.tracks.find (track.getRaw()))
             {
                 SongIndex::countVisited (list->size());
 
@@ -662,7 +661,7 @@ std::vector<ClipID> getAliasClips (const Song& song, ClipID clip)
 
     for (const auto& [track, onIt] : byTrack)
     {
-        const auto trackPlace = song.getIndex().getTrackPlace (findTrackState (song, TrackID::fromRaw (track))).index;
+        const auto trackPlace = getTrackPlace (song, TrackID::fromRaw (track)).index;
         const auto* list = clips.tracks.find (track);
         size_t place = 0;
 
@@ -1263,7 +1262,7 @@ ClipID placeClip (Song& song, TrackID track, BeatPosition start, ClipID lastUsed
         return copy->id;
     }
 
-    if (findTrackState (song, track).hasType (schema::TRACK) && hasInstrument (song, track))
+    if (const auto kind = getTrackKind (song, track); kind.has_value() && *kind != TrackValue::Kind::master && hasInstrument (song, track))
         return insertBarLongMidiClip (song, track, start, nullptr);
 
     return {};
@@ -1608,9 +1607,10 @@ namespace
         const auto clip = ClipID::fromRaw ((std::uint64_t) path[path.size() - 1].substring (clipStep.length()).getLargeIntValue());
         auto trackPath = path;
         trackPath.remove (trackPath.size() - 1);
-        const auto track = findByPath (song.getState(), trackPath);
+        // The track the path names, by its ID as the tracks' conversion reads it (TracksValue.h), none for no track there.
+        const auto track = readTrackElementID (findByPath (song.getState(), trackPath));
 
-        if (! clip.isValid() || ! track.hasType (schema::TRACK) || getClipTrack (song, clip) != getTrackID (track))
+        if (! clip.isValid() || ! track.isValid() || getClipTrack (song, clip) != track)
             return std::nullopt;
 
         return clip;

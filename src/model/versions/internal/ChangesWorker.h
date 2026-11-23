@@ -25,6 +25,10 @@ namespace phazite
 class ChangesWorker
 {
 public:
+    // The key the master's line is marked, copied and compared by, whatever its ID (a version may give it another: known bug
+    // 244, fixed): no track's ID is 0. Its line is named by its ID now (Request::master).
+    static constexpr std::uint64_t masterKey = 0;
+
     // What the history's thread keeps between rounds, for one version's song (a reference): its song, never changed, and
     // what each part compared to; only that thread touches it once given.
     struct State;
@@ -34,10 +38,11 @@ public:
     {
         std::shared_ptr<State> state;
         int epoch = 0, number = 0;
-        bool all = false;        // the whole song, copied (songNow): everything compared again
-        juce::ValueTree songNow; // all: the song; else, with skeleton, the song's own parts and its tracks' order (or none)
-        bool skeleton = false;   // songNow holds the song's own and its tracks' names and order
-        std::map<std::uint64_t, juce::ValueTree> tracks; // tracks and the master that changed, as they are (none: gone)
+        bool all = false;         // the whole song, copied (songNow): everything compared again
+        juce::ValueTree songNow;  // all: the song; else, with skeleton, the song's own parts and its tracks' order (or none)
+        bool skeleton = false;    // songNow holds the song's own and its tracks' names and order
+        std::uint64_t master = 0; // the master's ID now, which its line is named by
+        std::map<std::uint64_t, juce::ValueTree> tracks; // tracks and the master (masterKey) that changed, as they are (none: gone)
         std::map<juce::String, juce::ValueTree> curves;  // automation curves that changed, by key, as they are (none: gone)
         PluginParameterValues parameters;                // the plug-ins' knobs in what was copied, as they are now
         PluginParameterValues opened;                    // knobs of the reference's plug-ins that loaded after it was read
@@ -57,7 +62,7 @@ public:
     bool hasReference() const noexcept { return state != nullptr; }
     void clear(); // none: no changes, nothing to work out
 
-    // What changed, as the song notified it: a track or the master by its ID, an automation curve by its key
+    // What changed, as the song notified it: a track by its ID or the master by masterKey, an automation curve by its key
     // (schema::getElementKey()), the song's own (its properties, tempo map, sections, chords), its tracks' order or names,
     // and anything (every part copied again).
     void markTrack (std::uint64_t id);

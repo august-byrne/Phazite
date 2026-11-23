@@ -2500,7 +2500,17 @@ namespace
     bool makeTrackLikeIn (Song& song, juce::ValueTree state, TrackID id, const juce::ValueTree& other, juce::UndoManager* undo)
     {
         auto live = findTrack (state, id.getRaw());
-        const auto then = findTrack (other, id.getRaw());
+        auto then = findTrack (other, id.getRaw());
+
+        // The master's line by its kind: the master in each song, whichever of their IDs for it the line names (a version may
+        // give the master another ID), never taken for one the other hasn't, added since and taken away, or gone since and
+        // added beside it.
+        if (live.hasType (schema::MASTER) || then.hasType (schema::MASTER))
+        {
+            live = state.getChildWithName (schema::MASTER);
+            then = other.getChildWithName (schema::MASTER);
+            id = TrackID::fromRaw (readID (live[schema::trackID]));
+        }
 
         if (! live.isValid() && ! then.isValid())
             return false;
@@ -2509,21 +2519,12 @@ namespace
         if (then.isValid() && isStandIn (then))
             return true;
 
-        // Its devices' automation, of what either of them holds: its sends' levels' too, and its modulators' and macros' (its
-        // containers' macros included), which the song holds beside its tree (the other's whole copy holds their elements);
-        // the master's line the master's modulators' and macros'. Modulation's in one pass over its area's value.
+        // Its devices' automation, of what either of them holds: its fader's and VCA's, its devices', its sends' levels', and its
+        // modulators' and macros' (its containers' macros included), the song's read by its ID from where the song keeps each
+        // (Tracks.h: getAutomatableIDs()), the other's from its whole copy's elements; the master's line the master's.
         const auto isMaster = (live.isValid() ? live : then).hasType (schema::MASTER);
-        auto devices = getAutomatableIDs (live);
+        auto devices = getAutomatableIDs (song, id);
         devices.merge (getAutomatableIDs (then));
-
-        for (const auto send : getSends (song, id))
-            devices.insert (send.getRaw());
-
-        const auto modulation = getModulationValue (song);
-
-        for (const auto& entry : modulation.modulators)
-            if (const auto& place = entry.second.place; isMaster ? place.onMaster : ! place.onMaster && place.track == id)
-                devices.insert (entry.first);
 
         // Its clips, and those of the tracks that come back with it, in a pass of their own once the rest is done: what the
         // track holds that the other song holds on another track goes there, as it is now. And the tracks whose devices,

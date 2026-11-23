@@ -40,7 +40,8 @@ void makeSongTheSame (Song&, const juce::ValueTree& other);
 // that only those are made; a song whose history doesn't hold the copy's would lose what that history refers to.
 void makeSongAsCopied (Song&, const juce::ValueTree& copy);
 
-// One track (a folder's own part, a return, or the master by its ID) like the other's, with what it holds and its devices'
+// One track (a folder's own part, a return, or the master: named by either song's ID for it, the master is found as the
+// master in each, as a version may give it another ID) like the other's, with what it holds and its devices'
 // automation; one the other hasn't taken away, a folder without the tracks in it, which stay where it was, in their order,
 // as ungrouping it leaves them; and one the song hasn't put back where the other has it (after the track before it there,
 // in the same folder), a folder with the tracks in it that the song hasn't. An item that is on another track in the other

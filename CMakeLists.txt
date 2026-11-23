@@ -1603,6 +1603,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ToolRowTests.cpp
         tests/TopBarTests.cpp
         tests/TrackHoldingsTests.cpp
+        tests/TrackReadersTests.cpp
         tests/TrackTests.cpp
         tests/TracksValueTests.cpp
         tests/TransportModelTests.cpp

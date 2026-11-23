@@ -45,7 +45,7 @@ void SongRange::set (BeatRange newRange, const std::vector<TrackID>& ids)
 
     if (auto* song = impl->selection.getSong())
         for (const auto id : ids)
-            if (findTrackState (*song, id).isValid())
+            if (hasTrack (*song, id))
                 tracks.push_back (id);
 
     impl->range.set (newRange, tracks);

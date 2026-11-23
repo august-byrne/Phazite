@@ -354,11 +354,12 @@ void setMixedAsBus (Song&, TrackID folder, bool);
 
 // What sets a channel's volume (Schema.h: channelFader, or channelVCA for a plain folder), the master's for the master,
 // and the IDs of its parameters, which automation and modulation name ("volume" and "pan", "master volume" and "master
-// pan", or a VCA's "vca"). And the channel's element whose fader a device is, invalid for another device.
+// pan", or a VCA's "vca"). And the channel whose fader or VCA a device is (a track by its ID, the master by its flag:
+// ChannelRef, model/base/IDs.h), none for another device: a walk of the tracks and the master, one field of each read.
 DeviceID getFader (const Song&, TrackID channel);
 juce::String getVolumeParameterID (const Song&, TrackID channel);
 juce::String getPanParameterID (const Song&, TrackID channel); // none for a plain folder's VCA
-juce::ValueTree findChannelOfFader (const Song&, DeviceID fader);
+ChannelRef findChannelOfFader (const Song&, DeviceID fader);
 
 // A channel's volume, in decibels, and its pan, from -1 to 1 (Schema.h: channelVolume, channelPan): the song's, which its
 // fader plays (a plain folder's VCA has no pan); the master's are the master's, whose volume is -3 dB until it is set, as a

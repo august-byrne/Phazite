@@ -7,11 +7,11 @@
 #include "model/base/internal/ModulationArea.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/WholeState.h"
 
 #include <algorithm>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -31,23 +31,30 @@ namespace
         }
     }
 
-    // A track's own parts, or the master's: without the tracks in it (a folder's), which are parts of their own. Its clips
-    // first, by their IDs (Clips.h), each whole with its notes (WholeState.h: copyWholeClip()), as the song holds them beside
-    // its tree; then its other parts, each whole (a container with its macros); then its modulators and macros, then its
-    // sends, as whole state writes them (ModulationArea.h: writeModulationIn(); SendsArea.h: writeSendsIn()). A comparison
-    // finds a clip by its key, in no order among the rest (Schema.h: CLIP is in no order group), and a modulator and a send by
-    // its ID, in the order of its kind.
-    juce::ValueTree copyTrack (const Song& song, const juce::ValueTree& track)
+    // A track's own parts, or the master's, found by its ID (the master's by its ID now), none for one the song hasn't:
+    // without the tracks in it (a folder's), which are parts of their own. Its own properties and the elements its element
+    // holds, whole state of one track (Tracks.h: findTrackState(), the one element function the versions' copies still find a
+    // track by). Its clips first, by their IDs (Clips.h), each whole with its notes (WholeState.h: copyWholeClip()), as the
+    // song holds them beside its tree; then its other parts, each whole (a container with its macros); then its modulators and
+    // macros, then its sends, as whole state writes them (ModulationArea.h: writeModulationIn(); SendsArea.h: writeSendsIn()).
+    // A comparison finds a clip by its key, in no order among the rest (Schema.h: CLIP is in no order group), and a modulator
+    // and a send by its ID, in the order of its kind.
+    juce::ValueTree copyTrack (const Song& song, TrackID id)
     {
+        const auto track = findTrackState (song, id);
+
+        if (! track.isValid())
+            return {};
+
         juce::ValueTree copy (track.getType());
         copy.copyPropertiesFrom (track, nullptr);
 
-        if (track.hasType (schema::TRACK))
-            for (const auto clip : getClips (song, getTrackID (track)))
+        if (! isMaster (song, id))
+            for (const auto clip : getClips (song, id))
                 copy.appendChild (copyWholeClip (song, clip), nullptr);
 
         for (const auto& child : track)
-            if (! child.hasType (schema::TRACK))
+            if (! readTrackKind (child).has_value()) // not a track in it (TracksValue.h)
                 copy.appendChild (copyWhole (song, child), nullptr);
 
         const auto kept = keepValues (song);
@@ -61,6 +68,11 @@ namespace
     // folder, and the master's ID. What the song's own line and the lines' names and order are worked out from, without
     // copying any track's parts. Each of the song's own parts whole (WholeState.h), as the song holds it, beside its tree too
     // (roadmap step S5.20: the tempo map is a value beside it, its TEMPOMAP an empty place that copyWhole() fills).
+    // The tracks' three fields read one at a time from the elements the song's index gives (Tracks.h: getTrackStates()), through
+    // the tracks' readers of one field (TracksValue.h: readTrackElementID(), readTrackKind(), readTrackName()), never a track
+    // whole: it runs on the message thread at each round after a rename, a move or a change of the song's own
+    // (tests/PerformanceGateTests.cpp). Each stub holds them as the writer writes them (TracksValue.h: writeTrackElement()):
+    // the ID a number, the kind its word, the name where it has one.
     juce::ValueTree makeSkeleton (const Song& whole)
     {
         const auto song = whole.getState();
@@ -71,31 +83,39 @@ namespace
             if (const auto part = song.getChildWithName (*type); part.isValid())
                 own.appendChild (copyWhole (whole, part), nullptr);
 
-        const std::function<void (const juce::ValueTree&, juce::ValueTree)> addTracks =
-            [&addTracks] (const juce::ValueTree& from, juce::ValueTree into)
-        {
-            for (const auto& child : from)
-            {
-                if (! child.hasType (schema::TRACK))
-                    continue;
-
-                juce::ValueTree stub (schema::TRACK);
-
-                for (const auto* property : { &schema::trackID.getName(), &schema::trackKind.getName(), &schema::trackName.getName() })
-                    if (child.hasProperty (*property))
-                        stub.setProperty (*property, child[*property], nullptr);
-
-                into.appendChild (stub, nullptr);
-                addTracks (child, stub);
-            }
-        };
-
+        // The kinds' words as values, made once: a text made for each track would allocate.
+        static const juce::var trackWord (schema::trackIsTrack), folderWord (schema::trackIsFolder), returnWord (schema::trackIsReturn);
         juce::ValueTree list (schema::TRACKS);
-        addTracks (song.getChildWithName (schema::TRACKS), list);
+
+        // The open folders' elements and their stubs, outermost first.
+        std::vector<std::pair<juce::ValueTree, juce::ValueTree>> folders;
+
+        for (const auto& element : getTrackStates (whole))
+        {
+            // Each element comes after its folder's (getTrackStates()): its stub goes in that folder's stub.
+            while (! folders.empty() && folders.back().first != element.getParent())
+                folders.pop_back();
+
+            juce::ValueTree stub (schema::TRACK);
+            stub.setProperty (schema::trackID, (juce::int64) readTrackElementID (element).getRaw(), nullptr);
+            const auto kind = readTrackKind (element);
+            stub.setProperty (schema::trackKind,
+                              kind == TrackValue::Kind::folder        ? folderWord
+                              : kind == TrackValue::Kind::returnTrack ? returnWord
+                                                                      : trackWord,
+                              nullptr);
+
+            if (const auto name = readTrackName (element); name.isNotEmpty())
+                stub.setProperty (schema::trackName, name, nullptr);
+
+            (folders.empty() ? list : folders.back().second).appendChild (stub, nullptr);
+            folders.emplace_back (element, stub);
+        }
+
         own.appendChild (list, nullptr);
 
-        if (const auto master = song.getChildWithName (schema::MASTER); master.isValid())
-            own.appendChild (juce::ValueTree (schema::MASTER, { { schema::trackID, master[schema::trackID] } }), nullptr);
+        if (const auto master = getMasterID (whole); master.isValid())
+            own.appendChild (juce::ValueTree (schema::MASTER, { { schema::trackID, (juce::int64) master.getRaw() } }), nullptr);
 
         return own;
     }
@@ -143,6 +163,7 @@ struct ChangesWorker::State
     SongChange songLine;
     juce::ValueTree skeleton;
     std::map<std::uint64_t, std::set<std::uint64_t>> automatableNow;
+    std::uint64_t masterNow = 0; // the master's ID as the last round knew it, which its line is named by
 
     void index()
     {
@@ -156,11 +177,11 @@ struct ChangesWorker::State
             automatableBefore[id] = getAutomatableIDs (track);
         }
 
+        // The master's by its key, whatever its ID.
         if (const auto master = reference.getChildWithName (schema::MASTER); master.isValid())
         {
-            const auto id = readID (master[schema::trackID]);
-            referenceTracks[id] = master;
-            automatableBefore[id] = getAutomatableIDs (master);
+            referenceTracks[ChangesWorker::masterKey] = master;
+            automatableBefore[ChangesWorker::masterKey] = getAutomatableIDs (master);
         }
 
         for (const auto& curve : reference.getChildWithName (schema::AUTOMATION))
@@ -255,7 +276,7 @@ std::shared_ptr<ChangesWorker::Request> ChangesWorker::take (const Song& song, c
     request->epoch = epoch;
     request->number = ++number;
     request->withReported = reportedToo;
-    const auto songState = song.getState();
+    request->master = getMasterID (song).getRaw();
     std::set<std::uint64_t> devices;
 
     if (all)
@@ -263,7 +284,7 @@ std::shared_ptr<ChangesWorker::Request> ChangesWorker::take (const Song& song, c
         // Everything: the whole song, once.
         request->all = true;
         request->songNow = copyWholeSong (song);
-        tracksCopied += (juce::int64) getTrackElements (songState).size() + 1;
+        tracksCopied += (juce::int64) getTrackIDs (song).size() + 1;
         findPluginDevices (request->songNow, devices);
     }
     else
@@ -274,13 +295,10 @@ std::shared_ptr<ChangesWorker::Request> ChangesWorker::take (const Song& song, c
             request->songNow = makeSkeleton (song);
         }
 
-        // Each track that changed, its own parts alone; none for one that is gone.
-        const auto master = songState.getChildWithName (schema::MASTER);
-
+        // Each track that changed, its own parts alone, the master's by its key; none for one that is gone.
         for (const auto id : tracks)
         {
-            const auto element = master.isValid() && readID (master[schema::trackID]) == id ? master : song.getIndex().findTrack (id);
-            const auto copy = element.isValid() ? copyTrack (song, element) : juce::ValueTree();
+            const auto copy = copyTrack (song, id == masterKey ? getMasterID (song) : TrackID::fromRaw (id));
             ++tracksCopied;
             findPluginDevices (copy, devices);
             request->tracks[id] = copy;
@@ -325,6 +343,7 @@ ChangesWorker::Result ChangesWorker::work (const Request& request)
         return { request.epoch, request.number, {} };
 
     s.index();
+    s.masterNow = request.master;
 
     // The reference's knobs of plug-ins that loaded after it was read, as they opened (the state it opened from is the one
     // the reference holds), so that a knob turned after shows as a change.
@@ -388,7 +407,7 @@ ChangesWorker::Result ChangesWorker::work (const Request& request)
             tracksNow[readID (track[schema::trackID])] = track;
 
         if (const auto master = now.getChildWithName (schema::MASTER); master.isValid())
-            tracksNow[readID (master[schema::trackID])] = master;
+            tracksNow[masterKey] = master;
 
         std::set<std::uint64_t> ids;
 
@@ -441,7 +460,6 @@ ChangesWorker::Result ChangesWorker::work (const Request& request)
         automated.insert (device);
 
     const auto names = nameTracks (s.skeleton);
-    const auto masterNow = readID (s.skeleton.getChildWithName (schema::MASTER)[schema::trackID]);
     Result result { request.epoch, request.number, {} };
 
     const auto addLine = [&] (std::uint64_t id, const juce::String& name, bool isMaster)
@@ -466,6 +484,10 @@ ChangesWorker::Result ChangesWorker::work (const Request& request)
             change.trackID = id;
         }
 
+        // The master's line named by its ID now (its key is none of its IDs).
+        if (isMaster)
+            change.trackID = s.masterNow;
+
         change.name = name;
 
         if (touches)
@@ -487,8 +509,8 @@ ChangesWorker::Result ChangesWorker::work (const Request& request)
         if (const auto id = readID (track[schema::trackID]); shown.count (id) == 0)
             addLine (id, getTrackNameIn (s.reference, track), false);
 
-    if (const auto master = s.reference.getChildWithName (schema::MASTER); master.isValid() && masterNow != 0)
-        addLine (masterNow, "Master", true);
+    if (const auto master = s.reference.getChildWithName (schema::MASTER); master.isValid() && s.masterNow != 0)
+        addLine (masterKey, "Master", true);
 
     if (! s.songLine.what.isEmpty())
         result.changes.push_back (s.songLine);

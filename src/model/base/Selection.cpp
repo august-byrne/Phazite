@@ -2,11 +2,11 @@
 #include "internal/Selection.h"
 #include "internal/CurveValues.h"
 #include "internal/DevicesValue.h"
-#include "internal/Schema.h"
 #include "internal/SectionsValue.h"
 #include "internal/SendsValue.h"
-#include "internal/SongIndex.h"
 #include "internal/SongValues.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/mixer/internal/Mixer.h"
 
 #include <algorithm>
 #include <functional>
@@ -16,54 +16,14 @@ namespace phazite
 {
 namespace
 {
-    // Whether the song's tree holds a track (or a folder, a return or the master) with an ID, its element's "id"; a device (or
-    // a container) is the devices' to say (DevicesValue.h: holdsDevice()), and a clip the clips', which the song holds beside
-    // its tree (SongValues.h), found there by its ID.
-    [[maybe_unused]] bool holdsTrack (const juce::ValueTree& parent, std::uint64_t id)
-    {
-        for (const auto& child : parent)
-        {
-            const auto isTrack = child.hasType (schema::TRACK) || child.hasType (schema::MASTER);
-
-            if (isTrack && (std::uint64_t) (juce::int64) child.getProperty (schema::trackID, (juce::int64) 0) == id)
-                return true;
-
-            // Into what holds tracks: the track list and the folders.
-            if ((child.hasType (schema::TRACKS) || isTrack) && holdsTrack (child, id))
-                return true;
-        }
-
-        return false;
-    }
-
-    // Whether the song's tree holds a channel's ID, a fader's or a VCA's (Schema.h: channelFader, channelVCA) that a curve's
-    // points belong to (Schema.h: CURVE, curveDevice), as model/automation/ finds a curve's owner; a device's and a container's
-    // chain's are the devices' (holdsCurveOwner(), below), which the walk leaves to them, and a send's the sends' (holdsSend()),
-    // whose area the song holds them in, not its tree.
-    bool holdsChannelOwner (const juce::ValueTree& parent, std::uint64_t id)
-    {
-        for (const auto& child : parent)
-        {
-            if (child.hasType (schema::AUTOMATION) || readDeviceForm (child).has_value())
-                continue;
-
-            for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
-                if (child.hasProperty (*property) && schema::holdsID (child, *property)
-                    && (std::uint64_t) (juce::int64) child[*property] == id)
-                    return true;
-
-            if (holdsChannelOwner (child, id))
-                return true;
-        }
-
-        return false;
-    }
-
     // Whether the song holds what a curve's points belong to: a device, a container's chain (DevicesValue.h: holdsDevice()),
-    // or a channel's fader or VCA.
+    // or a channel's fader or VCA, by the tracks (model/mixer/internal/Mixer.h: findChannelOfFader()), or a channel by its ID
+    // (model/arrangement/internal/Tracks.h: hasTrack()). A send's is the sends' (holdsSend()), whose area the song holds them
+    // in.
     bool holdsCurveOwner (const Song& song, std::uint64_t id)
     {
-        return holdsDevice (song, DeviceID::fromRaw (id), true) || holdsChannelOwner (song.getState(), id);
+        return holdsDevice (song, DeviceID::fromRaw (id), true) || findChannelOfFader (song, DeviceID::fromRaw (id)).isValid()
+               || hasTrack (song, TrackID::fromRaw (id));
     }
 
     std::uint64_t pointComparisons = 0, noteComparisons = 0; // message thread
@@ -124,8 +84,8 @@ bool Selection::isThere (Item item) const
     if (song == nullptr || item.id == 0)
         return false;
 
-    // A clip in the song's values; a track by the song's index; a device (in a track's chain, the master's or a container's)
-    // looked for.
+    // A clip in the song's values; a track by the tracks' (one lookup in the song's index); a device (in a track's chain, the
+    // master's or a container's) looked for.
     if (item.kind == Kind::clip)
     {
         const auto* values = song->getValues();
@@ -135,12 +95,8 @@ bool Selection::isThere (Item item) const
     if (item.kind == Kind::device)
         return holdsDevice (*song, DeviceID::fromRaw (item.id));
 
-    const auto there = (std::uint64_t) (juce::int64) song->getState().getChildWithName (schema::MASTER)[schema::trackID] == item.id
-                       || song->getIndex().findTrack (item.id).isValid();
-
-    // The index and the song's tree differ.
-    jassert (! SongIndex::isChecking() || there == holdsTrack (song->getState(), item.id));
-    return there;
+    // The master's by its ID too (model/arrangement/internal/Tracks.h: hasTrack(), which the song's index checks as it looks).
+    return hasTrack (*song, TrackID::fromRaw (item.id));
 }
 
 bool Selection::isThere (SectionID id) const

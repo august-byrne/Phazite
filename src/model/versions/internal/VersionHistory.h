@@ -940,7 +940,12 @@ private:
     // names, or anything.
     void markChanged (const juce::ValueTree&, const juce::Identifier& property);
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
+
+    // A track's line or the master's, from the tree's callbacks by its element (a TRACK, which may have left the song, and the
+    // tracks in it), or by its ID (markLine(), the master's by its): the master's by one key whatever its ID, which a version
+    // may give anew (ChangesWorker::masterKey; known bug 244).
     void markTrack (const juce::ValueTree& track, bool withTracksInIt);
+    void markLine (TrackID);
 
     // The clips whose notes changed (the song holds them beside its tree: SongValues.h), heard as the values change and their
     // tracks marked (markTrack()) as the changes are next asked for: a listener of the values reads nothing of the song. With

@@ -11,6 +11,7 @@
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
+#include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/SavedValues.h"
 #include "model/devices/ParameterRef.h"
@@ -93,12 +94,14 @@ float getCurrentValue (const Song&, const ParameterRef&, bool withModulation);
 //==============================================================================
 // A parameter found in the song, for what reads one often (a control, at each of the display ticker's ticks): what it is of,
 // its element (state), and for one of Phazite's own devices' parameters, its description. The element is the one that holds
-// its value set by hand: a device's or a plug-in's DEVICE, a fader's channel (its TRACK or the MASTER), a container's chain's
-// CHAIN; none for a modulator's parameter and a macro's value, which are looked for by their modulator's ID in modulation's
-// area (model/modulation/internal/Modulation.h: getModulatorValue()), the modulator's still of the kind it was found of, nor
-// for a send's level, looked for by its send's ID in the sends' area (model/mixer/internal/Mixer.h: getSendValue()), one look
-// at each tick. The functions above, given one, take it as found, which holds while its element is the song's and still
-// names it, and for a modulator, a macro or a send, while its area holds it so (isStillThere()).
+// its value set by hand: a device's or a plug-in's DEVICE, a container's chain's CHAIN; none for a fader's volume and pan,
+// whose channel it holds by its track's ID or the master's flag (channel: model/base/IDs.h, ChannelRef), looked for in the
+// tracks by it (model/arrangement/internal/Tracks.h: isFaderOf()), nor for a modulator's parameter and a macro's value, which
+// are looked for by their modulator's ID in modulation's area (model/modulation/internal/Modulation.h: getModulatorValue()),
+// the modulator's still of the kind it was found of, nor for a send's level, looked for by its send's ID in the sends' area
+// (model/mixer/internal/Mixer.h: getSendValue()), one look at each tick. The functions above, given one, take it as found,
+// which holds while its element is the song's and still names it, and for a fader, a modulator, a macro or a send, while the
+// song holds it so (isStillThere()).
 struct FoundParameter
 {
     // Made by locateParameter() alone; a constructor of its own, so that a braced reference ({ device, "gain" }) is never
@@ -114,6 +117,7 @@ struct FoundParameter
     ParameterRef ref;
     ParameterSource source = ParameterSource::device;
     juce::ValueTree state;
+    ChannelRef channel {}; // a fader's volume's or pan's channel; none for the other sources
     const devices::ParameterInfo* info = nullptr;
 };
 

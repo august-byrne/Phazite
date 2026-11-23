@@ -937,14 +937,11 @@ void PluginInstances::storeTrack (TrackID track)
     tracks.insert (tracks.begin(), track);
     std::vector<DeviceID> ids;
 
+    // Each one's plug-ins by their IDs, in its devices' order, those in its containers' chains too (Mixer.h: getDeviceOutline()).
     for (const auto id : tracks)
-    {
-        std::vector<juce::ValueTree> found;
-        findPlugins (findTrackState (song, id), found);
-
-        for (const auto& device : found)
-            ids.push_back (getDeviceID (device));
-    }
+        for (const auto& device : getDeviceOutline (song, id))
+            if (device.form == DeviceValue::Form::plugin)
+                ids.push_back (device.id);
 
     store (ids);
 }

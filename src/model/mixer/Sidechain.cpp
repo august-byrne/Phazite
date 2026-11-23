@@ -31,9 +31,22 @@ namespace
     // Whether a track has sound of its own for a sidechain to listen to: a track, a return, or a bus, which mixes the tracks
     // in it (as Ableton Live's, Logic's and Cubase's sidechains take group and bus channels); not a plain folder, which only
     // scales its tracks' volumes (Buses.h).
+    // Read from a track's element the song's index gives it (the tracks' conversion, TracksValue.h), or by its ID.
     bool hasSoundOfItsOwn (const juce::ValueTree& state)
     {
-        return ! isFolderState (state) || state.hasProperty (schema::channelFader);
+        return readTrackKind (state) != TrackValue::Kind::folder || readIsBus (state);
+    }
+
+    // Whether the song holds a track (a track, a folder or a return, not the master) by its ID.
+    bool isSongTrack (const Song& song, TrackID track)
+    {
+        const auto kind = getTrackKind (song, track);
+        return kind.has_value() && *kind != TrackValue::Kind::master;
+    }
+
+    bool hasSoundOfItsOwn (const Song& song, TrackID track)
+    {
+        return isSongTrack (song, track) && (! isFolder (song, track) || isBus (song, track));
     }
 
     // The tracks with sound of their own, in the song's order.
@@ -43,7 +56,7 @@ namespace
 
         for (const auto& state : getTrackStates (song))
             if (hasSoundOfItsOwn (state))
-                tracks.push_back (getTrackID (state));
+                tracks.push_back (readTrackElementID (state));
 
         return tracks;
     }
@@ -53,17 +66,18 @@ namespace
     // listen to a sidechain.
     bool isFedBy (const Song& song, const juce::ValueTree& state, const std::vector<TrackID>& feeding)
     {
-        const auto track = getTrackID (state);
+        const auto track = readTrackElementID (state);
+        const auto kind = readTrackKind (state);
 
         if (const auto pad = getPlayedPad (song, track); pad.has_value() && contains (feeding, getDeviceChannel (song, pad->first)))
             return true;
 
-        if (isFolderState (state))
+        if (kind == TrackValue::Kind::folder)
             for (const auto inside : getTracksInFolder (song, track))
                 if (contains (feeding, inside))
                     return true;
 
-        if (isReturnState (state))
+        if (kind == TrackValue::Kind::returnTrack)
             for (const auto sender : feeding)
                 for (const auto send : getSends (song, sender))
                     if (getSendTarget (song, send) == track)
@@ -88,7 +102,7 @@ namespace
     {
         const auto plays = [&song] (TrackID each)
         {
-            const auto devices = getDeviceStates (findTrackState (song, each));
+            const auto devices = getDeviceStates (findChainState (song, each)); // the devices' (Mixer.h)
             return std::any_of (devices.begin(), devices.end(), [] (const juce::ValueTree& device) { return isDrumSampler (device); });
         };
 
@@ -215,9 +229,9 @@ std::vector<TrackID> getTracksFedBy (const Song& song, TrackID track)
 
         for (const auto& other : all)
         {
-            if (! contains (fed, getTrackID (other)) && isFedBy (song, other, fed))
+            if (const auto id = readTrackElementID (other); ! contains (fed, id) && isFedBy (song, other, fed))
             {
-                fed.push_back (getTrackID (other));
+                fed.push_back (id);
                 grew = true;
             }
         }
@@ -251,7 +265,7 @@ std::vector<TrackID> getSidechainSources (const Song& song, DeviceID id)
 
     // A device on the master, which no track's sound comes from, can listen to any track.
     const auto channel = getDeviceChannel (song, id);
-    const auto fed = findTrackState (song, channel).hasType (schema::TRACK) ? getTracksFedBy (song, channel) : std::vector<TrackID>();
+    const auto fed = isSongTrack (song, channel) ? getTracksFedBy (song, channel) : std::vector<TrackID>();
 
     for (const auto track : getSoundTracks (song))
         if (! contains (fed, track))
@@ -263,8 +277,7 @@ std::vector<TrackID> getSidechainSources (const Song& song, DeviceID id)
 TrackID getSidechainSource (const Song& song, DeviceID id)
 {
     const auto source = readDeviceSidechain (findDeviceState (song, id));
-    const auto state = findTrackState (song, source);
-    return state.hasType (schema::TRACK) && hasSoundOfItsOwn (state) ? source : TrackID();
+    return hasSoundOfItsOwn (song, source) ? source : TrackID();
 }
 
 bool hearsSidechain (const Song& song, DeviceID id)
@@ -292,11 +305,11 @@ SidechainChoice describeSidechainSource (const Song& song, DeviceID id)
 std::vector<SidechainChoice> describeTracksToListenTo (const Song& song, TrackID listener)
 {
     std::vector<SidechainChoice> choices;
-    const auto fed = findTrackState (song, listener).hasType (schema::TRACK) ? getTracksFedBy (song, listener) : std::vector<TrackID>();
+    const auto fed = isSongTrack (song, listener) ? getTracksFedBy (song, listener) : std::vector<TrackID>();
 
     for (const auto& state : getTrackStates (song))
     {
-        const auto track = getTrackID (state);
+        const auto track = readTrackElementID (state);
 
         if (track == listener)
             continue;
@@ -344,10 +357,7 @@ void setSidechainSource (Song& song, DeviceID id, TrackID source)
 
 DeviceID duckUnder (Song& song, TrackID ducked, TrackID key)
 {
-    const auto keyState = findTrackState (song, key);
-
-    if (ducked == key || ! findTrackState (song, ducked).hasType (schema::TRACK) || ! keyState.hasType (schema::TRACK)
-        || ! hasSoundOfItsOwn (keyState) || contains (getTracksFedBy (song, ducked), key))
+    if (ducked == key || ! isSongTrack (song, ducked) || ! hasSoundOfItsOwn (song, key) || contains (getTracksFedBy (song, ducked), key))
         return {};
 
     const UndoStep step (song, "Duck " + getTrackName (song, ducked) + " Under " + getTrackName (song, key));
@@ -385,7 +395,7 @@ void forgetSidechainLoops (Song& song)
     // then. A device in a container has no sidechain (Containers.h), nor does the master's listen to a loop.
     for (const auto& device : getSongDeviceOutline (song))
     {
-        if (! device.sidechain.isValid() || device.container.isValid() || ! findTrackState (song, device.channel).hasType (schema::TRACK))
+        if (! device.sidechain.isValid() || device.container.isValid() || ! isSongTrack (song, device.channel))
             continue;
 
         if (contains (getTracksFedBy (song, device.channel), device.sidechain))

@@ -123,7 +123,7 @@ namespace
 
         if (song != nullptr)
             for (const auto id : context.getSongSelection().getTracks())
-                if (findTrackState (*song, id).isValid())
+                if (hasTrack (*song, id))
                     tracks.push_back (id);
 
         return tracks;
@@ -136,7 +136,7 @@ namespace
             return getDeviceChannel (song, device);
 
         if (const auto channel = findChannelOfFader (song, device); channel.isValid())
-            return getTrackID (channel);
+            return channel.onMaster ? getMasterID (song) : channel.track;
 
         return getSendTrack (song, device); // none for none
     }
@@ -201,7 +201,7 @@ TrackID getMasterTrack (const ProjectContext& context)
 std::vector<AutomationLane> getAutomationLanes (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
-    return song != nullptr && findTrackState (*song, id).isValid() ? getLanes (*song, id) : std::vector<AutomationLane>();
+    return song != nullptr && hasTrack (*song, id) ? getLanes (*song, id) : std::vector<AutomationLane>();
 }
 
 TrackID showAutomationLane (ProjectContext& context, const ParameterRef& parameter)
@@ -246,7 +246,7 @@ void setAutomationLaneCollapsed (ProjectContext& context, const ParameterRef& pa
 
 void setAutomationLanesCollapsed (ProjectContext& context, TrackID id, bool collapsed)
 {
-    if (auto* song = findSong (context); song != nullptr && findTrackState (*song, id).isValid())
+    if (auto* song = findSong (context); song != nullptr && hasTrack (*song, id))
         for (const auto& lane : getLanes (*song, id))
             setLaneCollapsed (*song, id, lane.parameter, collapsed);
 }

@@ -25,21 +25,11 @@ namespace
     // A recording shorter than this keeps no clip, in seconds.
     constexpr double shortestRecording = 0.01;
 
-    juce::String getInputOf (const juce::ValueTree& trackState)
+    // A track that can have an input: a track or a return, not a folder (nor the master), by its kind.
+    bool hasInputs (const Song& song, TrackID track)
     {
-        return trackState.getProperty (schema::trackInput).toString();
-    }
-
-    // Whether the track hears its input always (schema::monitorAlways), or while it is armed (none), or never.
-    bool alwaysHears (const juce::ValueTree& trackState)
-    {
-        return trackState.getProperty (schema::trackMonitoring).toString() == schema::monitorAlways;
-    }
-
-    // A track that can have an input: a track, not a folder (nor the master).
-    bool hasInputs (const juce::ValueTree& trackState)
-    {
-        return trackState.hasType (schema::TRACK) && ! isFolderState (trackState);
+        const auto kind = getTrackKind (song, track);
+        return kind == TrackValue::Kind::track || kind == TrackValue::Kind::returnTrack;
     }
 } // namespace
 
@@ -53,8 +43,7 @@ juce::File getRecordingsFolder (const Song& song)
 
 bool canRecordAudio (const Song& song, TrackID track)
 {
-    const auto state = findTrackState (song, track);
-    return hasInputs (state) && ! isReturnState (state) && ! hasInstrument (song, track);
+    return getTrackKind (song, track) == TrackValue::Kind::track && ! hasInstrument (song, track);
 }
 
 int AudioRecorder::getNumInputs() const
@@ -113,8 +102,7 @@ bool AudioRecorder::isArmed (TrackID track) const
 
 void AudioRecorder::setArmed (TrackID track, bool shouldArm)
 {
-    if (const auto state = findTrackState (song, track);
-        shouldArm && (! hasInputs (state) || getInputChannels (getInputOf (state)).empty()))
+    if (shouldArm && (! hasInputs (song, track) || getInputChannels (getTrackInput (song, track)).empty()))
         return;
 
     if (shouldArm ? armed.insert (track).second : armed.erase (track) > 0)
@@ -128,8 +116,8 @@ std::vector<TrackID> AudioRecorder::getArmedTracks() const
 {
     std::vector<TrackID> tracks;
 
-    for (const auto& trackState : getTrackStates (song))
-        if (const auto id = getTrackID (trackState); hasInputs (trackState) && isArmed (id))
+    for (const auto id : getTrackIDs (song))
+        if (isArmed (id) && hasInputs (song, id))
             tracks.push_back (id);
 
     return tracks;
@@ -140,8 +128,7 @@ bool AudioRecorder::canRecord() const
     const auto numInputs = getNumInputs();
 
     for (const auto track : getArmedTracks())
-        if (const auto channels = getInputChannels (getInputOf (findTrackState (song, track)));
-            ! channels.empty() && channels.back() < numInputs)
+        if (const auto channels = getInputChannels (getTrackInput (song, track)); ! channels.empty() && channels.back() < numInputs)
             return true;
 
     return false;
@@ -165,14 +152,14 @@ void AudioRecorder::update()
     // goes).
     juce::BigInteger wanted;
 
-    for (const auto& trackState : closing ? std::vector<juce::ValueTree>() : getTrackStates (song))
+    for (const auto track : closing ? std::vector<TrackID>() : getTrackIDs (song))
     {
-        const auto channels = hasInputs (trackState) ? getInputChannels (getInputOf (trackState)) : std::vector<int>();
+        const auto channels = hasInputs (song, track) ? getInputChannels (getTrackInput (song, track)) : std::vector<int>();
 
         if (channels.empty() || channels.back() >= numInputs)
             continue;
 
-        if (isArmed (getTrackID (trackState)) || alwaysHears (trackState))
+        if (isArmed (track) || getTrackMonitoring (song, track) == TrackValue::Monitoring::always)
             for (auto channel : channels)
                 wanted.setBit (channel);
     }
@@ -221,7 +208,7 @@ std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, con
 {
     const auto rate = take.sampleRate;
 
-    if (const auto state = findTrackState (song, track); ! state.hasType (schema::TRACK) || isFolderState (state))
+    if (! hasInputs (song, track))
     {
         file.deleteFile();
         return {};

@@ -125,20 +125,20 @@ namespace
     // What of a track another DAW can't play, which its bounce plays: why, or nothing. Its devices (a container, or a device
     // that is no VST3), its modulation (Modulation.h) and its clips read by their IDs (Mixer.h, Clips.h), after its other
     // parts.
-    juce::String findWhyBounced (const Song& song, const juce::ValueTree& track)
+    juce::String findWhyBounced (const Song& song, TrackID track)
     {
-        if ((bool) track[schema::trackFrozen])
+        if (isTrackFrozen (song, track))
             return "frozen";
 
-        for (const auto& device : getDeviceOutline (song, getTrackID (track)))
+        for (const auto& device : getDeviceOutline (song, track))
             if (! device.container.isValid() && (device.form == DeviceValue::Form::container || ! isVst3 (device)))
                 return "devices";
 
-        if (hasModulations (song, getTrackID (track)))
+        if (hasModulations (song, track))
             return "modulation";
 
         // An audio clip's gain, tempo (while it follows the song's), pitch, direction and takes, as only Phazite plays them.
-        for (const auto& clip : getClipValues (song, getTrackID (track)))
+        for (const auto& clip : getClipValues (song, track))
             if (clip.isAudio()
                 && (! juce::approximatelyEqual (clip.gain, 0.0f) || clip.sound.tempo > 0.0
                     || ! juce::approximatelyEqual (clip.sound.pitch, 0.0f) || clip.sound.reversed || clip.takes != 0))
@@ -147,15 +147,24 @@ namespace
         return {};
     }
 
+    // A channel's pan as a number, as the song writes it (SongText.h: writeValue(), the fewest digits that read back as the
+    // float the tracks' value holds): what the export read of a channel's element before the tracks' readers moved onto the
+    // tracks' values, to the last digit it writes.
+    double readAsWritten (float value)
+    {
+        return readValueNumber (juce::var (writeValue (juce::var ((double) value)))).value_or ((double) value);
+    }
+
     //==============================================================================
     struct Writer
     {
         const Song& song;
         DawProjectContent& content;
-        engine::TempoMap tempo { getTempoMap (song) };      // in seconds
-        juce::StringArray leftOut {};                       // what couldn't go in
-        std::map<juce::String, juce::String> audioFiles {}; // each file's full path: its path in the zip
-        juce::XmlElement* lanes = nullptr;                  // the arrangement's
+        const SongTracks songTracks { getTracksValue (song) }; // every track and the master, read whole once
+        engine::TempoMap tempo { getTempoMap (song) };         // in seconds
+        juce::StringArray leftOut {};                          // what couldn't go in
+        std::map<juce::String, juce::String> audioFiles {};    // each file's full path: its path in the zip
+        juce::XmlElement* lanes = nullptr;                     // the arrangement's
 
         juce::String channelID (std::uint64_t track) const
         {
@@ -178,7 +187,7 @@ namespace
             lanes->setAttribute ("timeUnit", "beats");
             lanes->setAttribute ("id", "lanes");
 
-            writeTracks (structure, song.getState().getChildWithName (schema::TRACKS));
+            writeTracks (structure, TrackID());
             writeMaster (structure);
             writeMarkers (arrangement);
             writeTempoChanges (arrangement);
@@ -309,22 +318,24 @@ namespace
         }
 
         //==============================================================================
-        void writeTracks (juce::XmlElement& parent, const juce::ValueTree& tracks)
+        // A folder's tracks (the top list's for none), in their order, each written with its tracks.
+        void writeTracks (juce::XmlElement& parent, TrackID folder)
         {
-            for (const auto& track : tracks)
-                if (track.hasType (schema::TRACK))
-                    writeTrack (parent, track);
+            if (const auto* list = songTracks.findList (folder))
+                for (const auto id : *list)
+                    if (const auto* track = songTracks.find (id))
+                        writeTrack (parent, *track);
         }
 
-        void writeTrack (juce::XmlElement& parent, const juce::ValueTree& track)
+        void writeTrack (juce::XmlElement& parent, const TrackValue& track)
         {
-            const auto id = readID (track[schema::trackID]);
-            const auto trackID = TrackID::fromRaw (id);
+            const auto id = track.id.getRaw();
+            const auto trackID = track.id;
             const auto name = getTrackName (song, trackID);
             const auto colour = getTrackColour (song, trackID, (int) getTrackRow (trackID));
-            const auto isFolder = isFolderState (track), isReturn = isReturnState (track);
-            const auto bus = isFolder && (bool) track[schema::folderBus];
-            const auto why = isFolder ? juce::String() : findWhyBounced (song, track);
+            const auto isFolder = track.isFolder(), isReturn = track.isReturn();
+            const auto bus = isFolder && track.bus;
+            const auto why = isFolder ? juce::String() : findWhyBounced (song, trackID);
 
             auto* element = parent.createNewChildElement ("Track");
             element->setAttribute ("contentType", isFolder                                           ? "tracks"
@@ -340,7 +351,7 @@ namespace
                 writeChannel (*element, track, id, isReturn ? "effect" : bus ? "submix" : "regular", why.isNotEmpty());
 
             if (isFolder)
-                writeTracks (*element, track);
+                writeTracks (*element, trackID);
             else
                 writeLanes (track, id, "t" + juce::String ((juce::int64) id));
 
@@ -383,43 +394,43 @@ namespace
         }
 
         // Where a channel's sound goes: its bus's channel, or the master's.
-        juce::String findDestination (const juce::ValueTree& track) const
+        juce::String findDestination (const TrackValue& track) const
         {
-            const auto bus = getOutputBus (song, TrackID::fromRaw (readID (track[schema::trackID])));
+            const auto bus = getOutputBus (song, track.id);
             return channelID (bus.isValid() ? bus.getRaw() : 0);
         }
 
-        void writeChannel (juce::XmlElement& element, const juce::ValueTree& track, std::uint64_t id, const char* role, bool bounced)
+        void writeChannel (juce::XmlElement& element, const TrackValue& track, std::uint64_t id, const char* role, bool bounced)
         {
             // A bounced track keeps its notes, muted: its bounce plays its sound.
             writeChannelOf (element, track, channelID (id), role, ! bounced, bounced);
         }
 
-        void writeChannelOf (juce::XmlElement& element, const juce::ValueTree& track, const juce::String& id, const char* role,
-                             bool withDevices, bool muted)
+        void writeChannelOf (juce::XmlElement& element, const TrackValue& track, const juce::String& id, const char* role, bool withDevices,
+                             bool muted)
         {
             auto* channel = element.createNewChildElement ("Channel");
             channel->setAttribute ("audioChannels", 2);
             channel->setAttribute ("destination", findDestination (track));
             channel->setAttribute ("role", role);
-            channel->setAttribute ("solo", (bool) track[schema::trackSolo] ? "true" : "false");
+            channel->setAttribute ("solo", isTrackSoloed (song, track.id) ? "true" : "false");
             channel->setAttribute ("id", id);
 
             if (withDevices)
-                writeDevices (*channel, track, getTrackName (song, TrackID::fromRaw (readID (track[schema::trackID]))));
+                writeDevices (*channel, track.id, getTrackName (song, track.id));
 
             auto* mute = addParameter (*channel, "Mute", id + "m", "Mute");
-            mute->setAttribute ("value", muted || (bool) track[schema::trackMute] ? "true" : "false");
-            addPan (*channel, id + "p", (double) track.getProperty (schema::channelPan, 0.0));
-            writeSends (*channel, track, id);
-            addVolume (*channel, id + "v", toLinear ((float) track.getProperty (schema::channelVolume, 0.0)));
+            mute->setAttribute ("value", muted || isTrackMuted (song, track.id, false) ? "true" : "false");
+            addPan (*channel, id + "p", readAsWritten (track.pan));
+            writeSends (*channel, track.id, id);
+            addVolume (*channel, id + "v", toLinear (track.volume));
         }
 
-        void writeSends (juce::XmlElement& channel, const juce::ValueTree& track, const juce::String& id)
+        void writeSends (juce::XmlElement& channel, TrackID track, const juce::String& id)
         {
             juce::XmlElement* sends = nullptr;
 
-            for (const auto& send : getSendValues (song, TrackID::fromRaw (readID (track[schema::trackID]))))
+            for (const auto& send : getSendValues (song, track))
             {
                 if (sends == nullptr)
                     sends = channel.createNewChildElement ("Sends");
@@ -435,11 +446,11 @@ namespace
 
         // A channel's devices by their IDs (Mixer.h: getDeviceOutline()), a VST3 written from its whole copy, as the song holds
         // it (copyWholeDevice()).
-        void writeDevices (juce::XmlElement& channel, const juce::ValueTree& track, const juce::String& where)
+        void writeDevices (juce::XmlElement& channel, TrackID track, const juce::String& where)
         {
             juce::XmlElement* devices = nullptr;
 
-            for (const auto& device : getDeviceOutline (song, getTrackID (track)))
+            for (const auto& device : getDeviceOutline (song, track))
             {
                 if (device.container.isValid())
                     continue;
@@ -520,7 +531,7 @@ namespace
 
         void writeMaster (juce::XmlElement& structure)
         {
-            const auto master = song.getState().getChildWithName (schema::MASTER);
+            const auto& master = songTracks.master;
             auto* element = structure.createNewChildElement ("Track");
             element->setAttribute ("contentType", "audio notes");
             element->setAttribute ("loaded", "true");
@@ -532,10 +543,10 @@ namespace
             channel->setAttribute ("role", "master");
             channel->setAttribute ("solo", "false");
             channel->setAttribute ("id", channelID (0));
-            writeDevices (*channel, master, "the master");
+            writeDevices (*channel, master.id, "the master");
             addParameter (*channel, "Mute", "cmasterm", "Mute")->setAttribute ("value", "false");
-            addPan (*channel, "cmasterp", (double) master.getProperty (schema::channelPan, 0.0));
-            addVolume (*channel, "cmasterv", toLinear ((float) master.getProperty (schema::channelVolume, -3.0)));
+            addPan (*channel, "cmasterp", readAsWritten (master.pan));
+            addVolume (*channel, "cmasterv", toLinear (master.volume));
 
             auto* lane = lanes->createNewChildElement ("Lanes");
             lane->setAttribute ("track", "tmaster");
@@ -547,7 +558,7 @@ namespace
         }
 
         //==============================================================================
-        void writeLanes (const juce::ValueTree& track, std::uint64_t id, const juce::String& trackElementID)
+        void writeLanes (const TrackValue& track, std::uint64_t id, const juce::String& trackElementID)
         {
             auto* lane = lanes->createNewChildElement ("Lanes");
             lane->setAttribute ("track", trackElementID);
@@ -669,16 +680,16 @@ namespace
 
         // The automation of a channel's fader (its volume and pan), of its sends' levels and of its VST3 plug-ins, as points on
         // its lanes.
-        void writeAutomation (juce::XmlElement& lane, const juce::ValueTree& track, const juce::String& channel)
+        void writeAutomation (juce::XmlElement& lane, const TrackValue& track, const juce::String& channel)
         {
-            const auto fader = readID (track[schema::channelFader]);
+            const auto fader = track.fader.getRaw();
             std::set<std::uint64_t> pluginIDs, sendIDs;
 
-            for (const auto& device : getDeviceOutline (song, getTrackID (track)))
+            for (const auto& device : getDeviceOutline (song, track.id))
                 if (! device.container.isValid() && isVst3 (device))
                     pluginIDs.insert (device.id.getRaw());
 
-            for (const auto& send : getSendValues (song, TrackID::fromRaw (readID (track[schema::trackID]))))
+            for (const auto& send : getSendValues (song, track.id))
                 sendIDs.insert (send.id.getRaw());
 
             const auto toGain = [] (float position) { return toLinear (faderPositionToDecibels (position)); };

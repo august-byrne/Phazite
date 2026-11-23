@@ -1233,6 +1233,89 @@ TEST_CASE ("Performance gate: the plan after a device's knob moved on a song of 
 #endif
 }
 
+TEST_CASE ("Performance gate: the plan after a track's rename, colour, mute, height or volume on a song of 40 tracks reads its "
+           "channels' fields one at a time, and no more than it did")
+{
+    // The plan's compile reads each channel's fields (its kind, fader, volume, pan, pad, input, mute and solo) from the element
+    // the song's index gives it, through the tracks' readers of one field (model/base/internal/TracksValue.h), never a track
+    // whole (countTracksReadAsValues()). A track's own property marks no channel (model/playback/SongPlayer.cpp: markChange()),
+    // so the plan after a rename, a colour, a mute or a height reads no device's values again, and one after a volume set
+    // reads none either: what the compile reads of the channels stays what it read before the tracks' readers outside their
+    // area moved onto the tracks' readers (roadmap step S5.20, the tracks' second piece).
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 40);
+
+    for (const auto track : tracks)
+    {
+        phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+        phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
+    }
+
+    const auto track = tracks[17];
+    phazite::SongPlayer player (*song);
+    REQUIRE (player.compile (44100.0, 512, std::nullopt) != nullptr);
+
+    struct Counts
+    {
+        std::uint64_t devices = 0, whole = 0, visited = 0;
+        std::optional<int> allocations;
+    };
+
+    const auto measure = [&player] (const std::function<void()>& edit)
+    {
+        edit();
+        const auto devices = phazite::SongPlayer::countDevicesRead();
+        const auto whole = phazite::countTracksReadAsValues();
+        const auto visited = phazite::SongIndex::countElementsVisited();
+        std::unique_ptr<phazite::engine::Plan> plan;
+        Counts counts;
+        counts.allocations = phazite::test::countAllocations ([&player, &plan] { plan = player.compile (44100.0, 512, std::nullopt); });
+        REQUIRE (plan != nullptr);
+        counts.devices = phazite::SongPlayer::countDevicesRead() - devices;
+        counts.whole = phazite::countTracksReadAsValues() - whole;
+        counts.visited = phazite::SongIndex::countElementsVisited() - visited;
+        return counts;
+    };
+
+    struct Edit
+    {
+        const char* what;
+        std::function<void()> make;
+        int allocations; // at most, measured as the tracks' readers outside their area moved (Windows, MSVC's Debug build)
+    };
+
+    const std::vector<Edit> edits {
+        { "a track renamed", [&] { phazite::renameTrack (*song, track, "Renamed"); }, 5737 },
+        { "a track's colour", [&] { phazite::setTrackColours (*song, { track }, juce::Colour (0xff336699)); }, 5737 },
+        { "a track muted", [&] { phazite::toggleTracksMuted (*song, { track }); }, 5727 },
+        { "a track's height", [&] { phazite::setSavedTrackHeight (*song, track, 120); }, 5727 },
+        { "a track's volume set",
+          [&]
+          {
+              const phazite::UndoStep step (*song, "Change Volume");
+              phazite::setChannelVolume (*song, track, -6.0f);
+          },
+          5727 },
+    };
+
+    for (const auto& edit : edits)
+    {
+        INFO (std::string (edit.what));
+        const auto counts = measure (edit.make);
+        MESSAGE (std::string (edit.what) << ": devices' values read " << counts.devices << ", tracks read whole " << counts.whole
+                                         << ", elements visited " << counts.visited << ", allocations "
+                                         << counts.allocations.value_or (-1));
+        CHECK (counts.devices == 0);
+        CHECK (counts.whole == 0);
+        CHECK (counts.visited <= 162); // 40 tracks, measured as the allocations were
+
+#if JUCE_WINDOWS
+        if (counts.allocations.has_value())
+            CHECK (*counts.allocations <= edit.allocations);
+#endif
+    }
+}
+
 TEST_CASE ("Performance gate: a version that differs from a song of 40 tracks by one knob, applied, writes that knob alone and "
            "reads each of the version's devices once and none of the song's")
 {
@@ -3383,6 +3466,109 @@ TEST_CASE ("Performance gate: an edit has the versions copy and compare the one 
     CHECK (after.copied == before.copied);
     CHECK (after.compared == before.compared);
     CHECK (after.onMessageThread == before.onMessageThread);
+}
+
+TEST_CASE ("Performance gate: a track's own edit has the versions copy and compare that track alone")
+{
+    // A rename, a colour, a mute, a volume and the master's volume, each copied and compared alone (ChangesWorker.cpp: take(),
+    // a track found by its ID), however many tracks the song has.
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 32, 16.0);
+    auto& song = getSong (s);
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    std::optional<juce::Result> result;
+    REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    REQUIRE (phazite::countChanges (phazite::test::withChangesIn (s.context)) == 0);
+    const auto track = built.tracks[5];
+
+    struct Edit
+    {
+        const char* what;
+        std::function<void()> make;
+    };
+
+    const std::vector<Edit> edits {
+        { "a track renamed", [&] { phazite::renameTrack (song, track, "Renamed"); } },
+        { "a track's colour", [&] { phazite::setTrackColours (song, { track }, juce::Colour (0xff336699)); } },
+        { "a track muted", [&] { phazite::toggleMute (s.context, track); } },
+        { "a track's volume", [&] { s.setVolume (track, -6.0f); } },
+        { "the master's volume",
+          [&]
+          {
+              const phazite::UndoStep step (song, "Change Volume");
+              phazite::setChannelVolume (song, {}, -9.0f);
+          } },
+    };
+
+    for (const auto& edit : edits)
+    {
+        INFO (std::string (edit.what));
+        const auto copied = phazite::ChangesWorker::countTracksCopied();
+        const auto compared = phazite::ChangesWorker::countTracksCompared();
+        edit.make();
+        phazite::test::dispatchPendingMessages();
+        phazite::countChanges (phazite::test::withChangesIn (s.context));
+        CHECK (phazite::ChangesWorker::countTracksCopied() - copied == 1);
+        CHECK (phazite::ChangesWorker::countTracksCompared() - compared == 1);
+    }
+}
+
+TEST_CASE ("Performance gate: a round of the versions' changes after a rename on a song of 40 tracks reads no track whole")
+{
+    // A rename marks its track and the tracks' names (VersionHistory.cpp: markTrack()), so the round copies that track and the
+    // song's skeleton (ChangesWorker.cpp: makeSkeleton(): each track's ID, kind and name, in its folder, and the master's ID),
+    // on the message thread. The skeleton reads those three fields one at a time from the elements the song's index gives,
+    // through the tracks' readers of one field (model/base/internal/TracksValue.h), never a track whole
+    // (countTracksReadAsValues()), and allocates no more than the walk of the elements it replaced did.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 40);
+
+    for (const auto track : tracks)
+    {
+        phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+        phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
+    }
+
+    phazite::ChangesWorker worker;
+    worker.setReference (phazite::test::copyWholeSong (*song), {}, true, true);
+    const phazite::ChangesWorker::KnobReader none = [] (const std::set<std::uint64_t>&) { return phazite::PluginParameterValues(); };
+
+    const auto rename = [&] (const juce::String& name)
+    {
+        phazite::renameTrack (*song, tracks[17], name);
+        worker.markTrack (tracks[17].getRaw());
+        worker.markOrder();
+    };
+
+    // A round first, taken and worked out, so that what is made once (the kinds' words) is made before the round counted.
+    rename ("First");
+    const auto first = worker.take (*song, none, none, {});
+    REQUIRE (first != nullptr);
+    REQUIRE (worker.takeResult (phazite::ChangesWorker::work (*first)));
+
+    rename ("Renamed");
+    const auto whole = phazite::countTracksReadAsValues();
+    std::shared_ptr<phazite::ChangesWorker::Request> request;
+    const auto allocations = phazite::test::countAllocations ([&] { request = worker.take (*song, none, none, {}); });
+    const auto readWhole = phazite::countTracksReadAsValues() - whole;
+    REQUIRE (request != nullptr);
+    CHECK (request->skeleton);
+    CHECK (request->tracks.size() == 1);
+    MESSAGE ("A round after a rename on 40 tracks: tracks read whole " << readWhole << ", allocations " << allocations.value_or (-1));
+    CHECK (readWhole == 0);
+
+    if (! allocations.has_value())
+        return;
+
+#if JUCE_WINDOWS
+    // Measured 2026-11-23 on Windows (MSVC's Debug build), the whole round's copies (the renamed track's, with its devices,
+    // and the skeleton), the same in every run: 126 with the walk of the track list's elements the skeleton made before the
+    // tracks' readers moved, 405 with each track read whole (getTracksValue()) and its element written, 130 now (the list of
+    // the index's elements, and the open folders').
+    CHECK (*allocations <= 130);
+#endif
 }
 
 TEST_CASE ("Performance gate: a drag in a clip of 50,000 notes copies its track for the versions once, as it is committed")

@@ -27,12 +27,21 @@ namespace
         return session != nullptr ? &session->getRecorder() : nullptr;
     }
 
-    // A track's element in the open song, if it is a track (not a folder or the master), or else invalid.
+    // A track's element in the open song, if it is a track (not a folder or the master), or else invalid: what the writers of
+    // its input and its monitoring write (setTrackInput(), setInputMonitoring()); the readers read by its ID.
     juce::ValueTree findTrack (const ProjectContext& context, TrackID id)
     {
         auto* song = findSong (context);
         const auto state = song != nullptr && id.isValid() ? findTrackState (*song, id) : juce::ValueTree();
         return state.hasType (schema::TRACK) && ! isFolderState (state) ? state : juce::ValueTree();
+    }
+
+    // Whether the open song holds a track that can record (not a folder or the master): a track or a return, by its kind.
+    bool canHoldInput (const ProjectContext& context, TrackID id)
+    {
+        const auto* song = findSong (context);
+        const auto kind = song != nullptr && id.isValid() ? getTrackKind (*song, id) : std::nullopt;
+        return kind == TrackValue::Kind::track || kind == TrackValue::Kind::returnTrack;
     }
 } // namespace
 
@@ -67,7 +76,7 @@ bool canRecordAudio (const ProjectContext& context, TrackID id)
 
 juce::String getTrackInput (const ProjectContext& context, TrackID id)
 {
-    return readTrackInput (findTrack (context, id)); // the tracks' conversion (TracksValue.h)
+    return canHoldInput (context, id) ? getTrackInput (*findSong (context), id) : juce::String();
 }
 
 juce::String getLastInput (const ProjectContext& context)
@@ -99,8 +108,7 @@ void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inp
 
 InputMonitoring getInputMonitoring (const ProjectContext& context, TrackID id)
 {
-    // The tracks' conversion (TracksValue.h).
-    switch (readTrackMonitoring (findTrack (context, id)))
+    switch (canHoldInput (context, id) ? getTrackMonitoring (*findSong (context), id) : TrackValue::Monitoring::whileArmed)
     {
         case TrackValue::Monitoring::always:
             return InputMonitoring::always;
@@ -134,14 +142,14 @@ void setInputMonitoring (ProjectContext& context, TrackID id, InputMonitoring mo
 bool isArmed (const ProjectContext& context, TrackID id)
 {
     auto* recorder = findRecorder (context);
-    return recorder != nullptr && findTrack (context, id).isValid() && recorder->isArmed (id);
+    return recorder != nullptr && canHoldInput (context, id) && recorder->isArmed (id);
 }
 
 void setArmed (ProjectContext& context, TrackID id, bool armed)
 {
     auto* recorder = findRecorder (context);
 
-    if (recorder != nullptr && findTrack (context, id).isValid() && (! armed || canRecordAudio (context, id)))
+    if (recorder != nullptr && canHoldInput (context, id) && (! armed || canRecordAudio (context, id)))
         recorder->setArmed (id, armed);
 }
 
@@ -256,8 +264,7 @@ std::vector<float> getRecordingLevels (const ProjectContext& context, TrackID tr
 bool canRecordMidi (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
-    const auto track = findTrack (context, id);
-    return song != nullptr && track.isValid() && ! isReturnState (track) && hasInstrument (*song, id);
+    return song != nullptr && id.isValid() && getTrackKind (*song, id) == TrackValue::Kind::track && hasInstrument (*song, id);
 }
 
 bool isMidiArmed (const ProjectContext& context, TrackID id)
@@ -294,17 +301,15 @@ std::vector<RecordTarget> getRecordTargets (const ProjectContext& context)
 
     const auto numInputs = recorder->getNumInputs();
 
-    for (const auto& trackState : getTrackStates (*song))
+    for (const auto id : getTrackIDs (*song))
     {
-        const auto id = getTrackID (trackState);
-
         if (isMidiArmed (context, id))
         {
             targets.push_back ({ id, RecordSource::midi, {} });
         }
         else if (recorder->isArmed (id))
         {
-            const auto input = readTrackInput (trackState); // TracksValue.h
+            const auto input = getTrackInput (*song, id);
 
             if (const auto channels = getInputChannels (input); ! channels.empty() && channels.back() < numInputs)
                 targets.push_back ({ id, RecordSource::input, input });

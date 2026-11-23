@@ -14,8 +14,8 @@ namespace
     // A track live MIDI can play: a track, not a folder (nor the master).
     bool canPlayLive (const Song& song, TrackID track)
     {
-        const auto state = findTrackState (song, track);
-        return state.hasType (schema::TRACK) && ! isFolderState (state);
+        const auto kind = getTrackKind (song, track);
+        return kind == TrackValue::Kind::track || kind == TrackValue::Kind::returnTrack;
     }
 } // namespace
 
@@ -94,9 +94,9 @@ void routeLiveMidiInput (Song& song)
         return;
     }
 
-    for (const auto& trackState : getTrackStates (song))
+    for (const auto track : getTrackIDs (song))
     {
-        if (const auto track = getTrackID (trackState); canPlayLive (song, track) && hasInstrument (song, track))
+        if (canPlayLive (song, track) && hasInstrument (song, track))
         {
             setLiveMidiTrack (song, track);
             return;

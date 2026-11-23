@@ -1077,17 +1077,17 @@ juce::String getPanParameterID (const Song& song, TrackID channel)
     return readChannelVCA (state).isValid() ? juce::String() : juce::String (schema::faderPan);
 }
 
-juce::ValueTree findChannelOfFader (const Song& song, DeviceID fader)
+ChannelRef findChannelOfFader (const Song& song, DeviceID fader)
 {
     if (! fader.isValid())
         return {};
 
-    auto channels = getTrackStates (song);
-    channels.push_back (song.getState().getChildWithName (schema::MASTER));
-
-    for (const auto& channel : channels)
+    for (const auto& channel : getTrackStates (song))
         if (readChannelFader (channel) == fader || readChannelVCA (channel) == fader)
-            return channel;
+            return { .track = readTrackElementID (channel) };
+
+    if (const auto master = findChainState (song, {}); readChannelFader (master) == fader || readChannelVCA (master) == fader)
+        return { .onMaster = true };
 
     return {};
 }

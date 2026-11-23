@@ -54,6 +54,17 @@ struct NoteRef
     constexpr bool isValid() const noexcept { return clip.isValid() && note.isValid(); }
     constexpr auto operator<=> (const NoteRef&) const noexcept = default;
 };
+
+// A channel, by its track's ID, or the master by a flag: never by the master's ID, which a version may give anew (what is
+// kept across events, a control's found parameter, names the master so). None for neither.
+struct ChannelRef
+{
+    TrackID track {};
+    bool onMaster = false;
+
+    constexpr bool isValid() const noexcept { return onMaster || track.isValid(); }
+    constexpr bool operator== (const ChannelRef&) const noexcept = default;
+};
 } // namespace phazite
 
 template <typename Kind>

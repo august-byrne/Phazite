@@ -75,12 +75,11 @@ std::vector<ConsolidatePart> getConsolidateParts (const Song& song, const Select
 
     std::vector<ConsolidatePart> parts;
 
-    for (const auto& trackState : getTrackStates (song))
+    for (const auto track : getTrackIDs (song))
     {
-        const auto track = getTrackID (trackState);
         const auto found = ranges.find (track);
 
-        if (found == ranges.end() || found->second.isEmpty() || isFolderState (trackState) || isReturnState (trackState))
+        if (found == ranges.end() || found->second.isEmpty() || getTrackKind (song, track) != TrackValue::Kind::track)
             continue;
 
         ConsolidatePart part { track, found->second };

@@ -29,11 +29,6 @@ namespace
         return juce::String (text.data(), text.size());
     }
 
-    std::uint64_t readID (const juce::ValueTree& state, const juce::Identifier& property)
-    {
-        return (std::uint64_t) (juce::int64) state.getProperty (property, (juce::int64) 0);
-    }
-
     // A plug-in's parameter in its instance (none while no session plays the song, or the plug-in doesn't load): its
     // instance and its place there.
     std::pair<SandboxedInstance*, int> findPluginParameter (const Song& song, const ParameterRef& ref)
@@ -56,9 +51,10 @@ namespace
         return instance != nullptr && isSamePluginValue (value, instance->getParameterInfos()[(size_t) index].defaultValue);
     }
 
-    bool isVCA (const juce::ValueTree& channel, DeviceID fader)
+    // The track's ID a channel is named by in the mixer's functions (model/mixer/internal/Mixer.h): none for the master's.
+    TrackID getMixerChannel (const ChannelRef& channel)
     {
-        return readID (channel, schema::channelVCA) == fader.getRaw();
+        return channel.onMaster ? TrackID() : channel.track;
     }
 
     // A modulator or a macro of a parameter found (a modulator's parameter, a macro's value), by its ID: a look in modulation's
@@ -79,6 +75,14 @@ namespace
                                          const devices::ParameterInfo* info = nullptr)
     {
         return FoundParameter { ref, kind, state, info };
+    }
+
+    // A fader's volume or pan, by its channel (FoundParameter::channel), with no element.
+    std::optional<FoundParameter> foundOnChannel (const ParameterRef& ref, ParameterSource kind, ChannelRef channel)
+    {
+        FoundParameter parameter { ref, kind, {}, nullptr };
+        parameter.channel = channel;
+        return parameter;
     }
 
     // A chain's place among its container's, and how many chains it has; and whether it has a crossover: a band's, but the
@@ -158,16 +162,16 @@ std::optional<FoundParameter> locateParameterInTree (const Song& song, const Par
     // A fader's first, which controls read most.
     if (const auto channel = findChannelOfFader (song, ref.device); channel.isValid())
     {
-        const auto isMaster = channel.hasType (schema::MASTER);
+        const auto isMaster = channel.onMaster;
 
-        if (isVCA (channel, ref.device))
-            return ref.parameter == schema::vcaVolume ? found (ref, ParameterSource::volume, channel) : std::nullopt;
+        if (getChannelVCA (song, channel) == ref.device)
+            return ref.parameter == schema::vcaVolume ? foundOnChannel (ref, ParameterSource::volume, channel) : std::nullopt;
 
         if (ref.parameter == (isMaster ? schema::masterVolume : schema::faderVolume))
-            return found (ref, ParameterSource::volume, channel);
+            return foundOnChannel (ref, ParameterSource::volume, channel);
 
         if (ref.parameter == (isMaster ? schema::masterPan : schema::faderPan))
-            return found (ref, ParameterSource::pan, channel);
+            return foundOnChannel (ref, ParameterSource::pan, channel);
 
         return {};
     }
@@ -228,6 +232,11 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
     if (parameter.source == ParameterSource::send)
         return getSendValue (song, parameter.ref.device).has_value();
 
+    // A fader's by its channel, which still has it as its fader or its VCA: a folder's fader of the other kind, for one, has
+    // another ID. One lookup.
+    if (parameter.source == ParameterSource::volume || parameter.source == ParameterSource::pan)
+        return isFaderOf (song, parameter.channel, parameter.ref.device);
+
     if (! parameter.state.isAChildOf (song.getState()))
         return false;
 
@@ -241,7 +250,6 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
             return readDeviceElementID (parameter.state).getRaw() == id;
         case ParameterSource::volume:
         case ParameterSource::pan:
-            return readID (parameter.state, schema::channelFader) == id || readID (parameter.state, schema::channelVCA) == id;
         case ParameterSource::send:
         case ParameterSource::modulator:
         case ParameterSource::macro:
@@ -274,8 +282,10 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
         case ParameterSource::volume:
         {
             // The master's starts a little down (defaultMasterVolume), where a double-click sets it back.
-            const auto isMaster = state.hasType (schema::MASTER);
-            const auto* name = isMaster ? "Master volume" : isVCA (state, parameter.ref.device) ? "VCA" : "Volume";
+            const auto isMaster = parameter.channel.onMaster;
+            const auto* name = isMaster                                                          ? "Master volume"
+                               : getChannelVCA (song, parameter.channel) == parameter.ref.device ? "VCA"
+                                                                                                 : "Volume";
             return { parameter.source,
                      name,
                      { 0.0f, 1.0f },
@@ -284,7 +294,7 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
         }
 
         case ParameterSource::pan:
-            return { parameter.source, state.hasType (schema::MASTER) ? "Master pan" : "Pan", { -1.0f, 1.0f }, 0.0f, {} };
+            return { parameter.source, parameter.channel.onMaster ? "Master pan" : "Pan", { -1.0f, 1.0f }, 0.0f, {} };
 
         case ParameterSource::send:
             return { parameter.source, "Send level", { 0.0f, 1.0f }, atZeroDecibels, {} };
@@ -394,11 +404,11 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
         }
 
         case ParameterSource::volume:
-            return engine::decibelsToFaderPosition (
-                (float) state.getProperty (schema::channelVolume, state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f));
+            // Its channel's, by its ID, the master's by its flag (model/mixer/internal/Mixer.h: getChannelVolume()).
+            return engine::decibelsToFaderPosition (getChannelVolume (song, getMixerChannel (parameter.channel)));
 
         case ParameterSource::pan:
-            return (float) state.getProperty (schema::channelPan, 0.0f);
+            return getChannelPan (song, getMixerChannel (parameter.channel));
 
         case ParameterSource::send:
         {
@@ -505,7 +515,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         {
             told = juce::jlimit (0.0f, 1.0f, value);
             moveOnlyPoint (song, ref, told);
-            setChannelVolume (song, getTrackID (state), engine::faderPositionToDecibels (told));
+            setChannelVolume (song, getMixerChannel (parameter.channel), engine::faderPositionToDecibels (told));
             break;
         }
 
@@ -513,7 +523,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         {
             told = juce::jlimit (-1.0f, 1.0f, value);
             moveOnlyPoint (song, ref, told);
-            setChannelPan (song, getTrackID (state), told);
+            setChannelPan (song, getMixerChannel (parameter.channel), told);
             break;
         }
 
@@ -643,7 +653,7 @@ juce::String getChangeName (const Song& song, const ParameterRef& ref)
     switch (parameter->source)
     {
         case ParameterSource::volume:
-            return parameter->state.hasType (schema::MASTER) ? "Change Master Volume" : "Change Volume";
+            return parameter->channel.onMaster ? "Change Master Volume" : "Change Volume";
 
         case ParameterSource::pan:
             return "Change Pan";

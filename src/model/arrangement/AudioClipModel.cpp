@@ -41,12 +41,13 @@ namespace
         return song != nullptr && isAudioClip (*song, id);
     }
 
-    // A track that can hold clips of either kind (not a folder or the master), or invalid.
-    juce::ValueTree findTrack (const ProjectContext& context, TrackID id)
+    // Whether the open project holds a track that can hold clips of either kind (not a folder or the master): a track or a
+    // return, by its kind (Tracks.h: getTrackKind()).
+    bool isClipTrack (const ProjectContext& context, TrackID id)
     {
-        auto* song = findSong (context);
-        const auto state = song != nullptr ? findTrackState (*song, id) : juce::ValueTree();
-        return state.hasType (schema::TRACK) && ! isFolderState (state) ? state : juce::ValueTree();
+        const auto* song = findSong (context);
+        const auto kind = song != nullptr ? getTrackKind (*song, id) : std::nullopt;
+        return kind == TrackValue::Kind::track || kind == TrackValue::Kind::returnTrack;
     }
 
     // A change to an audio clip, as an undo step of its own with that name.
@@ -303,7 +304,7 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
 
 std::optional<ClipID> getAudioClipNearest (const ProjectContext& context, TrackID id, BeatPosition beat)
 {
-    if (! findTrack (context, id).isValid())
+    if (! isClipTrack (context, id))
         return {};
 
     const auto& song = *findSong (context);
@@ -350,7 +351,7 @@ std::optional<ClipType> getClipTypeToEdit (const ProjectContext& context)
         return type;
 
     if (const auto tracks = selection.getTracks(); ! tracks.empty())
-        if (findTrack (context, tracks.front()).isValid())
+        if (isClipTrack (context, tracks.front()))
             return hasClips (*findSong (context), tracks.front(), ClipValue::Kind::audio) ? ClipType::audio : ClipType::midi;
 
     return {};

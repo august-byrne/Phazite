@@ -10,10 +10,13 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/TracksOutside.h"
 #include "model/base/internal/TracksValue.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace phazite
@@ -80,16 +83,82 @@ SongTracks getTracksValue (const Song&);
 // getTrackName() numbers them (the order the tracks' value makes: makeTrackOrder()).
 TrackOrder getTrackOrder (const Song&);
 
+// A channel's fader (Schema.h: channelFader: a track's, a return's, a bus's, the master's) and its VCA (channelVCA: a plain
+// folder's), and whether a device is its fader or its VCA, by the channel's ChannelRef (model/base/IDs.h;
+// model/mixer/internal/Mixer.h: findChannelOfFader()): one lookup each, the master's by its flag or its ID; none and false for
+// a channel the song hasn't. What a fader's parameter found asks at each tick (model/devices/internal/Parameters.h:
+// FoundParameter::channel), and the devices automation's lanes show (model/automation/Automation.cpp: getLaneDevices()).
+DeviceID getChannelFader (const Song&, ChannelRef);
+DeviceID getChannelVCA (const Song&, ChannelRef);
+bool isFaderOf (const Song&, ChannelRef, DeviceID);
+
+// One track's place in that order (TrackOrder::Place: its index, and its number among those that aren't folders), from the
+// song's index, without the order made; none (-1 and 0) for the master and an ID the song hasn't.
+TrackOrder::Place getTrackPlace (const Song&, TrackID);
+
+// The IDs of what a track's (or the master's, by its ID) parameters are of, which automation names (Schema.h: curveDevice):
+// its channel's fader and VCA, its devices, containers and their chains (model/mixer/internal/Mixer.h: getDeviceOutline()),
+// its sends (getSends()), and its modulators and macros, its containers' macros too (model/modulation/internal/Modulation.h),
+// each read by its ID from where the song keeps it; not the tracks in it (a folder's), which are lines of their own. What a
+// version's line of a track carries of the curves (model/versions/ApplySong.cpp: makeTrackLikeIn()), as
+// model/versions/internal/SongDiff.h's getAutomatableIDs() reads it of a track's element in a whole copy.
+std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
+
 //==============================================================================
 // The song's tracks as it holds them: a TRACK element for each (Schema.h), folders holding theirs, and the master's own
-// element, MASTER.
-
-// The track list and the master's element, which every song has (a new song starts with them: model/project/internal/
-// Project.h, makeNewSong()): added if the song has none yet, without an undo step; or found without adding it (then
-// invalid). And the master's ID, which its channel's functions take (MixerModel.h: an empty ID names the master there).
+// element, MASTER. What reads tracks outside the tracks' own code reads them by ID (above, and the getters below), never
+// these elements (roadmap step S5.20, the tracks' second piece). The element functions below stay for the tracks' own code
+// (this file's, model/arrangement/PlaylistModel.cpp, model/mixer/MixerModel.cpp, Buses.cpp and the channels' functions of
+// model/mixer/Mixer.cpp) and for what the later pieces move. What still reads a TRACK's or the MASTER's element of a live
+// song outside this file, PlaylistModel.cpp, MixerModel.cpp, Buses.cpp and model/base/ (through these functions, the
+// conversion's readers of one field, TracksValue.h, or the schema's names), by file and function, each with whose it is:
+//   - model/mixer/Mixer.cpp, the channels' functions (the area's own, which the writers' piece moves): canHoldInstrument()
+//     (insertDevice()'s, setInstrument()'s and placeDevice()'s check), needsInstrument(), getDeviceChannel() (a device's
+//     TRACK by its parents), the master's and each channel's element in getDeviceOutline() and getSongDeviceOutline(),
+//     insertDevice() (a plain folder's chain), copyDevices() (both tracks' kinds), removeDevice() (a bus's switch),
+//     placeDevice(), setMixedAsBus(), getFader(), getVolumeParameterID(), getPanParameterID(), findChannelOfFader(),
+//     setChannelVolume(), setChannelPan(), getChannelVolume(), getChannelPan(), getReturnTracks() and
+//     forgetWhatNamesTheGone()'s walk of the pads' tracks; the sends' there: getSendValue(), getSendValues(), addSend(),
+//     takeSendsOf() (the keeper's) and chooseSendClash() (a merge's); the devices' there: findChainState() (a channel's chain
+//     by its TRACK or MASTER) and what reads a chain through it (getDevices(), getInstrument(), hasInstrument(),
+//     getDeviceSoundFiles(), getChannelDeviceValues(), getDeviceChannelPlace()), findDeviceState()'s walk of every channel,
+//     and getItemIDs()' walk of the IDs the tree holds.
+//   - model/notes/Notes.cpp, the tracks' view and key kept there (the writers' and the view's pieces): getTrackKey(),
+//     setTrackKey(), applyLastKey(); isDrumTrack()'s drum mode (its instrument by its ID), setDrumTrack(), getDrumRowOrder(),
+//     setDrumRowOrder(), getHiddenDrumRows(), hideDrumRow(), showAllDrumRows(); and chooseNoteClash() (a merge's path).
+//   - model/automation/Automation.cpp, the lanes and the write mode (the leaf switch): findLanesState(), keepLane() and the
+//     lanes' readers and writers on them, getAutomationMode(), setAutomationMode(), isWritingAutomation(); and
+//     isParameterValue() (a tree callback's test).
+//   - The writers (the writers' piece): model/devices/DrumKit.cpp: givePadItsOwnTrack(); model/mixer/Freeze.cpp:
+//     freezeFromFile(), unfreeze(); model/transport/RecordingModel.cpp: findTrack() (its helper), setTrackInput(),
+//     setInputMonitoring(), addTrackForInput(); model/presets/Presets.cpp: addTrackFromPreset()'s drum view;
+//     model/mixer/DeviceWriters.cpp: findOwnerElement(), isListed() (a device's place).
+//   - Walks that read one field of each track from the elements the song's index gives: Freeze.cpp: getFrozenTracks();
+//     model/mixer/Sidechain.cpp: getSoundTracks(), getTracksFedBy(), describeTracksToListenTo().
+//   - The devices' code (the devices' switch): Sidechain.cpp: playsDrumSampler(); model/mixer/Containers.cpp:
+//     findContainerChain(), makeContainerName(), canGroupIntoContainer() (a device's channel by its parent element);
+//     model/mixer/ContainerModel.cpp: addContainer() (whether the channel's element is there); model/plugins/DeviceStore.cpp:
+//     getChannelStore(); model/plugins/PluginInstances.cpp: findPlugins().
+//   - A merge's clash's path (an element the path names): model/modulation/Modulation.cpp: readOwnerPlace();
+//     model/arrangement/Clips.cpp: findClipOnPath().
+//   - The plan's compile (model/playback/SongPlayer.cpp), each channel's fields from the element the index gives it, through
+//     the readers of one field: compile()'s master's channel, getChannels(), updateAudibility() (a pad's sampler's track, a
+//     soloed return), setChannel(), addFaderAutomation(), addModulation(), getNotes() and compileNotes(), makeAudio(),
+//     checkAudio(), getHeardInput(), addFrozenFile().
+//   - The listeners' tree callbacks (the listener's piece): SongPlayer.cpp: markChange(), valueTreePropertyChanged(),
+//     markTracksIn(), takeValue() (a plain folder's VCA turning its tracks); model/project/ProjectContext.cpp:
+//     isTrackElement(), nameChannelOf(), mark(), valueTreePropertyChanged(); model/transport/AudioRecorder.cpp: update();
+//     model/playback/PlaybackSession.cpp: isViewState(); Freeze.cpp's keeper: holdsWhatWasFrozen().
+//   - The loader, the keepers and the check for unsaved changes: model/project/Project.cpp (makeSong(), makeNewSong(),
+//     keepPlaces(), belongsIn(), keepIDs(), keepNames(), keepModulators(), keepSendsAsHeld(), keepDevicesAsHeld(),
+//     keepTracksAsHeld(), collectLinkedClips(), getCountedChild(); holdSameClip(), holdSameTrackClips()); Freeze.cpp:
+//     forgetMissingFrozenFiles(); Clips.cpp: takeClipsOf().
+//   - The versions: model/versions/ApplySong.cpp's passes; ChangesWorker.cpp: copyTrack() (whole state of one track) and
+//     makeSkeleton() (each track's ID, kind and name, from the index's elements, through the readers of one field).
+// The track list, which every song has (a new song starts with it, the master's element too: model/project/internal/
+// Project.h, makeNewSong()): added if the song has none yet, without an undo step. And the master's ID, which its channel's
+// functions take (MixerModel.h: an empty ID names the master there).
 juce::ValueTree getTrackList (Song&);
-juce::ValueTree findTrackList (const Song&);
-juce::ValueTree getMasterState (Song&);
 TrackID getMasterID (const Song&);
 
 // A track's element, anywhere in the list, or the master's; invalid for one that is gone. And each track's, top to bottom,
@@ -104,13 +173,26 @@ bool isFolderState (const juce::ValueTree& trackState);
 bool isReturnState (const juce::ValueTree& trackState);
 
 // What a track is: a folder, which holds tracks; a return (it takes in what tracks send to it, and no solo silences it);
-// or the master.
+// or the master. And its kind (TrackValue::Kind: a track, the one kind that holds clips, a folder, a return, or the master for
+// the master's ID), none for an ID the song hasn't: one lookup in the index and one field read, for the readers outside the
+// tracks' area that ask what a track is (roadmap step S5.20, the tracks' second piece).
+std::optional<TrackValue::Kind> getTrackKind (const Song&, TrackID);
+
+// The song's tracks of one kind (the tracks that hold clips, the folders, the returns), top to bottom, a folder before its
+// tracks: one walk of the order, as getTrackIDs().
+std::vector<TrackID> getTrackIDsOfKind (const Song&, TrackValue::Kind);
 bool isFolder (const Song&, TrackID);
 bool isReturnTrack (const Song&, TrackID);
 bool isMaster (const Song&, TrackID);
 
 // A track's name as the song shows it: its own, or for a track or a return without one, its number among them, "Track 3".
 juce::String getTrackName (const Song&, TrackID);
+
+// The audio input a track records from (Schema.h: trackInput, "1" or "1+2"; empty for none, model/transport/internal/
+// AudioRecorder.h: getInputChannels()) and when it is heard through it: one lookup and one field read each, as
+// getTrackKind().
+juce::String getTrackInput (const Song&, TrackID);
+TrackValue::Monitoring getTrackMonitoring (const Song&, TrackID);
 
 // The folder a track is in, or none; and the tracks a folder holds, directly or in its folders, top to bottom: those folders
 // among them, empty ones too, as a folder is a track (its effects are part of the folder's sound).
@@ -121,6 +203,23 @@ std::vector<TrackID> getTracksInFolder (const Song&, TrackID folder);
 bool isTrackMuted (const Song&, TrackID, bool orInMutedFolder);
 bool isTrackSoloed (const Song&, TrackID);
 bool areAnyTracksSoloed (const Song&);
+
+// Whether a track plays its frozen file (Schema.h: trackFrozen; model/mixer/internal/Freeze.h): one lookup and one field
+// read; none for the master.
+bool isTrackFrozen (const Song&, TrackID);
+
+// A drum sampler's pad played on a track of its own (model/devices/internal/DrumKit.h: givePadItsOwnTrack()): the track, the
+// sampler (Schema.h: trackPadDevice) and the pad's note (trackPad). One track's, none for a track that plays no pad (one
+// lookup); and every one of the song, in its order, one walk of the order as getTrackIDs().
+struct TrackPad
+{
+    TrackID track {};
+    DeviceID sampler {};
+    int pad = 0;
+};
+
+std::optional<TrackPad> getTrackPad (const Song&, TrackID);
+std::vector<TrackPad> getPadTracks (const Song&);
 
 // The switches set, not as undo steps (as in many DAWs); a mute in the caller's undo step with its undo manager (a bounce
 // mutes the track it rendered as part of its step).
@@ -135,6 +234,11 @@ void setTrackColour (Song&, TrackID, juce::Colour);
 // own color as its value holds it (TrackValue::colour), for a reader that holds the value.
 juce::Colour getTrackColour (const Song&, TrackID, int row);
 juce::Colour getTrackColour (std::optional<juce::uint32> own, int row);
+
+// A track's view (base/internal/TracksOutside.h: its height, collapsed, pinned, drum mode and drum rows, lanes), the master's
+// by its ID, as readViewOf() reads it: one lookup, read whole, for what asks several of its fields once per command (a track's
+// preset); an empty view for an ID the song hasn't.
+TrackView getTrackView (const Song&, TrackID);
 
 // View settings the project keeps for each track, without undo steps; their on-screen meaning is the playlist's
 // (ui/playlist/TrackHeights.h).

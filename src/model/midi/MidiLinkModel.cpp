@@ -21,21 +21,6 @@ namespace phazite
 {
 namespace
 {
-    // The track a parameter is of: the one whose element holds its device, fader or chain.
-    TrackID findTrackOf (const Song& song, const juce::ValueTree& element)
-    {
-        for (auto parent = element; parent.isValid(); parent = parent.getParent())
-        {
-            if (parent.hasType (schema::MASTER))
-                return getMasterID (song);
-
-            if (parent.hasType (schema::TRACK))
-                return getTrackID (parent);
-        }
-
-        return {};
-    }
-
     MidiLinker* findLinker (const ProjectContext& context)
     {
         auto* song = findSong (context);
@@ -69,7 +54,7 @@ std::vector<MidiLinkInfo> getMidiLinks (const ProjectContext& context)
             const auto isModulation = found->source == ParameterSource::modulator || found->source == ParameterSource::macro;
             info.track = isModulation ? getModulatorTrack (*song, ModulatorID::fromRaw (link.parameter.device.getRaw()))
                          : found->source == ParameterSource::send ? getSendTrack (*song, link.parameter.device)
-                                                                  : findTrackOf (*song, found->state);
+                                                                  : getParameterTrack (*song, link.parameter);
 
             if (holdsDevice (*song, link.parameter.device))
                 info.device = link.parameter.device;

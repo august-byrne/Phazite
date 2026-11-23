@@ -35,8 +35,7 @@ namespace
     // the master.
     bool canHold (const Song& song, TrackID id)
     {
-        const auto state = findTrackState (song, id);
-        return state.hasType (schema::TRACK) && ! isFolderState (state) && ! isReturnState (state);
+        return getTrackKind (song, id) == TrackValue::Kind::track;
     }
 
     NoteClip makeNoteClip (const Song& song, const ClipValue& clip)
@@ -535,7 +534,7 @@ std::optional<Key> getTrackKey (const ProjectContext& context, TrackID id)
 
 void chooseTrackKey (ProjectContext& context, TrackID id, const std::optional<Key>& key)
 {
-    if (auto* song = findSong (context); song != nullptr && findTrackState (*song, id).isValid())
+    if (auto* song = findSong (context); song != nullptr && hasTrack (*song, id))
         chooseTrackKey (*song, id, key);
 }
 

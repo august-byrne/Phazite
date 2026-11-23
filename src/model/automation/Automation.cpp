@@ -506,7 +506,7 @@ namespace
         {
             const auto track = stretch.track;
 
-            if (! findTrackState (song, track).isValid() || stretch.range.isEmpty())
+            if (! hasTrack (song, track) || stretch.range.isEmpty())
                 continue;
 
             auto found = std::find_if (tracks.begin(), tracks.end(), [track] (const auto& each) { return each.first == track; });
@@ -600,19 +600,21 @@ namespace
     std::vector<DeviceID> getLaneDevices (const Song& song, TrackID track)
     {
         std::vector<DeviceID> ids;
-        const auto state = findTrackState (song, track);
 
-        // Read by the tracks' conversion (TracksValue.h).
-        for (const auto id : { readChannelFader (state), readChannelVCA (state) })
+        // None of a track the song hasn't (the master by its ID is one it has).
+        if (! hasTrack (song, track))
+            return ids;
+
+        // Its fader and its VCA by its ID (Tracks.h: getChannelFader(), getChannelVCA(): one lookup each).
+        for (const auto id : { getChannelFader (song, { .track = track }), getChannelVCA (song, { .track = track }) })
             if (id.isValid())
                 ids.push_back (id);
 
         for (const auto& send : getSendValues (song, track))
             ids.push_back (send.id);
 
-        // Its devices, its containers' chains and their devices, in their order (Mixer.h: getDeviceOutline()), a track's the song
-        // has.
-        for (const auto& device : state.isValid() ? getDeviceOutline (song, track) : std::vector<DeviceOutline>())
+        // Its devices, its containers' chains and their devices, in their order (Mixer.h: getDeviceOutline()).
+        for (const auto& device : getDeviceOutline (song, track))
             if (device.form != DeviceValue::Form::container)
                 ids.push_back (device.id);
 
@@ -736,7 +738,8 @@ TrackID getParameterTrack (const Song& song, const ParameterRef& parameter)
             return getDeviceChannel (song, parameter.device); // a container's devices are on its channel
         case ParameterSource::volume:
         case ParameterSource::pan:
-            return getTrackID (found->state); // a fader's channel (FoundParameter::state)
+            // A fader's channel (FoundParameter::channel), the master by its ID now.
+            return found->channel.onMaster ? getMasterID (song) : found->channel.track;
         case ParameterSource::send:
             return getSendTrack (song, parameter.device); // the track a send is on, by its ID
         case ParameterSource::chainVolume:
@@ -755,11 +758,11 @@ std::vector<ParameterRef> getAutomatableParameters (const Song& song, TrackID tr
 {
     std::vector<ParameterRef> parameters;
 
-    // The channel's fader's (or a plain folder's VCA's), the master's for the master; then a track's sends.
-    const auto chain = findChainState (song, track);
+    // The channel's fader's (or a plain folder's VCA's), the master's for the master, none for a channel the song hasn't;
+    // then a track's sends.
     const auto fader = getFader (song, track);
 
-    if (! chain.isValid() || ! fader.isValid())
+    if (! fader.isValid())
         return parameters;
 
     parameters.push_back ({ fader, getVolumeParameterID (song, track) });
@@ -829,7 +832,7 @@ juce::String getParameterName (const Song& song, const ParameterRef& parameter)
         case ParameterSource::send:
         {
             const auto target = getSendTarget (song, parameter.device);
-            return "Send to " + (findTrackState (song, target).isValid() ? getTrackName (song, target) : juce::String ("Return"));
+            return "Send to " + (hasTrack (song, target) ? getTrackName (song, target) : juce::String ("Return"));
         }
 
         case ParameterSource::volume:
@@ -1626,8 +1629,9 @@ void setAutomationMode (Song& song, TrackID track, AutomationMode mode)
 
 bool isWritingAutomation (const Song& song)
 {
+    // Each channel's mode read from the element the song's index gives it (TrackSwitchesValue.h), the master's too.
     auto states = getTrackStates (song);
-    states.push_back (song.getState().getChildWithName (schema::MASTER));
+    states.push_back (findTrackState (song, getMasterID (song)));
     return std::any_of (states.begin(), states.end(),
                         [] (const juce::ValueTree& state) { return readAutomationMode (state) != AutomationMode::read; });
 }

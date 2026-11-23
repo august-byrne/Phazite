@@ -205,7 +205,8 @@ TEST_CASE ("A channel's fader is the song's, by its ID, which what plays the cha
     CHECK (phazite::getFader (song, mix.a) == idOf (a, schema::channelFader));
     CHECK (phazite::getFader (song, {}) == idOf (master, schema::channelFader));
     CHECK (phazite::getFader (song, mix.a) != phazite::getFader (song, {}));
-    CHECK (phazite::getTrackID (phazite::findChannelOfFader (song, phazite::getFader (song, mix.a))) == mix.a);
+    CHECK (phazite::findChannelOfFader (song, phazite::getFader (song, mix.a)) == phazite::ChannelRef { .track = mix.a });
+    CHECK (phazite::findChannelOfFader (song, phazite::getFader (song, {})) == phazite::ChannelRef { .onMaster = true });
 
     // A folder starts as a bus, with a fader; made plain, a VCA of its own takes the fader's place and its meter goes, and
     // undo brings them back.

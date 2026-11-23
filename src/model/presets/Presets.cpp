@@ -960,20 +960,31 @@ juce::var makeDevicePreset (Song& song, DeviceID id)
 
 juce::var makeTrackPreset (Song& song, TrackID track)
 {
-    if (! findTrackState (song, track).hasType (schema::TRACK))
+    // A track, a folder or a return (not the master), by its kind; its own colour (none for its row's) and its drum view read
+    // by its ID (Tracks.h: findTrack(), getTrackView()).
+    if (const auto kind = getTrackKind (song, track); ! kind.has_value() || *kind == TrackValue::Kind::master)
         return {};
 
     song.storeDeviceStates (track.getRaw());
-    const auto state = findTrackState (song, track);
     auto saved = makeObject();
     set (saved, keys::name, getTrackName (song, track));
-    set (saved, keys::colour, juce::Colour::fromString (state[schema::trackColour].toString()).toString());
 
-    for (const auto& [property, key] :
-         { std::pair { &schema::drumMode.getName(), &keys::drumMode }, std::pair { &schema::drumOrder.getName(), &keys::drumOrder },
-           std::pair { &schema::drumHidden.getName(), &keys::drumHidden } })
-        if (state.hasProperty (*property))
-            set (saved, *key, state[*property]);
+    if (const auto value = findTrack (song, track))
+        set (saved, keys::colour, juce::Colour (value->colour.value_or (0)).toString());
+
+    const auto view = getTrackView (song, track);
+
+    // The drum mode as the view holds it, a switch (true), for a song opened from a file too, where the element's property as
+    // it was copied before wrote the text "1"; loading either gives the same track, so it is accepted as it is
+    // (tests/TrackReadersTests.cpp holds the two the same).
+    if (view.drumMode.has_value())
+        set (saved, keys::drumMode, *view.drumMode);
+
+    if (view.drumOrder.has_value())
+        set (saved, keys::drumOrder, *view.drumOrder);
+
+    if (view.drumHidden.has_value())
+        set (saved, keys::drumHidden, *view.drumHidden);
 
     set (saved, keys::volume, getChannelVolume (song, track));
     set (saved, keys::pan, getChannelPan (song, track));
@@ -1381,8 +1392,7 @@ bool saveTrackPreset (const ProjectContext& context, TrackID id, const juce::Fil
 {
     // A track that holds clips: not a folder, a return or the master.
     auto* song = findSong (context);
-    const auto state = song != nullptr && id.isValid() ? findTrackState (*song, id) : juce::ValueTree();
-    if (! state.hasType (schema::TRACK) || isFolderState (state) || isReturnState (state))
+    if (song == nullptr || ! id.isValid() || getTrackKind (*song, id) != TrackValue::Kind::track)
         return false;
 
     return savePresetFile (context, makeTrackPreset (*song, id), file);
@@ -1396,7 +1406,7 @@ namespace
     {
         auto* song = findSong (context);
 
-        if (song == nullptr || (target.isValid() && ! findTrackState (*song, target).isValid()))
+        if (song == nullptr || (target.isValid() && ! hasTrack (*song, target)))
             return false;
 
         const auto name = file.getFileNameWithoutExtension();
@@ -1456,7 +1466,7 @@ bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target
     auto* song = findSong (context);
     const auto preset = song != nullptr ? readPreset (file) : juce::var();
 
-    if (! preset.isObject() || (target.isValid() && ! findTrackState (*song, target).isValid()))
+    if (! preset.isObject() || (target.isValid() && ! hasTrack (*song, target)))
         return false;
 
     // The sounds it names copied into the project first, in the background for those outside it (known bug 183): it goes in

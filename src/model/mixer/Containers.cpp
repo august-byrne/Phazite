@@ -598,7 +598,7 @@ bool canGroupIntoContainer (const Song& song, const std::vector<DeviceID>& devic
     // Devices on one channel, none in a container nor a container itself; an instrument only as its track's, its first.
     const auto channel = findDeviceState (song, devices.front()).getParent();
 
-    if (! channel.hasType (schema::TRACK) && ! channel.hasType (schema::MASTER))
+    if (! readTrackKind (channel).has_value()) // a track, a folder, a return or the master (TracksValue.h)
         return false;
 
     const auto onChannel = getDeviceStates (channel);

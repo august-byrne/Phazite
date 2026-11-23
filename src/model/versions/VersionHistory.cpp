@@ -3076,7 +3076,7 @@ void VersionHistory::markChildChanged (const juce::ValueTree& parent, const juce
 
 void VersionHistory::markTrack (const juce::ValueTree& track, bool withTracksInIt)
 {
-    const auto id = readID (track[schema::trackID]);
+    const auto id = track.hasType (schema::MASTER) ? ChangesWorker::masterKey : readID (track[schema::trackID]);
     sinceBase.markTrack (id);
     againstCompared.markTrack (id);
 
@@ -3085,6 +3085,14 @@ void VersionHistory::markTrack (const juce::ValueTree& track, bool withTracksInI
             if (child.hasType (schema::TRACK))
                 markTrack (child, true);
 
+    changesMayDiffer();
+}
+
+void VersionHistory::markLine (TrackID track)
+{
+    const auto key = isMaster (song, track) ? ChangesWorker::masterKey : track.getRaw();
+    sinceBase.markTrack (key);
+    againstCompared.markTrack (key);
     changesMayDiffer();
 }
 
@@ -3173,13 +3181,13 @@ void VersionHistory::markHeard()
 {
     // A clip gone since was taken off its track, which marked it.
     for (const auto clip : std::exchange (notesHeard, {}))
-        if (const auto track = getClipTrack (song, clip); track.isValid())
-            markTrack (findTrackState (song, track), false);
+        if (const auto track = getClipTrack (song, clip); track.isValid() && hasTrack (song, track))
+            markLine (track);
 
-    // The master's line, by the ID it has now.
+    // The master's line, by its key (ChangesWorker::masterKey).
     if (std::exchange (masterHeard, false))
-        if (const auto master = song.getState().getChildWithName (schema::MASTER); master.isValid())
-            markTrack (master, false);
+        if (const auto master = getMasterID (song); hasTrack (song, master))
+            markLine (master);
 }
 
 void VersionHistory::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators,
@@ -3531,9 +3539,9 @@ void VersionHistory::takeChangesOutsideHistory()
         {
             if (const auto device = plugin.id.getRaw(); plugin.form == DeviceValue::Form::plugin && moved.count (device) > 0)
             {
-                if (const auto channel = findTrackState (song, plugin.channel); channel.isValid())
+                if (hasTrack (song, plugin.channel))
                 {
-                    markTrack (channel, false);
+                    markLine (plugin.channel);
                     placed.insert (device);
                 }
             }

@@ -27,16 +27,18 @@ namespace phazite
 {
 namespace
 {
-    // Whether a channel's element can hold modulators: a track's, a folder's or the master's; and macros: a track's or a
-    // return's, which hold clips or take them in, not a folder's or the master's.
-    bool canHoldModulators (const juce::ValueTree& channel)
+    // Whether a channel can hold modulators, by its track's ID (the master's by its): a track, a folder, a return or the
+    // master; and macros: a track or a return, which hold clips or take them in, not a folder or the master. By its kind
+    // (model/arrangement/internal/Tracks.h).
+    bool canHoldModulators (const Song& song, TrackID channel)
     {
-        return channel.hasType (schema::TRACK) || channel.hasType (schema::MASTER);
+        return channel.isValid() && hasTrack (song, channel);
     }
 
-    bool canHoldMacros (const juce::ValueTree& owner)
+    bool canHoldMacros (const Song& song, TrackID channel)
     {
-        return (owner.hasType (schema::TRACK) && ! isFolderState (owner)) || owner.hasType (schema::CONTAINER);
+        const auto kind = channel.isValid() ? getTrackKind (song, channel) : std::nullopt;
+        return kind == TrackValue::Kind::track || kind == TrackValue::Kind::returnTrack;
     }
 
     // Whether two places have one owner (ModulationValue.h: ModulatorPlace): the same container where either names one,
@@ -78,7 +80,7 @@ namespace
     {
         ModulatorPlace place;
 
-        if (findChainState (song, track).hasType (schema::MASTER))
+        if (! track.isValid() || isMaster (song, track))
             place.onMaster = true;
         else
             place.track = track;
@@ -96,11 +98,10 @@ namespace
     // none for another element.
     std::optional<ModulatorPlace> readOwnerPlace (const juce::ValueTree& owner)
     {
-        if (owner.hasType (schema::MASTER))
-            return ModulatorPlace { .onMaster = true };
-
-        if (owner.hasType (schema::TRACK))
-            return ModulatorPlace { .track = TrackID::fromRaw (readID (owner[schema::trackID])) };
+        // A track's or the master's, as the tracks' conversion reads them (TracksValue.h).
+        if (const auto kind = readTrackKind (owner))
+            return *kind == TrackValue::Kind::master ? ModulatorPlace { .onMaster = true }
+                                                     : ModulatorPlace { .track = readTrackElementID (owner) };
 
         if (! owner.hasType (schema::CONTAINER))
             return std::nullopt;
@@ -118,13 +119,15 @@ namespace
     // the master's), its own and then its containers', whether or not it holds any.
     void forEachOwner (const Song& song, const std::function<void (const ModulatorPlace&)>& each)
     {
-        auto channels = getTrackStates (song);
-        channels.push_back (findChainState (song, {}));
+        auto places = std::vector<ModulatorPlace>();
 
-        for (const auto& channel : channels)
+        for (const auto track : getTrackIDs (song))
+            places.push_back ({ .track = track });
+
+        places.push_back ({ .onMaster = true });
+
+        for (const auto& place : places)
         {
-            const auto place =
-                channel.hasType (schema::MASTER) ? ModulatorPlace { .onMaster = true } : ModulatorPlace { .track = getTrackID (channel) };
             each (place);
 
             // Its containers, by their IDs (Mixer.h: getDeviceOutline()).
@@ -345,7 +348,7 @@ TrackID getModulatorTrack (const Song& song, ModulatorID id)
         return {};
 
     // The master's by its own ID, as a track's (Schema.h: MASTER).
-    return value->place.onMaster ? getTrackID (findChainState (song, {})) : value->place.track;
+    return value->place.onMaster ? getMasterID (song) : value->place.track;
 }
 
 DeviceID getModulatorContainer (const Song& song, ModulatorID id)
@@ -488,7 +491,7 @@ std::optional<ModulatorPlace> findOwnerPlace (const Song& song, const ModulatorP
         return ModulatorPlace { .track = container->track, .onMaster = container->onMaster, .container = owner.container };
     }
 
-    if (! (owner.onMaster ? findChainState (song, {}) : findTrackState (song, owner.track)).isValid())
+    if (! hasTrack (song, owner.onMaster ? getMasterID (song) : owner.track))
         return std::nullopt;
 
     return owner;
@@ -497,11 +500,9 @@ std::optional<ModulatorPlace> findOwnerPlace (const Song& song, const ModulatorP
 //==============================================================================
 ModulatorID addModulator (Song& song, TrackID track, ModulatorType type)
 {
-    const auto channel = track.isValid() ? findChainState (song, track) : juce::ValueTree();
-
     if (type == ModulatorType::macro)
     {
-        if (! channel.hasType (schema::TRACK) || ! canHoldMacros (channel))
+        if (! canHoldMacros (song, track))
             return {};
 
         const auto owned = getOwnedModulators (song, getChannelPlace (song, track));
@@ -509,7 +510,7 @@ ModulatorID addModulator (Song& song, TrackID track, ModulatorType type)
         return addMacro (song, track, "Macro " + juce::String ((int) count + 1));
     }
 
-    if (! canHoldModulators (channel))
+    if (! canHoldModulators (song, track))
         return {};
 
     ModulatorValue value;
@@ -545,8 +546,7 @@ ModulatorID addModulator (Song& song, TrackID track, ModulatorType type)
 
 ModulatorID addMacro (Song& song, TrackID track, const juce::String& name)
 {
-    if (const auto channel = track.isValid() ? findChainState (song, track) : juce::ValueTree();
-        ! channel.hasType (schema::TRACK) || ! canHoldMacros (channel))
+    if (! canHoldMacros (song, track))
         return {};
 
     // At 0, so that what it modulates doesn't move until it is turned.
@@ -825,9 +825,7 @@ void copyModulations (Song& song, const std::map<std::uint64_t, std::uint64_t>& 
 
 void copyModulators (Song& song, TrackID from, TrackID to, CopiedIDs& copied)
 {
-    const auto target = to.isValid() ? findChainState (song, to) : juce::ValueTree();
-
-    if (! from.isValid() || ! target.isValid())
+    if (! from.isValid() || ! to.isValid() || ! hasTrack (song, to))
         return;
 
     const auto place = getChannelPlace (song, to);
@@ -836,7 +834,7 @@ void copyModulators (Song& song, TrackID from, TrackID to, CopiedIDs& copied)
 
     for (const auto& modulator : getOwnedModulators (song, getChannelPlace (song, from)))
     {
-        if (! (modulator.isMacro() ? canHoldMacros (target) : canHoldModulators (target)))
+        if (! (modulator.isMacro() ? canHoldMacros (song, to) : canHoldModulators (song, to)))
             continue;
 
         // As it is set, with what it modulates of the originals alone, which its copy modulates of their copies.
