@@ -65,11 +65,12 @@ namespace
         return readChainCrossover (chain).value_or (getDefaultCrossover (index, numChains));
     }
 
-    // Whether any of a container's chains is soloed, each read from its element (model/plugins/internal/DeviceStore.h).
-    bool anySoloed (const juce::ValueTree& container)
+    // Whether any of a container's chains is soloed, each a look in the store by its ID (model/plugins/internal/DeviceStore.h).
+    bool anySoloed (const Song& song, const juce::ValueTree& container)
     {
         const auto chains = getChainStates (container);
-        return std::any_of (chains.begin(), chains.end(), [] (const juce::ValueTree& chain) { return isChainSoloed (chain); });
+        return std::any_of (chains.begin(), chains.end(),
+                            [&song] (const juce::ValueTree& chain) { return isChainSoloed (song, readDeviceElementID (chain)); });
     }
 
     // The track a place's channel is, as the outline and the channels' readers name a channel: a track's ID, none for the
@@ -345,14 +346,9 @@ DeviceID duplicateChain (Song& song, DeviceID chain)
     const auto chains = getChainStates (element.getParent());
     const auto index = (int) (std::find (chains.begin(), chains.end(), element) - chains.begin()) + 1;
 
-    const auto held = getChannelStore (song, channel);
-    made.store = renameStore (held.store, copied);
+    made.store = copyStoreOf (song, copied);
     setNewDevices (song, made, index);
-
-    // Its devices' windows' places, view state outside the history, as a copy of its element carried them.
-    for (const auto& [id, window] : held.windows)
-        if (const auto found = copied.find (id.getRaw()); found != copied.end())
-            setWindowPlace (song, DeviceID::fromRaw (found->second), window);
+    copyWindowPlaces (song, copied); // its devices' windows' places, view state outside the history
 
     copyCurves (song, copied);
     copyModulations (song, copied); // the container's macros and the track's modulators move the copy's devices too
@@ -387,7 +383,7 @@ void setChainName (Song& song, DeviceID chain, const juce::String& name)
 bool isChainHeard (const Song& song, DeviceID chain)
 {
     const auto state = findContainerChain (song, chain);
-    return state.isValid() && ! isChainMuted (state) && (! anySoloed (state.getParent()) || isChainSoloed (state));
+    return state.isValid() && ! isChainMuted (song, chain) && (! anySoloed (song, state.getParent()) || isChainSoloed (song, chain));
 }
 
 void setChainMuted (Song& song, DeviceID chain, bool muted)

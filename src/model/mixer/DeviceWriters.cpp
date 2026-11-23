@@ -194,13 +194,6 @@ namespace
         }
     }
 
-    // A made item's element, with what the store holds of it.
-    juce::ValueTree writeMade (const DeviceValue& value, const DeviceStore& store)
-    {
-        auto element = writeDeviceElement (value);
-        writeStoreIntoMade (element, store, value.id);
-        return element;
-    }
 } // namespace
 
 //==============================================================================
@@ -215,8 +208,17 @@ bool setNewDevices (Song& song, const MadeDevices& made, int index)
     if (! owner.isValid())
         return false;
 
+    // What the store holds of each made, set first (model/plugins/internal/DeviceStore.h: setMadeStore(): outside the history
+    // for a new ID, in the step for one the store knows), so that a plug-in comes in with its state.
+    std::vector<DeviceID> ids;
+
+    for (const auto& each : made.devices)
+        ids.push_back (each.id);
+
+    setMadeStore (song, ids, made.store);
+
     // The first with the rest in it: a container's chains, each chain's devices, each in its owner's list in their order.
-    auto element = writeMade (first, made.store);
+    auto element = writeDeviceElement (first);
     std::vector<std::pair<DeviceID, juce::ValueTree>> owners { { first.id, element } };
 
     for (size_t i = 1; i < made.devices.size(); ++i)
@@ -231,7 +233,7 @@ bool setNewDevices (Song& song, const MadeDevices& made, int index)
             continue;
         }
 
-        auto child = writeMade (inside, made.store);
+        auto child = writeDeviceElement (inside);
         found->second.appendChild (child, nullptr);
 
         if (inside.form == Form::chain)

@@ -984,11 +984,17 @@ private:
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
     // The devices, containers and chains (SongValues.h), what the devices' value covers of which the tree's callbacks below
-    // leave alone (isHeardAsKept(); the store's properties and a plug-in's VALUEs they mark as before): the lines of the
-    // channels each was on and is on, and of those whose devices came in another order, by their tracks' IDs, as a change at
-    // or under a device marked its channel's line; the master's by its own ID, as for modulation (masterHeard).
+    // leave alone (isHeardAsKept()): the lines of the channels each was on and is on, and of those whose devices came in
+    // another order, by their tracks' IDs, as a change at or under a device marked its channel's line; the master's by its own
+    // ID, as for modulation (masterHeard).
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
+
+    // The devices' store (SongValues.h; the song's tree holds none of it): a change of the song's, counted as a store's property
+    // or a VALUE was, and the line of the channel of each item whose song's entries changed, by its place as the change names
+    // it (the devices' keeper's), as a change of a DEVICE's or a CHAIN's property marked its channel's line. A held value
+    // alone, and what is written for an item the song doesn't hold, mark nothing.
+    void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();

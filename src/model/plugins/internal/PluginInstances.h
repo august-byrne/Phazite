@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The plug-ins a song holds, each an instance in its helper (SandboxedInstance.h), by its device's ID: made from the
-// device's element in the song (Schema.h: DEVICE, a plug-in's), which names the plug-in, its state and its program, and
-// whose values set by hand (VALUE) it then takes; made again when the song gets the device back (an undo), and let go of
-// when the song no longer has it. A playback session owns one for its project (model/playback/internal/PlaybackSession.h).
+// device's element in the song (Schema.h: DEVICE, a plug-in's), which names the plug-in, and what the song stores of it
+// (DeviceStore.h: its state and its program), whose values set by hand it then takes; made again when the song gets the
+// device back (an undo), and let go of when the song no longer has it. A playback session owns one for its project
+// (model/playback/internal/PlaybackSession.h).
 // What a plug-in changes itself (in its own window) comes back to the song: its values set by hand, which a VALUE the song
 // has takes in without an undo step; its gestures; its state, which isn't stored until the song is saved or copied, but
 // counts as an unsaved change (Song::markChangedOutsideHistory()); and its latency, which needs a new plan. What the song
@@ -24,6 +25,8 @@
 #include "PluginHost.h"
 #include "SandboxedInstance.h"
 #include "model/base/IDs.h"
+#include "model/base/internal/DeviceStoreValue.h"
+#include "model/base/internal/SongValues.h"
 #include "model/devices/ParameterRef.h"
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -40,7 +43,7 @@ namespace phazite
 class PluginHost;
 class Song;
 
-class PluginInstances final : private juce::ValueTree::Listener,
+class PluginInstances final : private SongValues::Listener, // what the song stores of its plug-ins (deviceStoreChanged())
                               private juce::ChangeListener, // the plug-ins scanning found, which a missing one may now be among
                               private juce::Timer           // what opens in the background, and the states asked for
 {
@@ -179,7 +182,6 @@ private:
     PluginHost& host;
     double sampleRate;
     Listener* listener = nullptr;
-    juce::ValueTree state; // the song's
     std::map<DeviceID, Entry> entries;
     bool storing = false; // while it writes into the song, which it doesn't take back from it
     bool synced = false;  // the first sync() done
@@ -192,10 +194,11 @@ private:
     void startOpening (Entry&, std::shared_ptr<Opening>, const PluginHost::Reopening&);
     void finishOpening (DeviceID, Entry&);
     void finishReloading (DeviceID, Entry&);
-    void setUp (SandboxedInstance&, const juce::ValueTree& deviceState, const juce::MemoryBlock& openedFrom, int openedProgram);
+    void setUp (SandboxedInstance&, DeviceID, const juce::MemoryBlock& openedFrom, int openedProgram);
     void listen (DeviceID, SandboxedInstance&);
     void store (const std::vector<DeviceID>&);
-    void write (DeviceID, const juce::ValueTree& device, SandboxedInstance&); // what it keeps, as it last gave it, into the song
+    // What it keeps, as it last gave it, into the song, by the device's ID (with the plug-in's identity as the song names it).
+    void write (DeviceID, const juce::PluginDescription& identity, SandboxedInstance&);
     void timerCallback() override;
     void lookSoon(); // the timer started, unless it runs
 
@@ -206,16 +209,18 @@ private:
     void pruneReports (DeviceID, const SandboxedInstance&);
     int countReportsHeld (DeviceID, const SandboxedInstance&);
 
-    // The answers a store asked for, still to come: for a device, to be written into the song's element of it, held here
-    // (DeviceStore.h), which, if it goes meanwhile, an undo may bring back; from its instance (kept until then). The element
-    // is held, and tells the song's device from another of its ID, until the store's switch, which writes an answer for a
-    // device gone by its ID into the store, where the Undo finds it, and tells the devices by the identity of the store's
-    // state entry as it was when the answer was asked for (model/base/internal/DeviceStoreValue.h: for the store's switch).
+    // The answers a store asked for, still to come: for a device, to be written into the song's store by its ID (DeviceStore.h),
+    // where the Undo of a step that took the device away meanwhile finds it (the store keeps a removed device's entries); from
+    // its instance (kept until then), with the plug-in's identity as the song named it then. Which device of that ID it is
+    // for is told by the identity of the store's state entry as it was when the answer was asked for (PluginBytes, by its
+    // pointer: model/base/internal/DeviceStoreValue.h, rule (e)): the Undo of the removal brings back that same entry; a
+    // version or a preset brings other bytes, and the answer is no longer that device's.
     struct Answering
     {
-        DeviceID id;
-        juce::ValueTree device;
-        std::shared_ptr<SandboxedInstance> instance;
+        DeviceID id {};
+        juce::PluginDescription identity {};
+        PluginBytes stateAsked {};
+        std::shared_ptr<SandboxedInstance> instance {};
     };
 
     std::vector<Answering> answering;
@@ -231,13 +236,14 @@ private:
 
     std::map<DeviceID, Wanted> wantedStates;
     bool askStates (SandboxedInstance::Ask);
-    void takeFromSong (const juce::ValueTree& deviceState, const juce::Identifier& property);
-    void takeValueFromSong (const juce::ValueTree& value);
+    // What the song changed of a plug-in (a preset loaded into it, an Undo, a version applied, a value set by hand), given to
+    // its instance from the store as it is handed: its program if it differs, then its state (takeFromSong()); a value set by
+    // hand, or the value an Undo of a first one gives back (takeValueFromSong()). Its own writes, inside storing, aside.
+    void takeFromSong (DeviceID, const DeviceStore&);
+    void takeValueFromSong (DeviceID, const juce::String& parameter, float value);
+    void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
 
     JUCE_DECLARE_NON_COPYABLE (PluginInstances)
 };

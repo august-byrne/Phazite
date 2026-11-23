@@ -10,6 +10,7 @@
 #include "model/base/Json.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/DeviceStoreValue.h"
 #include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/ModulationValue.h"
@@ -1520,15 +1521,21 @@ namespace
             // (keepKeys()): each of its own properties the value covers in the writer's text, none at its default, none the
             // writer leaves out; no value at its default, no sound of a property its type hasn't nor an empty one, no VALUES
             // or SOUNDS left empty, nothing Phazite doesn't know in either (the two in their order), and no SOUNDS
-            // on a plug-in. What the value doesn't cover stays (a plug-in's state, a chain's mute and solo, a window's place, a
-            // property Phazite doesn't know). Only through what can hold a device (the tracks, the master, containers and
-            // their chains), never through a clip's notes.
+            // on a plug-in. And what a DEVICE or a CHAIN holds of the devices' store and a window's place, as the song holds
+            // it, by the store's one rule (DeviceStoreValue.h: keepStoreAsHeld(), the held reader's): a plug-in's VALUEs sorted
+            // by their parameters after its other children, a chain's switch written off gone, a state that isn't base 64 of
+            // some bytes and an empty format ID or version gone, nothing of the store on a device that isn't a plug-in, a
+            // window's place as both its numbers. What neither covers stays (a property Phazite doesn't know). Only through
+            // what can hold a device (the tracks, the master, containers and their chains), never through a clip's notes.
             void keepDevicesAsHeld (juce::ValueTree tree)
             {
                 for (auto child : tree)
                 {
                     if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
                         keepDeviceAsHeld (child);
+
+                    if (child.hasType (schema::DEVICE) || child.hasType (schema::CHAIN))
+                        keepStoreAsHeld (child);
 
                     if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK) || child.hasType (schema::MASTER)
                         || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
@@ -2811,6 +2818,8 @@ void Project::clearToCompare()
     comparingDevicesWhole = false;
     devicesToCompare.clear();
     deviceOwnersToCompare.clear();
+    comparingStoreWhole = false;
+    storeToCompare.clear();
     toCompare.clear();
     notesToCompare.clear();
     clipsToCompare.clear();
@@ -2964,7 +2973,7 @@ void Project::compareWithSavedState()
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
     // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the
-    // sections, modulation, the sends, the devices), each asked only while all before it compare.
+    // sections, modulation, the sends, the devices, the devices' store), each asked only while all before it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
@@ -2975,6 +2984,7 @@ void Project::compareWithSavedState()
     same = same && areModulatorsAsSaved();
     same = same && areSendsAsSaved();
     same = same && areDevicesAsSaved();
+    same = same && isDeviceStoreAsSaved();
 
     clearToCompare();
 
@@ -3657,6 +3667,90 @@ bool Project::areDevicesAsSaved() const
                                 return found.element.isValid() == saved.element.isValid();
 
                             return found.place == saved.place && holdTheSameProject (found.element, now, saved.element, savedState.values);
+                        });
+}
+
+void Project::deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& entries, const DeviceStore&)
+{
+    // As markChanged() marks an element of the song, where the song's entries changed of an item it holds (a property it counts,
+    // which a plug-in's state, program, format ID and version, its values set by hand and a chain's mute and solo all are):
+    // counted, and compared when asked; past mostToCompare of them, the tracks and the master whole. A held value alone, and
+    // what is written for an item the song doesn't hold (an answer of a plug-in a step took away), are no change of the
+    // song's, as an answer written into a removed element wasn't.
+    if (isWriting)
+        return;
+
+    std::vector<DeviceID> items;
+
+    for (const auto& entry : entries)
+        if (entry.changesSong && entry.isInSong && std::find (items.begin(), items.end(), entry.item) == items.end())
+            items.push_back (entry.item);
+
+    if (items.empty())
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+
+    if (comparingStoreWhole)
+        return;
+
+    for (const auto id : items)
+        if (std::find (storeToCompare.begin(), storeToCompare.end(), id) == storeToCompare.end())
+            storeToCompare.push_back (id);
+
+    if (storeToCompare.size() > mostToCompare)
+    {
+        comparingStoreWhole = true;
+        storeToCompare.clear();
+    }
+}
+
+bool Project::isDeviceStoreAsSaved() const
+{
+    if (! comparingStoreWhole && storeToCompare.empty())
+        return true;
+
+    // As values (WholeState.h), as the whole comparison compares them (holdTheSameProject(), each DEVICE's and CHAIN's through
+    // holdSameKeptOf()): past mostToCompare, the tracks and the master whole; else each item the song holds against the saved
+    // copy's entries of its ID, one compared each (one the song no longer holds, or holds since, is the devices' to find:
+    // areDevicesAsSaved()).
+    const auto now = keepValues (*song);
+
+    if (comparingStoreWhole)
+    {
+        const auto state = song->getState();
+
+        for (const auto* type : { &schema::TRACKS, &schema::MASTER })
+        {
+            const auto element = state.getChildWithName (*type), saved = savedState.tree.getChildWithName (*type);
+
+            if (element.isValid() != saved.isValid()
+                || (element.isValid() && ! holdTheSameProject (element, now, saved, savedState.values)))
+                return false;
+        }
+
+        return true;
+    }
+
+    const auto* told = song->getValues() != nullptr ? song->getValues()->getDevicesAsTold() : nullptr;
+
+    return std::all_of (storeToCompare.begin(), storeToCompare.end(),
+                        [this, &now, told] (DeviceID id)
+                        {
+                            if (told == nullptr || told->find (id) == nullptr)
+                                return true;
+
+                            elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+                            return holdSameDeviceStore (now, savedState.values, id);
                         });
 }
 

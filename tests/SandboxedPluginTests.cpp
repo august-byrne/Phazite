@@ -3398,18 +3398,27 @@ TEST_CASE ("A store that isn't a save waits for no plug-in: what it gave last is
     SlowGate gate;
     instance.setParameterValue (level, 0.25f);
     session->getPlugins().storeTrack (track); // returned while the plug-in can't answer: it waited for none of it (below)
-    auto device = phazite::findDeviceState (getSong (song), slow);
-    CHECK (readLevel (device[phazite::schema::pluginState]) == doctest::Approx (0.5f));
+
+    // What the song's store holds of the device by its ID, whether the song holds the device or a step took it away (the
+    // store keeps its entries for the step's Undo: model/base/internal/DeviceStoreValue.h).
+    const auto storedLevel = [&song, slow]
+    {
+        const auto* state = getSong (song).getValues()->deviceStore.get().states.find (slow.getRaw());
+        REQUIRE (state != nullptr);
+        return juce::MemoryInputStream (state->get(), false).readFloat();
+    };
+
+    CHECK (storedLevel() == doctest::Approx (0.5f));
     CHECK (instance.isAskingState());
 
-    // Taken away meanwhile, and its answer comes: into its element, which the undo brings back, and the plug-in opened
+    // Taken away meanwhile, and its answer comes: into the store by its ID, which the undo finds, and the plug-in opened
     // again for it plays it.
     phazite::removeDevice (song.context, slow);
     CHECK (turnMessageLoop (10));
     gate.open();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! instance.isAskingState(); }, longWait));
     CHECK (turnMessageLoop (10));
-    CHECK (readLevel (device[phazite::schema::pluginState]) == doctest::Approx (0.25f));
+    CHECK (storedLevel() == doctest::Approx (0.25f));
     phazite::undo (getSong (song));
     CHECK (readLevel (phazite::test::copyDevice (getSong (song), slow)[phazite::schema::pluginState]) == doctest::Approx (0.25f));
     song.waitForPlugins(); // brought back, it loads in the background
@@ -3456,6 +3465,58 @@ TEST_CASE ("A store's answer that comes after its device was taken away and the 
     const auto played = back.getRemote().getState (longWait); // the plug-in's own, its Level first
     REQUIRE (played.has_value());
     CHECK (juce::MemoryInputStream (*played, false).readFloat() == doctest::Approx (0.25f));
+}
+
+TEST_CASE ("A store's answer from the instance it asked, which comes after a preset brought other settings into the song, is "
+           "dropped: the song keeps the preset's")
+{
+    // Which device an answer is for is told by the store's state entry as it was when the answer was asked for
+    // (model/plugins/internal/PluginInstances.h: Answering): a preset loaded meanwhile brings other bytes, and the answer,
+    // from the same instance, is no longer the song's.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto track = song.firstTrack;
+    const auto slow = addSlow (song, track);
+    auto& instance = getSandboxed (song, slow);
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    const auto level = instance.findParameter ("60");
+    const auto quiet = [&instance] { return ! instance.isStateUnasked() && ! instance.isAskingState(); };
+
+    // The song's state's Level, as its store holds it.
+    const auto storedLevel = [&song, slow]
+    {
+        const auto* state = getSong (song).getValues()->deviceStore.get().states.find (slow.getRaw());
+        REQUIRE (state != nullptr);
+        return juce::MemoryInputStream (state->get(), false).readFloat();
+    };
+
+    // A preset of it at a Level of 0.75.
+    phazite::test::TemporaryFolder temp;
+    instance.setParameterValue (level, 0.75f);
+    REQUIRE (phazite::test::dispatchMessagesUntil (quiet, longWait));
+    const auto file = temp.folder.getChildFile ("Loud" + juce::String (phazite::presetExtension));
+    REQUIRE (phazite::saveDevicePreset (song.context, slow, file));
+
+    // At 0.5, its state in; then at 0.25 while it can't answer: a store writes the state it gave last, and asks it.
+    instance.setParameterValue (level, 0.5f);
+    REQUIRE (phazite::test::dispatchMessagesUntil (quiet, longWait));
+    SlowGate gate;
+    instance.setParameterValue (level, 0.25f);
+    session->getPlugins().storeTrack (track);
+    CHECK (storedLevel() == doctest::Approx (0.5f));
+    REQUIRE (instance.isAskingState());
+
+    // The preset loaded into it meanwhile, a step: the song's state the preset's.
+    REQUIRE (phazite::loadPresetInto (song.context, slow, file));
+    CHECK (storedLevel() == doctest::Approx (0.75f));
+
+    // The answer comes: dropped, the song's state the preset's still.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return ! instance.isAskingState(); }, longWait));
+    CHECK (turnMessageLoop (10));
+    CHECK (phazite::getPluginsAnswering (getSong (song)).isEmpty());
+    CHECK (storedLevel() == doctest::Approx (0.75f));
 }
 
 TEST_CASE ("A plug-in prepared for another sample rate waits for no helper: it is skipped until its channel has come")

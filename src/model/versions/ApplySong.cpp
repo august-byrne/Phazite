@@ -977,18 +977,20 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            return values->countAdopted()             // the clips', with their notes
-                   + values->countTempoMapAdopted()   // the tempo map's
-                   + values->countChordLaneAdopted()  // the chord lane's
-                   + values->countMidiLinksAdopted()  // the MIDI links'
-                   + values->countCurvesAdopted()     // the curves'
-                   + values->countSectionsAdopted()   // the sections'
-                   + values->countModulationAdopted() // modulation's: no copy the passes add holds one (copyForSong())
-                   + values->countSendsAdopted();     // the sends': nor a send (copyForSong())
+            return values->countAdopted()               // the clips', with their notes
+                   + values->countTempoMapAdopted()     // the tempo map's
+                   + values->countChordLaneAdopted()    // the chord lane's
+                   + values->countMidiLinksAdopted()    // the MIDI links'
+                   + values->countCurvesAdopted()       // the curves'
+                   + values->countSectionsAdopted()     // the sections'
+                   + values->countModulationAdopted()   // modulation's: no copy the passes add holds one (copyForSong())
+                   + values->countSendsAdopted()        // the sends': nor a send (copyForSong())
+                   + values->countDeviceStoreAdopted(); // the store's: the devices pass sets an item's entries in the store
 
             // Not the devices': their part of the keeper (DevicesArea.h) tells what the tree holds and takes nothing in until
             // the devices' switch, so it has no count; no copy the passes add holds a device, a container or a chain
-            // (copyForSong()), which the devices pass alone adds (makeDevicesLike()).
+            // (copyForSong()), which the devices pass alone adds (makeDevicesLike()), with what the store holds of each
+            // (Mixer.h: setNewDevices()), none of it in its element.
         }
 
         const Song& song;
@@ -1672,12 +1674,6 @@ namespace
         return owner.hasType (schema::CHAIN) && child.hasType (schema::DEVICE);
     }
 
-    // What a store holds of one item (its own entries alone).
-    DeviceStore getEntriesOf (const DeviceStore& store, DeviceID id)
-    {
-        return renameStore (store, { { id.getRaw(), id.getRaw() } });
-    }
-
     // Which channels' devices a devices pass makes like the other's, by a place on one (the song's, and the other's).
     using DeviceChannelsTaken = std::function<bool (const DevicePlace&)>;
 
@@ -1707,7 +1703,6 @@ namespace
         std::map<std::uint64_t, DevicePlace> standIns {}; // each item that stands in, with the place of the list naming it
         std::set<ChannelKey> standInChannels {};
         DeviceStore store {};
-        std::map<std::uint64_t, std::vector<juce::String>> valueOrders {};
         std::map<std::uint64_t, WindowPlace> windows {};
 
         OtherDevices (const juce::ValueTree& other, const DeviceChannelsTaken& which, const SongDevices& held)
@@ -1789,15 +1784,7 @@ namespace
 
                 readHeldStoreOf (child, store);
 
-                if (value->isPlugin())
-                {
-                    auto& order = valueOrders[id.getRaw()];
-
-                    for (const auto& each : getPluginValues (child))
-                        order.push_back (each.parameter);
-                }
-
-                if (const auto window = readWindowPlace (child))
+                if (const auto window = readWindowPlaceOf (child))
                     windows.emplace (id.getRaw(), *window);
 
                 items.push_back (std::move (*value));
@@ -1987,7 +1974,7 @@ namespace
 
             MadeDevices made;
             made.devices.push_back (next);
-            made.store = getEntriesOf (theirs.store, id);
+            made.store = takeEntriesOf (theirs.store, id);
 
             // Refused only for nothing made or a place the song hasn't what holds (holdsPlace()).
             const auto added = setNewDevices (song, made, index);
@@ -2083,18 +2070,14 @@ namespace
     // What the store holds of the devices and chains the other holds on a channel which takes, made what the other holds of
     // them, once the devices pass put each where the other has it (now: the song's devices as it left them), through the
     // store's functions by their IDs, in the mode of the moment (model/plugins/internal/DeviceStore.h: setStoreEntries(),
-    // which writes only what differs): a plug-in's state, program, format ID and version and its values set by hand, each in
-    // the other's order, and a chain's mute and solo, as the passes over elements made a DEVICE's and a CHAIN's properties and
-    // VALUE children the other's; and with taken everything, a window's place too (view state, which a version applied in
-    // the history leaves as it is). Each channel's store read once (getChannelStore(), no walk of the song); a plug-in that
-    // holds values set by hand compared there for their order too (a walk), so that the store's writer is asked only where
-    // something differs (an item's entries, or its values' order). What the other's version couldn't read (a stand-in) left
-    // as the song has it. How many writes it made.
+    // which writes nothing where the song holds the same): a plug-in's state, program, format ID and version and its values
+    // set by hand, and a chain's mute and solo; and with taken everything, a window's place too (view state, which a version
+    // applied in the history leaves as it is). Each item's entries a look in the store by its ID (getStoreOf()), compared
+    // before anything is written, so that the store's writer is asked only where something differs. What the other's version
+    // couldn't read (a stand-in) left as the song has it. How many writes it made.
     int makeDeviceStoreLike (Song& song, const OtherDevices& theirs, const DeviceChannelsTaken& which, Taken taken, const SongDevices& now)
     {
         auto writes = 0;
-        std::map<ChannelKey, ChannelStore> channels; // each channel's store, read as the pass first comes to it
-        const std::vector<juce::String> noOrder;
 
         for (const auto& item : theirs.items)
         {
@@ -2104,32 +2087,19 @@ namespace
             if (! which (item.place) || ours == nullptr || ! (ours->place == item.place) || (! isStored && taken == Taken::counted))
                 continue;
 
-            const auto key = getChannelKey (item.place);
-            auto channel = channels.find (key);
-
-            if (channel == channels.end())
-                channel = channels.emplace (key, getChannelStore (song, item.place.onMaster ? TrackID() : item.place.track)).first;
-
             if (isStored)
             {
-                const auto wanted = getEntriesOf (theirs.store, item.id);
-                const auto held = getEntriesOf (channel->second.store, item.id);
-                const auto order = theirs.valueOrders.find (item.id.getRaw());
-                const auto& orderThere = order != theirs.valueOrders.end() ? order->second : noOrder;
-                const auto isSame = held == wanted && (held.pluginValues.empty() || getPluginValueOrder (song, item.id) == orderThere);
+                const auto wanted = takeEntriesOf (theirs.store, item.id);
 
-                if (! isSame && setStoreEntries (song, item.id, wanted, orderThere))
+                if (! (getStoreOf (song, item.id) == wanted) && setStoreEntries (song, item.id, wanted))
                     ++writes;
             }
 
             if (taken != Taken::everything)
                 continue;
 
-            std::optional<WindowPlace> window, windowThere;
-
-            for (const auto& [device, place] : channel->second.windows)
-                if (device == item.id)
-                    window = place;
+            const auto window = getWindowPlace (song, item.id);
+            std::optional<WindowPlace> windowThere;
 
             if (const auto there = theirs.windows.find (item.id.getRaw()); there != theirs.windows.end())
                 windowThere = there->second;

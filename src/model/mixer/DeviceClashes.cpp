@@ -154,7 +154,6 @@ AreaChoice chooseDeviceStoreClash (Song& song, const MergeClash& clash, int valu
     const auto& chosen = getChosen (clash, value);
     const auto raw = item->id.getRaw();
     auto entries = getStoreOf (song, item->id);
-    auto order = getPluginValueOrder (song, item->id);
 
     if (isValue)
     {
@@ -212,7 +211,7 @@ AreaChoice chooseDeviceStoreClash (Song& song, const MergeClash& clash, int valu
         flags = (bool) chosen ? flags.set (raw, true) : flags.erase (raw);
     }
 
-    setStoreEntries (song, item->id, entries, order);
+    setStoreEntries (song, item->id, entries);
     return AreaChoice::chosen;
 }
 

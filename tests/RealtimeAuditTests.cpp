@@ -1259,6 +1259,47 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: edited while it plays: a plug-in's value set by hand and a chain muted and soloed, set at once from "
+               "what the devices' store tells, and undone")
+    {
+        // What the store's listener plays at once (SongPlayer::takeStoreEntry(), from what the song's values tell:
+        // SongValues.h, deviceStoreChanged()): a plug-in's value set by hand on its node, a chain's mute and solo on its fader.
+        phazite::test::TestPlugin testPlugin;
+        TestSong song;
+        auto& context = song.context;
+        const auto track = song.firstTrack;
+        addTone (song, track);
+        const auto plugin = song.addEffect (track, "PhaziteTestEffect");
+        const auto layers = phazite::addContainer (context, track);
+        REQUIRE (phazite::addChain (context, layers).isValid());
+        const auto chains = phazite::getChains (context, layers);
+        REQUIRE (chains.size() == 2);
+        phazite::addEffectToChain (context, chains[1].id, song.findDeviceType (phazite::devices::Equalizer::typeID));
+        song.waitForPlugins();
+        auto& played = getSong (song);
+        const phazite::ParameterRef gain { plugin, phazite::test::TestPlugin::gainID };
+
+        const auto inStep = [&played] (const char* name, const std::function<void()>& change)
+        {
+            const phazite::UndoStep step (played, name);
+            change();
+        };
+
+        const auto m = playProjectAndMeasure (
+            context, Playing { .edits = {
+                                   { 10, "the plug-in's gain set by hand, its first value",
+                                     [&] { inStep ("Gain", [&] { phazite::setValueSetByHand (played, gain, 0.6f); }); } },
+                                   { 20, "set again", [&] { inStep ("Gain", [&] { phazite::setValueSetByHand (played, gain, 0.8f); }); } },
+                                   { 30, "the first chain muted", [&] { phazite::setChainMuted (played, chains[0].id, true); } },
+                                   { 40, "the second chain soloed", [&] { phazite::setChainSoloed (played, chains[1].id, true); } },
+                                   { 50, "the gain undone", [&] { phazite::undo (played); } },
+                                   { 60, "and again", [&] { phazite::undo (played); } },
+                               } });
+        report ("Edited while it plays: a plug-in's value set by hand and a chain muted and soloed", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: Phazite's compressor, ducked by another track at 70 % mix, with its meters and its trail read")
     {
         using phazite::devices::Compressor;

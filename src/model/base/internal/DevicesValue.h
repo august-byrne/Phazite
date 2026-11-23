@@ -338,11 +338,6 @@ juce::String readSoundsProperty (const juce::ValueTree& sounds, const juce::Iden
 // getDeviceSoundFiles()); an invalid tree for none.
 juce::ValueTree readDeviceSounds (const juce::ValueTree& device);
 
-// What the value doesn't cover, the store's (the top of this header), read where the element is in hand: a chain's mute
-// and solo (chainMute, chainSolo), which what plays the song reads as it compiles a plan (model/playback/SongPlayer.cpp).
-bool readChainMute (const juce::ValueTree& chain);
-bool readChainSolo (const juce::ValueTree& chain);
-
 // The IDs of what an owner's element lists, in its order (readDeviceElementID()): a TRACK's or the MASTER's DEVICEs and
 // CONTAINERs, a CONTAINER's CHAINs, a CHAIN's DEVICEs; none for another element.
 std::vector<DeviceID> readDeviceList (const juce::ValueTree& owner);

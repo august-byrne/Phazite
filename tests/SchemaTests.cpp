@@ -327,19 +327,20 @@ struct Changed
         problemsBefore = findSongProblems (rawSong, tables);
 
         // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, a chord or a key change, a
-        // MIDI link, a curve or its point, a section, a modulator, a macro or a modulation, or a send: the loader's part alone
-        // (makeConsistent()), on a song that keeps everything in its tree, since a song made by makeSong() holds its clips,
-        // their notes, its tempo map, its chord lane, its MIDI links, its curves, its sections, its modulation and its sends as
-        // values beside it (Song::holdValues()); and the song opened, whose values findOpened() reads back through whole state.
+        // MIDI link, a curve or its point, a section, a modulator, a macro or a modulation, a send, or a plug-in's value set by
+        // hand: the loader's part alone (makeConsistent()), on a song that keeps everything in its tree, since a song made by
+        // makeSong() holds its clips, their notes, its tempo map, its chord lane, its MIDI links, its curves, its sections, its
+        // modulation, its sends and its devices' store as values beside it (Song::holdValues()); and the song opened, whose
+        // values findOpened() reads back through whole state.
         if (isCurveElement (element))
             curveKey = schema::getElementKey (element.hasType (schema::CURVE) ? element : element.getParent());
 
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
             || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element)
-            || isCurveElement (element) || isSection (element) || isModulation (element) || isSend (element))
+            || isCurveElement (element) || isSection (element) || isModulation (element) || isSend (element) || isStoreEntry (element))
         {
             if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element) && ! isCurveElement (element)
-                && ! isSection (element) && ! isModulation (element) && ! isSend (element))
+                && ! isSection (element) && ! isModulation (element) && ! isSend (element) && ! isStoreEntry (element))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -395,9 +396,16 @@ struct Changed
 
     static bool isSend (const juce::ValueTree& element) { return element.hasType (schema::SEND); }
 
-    // A modulator's, a macro's, a modulation's or a send's owner in the whole state of the opened song: the element of the
-    // original's parent's type and key (a track, the master or a container for a modulator or a macro; the modulator or the
-    // macro for a modulation; a track for a send), whose children the opened song holds as values, written in.
+    // A plug-in's value set by hand, the devices' store's (DeviceStoreValue.h), which the song holds beside its tree.
+    static bool isStoreEntry (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::VALUE) && element.getParent().hasType (schema::DEVICE);
+    }
+
+    // A modulator's, a macro's, a modulation's, a send's or a plug-in's value's owner in the whole state of the opened song: the
+    // element of the original's parent's type and key (a track, the master or a container for a modulator or a macro; the
+    // modulator or the macro for a modulation; a track for a send; a plug-in's device for its value), whose children the
+    // opened song holds as values, written in.
     juce::ValueTree findModulationState() const
     {
         const std::function<juce::ValueTree (const juce::ValueTree&)> find = [&] (const juce::ValueTree& tree)
@@ -452,7 +460,9 @@ struct Changed
                                : isSection (original)        ? phazite::copyWholeSong (*opened).getChildWithName (schema::SECTIONS)
                                : isModulation (original)     ? findModulationState()
                                : isSend (original)           ? findModulationState()
-                                                             : phazite::copyWholeClip (*opened, clip);
+                               : original.hasType (schema::VALUE)
+                                   ? findModulationState() // a plug-in's (isStoreEntry(): the copy has no parent)
+                                   : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))
             return clipState;

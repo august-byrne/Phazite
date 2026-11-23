@@ -163,12 +163,18 @@ private:
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
     // The devices, containers and chains that changed (SongValues.h), what the devices' value covers of which the tree's
-    // callbacks below leave alone (isHeardAsKept(); the store's properties and a plug-in's VALUEs they look at as before): the
-    // frozen tracks they were on and are on, and those whose devices came in another order, marked and compared at the later
-    // moment, as check() takes a change in a frozen track. Its Holds keep copies of its frozen devices' elements still (they
-    // move to values at the devices' switch): compared whole there, as before.
+    // callbacks below leave alone (isHeardAsKept()): the frozen tracks they were on and are on, and those whose devices came in
+    // another order, marked and compared at the later moment, as check() takes a change in a frozen track. Its Holds keep
+    // copies of its frozen devices' elements still (they move to values at the devices' switch): compared whole there, as
+    // before, with what the store holds of them (the song's values kept: Holds::values).
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
+
+    // The devices' store (SongValues.h; the song's tree holds none of it): the frozen track of each item whose song's entries
+    // changed (its channel, as the change names it), marked and compared at the later moment, as a change of a DEVICE's or a
+    // CHAIN's property or of a VALUE marked it; not a plug-in's state, which every save stores again, which the comparison
+    // leaves out too.
+    void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
     // The sends (sendsChanged()): nothing, as no frozen track's file holds anything of them: a frozen file is its track before
     // its fader, which its sends come after (its Holds keep its frozen devices, the song's values, its tempos, its frozen

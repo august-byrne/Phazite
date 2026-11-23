@@ -15,12 +15,16 @@
 // the song's modulation (ModulationValue.h: SongModulation, each modulator and macro by its ID, each owner's in its order),
 // which modulation's code (model/modulation/internal/Modulation.h) computes each edit on; and the song's sends (SendsValue.h:
 // SongSends, each send by its ID, each track's in its order), which the sends' code (model/mixer/internal/Mixer.h) computes
-// each edit on. All as plain values in Phazite's own types.
+// each edit on; and what the song's devices store in the history and outside it alike (DeviceStoreValue.h: DeviceStore, a
+// plug-in's values set by hand, state, program, format ID and version, a chain's mute and solo, keyed: undone by entry), with
+// each device's window's place outside the history alone (DevicesOutside.h, an OutsideValue), which the store's functions
+// (model/plugins/internal/DeviceStore.h) read and write by IDs. All as plain values in Phazite's own types.
 //
 // The values are the storage: the song holds an area of each (SongValues) in its one undo history, and the song's tree holds
 // no CLIP element (nor a clip's NOTE, CONTROL or WARP elements), no TEMPO or TIMESIGNATURE element, no CHORD or CHORDKEY
 // element, no MIDILINK element, no CURVE or POINT element, no SECTION element, no MODULATOR or MACRO element (nor a
-// MODULATES, nor a modulator's VALUES) and no SEND element: its TEMPOMAP element stays, empty, the
+// MODULATES, nor a modulator's VALUES), no SEND element, and no plug-in's VALUE element, nor a DEVICE's or a CHAIN's
+// property of the store's or a window's place (the DEVICE and CHAIN elements stay): its TEMPOMAP element stays, empty, the
 // place a whole copy writes the map in, its AUTOMATION too (which a whole copy writes only while the song has a curve), its
 // CHORDLANE, where it has one, empty too, the sign that it has a lane, and its MIDILINKS and its SECTIONS, where it has them
 // (added with the first link and the first section), empty too. Each area's value header holds the conversion between its
@@ -211,10 +215,13 @@
 #include "model/base/internal/ClipNotesValue.h"
 #include "model/base/internal/ClipsValue.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DeviceStoreValue.h"
+#include "model/base/internal/DevicesOutside.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Immer.h"
 #include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/ModulationValue.h"
+#include "model/base/internal/OutsideValue.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/TempoMapValue.h"
@@ -315,13 +322,15 @@ public:
 
     ValueArea<SongClips> clips;
     ValueArea<NotesByClip> notes;
-    ValueArea<TempoMapValue> tempoMap;    // each kind by beat, at least one of each (TempoMapValue.h)
-    ValueArea<ChordLaneValue> chordLane;  // each kind in the lane's order, empty for a song without a lane (ChordLaneValue.h)
-    ValueArea<MidiLinksValue> midiLinks;  // in the song's order, one of each controller and of each parameter (MidiLinksValue.h)
-    ValueArea<SongCurves> curves;         // by their parameters, in the order the song made them, each point keyed (CurveValues.h)
-    ValueArea<SectionsValue> sections;    // in the song's order, one of each ID (SectionsValue.h)
-    ValueArea<SongModulation> modulation; // by ID, each owner's in its order, held together (ModulationValue.h)
-    ValueArea<SongSends> sends;           // by ID, each track's in its order, held together (SendsValue.h)
+    ValueArea<TempoMapValue> tempoMap;           // each kind by beat, at least one of each (TempoMapValue.h)
+    ValueArea<ChordLaneValue> chordLane;         // each kind in the lane's order, empty for a song without a lane (ChordLaneValue.h)
+    ValueArea<MidiLinksValue> midiLinks;         // in the song's order, one of each controller and of each parameter (MidiLinksValue.h)
+    ValueArea<SongCurves> curves;                // by their parameters, in the order the song made them, each point keyed (CurveValues.h)
+    ValueArea<SectionsValue> sections;           // in the song's order, one of each ID (SectionsValue.h)
+    ValueArea<SongModulation> modulation;        // by ID, each owner's in its order, held together (ModulationValue.h)
+    ValueArea<SongSends> sends;                  // by ID, each track's in its order, held together (SendsValue.h)
+    ValueArea<DeviceStore> deviceStore;          // keyed: undone by entry (DeviceStoreValue.h)
+    OutsideValue<DevicesOutside> devicesOutside; // never in the history: each device's window's place (DevicesOutside.h)
 
     // A parameter's curve: none for a parameter without one. A pointer into the area's value as it is now, valid until the
     // area's next change (as findClip()).
@@ -440,6 +449,23 @@ public:
     bool setTrackSendOrder (Song&, TrackID, immer::flex_vector<DeviceID> order);
     bool setAllSends (Song&, SongSends);
 
+    // Give the song's devices' store a whole value (DeviceStoreValue.h, keyed: an Undo puts back only the entries its step
+    // changed), its functions' one way to change it (model/plugins/internal/DeviceStore.h):
+    //   - setDeviceStore(): in the song's undo history (the step in progress: a preset's state and program, a value set by
+    //     hand, a chain's switches cleared with its last neighbour, a version applied in the history), or outside it while the
+    //     song is written outside it. A value that holds the same of the song's as the area (==) makes no undo action: where
+    //     only a plug-in's held values differ, it is kept outside the history (a held value is never a change of the song's).
+    //   - storeOutsideHistory(): outside the history whatever is open (a plug-in's store, its own window, its late answers, a
+    //     chain's mute and solo, a parameter's held value): compared with what the area holds by identity alone
+    //     (isSameAs()), so that a value that differs only in a held value is kept, as no change of the song's.
+    // Whether the song's entries changed (a held value aside). In DeviceStoreArea.cpp, as the next.
+    bool setDeviceStore (Song&, DeviceStore);
+    bool storeOutsideHistory (Song&, DeviceStore);
+
+    // A device's window's place given, or taken away (none), as view state: never in the history, no change of the song's,
+    // nothing told (OutsideValue.h).
+    void setWindowPlace (DeviceID, std::optional<WindowPlace>);
+
     // The tempo map as Phazite's engine plays it (engine/core/TempoMap.h), made of the tempo map's value at a sample rate,
     // kept for the tempo map's code (model/transport/Tempo.cpp: getTempoMap()), so that it is made once for each change of
     // the value and each sample rate asked, not at every call (each conversion of a beat to seconds, each audio clip read):
@@ -525,7 +551,7 @@ public:
     // during the call alone: what plays may set its device's node from the two at once (PlaybackSession.h: the values that
     // differ between them), as nothing else of the song is read meanwhile. Set its members by name. Only what the devices'
     // value covers (DevicesValue.h): never a plug-in's VALUE, its state, program, format ID or version, a chain's mute or solo
-    // (the store's, which the tree still tells: DevicesArea.h), nor a window's place.
+    // (the store's: DeviceStoreChange), nor a window's place.
     struct DeviceChange
     {
         // The parts, as bits of parts: each its own, as what plays takes each its own way (PlaybackSession.h).
@@ -553,6 +579,37 @@ public:
         const DeviceValue* now = nullptr;
 
         bool has (std::uint16_t part) const noexcept { return (parts & part) != 0; }
+    };
+
+    // An entry of the devices' store that changed (DeviceStoreValue.h): its kind; its item (the plug-in, or the chain for a
+    // switch) and, for a plug-in's value, its parameter (the plug-in's own ID for it); whether the song's entry of it came or
+    // went (a plug-in's first value set by hand, its last set back to its default); whether the song's entries differ at all
+    // (false for a plug-in's held value alone, written or taken back: DeviceStoreValue.h, PluginValueEntry); for a plug-in's
+    // value, the value to give the plug-in (the entry after: the song's, or the held one an Undo of a first value comes back
+    // to; none where none is left); and where the item is, as the devices' part of the keeper last told it (getDevicesAsTold()),
+    // with whether the song holds it at all (an answer of a plug-in a step took away is written for a device the song
+    // doesn't hold), so that what is told names the item's channel without reading the song. Set its members by name.
+    struct DeviceStoreChange
+    {
+        enum class Kind : std::uint8_t
+        {
+            pluginValue,
+            state,
+            program,
+            formatID,
+            version,
+            chainMute,
+            chainSolo
+        };
+
+        Kind kind = Kind::pluginValue;
+        DeviceID item {};
+        juce::String parameter {};
+        bool appeared = false, went = false;
+        bool changesSong = true;
+        std::optional<float> valueToGive {};
+        DevicePlace place {};
+        bool isInSong = false;
     };
 
     // What hears the song's values change, from one place: one listener for every area, a function for each, which does
@@ -665,16 +722,30 @@ public:
         // each of the tree's notifications that changes what the value covers, in an undo and a redo too: so how many calls
         // a step makes is the tree's until the devices' switch (a knob's drag, one each move; a preset loaded, one for each
         // value), and only what they told in all is the step's (what differs in the song's devices before and after). What
-        // the value doesn't cover is the tree's still, which the listeners hear as before: a plug-in's VALUE children, its
-        // state, program, format ID and version, a chain's mute and solo (the store's: DevicesArea.cpp,
-        // isDeviceStoreProperty()), and a window's place. A TRACK that comes or goes with devices, or is given another ID in
-        // place, is the tree's too, heard as before, and its devices are told here, so the step is heard twice, and only
-        // marks twice: the views' watcher raises the devices' group for it (and any channel where one of them listens to a
-        // sidechain) beside what the tree raises for the track (ProjectContext.cpp).
+        // the value doesn't cover is the store's (deviceStoreChanged(), below: a plug-in's values set by hand, its state,
+        // program, format ID and version, a chain's mute and solo), or a window's place, which no one is told. A TRACK that
+        // comes or goes with devices, or is given another ID in place, is the tree's, heard as before, and its devices are
+        // told here, so the step is heard twice, and only marks twice: the views' watcher raises the devices' group for it
+        // (and any channel where one of them listens to a sidechain) beside what the tree raises for the track
+        // (ProjectContext.cpp).
         virtual void devicesChanged (const std::vector<DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
                                      const SongDevices& now)
         {
             juce::ignoreUnused (devices, reordered, now);
+        }
+
+        // The song's devices' store (DeviceStoreValue.h): each entry that changed (DeviceStoreChange), sorted by its item, its
+        // kind and its parameter, in one call; and the store whole after (now: a copy of the area's value, valid during the
+        // call, which what plays keeps for what decides which chain is heard: SongPlayer.h). The store's area tells it
+        // (DeviceStoreArea.h: DeviceStoreTeller), at once, once for each change of its value: a step's, an undo's or a redo's
+        // whole step, a write outside the history (a plug-in's instance hears its own writes, inside them). An Undo and a Redo
+        // put back only the entries their step changed, so a value a plug-in's window set since survives the Undo of a step
+        // that changed another (ValueArea.h: keyed). The song's tree holds none of it: a DEVICE or a CHAIN that comes or goes
+        // is the tree's (and the devices'), heard as before, and its entries stay in the store, told nothing (a removal keeps
+        // them, for its Undo).
+        virtual void deviceStoreChanged (const std::vector<DeviceStoreChange>& entries, const DeviceStore& now)
+        {
+            juce::ignoreUnused (entries, now);
         }
     };
 
@@ -728,6 +799,13 @@ public:
     // passes never leave to it.
     int countSendsAdopted() const noexcept { return sendsAdopted; }
 
+    // How many DEVICE and CHAIN elements that came into the song with what the store holds (a store's property, a VALUE, a
+    // window's place) the keeper took it out of since the song held its values, and how many lone VALUE elements it took in
+    // (the safety net, DeviceStoreArea.h): what a track a merge's choice brings in whole holds; what the versions' passes and
+    // the devices' writers, which give the store its entries through its setters (model/plugins/internal/DeviceStore.h:
+    // setStoreEntries(); model/mixer/internal/Mixer.h: setNewDevices()), check they never leave to it.
+    int countDeviceStoreAdopted() const noexcept { return deviceStoreAdopted; }
+
     // The song's devices, containers and chains as the devices' part of the keeper last told them (DevicesArea.h), while the
     // song's tree holds them: read once as the song took its values, and kept since by what the tree told; nullptr before.
     // What plays takes what decides what is heard from as it is made (SongPlayer.h: heldDevices), so that it holds what the
@@ -756,6 +834,8 @@ private:
     struct ModulationKeeper;                        // ModulationArea.h
     struct SendsTeller;                             // SendsArea.h
     struct SendsKeeper;                             // SendsArea.h
+    struct DeviceStoreTeller;                       // DeviceStoreArea.h
+    struct DeviceStoreKeeper;                       // DeviceStoreArea.h
     struct DevicesKeeper;                           // DevicesArea.h: tells devicesChanged() from the tree, until the switch
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
@@ -768,6 +848,7 @@ private:
     std::unique_ptr<SectionsTeller> sectionsTeller;
     std::unique_ptr<ModulationTeller> modulationTeller;
     std::unique_ptr<SendsTeller> sendsTeller;
+    std::unique_ptr<DeviceStoreTeller> deviceStoreTeller;
     std::unique_ptr<Keeper> keeper;
     int adopted = 0, tempoMapAdopted = 0;
     int chordLaneAdopted = 0;
@@ -776,6 +857,7 @@ private:
     int sectionsAdopted = 0;
     int modulationAdopted = 0;
     int sendsAdopted = 0;
+    int deviceStoreAdopted = 0;
     std::uint64_t nextPointKey = 1; // givePointKey(): outside the history, never undone, never saved
 
     // In the history, or outside it, as the song is written now; and a value alike to the area's, without a step of its own
@@ -845,9 +927,9 @@ bool isHeardAsSections (const juce::ValueTree& parent, const juce::ValueTree& ch
 // alone (SongValues::Listener::devicesChanged()) and leaves alone in its tree callbacks, while the tree is still their storage
 // (DevicesArea.h, whose part of the keeper tells them from the tree). A property changed: one the devices' value covers of a
 // DEVICE, a CONTAINER or a CHAIN of the song's (on a channel: a TRACK, the MASTER), or any of what is in one (its VALUES, its
-// SOUNDS, and what Phazite doesn't know there); not what the value doesn't cover, which the listeners hear from the tree as
-// before (DevicesArea.cpp: isDeviceStoreProperty(): a plug-in's state, program, format ID and version, a chain's mute and solo,
-// a window's place), nor anything of a plug-in's VALUE. Children in another order: those of a CONTAINER or a CHAIN of the
+// SOUNDS, and what Phazite doesn't know there); not what the value doesn't cover (DevicesArea.cpp: isDeviceStoreProperty(): a
+// plug-in's state, program, format ID and version, a chain's mute and solo, a window's place), nor anything of a plug-in's
+// VALUE, which are the store's (isHeardAsDeviceStore(), below). Children in another order: those of a CONTAINER or a CHAIN of the
 // song's, or of what is in a VALUES or a SOUNDS; not a DEVICE's (its VALUES, SOUNDS and VALUEs, whose order the value holds
 // none of), nor a channel's, whose devices' order the devices' listener is told and whose other children's order is the
 // tree's. A child added or taken out: a DEVICE or a CONTAINER of a channel, a CHAIN of a container, a DEVICE of a chain, a
@@ -858,14 +940,25 @@ bool isHeardAsDevices (const juce::ValueTree& element);
 bool isHeardAsDevices (const juce::ValueTree& element, const juce::Identifier& property);
 bool isHeardAsDevices (const juce::ValueTree& parent, const juce::ValueTree& child);
 
+// Whether what the song's tree tells is the devices' store's, which a listener of the song's root hears from the values'
+// listener alone (SongValues::Listener::deviceStoreChanged()) and leaves alone in its tree callbacks: a VALUE under a DEVICE,
+// or anything in one (an element of it, a child added to it or taken out, a property of it changed), added or taken out; a
+// store's property of a DEVICE (a plug-in's state, program, format ID and version, a window's place) or of a CHAIN (its mute
+// and solo) changed. The song's tree holds none of them: what it tells of them is what the keeper takes out of a DEVICE or a
+// CHAIN that came in with them (its safety net, DeviceStoreArea.h), which the area tells. In DeviceStoreArea.cpp.
+bool isHeardAsDeviceStore (const juce::ValueTree& element);
+bool isHeardAsDeviceStore (const juce::ValueTree& element, const juce::Identifier& property);
+bool isHeardAsDeviceStore (const juce::ValueTree& parent, const juce::ValueTree& child);
+
 // Whether what the song's tree tells is any area's of the song's values, which a listener of the song's root hears from the
 // values' listener alone (SongValues::Listener) and leaves alone in its tree callbacks: of an element (a child moved in it),
 // of a property changed (the element and the property: a DEVICE's or a CHAIN's properties are the devices' but for the
 // store's), and of a child added to an element or taken out of it. Each the OR of the areas' own functions above
 // (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, the curves', the MIDI
-// links', the sections', then the devices' (modulation's and the sends' went at their switches: the tree holds nothing of
-// them). What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step
-// 12, above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
+// links', the sections', the devices', then the devices' store's (modulation's and the sends' went at their switches: the
+// tree holds nothing of them; the store's stays for what its keeper takes out of a DEVICE or a CHAIN that comes in with it).
+// What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12,
+// above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
 bool isHeardAsKept (const juce::ValueTree& element);
 bool isHeardAsKept (const juce::ValueTree& element, const juce::Identifier& property);
 bool isHeardAsKept (const juce::ValueTree& parent, const juce::ValueTree& child);

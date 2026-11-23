@@ -76,7 +76,8 @@ juce::String getDeviceTypeOf (const Song&, DeviceID);
 
 //==============================================================================
 // What a plug-in's store, or the plug-in's own window, writes into the song outside its undo history, for the tests that
-// write it by hand as either does: the plug-in's state (Schema.h: pluginState, in base 64).
+// write it by hand as either does: the plug-in's state, into the song's devices' store by the device's ID, as its instance
+// stores it (model/plugins/internal/DeviceStore.h: storePluginOutsideHistory()); as bytes, or as base 64 of some bytes.
 void storePluginState (Song&, DeviceID, const juce::MemoryBlock&);
 void storePluginState (Song&, DeviceID, const juce::String& base64);
 

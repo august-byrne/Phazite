@@ -456,6 +456,18 @@ private:
                          const SongDevices& now) override;
     bool areDevicesAsSaved() const;
 
+    // The devices and chains whose entries in the devices' store changed, by their IDs (SongValues.h:
+    // Listener::deviceStoreChanged(); the song's tree holds none of it): counted as a change where the song's entries changed
+    // of an item the song holds (a held value alone, and an answer written for a device a step took away, count nothing),
+    // and compared with savedState when asked, each against the saved copy's entries of its ID, as values (WholeState.h:
+    // holdSameDeviceStore()), so that a knob a plug-in's window turned and turned back is saved again. A plug-in's own change
+    // in its window counts besides, as the song counts it (getOwnChangesOutsideHistory()). Bounded as toCompare is: past
+    // mostToCompare of them, the tracks and the master whole.
+    std::vector<DeviceID> storeToCompare;
+    bool comparingStoreWhole = false;
+    void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
+    bool isDeviceStoreAsSaved() const;
+
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
     // where nothing of it was marked.
     bool areNotesAsSaved() const;

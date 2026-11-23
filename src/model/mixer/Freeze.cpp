@@ -98,11 +98,11 @@ namespace
         return {};
     }
 
-    // Properties written into a device's element without its sound changing: where its window was, and a plug-in's own
-    // state, which every save stores again (model/plugins/internal/PluginInstances.h).
+    // Properties of a device's element that don't change its sound: where its window was, view state (which the song's tree
+    // holds none of now, as of a plug-in's own state: the devices' store's, holdSameStoreOf() below leaving that out).
     bool isIgnoredProperty (const juce::Identifier& property)
     {
-        return schema::isDeviceViewProperty (property) || property == schema::pluginState;
+        return schema::isDeviceViewProperty (property);
     }
 
     bool isSameSound (const juce::ValueTree& a, const juce::ValueTree& b)
@@ -135,6 +135,43 @@ namespace
                 return false;
 
         return true;
+    }
+
+    // Whether the store holds the same now of a frozen part (a device, a container with its chains and their devices) as the
+    // values kept as it was frozen: a plug-in's values set by hand, program, format ID and version, a chain's mute and solo,
+    // each item's by its ID; not a plug-in's state, which every save stores again, as isSameSound() leaves it out.
+    bool holdSameStoreOf (const juce::ValueTree& part, const Song& song, const ValuesKept& frozen)
+    {
+        const auto* values = song.getValues();
+
+        if (values == nullptr)
+            return true;
+
+        const auto withoutState = [] (DeviceStore entries)
+        {
+            entries.states = {};
+            return entries;
+        };
+
+        const auto& now = values->deviceStore.get();
+
+        if (now.isSameAs (frozen.deviceStore))
+            return true;
+
+        const std::function<bool (const juce::ValueTree&)> holdSame = [&] (const juce::ValueTree& item) -> bool
+        {
+            if (item.hasType (schema::DEVICE) || item.hasType (schema::CHAIN))
+            {
+                const auto id = readDeviceElementID (item);
+
+                if (! (withoutState (takeEntriesOf (now, id)) == withoutState (takeEntriesOf (frozen.deviceStore, id))))
+                    return false;
+            }
+
+            return std::all_of (item.begin(), item.end(), holdSame);
+        };
+
+        return holdSame (part);
     }
 
     // What a frozen track's file holds, as the song's tree has it: its frozen devices. Its clips, with their notes, are the
@@ -236,7 +273,7 @@ namespace
         // where asked. Its parts first: what its curves are of (getFrozenCurveOwners()) and the containers whose macros it holds
         // are in them, so curves and macros left out are of the same owners as before.
         for (int i = 0; i < (int) parts.size(); ++i)
-            if (! isSameSound (parts[(size_t) i], frozen.parts.getChild (i)))
+            if (! isSameSound (parts[(size_t) i], frozen.parts.getChild (i)) || ! holdSameStoreOf (parts[(size_t) i], song, frozen.values))
                 return false;
 
         if (const auto tempos = getTempoMapValue (song).tempos;
@@ -591,6 +628,27 @@ void FreezeKeeper::devicesChanged (const std::vector<SongValues::DeviceChange>& 
 
     for (const auto& place : reordered)
         mark (place);
+
+    if (marked)
+        triggerAsyncUpdate();
+}
+
+void FreezeKeeper::deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& entries, const DeviceStore&)
+{
+    if (checking || frozen.empty())
+        return;
+
+    auto marked = false;
+
+    for (const auto& entry : entries)
+    {
+        if (entry.kind == SongValues::DeviceStoreChange::Kind::state || ! entry.changesSong || ! entry.isInSong || entry.place.onMaster
+            || ! frozen.contains (entry.place.track))
+            continue;
+
+        waiting.tracks.insert (entry.place.track);
+        marked = true;
+    }
 
     if (marked)
         triggerAsyncUpdate();

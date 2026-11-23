@@ -203,7 +203,9 @@ std::vector<std::pair<juce::String, juce::var>> readValueChildren (const juce::V
 // An element of a song that went through the loader read both ways the same, and written back from the store into the same
 // element without the store's properties and VALUEs: the same properties as the same text, the same VALUEs, in their
 // parameters' order (sortedInFile: whether the file holds them so, which the written one then is too). The properties the
-// store holds none of where the file holds one (a state that isn't base 64, an empty format ID) named in dropped.
+// store holds none of where the file held one (a state that isn't base 64, an empty format ID) named in dropped: since the
+// store's switch the loader takes them away as the song opens (DeviceStoreValue.h: keepStoreAsHeld()), so a song's element
+// holds none of them either.
 void checkRoundTrip (const juce::ValueTree& element, const std::vector<const juce::Identifier*>& dropped = {})
 {
     INFO (element.toXmlString().toStdString());
@@ -235,9 +237,16 @@ void checkRoundTrip (const juce::ValueTree& element, const std::vector<const juc
         const auto isSwitchOff = (*property == schema::chainMute.getName() || *property == schema::chainSolo.getName())
                                  && element.hasProperty (*property) && ! (bool) element[*property];
 
-        if (isSwitchOff || std::find (dropped.begin(), dropped.end(), property) != dropped.end())
+        if (isSwitchOff)
         {
             CHECK (element.hasProperty (*property));
+            CHECK_FALSE (written.hasProperty (*property));
+            continue;
+        }
+
+        if (std::find (dropped.begin(), dropped.end(), property) != dropped.end())
+        {
+            CHECK_FALSE (element.hasProperty (*property));
             CHECK_FALSE (written.hasProperty (*property));
             continue;
         }
@@ -413,8 +422,8 @@ TEST_CASE ("Device store: damaged plug-ins and chains open as the store holds th
 
     CHECK (order.joinIntoString (" ").endsWith ("2 10 a9 a10 b"));
 
-    // A state that isn't base 64, which the loader leaves, and an empty format ID: none in the store (what reads them today
-    // reads none either: getPluginState()), so a song written from the store has neither.
+    // A state that isn't base 64 and an empty format ID, which the loader takes away as the song opens: none in the store,
+    // so a song written from the store has neither.
     DeviceStore oddStore;
     phazite::readHeldStoreOf (findByID (whole, 900002), oddStore);
     CHECK (oddStore.states.empty());

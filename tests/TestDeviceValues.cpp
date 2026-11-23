@@ -166,12 +166,18 @@ juce::String getDeviceTypeOf (const Song& song, DeviceID id)
 //==============================================================================
 void storePluginState (Song& song, DeviceID id, const juce::MemoryBlock& state)
 {
-    storePluginState (song, id, writeBytes (state));
+    // As a plug-in's instance stores it, outside the history, by the device's ID (model/plugins/internal/DeviceStore.h).
+    REQUIRE (findDeviceToWrite (song, id).isValid());
+    StoredPlugin stored;
+    stored.state = &state;
+    storePluginOutsideHistory (song, id, stored);
 }
 
 void storePluginState (Song& song, DeviceID id, const juce::String& base64)
 {
-    findDeviceToWrite (song, id).setProperty (schema::pluginState, base64, nullptr);
+    const auto bytes = readBytes (base64);
+    REQUIRE (bytes.has_value());
+    storePluginState (song, id, *bytes);
 }
 
 void setPluginStateInStep (Song& song, DeviceID id, const juce::MemoryBlock& state)

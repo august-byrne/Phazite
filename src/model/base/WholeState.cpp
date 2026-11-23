@@ -4,6 +4,7 @@
 #include "internal/ChordLaneArea.h"
 #include "internal/ClipsArea.h"
 #include "internal/CurvesArea.h"
+#include "internal/DeviceStoreArea.h"
 #include "internal/MidiLinksArea.h"
 #include "internal/ModulationArea.h"
 #include "internal/Schema.h"
@@ -45,6 +46,9 @@ namespace
         if (leadsToSends (parent, child)) // the track list, a track or a folder's tracks, for the sends
             return true;
 
+        if (leadsToDeviceStore (parent, child)) // a channel, its devices, a container's chains, a chain's devices: the store
+            return true;
+
         return false;
     }
 
@@ -62,10 +66,12 @@ namespace
         writeChordLaneIn (element, kept);
         writeMidiLinksIn (element, kept);
         writeCurvesIn (element, kept);
-        writeSectionsIn (element, kept);   // the sections in the song's SECTIONS: SectionsArea.h
-        writeModulationIn (element, kept); // a TRACK's, the MASTER's or a CONTAINER's modulators and macros: ModulationArea.h
-        writeSendsIn (element, kept);      // a TRACK's sends, after its modulators and macros (the last of its
-                                           // children): SendsArea.h
+        writeSectionsIn (element, kept);    // the sections in the song's SECTIONS: SectionsArea.h
+        writeModulationIn (element, kept);  // a TRACK's, the MASTER's or a CONTAINER's modulators and macros: ModulationArea.h
+        writeSendsIn (element, kept);       // a TRACK's sends, after its modulators and macros (the last of its
+                                            // children): SendsArea.h
+        writeDeviceStoreIn (element, kept); // a plug-in's DEVICE's store (its VALUEs after its other children), a CHAIN's
+                                            // mute and solo, a DEVICE's window's place: DeviceStoreArea.h
 
         for (auto child : element)
             if (leadsToKept (element, child))
@@ -115,6 +121,8 @@ ValuesKept keepValues (const Song& song)
         kept.sections = values->sections.get();
         kept.modulation = values->modulation.get();
         kept.sends = values->sends.get();
+        kept.deviceStore = values->deviceStore.get();
+        kept.devicesOutside = values->devicesOutside.get();
     }
 
     return kept;
@@ -154,6 +162,9 @@ bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, con
         return false;
 
     if (! holdSameSendsOf (element, kept, otherElement, otherKept)) // then a track's sends
+        return false;
+
+    if (! holdSameDeviceStoreOf (element, kept, otherElement, otherKept)) // then what a device or a chain stores
         return false;
 
     return true;

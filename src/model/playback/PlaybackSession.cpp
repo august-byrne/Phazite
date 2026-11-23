@@ -204,6 +204,30 @@ void PlaybackSession::devicesChanged (const std::vector<SongValues::DeviceChange
         followAfterMove = true;
 }
 
+void PlaybackSession::deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& entries, const DeviceStore&)
+{
+    // A plug-in's value set by hand plays at once, and its first that came or its last that went makes a new plan too, as a
+    // VALUE added or taken out made one; a chain's mute and solo play at once (takeStoreEntry()); a plug-in's state, program,
+    // format ID and version, which its instance takes (PluginInstances.h), nothing. What an undo or a redo took at once is
+    // what a pass writing it writes from then, once the history's move is whole (followAfterMove).
+    using Kind = SongValues::DeviceStoreChange::Kind;
+    auto plan = false, taken = false;
+
+    for (const auto& entry : entries)
+    {
+        if (entry.kind == Kind::pluginValue && (entry.appeared || entry.went))
+            plan = true;
+
+        taken = player.takeStoreEntry (entry) || taken;
+    }
+
+    if (plan)
+        triggerAsyncUpdate();
+
+    if (taken && song->getUndoManager().isPerformingUndoRedo())
+        followAfterMove = true;
+}
+
 void PlaybackSession::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators,
                                          const std::vector<ModulatorPlace>& reordered)
 {

@@ -1766,10 +1766,13 @@ TEST_CASE ("A plug-in's state that Save a Copy As or an autosave stores, which t
     auto project = createProject (temp.folder, "Stored");
     auto& song = project->getSong();
     const auto track = getFirstTrack (song);
-    const auto synth = phazite::test::setOwnInstrument (song, track, phazite::devices::Synth::typeID);
-    REQUIRE (synth.isValid());
+    // A plug-in's device (the devices' store holds a state for a plug-in alone), which nothing here loads: its state is what
+    // the store writes, the bytes of a letter.
+    const auto plugin = phazite::test::addPluginDevice (song, track, phazite::test::TestPlugin::getDescription());
     juce::String pluginState ("A");
-    song.setDeviceStateStore ([&song, synth, &pluginState] (std::uint64_t) { phazite::test::storePluginState (song, synth, pluginState); });
+    song.setDeviceStateStore (
+        [&song, plugin, &pluginState] (std::uint64_t)
+        { phazite::test::storePluginState (song, plugin, juce::MemoryBlock (pluginState.toRawUTF8(), (size_t) pluginState.length())); });
     phazite::test::dispatchPendingMessages();
     REQUIRE (project->save().wasOk());
     REQUIRE_FALSE (project->hasUnsavedChanges());

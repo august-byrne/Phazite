@@ -1043,6 +1043,27 @@ struct TreeWrites : public juce::ValueTree::Listener
     juce::ValueTree state;
     int count = 0;
 };
+
+// What is written into a song's devices' store while it listens (SongValues.h: deviceStoreChanged()), which holds what the
+// tree held of a plug-in's values set by hand until the store's switch: each entry told.
+struct StoreWrites final : phazite::SongValues::Listener
+{
+    explicit StoreWrites (const phazite::Song& s)
+        : song (s)
+    {
+        song.getValues()->addListener (this);
+    }
+
+    ~StoreWrites() override { song.getValues()->removeListener (this); }
+
+    void deviceStoreChanged (const std::vector<phazite::SongValues::DeviceStoreChange>& entries, const phazite::DeviceStore&) override
+    {
+        count += (int) entries.size();
+    }
+
+    const phazite::Song& song;
+    int count = 0;
+};
 } // namespace
 
 TEST_CASE ("A version brought back puts a bus's tracks among its effects where it holds them, the project as saved: a track "
@@ -1283,9 +1304,10 @@ TEST_CASE ("A device a version moves home is the same element: what is written o
 TEST_CASE ("What the store holds of a plug-in of 200 values set by hand: a version that holds the same writes nothing and puts "
            "nothing in order; one a value apart puts them in order once; a second pass writes nothing, in the history and out")
 {
-    // The store's pass compares a plug-in's values and their order before it writes (ApplySong.cpp: makeDeviceStoreLike()),
-    // and the store's writer lists where the values stand once a call (DeviceStore.cpp: setStoreEntries(),
-    // countPluginValuePlacesBuilt()), not once for each value: its cost grows with the values' count, not with its square.
+    // The store's pass compares a plug-in's values before it writes (ApplySong.cpp: makeDeviceStoreLike()), and the store's
+    // writer writes them once a call (DeviceStore.cpp: setStoreEntries(), countPluginValuePlacesBuilt()), not once for each
+    // value: its cost grows with the values' count, not with its square. What it wrote: into the tree, and into the store
+    // (which holds a plug-in's values since the store's switch).
     const TestPlugin testPlugin;
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
@@ -1325,8 +1347,9 @@ TEST_CASE ("What the store holds of a plug-in of 200 values set by hand: a versi
     {
         Applied applied;
         const TreeWrites writes (song.getState());
+        const StoreWrites stored (song);
         const auto places = phazite::countPluginValuePlacesBuilt();
-        const auto stored = phazite::countDeviceStorePassWrites();
+        const auto storeWrites = phazite::countDeviceStorePassWrites();
 
         if (inHistory)
         {
@@ -1339,9 +1362,9 @@ TEST_CASE ("What the store holds of a plug-in of 200 values set by hand: a versi
             phazite::makeSongTheSame (song, version);
         }
 
-        applied.written = writes.count;
+        applied.written = writes.count + stored.count;
         applied.placesBuilt = phazite::countPluginValuePlacesBuilt() - places;
-        applied.storeWrites = phazite::countDeviceStorePassWrites() - stored;
+        applied.storeWrites = phazite::countDeviceStorePassWrites() - storeWrites;
         return applied;
     };
 

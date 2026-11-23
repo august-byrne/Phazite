@@ -344,6 +344,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/CurvesArea.cpp
     src/model/base/CurveValues.cpp
     src/model/base/DevicesArea.cpp
+    src/model/base/DeviceStoreArea.cpp
     src/model/base/DeviceStoreValue.cpp
     src/model/base/DevicesValue.cpp
     src/model/base/IDs.h
@@ -385,6 +386,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/ClipsValue.h
     src/model/base/internal/CurveValues.h
     src/model/base/internal/DevicesArea.h
+    src/model/base/internal/DeviceStoreArea.h
     src/model/base/internal/DeviceStoreValue.h
     src/model/base/internal/DevicesOutside.h
     src/model/base/internal/DevicesValue.h
@@ -1555,6 +1557,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongValuesClipsTests.cpp
         tests/SongValuesCurvesTests.cpp
         tests/SongValuesDevicesTests.cpp
+        tests/SongValuesDeviceStoreTests.cpp
         tests/SongValuesMidiLinksTests.cpp
         tests/SongValuesModulationTests.cpp
         tests/SongValuesSectionsTests.cpp

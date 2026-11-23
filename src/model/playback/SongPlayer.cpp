@@ -368,6 +368,30 @@ void SongPlayer::devicesChanged (const std::vector<SongValues::DeviceChange>& ch
         mark (place);
 }
 
+void SongPlayer::deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& changed, const DeviceStore& now)
+{
+    // The channel of a plug-in whose first value set by hand came or whose last went, and of a chain muted or soloed, as a
+    // VALUE added or taken out and a CHAIN's switch marked the channel they were on (markChange()): the next plan reads its
+    // devices again. A value in place, a state, a program, a format ID and a version: nothing.
+    using Kind = SongValues::DeviceStoreChange::Kind;
+
+    for (const auto& change : changed)
+    {
+        const auto marks = (change.kind == Kind::pluginValue && (change.appeared || change.went)) || change.kind == Kind::chainMute
+                           || change.kind == Kind::chainSolo;
+
+        if (! marks || ! change.isInSong)
+            continue;
+
+        if (change.place.onMaster)
+            changes.channels.insert (0);
+        else if (change.place.track.isValid())
+            changes.channels.insert ((std::int64_t) change.place.track.getRaw());
+    }
+
+    heldStore = now; // what updateChainAudibility() reads, as the song holds it now
+}
+
 void SongPlayer::holdDevices()
 {
     // Each device (its own or a plug-in, its containers' chains' too) by its ID: its sidechain's track and its channel, from
@@ -476,8 +500,8 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
 
     for (auto element = changed; element.isValid(); element = element.getParent())
     {
-        if (element.hasType (schema::VALUE) || schema::isUncountedElement (element.getParent(), element))
-            return; // a plug-in's value, or view state (a track's lanes)
+        if (schema::isUncountedElement (element.getParent(), element))
+            return; // view state (a track's lanes)
 
         if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN))
             inDevice = true;
@@ -503,12 +527,6 @@ void SongPlayer::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Id
     // its own is under an ID no longer known.
     if (tree.hasType (schema::TRACK) && property == schema::trackID)
         changes.allNotes = changes.allChannels = true;
-
-    // What a device's player doesn't read: where its window was, and a plug-in's own state, which every save stores
-    // (Song::storeDeviceStates()).
-    if (tree.hasType (schema::DEVICE)
-        && (schema::isDeviceViewProperty (property) || property == schema::pluginState || property == schema::pluginProgram))
-        return;
 
     markChange (tree, false);
 }
@@ -675,6 +693,13 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     compilingAfresh = pathLengths.empty(); // the first plan, or the first for another rate or block size: no path is new
     compilingLive = live.has_value();
     const auto songSends = getSendsValue (song); // the song's sends, read once for every channel's (getChannels())
+
+    // The devices' store, read once for every container's chains (updateChainAudibility()), and each container's chains as
+    // this plan finds them.
+    if (const auto* values = song.getValues())
+        heldStore = values->deviceStore.get();
+
+    containerChains.clear();
     const auto channels = getChannels (songSends);
     std::map<std::int64_t, int> places; // each channel's strip, by its ID
 
@@ -1278,7 +1303,16 @@ void SongPlayer::addContainer (engine::Plan::Strip& strip, const juce::ValueTree
     kept->setMix (readDeviceMix (containerState));
     container.state = kept;
     usedContainers.insert (id);
-    updateChainAudibility (containerState);
+
+    // Its chains, each by its ID, which what is heard is worked out over.
+    auto& listed = containerChains[id];
+    listed.clear();
+
+    for (const auto& chainState : containerState)
+        if (readDeviceForm (chainState) == DeviceValue::Form::chain)
+            listed.push_back (getDeviceKey (chainState));
+
+    updateChainAudibility (id);
     strip.containers.push_back (std::move (container));
 }
 
@@ -1348,18 +1382,22 @@ void SongPlayer::setChainValues (engine::ChainState& chain, const DeviceValue& v
     chain.setNotes (value.keys.low, value.keys.high, value.velocities.low, value.velocities.high);
 }
 
-void SongPlayer::updateChainAudibility (const juce::ValueTree& containerState)
+void SongPlayer::updateChainAudibility (std::int64_t container)
 {
-    // A chain is heard unless it is muted, or another of its container's chains is soloed and it isn't.
-    auto anySoloed = false;
+    // A chain is heard unless it is muted, or another of its container's chains is soloed and it isn't: each read from the
+    // store the player holds (heldStore), by the chain's ID.
+    const auto listed = containerChains.find (container);
 
-    for (const auto& chainState : containerState)
-        anySoloed = anySoloed || readChainSolo (chainState);
+    if (listed == containerChains.end())
+        return;
 
-    for (const auto& chainState : containerState)
-        if (readDeviceForm (chainState) == DeviceValue::Form::chain)
-            if (const auto found = chains.find (getDeviceKey (chainState)); found != chains.end())
-                found->second->getFader().setAudible (! readChainMute (chainState) && (! anySoloed || readChainSolo (chainState)));
+    const auto isSoloed = [this] (std::int64_t chain) { return isChainSoloedIn (heldStore, DeviceID::fromRaw ((std::uint64_t) chain)); };
+    const auto anySoloed = std::any_of (listed->second.begin(), listed->second.end(), isSoloed);
+
+    for (const auto chain : listed->second)
+        if (const auto found = chains.find (chain); found != chains.end())
+            found->second->getFader().setAudible (! isChainMutedIn (heldStore, DeviceID::fromRaw ((std::uint64_t) chain))
+                                                  && (! anySoloed || isSoloed (chain)));
 }
 
 engine::ChainState* SongPlayer::findChain (std::int64_t id) const
@@ -2401,15 +2439,6 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
     // (A modulator's parameter, steps or switch, and a macro's value: the song's values tell them, takeModulator(); a send's
     // level too, takeSendLevel(); and what the devices' value covers of a device, a container or a chain, takeDevice().)
 
-    // A container's chain's mute and solo (the store's, still the tree's), at once.
-    if (tree.hasType (schema::CHAIN))
-    {
-        if (property == schema::chainMute || property == schema::chainSolo)
-            updateChainAudibility (tree.getParent());
-
-        return true;
-    }
-
     // A plain folder's VCA turns the tracks in it.
     if (tree.hasType (schema::TRACK) && isFolderState (tree) && ! tree.hasProperty (schema::channelFader)
         && property == schema::channelVolume)
@@ -2430,20 +2459,6 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
         return true;
     }
 
-    // A plug-in's value set by hand, by its own ID; and its settings and program, which its instance takes
-    // (model/plugins/internal/PluginInstances.h).
-    if (tree.hasType (schema::VALUE))
-    {
-        if (auto* node = findDevice (getID (tree.getParent(), schema::deviceID)))
-            if (const auto index = findParameter (*node, tree[schema::valueParameter].toString()); index >= 0)
-                node->setValue (index, (float) tree[schema::valueSetByHand]);
-
-        return true;
-    }
-
-    if (tree.hasType (schema::DEVICE) && (property == schema::pluginState || property == schema::pluginProgram))
-        return true;
-
     const auto isChannel = tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER);
 
     if (isChannel && (property == schema::channelVolume || property == schema::channelPan))
@@ -2463,6 +2478,47 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
     // How a track shows changes nothing that plays.
     if (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
         return true;
+
+    return false;
+}
+
+bool SongPlayer::takeStoreEntry (const SongValues::DeviceStoreChange& change)
+{
+    using Kind = SongValues::DeviceStoreChange::Kind;
+
+    switch (change.kind)
+    {
+        case Kind::pluginValue:
+        {
+            // A plug-in's value set by hand, by its own ID; its settings and program its instance takes
+            // (model/plugins/internal/PluginInstances.h).
+            if (! change.valueToGive.has_value())
+                return false;
+
+            if (auto* node = findDevice ((std::int64_t) change.item.getRaw()))
+                if (const auto index = findParameter (*node, change.parameter); index >= 0)
+                    node->setValue (index, *change.valueToGive);
+
+            return true;
+        }
+
+        case Kind::chainMute:
+        case Kind::chainSolo:
+        {
+            // A container's chain's mute and solo, its container's chains heard as the store holds them now.
+            for (const auto& [container, listed] : containerChains)
+                if (std::find (listed.begin(), listed.end(), (std::int64_t) change.item.getRaw()) != listed.end())
+                    updateChainAudibility (container);
+
+            return true;
+        }
+
+        case Kind::state:
+        case Kind::program:
+        case Kind::formatID:
+        case Kind::version:
+            break;
+    }
 
     return false;
 }

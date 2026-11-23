@@ -1729,16 +1729,6 @@ juce::ValueTree readDeviceSounds (const juce::ValueTree& device)
     return device.hasType (schema::DEVICE) ? device.getChildWithName (schema::SOUNDS) : juce::ValueTree();
 }
 
-bool readChainMute (const juce::ValueTree& chain)
-{
-    return chain.hasType (schema::CHAIN) && (bool) chain[schema::chainMute];
-}
-
-bool readChainSolo (const juce::ValueTree& chain)
-{
-    return chain.hasType (schema::CHAIN) && (bool) chain[schema::chainSolo];
-}
-
 std::vector<DeviceID> readDeviceList (const juce::ValueTree& owner)
 {
     std::vector<DeviceID> ids;

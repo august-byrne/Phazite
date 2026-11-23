@@ -1437,6 +1437,83 @@ namespace
         }
     }
 
+    // The devices' store's area (DeviceStoreValue.h): no DEVICE or CHAIN of the song's tree holds anything of it (a store's
+    // property, a VALUE, a window's place: the keeper takes them out of what comes in); each entry of an item the song holds
+    // is of an item of its kind (a plug-in's values, state, program, format ID and version; a chain's mute and solo), the
+    // entries of items it doesn't hold being kept for an Undo; and each is as the song holds it (a value within 0 and 1, a
+    // state of some bytes, a text that isn't empty, a switch on).
+    void checkDeviceStoreValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> visit = [&problems, &visit] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (holdsStoreIn (child))
+                    problems.push_back (
+                        "values: the song's " + child.getType().toString().toStdString() + " "
+                        + writeValue (child[schema::deviceID].isVoid() ? child[schema::chainID] : child[schema::deviceID]).toStdString()
+                        + " holds what the devices' store holds");
+
+                visit (child);
+            }
+        };
+
+        visit (song.getState());
+
+        const auto& store = values.deviceStore.get();
+        const auto* told = values.getDevicesAsTold();
+
+        const auto check = [&problems, told] (std::uint64_t item, DeviceValue::Form form, const char* what)
+        {
+            const auto* held = told != nullptr ? told->find (DeviceID::fromRaw (item)) : nullptr;
+
+            if (held != nullptr && held->form != form)
+                problems.push_back ("values: the store holds " + std::string (what) + " of " + std::to_string (item)
+                                    + ", which is no item of its kind");
+        };
+
+        for (const auto& [key, entry] : store.pluginValues)
+        {
+            check (key.device.getRaw(), DeviceValue::Form::plugin, "a plug-in's value");
+
+            if (! std::isfinite (entry.value) || entry.value < 0.0f || entry.value > 1.0f)
+                problems.push_back ("values: the store holds a plug-in's value outside 0 to 1");
+        }
+
+        for (const auto& [item, state] : store.states)
+        {
+            check (item, DeviceValue::Form::plugin, "a state");
+
+            if (state.get().getSize() == 0)
+                problems.push_back ("values: the store holds an empty state");
+        }
+
+        for (const auto& [item, program] : store.programs)
+            check (item, DeviceValue::Form::plugin, "a program");
+
+        for (const auto* texts : { &store.formatIDs, &store.versions })
+        {
+            for (const auto& [item, text] : *texts)
+            {
+                check (item, DeviceValue::Form::plugin, "a format ID or a version");
+
+                if (text.isEmpty())
+                    problems.push_back ("values: the store holds an empty format ID or version");
+            }
+        }
+
+        for (const auto* flags : { &store.chainMutes, &store.chainSolos })
+        {
+            for (const auto& [item, on] : *flags)
+            {
+                check (item, DeviceValue::Form::chain, "a chain's switch");
+
+                if (! on)
+                    problems.push_back ("values: the store holds a chain's switch off");
+            }
+        }
+    }
+
     // The fields in which two values of one track differ, by name.
     std::string findDifferingFields (const TrackValue& a, const TrackValue& b)
     {
@@ -1605,6 +1682,7 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkModulationValue (song, *values, problems);
     checkSendsValue (song, *values, problems);
     checkDevicesValue (song, *values, problems);
+    checkDeviceStoreValue (song, *values, problems); // the devices' store
     checkTracksValue (song, problems);
     return problems;
 }

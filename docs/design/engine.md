@@ -26,7 +26,7 @@ between them, which compiles the song into what plays. The layers and where the 
 | Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
 | Browser previews on an engine of their own | Built | |
 | Every element of the song described once in code: its type, range, default and kind | Built | `src/model/base/internal/Schema.h`, `SchemaDescription.h`; `tests/SchemaTests.cpp` |
-| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: the clips, a clip's notes and controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves, the sections, modulation and the sends are values beside the tree (built); the other areas next |
+| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: the clips, a clip's notes and controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves, the sections, modulation, the sends and the devices' store (keyed, with the windows' places outside the history) are values beside the tree (built); the other areas next |
 | Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
 | Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
 
@@ -348,12 +348,14 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
   ([decisions.md](decisions.md), "Engineering"). Every element is described once in code first (roadmap step S5.19),
   which the values, the loader and the merge are made from; then the song moves one area at a time behind the
   model's functions (S5.20), the notes first, then the clips, then the tempo map, then the chord lane, then the MIDI
-  links, then automation, then the sections, then modulation, then the sends (done: all nine are values beside the tree, the
+  links, then automation, then the sections, then modulation, then the sends, then the devices' store (done: all ten are values beside the tree, the
   chord lane's element left
   as the sign that the song has one, the MIDI links' and the sections' as the places their first link and section made,
   automation's AUTOMATION as the place of its curves, each point with a key the selection of points holds, never saved,
-  modulation under the tracks and containers that stay, its keeper following both as they come and go, and the sends under
-  the tracks, as the clips),
+  modulation under the tracks and containers that stay, its keeper following both as they come and go, the sends under
+  the tracks, as the clips, and the devices' store, the first keyed area, by its items' IDs under the DEVICE and CHAIN
+  elements that stay, which keeps a removed item's entries for an Undo and the windows' places outside the history in a
+  value no step holds),
   with one undo history for the tree's changes and the values' while both are there, and the project file as it is.
 - **Beats are quarter notes everywhere,** and a time signature only sets the bar's length and the counted beat.
   Everything that keeps time then agrees, in every meter.

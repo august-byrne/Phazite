@@ -764,7 +764,6 @@ void copyDevices (Song& song, CopiedIDs& copied)
     for (const auto& [from, to] : channels)
     {
         const auto values = getChannelDeviceValues (song, from);
-        const auto held = getChannelStore (song, from);
 
         // Each by the ID the copied give it (a duplicate's: Schema.h, giveNewIDs()), else a new one of the song's, given it.
         const auto copyOf = [&song, &copied] (DeviceID id)
@@ -780,8 +779,9 @@ void copyDevices (Song& song, CopiedIDs& copied)
         for (const auto& value : values)
             copyOf (value.id);
 
-        // Each device or container of the channel, with what it holds, one element put after the others.
-        const auto store = renameStore (held.store, copied);
+        // Each device or container of the channel, with what it holds, one element put after the others, with what the store
+        // holds of each (the song's values alone), under the copies' IDs.
+        const auto store = copyStoreOf (song, copied);
         MadeDevices made;
 
         const auto put = [&song, &store, &made, to]
@@ -813,12 +813,10 @@ void copyDevices (Song& song, CopiedIDs& copied)
         }
 
         put();
-
-        // Their windows' places, view state outside the history, as a copy of their elements carried them.
-        for (const auto& [id, place] : held.windows)
-            if (const auto found = copied.find (id.getRaw()); found != copied.end())
-                setWindowPlace (song, DeviceID::fromRaw (found->second), place);
     }
+
+    // Their windows' places, view state outside the history, as a copy of their elements carried them.
+    copyWindowPlaces (song, copied);
 }
 
 void removeDevice (Song& song, DeviceID id)

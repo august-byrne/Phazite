@@ -279,17 +279,24 @@ private:
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
     // The devices, containers and chains (SongValues.h; its tree callbacks above leave what the devices' value covers alone,
-    // isHeardAsKept(): the store's, a plug-in's VALUE, state and program and a chain's mute and solo, are still the tree's,
-    // SongPlayer::takeValue()), by the parts that changed, as the tree's changes of them were taken: one changed in place in
-    // its values set by hand, its sounds, a container's mix or a chain's volume, pan, crossover or notes plays at once, from
-    // the values before and after it is told (SongPlayer::takeDevice()), and while the history undoes or redoes, what a pass
-    // writing it writes from then follows once the move is whole (historyMoved()), as for a name alone, which plays nothing;
-    // values that make its sound come later or sooner, a new plan, after the gesture that drags them if one does
-    // (latencyWaits); one added, taken out or come to another place, its switch (set at once too), sidechain, type or plug-in,
-    // a plug-in's mix, a container's switch, split or kind, its first value set by hand or its last set back to its default
-    // (as its VALUES came or went), its first sound or its last (as its SOUNDS did), and devices in another order: a new plan.
+    // isHeardAsKept(); the store's: deviceStoreChanged(), below), by the parts that changed, as the tree's changes of them were
+    // taken: one changed in place in its values set by hand, its sounds, a container's mix or a chain's volume, pan, crossover
+    // or notes plays at once, from the values before and after it is told (SongPlayer::takeDevice()), and while the history
+    // undoes or redoes, what a pass writing it writes from then follows once the move is whole (historyMoved()), as for a name
+    // alone, which plays nothing; values that make its sound come later or sooner, a new plan, after the gesture that drags
+    // them if one does (latencyWaits); one added, taken out or come to another place, its switch (set at once too), sidechain,
+    // type or plug-in, a plug-in's mix, a container's switch, split or kind, its first value set by hand or its last set back
+    // to its default (as its VALUES came or went), its first sound or its last (as its SOUNDS did), and devices in another
+    // order: a new plan.
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
+
+    // The devices' store (SongValues.h; the song's tree holds none of it), as the tree's changes of it were taken while it held
+    // it: a plug-in's value set by hand and a chain's mute and solo play at once (SongPlayer::takeStoreEntry()), and while the
+    // history undoes or redoes, what a pass writing them writes from then follows once the move is whole (historyMoved()); a
+    // plug-in's first value set by hand or its last set back to its default (as its VALUE came or went): a new plan too. A
+    // plug-in's state, program, format ID and version: nothing (its instance takes them: PluginInstances.h).
+    void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
     // The song's history moved by hand, and the move is whole (Song.h: HistoryListener): what a pass writing automation writes
     // follows the values the move set by hand that play at once (AutomationWriter::followValuesSetByHand()), where the

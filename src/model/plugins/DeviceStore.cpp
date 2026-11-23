@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DeviceStore.h"
-#include "model/base/Numbers.h"
 #include "model/base/Song.h"
-#include "model/base/internal/DevicesValue.h"
-#include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
-#include "model/mixer/internal/Containers.h"
-#include "model/mixer/internal/Mixer.h"
+#include "model/base/internal/SongValues.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
-#include <functional>
+#include <iterator>
 #include <map>
+#include <memory>
 #include <optional>
-#include <set>
 #include <utility>
 #include <vector>
 
@@ -21,588 +18,387 @@ namespace phazite
 {
 namespace
 {
-    // Sets a property as ValueTree::setProperty() does with an undo manager, which leaves a value that is the same as JUCE
-    // compares values alone (a number read from a file is text), but without one. JUCE workaround W8
-    // (docs/juce-workarounds.md).
-    void storeProperty (juce::ValueTree& element, const juce::Identifier& property, const juce::var& value)
+    std::atomic<std::uint64_t> placesBuilt { 0 }; // countPluginValuePlacesBuilt(): a count alone, which orders nothing
+
+    const DeviceStore& getStore (const Song& song)
     {
-        if (const auto* stored = element.getPropertyPointer (property); stored == nullptr || *stored != value)
-            element.setProperty (property, value, nullptr);
+        static const DeviceStore none;
+        const auto* values = song.getValues();
+        return values != nullptr ? values->deviceStore.get() : none;
     }
 
-    // A plug-in's element in the song by its ID, invalid for a device the song hasn't or one that isn't a plug-in.
-    juce::ValueTree findPlugin (const Song& song, DeviceID id)
+    // An item the song holds by its ID, as the devices' keeper last told it (a look in a map: no walk), nullptr for none.
+    const DeviceValue* findHeld (const Song& song, DeviceID id)
     {
-        const auto device = findDeviceState (song, id);
-        return isPluginState (device) ? device : juce::ValueTree();
+        const auto* values = song.getValues();
+        const auto* told = values != nullptr && id.isValid() ? values->getDevicesAsTold() : nullptr;
+        return told != nullptr ? told->find (id) : nullptr;
     }
 
-    // A plug-in's VALUE of a parameter, the first, invalid for none.
-    juce::ValueTree findValueOf (const juce::ValueTree& device, const juce::String& parameter)
+    bool holdsForm (const Song& song, DeviceID id, DeviceValue::Form form)
     {
-        return device.getChildWithProperty (schema::valueParameter, parameter);
+        const auto* held = findHeld (song, id);
+        return held != nullptr && held->form == form;
     }
 
-    juce::MemoryBlock readState (const juce::ValueTree& device)
+    bool holdsPlugin (const Song& song, DeviceID id)
     {
-        if (const auto text = device[schema::pluginState].toString(); text.isNotEmpty())
-            if (auto bytes = readBytes (text))
-                return std::move (*bytes);
-
-        return {};
+        return holdsForm (song, id, DeviceValue::Form::plugin);
     }
 
-    const juce::Identifier& getProperty (ChainFlag flag)
+    bool holdsChain (const Song& song, DeviceID id)
     {
-        switch (flag)
-        {
-            case ChainFlag::mute:
-                return schema::chainMute.getName();
-            case ChainFlag::solo:
-                break;
-        }
+        return holdsForm (song, id, DeviceValue::Form::chain);
+    }
 
-        return schema::chainSolo.getName();
+    PluginValueKey makeKey (DeviceID device, const juce::String& parameter)
+    {
+        PluginValueKey key;
+        key.device = device;
+        key.parameter = parameter;
+        return key;
+    }
+
+    PluginBytes makeBytes (const juce::MemoryBlock& block)
+    {
+        return { .bytes = std::make_shared<const juce::MemoryBlock> (block) };
+    }
+
+    // A map's entry of an item set to a value, the very map where it holds it so.
+    template <typename Map, typename Entry>
+    Map withEntry (const Map& map, std::uint64_t key, const Entry& entry)
+    {
+        const auto* held = map.find (key);
+        return held != nullptr && *held == entry ? map : map.set (key, entry);
+    }
+
+    template <typename Map>
+    Map withoutEntry (const Map& map, std::uint64_t key)
+    {
+        return map.find (key) != nullptr ? map.erase (key) : map;
+    }
+
+    // A plug-in's song's value of a parameter set, the very store where it holds it so.
+    DeviceStore withSongsValue (const DeviceStore& store, DeviceID id, const juce::String& parameter, float value)
+    {
+        const auto key = makeKey (id, parameter);
+        const auto entry = makeSongsPluginValue (value);
+
+        if (const auto* held = store.pluginValues.find (key); held != nullptr && *held == entry)
+            return store;
+
+        auto next = store;
+        next.pluginValues = next.pluginValues.set (key, entry);
+        return next;
+    }
+
+    SongValues* findValues (Song& song)
+    {
+        return song.getValues();
     }
 } // namespace
 
 //==============================================================================
 juce::MemoryBlock getPluginState (const Song& song, DeviceID id)
 {
-    return getPluginState (findPlugin (song, id));
+    return getPluginStateBytes (song, id).get();
+}
+
+PluginBytes getPluginStateBytes (const Song& song, DeviceID id)
+{
+    if (! holdsPlugin (song, id))
+        return {};
+
+    const auto* state = getStore (song).states.find (id.getRaw());
+    return state != nullptr ? *state : PluginBytes();
 }
 
 std::optional<int> getPluginProgram (const Song& song, DeviceID id)
 {
-    return getPluginProgram (findPlugin (song, id));
-}
+    if (! holdsPlugin (song, id))
+        return std::nullopt;
 
-juce::MemoryBlock getPluginState (const juce::ValueTree& device)
-{
-    return readState (device);
-}
-
-std::optional<int> getPluginProgram (const juce::ValueTree& device)
-{
-    if (const auto* program = device.getPropertyPointer (schema::pluginProgram))
-        return toWhole<int> (*program);
-
-    return std::nullopt;
+    const auto* program = getStore (song).programs.find (id.getRaw());
+    return program != nullptr ? std::optional (*program) : std::nullopt;
 }
 
 juce::String getPluginFormatID (const Song& song, DeviceID id)
 {
-    return findPlugin (song, id)[schema::pluginFormatID].toString();
+    const auto* text = holdsPlugin (song, id) ? getStore (song).formatIDs.find (id.getRaw()) : nullptr;
+    return text != nullptr ? *text : juce::String();
 }
 
 juce::String getPluginVersion (const Song& song, DeviceID id)
 {
-    return findPlugin (song, id)[schema::pluginVersion].toString();
+    const auto* text = holdsPlugin (song, id) ? getStore (song).versions.find (id.getRaw()) : nullptr;
+    return text != nullptr ? *text : juce::String();
 }
 
 std::vector<PluginValueSet> getPluginValues (const Song& song, DeviceID id)
 {
-    return getPluginValues (findPlugin (song, id));
+    std::vector<PluginValueSet> values;
+
+    if (! holdsPlugin (song, id))
+        return values;
+
+    for (const auto& [key, entry] : getStore (song).pluginValues)
+        if (key.device == id && entry.isSongs)
+            values.push_back ({ .parameter = key.parameter, .value = entry.value });
+
+    std::sort (values.begin(), values.end(),
+               [] (const PluginValueSet& a, const PluginValueSet& b) { return isPluginParameterBefore (a.parameter, b.parameter); });
+    return values;
 }
 
 std::optional<float> findPluginValue (const Song& song, DeviceID id, const juce::String& parameter)
 {
-    return findPluginValue (findPlugin (song, id), parameter);
-}
-
-std::vector<PluginValueSet> getPluginValues (const juce::ValueTree& device)
-{
-    std::vector<PluginValueSet> values;
-
-    for (const auto& child : device)
-        if (child.hasType (schema::VALUE))
-            values.push_back (readPluginValue (child));
-
-    return values;
-}
-
-std::optional<float> findPluginValue (const juce::ValueTree& device, const juce::String& parameter)
-{
-    if (const auto value = findValueOf (device, parameter); value.isValid())
-        return (float) value[schema::valueSetByHand];
-
-    return std::nullopt;
-}
-
-PluginValueSet readPluginValue (const juce::ValueTree& value)
-{
-    return { .parameter = value[schema::valueParameter].toString(), .value = (float) value[schema::valueSetByHand] };
+    return holdsPlugin (song, id) ? findPluginValue (getStore (song), id, parameter) : std::nullopt;
 }
 
 //==============================================================================
-void storePluginIntoHeld (juce::ValueTree device, const StoredPlugin& stored)
+void storePluginOutsideHistory (Song& song, DeviceID id, const StoredPlugin& stored)
 {
-    if (! device.isValid())
+    auto* values = findValues (song);
+
+    if (values == nullptr || ! id.isValid())
         return;
+
+    auto next = values->deviceStore.get();
+    const auto raw = id.getRaw();
 
     if (stored.state != nullptr)
     {
-        if (stored.state->getSize() > 0)
-            storeProperty (device, schema::pluginState, writeBytes (*stored.state));
-        else
-            device.removeProperty (schema::pluginState, nullptr);
+        if (stored.state->getSize() == 0)
+            next.states = withoutEntry (next.states, raw);
+        else if (const auto* held = next.states.find (raw); held == nullptr || ! (held->get() == *stored.state))
+            next.states = next.states.set (raw, makeBytes (*stored.state));
     }
 
     if (stored.formatID.isNotEmpty())
-        storeProperty (device, schema::pluginFormatID, stored.formatID);
+        next.formatIDs = withEntry (next.formatIDs, raw, stored.formatID);
 
     if (stored.version.isNotEmpty())
-        storeProperty (device, schema::pluginVersion, stored.version);
+        next.versions = withEntry (next.versions, raw, stored.version);
 
     if (stored.program.has_value())
-    {
-        if (*stored.program >= 0)
-            storeProperty (device, schema::pluginProgram, *stored.program);
-        else
-            device.removeProperty (schema::pluginProgram, nullptr);
-    }
+        next.programs = *stored.program >= 0 ? withEntry (next.programs, raw, *stored.program) : withoutEntry (next.programs, raw);
 
     for (const auto& [parameter, value] : stored.values)
-    {
-        auto held = findValueOf (device, parameter);
+        next = withSongsValue (next, id, parameter, value);
 
-        if (! held.isValid())
-        {
-            held = juce::ValueTree (schema::VALUE, { { schema::valueParameter, parameter } });
-            device.appendChild (held, nullptr);
-        }
-
-        storeProperty (held, schema::valueSetByHand, value);
-    }
-}
-
-void storePluginOutsideHistory (Song& song, DeviceID id, const StoredPlugin& stored)
-{
-    storePluginOutsideHistory (findPlugin (song, id), stored);
-}
-
-void storePluginOutsideHistory (juce::ValueTree device, const StoredPlugin& stored)
-{
-    storePluginIntoHeld (std::move (device), stored);
+    values->storeOutsideHistory (song, std::move (next));
 }
 
 void setPluginValueOutsideHistory (Song& song, DeviceID id, const juce::String& parameter, float value)
 {
-    if (auto device = findDeviceState (song, id); device.isValid())
-        for (auto child : device)
-            if (child.hasType (schema::VALUE) && child[schema::valueParameter].toString() == parameter)
-                storeProperty (child, schema::valueSetByHand, value);
+    auto* values = findValues (song);
+
+    if (values == nullptr || ! holdsPlugin (song, id) || ! findPluginValue (values->deviceStore.get(), id, parameter).has_value())
+        return;
+
+    values->storeOutsideHistory (song, withSongsValue (values->deviceStore.get(), id, parameter, value));
 }
 
 void setPluginStateInStep (Song& song, DeviceID id, const juce::String& base64)
 {
-    setPluginStateInStep (song, findPlugin (song, id), base64);
+    const auto bytes = base64.isNotEmpty() ? readBytes (base64) : std::nullopt;
+    setPluginStateInStep (song, id, bytes.has_value() ? *bytes : juce::MemoryBlock());
 }
 
 void setPluginStateInStep (Song& song, DeviceID id, const juce::MemoryBlock& state)
 {
-    setPluginStateInStep (song, id, writeBytes (state));
+    auto* values = findValues (song);
+
+    if (values == nullptr || ! holdsPlugin (song, id))
+        return;
+
+    auto next = values->deviceStore.get();
+    const auto raw = id.getRaw();
+
+    if (state.getSize() == 0)
+        next.states = withoutEntry (next.states, raw);
+    else if (const auto* held = next.states.find (raw); held == nullptr || ! (held->get() == state))
+        next.states = next.states.set (raw, makeBytes (state));
+
+    values->setDeviceStore (song, std::move (next));
 }
 
 void setPluginProgramInStep (Song& song, DeviceID id, int program)
 {
-    setPluginProgramInStep (song, findPlugin (song, id), program);
-}
-
-void setPluginStateInStep (Song& song, juce::ValueTree device, const juce::String& base64)
-{
-    if (! device.isValid())
-        return;
-
-    if (base64.isNotEmpty())
-        device.setProperty (schema::pluginState, base64, &song.getUndoManager());
-    else
-        device.removeProperty (schema::pluginState, &song.getUndoManager());
-}
-
-void setPluginProgramInStep (Song& song, juce::ValueTree device, int program)
-{
-    if (device.isValid())
-        device.setProperty (schema::pluginProgram, program, &song.getUndoManager());
+    if (auto* values = findValues (song); values != nullptr && holdsPlugin (song, id))
+    {
+        auto next = values->deviceStore.get();
+        next.programs = withEntry (next.programs, id.getRaw(), program);
+        values->setDeviceStore (song, std::move (next));
+    }
 }
 
 void setPluginValueSetByHand (Song& song, DeviceID id, const juce::String& parameter, float value, float held)
 {
-    setPluginValueSetByHand (song, findPlugin (song, id), parameter, value, held);
+    auto* values = findValues (song);
+
+    if (values == nullptr || ! holdsPlugin (song, id))
+        return;
+
+    // The song's first of it: what the plug-in holds written first as a held value, outside the history, so that the step's
+    // Undo comes back to it (DeviceStoreValue.h: rule (a)).
+    if (! findPluginValue (values->deviceStore.get(), id, parameter).has_value())
+    {
+        auto withHeld = values->deviceStore.get();
+        withHeld.pluginValues = withHeld.pluginValues.set (makeKey (id, parameter), makeHeldPluginValue (held));
+        values->storeOutsideHistory (song, std::move (withHeld));
+    }
+
+    values->setDeviceStore (song, withSongsValue (values->deviceStore.get(), id, parameter, value));
 }
 
 void removePluginValueSetByHand (Song& song, DeviceID id, const juce::String& parameter)
 {
-    removePluginValueSetByHand (song, findPlugin (song, id), parameter);
-}
+    auto* values = findValues (song);
 
-void setPluginValueSetByHand (Song& song, juce::ValueTree device, const juce::String& parameter, float value, float held)
-{
-    if (! device.isValid())
+    if (values == nullptr || ! holdsPlugin (song, id))
         return;
 
-    auto* undo = &song.getUndoManager();
-    auto stored = findValueOf (device, parameter);
-
-    if (! stored.isValid())
+    // The value it had left as a held value, in the step, so that a Redo of the step gives the plug-in that value.
+    if (const auto had = findPluginValue (values->deviceStore.get(), id, parameter))
     {
-        stored = juce::ValueTree (schema::VALUE, { { schema::valueParameter, parameter }, { schema::valueSetByHand, held } });
-        device.appendChild (stored, undo);
+        auto next = values->deviceStore.get();
+        next.pluginValues = next.pluginValues.set (makeKey (id, parameter), makeHeldPluginValue (*had));
+        values->setDeviceStore (song, std::move (next));
     }
-
-    stored.setProperty (schema::valueSetByHand, value, undo);
-}
-
-void removePluginValueSetByHand (Song& song, juce::ValueTree device, const juce::String& parameter)
-{
-    if (device.isValid())
-        if (const auto stored = findValueOf (device, parameter); stored.isValid())
-            device.removeChild (stored, &song.getUndoManager());
 }
 
 //==============================================================================
 bool isChainMuted (const Song& song, DeviceID chain)
 {
-    return isChainMuted (findContainerChain (song, chain));
+    return holdsChain (song, chain) && isChainMutedIn (getStore (song), chain);
 }
 
 bool isChainSoloed (const Song& song, DeviceID chain)
 {
-    return isChainSoloed (findContainerChain (song, chain));
-}
-
-bool isChainMuted (const juce::ValueTree& chain)
-{
-    return chain[schema::chainMute];
-}
-
-bool isChainSoloed (const juce::ValueTree& chain)
-{
-    return chain[schema::chainSolo];
+    return holdsChain (song, chain) && isChainSoloedIn (getStore (song), chain);
 }
 
 void setChainSwitch (Song& song, DeviceID chain, ChainFlag flag, bool on)
 {
-    auto state = findContainerChain (song, chain);
-    const auto& property = getProperty (flag);
+    auto* values = findValues (song);
 
-    if (! state.isValid() || (bool) state[property] == on)
+    if (values == nullptr || ! holdsChain (song, chain))
         return;
 
-    if (on)
-        state.setProperty (property, true, nullptr);
-    else
-        state.removeProperty (property, nullptr);
+    auto next = values->deviceStore.get();
+    auto& flags = flag == ChainFlag::mute ? next.chainMutes : next.chainSolos;
+    flags = on ? withEntry (flags, chain.getRaw(), true) : withoutEntry (flags, chain.getRaw());
+    values->storeOutsideHistory (song, std::move (next));
 }
 
 void clearChainSwitchesInStep (Song& song, DeviceID chain)
 {
-    clearChainSwitchesInStep (song, findContainerChain (song, chain));
-}
+    auto* values = findValues (song);
 
-void clearChainSwitchesInStep (Song& song, juce::ValueTree chain)
-{
-    if (chain.isValid())
-    {
-        chain.removeProperty (schema::chainMute, &song.getUndoManager());
-        chain.removeProperty (schema::chainSolo, &song.getUndoManager());
-    }
-}
+    if (values == nullptr || ! holdsChain (song, chain))
+        return;
 
-//==============================================================================
-ChannelStore getChannelStore (const Song& song, TrackID channel)
-{
-    ChannelStore held;
-
-    // An item's entries and its window's place, then what it holds: a container's chains, a chain's devices.
-    const std::function<void (const juce::ValueTree&)> readItem = [&held, &readItem] (const juce::ValueTree& item)
-    {
-        readStoreOf (item, held.store);
-
-        if (item.hasProperty (schema::deviceWindowX))
-            held.windows.emplace_back (readDeviceElementID (item), WindowPlace { .x = toWhole<int> (item[schema::deviceWindowX]),
-                                                                                 .y = toWhole<int> (item[schema::deviceWindowY]) });
-
-        for (const auto& child : item)
-            if (child.hasType (schema::CHAIN) || child.hasType (schema::DEVICE))
-                readItem (child);
-    };
-
-    for (const auto& child : findChainState (song, channel))
-        if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER))
-            readItem (child);
-
-    return held;
-}
-
-DeviceStore renameStore (const DeviceStore& from, const std::map<std::uint64_t, std::uint64_t>& copied)
-{
-    DeviceStore renamed;
-
-    // Each map's entries of an item copied, under its copy's ID.
-    const auto rename = [&copied] (const auto& entries, auto& into)
-    {
-        for (const auto& [key, entry] : entries)
-            if (const auto found = copied.find (key); found != copied.end())
-                into = into.set (found->second, entry);
-    };
-
-    rename (from.states, renamed.states);
-    rename (from.programs, renamed.programs);
-    rename (from.formatIDs, renamed.formatIDs);
-    rename (from.versions, renamed.versions);
-    rename (from.chainMutes, renamed.chainMutes);
-    rename (from.chainSolos, renamed.chainSolos);
-
-    for (const auto& [key, entry] : from.pluginValues)
-    {
-        if (const auto found = copied.find (key.device.getRaw()); found != copied.end())
-        {
-            auto copy = key;
-            copy.device = DeviceID::fromRaw (found->second);
-            renamed.pluginValues = renamed.pluginValues.set (copy, entry);
-        }
-    }
-
-    return renamed;
-}
-
-void writeStoreIntoMade (juce::ValueTree& made, const DeviceStore& store, DeviceID id)
-{
-    jassert (! made.getParent().isValid()); // an element not in a song yet
-    writeStoreInto (made, store, id);
+    auto next = values->deviceStore.get();
+    next.chainMutes = withoutEntry (next.chainMutes, chain.getRaw());
+    next.chainSolos = withoutEntry (next.chainSolos, chain.getRaw());
+    values->setDeviceStore (song, std::move (next));
 }
 
 //==============================================================================
-namespace
+DeviceStore copyStoreOf (const Song& song, const std::map<std::uint64_t, std::uint64_t>& copied)
 {
-    // A device's, a container's or a chain's element by its ID (a walk, and another for a chain), invalid for none.
-    juce::ValueTree findItem (const Song& song, DeviceID id)
-    {
-        if (auto device = findDeviceState (song, id); device.isValid())
-            return device;
+    return copyEntriesTo ({}, getStore (song), copied);
+}
 
-        return findContainerChain (song, id);
+void copyWindowPlaces (Song& song, const std::map<std::uint64_t, std::uint64_t>& copied)
+{
+    auto* values = findValues (song);
+
+    if (values == nullptr)
+        return;
+
+    for (const auto& [original, copy] : copied)
+        if (const auto window = values->devicesOutside.get().findWindow (DeviceID::fromRaw (original)))
+            if (findHeld (song, DeviceID::fromRaw (original)) != nullptr)
+                values->setWindowPlace (DeviceID::fromRaw (copy), window);
+}
+
+void setMadeStore (Song& song, const std::vector<DeviceID>& made, const DeviceStore& store)
+{
+    auto* values = findValues (song);
+
+    if (values == nullptr)
+        return;
+
+    // Which of the made the store holds entries of already, of any kind (a held value too): one walk of the plug-ins' values,
+    // only where a look in the other maps found none.
+    const auto& now = values->deviceStore.get();
+    std::vector<bool> known (made.size(), false);
+    auto anyUnknown = false;
+
+    for (size_t i = 0; i < made.size(); ++i)
+    {
+        const auto raw = made[i].getRaw();
+        known[i] = now.states.find (raw) != nullptr || now.programs.find (raw) != nullptr || now.formatIDs.find (raw) != nullptr
+                   || now.versions.find (raw) != nullptr || now.chainMutes.find (raw) != nullptr || now.chainSolos.find (raw) != nullptr;
+        anyUnknown = anyUnknown || ! known[i];
     }
 
-    // The song's tree written as the song is written now: in the step in progress, or outside the history.
-    juce::UndoManager* getUndoNow (Song& song)
+    if (anyUnknown)
     {
-        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+        for (const auto& each : now.pluginValues)
+            if (const auto found = std::find (made.begin(), made.end(), each.first.device); found != made.end())
+                known[(size_t) std::distance (made.begin(), found)] = true;
     }
 
-    // Whether two of a store's maps hold the same of one key: both none, or both alike.
-    template <typename Map>
-    bool holdSameEntry (const Map& a, const Map& b, std::uint64_t key)
-    {
-        const auto* x = a.find (key);
-        const auto* y = b.find (key);
-        return (x == nullptr) == (y == nullptr) && (x == nullptr || *x == *y);
-    }
+    // The entries of an item the store holds none of (a new ID: a duplicate's, a maker's, a version's device the song never
+    // held) are written outside the history: unseen while the item isn't in the song (the store keeps a removed item's
+    // entries and never writes, compares or counts them), they are left by the step's Undo, which takes the item out, and
+    // what is written for the item later outside the history (its state stored, a value moved in its window, a copied chain
+    // unsoloed) is what it holds when the step's Redo brings it back, as its element held it while the tree held the store.
+    // Written in the step, the Redo would put the made entries back over those later writes. An item the store holds entries
+    // of already (a version's or a merge's device come back under an ID the store knows) gets them in the step, so that its
+    // Undo can put the entries it had back.
+    auto outside = now;
 
-    // A chain's switch made what the entries hold of it.
-    bool writeChainFlag (juce::ValueTree& chain, const juce::Identifier& property, bool on, juce::UndoManager* undo)
-    {
-        if ((bool) chain[property] == on && (on || ! chain.hasProperty (property)))
-            return false;
+    for (size_t i = 0; i < made.size(); ++i)
+        if (! known[i])
+            outside = withEntriesOf (outside, made[i], store);
 
-        if (on)
-            chain.setProperty (property, true, undo);
-        else
-            chain.removeProperty (property, undo);
+    values->storeOutsideHistory (song, std::move (outside));
+    auto next = values->deviceStore.get();
 
-        return true;
-    }
+    for (size_t i = 0; i < made.size(); ++i)
+        if (known[i])
+            next = withEntriesOf (next, made[i], store);
 
-    std::atomic<std::uint64_t> placesBuilt { 0 }; // countPluginValuePlacesBuilt(): a count alone, which orders nothing
+    values->setDeviceStore (song, std::move (next));
+}
 
-    // A plug-in's VALUE children made the song's values the entries hold of it, then put in the order given: each found by its
-    // parameter in an index made once (the first of two of one parameter, as findValueOf() finds it), and the places the
-    // VALUE children stand at listed once (countPluginValuePlacesBuilt()), each moved to its place there; again after a move
-    // only where something else stands among them, which a move shifts. A cost that grows with the values' count, not with
-    // its square (tests/DevicesVersionsTests.cpp).
-    bool writePluginValues (juce::ValueTree& device, DeviceID id, const DeviceStore& entries, const std::vector<juce::String>& order,
-                            juce::UndoManager* undo)
-    {
-        auto changed = false;
-        const auto findEntry = [&entries, id] (const juce::String& parameter)
-        {
-            PluginValueKey key;
-            key.device = id;
-            key.parameter = parameter;
-            const auto* entry = entries.pluginValues.find (key);
-            return entry != nullptr && entry->isSongs ? entry : nullptr;
-        };
-
-        // Those the entries hold none of taken away.
-        for (int i = device.getNumChildren(); --i >= 0;)
-        {
-            if (const auto child = device.getChild (i);
-                child.hasType (schema::VALUE) && findEntry (child[schema::valueParameter].toString()) == nullptr)
-            {
-                device.removeChild (i, undo);
-                changed = true;
-            }
-        }
-
-        // The VALUE children left, by their parameters (the first of each).
-        std::map<juce::String, juce::ValueTree> held;
-
-        for (const auto& child : device)
-            if (child.hasType (schema::VALUE))
-                held.emplace (child[schema::valueParameter].toString(), child);
-
-        // Each the entries hold set where it differs (as the song holds it: DeviceStoreValue.h, readHeldStoreOf()), or made.
-        for (const auto& [key, entry] : entries.pluginValues)
-        {
-            if (key.device != id || ! entry.isSongs)
-                continue;
-
-            if (const auto found = held.find (key.parameter); found != held.end())
-            {
-                if (auto value = found->second; ! juce::exactlyEqual ((float) readDescribed (value, schema::valueSetByHand), entry.value))
-                {
-                    value.setProperty (schema::valueSetByHand, entry.value, undo);
-                    changed = true;
-                }
-            }
-            else
-            {
-                juce::ValueTree made (schema::VALUE, { { schema::valueParameter, key.parameter } });
-                made.setProperty (schema::valueSetByHand, entry.value, nullptr);
-                device.appendChild (made, undo);
-                held.emplace (key.parameter, made);
-                changed = true;
-            }
-        }
-
-        // Their order: those the order names, in it, then the others in theirs.
-        std::vector<juce::ValueTree> wanted;
-        std::set<juce::String> named;
-
-        for (const auto& parameter : order)
-            if (const auto found = held.find (parameter); found != held.end() && named.insert (parameter).second)
-                wanted.push_back (found->second);
-
-        for (const auto& child : device)
-            if (child.hasType (schema::VALUE))
-                if (const auto parameter = child[schema::valueParameter].toString(); named.insert (parameter).second)
-                    wanted.push_back (held[parameter]);
-
-        // The places the VALUE children stand at, in their order: the same places after a move among them while nothing else
-        // stands among them (a plug-in's element holds its VALUE children alone), else listed again after each move.
-        const auto listPlaces = [&device]
-        {
-            placesBuilt.fetch_add (1, std::memory_order_relaxed);
-            std::vector<int> places;
-
-            for (int i = 0; i < device.getNumChildren(); ++i)
-                if (device.getChild (i).hasType (schema::VALUE))
-                    places.push_back (i);
-
-            return places;
-        };
-
-        auto places = listPlaces();
-        const auto together = places.empty() || places.back() - places.front() + 1 == (int) places.size();
-
-        for (size_t k = 0; k < wanted.size() && k < places.size(); ++k)
-        {
-            if (device.getChild (places[k]) == wanted[k])
-                continue;
-
-            device.moveChild (device.indexOf (wanted[k]), places[k], undo);
-            changed = true;
-
-            if (! together)
-                places = listPlaces();
-        }
-
-        return changed;
-    }
-} // namespace
-
+//==============================================================================
 DeviceStore getStoreOf (const Song& song, DeviceID id)
 {
-    DeviceStore store;
-
-    if (const auto item = findItem (song, id); item.isValid())
-        readHeldStoreOf (item, store);
-
-    return store;
+    return findHeld (song, id) != nullptr ? takeEntriesOf (getStore (song), id) : DeviceStore();
 }
 
-std::vector<juce::String> getPluginValueOrder (const Song& song, DeviceID id)
+bool setStoreEntries (Song& song, DeviceID id, const DeviceStore& entries)
 {
-    std::vector<juce::String> order;
+    auto* values = findValues (song);
 
-    for (const auto& [parameter, value] : getPluginValues (song, id))
-        order.push_back (parameter);
-
-    return order;
-}
-
-bool setStoreEntries (Song& song, DeviceID id, const DeviceStore& entries, const std::vector<juce::String>& valueOrder)
-{
-    auto item = findItem (song, id);
-    auto* undo = getUndoNow (song);
-    DeviceStore held;
-    readHeldStoreOf (item, held);
-    const auto raw = id.getRaw();
-
-    if (item.hasType (schema::CHAIN))
-    {
-        const auto isOn = [raw] (const immer::map<std::uint64_t, bool>& flags)
-        {
-            const auto* on = flags.find (raw);
-            return on != nullptr && *on;
-        };
-
-        const auto muted = writeChainFlag (item, schema::chainMute, isOn (entries.chainMutes), undo);
-        const auto soloed = writeChainFlag (item, schema::chainSolo, isOn (entries.chainSolos), undo);
-        return muted || soloed;
-    }
-
-    if (! isPluginState (item))
+    if (values == nullptr || ! (holdsPlugin (song, id) || holdsChain (song, id)))
         return false;
 
-    auto changed = false;
+    const auto& now = values->deviceStore.get();
+    auto next = withEntriesOf (now, id, entries);
 
-    if (! holdSameEntry (held.states, entries.states, raw))
-    {
-        if (const auto* state = entries.states.find (raw); state != nullptr && state->get().getSize() > 0)
-            item.setProperty (schema::pluginState, writeBytes (state->get()), undo);
-        else
-            item.removeProperty (schema::pluginState, undo);
+    if (next.isSameAs (now))
+        return false;
 
-        changed = true;
-    }
+    if (next.pluginValues.identity() != now.pluginValues.identity())
+        placesBuilt.fetch_add (1, std::memory_order_relaxed);
 
-    if (! holdSameEntry (held.programs, entries.programs, raw))
-    {
-        if (const auto* program = entries.programs.find (raw))
-            item.setProperty (schema::pluginProgram, *program, undo);
-        else
-            item.removeProperty (schema::pluginProgram, undo);
-
-        changed = true;
-    }
-
-    for (const auto& [property, map] :
-         { std::pair (&schema::pluginFormatID, &DeviceStore::formatIDs), std::pair (&schema::pluginVersion, &DeviceStore::versions) })
-    {
-        if (holdSameEntry (held.*map, entries.*map, raw))
-            continue;
-
-        if (const auto* text = (entries.*map).find (raw); text != nullptr && text->isNotEmpty())
-            item.setProperty (*property, *text, undo);
-        else
-            item.removeProperty (*property, undo);
-
-        changed = true;
-    }
-
-    return writePluginValues (item, id, entries, valueOrder, undo) || changed;
+    return values->setDeviceStore (song, std::move (next));
 }
 
 std::uint64_t countPluginValuePlacesBuilt() noexcept
@@ -610,35 +406,22 @@ std::uint64_t countPluginValuePlacesBuilt() noexcept
     return placesBuilt.load (std::memory_order_relaxed);
 }
 
-std::optional<WindowPlace> readWindowPlace (const juce::ValueTree& device)
-{
-    if (device.hasProperty (schema::deviceWindowX))
-        return WindowPlace { .x = toWhole<int> (device[schema::deviceWindowX]), .y = toWhole<int> (device[schema::deviceWindowY]) };
-
-    return std::nullopt;
-}
-
 void forgetWindowPlace (Song& song, DeviceID id)
 {
-    if (auto state = findDeviceState (song, id); state.isValid())
-    {
-        state.removeProperty (schema::deviceWindowX, nullptr);
-        state.removeProperty (schema::deviceWindowY, nullptr);
-    }
+    if (auto* values = findValues (song))
+        values->setWindowPlace (id, std::nullopt);
 }
 
 //==============================================================================
 std::optional<WindowPlace> getWindowPlace (const Song& song, DeviceID id)
 {
-    return readWindowPlace (findDeviceState (song, id));
+    const auto* values = song.getValues();
+    return values != nullptr && findHeld (song, id) != nullptr ? values->devicesOutside.get().findWindow (id) : std::nullopt;
 }
 
 void setWindowPlace (Song& song, DeviceID id, WindowPlace place)
 {
-    if (auto state = findDeviceState (song, id); state.isValid())
-    {
-        storeProperty (state, schema::deviceWindowX, place.x);
-        storeProperty (state, schema::deviceWindowY, place.y);
-    }
+    if (auto* values = findValues (song); values != nullptr && findHeld (song, id) != nullptr)
+        values->setWindowPlace (id, place);
 }
 } // namespace phazite

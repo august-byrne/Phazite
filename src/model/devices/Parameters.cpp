@@ -177,7 +177,8 @@ std::optional<FoundParameter> locateParameterInTree (const Song& song, const Par
         if (isPluginState (device))
         {
             // One its instance has, or one the song keeps a value of (a plug-in that doesn't load keeps what refers to it).
-            const auto there = findPluginParameter (song, ref).first != nullptr || findPluginValue (device, ref.parameter).has_value();
+            const auto there =
+                findPluginParameter (song, ref).first != nullptr || findPluginValue (song, ref.device, ref.parameter).has_value();
             return there ? found (ref, ParameterSource::plugin, device) : std::nullopt;
         }
 
@@ -421,8 +422,9 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
             return getCrossover (state);
 
         case ParameterSource::plugin:
-            // The song's, where it sets one (from the element found: model/plugins/internal/DeviceStore.h); else its instance's.
-            if (const auto stored = findPluginValue (state, parameter.ref.parameter))
+            // The song's, where it sets one (a look in the store by its ID: model/plugins/internal/DeviceStore.h); else its
+            // instance's.
+            if (const auto stored = findPluginValue (song, parameter.ref.device, parameter.ref.parameter))
                 return *stored;
 
             if (const auto [instance, index] = findPluginParameter (song, parameter.ref); instance != nullptr)
@@ -475,15 +477,15 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             told = juce::jlimit (0.0f, 1.0f, value);
             moveOnlyPoint (song, ref, told);
 
-            if (! findPluginValue (state, ref.parameter).has_value())
+            if (! findPluginValue (song, ref.device, ref.parameter).has_value())
             {
                 if (const auto held = getValueSetByHand (song, parameter); ! isSamePluginValue (held, told))
-                    setPluginValueSetByHand (song, state, ref.parameter, told, held);
+                    setPluginValueSetByHand (song, ref.device, ref.parameter, told, held);
 
                 break;
             }
 
-            setPluginValueSetByHand (song, state, ref.parameter, told, told);
+            setPluginValueSetByHand (song, ref.device, ref.parameter, told, told);
 
             // One set back to the parameter's default goes, as Phazite's own devices keep none at their defaults
             // (model/mixer/internal/Mixer.h: setDeviceValue()): the plug-in holds the value then, which its settings hold
@@ -492,7 +494,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             // (model/base/Song.h).
             if (isPluginDefault (song, ref, told))
             {
-                removePluginValueSetByHand (song, state, ref.parameter);
+                removePluginValueSetByHand (song, ref.device, ref.parameter);
                 song.markChangedOutsideHistory();
             }
 

@@ -201,7 +201,9 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   a VALUE without a value, which every reader read as 0, now and at every load; a clash on one is chosen through the
   store's functions (`chooseDeviceStoreClash()`, `src/model/mixer/DeviceClashes.cpp`), and what was before takes the
   value away, so that the plug-in plays what its state holds, with a test in `tests/DevicesVersionsTests.cpp` (the
-  store's switch was to fix it, decision L.2 of the devices' design; its chooser made it one line here). A property of
+  store's switch was to fix it, decision L.2 of the devices' design; its chooser made it one line here), which passes
+  unchanged on the store's area since its switch (2026-11-23): the choice takes the song's entry of the value away from
+  the keyed store (`DeviceStoreValue.h`: `withEntriesOf()`), where no element is left behind to read as 0. A property of
   a device, a container or a chain, of a device's VALUES or of its SOUNDS taken away means its default, which is
   right. Any other keyed element both lines added with a clashing property is likely the
   same (a chord, a chord lane's key, a MIDI link). A section's property can be so only in a damaged commit's song:

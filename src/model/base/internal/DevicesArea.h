@@ -7,9 +7,9 @@
 //
 // What is the devices' and what isn't, written once (DevicesArea.cpp: isDeviceStoreProperty()): everything at or under a
 // DEVICE, a CONTAINER or a CHAIN of the song's, but a plug-in's VALUE children, its state, program, format ID and version, a
-// chain's mute and solo (the keyed store's, a later piece: those the listeners hear from the tree as before, isHeardAsKept()
-// leaving them to it) and a window's place (a value outside the history's, later). Message thread, but for the comparisons'
-// readers, which read only the trees they are given.
+// chain's mute and solo (the keyed store's, DeviceStoreArea.h, which the song's tree holds none of but for what its keeper
+// takes out of an element that comes in with it) and a window's place (the value outside the history's). Message thread,
+// but for the comparisons' readers, which read only the trees they are given.
 #pragma once
 
 #include "model/base/IDs.h"

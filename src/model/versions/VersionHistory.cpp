@@ -3284,6 +3284,36 @@ void VersionHistory::devicesChanged (const std::vector<SongValues::DeviceChange>
     changesMayDiffer();
 }
 
+void VersionHistory::deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& entries, const DeviceStore&)
+{
+    auto marked = false;
+
+    for (const auto& entry : entries)
+    {
+        if (! entry.changesSong || ! entry.isInSong)
+            continue;
+
+        if (entry.place.onMaster)
+        {
+            masterHeard = true;
+        }
+        else if (entry.place.track.isValid())
+        {
+            sinceBase.markTrack (entry.place.track.getRaw());
+            againstCompared.markTrack (entry.place.track.getRaw());
+        }
+
+        marked = true;
+    }
+
+    if (! marked)
+        return;
+
+    ++songChanges;
+    edited();
+    changesMayDiffer();
+}
+
 void VersionHistory::markCurve (const juce::String& key)
 {
     sinceBase.markCurve (key);

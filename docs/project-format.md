@@ -180,7 +180,8 @@ keeps it, then by its file and name, then by its name, maker and format. Its `st
 base 64 (RFC 4648): for a VST3, **its preset file**, a `.vstpreset` as the VST3 SDK writes one ("VST3", the version, the
 class ID, the processor's and the controller's chunks and their list), which any VST3 host reads and which DAWproject
 holds too. Its `VALUE` children are the values set by hand of the parameters Phazite moves, by the plug-in's own
-parameter IDs.
+parameter IDs, written after its other children and sorted by their parameters (numbers as numbers: `"2"` before
+`"10"`), as the song holds them (in its devices' store, beside its tree: one value each, in no order of its own).
 
 ## 5. Presets
 
@@ -271,10 +272,15 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
     the device's type hasn't (a sampler's `pad36Sound`) or an empty one is left out, a `VALUES` or a `SOUNDS` left empty
     goes, and a property or an element Phazite doesn't know in either goes (the two stay in their order); a
     plug-in's `SOUNDS` goes, as its `VALUES` does (it plays neither);
-  - what the song's value doesn't cover stays as the file has it: a plug-in's `state`, `program`, `formatID` and
-    `version` and its `VALUE` children, a chain's `mute` and `solo`, a device's `windowX` and `windowY`, a `mix` on one of
-    Phazite's own devices (whose mix is its `VALUES`' `mix`), the element's other children, and a property Phazite
-    doesn't know.
+  - what the devices' store holds of it is written as Phazite writes what the song holds of it (one rule, the one the song
+    reads it by: `keepStoreAsHeld()` in `src/model/base/DeviceStoreValue.cpp`): a plug-in's `VALUE` children are written
+    after its other children, sorted by their `parameter` (numbers as numbers: `"2"` before `"10"`), one of each
+    parameter; a `state` that isn't base 64 of some bytes goes, and is written in the base 64 Phazite writes (no other
+    text of the same bytes); an empty `formatID` or `version` goes; a chain's `mute` or `solo` written off (`"0"`) goes; a
+    store's property or a `VALUE` on a device that isn't a plug-in goes; and a device's `windowX` without its `windowY`
+    gets a `windowY` of `0`, a `windowY` without its `windowX` goes;
+  - what neither covers stays as the file has it: a `mix` on one of Phazite's own devices (whose mix is its `VALUES`'
+    `mix`), the element's other children, and a property Phazite doesn't know.
 
   A file Phazite wrote holds each of them so already, and comes through without any of them read whole.
 - **Tracks and the master:** each `TRACK` and the `MASTER` is written as Phazite writes what the song holds of it, where

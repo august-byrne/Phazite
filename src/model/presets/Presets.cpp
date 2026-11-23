@@ -1510,11 +1510,11 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
 
     const UndoStep step (*song, stepName);
 
-    // Into the element found above (model/plugins/internal/DeviceStore.h).
+    // Into the store, by its ID (model/plugins/internal/DeviceStore.h).
     if (saved.hasProperty (keys::program))
-        setPluginProgramInStep (*song, device, (int) saved[keys::program]);
+        setPluginProgramInStep (*song, id, (int) saved[keys::program]);
 
-    setPluginStateInStep (*song, device, saved[keys::state].toString()); // none taken away
+    setPluginStateInStep (*song, id, saved[keys::state].toString()); // none taken away
 
     if (saved.hasProperty (keys::mix))
         setMix (*song, id, toFloat (saved[keys::mix], 1.0f));

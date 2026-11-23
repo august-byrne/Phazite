@@ -281,6 +281,33 @@ namespace
                 add (pending.devices);
         }
 
+        // The devices' store (SongValues.h; the song's tree holds none of it): the devices' group, naming the channel of the
+        // item, as a change of a DEVICE's or a CHAIN's property was (mark()), for a plug-in's state, program, format ID or
+        // version and a chain's mute or solo; nothing for a plug-in's value set by hand, its first or its last, as no VALUE
+        // was (a parameter's value is no change that views show), nor for an item the song doesn't hold (an answer of a
+        // plug-in a step took away).
+        void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& entries, const DeviceStore&) override
+        {
+            using Kind = SongValues::DeviceStoreChange::Kind;
+            auto changed = false;
+
+            for (const auto& entry : entries)
+            {
+                if (entry.kind == Kind::pluginValue || ! entry.changesSong || ! entry.isInSong)
+                    continue;
+
+                if (entry.place.onMaster)
+                    masterDevices = true;
+                else
+                    name (pending.deviceChannels, entry.place.track);
+
+                changed = true;
+            }
+
+            if (changed)
+                add (pending.devices);
+        }
+
         // Each clip whose notes changed named, on its track, as the song holds it now (a listener of the values reads nothing
         // of the song as it is told: this is later); one gone since was named as it was taken off its track.
         void nameNotesChanged()
@@ -433,9 +460,8 @@ namespace
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
             // makes one at each move (docs/archive/performance-audit.md, U1); a channel's volume and pan neither (a macro's
             // value: modulationChanged(); a send's level: sendsChanged(); a device's values, a chain's volume, pan and
-            // crossover: devicesChanged()). Nor is where a device's window was, which no view shows.
-            if (isParameterValue (tree, property) || tree.hasType (schema::VALUE)
-                || (tree.hasType (schema::DEVICE) && schema::isDeviceViewProperty (property))
+            // crossover: devicesChanged(); a plug-in's: deviceStoreChanged()).
+            if (isParameterValue (tree, property)
                 || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
                     && (property == schema::channelVolume || property == schema::channelPan)))
                 return;
@@ -460,17 +486,16 @@ namespace
 
         void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
         {
-            // A plug-in's first value set by hand, as its other values, is no change that views show (a device's: its VALUES,
-            // devicesChanged()). The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged(),
-            // midiLinksChanged(), devicesChanged().
-            if (child.hasType (schema::VALUE) || isHeardAsKept (parent, child))
+            // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged(),
+            // devicesChanged(), deviceStoreChanged().
+            if (isHeardAsKept (parent, child))
                 return;
 
             mark (child);
         }
         void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
         {
-            if (! child.hasType (schema::VALUE) && ! isHeardAsKept (parent, child))
+            if (! isHeardAsKept (parent, child))
                 markRemoved (parent, child);
         }
         void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override

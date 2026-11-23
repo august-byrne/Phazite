@@ -15,7 +15,9 @@
 // curves in their order, each written as CurveValues.h's writeCurves() writes it; under each TRACK, the MASTER and each
 // CONTAINER, its modulators and macros in their order, after its other children, each written as ModulationValue.h's
 // writeModulatorElement() writes it; and under each TRACK, its sends in their order, after those (the last of its children),
-// each written as SendsValue.h's writeSendElement() writes it.
+// each written as SendsValue.h's writeSendElement() writes it; and in each plug-in's DEVICE what the store holds of it, its
+// values set by hand as VALUEs sorted by their parameters after its other children, in each CHAIN its mute and solo, and in
+// each DEVICE its window's place (DeviceStoreValue.h: writeStoreInto(), writeWindowPlaceInto()).
 #pragma once
 
 #include "model/base/IDs.h"
@@ -49,13 +51,15 @@ struct ValuesKept
 {
     NotesByClip notes;
     SongClips clips;
-    TempoMapValue tempoMap;       // none (no entry of either kind) kept of a song that holds no values
-    ChordLaneValue chordLane;     // empty kept of a song that holds no values, and of one without chords or keys
-    MidiLinksValue midiLinks;     // none kept of a song that holds no values, and of one without links
-    SongCurves curves;            // none kept of a song that holds no values, and of one without automation
-    SectionsValue sections;       // none kept of a song that holds no values, and of one without sections
-    SongModulation modulation {}; // none kept of a song that holds no values, and of one without modulators or macros
-    SongSends sends {};           // none kept of a song that holds no values, and of one without sends
+    TempoMapValue tempoMap;           // none (no entry of either kind) kept of a song that holds no values
+    ChordLaneValue chordLane;         // empty kept of a song that holds no values, and of one without chords or keys
+    MidiLinksValue midiLinks;         // none kept of a song that holds no values, and of one without links
+    SongCurves curves;                // none kept of a song that holds no values, and of one without automation
+    SectionsValue sections;           // none kept of a song that holds no values, and of one without sections
+    SongModulation modulation {};     // none kept of a song that holds no values, and of one without modulators or macros
+    SongSends sends {};               // none kept of a song that holds no values, and of one without sends
+    DeviceStore deviceStore {};       // none kept of a song that holds no values, and of one without what devices store
+    DevicesOutside devicesOutside {}; // none kept of a song that holds no values, and of one whose windows never moved
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -133,6 +137,13 @@ bool holdSameSends (const ValuesKept&, const ValuesKept&);
 bool holdSameSend (const ValuesKept&, const ValuesKept&, DeviceID);
 bool holdSameTrackSendOrder (const ValuesKept&, const ValuesKept&, TrackID);
 
+// Whether two songs' kept values hold the same of what one device or chain stores (DeviceStoreValue.h: a plug-in's values set
+// by hand, its state, program, format ID and version; a chain's mute and solo), the song's entries alone (a held value aside),
+// none in both or the same in both. A window's place counts as no change, and is no part of it. Both of Project's comparisons
+// with the saved copy compare the store so (the quick one, an item at a time, and the whole song's, each DEVICE's and CHAIN's
+// as holdSameKeptOf() asks it), so that the two agree. The trees hold none of it. In DeviceStoreArea.cpp. Any thread.
+bool holdSameDeviceStore (const ValuesKept&, const ValuesKept&, DeviceID);
+
 // Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
 // what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips
 // (holdSameTrackClips()), then the tempo map of an element either of which holds a TEMPOMAP (holdSameTempoMap()), then the
@@ -140,7 +151,7 @@ bool holdSameTrackSendOrder (const ValuesKept&, const ValuesKept&, TrackID);
 // elements (holdSameCurves()), then the MIDI links of a song's element either of which holds a MIDILINKS
 // (holdSameMidiLinks()), then the sections of a song's element either of which holds a SECTIONS (holdSameSections()), then
 // a TRACK's, the MASTER's or a CONTAINER's modulators and macros (ModulationArea.h: holdSameModulationOf()), then a TRACK's
-// sends (SendsArea.h: holdSameSendsOf()). What
+// sends (SendsArea.h: holdSameSendsOf()), then what a DEVICE or a CHAIN stores (DeviceStoreArea.h: holdSameDeviceStoreOf()). What
 // Project's comparison of an element whole asks once the element's own properties compare (holdTheSameProject()). And
 // whether a child of an element is the place of what an area keeps (the song's TEMPOMAP, its CHORDLANE, its MIDILINKS, its
 // AUTOMATION, its SECTIONS), which that comparison leaves out of the elements it compares one by one. Any thread.

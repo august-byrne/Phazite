@@ -75,10 +75,18 @@ public:
     void readLive (engine::FileReader&, const std::atomic<std::uint64_t>& blocksPlayed);
 
     // Takes a change of the song's tree that is a value set by hand into what plays at once; false for any other change, which
-    // needs a new plan. What the tree still holds that plays: a plug-in's VALUE, a chain's mute and solo, a channel's volume,
-    // pan, mute and solo. Not a modulator's nor a macro's, nor a send's, nor a device's, a container's or a chain's that the
-    // devices' value covers, which the song's values tell (takeModulator(), takeSendLevel(), takeDevice()).
+    // needs a new plan. What the tree still holds that plays: a channel's volume, pan, mute and solo. Not a modulator's nor a
+    // macro's, nor a send's, nor a device's, a container's or a chain's that the devices' value covers, nor what the devices'
+    // store holds, which the song's values tell (takeModulator(), takeSendLevel(), takeDevice(), takeStoreEntry()).
     bool takeValue (const juce::ValueTree& tree, const juce::Identifier& property);
+
+    // An entry of the devices' store that changed, as the song's values told it (SongValues::DeviceStoreChange), into what
+    // plays it at once, if anything does: a plug-in's value set by hand (the value to give it: the song's, or the held one an
+    // Undo of a first comes back to) set on its node; a chain's mute or solo, what its container's chains are heard as, from
+    // the store as it was handed (heldStore). Whether it took something at once (what an undo's following looks at,
+    // PlaybackSession.h). A plug-in's state, program, format ID and version: nothing (its instance takes them:
+    // PluginInstances.h).
+    bool takeStoreEntry (const SongValues::DeviceStoreChange&);
 
     // A device, a container or a chain changed in place, as the song's values told it (SongValues::DeviceChange: its value
     // before and after), into what plays it at once, if anything does: Phazite's own device's values that differ between the
@@ -341,6 +349,13 @@ private:
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
 
+    // What the devices' store changed (SongValues.h; the song's tree holds none of it): the channel of a plug-in whose first
+    // value set by hand came or whose last went, and of a chain muted or soloed, its devices read again by the next compile
+    // (as a VALUE added or taken out, a CHAIN's switch, marked its channel); a plug-in's state, program, format ID and version
+    // nothing, nor a value set by hand in place (the plug-in keeps it). The store as it is now kept (heldStore), which a
+    // chain's mute and solo are read from.
+    void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
+
     // What decides what is heard between plans (updateAudibility(), which a track muted or soloed asks in the tree's callback,
     // where nothing reads the song's devices: SongValues.h), of each device: the track its sidechain listens to (0 for none)
     // and its channel (a track's ID, 0 for the master's). Read from the song's devices as the player is made, and kept as
@@ -367,6 +382,12 @@ private:
     // its fader and then a track soloed, before the plan the first asked for). A copy of the area's value, which shares what it
     // holds.
     SongSends heldSends;
+
+    // What decides which of a container's chains is heard (updateChainAudibility()): the store as the last compile read it (the
+    // store's area's value, read once for the plan), and as deviceStoreChanged() was handed it since; and each container's
+    // chains, by their IDs, in their order, as the last compile found them.
+    DeviceStore heldStore;
+    std::map<std::int64_t, std::vector<std::int64_t>> containerChains;
 
     // Whether a part kept from the plan before is checked against the song now (setChecking()): all of them while the
     // player plays few devices, a share otherwise, one part in every so many, its phase moving on with each plan.
@@ -481,7 +502,7 @@ private:
                        const std::function<void (const juce::ValueTree&)>& add);
     std::shared_ptr<engine::ChainState> getChain (const juce::ValueTree& chainState);
     void setChainValues (engine::ChainState&, const juce::ValueTree& chainState);
-    void updateChainAudibility (const juce::ValueTree& containerState);
+    void updateChainAudibility (std::int64_t container);
     static engine::Plan::Container::Chain* findPlannedChain (engine::Plan::Strip&, std::int64_t id);
     // A modulator or a macro as the song holds it (model/base/internal/ModulationValue.h), its node kept by its ID; and a
     // channel's own and its containers' from the song's modulation, which the compile reads once.

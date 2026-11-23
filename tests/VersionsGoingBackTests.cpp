@@ -663,21 +663,21 @@ TEST_CASE ("Bring Back sets a plug-in's settings only where they differ from the
         }));
     const auto version = keepVersion (s.context, "Before");
 
-    // What writes the plug-in's settings into the song, which its instance then takes.
-    struct StateWrites : public juce::ValueTree::Listener
+    // What writes the plug-in's settings into the song (its devices' store: SongValues.h), which its instance then takes.
+    struct StateWrites : public phazite::SongValues::Listener
     {
         int count = 0;
-        void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
+        void deviceStoreChanged (const std::vector<phazite::SongValues::DeviceStoreChange>& entries, const phazite::DeviceStore&) override
         {
-            if (tree.hasType (schema::DEVICE) && property == schema::pluginState)
-                ++count;
+            for (const auto& entry : entries)
+                if (entry.kind == phazite::SongValues::DeviceStoreChange::Kind::state)
+                    ++count;
         }
     };
 
     auto& song = *phazite::findSong (s.context);
     StateWrites writes;
-    auto state = song.getState(); // a listener belongs to the tree object it was added to
-    state.addListener (&writes);
+    song.getValues()->addListener (&writes);
 
     // Something else changed: the plug-in isn't set again.
     s.setVolume (track, -8.0f);
@@ -694,7 +694,7 @@ TEST_CASE ("Bring Back sets a plug-in's settings only where they differ from the
     phazite::undo (song);
     REQUIRE (
         dispatchMessagesUntil ([&song, device, gain] { return std::abs (TestPlugin::getGain (song, device) - gain * 0.25f) < 0.001f; }));
-    state.removeListener (&writes);
+    song.getValues()->removeListener (&writes);
 }
 
 TEST_CASE ("Every example song, changed through the model and brought back, saves and plays as it did")

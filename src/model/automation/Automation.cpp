@@ -1634,11 +1634,8 @@ bool isWritingAutomation (const Song& song)
 
 bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // A plug-in's values set by hand are its VALUEs' (a device's of Phazite's own, its VALUES' properties, are the devices'
-    // area's, which the song's values tell; a modulator's modulation's area's).
-    if (tree.hasType (schema::VALUE))
-        return property == schema::valueSetByHand;
-
+    // A channel's volume and pan (a device's of Phazite's own, its VALUES' properties, are the devices' area's, a plug-in's the
+    // devices' store's, which the song's values tell; a modulator's modulation's area's).
     return (tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
            && (property == schema::channelVolume || property == schema::channelPan);
 }
