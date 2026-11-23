@@ -73,8 +73,13 @@ int PlanCounter::take()
 
 std::optional<int> countAllocations (const std::function<void()>& work)
 {
+    // Where they can't be counted the work still runs, uncounted: a test that looks at what the work did before it looks at
+    // the count then finds it done in every build (three gates failed in the Windows release build alone for work not run).
     if (! AudioThreadMonitor::isAvailable())
+    {
+        work();
         return std::nullopt;
+    }
 
     AudioThreadMonitor::reset();
     {
