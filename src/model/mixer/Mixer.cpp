@@ -10,6 +10,7 @@
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
@@ -393,6 +394,168 @@ bool opensWindow (const Song& song, DeviceID id)
 bool popsOut (const Song& song, DeviceID id)
 {
     return findOwnInfo (findDeviceState (song, id)) != nullptr;
+}
+
+//==============================================================================
+namespace
+{
+    // An outline's entry of what an element is, at its place: none for an element that is no device, container or chain.
+    std::optional<DeviceOutline> outlineOf (const juce::ValueTree& element, TrackID channel, DeviceID container, DeviceID chain)
+    {
+        const auto form = readDeviceForm (element);
+
+        if (! form.has_value())
+            return std::nullopt;
+
+        DeviceOutline outline;
+        outline.id = readDeviceElementID (element);
+        outline.form = *form;
+        outline.channel = channel;
+        outline.container = container;
+        outline.chain = chain;
+
+        if (*form == DeviceValue::Form::own)
+            outline.type = readDeviceType (element);
+
+        if (*form == DeviceValue::Form::plugin)
+            outline.plugin = readPluginIdentity (element);
+
+        outline.instrument = readIsInstrument (element);
+        outline.sidechain = readDeviceSidechain (element);
+        return outline;
+    }
+
+    // A channel's element's outline, after what the list holds already.
+    void addOutlineOf (const juce::ValueTree& channelState, TrackID channel, std::vector<DeviceOutline>& outline)
+    {
+        for (const auto& child : channelState)
+        {
+            const auto entry = outlineOf (child, channel, {}, {});
+
+            if (! entry.has_value() || entry->form == DeviceValue::Form::chain)
+                continue;
+
+            outline.push_back (*entry);
+
+            if (entry->form != DeviceValue::Form::container)
+                continue;
+
+            for (const auto& chainState : child)
+            {
+                const auto chain = outlineOf (chainState, channel, entry->id, {});
+
+                if (! chain.has_value() || chain->form != DeviceValue::Form::chain)
+                    continue;
+
+                outline.push_back (*chain);
+
+                for (const auto& inside : chainState)
+                    if (const auto device = outlineOf (inside, channel, entry->id, chain->id);
+                        device.has_value() && (device->form == DeviceValue::Form::own || device->form == DeviceValue::Form::plugin))
+                        outline.push_back (*device);
+            }
+        }
+    }
+
+    // Each sound file a device's element names, after those the list holds already.
+    void addSoundFilesOf (const juce::ValueTree& device, std::vector<DeviceSoundFile>& files)
+    {
+        const auto sounds = readDeviceSounds (device);
+
+        for (int i = 0; i < sounds.getNumProperties(); ++i)
+            if (const auto property = sounds.getPropertyName (i); schema::isSoundFileProperty (property))
+                if (const auto path = readSoundsProperty (sounds, property); path.isNotEmpty())
+                    files.push_back ({ .device = readDeviceElementID (device), .property = property, .path = path });
+    }
+} // namespace
+
+std::vector<DeviceOutline> getDeviceOutline (const Song& song, TrackID channel)
+{
+    std::vector<DeviceOutline> outline;
+    const auto state = findChainState (song, channel);
+    addOutlineOf (state, state.hasType (schema::MASTER) ? getTrackID (state) : channel, outline);
+    return outline;
+}
+
+std::vector<DeviceOutline> getSongDeviceOutline (const Song& song)
+{
+    std::vector<DeviceOutline> outline;
+
+    for (const auto& track : getTrackStates (song))
+        addOutlineOf (track, getTrackID (track), outline);
+
+    const auto master = findChainState (song, {});
+    addOutlineOf (master, getTrackID (master), outline);
+    return outline;
+}
+
+const devices::DeviceInfo* getOwnDeviceInfo (const Song& song, DeviceID id)
+{
+    return findOwnInfo (findDeviceState (song, id));
+}
+
+bool holdsPlugin (const Song& song, TrackID track)
+{
+    const auto outline = getDeviceOutline (song, track);
+    return std::any_of (outline.begin(), outline.end(), [] (const DeviceOutline& each) { return each.form == DeviceValue::Form::plugin; });
+}
+
+std::optional<DevicePlace> findContainerPlace (const Song& song, DeviceID container)
+{
+    const auto element = findDeviceState (song, container);
+
+    if (readDeviceForm (element) != DeviceValue::Form::container)
+        return std::nullopt;
+
+    return readDevicePlace (element);
+}
+
+std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song& song, TrackID channel)
+{
+    std::vector<DeviceSoundFile> files;
+
+    // In the outline's order: a channel's devices, and its containers' chains' devices in their places.
+    const auto addIn = [&files] (const juce::ValueTree& list, auto& addInside) -> void
+    {
+        for (const auto& child : list)
+        {
+            const auto form = readDeviceForm (child);
+
+            if (form == DeviceValue::Form::own)
+                addSoundFilesOf (child, files);
+            else if (form == DeviceValue::Form::container || form == DeviceValue::Form::chain)
+                addInside (child, addInside);
+        }
+    };
+
+    addIn (findChainState (song, channel), addIn);
+    return files;
+}
+
+std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song& song)
+{
+    std::vector<DeviceSoundFile> files;
+
+    // Every element of the song's tree in turn, each device's sounds where it is.
+    const auto addIn = [&files] (const juce::ValueTree& element, auto& addInside) -> void
+    {
+        for (const auto& child : element)
+        {
+            if (readDeviceForm (child) == DeviceValue::Form::own)
+                addSoundFilesOf (child, files);
+
+            addInside (child, addInside);
+        }
+    };
+
+    addIn (song.getState(), addIn);
+    return files;
+}
+
+juce::ValueTree copyWholeDevice (const Song& song, DeviceID id)
+{
+    const auto device = findDeviceState (song, id);
+    return device.isValid() ? copyWhole (song, device) : juce::ValueTree();
 }
 
 //==============================================================================
@@ -1267,12 +1430,6 @@ std::optional<juce::PluginDescription> findKnownPlugin (const PluginHost& host, 
             return type;
 
     return {};
-}
-
-juce::PluginDescription getPluginDescription (const PluginHost& host, const juce::ValueTree& device)
-{
-    const auto description = getPluginIdentity (device);
-    return findKnownPlugin (host, description).value_or (description);
 }
 
 juce::StringArray getKeyControls (const Song& song, DeviceID id, int maximum)

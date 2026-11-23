@@ -48,12 +48,15 @@ bool hasDevice (const Song&, DeviceID);
 bool isPlugin (const Song&, DeviceID);
 bool isInstrument (const Song&, DeviceID);
 
-// The song's devices' elements, for the devices' writers, the conversion's readers of one field and the readers outside
-// the devices' own code that the next piece moves (the plan's compile, presets, the DAWproject export, the selection, the
-// project's files: roadmap step S5.20, the devices' second piece); not for a new reader, which reads by ID above. The element
-// that holds a channel's chain (its TRACK, or MASTER for the master or none); a chain's devices' elements, in order (a
-// container's chain's, given its CHAIN; or all a container's chains', in their order, given its CONTAINER); a device's
-// element, on a chain or in a container, invalid for one the song hasn't; the ID an element names; and what it is.
+// The song's devices' elements, for the devices' own code alone: its writers, the conversion's readers of one field, the
+// store's (model/plugins/) and the listeners' callbacks, which later pieces of roadmap step S5.20 move; not for a reader,
+// which reads by ID (above, and the readers outside the devices' own code below). The element that holds a channel's chain
+// (its TRACK, or MASTER for the master or none: the tracks' element, which the containers', the modulators' and automation's
+// code find a channel by); a chain's devices' elements, in order (a container's chain's, given its CHAIN; or all a
+// container's chains', in their order, given its CONTAINER: the mixer's, the containers', the sidechains' code and a folder
+// made plain, Buses.h); a device's element, on a chain or in a container, invalid for one the song hasn't (the devices' own
+// code, the store, a preset loaded into a plug-in, Presets.h, what a frozen track's file holds until the freeze's listener
+// moves, Freeze.h, and the loader's curves, Project.h); the ID an element names; and what it is.
 juce::ValueTree findChainState (const Song&, TrackID channel);
 std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
 juce::ValueTree findDeviceState (const Song&, DeviceID);
@@ -61,9 +64,9 @@ DeviceID getDeviceID (const juce::ValueTree& deviceState);
 bool isPluginState (const juce::ValueTree& deviceState);
 
 // How many walks of the song's tree have looked for a device's, a container's or a chain's element by its ID
-// (findDeviceState(), Containers.h: findContainerChain(); findDevice() and hasDevice() through them) since Phazite started,
-// on any thread: for the tests that a control's tick walks the song no more often however many tracks it has
-// (tests/PerformanceGateTests.cpp). And one more walk counted, by those two alone.
+// (findDeviceState(), Containers.h: findContainerChain(), DevicesValue.h: holdsDevice(); findDevice() and hasDevice() through
+// them) since Phazite started, on any thread: for the tests that a control's tick walks the song no more often however many
+// tracks it has (tests/PerformanceGateTests.cpp). And one more walk counted, by those three alone.
 std::uint64_t countDeviceWalks() noexcept;
 void countDeviceWalk() noexcept;
 
@@ -97,6 +100,67 @@ juce::String getDeviceName (const juce::ValueTree& deviceState);
 // window of its own when the user wants it, out of the Devices view.
 bool opensWindow (const Song&, DeviceID);
 bool popsOut (const Song&, DeviceID);
+
+//==============================================================================
+// What the readers outside the devices' own code read of the song's devices (roadmap step S5.20, the devices' second
+// piece), by IDs and plain values, each field read through the conversion's readers of one field (DevicesValue.h), never a
+// device whole; each reads the song's tree for now, and the area of the song's values once the devices leave it. Whether the
+// song holds a device or a container by its ID, without a value made, is DevicesValue.h's holdsDevice() (its walk counted).
+//
+// A channel's devices and containers in their order, each container followed by its chains and each chain by its devices,
+// in theirs: each by its ID with what it is, its channel (a track's ID, or the master's ID for the master's), the container
+// and the chain it is in, Phazite's own device's type (deviceType), whether it turns notes into sound
+// (DeviceValue::isInstrument()), a plug-in's identity and the track a device's sidechain listens to (as the song holds it,
+// whether or not that track can be heard: Sidechain.h, getSidechainSource()). One look through the channel's elements, no
+// walk of the song by an ID; none for a channel the song hasn't. A track's by its ID; the master's by its ID or by none
+// (TrackID()), as getDevices() has always read the master's for none. And
+// every channel's, in the song's order: each track's (a folder's before the tracks in it), then the master's. For the
+// project's plug-ins, automation's lanes, notes' drum mode, modulation's owners, the freeze and the versions' plug-ins.
+struct DeviceOutline
+{
+    DeviceID id {};
+    DeviceValue::Form form = DeviceValue::Form::own;
+    TrackID channel {};
+    DeviceID container {}, chain {};
+    juce::String type {};
+    bool instrument = false;
+    PluginIdentity plugin {};
+    TrackID sidechain {};
+};
+
+std::vector<DeviceOutline> getDeviceOutline (const Song&, TrackID channel);
+std::vector<DeviceOutline> getSongDeviceOutline (const Song&);
+
+// The description of one of Phazite's own devices by its ID (nullptr for a plug-in, a container, a chain or one the song
+// hasn't); and whether a track's devices, those in its containers too, hold a plug-in (the arrangement's selection, which
+// gets the plug-ins' states before it copies the track).
+const devices::DeviceInfo* getOwnDeviceInfo (const Song&, DeviceID);
+bool holdsPlugin (const Song&, TrackID);
+
+// Where a container is by its ID, as findDevice() reads a place (DevicesValue.h: readDevicePlace()), without its value
+// made: one walk of the song (countDeviceWalks()), no whole read; none for anything but a container the song holds. For
+// the place a modulator of a container's is kept at (model/modulation/Modulation.cpp: findOwnerPlace()).
+std::optional<DevicePlace> findContainerPlace (const Song&, DeviceID container);
+
+// The sound files Phazite's own devices name (Schema.h: SOUNDS, schema::isSoundFileProperty()), each by its device, its
+// property and its path as the song keeps it: a channel's devices', in the outline's order (getDeviceOutline()), for the
+// project's files; or every device's of the song, in its tree's order, for the paths the song plays (AudioClips.h:
+// findAudioFilePaths(), what Clean Up and an import keep).
+struct DeviceSoundFile
+{
+    DeviceID device {};
+    juce::Identifier property {};
+    juce::String path {};
+};
+
+std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song&, TrackID channel);
+std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song&);
+
+// A device's or a container's element whole (model/base/internal/WholeState.h: copyWhole()), a copy: with what a plug-in
+// keeps of its own as the song holds it (store it first: Song::storeDeviceStates()), a container's chains with their devices
+// and its macros. What a preset and the DAWproject export read a device from. An invalid tree for one the song hasn't (a
+// chain is none of these).
+juce::ValueTree copyWholeDevice (const Song&, DeviceID);
 
 //==============================================================================
 // New devices' elements, with IDs of the song's: one of Phazite's own (by its type ID), with values set by hand by its
@@ -283,11 +347,9 @@ DeviceSlot makeDeviceSlot (const ProjectContext&, DeviceID);
 //==============================================================================
 // The devices that can be added (DeviceType.h): Phazite's own and the plug-ins found by scanning, which the plug-in host
 // keeps (model/plugins/internal/PluginHost.h). The plug-in scanning found that a description names: by its identifier and
-// name, else by its name, maker and format, as a preset finds it. And the description of the plug-in an element names:
-// the one scanning found, or else the element's own, for a plug-in that isn't installed here.
+// name, else by its name, maker and format, as a preset finds it.
 std::vector<DeviceType> getDeviceTypes (const PluginHost&);
 std::optional<juce::PluginDescription> findKnownPlugin (const PluginHost&, const juce::PluginDescription&);
-juce::PluginDescription getPluginDescription (const PluginHost&, const juce::ValueTree& device);
 
 // A plug-in's key parameters, by its own IDs (MixerModel.h): its first parameters that can be automated, as its instance
 // tells them, up to so many. None for a plug-in that doesn't play (with no instance), for Phazite's own devices, whose

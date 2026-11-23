@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Selection.h"
 #include "internal/CurveValues.h"
+#include "internal/DevicesValue.h"
 #include "internal/Schema.h"
 #include "internal/SectionsValue.h"
 #include "internal/SendsValue.h"
@@ -15,39 +16,35 @@ namespace phazite
 {
 namespace
 {
-    // Whether the song's tree holds an item of a kind with an ID: a track (or a folder, a return or the master), or a device
-    // (or a container) of a track, of the master or of a container. Each kind's ID is its element's "id". Not a clip, which
-    // the song holds beside its tree (SongValues.h), found there by its ID.
-    bool holds (const juce::ValueTree& parent, Selection::Kind kind, std::uint64_t id)
+    // Whether the song's tree holds a track (or a folder, a return or the master) with an ID, its element's "id"; a device (or
+    // a container) is the devices' to say (DevicesValue.h: holdsDevice()), and a clip the clips', which the song holds beside
+    // its tree (SongValues.h), found there by its ID.
+    [[maybe_unused]] bool holdsTrack (const juce::ValueTree& parent, std::uint64_t id)
     {
-        jassert (kind != Selection::Kind::clip);
-
         for (const auto& child : parent)
         {
             const auto isTrack = child.hasType (schema::TRACK) || child.hasType (schema::MASTER);
-            const auto isOfKind =
-                kind == Selection::Kind::track ? isTrack : child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER);
 
-            if (isOfKind && (std::uint64_t) (juce::int64) child.getProperty (schema::trackID, (juce::int64) 0) == id)
+            if (isTrack && (std::uint64_t) (juce::int64) child.getProperty (schema::trackID, (juce::int64) 0) == id)
                 return true;
 
-            // Into what holds items: the track list, tracks, containers and their chains, not clips' notes or devices' values.
-            if ((child.hasType (schema::TRACKS) || isTrack || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
-                && holds (child, kind, id))
+            // Into what holds tracks: the track list and the folders.
+            if ((child.hasType (schema::TRACKS) || isTrack) && holdsTrack (child, id))
                 return true;
         }
 
         return false;
     }
 
-    // Whether the song's tree holds what a curve's points belong to (Schema.h: CURVE, curveDevice): a device, a container's
-    // chain, or a channel's fader or VCA, as model/automation/ finds a curve's owner; a send is the sends' (holdsSend()), which
-    // the walk leaves to them.
-    bool holdsCurveOwner (const juce::ValueTree& parent, std::uint64_t id)
+    // Whether the song's tree holds a channel's ID, a fader's or a VCA's (Schema.h: channelFader, channelVCA) that a curve's
+    // points belong to (Schema.h: CURVE, curveDevice), as model/automation/ finds a curve's owner; a device's and a container's
+    // chain's are the devices' (holdsCurveOwner(), below), which the walk leaves to them, and a send's the sends' (holdsSend()),
+    // whose area the song holds them in, not its tree.
+    bool holdsChannelOwner (const juce::ValueTree& parent, std::uint64_t id)
     {
         for (const auto& child : parent)
         {
-            if (child.hasType (schema::AUTOMATION) || child.hasType (schema::SEND))
+            if (child.hasType (schema::AUTOMATION) || readDeviceForm (child).has_value())
                 continue;
 
             for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
@@ -55,11 +52,18 @@ namespace
                     && (std::uint64_t) (juce::int64) child[*property] == id)
                     return true;
 
-            if (holdsCurveOwner (child, id))
+            if (holdsChannelOwner (child, id))
                 return true;
         }
 
         return false;
+    }
+
+    // Whether the song holds what a curve's points belong to: a device, a container's chain (DevicesValue.h: holdsDevice()),
+    // or a channel's fader or VCA.
+    bool holdsCurveOwner (const Song& song, std::uint64_t id)
+    {
+        return holdsDevice (song, DeviceID::fromRaw (id), true) || holdsChannelOwner (song.getState(), id);
     }
 
     std::uint64_t pointComparisons = 0, noteComparisons = 0; // message thread
@@ -129,13 +133,13 @@ bool Selection::isThere (Item item) const
     }
 
     if (item.kind == Kind::device)
-        return holds (song->getState(), item.kind, item.id);
+        return holdsDevice (*song, DeviceID::fromRaw (item.id));
 
     const auto there = (std::uint64_t) (juce::int64) song->getState().getChildWithName (schema::MASTER)[schema::trackID] == item.id
                        || song->getIndex().findTrack (item.id).isValid();
 
     // The index and the song's tree differ.
-    jassert (! SongIndex::isChecking() || there == holds (song->getState(), item.kind, item.id));
+    jassert (! SongIndex::isChecking() || there == holdsTrack (song->getState(), item.id));
     return there;
 }
 
@@ -266,8 +270,7 @@ int Selection::getNumObjectsSelected() const
         const auto* values = song->getValues();
         const auto* curve = values != nullptr ? values->findCurve (pointsParameter) : nullptr;
 
-        if (curve != nullptr
-            && (holdsCurveOwner (song->getState(), pointsParameter.device.getRaw()) || holdsSend (*song, pointsParameter.device)))
+        if (curve != nullptr && (holdsCurveOwner (*song, pointsParameter.device.getRaw()) || holdsSend (*song, pointsParameter.device)))
             for (const auto& point : curve->points)
                 if (isPointSelected (point.key))
                     ++count;

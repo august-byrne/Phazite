@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -26,6 +27,11 @@ juce::String getPadName (const Song&, DeviceID, int pad, int layer = 0);
 bool hasPadSound (const Song&, DeviceID, int pad, int layer = 0);
 bool isPadEmpty (const Song&, const juce::ValueTree& deviceState, int pad);
 bool isPadEmpty (const Song&, DeviceID, int pad);
+
+// A drum sampler's pads that play a sound (those not empty: isPadEmpty()), in their order, each with its name (its first
+// layer's: getPadName()): one look for the device, for the piano roll's drum rows (model/notes/internal/Notes.h:
+// getSamplerSounds()). None for a device that is no drum sampler.
+std::vector<std::pair<int, juce::String>> getSoundingPads (const Song&, DeviceID);
 
 // Puts a sound file on a pad's layer, as one undo step named after it ("Put Clap on Pad 38's Layer 2"): the project plays
 // its own copy, in its Audio folder (model/arrangement/internal/Import.h). Returns false, changing nothing, for a file that

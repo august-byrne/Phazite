@@ -160,10 +160,14 @@ std::vector<juce::ValueTree> getChainStates (const juce::ValueTree& container)
     return chains;
 }
 
-bool isChainState (const juce::ValueTree& state)
+namespace
 {
-    return state.hasType (schema::CHAIN);
-}
+    // Whether an element is a chain's (Schema.h: CHAIN): for the containers' own code alone.
+    bool isChainState (const juce::ValueTree& state)
+    {
+        return state.hasType (schema::CHAIN);
+    }
+} // namespace
 
 juce::ValueTree findContainerChain (const Song& song, DeviceID id)
 {
@@ -650,11 +654,16 @@ void setContainerName (Song& song, DeviceID id, const juce::String& name)
         state.setProperty (schema::containerName, name, &song.getUndoManager());
 }
 
-bool canHoldInChain (const Song& song, DeviceID chain, const juce::ValueTree& device)
+namespace
 {
-    const auto container = getOwningContainer (findContainerChain (song, chain));
-    return container.isValid() && device.hasType (schema::DEVICE) && (! isInstrumentState (device) || readContainerInstrument (container));
-}
+    // Whether a chain can take a device's element: for insertIntoChain() alone.
+    bool canHoldInChain (const Song& song, DeviceID chain, const juce::ValueTree& device)
+    {
+        const auto container = getOwningContainer (findContainerChain (song, chain));
+        return container.isValid() && device.hasType (schema::DEVICE)
+               && (! isInstrumentState (device) || readContainerInstrument (container));
+    }
+} // namespace
 
 DeviceID insertIntoChain (Song& song, DeviceID chain, juce::ValueTree device, int index)
 {

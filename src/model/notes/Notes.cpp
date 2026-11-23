@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Numbers.h"
 #include "model/base/Toggles.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
@@ -2419,9 +2420,13 @@ bool isDrumTrack (const Song& song, TrackID track)
     if (state.hasProperty (schema::drumMode))
         return state[schema::drumMode];
 
-    for (const auto& device : getDeviceStates (state))
-        if (isInstrumentState (device))
-            return isDrumSampler (device);
+    // As its instrument says: a drum sampler (Mixer.h: getDeviceOutline(), its devices by their IDs).
+    if (! state.isValid())
+        return false;
+
+    for (const auto& device : getDeviceOutline (song, track))
+        if (! device.container.isValid() && device.instrument)
+            return device.type == devices::DrumSampler::typeID;
 
     return false;
 }
@@ -2434,16 +2439,19 @@ void setDrumTrack (Song& song, TrackID track, bool isDrums)
 
 std::optional<std::vector<DrumRow>> getSamplerSounds (const Song& song, TrackID track)
 {
-    // A row for each of the drum sampler's pads that plays a sound, by their notes.
-    for (const auto& device : getDeviceStates (findTrackState (song, track)))
+    // A row for each of the drum sampler's pads that plays a sound, by their notes: the first drum sampler on the track's
+    // channel, by its ID.
+    if (! findTrackState (song, track).isValid())
+        return std::nullopt;
+
+    for (const auto& device : getDeviceOutline (song, track))
     {
-        if (isDrumSampler (device))
+        if (! device.container.isValid() && device.type == devices::DrumSampler::typeID)
         {
             std::vector<DrumRow> pads;
 
-            for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-                if (! isPadEmpty (song, device, pad))
-                    pads.push_back ({ devices::DrumSampler::firstNote + pad, getPadName (song, device, pad) });
+            for (const auto& [pad, name] : getSoundingPads (song, device.id))
+                pads.push_back ({ devices::DrumSampler::firstNote + pad, name });
 
             return pads;
         }

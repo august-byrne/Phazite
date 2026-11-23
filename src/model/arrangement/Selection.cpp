@@ -300,13 +300,13 @@ bool doesDeleteReadPlugins (const Selection& selection, const RangeSelection& ra
     }
 
     for (const auto id : taken)
-        if (holdsPlugin (findTrackState (*song, id)))
+        if (holdsPlugin (*song, id))
             return true;
 
     // And the tracks of the pads of their drum samplers, which a delete takes along.
     for (const auto id : getTrackIDs (*song))
         if (const auto pad = getPlayedPad (*song, id); pad.has_value() && ! taken.contains (id))
-            if (taken.contains (getDeviceChannel (*song, pad->first)) && holdsPlugin (findTrackState (*song, id)))
+            if (taken.contains (getDeviceChannel (*song, pad->first)) && holdsPlugin (*song, id))
                 return true;
 
     return false;

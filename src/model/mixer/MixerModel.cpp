@@ -8,6 +8,7 @@
 #include "internal/Mixer.h"
 #include "internal/Sidechain.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
@@ -367,14 +368,14 @@ std::vector<ParameterHandle> getKeyControls (ProjectContext& context, DeviceID i
 MixHandle getMix (ProjectContext& context, DeviceID id)
 {
     auto* song = findSong (context);
-    return song != nullptr && findDeviceState (*song, id).isValid() ? makeMixHandle (*song, id) : MixHandle();
+    return song != nullptr && holdsDevice (*song, id) ? makeMixHandle (*song, id) : MixHandle();
 }
 
 void setDeviceOn (ProjectContext& context, DeviceID id, bool on)
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! findDeviceState (*song, id).isValid())
+    if (song == nullptr || ! holdsDevice (*song, id))
         return;
 
     // An instrument stays on: its track's switch mutes it (the owner, 2026-11-01: with one instrument a track, its own switch
@@ -389,7 +390,7 @@ void moveEffect (ProjectContext& context, DeviceID id, int places)
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! findDeviceState (*song, id).isValid())
+    if (song == nullptr || ! holdsDevice (*song, id))
         return;
 
     const auto indexOf = [] (const std::vector<DeviceID>& devices, DeviceID device)
@@ -431,7 +432,7 @@ void replaceEffect (ProjectContext& context, DeviceID id, const DeviceType& type
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || type.isInstrument || ! findDeviceState (*song, id).isValid() || isInstrument (*song, id))
+    if (song == nullptr || type.isInstrument || ! holdsDevice (*song, id) || isInstrument (*song, id))
         return;
 
     const UndoStep step (*song, "Replace " + getDeviceName (*song, id) + " with " + type.name);
@@ -501,7 +502,7 @@ std::optional<TrackID> getDeviceChannel (const ProjectContext& context, DeviceID
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! findDeviceState (*song, id).isValid())
+    if (song == nullptr || ! holdsDevice (*song, id))
         return {};
 
     // A container's devices are on its channel (containers don't nest); the master's, which the mixer calls the master, by

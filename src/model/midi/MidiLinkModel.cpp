@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -70,7 +71,7 @@ std::vector<MidiLinkInfo> getMidiLinks (const ProjectContext& context)
                          : found->source == ParameterSource::send ? getSendTrack (*song, link.parameter.device)
                                                                   : findTrackOf (*song, found->state);
 
-            if (findDeviceState (*song, link.parameter.device).isValid())
+            if (holdsDevice (*song, link.parameter.device))
                 info.device = link.parameter.device;
             else if (const auto container = getChainContainer (*song, link.parameter.device); container.isValid())
                 info.device = container;

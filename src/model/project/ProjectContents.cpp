@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/BackgroundJobs.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
@@ -22,12 +23,13 @@ namespace phazite
 {
 namespace
 {
-    // Each channel's element, the tracks top to bottom (a folder before its tracks), then the master's, with its name.
+    // Each channel, the tracks top to bottom (a folder before its tracks), then the master, by its ID, with its name. What
+    // each holds is read by its ID: its clips (Clips.h, getClipValues()) and its devices (Mixer.h: getDeviceOutline(),
+    // getDeviceSoundFiles()).
     struct Channel
     {
         TrackID id;
         juce::String name;
-        juce::ValueTree state;
     };
 
     std::vector<Channel> getChannels (const Song& song)
@@ -37,40 +39,15 @@ namespace
         for (const auto& state : getTrackStates (song))
         {
             const auto id = getTrackID (state);
-            channels.push_back ({ id, getTrackName (song, id), state });
+            channels.push_back ({ id, getTrackName (song, id) });
         }
 
         const auto master = getMasterID (song);
 
-        if (const auto state = findTrackState (song, master); state.isValid())
-            channels.push_back ({ master, "Master", state });
+        if (findTrackState (song, master).isValid())
+            channels.push_back ({ master, "Master" });
 
         return channels;
-    }
-
-    // Everything in a channel's element, but the tracks a folder holds, which are channels of their own (its clips are read
-    // by their IDs: Clips.h, getClipValues()).
-    void forEachIn (const juce::ValueTree& element, const std::function<void (const juce::ValueTree&)>& visit)
-    {
-        for (const auto& child : element)
-        {
-            if (child.hasType (schema::TRACK))
-                continue;
-
-            visit (child);
-            forEachIn (child, visit);
-        }
-    }
-
-    // Each path an element names an audio file by: a device's sound file (a pad's, an oscillator's or a sampler's). A clip's
-    // is its value's (ClipSound::file).
-    void forEachSoundPath (const juce::ValueTree& element, const std::function<void (const juce::Identifier&)>& visit)
-    {
-        if (element.hasType (schema::SOUNDS))
-            for (int i = 0; i < element.getNumProperties(); ++i)
-                if (const auto property = element.getPropertyName (i);
-                    schema::isSoundFileProperty (property) && element[property].toString().isNotEmpty())
-                    visit (property);
     }
 
     PluginState toState (std::optional<PluginInstances::Status> status)
@@ -146,8 +123,8 @@ std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext& contex
             if (clip.sound.file.isNotEmpty())
                 use (clip.sound.file);
 
-        forEachIn (channel.state, [&] (const juce::ValueTree& element)
-                   { forEachSoundPath (element, [&] (const juce::Identifier& property) { use (element[property].toString()); }); });
+        for (const auto& sound : getDeviceSoundFiles (*song, channel.id))
+            use (sound.path);
     }
 
     return files;
@@ -309,9 +286,9 @@ bool locateAudioFileNow (ProjectContext& context, const juce::String& path, cons
     if (song == nullptr || path.isEmpty() || ! found.existsAsFile())
         return false;
 
-    // Where the song plays the path now: its clips (by their IDs) and its devices' sounds.
+    // Where the song plays the path now: its clips and its devices' sounds, by their IDs.
     std::vector<ClipID> clips;
-    std::vector<std::pair<juce::ValueTree, juce::Identifier>> uses;
+    std::vector<DeviceSoundFile> uses;
 
     for (const auto& channel : getChannels (*song))
     {
@@ -319,16 +296,9 @@ bool locateAudioFileNow (ProjectContext& context, const juce::String& path, cons
             if (clip.sound.file == path)
                 clips.push_back (clip.id);
 
-        forEachIn (channel.state,
-                   [&uses, &path] (const juce::ValueTree& element)
-                   {
-                       forEachSoundPath (element,
-                                         [&] (const juce::Identifier& property)
-                                         {
-                                             if (element[property].toString() == path)
-                                                 uses.emplace_back (element, property);
-                                         });
-                   });
+        for (const auto& sound : getDeviceSoundFiles (*song, channel.id))
+            if (sound.path == path)
+                uses.push_back (sound);
     }
 
     if (clips.empty() && uses.empty())
@@ -344,8 +314,8 @@ bool locateAudioFileNow (ProjectContext& context, const juce::String& path, cons
 
     setClipFiles (*song, path, newPath);
 
-    for (auto& [element, property] : uses)
-        element.setProperty (property, newPath, &song->getUndoManager());
+    for (const auto& sound : uses)
+        setDeviceSound (*song, sound.device, sound.property, newPath);
 
     return true;
 }
@@ -360,22 +330,20 @@ std::vector<ProjectPlugin> getProjectPlugins (const ProjectContext& context)
 
     for (const auto& channel : getChannels (*song))
     {
-        forEachIn (channel.state,
-                   [&] (const juce::ValueTree& element)
-                   {
-                       if (! element.hasType (schema::DEVICE) || element[schema::deviceType].toString() != schema::deviceIsPlugin)
-                           return;
+        for (const auto& device : getDeviceOutline (*song, channel.id))
+        {
+            if (device.form != DeviceValue::Form::plugin)
+                continue;
 
-                       const auto id = getDeviceID (element);
-                       plugins.push_back ({ .device = id,
-                                            .channel = channel.id,
-                                            .channelName = channel.name,
-                                            .name = getDeviceName (element),
-                                            .maker = element[schema::pluginMaker].toString(),
-                                            .format = element[schema::pluginFormat].toString(),
-                                            .isInstrument = (bool) element[schema::pluginInstrument],
-                                            .state = toState (getPluginStatus (*song, id)) });
-                   });
+            plugins.push_back ({ .device = device.id,
+                                 .channel = channel.id,
+                                 .channelName = channel.name,
+                                 .name = device.plugin.name,
+                                 .maker = device.plugin.maker,
+                                 .format = device.plugin.format,
+                                 .isInstrument = device.plugin.instrument,
+                                 .state = toState (getPluginStatus (*song, device.id)) });
+        }
     }
 
     return plugins;

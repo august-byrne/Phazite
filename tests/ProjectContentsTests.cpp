@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the open project holds, as the Project view shows it (src/model/project/ProjectContents.h): its notes, the audio files
 // its song plays and its plug-ins, by the project's context.
+#include "TestDeviceValues.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/drums/DrumSampler.h"
+#include "devices/sampler/Sampler.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/SongGesture.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumKit.h"
+#include "model/devices/internal/SamplerSound.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -97,6 +102,61 @@ TEST_CASE ("The project's audio files: each once, with the tracks that play it; 
     // A path the song doesn't play, or a file that isn't there, changes nothing.
     CHECK_FALSE (phazite::locateAudioFile (test.context, "Audio/Nothing.wav", found));
     CHECK_FALSE (phazite::locateAudioFile (test.context, "Audio/Loop.wav", sounds.getChildFile ("Gone.wav")));
+}
+
+TEST_CASE ("A drum pad's missing file and a sampler's, found again: each device's sound names the project's copy, as one undo step")
+{
+    // What Locate Audio File writes into a device (ProjectContents.cpp: locateAudioFileNow(), Mixer.h: setDeviceSound()):
+    // a drum sampler's pad's file and a sampler's sample, each read back by its device's ID.
+    phazite::test::TestSong test;
+    auto& song = *findSong (test.context);
+    const auto sounds = test.getSoundsFolder();
+    const auto drumsTrack = test.firstTrack;
+    const auto keysTrack = test.addTrack ("Keys");
+    const auto drums = test.setInstrument (drumsTrack, phazite::devices::DrumSampler::typeID);
+    const auto sampler = test.setInstrument (keysTrack, phazite::devices::Sampler::typeID);
+    const auto padFile = phazite::schema::getPadSoundFile (36, 0);
+    const juce::Identifier sampleFile = phazite::schema::samplerSampleFile;
+
+    {
+        const phazite::UndoStep step (song, "Sounds");
+        REQUIRE (phazite::setPadSound (song, drums, 36, phazite::test::writeSound (sounds.getChildFile ("Kick.wav"), 0.1)));
+        REQUIRE (phazite::setSampleFile (song, sampler, phazite::test::writeSound (sounds.getChildFile ("Pluck.wav"), 0.1)));
+    }
+
+    const auto soundOf = [&song] (phazite::DeviceID device, const juce::Identifier& property)
+    { return phazite::test::copyDevice (song, device).getChildWithName (phazite::schema::SOUNDS)[property].toString(); };
+
+    REQUIRE (soundOf (drums, padFile) == juce::String ("Audio/Kick.wav"));
+    REQUIRE (soundOf (sampler, sampleFile) == juce::String ("Audio/Pluck.wav"));
+
+    // The project's copies gone, each found again elsewhere.
+    for (const auto& file : phazite::getProjectAudioFiles (test.context))
+        REQUIRE (file.file.deleteFile());
+
+    test.saveWithPluginStates();
+    REQUIRE_FALSE (test.getProject().hasUnsavedChanges());
+
+    const auto locate = [&] (phazite::DeviceID device, const juce::Identifier& property, const juce::String& path, const char* found)
+    {
+        const auto before = song.getUndoManager().getUndoDescription();
+        CHECK (phazite::locateAudioFile (test.context, path, phazite::test::writeSound (sounds.getChildFile (found), 0.1)));
+        phazite::test::waitForAudioWork (test.context); // copied into the project in the background
+        const auto located = "Audio/" + juce::String (found).fromLastOccurrenceOf ("/", false, false);
+        CHECK (soundOf (device, property) == located);
+        CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Locate Audio File"));
+        CHECK (test.getProject().hasUnsavedChanges());
+
+        // One step: its Undo puts the old path back, and the step before it is next; Redo the new.
+        phazite::undo (song);
+        CHECK (soundOf (device, property) == path);
+        CHECK (song.getUndoManager().getUndoDescription() == before);
+        phazite::redo (song);
+        CHECK (soundOf (device, property) == located);
+    };
+
+    locate (drums, padFile, "Audio/Kick.wav", "Found/Kick take 2.wav");
+    locate (sampler, sampleFile, "Audio/Pluck.wav", "Found/Pluck take 2.wav");
 }
 
 TEST_CASE ("One check of the missing files at a time: those asked for while one is held start one more, the newest")

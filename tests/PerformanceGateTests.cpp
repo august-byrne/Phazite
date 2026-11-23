@@ -831,6 +831,79 @@ TEST_CASE ("Performance gate: a tick of a device's knob, a chain's volume or a d
     CHECK (small[3].whole == 0);
 }
 
+TEST_CASE ("Performance gate: the plan after a device's knob moved on a song of 40 tracks reads that channel's devices one field at a "
+           "time, none whole")
+{
+    // The plan's compile reads what it plays of the song's devices from the elements it walks through, a field at a time
+    // through the conversion's readers of one field (model/base/internal/DevicesValue.h), never a device whole nor the song's
+    // devices whole (Mixer.h: getDevicesValue(), findDevice()): a drum sampler's whole value holds thousands of entries.
+    // On a song of 40 tracks, each with an instrument and an effect, the last with a drum sampler, an equalizer and a
+    // container with a delay in its chain: the plan after the equalizer's knob moved, which reads the values of that
+    // channel's three devices again (SongPlayer::countDevicesRead()) and no device whole (countDevicesReadAsValues()),
+    // walks the song to find a device no more often than before (countDeviceWalks()), and allocates no more than before.
+    using dev::DrumSampler;
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 40);
+
+    for (const auto track : tracks)
+    {
+        phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+        phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
+    }
+
+    const auto last = tracks.back();
+    phazite::test::setOwnInstrument (*song, last, DrumSampler::typeID);
+    const auto equalizer = phazite::getEffects (*song, last).front();
+    const auto container = phazite::addContainer (*song, last);
+    REQUIRE (container.isValid());
+    phazite::test::addOwnDeviceToChain (*song, phazite::getChains (*song, container).front(), dev::Delay::typeID);
+
+    phazite::SongPlayer player (*song);
+    REQUIRE (player.compile (44100.0, 512, std::nullopt) != nullptr);
+    const phazite::ParameterRef knob { equalizer, juce::String (std::string (dev::Equalizer::info.parameters[0].id)) };
+
+    const auto turn = [&song, &knob] (float value)
+    {
+        const phazite::UndoStep step (*song, "Turn Knob");
+        phazite::setValueSetByHand (*song, knob, value);
+    };
+
+    // Its first value set by hand, then another, each followed by a plan.
+    turn (0.25f);
+    REQUIRE (player.compile (44100.0, 512, std::nullopt) != nullptr);
+    turn (0.5f);
+    const auto devicesRead = phazite::SongPlayer::countDevicesRead();
+    const auto whole = phazite::countDevicesReadAsValues();
+    const auto walks = phazite::countDeviceWalks();
+    REQUIRE (player.compile (44100.0, 512, std::nullopt) != nullptr);
+    const auto read = phazite::SongPlayer::countDevicesRead() - devicesRead;
+    const auto readWhole = phazite::countDevicesReadAsValues() - whole;
+    const auto walked = phazite::countDeviceWalks() - walks;
+
+    turn (0.75f);
+    std::unique_ptr<phazite::engine::Plan> plan;
+    const auto allocations = phazite::test::countAllocations ([&player, &plan] { plan = player.compile (44100.0, 512, std::nullopt); });
+
+    MESSAGE ("The plan after a knob moved on 40 tracks: devices' values read " << read << ", devices read whole " << readWhole
+                                                                               << ", walks of the song " << walked << ", allocations "
+                                                                               << allocations.value_or (-1));
+    CHECK (read == 3); // the drum sampler, the equalizer and the delay
+    CHECK (readWhole == 0);
+    CHECK (walked == 0);
+
+    if (! allocations.has_value())
+        return; // nothing counted on this build, and nothing run
+
+    REQUIRE (plan != nullptr);
+
+    // Measured 2026-11-22 on Windows (MSVC's Debug build): 5,928 allocations before the compile read devices through the
+    // conversion, 5,840 after, the same in every run; no device read whole and no walk, before and after. Another standard
+    // library counts otherwise.
+#if JUCE_WINDOWS
+    CHECK (*allocations <= 5840);
+#endif
+}
+
 TEST_CASE ("Performance gate: the loader's rule for the devices allocates nothing for a song Phazite wrote, a full drum sampler's "
            "thousands of values among its devices")
 {

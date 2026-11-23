@@ -2,6 +2,7 @@
 #include "AutomationModel.h"
 #include "internal/Automation.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -41,7 +42,7 @@ namespace
     {
         using devices::DrumSampler;
 
-        if (! isDrumSampler (findDeviceState (song, parameter.device)))
+        if (! isDrumSampler (song, parameter.device))
             return -1;
 
         const auto index = devices::findParameter (DrumSampler::info, parameter.parameter.toStdString());
@@ -131,7 +132,7 @@ namespace
     // The track whose channel a device, a fader or a send is on (a container's devices' too).
     TrackID findChannel (const Song& song, DeviceID device)
     {
-        if (findDeviceState (song, device).isValid())
+        if (holdsDevice (song, device))
             return getDeviceChannel (song, device);
 
         if (const auto channel = findChannelOfFader (song, device); channel.isValid())

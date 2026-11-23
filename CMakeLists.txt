@@ -1371,6 +1371,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DeviceConformanceTests.cpp
         tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp
+        tests/DeviceReadersTests.cpp
         tests/DeviceStatesTests.cpp
         tests/DevicesValueTests.cpp
         tests/DevicesViewTests.cpp

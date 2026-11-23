@@ -2,6 +2,7 @@
 #include "MixHandle.h"
 #include "internal/MixHandle.h"
 #include "internal/Mixer.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/commands/internal/Undo.h"
 
 namespace phazite
@@ -16,7 +17,7 @@ struct MixHandle::Impl
     Song* findSong() const
     {
         auto* in = song.get();
-        return in != nullptr && findDeviceState (*in, device).isValid() ? in : nullptr;
+        return in != nullptr && holdsDevice (*in, device) ? in : nullptr;
     }
 };
 

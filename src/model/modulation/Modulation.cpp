@@ -3,6 +3,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/Numbers.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
@@ -72,19 +73,6 @@ namespace
     }
 
     //==============================================================================
-    // The element of an owner of modulators or macros (ModulationValue.h: ModulatorPlace): a container's, the master's or a
-    // track's; invalid for one the song hasn't.
-    juce::ValueTree findOwnerState (const Song& song, const ModulatorPlace& owner)
-    {
-        if (owner.container.isValid())
-        {
-            const auto container = findDeviceState (song, owner.container);
-            return container.hasType (schema::CONTAINER) ? container : juce::ValueTree();
-        }
-
-        return owner.onMaster ? findChainState (song, {}) : findTrackState (song, owner.track);
-    }
-
     // A channel's own place: the master's, or a track's.
     ModulatorPlace getChannelPlace (const Song& song, TrackID track)
     {
@@ -139,9 +127,10 @@ namespace
                 channel.hasType (schema::MASTER) ? ModulatorPlace { .onMaster = true } : ModulatorPlace { .track = getTrackID (channel) };
             each (place);
 
-            for (const auto& device : getDeviceStates (channel))
-                if (device.hasType (schema::CONTAINER))
-                    each ({ .track = place.track, .onMaster = place.onMaster, .container = getDeviceID (device) });
+            // Its containers, by their IDs (Mixer.h: getDeviceOutline()).
+            for (const auto& device : getDeviceOutline (song, place.onMaster ? TrackID() : place.track))
+                if (device.form == DeviceValue::Form::container && ! device.container.isValid())
+                    each ({ .track = place.track, .onMaster = place.onMaster, .container = device.id });
         }
     }
 
@@ -451,16 +440,24 @@ bool setAllModulation (Song& song, SongModulation next)
 
 std::optional<ModulatorPlace> findOwnerPlace (const Song& song, const ModulatorPlace& owner)
 {
-    // A container's: on the channel its element is on (the place as given for one whose channel the song's element doesn't
-    // say: a container in another's chain); a channel's own as given.
-    const auto state = findOwnerState (song, owner);
+    // A container's: on the channel the devices' place of it names (Mixer.h: findContainerPlace(), read without the
+    // container's value), or the place as given for one whose channel its place doesn't name (a container in another's
+    // chain); a channel's own as given, while the song has its element.
+    if (owner.container.isValid())
+    {
+        const auto container = findContainerPlace (song, owner.container);
 
-    if (! state.isValid())
+        if (! container.has_value())
+            return std::nullopt;
+
+        if (! container->onMaster && ! container->track.isValid())
+            return owner;
+
+        return ModulatorPlace { .track = container->track, .onMaster = container->onMaster, .container = owner.container };
+    }
+
+    if (! (owner.onMaster ? findChainState (song, {}) : findTrackState (song, owner.track)).isValid())
         return std::nullopt;
-
-    if (state.hasType (schema::CONTAINER))
-        if (const auto channel = readOwnerPlace (state))
-            return channel;
 
     return owner;
 }

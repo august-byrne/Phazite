@@ -12,6 +12,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
@@ -52,15 +53,20 @@ namespace
         return isTrackState (state) && ! isFolderState (state) && ! isReturnState (state);
     }
 
-    // Whether a device, or a device in a container, listens to another track through its sidechain.
-    bool listensToSidechain (const Song& song, const juce::ValueTree& device)
+    // Whether a device on a channel, or a device in a container on it, listens to another track through its sidechain: by
+    // their IDs, among the channel's outline (Mixer.h: getDeviceOutline()).
+    bool listensToSidechain (const Song& song, const std::vector<DeviceOutline>& outline, const DeviceOutline& device)
     {
-        if (getSidechainSource (song, getDeviceID (device)).isValid())
+        if (getSidechainSource (song, device.id).isValid())
             return true;
 
-        const auto inside = getDeviceStates (device);
-        return std::any_of (inside.begin(), inside.end(),
-                            [&song] (const juce::ValueTree& state) { return getSidechainSource (song, getDeviceID (state)).isValid(); });
+        return device.form == DeviceValue::Form::container
+               && std::any_of (outline.begin(), outline.end(),
+                               [&song, &device] (const DeviceOutline& inside)
+                               {
+                                   return inside.container == device.id && inside.form != DeviceValue::Form::chain
+                                          && getSidechainSource (song, inside.id).isValid();
+                               });
     }
 
     // Why a track can't be rendered on its own, frozen or bounced (what it would be, and what is done to it); empty if it
@@ -153,7 +159,7 @@ namespace
 
         for (const auto id : getFrozenDevices (song, track))
         {
-            if (! findDeviceState (song, id).hasType (schema::CONTAINER))
+            if (! isContainer (song, id))
                 continue;
 
             const auto macros = getOwnedModulators (song, { .track = track, .container = id });
@@ -168,17 +174,16 @@ namespace
     std::set<DeviceID> getFrozenCurveOwners (const Song& song, TrackID track)
     {
         std::set<DeviceID> devices;
+        const auto outline = getDeviceOutline (song, track);
 
+        // Each frozen device, and what is in a frozen container: its chains and their devices (Mixer.h: getDeviceOutline()).
         for (const auto id : getFrozenDevices (song, track))
         {
-            const auto device = findDeviceState (song, id);
             devices.insert (id);
 
-            for (const auto& inside : getDeviceStates (device))
-                devices.insert (getDeviceID (inside));
-
-            for (const auto& chain : getChainStates (device))
-                devices.insert (DeviceID::fromRaw ((std::uint64_t) (juce::int64) chain[schema::chainID]));
+            for (const auto& inside : outline)
+                if (inside.container == id)
+                    devices.insert (inside.id);
         }
 
         return devices;
@@ -302,8 +307,13 @@ namespace
     // Whether a track can be frozen through all its devices (none listens to another track): what Bounce in Place freezes.
     bool canFreezeWhole (const Song& song, TrackID track)
     {
-        const auto state = findTrackState (song, track);
-        return canRender (state) && getFrozenDevices (song, track).size() == getDeviceStates (state).size();
+        if (! canRender (findTrackState (song, track)))
+            return false;
+
+        const auto outline = getDeviceOutline (song, track);
+        const auto onChannel =
+            std::count_if (outline.begin(), outline.end(), [] (const DeviceOutline& each) { return ! each.container.isValid(); });
+        return getFrozenDevices (song, track).size() == (size_t) onChannel;
     }
 
     // A file's length in seconds, as JUCE's formats read it; 0 for one they can't.
@@ -320,17 +330,23 @@ namespace
 std::vector<DeviceID> getFrozenDevices (const Song& song, TrackID track)
 {
     std::vector<DeviceID> devices;
-    const auto state = findTrackState (song, track);
 
-    if (! canRender (state))
+    if (! canRender (findTrackState (song, track)))
         return devices;
 
-    for (const auto& device : getDeviceStates (state))
+    // Its devices and containers on its channel, by their IDs (Mixer.h: getDeviceOutline()), up to the first that listens to
+    // another track.
+    const auto outline = getDeviceOutline (song, track);
+
+    for (const auto& device : outline)
     {
-        if (listensToSidechain (song, device))
+        if (device.container.isValid())
+            continue;
+
+        if (listensToSidechain (song, outline, device))
             break;
 
-        devices.push_back (getDeviceID (device));
+        devices.push_back (device.id);
     }
 
     return devices;
@@ -371,19 +387,23 @@ void unfreeze (Song& song, TrackID track)
 
 bool isFrozenDevice (const Song& song, DeviceID id)
 {
-    auto device = findDeviceState (song, id);
-
-    // A device in a container is frozen with its container.
-    if (const auto container = getOwningContainer (device); container.isValid())
-        device = container;
-
-    const auto track = device.getParent();
+    // On a frozen track's channel (not the master's), by its ID and its place there (Mixer.h: getDeviceOutline()).
+    const auto channel = getDeviceChannel (song, id);
+    const auto track = findTrackState (song, channel);
 
     if (! isTrackState (track) || ! (bool) track[schema::trackFrozen])
         return false;
 
-    const auto frozen = getFrozenDevices (song, getTrackID (track));
-    return std::find (frozen.begin(), frozen.end(), getDeviceID (device)) != frozen.end();
+    // A device in a container is frozen with its container.
+    const auto outline = getDeviceOutline (song, channel);
+    const auto found = std::find_if (outline.begin(), outline.end(), [id] (const DeviceOutline& each) { return each.id == id; });
+
+    if (found == outline.end())
+        return false;
+
+    const auto device = found->container.isValid() ? found->container : id;
+    const auto frozen = getFrozenDevices (song, channel);
+    return std::find (frozen.begin(), frozen.end(), device) != frozen.end();
 }
 
 std::vector<TrackID> getFrozenTracks (const Song& song)

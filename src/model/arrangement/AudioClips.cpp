@@ -8,6 +8,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/engine/AudioFiles.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
@@ -1001,22 +1002,6 @@ std::vector<ClipID> getAudioClips (const Song& song)
     return clips;
 }
 
-namespace
-{
-    // The devices' sound files an element of the song names, and those of what it holds (the song's tree holds no clip).
-    void addSoundFilePaths (const juce::ValueTree& element, juce::StringArray& paths)
-    {
-        if (element.hasType (schema::SOUNDS))
-            for (int i = 0; i < element.getNumProperties(); ++i)
-                if (const auto property = element.getPropertyName (i); schema::isSoundFileProperty (property))
-                    if (const auto path = element[property].toString(); path.isNotEmpty())
-                        paths.addIfNotAlreadyThere (path);
-
-        for (const auto& child : element)
-            addSoundFilePaths (child, paths);
-    }
-} // namespace
-
 juce::StringArray findAudioFilePaths (const Song& song)
 {
     juce::StringArray paths;
@@ -1025,7 +1010,10 @@ juce::StringArray findAudioFilePaths (const Song& song)
         if (clip.sound.file.isNotEmpty())
             paths.addIfNotAlreadyThere (clip.sound.file);
 
-    addSoundFilePaths (song.getState(), paths);
+    // The devices' sound files, by their devices' IDs (Mixer.h: getDeviceSoundFiles()).
+    for (const auto& sound : getDeviceSoundFiles (song))
+        paths.addIfNotAlreadyThere (sound.path);
+
     return paths;
 }
 

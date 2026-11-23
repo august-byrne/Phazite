@@ -378,9 +378,9 @@ private:
     std::shared_ptr<engine::DeviceNode> getPluginDevice (const juce::ValueTree& deviceState);
     static int findParameter (const engine::DeviceNode&, const juce::String& id); // its index, or -1
 
-    // A device's values set by hand, in its description's order, as the song holds them (readValueSetByHand()), each
-    // parameter's name made once for each kind of device: a juce::Identifier made from a string is looked up in JUCE's pool
-    // of names, under a lock, which was most of a big song's compile (known bug 145).
+    // A device's values set by hand, in its description's order, as the song holds them (DevicesValue.h:
+    // readDeviceParameterValue()), each parameter's name made once for each kind of device: a juce::Identifier made from a
+    // string is looked up in JUCE's pool of names, under a lock, which was most of a big song's compile (known bug 145).
     std::map<const devices::DeviceInfo*, std::vector<juce::Identifier>> parameterNames;
     std::vector<float> readValues (const devices::DeviceInfo&, const juce::ValueTree& deviceState);
     void checkValues (const engine::DeviceNode&, const juce::ValueTree& deviceState); // kept ones, while checking

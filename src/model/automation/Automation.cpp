@@ -2,6 +2,7 @@
 #include "internal/Automation.h"
 #include "engine/automation/Curve.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
 #include "model/devices/internal/Devices.h"
@@ -478,8 +479,7 @@ namespace
     // parameter now (a plug-in that isn't installed, or doesn't load, knows none of its own).
     bool isCurveOwnerThere (const Song& song, DeviceID owner)
     {
-        return findDeviceState (song, owner).isValid() || getSendValue (song, owner).has_value()
-               || findChannelOfFader (song, owner).isValid() || findContainerChain (song, owner).isValid();
+        return holdsDevice (song, owner, true) || getSendValue (song, owner).has_value() || findChannelOfFader (song, owner).isValid();
     }
 
     // The parameters the song has curves for whose devices are there, a plug-in's that isn't loaded too; not those of
@@ -610,22 +610,11 @@ namespace
         for (const auto& send : getSendValues (song, track))
             ids.push_back (send.id);
 
-        for (const auto& device : getDeviceStates (state))
-        {
-            if (! device.hasType (schema::CONTAINER))
-            {
-                ids.push_back (getDeviceID (device));
-                continue;
-            }
-
-            for (const auto& chain : getChainStates (device))
-            {
-                ids.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) chain[schema::chainID]));
-
-                for (const auto& inside : getDeviceStates (chain))
-                    ids.push_back (getDeviceID (inside));
-            }
-        }
+        // Its devices, its containers' chains and their devices, in their order (Mixer.h: getDeviceOutline()), a track's the song
+        // has.
+        for (const auto& device : state.isValid() ? getDeviceOutline (song, track) : std::vector<DeviceOutline>())
+            if (device.form != DeviceValue::Form::container)
+                ids.push_back (device.id);
 
         return ids;
     }
@@ -640,7 +629,7 @@ namespace
         if (parameter.parameter == "pan" || parameter.parameter == "master pan")
             return 1;
 
-        if (const auto* info = findOwnDevice (findDeviceState (song, parameter.device)[schema::deviceType].toString().toStdString()))
+        if (const auto* info = getOwnDeviceInfo (song, parameter.device))
             if (const auto index = devices::findParameter (*info, parameter.parameter.toStdString()); index >= 0)
                 return index;
 
@@ -778,46 +767,40 @@ std::vector<ParameterRef> getAutomatableParameters (const Song& song, TrackID tr
     for (const auto send : getSends (song, track))
         parameters.push_back ({ send, schema::sendLevelParameter });
 
-    // Each device's (those in its containers after each container). A device's mix (Mixer.h: getMix()) is its own knob, not
-    // one of these; a container has no parameters of its own.
-    const auto addParametersOf = [&] (DeviceID device)
+    // Each device's, in the channel's order (Mixer.h: getDeviceOutline()): a container's chains after it, each its volume and
+    // pan (and a band's crossover), then its devices'. A device's mix (Mixer.h: getMix()) is its own knob, not one of these;
+    // a container has no parameters of its own.
+    for (const auto& device : getDeviceOutline (song, track))
     {
-        const auto state = findDeviceState (song, device);
-
-        if (isContainerState (state))
-            return;
-
-        // A plug-in's, as its instance lists them, by their own IDs: those it lets be automated.
-        if (isPluginState (state))
+        switch (device.form)
         {
-            if (auto* instance = findPluginInstance (song, device))
-                for (const auto& info : instance->getParameterInfos())
-                    if (info.isAutomatable)
-                        parameters.push_back ({ device, info.id });
+            case DeviceValue::Form::container:
+                break;
 
-            return;
-        }
+            case DeviceValue::Form::chain:
+                for (const auto* parameter : { schema::chainVolumeParameter, schema::chainPanParameter, schema::crossoverParameter })
+                    if (locateParameter (song, { device.id, parameter }).has_value())
+                        parameters.push_back ({ device.id, parameter });
 
-        // One of Phazite's own devices', in its description's order.
-        if (const auto* own = findOwnDevice (state[schema::deviceType].toString().toStdString()))
-            for (const auto& info : own->parameters)
-                if (own->kind == devices::DeviceKind::instrument || info.id != devices::mixParameterID)
-                    parameters.push_back ({ device, juce::String (info.id.data(), info.id.size()) });
-    };
+                break;
 
-    for (const auto device : getDevices (song, track))
-    {
-        addParametersOf (device);
+            // A plug-in's, as its instance lists them, by their own IDs: those it lets be automated.
+            case DeviceValue::Form::plugin:
+                if (auto* instance = findPluginInstance (song, device.id))
+                    for (const auto& info : instance->getParameterInfos())
+                        if (info.isAutomatable)
+                            parameters.push_back ({ device.id, info.id });
 
-        // A container's chains, each its volume and pan (and a band's crossover), then its devices'.
-        for (const auto containerChain : getChains (song, device))
-        {
-            for (const auto* parameter : { schema::chainVolumeParameter, schema::chainPanParameter, schema::crossoverParameter })
-                if (locateParameter (song, { containerChain, parameter }).has_value())
-                    parameters.push_back ({ containerChain, parameter });
+                break;
 
-            for (const auto inside : getChainDevices (song, containerChain))
-                addParametersOf (inside);
+            // One of Phazite's own devices', in its description's order.
+            case DeviceValue::Form::own:
+                if (const auto* own = findOwnDevice (device.type.toStdString()))
+                    for (const auto& info : own->parameters)
+                        if (own->kind == devices::DeviceKind::instrument || info.id != devices::mixParameterID)
+                            parameters.push_back ({ device.id, juce::String (info.id.data(), info.id.size()) });
+
+                break;
         }
     }
 

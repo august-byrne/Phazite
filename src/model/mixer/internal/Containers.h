@@ -30,15 +30,16 @@ std::vector<DeviceID> getContainerDevices (const Song&, DeviceID container);
 DeviceID findContainerOf (const Song&, DeviceID device);
 
 //==============================================================================
-// Chains (Schema.h: CHAIN). A container's chains' elements, in their order; whether an element is a chain's; a chain's
-// element by its ID, invalid for one the song hasn't; and the container's element a chain's, or a device's in a chain, is
-// in (invalid for any other). For the containers' writers, the conversion's readers of one field (model/base/internal/
-// DevicesValue.h) and the readers outside the devices' own code that the devices' next piece moves (roadmap step S5.20); a
-// new reader reads by ID below, each of which reads its fields through the conversion. The other functions here that take
-// an element (keepCrossoversInOrder(), canHoldInChain(), insertIntoChain(), makeContainerState(), makeChainState()) are the
-// writers'.
+// Chains (Schema.h: CHAIN). A container's chains' elements, in their order; a chain's element by its ID, invalid for one the
+// song hasn't; and the container's element a chain's, or a device's in a chain, is in (invalid for any other). For the
+// devices' own code alone, no reader outside it (roadmap step S5.20, the devices' second piece; a reader reads by ID below,
+// each of which reads its fields through the conversion: model/base/internal/DevicesValue.h). Their callers:
+// getChainStates() the containers' code, the parameters' (model/devices/Parameters.cpp) and a preset's makers (on the
+// elements they make); findContainerChain() the mixer's, the containers' and the parameters' code, and the loader
+// (model/project/Project.cpp, keepCurves()) and the tests' helpers; getOwningContainer() the containers' and the sidechains'
+// code. The other functions here that take an element (keepCrossoversInOrder(), insertIntoChain(), makeContainerState(),
+// makeChainState()) are the writers'.
 std::vector<juce::ValueTree> getChainStates (const juce::ValueTree& container);
-bool isChainState (const juce::ValueTree&);
 juce::ValueTree findContainerChain (const Song&, DeviceID chain);
 juce::ValueTree getOwningContainer (const juce::ValueTree& chainOrDevice);
 
@@ -154,7 +155,6 @@ void setContainerName (Song&, DeviceID container, const juce::String&);
 // a container of effects. Moving one to another place in its chain (an instrument stays first), or into another chain of
 // its container at a place among its devices (-1 for the end). Each joins the caller's step, and returns the device, or
 // none. (Removing one is removeDevice() in Mixer.h, as for any device.)
-bool canHoldInChain (const Song&, DeviceID chain, const juce::ValueTree& device);
 DeviceID insertIntoChain (Song&, DeviceID chain, juce::ValueTree device, int index = -1);
 void moveInChain (Song&, DeviceID device, int newIndex);
 DeviceID moveToChain (Song&, DeviceID device, DeviceID chain, int index = -1);

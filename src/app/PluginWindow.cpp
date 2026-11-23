@@ -2,6 +2,7 @@
 #include "PluginWindow.h"
 #include "SandboxedEditor.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
@@ -47,10 +48,10 @@ namespace
         {
             if (const auto* song = findSong (context))
             {
-                if (const auto device = findDeviceState (*song, id); isPluginState (device))
+                if (const auto device = findDevice (*song, id); device.has_value() && device->isPlugin())
                 {
                     name = getDeviceName (*song, id);
-                    identity = getIdentity (getPluginIdentity (device));
+                    identity = getIdentity (toDescription (device->plugin));
                 }
             }
         }
@@ -106,7 +107,7 @@ namespace
                 return false;
 
             const auto* song = findSong (context);
-            return song != nullptr && findDeviceState (*song, id).isValid();
+            return song != nullptr && holdsDevice (*song, id);
         }
 
         // Its folder among the user's presets, named after it in the plug-ins' folder (PresetModel.h: getPresetFolderName()).
@@ -315,7 +316,7 @@ namespace
             // is frozen, shows nothing: its window goes. (This deletes the window, which a timer's callback may do.)
             auto* shown = song.get();
 
-            if (shown == nullptr || ! findDeviceState (*shown, id).isValid() || isFrozenDevice (*shown, id) || ! refresh (*shown))
+            if (shown == nullptr || ! holdsDevice (*shown, id) || isFrozenDevice (*shown, id) || ! refresh (*shown))
                 owner.close (id);
         }
 
@@ -580,7 +581,7 @@ void DeviceWindows::show (DeviceID id)
 
     auto* song = findSong (context);
 
-    if (song == nullptr || ! findDeviceState (*song, id).isValid() || isFrozenDevice (*song, id))
+    if (song == nullptr || ! holdsDevice (*song, id) || isFrozenDevice (*song, id))
         return;
 
     // Asked again while it opens: the wait given up (a helper alive that never makes the editor kept it for ever: the second
@@ -637,7 +638,7 @@ void DeviceWindows::lookAtOpening()
         const auto id = it->first;
         auto& waiting = it->second;
 
-        if (song == nullptr || session == nullptr || ! findDeviceState (*song, id).isValid() || isFrozenDevice (*song, id))
+        if (song == nullptr || session == nullptr || ! holdsDevice (*song, id) || isFrozenDevice (*song, id))
         {
             it = opening.erase (it);
             continue;
@@ -691,7 +692,7 @@ void DeviceWindows::editorMade (DeviceID id, std::unique_ptr<SandboxedEditor> ma
     auto* song = findSong (context);
     auto* session = song != nullptr ? findSession (*song) : nullptr;
 
-    if (session == nullptr || ! findDeviceState (*song, id).isValid())
+    if (session == nullptr || ! holdsDevice (*song, id))
         return;
 
     // Whatever came, editor or none, of an instance the song no longer has (an undo or a redo replaced it before the timer

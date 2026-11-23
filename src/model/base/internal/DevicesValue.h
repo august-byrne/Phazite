@@ -42,6 +42,8 @@
 
 namespace phazite
 {
+class Song;
+
 // Where a device, a container or a chain is: its channel, a track's by its ID (a track's, a folder's made a bus or a
 // return's) or the master's by a flag, never its ID (which a version applied sets anew: the MASTER is one by its type); and
 // for what is in a container, the container, and for a device in a chain, the chain. The list that holds it: a chain's for a
@@ -300,9 +302,27 @@ float readDeviceParameterValue (const juce::ValueTree& device, const devices::Pa
 juce::String readDeviceSound (const juce::ValueTree& device, const juce::Identifier& property);
 juce::String readSoundsProperty (const juce::ValueTree& sounds, const juce::Identifier& property);
 
+// Phazite's own device's SOUNDS as the element holds it, what the sounds' loaders take (model/devices/internal/DrumKit.h:
+// loadPadSound(), SamplerSound.h, Wavetables.h) and what reads the sound files a device names (Mixer.h:
+// getDeviceSoundFiles()); an invalid tree for none.
+juce::ValueTree readDeviceSounds (const juce::ValueTree& device);
+
+// What the value doesn't cover, the store's (the top of this header), read where the element is in hand: a chain's mute
+// and solo (chainMute, chainSolo), which what plays the song reads as it compiles a plan (model/playback/SongPlayer.cpp).
+bool readChainMute (const juce::ValueTree& chain);
+bool readChainSolo (const juce::ValueTree& chain);
+
 // The IDs of what an owner's element lists, in its order (readDeviceElementID()): a TRACK's or the MASTER's DEVICEs and
 // CONTAINERs, a CONTAINER's CHAINs, a CHAIN's DEVICEs; none for another element.
 std::vector<DeviceID> readDeviceList (const juce::ValueTree& owner);
+
+// Whether a song holds a device or a container with this ID, and with chainsToo a container's chain too (an invalid ID: no),
+// without a value made of its devices and without an allocation: what the selection asks of the devices it names and of an
+// automation point's owner (Selection.h), and what the readers outside the devices' own code ask of a device by its ID
+// (Mixer.h: hasDevice(), which counts a chain). While the song's tree holds its devices, a walk of each track's and the
+// master's devices and containers and of each container's chains, counted as findDeviceState()'s is (Mixer.h:
+// countDeviceWalks()).
+bool holdsDevice (const Song&, DeviceID, bool chainsToo = false);
 
 //==============================================================================
 // The properties of one of Phazite's own devices' SOUNDS (Schema.h), in their order, by which a device's value holds its

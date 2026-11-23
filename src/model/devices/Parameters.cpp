@@ -712,9 +712,4 @@ void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& 
             element.removeChild (values, undo);
     }
 }
-
-float readValueSetByHand (const juce::ValueTree& element, const devices::ParameterInfo& info)
-{
-    return readSavedValue (info, element.getChildWithName (schema::VALUES).getProperty (juce::Identifier (toString (info.id))));
-}
 } // namespace phazite

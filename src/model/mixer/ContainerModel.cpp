@@ -91,7 +91,7 @@ namespace
 
     bool isChain (const Song& song, DeviceID chain)
     {
-        return findContainerChain (song, chain).isValid();
+        return getChainContainer (song, chain).isValid();
     }
 } // namespace
 

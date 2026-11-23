@@ -4,11 +4,13 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
 #include "model/base/Numbers.h"
+#include "model/base/Song.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mixer/internal/Mixer.h"
 
 #include <algorithm>
 #include <atomic>
@@ -41,6 +43,13 @@ namespace
     const devices::DeviceInfo* findInfo (const juce::String& type)
     {
         return type.isEmpty() ? nullptr : findOwnDevice (std::string_view (type.toRawUTF8()));
+    }
+
+    // An ID an element holds or names, as readID() reads one (a number or text): a number's own value, with no text made of it
+    // (the compile reads every device's ID and sidechain at each plan, the selection at each check, a control at each tick).
+    std::uint64_t readIDOf (const juce::var& held)
+    {
+        return held.isInt() || held.isInt64() ? (std::uint64_t) (juce::int64) held : readID (held);
     }
 
     // A number as the song reads one (SongText.h: readValueNumber()), or `otherwise` for none and what is no finite number.
@@ -1042,7 +1051,7 @@ DevicePlace readDevicePlace (const juce::ValueTree& element)
     if (parent.hasType (schema::MASTER))
         place.onMaster = true;
     else if (parent.hasType (schema::TRACK))
-        place.track = TrackID::fromRaw (readID (parent[schema::trackID]));
+        place.track = TrackID::fromRaw (readIDOf (parent[schema::trackID]));
 
     return place;
 }
@@ -1419,10 +1428,11 @@ bool setDeviceProperty (DeviceValue& value, const juce::Identifier& element, con
 DeviceID readDeviceElementID (const juce::ValueTree& element)
 {
     if (element.hasType (schema::CHAIN))
-        return DeviceID::fromRaw (readID (element[schema::chainID]));
+        return DeviceID::fromRaw (readIDOf (element[schema::chainID]));
 
-    return element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) ? DeviceID::fromRaw (readID (element[schema::deviceID]))
-                                                                                   : DeviceID();
+    return element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER)
+               ? DeviceID::fromRaw (readIDOf (element[schema::deviceID]))
+               : DeviceID();
 }
 
 juce::String readDeviceType (const juce::ValueTree& device)
@@ -1437,7 +1447,7 @@ bool readDeviceOff (const juce::ValueTree& element)
 
 TrackID readDeviceSidechain (const juce::ValueTree& device)
 {
-    return device.hasType (schema::DEVICE) ? TrackID::fromRaw (readID (device[schema::deviceSidechain])) : TrackID();
+    return device.hasType (schema::DEVICE) ? TrackID::fromRaw (readIDOf (device[schema::deviceSidechain])) : TrackID();
 }
 
 float readDeviceMix (const juce::ValueTree& element)
@@ -1554,6 +1564,21 @@ juce::String readSoundsProperty (const juce::ValueTree& sounds, const juce::Iden
     return sounds.hasType (schema::SOUNDS) ? sounds[property].toString() : juce::String();
 }
 
+juce::ValueTree readDeviceSounds (const juce::ValueTree& device)
+{
+    return device.hasType (schema::DEVICE) ? device.getChildWithName (schema::SOUNDS) : juce::ValueTree();
+}
+
+bool readChainMute (const juce::ValueTree& chain)
+{
+    return chain.hasType (schema::CHAIN) && (bool) chain[schema::chainMute];
+}
+
+bool readChainSolo (const juce::ValueTree& chain)
+{
+    return chain.hasType (schema::CHAIN) && (bool) chain[schema::chainSolo];
+}
+
 std::vector<DeviceID> readDeviceList (const juce::ValueTree& owner)
 {
     std::vector<DeviceID> ids;
@@ -1573,6 +1598,62 @@ std::vector<DeviceID> readDeviceList (const juce::ValueTree& owner)
             ids.push_back (readDeviceElementID (child));
 
     return ids;
+}
+
+bool holdsDevice (const Song& song, DeviceID id, bool chainsToo)
+{
+    if (! id.isValid())
+        return false;
+
+    countDeviceWalk(); // a walk of the song, counted as findDeviceState() counts its own (Mixer.h: countDeviceWalks())
+
+    const auto isIt = [id] (const juce::ValueTree& element) { return readDeviceElementID (element) == id; };
+
+    // A channel's devices and containers, a container's chains and their devices.
+    const auto holdsIn = [&isIt, chainsToo] (const juce::ValueTree& channel)
+    {
+        for (const auto& child : channel)
+        {
+            const auto form = readDeviceForm (child);
+
+            if (! form.has_value() || *form == Form::chain)
+                continue;
+
+            if (isIt (child))
+                return true;
+
+            if (*form != Form::container)
+                continue;
+
+            for (const auto& chain : child)
+            {
+                if (readDeviceForm (chain) != Form::chain)
+                    continue;
+
+                if (chainsToo && isIt (chain))
+                    return true;
+
+                for (const auto& device : chain)
+                    if (const auto inside = readDeviceForm (device); (inside == Form::own || inside == Form::plugin) && isIt (device))
+                        return true;
+            }
+        }
+
+        return false;
+    };
+
+    // Each track's, in the track list and in the folders in it, then the master's.
+    const auto holdsInTracks = [&holdsIn] (const juce::ValueTree& list, auto& holdsInNext) -> bool
+    {
+        for (const auto& child : list)
+            if (child.hasType (schema::TRACK) && (holdsIn (child) || holdsInNext (child, holdsInNext)))
+                return true;
+
+        return false;
+    };
+
+    const auto state = song.getState();
+    return holdsInTracks (state.getChildWithName (schema::TRACKS), holdsInTracks) || holdsIn (state.getChildWithName (schema::MASTER));
 }
 
 //==============================================================================

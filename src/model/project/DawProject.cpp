@@ -11,6 +11,7 @@
 #include "model/base/Numbers.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SongText.h"
@@ -116,21 +117,21 @@ namespace
     }
 
     // Whether another DAW plays a device: a VST3 plug-in.
-    bool isVst3 (const juce::ValueTree& device)
+    bool isVst3 (const DeviceOutline& device)
     {
-        return device.hasType (schema::DEVICE) && device[schema::deviceType].toString() == schema::deviceIsPlugin
-               && device[schema::pluginFormat].toString() == "VST3";
+        return device.form == DeviceValue::Form::plugin && device.plugin.format == "VST3";
     }
 
-    // What of a track another DAW can't play, which its bounce plays: why, or nothing. Its modulation (Modulation.h) and its
-    // clips read by their IDs (Clips.h), after its other parts.
+    // What of a track another DAW can't play, which its bounce plays: why, or nothing. Its devices (a container, or a device
+    // that is no VST3), its modulation (Modulation.h) and its clips read by their IDs (Mixer.h, Clips.h), after its other
+    // parts.
     juce::String findWhyBounced (const Song& song, const juce::ValueTree& track)
     {
         if ((bool) track[schema::trackFrozen])
             return "frozen";
 
-        for (const auto& child : track)
-            if (child.hasType (schema::CONTAINER) || (child.hasType (schema::DEVICE) && ! isVst3 (child)))
+        for (const auto& device : getDeviceOutline (song, getTrackID (track)))
+            if (! device.container.isValid() && (device.form == DeviceValue::Form::container || ! isVst3 (device)))
                 return "devices";
 
         if (hasModulations (song, getTrackID (track)))
@@ -432,25 +433,27 @@ namespace
             }
         }
 
+        // A channel's devices by their IDs (Mixer.h: getDeviceOutline()), a VST3 written from its whole copy, as the song holds
+        // it (copyWholeDevice()).
         void writeDevices (juce::XmlElement& channel, const juce::ValueTree& track, const juce::String& where)
         {
             juce::XmlElement* devices = nullptr;
 
-            for (const auto& device : track)
+            for (const auto& device : getDeviceOutline (song, getTrackID (track)))
             {
-                if (! device.hasType (schema::DEVICE) && ! device.hasType (schema::CONTAINER))
+                if (device.container.isValid())
                     continue;
 
                 if (! isVst3 (device))
                 {
-                    leftOut.addIfNotAlreadyThere (where + "'s " + getDeviceName (device));
+                    leftOut.addIfNotAlreadyThere (where + "'s " + getDeviceName (song, device.id));
                     continue;
                 }
 
                 if (devices == nullptr)
                     devices = channel.createNewChildElement ("Devices");
 
-                writePlugin (*devices, device);
+                writePlugin (*devices, copyWholeDevice (song, device.id));
             }
         }
 
@@ -671,9 +674,9 @@ namespace
             const auto fader = readID (track[schema::channelFader]);
             std::set<std::uint64_t> pluginIDs, sendIDs;
 
-            for (const auto& child : track)
-                if (isVst3 (child))
-                    pluginIDs.insert (readID (child[schema::deviceID]));
+            for (const auto& device : getDeviceOutline (song, getTrackID (track)))
+                if (! device.container.isValid() && isVst3 (device))
+                    pluginIDs.insert (device.id.getRaw());
 
             for (const auto& send : getSendValues (song, TrackID::fromRaw (readID (track[schema::trackID]))))
                 sendIDs.insert (send.id.getRaw());

@@ -8,11 +8,13 @@
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AppInfo.h"
 #include "model/mixer/FreezeModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/transport/internal/Recording.h"
@@ -2779,15 +2781,17 @@ juce::String VersionHistory::findMergeLeftOn (const BranchRecord& branch) const
 
 PluginParameterValues VersionHistory::readPluginParameters() const
 {
+    // The song's plug-ins by their IDs (Mixer.h: getSongDeviceOutline()), those in containers too.
     PluginParameterValues values;
-    std::vector<juce::ValueTree> plugins;
-    findPlugins (song.getState(), plugins);
 
-    for (const auto& plugin : plugins)
+    for (const auto& plugin : getSongDeviceOutline (song))
     {
-        const auto id = readID (plugin[schema::deviceID]);
+        if (plugin.form != DeviceValue::Form::plugin)
+            continue;
 
-        if (auto* instance = findPluginInstance (song, DeviceID::fromRaw (id)))
+        const auto id = plugin.id.getRaw();
+
+        if (auto* instance = findPluginInstance (song, plugin.id))
         {
             auto& parameters = values[id];
             const auto& infos = instance->getParameterInfos();
@@ -3454,22 +3458,17 @@ void VersionHistory::takeChangesOutsideHistory()
             return;
         }
 
-        std::vector<juce::ValueTree> plugins;
-        findPlugins (song.getState(), plugins);
+        // Each moved plug-in's channel, by the song's plug-ins' IDs (Mixer.h: getSongDeviceOutline()).
         std::set<std::uint64_t> placed;
 
-        for (const auto& plugin : plugins)
+        for (const auto& plugin : getSongDeviceOutline (song))
         {
-            if (const auto device = readID (plugin[schema::deviceID]); moved.count (device) > 0)
+            if (const auto device = plugin.id.getRaw(); plugin.form == DeviceValue::Form::plugin && moved.count (device) > 0)
             {
-                for (auto element = plugin.getParent(); element.isValid(); element = element.getParent())
+                if (const auto channel = findTrackState (song, plugin.channel); channel.isValid())
                 {
-                    if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
-                    {
-                        markTrack (element, false);
-                        placed.insert (device);
-                        break;
-                    }
+                    markTrack (channel, false);
+                    placed.insert (device);
                 }
             }
         }

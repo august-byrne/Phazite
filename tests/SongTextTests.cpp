@@ -3,6 +3,7 @@
 // same in a project file and in a version's pieces; bytes in standard base 64; and XML that any XML reader takes.
 #include "TestHelpers.h"
 #include "devices/modulation/Modulators.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/devices/internal/Devices.h"
@@ -358,7 +359,7 @@ TEST_CASE ("Every choice of Phazite's devices and modulators is saved by a name 
                        == juce::String::fromUTF8 (phazite::devices::getChoiceName (parameter, i).data(),
                                                   (int) phazite::devices::getChoiceName (parameter, i).size()));
 
-            CHECK (phazite::readValueSetByHand (element, parameter) == doctest::Approx (value));
+            CHECK (phazite::readDeviceParameterValue (element, parameter) == doctest::Approx (value));
         }
     }
 }

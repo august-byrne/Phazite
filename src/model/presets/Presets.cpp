@@ -6,6 +6,7 @@
 #include "model/base/Json.h"
 #include "model/base/Numbers.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
@@ -68,12 +69,12 @@ namespace
     }
 
     //==============================================================================
-    // The description of one of Phazite's own devices an element names, or nullptr (a plug-in, a container).
+    // The description of one of Phazite's own devices an element names (a whole copy's, or one a preset made), or nullptr (a
+    // plug-in, a container); read through the devices' conversion (DevicesValue.h). One the song holds is by its ID (Mixer.h:
+    // getOwnDeviceInfo()).
     const devices::DeviceInfo* findOwnInfo (const juce::ValueTree& device)
     {
-        return device.hasType (schema::DEVICE) && ! isPluginState (device)
-                   ? findOwnDevice (device[schema::deviceType].toString().toStdString())
-                   : nullptr;
+        return readDeviceForm (device) == DeviceValue::Form::own ? findOwnDevice (readDeviceType (device).toStdString()) : nullptr;
     }
 
     // A value as a preset holds it: a choice by its name, as the song keeps it (model/devices/internal/Parameters.h:
@@ -122,20 +123,21 @@ namespace
     }
 
     //==============================================================================
-    // A device as a preset holds it: its values set by hand, not what automation or modulation played; its sound files by
-    // their full paths; nothing that ties it to its project (its automation, what modulates it, its sidechain, whether it
-    // is on). Void for an element that is neither one of Phazite's own devices nor a plug-in.
+    // A device as a preset holds it, read from its whole copy (Mixer.h: copyWholeDevice()), never the song's own element: its
+    // values set by hand, not what automation or modulation played; its sound files by their full paths; nothing that ties
+    // it to its project (its automation, what modulates it, its sidechain, whether it is on). Void for an element that is
+    // neither one of Phazite's own devices nor a plug-in.
     juce::var describeDevice (const Song& song, const juce::ValueTree& device)
     {
-        const auto id = getDeviceID (device);
+        const auto id = readDeviceElementID (device);
         const auto* own = findOwnInfo (device);
 
-        if (own == nullptr && ! isPluginState (device))
+        if (own == nullptr && readDeviceForm (device) != DeviceValue::Form::plugin)
             return {};
 
         auto preset = makeObject();
         set (preset, keys::name, getDeviceName (song, id));
-        set (preset, keys::instrument, isInstrumentState (device));
+        set (preset, keys::instrument, readIsInstrument (device));
 
         if (own != nullptr)
         {
@@ -146,7 +148,7 @@ namespace
 
             for (const auto& parameter : own->parameters)
                 set (parameters, juce::Identifier (toString (parameter.id)),
-                     toPresetValue (parameter, readValueSetByHand (device, parameter)));
+                     toPresetValue (parameter, readDeviceParameterValue (device, parameter)));
 
             set (preset, keys::parameters, parameters);
 
@@ -168,7 +170,7 @@ namespace
 
         // A plug-in: which one it is, and what it keeps of its own (its state and its program, stored into its element as
         // the caller stored the song's devices), and its mix.
-        const auto description = getPluginIdentity (device);
+        const auto description = toDescription (readPluginIdentity (device));
         const auto identity = makeObject();
         set (identity, keys::format, description.pluginFormatName);
         set (identity, keys::name, description.name);
@@ -215,27 +217,51 @@ namespace
         return preset;
     }
 
+    // A whole copy's chains (a container's CHAINs, read through the devices' conversion: DevicesValue.h), in their order; and
+    // a chain's devices and containers (a container in a chain, which no edit makes and the loader takes away, among them).
+    std::vector<juce::ValueTree> getChainsOf (const juce::ValueTree& container)
+    {
+        std::vector<juce::ValueTree> chains;
+
+        for (const auto& child : container)
+            if (readDeviceForm (child) == DeviceValue::Form::chain)
+                chains.push_back (child);
+
+        return chains;
+    }
+
+    std::vector<juce::ValueTree> getDevicesOf (const juce::ValueTree& chain)
+    {
+        std::vector<juce::ValueTree> devices;
+
+        for (const auto& child : chain)
+            if (const auto form = readDeviceForm (child); form.has_value() && *form != DeviceValue::Form::chain)
+                devices.push_back (child);
+
+        return devices;
+    }
+
     // Where a parameter is among a container's chains, as a preset names it, written into the target: "chain", its chain's
     // index, with its device's index among the chain's (under deviceKey), or none for the chain's own volume, pan or
-    // crossover. False for one that is in none of them.
+    // crossover. False for one that is in none of them. Of the container's whole copy (Mixer.h: copyWholeDevice()).
     bool locateInChains (const juce::ValueTree& container, const juce::var& target, const ParameterRef& parameter,
                          const juce::Identifier& deviceKey)
     {
-        const auto chains = getChainStates (container);
+        const auto chains = getChainsOf (container);
 
         for (size_t c = 0; c < chains.size(); ++c)
         {
-            if ((std::uint64_t) (juce::int64) chains[c][schema::chainID] == parameter.device.getRaw())
+            if (readDeviceElementID (chains[c]) == parameter.device)
             {
                 set (target, keys::chain, (int) c);
                 return true;
             }
 
-            const auto devices = getDeviceStates (chains[c]);
+            const auto devices = getDevicesOf (chains[c]);
 
             for (size_t d = 0; d < devices.size(); ++d)
             {
-                if (getDeviceID (devices[d]) == parameter.device)
+                if (readDeviceElementID (devices[d]) == parameter.device)
                 {
                     set (target, keys::chain, (int) c);
                     set (target, deviceKey, (int) d);
@@ -248,23 +274,25 @@ namespace
     }
 
     // A container: its chains, each with its devices, its volume and pan, its mute and solo, its crossover and the notes it
-    // plays; its kind, split and mix; and its macros with what they modulate in it.
+    // plays; its kind, split and mix; and its macros with what they modulate in it. Read from its whole copy (Mixer.h:
+    // copyWholeDevice()), never the song's own element.
     juce::var describeContainer (const Song& song, const juce::ValueTree& container)
     {
+        const auto id = readDeviceElementID (container);
         auto preset = makeObject();
         set (preset, keys::name, container[schema::containerName].toString());
 
         if ((bool) container[schema::containerInstrument])
             set (preset, keys::instrument, true);
         else
-            set (preset, keys::mix, getMix (song, getDeviceID (container)));
+            set (preset, keys::mix, getMix (song, id));
 
         if (const auto split = container[schema::containerSplit].toString(); split.isNotEmpty())
             set (preset, keys::split, split);
 
         juce::Array<juce::var> chainPresets, macroPresets;
 
-        for (const auto& chain : getChainStates (container))
+        for (const auto& chain : getChainsOf (container))
         {
             auto saved = makeObject();
             set (saved, keys::name, chain[schema::chainName].toString());
@@ -286,7 +314,7 @@ namespace
 
             juce::Array<juce::var> devicePresets;
 
-            for (const auto& device : getDeviceStates (chain))
+            for (const auto& device : getDevicesOf (chain))
                 devicePresets.add (describeDevice (song, device));
 
             set (saved, keys::devices, devicePresets);
@@ -296,7 +324,7 @@ namespace
         const auto inContainer = [&container] (const juce::var& target, const ParameterRef& parameter)
         { return locateInChains (container, target, parameter, keys::device); };
 
-        for (const auto& macro : getOwnedModulators (song, { .container = getDeviceID (container) }))
+        for (const auto& macro : getOwnedModulators (song, { .container = id }))
             if (macro.isMacro())
                 macroPresets.add (describeMacro (macro, inContainer));
 
@@ -865,22 +893,22 @@ namespace
 //==============================================================================
 juce::var makeDevicePreset (Song& song, DeviceID id)
 {
-    if (! findDeviceState (song, id).isValid())
+    if (! holdsDevice (song, id))
         return {};
 
-    // What its channel's plug-ins keep of their own, in their elements first.
+    // What its channel's plug-ins keep of their own, in their elements first; then the device whole, as the song holds it.
     song.storeDeviceStates (getDeviceChannel (song, id).getRaw());
-    const auto state = findDeviceState (song, id);
+    const auto copy = copyWholeDevice (song, id);
     auto preset = makeObject();
 
-    if (isContainerState (state))
+    if (readDeviceForm (copy) == DeviceValue::Form::container)
     {
         set (preset, keys::kind, keys::containerKind);
-        set (preset, keys::container, describeContainer (song, state));
+        set (preset, keys::container, describeContainer (song, copy));
         return preset;
     }
 
-    const auto described = describeDevice (song, state);
+    const auto described = describeDevice (song, copy);
 
     if (! described.isObject())
         return {};
@@ -910,34 +938,41 @@ juce::var makeTrackPreset (Song& song, TrackID track)
     set (saved, keys::volume, getChannelVolume (song, track));
     set (saved, keys::pan, getChannelPan (song, track));
 
-    // Its instrument, and its effects and containers, in their order.
+    // Its instrument, and its effects and containers, in their order, each whole as the song holds it.
     const auto instrument = getInstrument (song, track);
     const auto effects = getEffects (song, track);
+    const auto instrumentCopy = copyWholeDevice (song, instrument);
+    std::vector<juce::ValueTree> effectCopies;
 
-    if (const auto instrumentState = findDeviceState (song, instrument); isContainerState (instrumentState))
+    for (const auto effect : effects)
+        effectCopies.push_back (copyWholeDevice (song, effect));
+
+    const auto isContainerCopy = [] (const juce::ValueTree& copy) { return readDeviceForm (copy) == DeviceValue::Form::container; };
+
+    if (isContainerCopy (instrumentCopy))
     {
         auto container = makeObject();
-        set (container, keys::container, describeContainer (song, instrumentState));
+        set (container, keys::container, describeContainer (song, instrumentCopy));
         set (saved, keys::instrument, container);
     }
     else if (instrument.isValid())
     {
-        set (saved, keys::instrument, describeDevice (song, instrumentState));
+        set (saved, keys::instrument, describeDevice (song, instrumentCopy));
     }
 
     juce::Array<juce::var> effectPresets;
 
-    for (const auto effect : effects)
+    for (const auto& effectCopy : effectCopies)
     {
-        if (const auto effectState = findDeviceState (song, effect); isContainerState (effectState))
+        if (isContainerCopy (effectCopy))
         {
             auto container = makeObject();
-            set (container, keys::container, describeContainer (song, effectState));
+            set (container, keys::container, describeContainer (song, effectCopy));
             effectPresets.add (container);
         }
         else
         {
-            effectPresets.add (describeDevice (song, effectState));
+            effectPresets.add (describeDevice (song, effectCopy));
         }
     }
 
@@ -946,7 +981,8 @@ juce::var makeTrackPreset (Song& song, TrackID track)
     // Its modulators and macros, with what they modulate on it: its devices', those in its containers, its volume and pan.
     const auto fader = getFader (song, track);
 
-    const auto onTrack = [&song, fader, instrument, &effects] (const juce::var& target, const ParameterRef& parameter)
+    const auto onTrack = [fader, instrument, &effects, &instrumentCopy, &effectCopies, &isContainerCopy] (const juce::var& target,
+                                                                                                          const ParameterRef& parameter)
     {
         if (parameter.device == fader)
         {
@@ -961,8 +997,7 @@ juce::var makeTrackPreset (Song& song, TrackID track)
         }
 
         // In an instrument container's chains, or a container of effects': by the chain, and the device's place in it.
-        if (const auto container = findDeviceState (song, instrument);
-            isContainerState (container) && locateInChains (container, target, parameter, keys::inside))
+        if (isContainerCopy (instrumentCopy) && locateInChains (instrumentCopy, target, parameter, keys::inside))
         {
             set (target, keys::instrument, true);
             return true;
@@ -976,8 +1011,7 @@ juce::var makeTrackPreset (Song& song, TrackID track)
                 return true;
             }
 
-            if (const auto container = findDeviceState (song, effects[i]);
-                isContainerState (container) && locateInChains (container, target, parameter, keys::inside))
+            if (isContainerCopy (effectCopies[i]) && locateInChains (effectCopies[i], target, parameter, keys::inside))
             {
                 set (target, keys::effect, (int) i);
                 return true;
@@ -1273,18 +1307,17 @@ juce::String getPresetFolderName (const DeviceType& type)
 juce::String getPresetFolderName (const ProjectContext& context, DeviceID id)
 {
     auto* song = findSong (context);
-    const auto device = song != nullptr && id.isValid() ? findDeviceState (*song, id) : juce::ValueTree();
 
-    if (! device.isValid())
+    if (song == nullptr || ! holdsDevice (*song, id))
         return {};
 
-    if (isContainerState (device))
+    if (isContainer (*song, id))
         return "Containers";
 
     // As its type's in the device lists.
     DeviceType type;
     type.name = getDeviceName (*song, id);
-    type.isBuiltIn = ! isPluginState (device);
+    type.isBuiltIn = ! isPlugin (*song, id);
     return getPresetFolderName (type);
 }
 
@@ -1292,7 +1325,7 @@ bool saveDevicePreset (const ProjectContext& context, DeviceID id, const juce::F
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! id.isValid() || ! findDeviceState (*song, id).isValid())
+    if (song == nullptr || ! id.isValid() || ! holdsDevice (*song, id))
         return false;
 
     return savePresetFile (context, makeDevicePreset (*song, id), file);
@@ -1356,8 +1389,7 @@ namespace
     bool loadOwnPresetNow (ProjectContext& context, DeviceID id, const juce::File& file, const juce::var& preset)
     {
         auto* song = findSong (context);
-        const auto device = song != nullptr && id.isValid() ? findDeviceState (*song, id) : juce::ValueTree();
-        const auto* own = findOwnInfo (device);
+        const auto* own = song != nullptr && id.isValid() ? getOwnDeviceInfo (*song, id) : nullptr;
         const auto saved = preset[keys::device];
 
         if (own == nullptr || saved[keys::type].toString() != toString (own->typeID))
@@ -1469,7 +1501,7 @@ void loadPresetWithPluginStates (ProjectContext& context, DeviceID id, const juc
 
 bool isPresetFor (const Song& song, DeviceID id, const juce::File& file)
 {
-    const auto* own = findOwnInfo (findDeviceState (song, id));
+    const auto* own = getOwnDeviceInfo (song, id);
 
     if (own == nullptr || ! isPresetFile (file))
         return false;
@@ -1484,7 +1516,7 @@ bool tryPresetIn (Song& song, DeviceID id, const juce::File& file)
     if (! isPresetFor (song, id, file))
         return false;
 
-    loadInto (song, id, *findOwnInfo (findDeviceState (song, id)), readPreset (file)[keys::device], false);
+    loadInto (song, id, *getOwnDeviceInfo (song, id), readPreset (file)[keys::device], false);
     return true;
 }
 } // namespace phazite

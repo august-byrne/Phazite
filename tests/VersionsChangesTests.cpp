@@ -3,6 +3,7 @@
 // roadmap S4.5): from copies of what the song's notifications said changed, a round at a time, the last list kept until the
 // next is in, whose listeners are told then; never a list of another song's, nor an older one last.
 #include "TestClips.h"
+#include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
@@ -13,6 +14,7 @@
 #include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
@@ -24,8 +26,10 @@
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/VersionHistory.h"
 
+#include <algorithm>
 #include <functional>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace
@@ -721,4 +725,49 @@ TEST_CASE ("A round of a reference let go of since it was taken works nothing ou
         CHECK (result.changes.empty() == letGo);
         CHECK (worker.takeResult (result) == ! letGo);
     }
+}
+
+TEST_CASE ("A plug-in's change in its own window has its track compared again alone, one in a container's chain too")
+{
+    // What the history takes of a plug-in's own change (VersionHistory.cpp: takeChangesOutsideHistory(), the song's plug-ins
+    // by their IDs and channels; readPluginParameters(), their knobs): the moved plug-in's track's line, that track alone
+    // copied and compared, never the whole song.
+    const phazite::test::TestPlugin plugin;
+    TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto effects = s.addTrack ("Effects"), grouped = s.addTrack ("Grouped");
+    s.addTrack ("Bass");
+    s.addTrack ("Drums");
+    phazite::DeviceID onTrack, inChain;
+
+    {
+        const phazite::UndoStep step (song, "Add the stand-ins");
+        onTrack = phazite::test::TestPlugin::add (song, effects);
+        inChain = phazite::test::TestPlugin::add (song, grouped);
+        REQUIRE (phazite::groupIntoContainer (song, { inChain }).isValid());
+    }
+
+    s.waitForPlugins();
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    for (const auto& [device, track] : { std::pair { onTrack, effects }, std::pair { inChain, grouped } })
+    {
+        CAPTURE (track.getRaw());
+        const auto compared = phazite::ChangesWorker::countTracksCompared();
+        phazite::test::TestPlugin::setGain (song, device, track == effects ? 0.25f : 0.5f); // in its own window
+        REQUIRE (dispatchMessagesUntil (
+            [&s, track = track]
+            {
+                const auto lines = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
+                return std::any_of (lines.begin(), lines.end(),
+                                    [track] (const phazite::VersionChange& line) { return line.track == track; });
+            }));
+        CHECK (phazite::ChangesWorker::countTracksCompared() - compared == 1);
+    }
+
+    const auto lines = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
+    REQUIRE (lines.size() == 2);
+    CHECK (lines[0].track == effects);
+    CHECK (lines[1].track == grouped);
 }

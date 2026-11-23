@@ -14,6 +14,8 @@
 #include <map>
 #include <memory>
 #include <tuple>
+#include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -170,6 +172,19 @@ bool isPadEmpty (const Song& song, DeviceID id, int pad)
 {
     const auto device = findDeviceState (song, id);
     return ! isDrumSampler (device) || ! juce::isPositiveAndBelow (pad, DrumSampler::numPads) || isPadEmpty (song, device, pad);
+}
+
+std::vector<std::pair<int, juce::String>> getSoundingPads (const Song& song, DeviceID id)
+{
+    std::vector<std::pair<int, juce::String>> pads;
+    const auto device = findDeviceState (song, id);
+
+    if (isDrumSampler (device))
+        for (int pad = 0; pad < DrumSampler::numPads; ++pad)
+            if (! isPadEmpty (song, device, pad))
+                pads.emplace_back (pad, getPadName (song, device, pad));
+
+    return pads;
 }
 
 bool setPadSound (Song& song, DeviceID id, int pad, const juce::File& file, int layer)
