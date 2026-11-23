@@ -5,6 +5,8 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/TracksOutside.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/midi/internal/MidiLinks.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -42,9 +44,12 @@ namespace
 
         for (auto i = lanes.getNumChildren(); --i >= 0;)
         {
-            if (const auto lane = lanes.getChild (i);
-                lane[schema::laneDevice].toString() == juce::String ((juce::int64) was.device.getRaw())
-                && lane[schema::laneParameter].toString() == was.parameter)
+            const auto lane = lanes.getChild (i);
+
+            if (! lane.hasType (schema::LANE))
+                continue;
+
+            if (const auto value = readLaneValue (lane); value.device == was.device && value.parameter == was.parameter)
             {
                 auto copy = lane.createCopy();
                 copy.setProperty (schema::laneDevice, device, nullptr);
@@ -64,8 +69,7 @@ namespace
 bool isBus (const Song& song, TrackID track)
 {
     // A folder whose volume a fader of its own sets, not a VCA (Schema.h: channelFader).
-    const auto state = findTrackState (song, track);
-    return isFolderState (state) && state.hasProperty (schema::channelFader);
+    return readIsBus (findTrackState (song, track));
 }
 
 void makeBus (Song& song, TrackID folder)

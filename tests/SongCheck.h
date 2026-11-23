@@ -32,7 +32,11 @@
 //           of the song's; and the clips of an alias group hold ONE value of notes, or audio clips ONE sound (the same, not
 //           two alike); and of its tempo map (TempoMapValue.h): no TEMPO or TIMESIGNATURE element in its tree, whose
 //           TEMPOMAP is there and empty; each kind of the value not empty and in the order of its beats; every number within
-//           its description's range (Schema.h)
+//           its description's range (Schema.h); and, while the song's tree holds its tracks, each TRACK and the MASTER read
+//           alike by the lenient readers and the readers of what the song holds (TracksValue.h, TrackSwitchesValue.h,
+//           TracksOutside.h), and the three values written back holding each property they cover as the same text, and the
+//           same lanes, and no other (the tracks' round trip: what the loader's rules leave), but a colour that reads as
+//           none ("0", which a track's preset loaded still writes), compared by the readers alone
 #pragma once
 
 #include "TestHelpers.h"

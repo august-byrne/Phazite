@@ -5,7 +5,6 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/WholeState.h"
 
-#include <algorithm>
 #include <functional>
 
 namespace phazite::test
@@ -45,14 +44,7 @@ juce::ValueTree copyTrack (const Song& song, TrackID id)
 
 bool hasTrack (const Song& song, TrackID id)
 {
-    if (! id.isValid())
-        return false;
-
-    if (isMaster (song, id))
-        return true;
-
-    const auto ids = getTrackIDs (song);
-    return std::find (ids.begin(), ids.end(), id) != ids.end();
+    return phazite::hasTrack (song, id);
 }
 
 juce::var getTrackProperty (const Song& song, TrackID id, const juce::Identifier& property)

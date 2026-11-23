@@ -25,6 +25,7 @@
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/FreezeModel.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
@@ -1131,6 +1132,37 @@ TEST_CASE ("Bounce in Place's freeze is kept across a save, holds a track's cont
         CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
         CHECK (getPlayed (model, song.bass).second == 1); // its devices play live, for when it is unmuted
     }
+}
+
+TEST_CASE ("Bounce in Place's Undo unmutes and unfreezes the original and keeps a solo of another track set since, and its Redo "
+           "mutes and freezes it again, the solo still kept")
+{
+    // Design J.1 of the tracks' values (roadmap step S5.20) on a real song: the mute and the freeze are in the bounce's step,
+    // the solo outside the history, as the tree holds them today and the switches' area must keep them.
+    Song song;
+    auto& model = song.getSong();
+    const auto other = phazite::insertPlainTrack (model, song.bass);
+    REQUIRE (other.isValid());
+    model.getUndoManager().clearUndoHistory();
+    bounce (song);
+    REQUIRE (phazite::isTrackMuted (model, song.bass, false));
+    REQUIRE (phazite::isFrozen (song.context, song.bass));
+
+    phazite::toggleSolo (song.context, other); // outside the history
+    REQUIRE (phazite::isTrackSoloed (model, other));
+    CHECK (phazite::describeUndo (&model) == juce::String ("Undo Bounce in Place"));
+
+    phazite::undo (model);
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (phazite::isTrackMuted (model, song.bass, false));
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK (phazite::isTrackSoloed (model, other));
+
+    phazite::redo (model);
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::isTrackMuted (model, song.bass, false));
+    CHECK (phazite::isFrozen (song.context, song.bass));
+    CHECK (phazite::isTrackSoloed (model, other));
 }
 
 TEST_CASE ("Bounce in Place goes through where its frozen copy can't be made, and leaves the original muted and unfrozen")

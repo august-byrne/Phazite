@@ -277,6 +277,32 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
     doesn't know.
 
   A file Phazite wrote holds each of them so already, and comes through without any of them read whole.
+- **Tracks and the master:** each `TRACK` and the `MASTER` is written as Phazite writes what the song holds of it, where
+  it holds anything else, once the ranges and words above have brought its numbers within theirs and its IDs are its own:
+  - its own properties (a track's `id`, `kind`, `name`, `colour`, `bus`, `volume`, `pan`, `fader`, `vca`, `keyRoot`,
+    `keyScale`, `input`, `monitoring`, `padDevice` and `pad`; the master's `id`, `fader`, `vca`, `volume` and `pan`): one
+    at its default goes (a `volume` of `0`, or the master's of `-3`, its level where it has none; a `pan` of `0`, `bus="0"`,
+    an empty `input`); a number in more digits than its float holds is written in the fewest that read back as it
+    (`volume="-6.0000001"` as `-6`); a `colour` is written as Phazite writes it (lowercase, `FF00FF00` as `ff00ff00`), and
+    one that reads as no colour (transparent: no hexadecimal digits, `pink`, or too few for an alpha, `red`, whose `e`
+    and `d` read as `000000ed`) goes, the track taking its row's colour as it did; a `keyRoot` without a `keyScale` gets `major`, as the track's key read it, and a `keyScale` without a
+    `keyRoot`, which no key read, goes; a `name` stays as written, empty too;
+  - its switches (a track's `mute`, `solo` and `frozen`, a track's and the master's `automationMode`): one written off
+    (`mute="0"`) goes;
+  - its view (a track's `height`, `collapsed`, `pinned`, `drumMode`, `drumOrder` and `drumHidden`; the master's `height`
+    and `collapsed`) and each `LANE` of its `LANES` (`device`, `parameter`, `height`, `collapsed`): as Phazite writes
+    them, a lane's `collapsed="0"` going; its `LANES` stays where it is, empty or not;
+  - a property of a track's alone on the `MASTER` goes (its `kind`, `name`, `colour`, `bus`, `keyRoot`, `keyScale`,
+    `input`, `monitoring`, `padDevice`, `pad`, `mute`, `solo`, `frozen`, `pinned`, `drumMode`, `drumOrder` and
+    `drumHidden`): what no master holds, which Phazite's code read on it all the same, and which the song doesn't hold, so
+    that every reader reads the master alike (none of these is ever written on it by Phazite);
+  - what the song's values don't cover stays as the file has it: the elements in it, and a property Phazite doesn't
+    know.
+
+  A file Phazite wrote holds each of them so already, and comes through without any of them read whole. A `keyScale`,
+  on a track, on `LASTKEY` and on a `CHORDKEY`, is one of the scales' saved names (`major`, `minor`, `dorian`, `phrygian`,
+  `lydian`, `mixolydian`, `locrian`, `harmonicMinor`, `melodicMinor`): another word goes as the song opens, and reads as
+  major, as it did.
 - **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values, and its audio clips play
   one file alike: they share their `file` (the path as written, compared as text, whether the file is there or not),
   `tempo`, `pitch`, `reversed` and `WARP` markers. Each keeps its own place, the part of the file it plays (`fileStart`,

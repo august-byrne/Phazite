@@ -9,6 +9,7 @@
 #include "internal/Sidechain.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/DevicesValue.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
@@ -33,7 +34,8 @@ namespace
     // A track of the playlist's (a track, a folder or a return); and one with sound of its own (not a folder).
     bool isTrack (const Song& song, TrackID id)
     {
-        return findTrackState (song, id).hasType (schema::TRACK);
+        const auto kind = readTrackKind (findTrackState (song, id));
+        return kind.has_value() && *kind != TrackValue::Kind::master;
     }
 
     bool hasSound (const Song& song, TrackID id)
@@ -268,7 +270,7 @@ namespace
 
         // A track's while it is the song's (the engine may play one deleted a moment ago), the master's always.
         if (auto* session = song != nullptr ? findPlayingSession (*song) : nullptr)
-            if (id == 0 || findTrackState (*song, TrackID::fromRaw ((std::uint64_t) id)).isValid())
+            if (id == 0 || hasTrack (*song, TrackID::fromRaw ((std::uint64_t) id)))
                 if (auto* strip = session->getPlayer().findStrip (id))
                     return &strip->getChannel().getMeter();
 

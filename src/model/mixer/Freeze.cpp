@@ -14,6 +14,7 @@
 #include "model/base/WholeFile.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -1377,7 +1378,7 @@ void TrackRender::cancel()
 bool isFrozen (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
-    return song != nullptr && id.isValid() && (bool) findTrackState (*song, id)[schema::trackFrozen];
+    return song != nullptr && id.isValid() && readTrackFrozen (findTrackState (*song, id)); // TrackSwitchesValue.h
 }
 
 bool isFrozenDevice (const ProjectContext& context, DeviceID id)

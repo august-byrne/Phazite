@@ -9,6 +9,9 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/TrackSwitchesValue.h"
+#include "model/base/internal/TracksOutside.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/chords/internal/Chords.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
@@ -21,6 +24,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <optional>
 
 namespace phazite
 {
@@ -34,20 +38,22 @@ namespace
     // A track of the song's that holds clips (Schema.h: trackKind): a track, not a folder, a return or the master.
     bool holdsClips (const Song& song, TrackID id)
     {
-        const auto state = findTrackState (song, id);
-        return state.hasType (schema::TRACK) && ! isFolderState (state) && ! isReturnState (state);
+        return readTrackKind (findTrackState (song, id)) == TrackValue::Kind::track;
     }
 
     // A track's row; its color is its row's in the palette unless it has its own. The master's is gray. Without the colors
-    // of the folders it is in, which getPlaylistRows() knows from the folders before it.
+    // of the folders it is in, which getPlaylistRows() knows from the folders before it. Each field read alone from the
+    // element the song's index found (TracksValue.h, TrackSwitchesValue.h, TracksOutside.h: the readers of one field), never
+    // the track whole: a row is made at every paint of the audio clip editor and every event of a drag.
     TrackRow makeRow (const Song& song, TrackID id, int index)
     {
         const auto state = findTrackState (song, id);
+        const auto kind = readTrackKind (state);
         TrackRow row;
         row.id = id;
-        row.collapsed = isCollapsed (song, id); // the master's: its lanes are thin rows
+        row.collapsed = readCollapsed (state).value_or (false); // the master's: its lanes are thin rows
 
-        if (state.hasType (schema::MASTER))
+        if (kind == TrackValue::Kind::master)
         {
             row.name = "Master";
             row.colour = getTrackColours().back().colour;
@@ -56,16 +62,18 @@ namespace
         }
 
         row.name = getTrackName (song, id);
-        row.colour = getTrackColour (song, id, index);
-        row.kind = isFolderState (state) ? TrackType::folder : (isReturnState (state) ? TrackType::returnTrack : TrackType::track);
+        row.colour = getTrackColour (readTrackColour (state), index);
+        row.kind = kind == TrackValue::Kind::folder        ? TrackType::folder
+                   : kind == TrackValue::Kind::returnTrack ? TrackType::returnTrack
+                                                           : TrackType::track;
 
         for (auto folder = state.getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
             ++row.depth;
 
-        row.pinned = isPinned (song, id);
-        row.savedHeight = getSavedTrackHeight (song, id);
-        row.hasInstrument = ! isFolderState (state) && hasInstrument (song, id);
-        row.frozen = state[schema::trackFrozen];
+        row.pinned = readPinned (state).value_or (false);
+        row.savedHeight = readSavedHeight (state);
+        row.hasInstrument = kind != TrackValue::Kind::folder && hasInstrument (song, id);
+        row.frozen = readTrackFrozen (state);
         return row;
     }
 
@@ -165,7 +173,7 @@ std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! findTrackState (*song, id).isValid())
+    if (song == nullptr || ! hasTrack (*song, id))
         return {};
 
     const auto indexOf = [song] (TrackID track) { return song->getIndex().getTrackPlace (findTrackState (*song, track)).index; };
@@ -198,7 +206,7 @@ bool isInside (const ProjectContext& context, TrackID track, TrackID folder)
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || track == folder || ! findTrackState (*song, folder).isValid())
+    if (song == nullptr || track == folder || ! hasTrack (*song, folder))
         return false;
 
     for (auto parent = findTrackState (*song, track).getParent(); parent.hasType (schema::TRACK); parent = parent.getParent())
@@ -213,7 +221,7 @@ FolderSummary getFolderSummary (const ProjectContext& context, TrackID folder)
     FolderSummary summary;
     auto* song = findSong (context);
 
-    if (song == nullptr || ! findTrackState (*song, folder).isValid())
+    if (song == nullptr || ! hasTrack (*song, folder))
         return summary;
 
     for (const auto id : getAllPlaylistTracks (context))
@@ -321,11 +329,11 @@ juce::String whyClipsCantGo (const ProjectContext& context, TrackID id, const st
 
     if (! holdsClips (*song, id))
     {
-        const auto state = findTrackState (*song, id);
-        return state.hasType (schema::MASTER) ? "The master holds no clips"
-               : isReturnState (state)        ? "A return holds no clips"
-               : isFolderState (state)        ? "A folder holds no clips"
-                                              : "This row holds no clips";
+        const auto kind = readTrackKind (findTrackState (*song, id));
+        return kind == TrackValue::Kind::master        ? "The master holds no clips"
+               : kind == TrackValue::Kind::returnTrack ? "A return holds no clips"
+               : kind == TrackValue::Kind::folder      ? "A folder holds no clips"
+                                                       : "This row holds no clips";
     }
 
     auto anyMidi = false, anyAudio = false;
@@ -574,7 +582,7 @@ void moveAutomationWithClips (ProjectContext& context, const std::vector<ClipPla
     std::vector<AutomationStretch> stretches;
 
     for (const auto& place : places)
-        if (findTrackState (*song, place.track).isValid())
+        if (hasTrack (*song, place.track))
             stretches.push_back ({ place.track, place.range });
 
     moveAutomation (*song, stretches, distance, copied);

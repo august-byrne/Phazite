@@ -877,10 +877,6 @@ const std::map<juce::String, juce::String>& getNamesNotInTheProject()
         { "DEVICE@formatID", "a VST3's class ID, as its preset file holds it: the tests' plug-ins are of a format of their own" },
         { "MASTER@vca", "the master has a fader, never a VCA: the rules name every channel's" },
         { "MASTER@height", "the master's row is collapsed or not, and nothing else: the rules name every track's view settings for it" },
-        { "MASTER@pinned", "as MASTER@height" },
-        { "MASTER@drumMode", "as MASTER@height" },
-        { "MASTER@drumOrder", "as MASTER@height" },
-        { "MASTER@drumHidden", "as MASTER@height" },
         { "MERGING", "a merge waiting for its version names versions and a piece of the project's Versions folder, which the "
                      "representative project hasn't: tests/VersionsMergeWaitingTests.cpp saves and opens songs that hold one" },
         { "MERGING@version", "as MERGING" },

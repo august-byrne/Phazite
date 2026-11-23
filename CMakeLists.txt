@@ -372,6 +372,9 @@ target_sources(phazite_core PRIVATE
     src/model/base/TempoMapArea.cpp
     src/model/base/TempoMapValue.cpp
     src/model/base/Toggles.h
+    src/model/base/TrackSwitchesValue.cpp
+    src/model/base/TracksOutside.cpp
+    src/model/base/TracksValue.cpp
     src/model/base/WholeFile.cpp
     src/model/base/WholeFile.h
     src/model/base/WholeState.cpp
@@ -408,6 +411,9 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/SongText.h
     src/model/base/internal/TempoMapArea.h
     src/model/base/internal/TempoMapValue.h
+    src/model/base/internal/TrackSwitchesValue.h
+    src/model/base/internal/TracksOutside.h
+    src/model/base/internal/TracksValue.h
     src/model/base/internal/ValueArea.h
     src/model/base/internal/WholeState.h
     src/model/chords/ChordModel.cpp
@@ -1594,6 +1600,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ToolRowTests.cpp
         tests/TopBarTests.cpp
         tests/TrackTests.cpp
+        tests/TracksValueTests.cpp
         tests/TransportModelTests.cpp
         tests/TruePeakTests.cpp
         tests/UiTestHelpers.cpp

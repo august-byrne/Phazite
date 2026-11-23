@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
@@ -66,7 +67,7 @@ bool canRecordAudio (const ProjectContext& context, TrackID id)
 
 juce::String getTrackInput (const ProjectContext& context, TrackID id)
 {
-    return findTrack (context, id).getProperty (schema::trackInput).toString();
+    return readTrackInput (findTrack (context, id)); // the tracks' conversion (TracksValue.h)
 }
 
 juce::String getLastInput (const ProjectContext& context)
@@ -98,10 +99,18 @@ void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inp
 
 InputMonitoring getInputMonitoring (const ProjectContext& context, TrackID id)
 {
-    const auto value = findTrack (context, id).getProperty (schema::trackMonitoring).toString();
-    return value == schema::monitorAlways  ? InputMonitoring::always
-           : value == schema::monitorNever ? InputMonitoring::never
-                                           : InputMonitoring::whileArmed;
+    // The tracks' conversion (TracksValue.h).
+    switch (readTrackMonitoring (findTrack (context, id)))
+    {
+        case TrackValue::Monitoring::always:
+            return InputMonitoring::always;
+        case TrackValue::Monitoring::never:
+            return InputMonitoring::never;
+        case TrackValue::Monitoring::whileArmed:
+            break;
+    }
+
+    return InputMonitoring::whileArmed;
 }
 
 void setInputMonitoring (ProjectContext& context, TrackID id, InputMonitoring monitoring)
@@ -295,7 +304,7 @@ std::vector<RecordTarget> getRecordTargets (const ProjectContext& context)
         }
         else if (recorder->isArmed (id))
         {
-            const auto input = trackState[schema::trackInput].toString();
+            const auto input = readTrackInput (trackState); // TracksValue.h
 
             if (const auto channels = getInputChannels (input); ! channels.empty() && channels.back() < numInputs)
                 targets.push_back ({ id, RecordSource::input, input });

@@ -9,6 +9,7 @@
 #include "model/base/internal/SectionsArea.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksValue.h"
 
 #include <algorithm>
 
@@ -19,6 +20,11 @@ namespace
     // Whether the song holds its devices, containers and chains beside its tree: not yet (the devices' first piece, roadmap
     // step S5.20: the tree is their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
     constexpr bool devicesHeldBesideTheTree = false;
+
+    // Whether the song holds its tracks (TracksValue.h, TrackSwitchesValue.h, TracksOutside.h) beside its tree: not yet (the
+    // tracks' first piece, roadmap step S5.20: the tree is their storage, whose IDs findLargestID() and holdsID() count). The
+    // lines for them read nothing until it is on.
+    constexpr bool tracksHeldBesideTheTree = false;
 } // namespace
 
 std::uint64_t findLargestIDHeld (const Song& song)
@@ -35,6 +41,12 @@ std::uint64_t findLargestIDHeld (const Song& song)
     largest = std::max (largest, findLargestIDIn (values->sections.get()));   // the sections' (each section's ID)
     largest = std::max (largest, findLargestIDIn (values->modulation.get())); // modulation's (each modulator's and macro's ID)
     largest = std::max (largest, findLargestIDIn (values->sends.get()));      // the sends' (each send's ID)
+
+    // The tracks' (each track's, its fader's and its VCA's ID, and the master's), the same: the tree holds them until their
+    // switch, which turns tracksHeldBesideTheTree on and reads the area's value in place of the tree's.
+    if constexpr (tracksHeldBesideTheTree)
+        largest = std::max (largest, findLargestIDIn (readTracksValue (song.getState())));
+
     return largest;
 }
 
@@ -55,6 +67,11 @@ void forEachNameableIDHeld (const Song& song, const std::function<void (std::uin
     // value in place of the tree's.
     if constexpr (devicesHeldBesideTheTree)
         forEachIDHeld (readDevicesValue (song.getState()), each);
+
+    // The tracks' (each track's, its fader's and its VCA's, and the master's: TracksValue.h), what a curve, a lane, a modulation
+    // and a MIDI link name a fader by and a send, a sidechain and a modulator's place a track by, the same until their switch.
+    if constexpr (tracksHeldBesideTheTree)
+        forEachIDHeld (readTracksValue (song.getState()), each);
 }
 
 std::uint64_t countHeldID (std::uint64_t largest, std::uint64_t held) noexcept

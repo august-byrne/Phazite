@@ -232,9 +232,11 @@ inline const Property<juce::String> trackAutomationMode { "automationMode", on (
 inline const Property<bool> folderBus { "bus", on (TRACK), Kind::song };
 
 // On TRACK, and on MASTER: the channel's volume, in decibels (-100 for silence), as its fader sets it (a
-// track's, a return's or a bus's; a plain folder's VCA), none for 0 dB, or for the master's -3 dB, a new song's level; and
-// its pan, from -1 (left) to 1 (right), none for the centre, which a plain folder keeps for when it is a bus again.
-inline const Property<float> channelVolume { "volume", on (TRACK, MASTER, CHAIN), within (-100.0, 6.0), Kind::song };
+// track's, a return's or a bus's; a plain folder's VCA), default 0: none for 0 dB, but on the MASTER, whose default is -3 dB,
+// a new song's level (TracksValue.h: TrackValue::defaultVolume()): a description gives one default for every element, so a
+// reader of it takes the master's from there, not from byDefault(); and its pan, from -1
+// (left) to 1 (right), none for the centre, which a plain folder keeps for when it is a bus again.
+inline const Property<float> channelVolume { "volume", on (TRACK, MASTER, CHAIN), within (-100.0, 6.0), byDefault (0.0f), Kind::song };
 inline const Property<float> channelPan { "pan", on (TRACK, MASTER, CHAIN), within (-1.0, 1.0), byDefault (0.0f), Kind::song };
 
 // On TRACK, and on MASTER: the device that sets the channel's volume, by its ID (DeviceID, of the song's), which the
@@ -262,9 +264,18 @@ inline constexpr const char* sendLevelParameter = "send level";
 inline const Property<bool> trackFrozen { "frozen", on (TRACK), Kind::song };
 
 // A key, on a TRACK (song), on LASTKEY (state) and on CHORDKEY (song): the root, int 0..11 (0 is C), none = no key; and the
-// scale: "major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor".
+// scale: "major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor" or "melodicMinor"
+// (model/notes/NoteValues.h: getSavedScaleName()), none or any other word read as major.
 inline const Property<int> keyRoot { "keyRoot", on (TRACK, LASTKEY, CHORDKEY), whole (0.0, 11.0), Kind::song };
-inline const Property<juce::String> keyScale { "keyScale", on (TRACK, LASTKEY, CHORDKEY), Kind::song };
+
+// The scales' words, made apart from keyScale's description so that it is declared on one line, as tests/GoldenProjectTests.cpp
+// reads each name of this header.
+inline Words getScaleWords()
+{
+    return oneOf ("major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonicMinor", "melodicMinor");
+}
+
+inline const Property<juce::String> keyScale { "keyScale", on (TRACK, LASTKEY, CHORDKEY), getScaleWords(), Kind::song };
 
 // On TRACK (model/transport/RecordingModel.h; roadmap step 3.4). The audio device's input the track records (AudioInput::id):
 // a channel, counted from 1 ("1"), or a pair of neighbours from an odd-numbered one ("1+2"); none for no input.
@@ -282,27 +293,30 @@ inline constexpr const char* monitorAlways = "always";
 inline constexpr const char* monitorNever = "never";
 inline const Property<juce::String> trackMonitoring { "monitoring", on (TRACK), oneOf (monitorAlways, monitorNever), Kind::song };
 
-// The view state below is the master's too (its row), and none of it a change (isUncountedProperty()).
+// The view state below, none of it a change (isUncountedProperty()). The master's row has a height and is collapsed or
+// not; no row of the master's is pinned, nor shows its clips in a piano roll (it holds none), so the rest is a track's alone.
 
-// On TRACK. int 32..320, default 64: the track's height in the playlist, in pixels at an interface scale of 100%. view
+// On TRACK, and on MASTER. int 32..320, default 64: the track's height in the playlist, in pixels at an interface scale of
+// 100%. view
 inline const Property<int> trackHeight { "height", on (TRACK, MASTER), whole (32.0, 320.0), byDefault (64), Kind::view, uncounted };
 
-// On TRACK. bool, default false: the track is a thin row with only its name; a collapsed folder hides its tracks. view
+// On TRACK, and on MASTER. bool, default false: the track is a thin row with only its name; a collapsed folder hides its
+// tracks. view
 inline const Property<bool> trackCollapsed { "collapsed", on (TRACK, MASTER), byDefault (false), Kind::view, uncounted };
 
 // On TRACK. bool, default false: the track stays in view while the others scroll. view
-inline const Property<bool> trackPinned { "pinned", on (TRACK, MASTER), byDefault (false), Kind::view, uncounted };
+inline const Property<bool> trackPinned { "pinned", on (TRACK), byDefault (false), Kind::view, uncounted };
 
 // On TRACK. bool: the piano roll shows the track's clips in drum mode; none = on while the track's instrument is
 // Phazite's drum sampler. view
-inline const Property<bool> drumMode { "drumMode", on (TRACK, MASTER), Kind::view, uncounted };
+inline const Property<bool> drumMode { "drumMode", on (TRACK), Kind::view, uncounted };
 
 // On TRACK: the order of the drum rows, as note numbers separated by commas, top first; rows it doesn't list come
 // after them. view
-inline const Property<juce::String> drumOrder { "drumOrder", on (TRACK, MASTER), Kind::view, uncounted };
+inline const Property<juce::String> drumOrder { "drumOrder", on (TRACK), Kind::view, uncounted };
 
 // On TRACK: the drum rows hidden, as note numbers separated by commas. view
-inline const Property<juce::String> drumHidden { "drumHidden", on (TRACK, MASTER), Kind::view, uncounted };
+inline const Property<juce::String> drumHidden { "drumHidden", on (TRACK), Kind::view, uncounted };
 
 // Child of PHAZITE, which every project has: the master channel's own element, with its write mode
 // (trackAutomationMode), its volume and pan (channelVolume, channelPan), its devices, and its automation lanes (LANES,

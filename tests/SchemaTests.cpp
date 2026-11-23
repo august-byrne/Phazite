@@ -13,6 +13,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
@@ -149,6 +150,17 @@ juce::ValueTree findFirst (const juce::ValueTree& tree, const juce::Identifier& 
             return found;
 
     return {};
+}
+
+// A property's default as the song holds it on an element of a type where it has none: the description's, but for the
+// master's volume, which is -3 dB, a new song's level (Schema.h: channelVolume, whose description gives the one default of a
+// track's, a chain's and the master's: 0; TracksValue.h: TrackValue::defaultVolume()).
+juce::var getHeldDefault (const juce::Identifier& type, const schema::PropertyDescription& property)
+{
+    if (type == schema::MASTER.getName() && &property == &schema::channelVolume)
+        return phazite::TrackValue::defaultVolume (phazite::TrackValue::Kind::master);
+
+    return property.getDefault();
 }
 
 // The first element of a type that a property can be checked on as a song opened holds it: for a clip's, the first clip of
@@ -540,7 +552,7 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                     if (expected.has_value())
                     {
                         REQUIRE (opened.isValid());
-                        const auto held = opened.hasProperty (*property) ? opened[*property] : property->getDefault();
+                        const auto held = opened.hasProperty (*property) ? opened[*property] : getHeldDefault (type->getName(), *property);
 
                         // A clip's own property as what the loader kept is then kept with the clip's others, as the song
                         // takes a clip in (ClipsValue.h: keepWithinClip(): a MIDI clip no shorter than the shortest, a take

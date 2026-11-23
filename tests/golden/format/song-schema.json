@@ -647,40 +647,34 @@
     {
       "name": "drumHidden",
       "on": [
-        "TRACK",
-        "MASTER"
+        "TRACK"
       ],
       "type": "text",
       "kind": "view",
       "uncountedOn": [
-        "TRACK",
-        "MASTER"
+        "TRACK"
       ]
     },
     {
       "name": "drumMode",
       "on": [
-        "TRACK",
-        "MASTER"
+        "TRACK"
       ],
       "type": "bool",
       "kind": "view",
       "uncountedOn": [
-        "TRACK",
-        "MASTER"
+        "TRACK"
       ]
     },
     {
       "name": "drumOrder",
       "on": [
-        "TRACK",
-        "MASTER"
+        "TRACK"
       ],
       "type": "text",
       "kind": "view",
       "uncountedOn": [
-        "TRACK",
-        "MASTER"
+        "TRACK"
       ]
     },
     {
@@ -1194,6 +1188,18 @@
         "CHORDKEY"
       ],
       "type": "text",
+      "form": "words",
+      "words": [
+        "major",
+        "minor",
+        "dorian",
+        "phrygian",
+        "lydian",
+        "mixolydian",
+        "locrian",
+        "harmonicMinor",
+        "melodicMinor"
+      ],
       "kind": "song",
       "counted": true
     },
@@ -1821,15 +1827,13 @@
     {
       "name": "pinned",
       "on": [
-        "TRACK",
-        "MASTER"
+        "TRACK"
       ],
       "type": "bool",
       "default": false,
       "kind": "view",
       "uncountedOn": [
-        "TRACK",
-        "MASTER"
+        "TRACK"
       ]
     },
     {
@@ -2431,6 +2435,7 @@
         "high": 6.0,
         "whole": false
       },
+      "default": 0.0,
       "kind": "song",
       "counted": true
     },

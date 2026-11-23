@@ -11,6 +11,8 @@
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksOutside.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -97,8 +99,8 @@ namespace
                                   { ChordType::minorNinth,            { 0, 3, 7, 10, 14 },  "m9" } };
     // clang-format on
 
-    // A key, on a track's element or on LASTKEY in the song's Phazite state (model/base/internal/Schema.h). A key exists exactly when
-    // its root does.
+    // A key on LASTKEY in the song's Phazite state (model/base/internal/Schema.h); a track's is read by the tracks' conversion
+    // (TracksValue.h: readTrackKey()), alike. A key exists exactly when its root does.
     std::optional<Key> readKey (const juce::ValueTree& state)
     {
         if (! state.hasProperty (schema::keyRoot))
@@ -2279,7 +2281,7 @@ std::optional<Scale> findScale (const juce::String& savedName)
 
 std::optional<Key> getTrackKey (const Song& song, TrackID track)
 {
-    return readKey (findTrackState (song, track));
+    return readTrackKey (findTrackState (song, track)); // the tracks' conversion (TracksValue.h)
 }
 
 void setTrackKey (Song& song, TrackID track, const std::optional<Key>& key)
@@ -2417,8 +2419,8 @@ bool isDrumTrack (const Song& song, TrackID track)
 {
     const auto state = findTrackState (song, track);
 
-    if (state.hasProperty (schema::drumMode))
-        return state[schema::drumMode];
+    if (const auto drumMode = readDrumMode (state)) // the tracks' view's conversion (TracksOutside.h)
+        return *drumMode;
 
     // As its instrument says: a drum sampler (Mixer.h: getDeviceOutline(), its devices by their IDs).
     if (! state.isValid())
@@ -2473,7 +2475,7 @@ std::vector<int> getNoteNumbersPlayed (const Song& song, const std::vector<ClipI
 
 std::vector<int> getDrumRowOrder (const Song& song, TrackID track)
 {
-    return parseNotes (findTrackState (song, track)[schema::drumOrder]);
+    return parseNotes (readDrumOrder (findTrackState (song, track)));
 }
 
 void setDrumRowOrder (Song& song, TrackID track, const std::vector<int>& notes)
@@ -2484,7 +2486,7 @@ void setDrumRowOrder (Song& song, TrackID track, const std::vector<int>& notes)
 
 std::vector<int> getHiddenDrumRows (const Song& song, TrackID track)
 {
-    return parseNotes (findTrackState (song, track)[schema::drumHidden]);
+    return parseNotes (readDrumHidden (findTrackState (song, track)));
 }
 
 void hideDrumRow (Song& song, TrackID track, int note)

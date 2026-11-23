@@ -1990,17 +1990,23 @@ TEST_CASE ("A version's piece with a number whose exponent JUCE's reader would o
 {
     // Known bug 170, for the versions: a piece is anyone's, as a project file is. Its numbers made readable first, then the
     // song made consistent as a project file is as it opens (known bug 126's round: joinSong()).
+    // The master's volume a 0 written with an exponent too small: made readable, the 0 it is, which the master keeps (its
+    // default is -3 dB); left unreadable, no finite number, which the loader would take away as it does the track's volume.
     const auto piece =
         juce::String (R"(<PHAZITE><TRACKS><TRACK id="5" kind="track" name="1e12345678901" volume="1e12345678901" pan="5e-12345678901">)"
                       R"(<DEVICE id="7" type="phaziteSampler"><SOUNDS sampleSlices="0.25 1e12345678901"/></DEVICE>)"
-                      R"(<CLIP id="6" kind="midi" start="2" length="-3e-12345678901"/></TRACK></TRACKS></PHAZITE>)");
+                      R"(<CLIP id="6" kind="midi" start="2" length="-3e-12345678901"/></TRACK></TRACKS>)"
+                      R"(<MASTER id="8" volume="5e-12345678901"/></PHAZITE>)");
     const auto song = phazite::joinSong ("song", [&piece] (const juce::String&) -> std::optional<juce::MemoryBlock>
                                          { return juce::MemoryBlock (piece.toRawUTF8(), piece.getNumBytesAsUTF8()); });
     REQUIRE (song.isValid());
     const auto track = song.getChildWithName (schema::TRACKS).getChild (0);
     CHECK_FALSE (track.hasProperty (schema::channelVolume));        // no finite number: its default, as a file's
     CHECK (track[schema::trackName].toString() == "1e12345678901"); // a name, as it was
-    CHECK (track[schema::channelPan].toString() == "0");
+    CHECK_FALSE (track.hasProperty (schema::channelPan));           // 0, as JUCE's reader takes it, written as none: the centre
+    const auto master = song.getChildWithName (schema::MASTER);
+    REQUIRE (master.isValid());
+    CHECK (master[schema::channelVolume].toString() == "0"); // the 0 it is, kept: not -3 dB
 
     const auto slices = track.getChildWithName (schema::DEVICE).getChildWithName (schema::SOUNDS)[schema::samplerSlices].toString();
     CHECK_FALSE (slices.contains ("12345678901"));

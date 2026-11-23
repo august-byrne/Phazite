@@ -5,6 +5,9 @@
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TrackSwitchesValue.h"
+#include "model/base/internal/TracksOutside.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
@@ -50,12 +53,7 @@ namespace
         return engine::Curve (std::move (points));
     }
 
-    // A device's ID as a lane keeps it, and the other way.
-    DeviceID readDeviceID (const juce::var& id)
-    {
-        return DeviceID::fromRaw ((std::uint64_t) (juce::int64) id);
-    }
-
+    // A device's ID as a lane keeps it (read through the tracks' view's conversion: TracksOutside.h, readLaneValue()).
     juce::String writeDeviceID (DeviceID id)
     {
         return juce::String ((juce::int64) id.getRaw());
@@ -586,7 +584,8 @@ namespace
     //==============================================================================
     ParameterRef readLane (const juce::ValueTree& lane)
     {
-        return { readDeviceID (lane[schema::laneDevice]), lane[schema::laneParameter].toString() };
+        const auto value = readLaneValue (lane); // the tracks' view's conversion (TracksOutside.h)
+        return { value.device, value.parameter };
     }
 
     void writeLane (juce::ValueTree& lane, const ParameterRef& parameter)
@@ -603,9 +602,10 @@ namespace
         std::vector<DeviceID> ids;
         const auto state = findTrackState (song, track);
 
-        for (const auto* property : { &schema::channelFader, &schema::channelVCA })
-            if (const auto* id = state.getPropertyPointer (*property))
-                ids.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) *id));
+        // Read by the tracks' conversion (TracksValue.h).
+        for (const auto id : { readChannelFader (state), readChannelVCA (state) })
+            if (id.isValid())
+                ids.push_back (id);
 
         for (const auto& send : getSendValues (song, track))
             ids.push_back (send.id);
@@ -682,16 +682,19 @@ namespace
     // A track's write mode as the song keeps it (Schema.h: trackAutomationMode).
     AutomationMode readAutomationMode (const juce::ValueTree& state)
     {
-        const auto mode = state[schema::trackAutomationMode].toString();
-
-        if (mode == schema::automationTouch)
-            return AutomationMode::touch;
-
-        if (mode == schema::automationLatch)
-            return AutomationMode::latch;
-
-        if (mode == schema::automationWrite)
-            return AutomationMode::write;
+        // The switches' conversion (TrackSwitchesValue.h): none is read.
+        if (const auto mode = readSavedAutomationMode (state))
+        {
+            switch (*mode)
+            {
+                case SavedAutomationMode::touch:
+                    return AutomationMode::touch;
+                case SavedAutomationMode::latch:
+                    return AutomationMode::latch;
+                case SavedAutomationMode::write:
+                    return AutomationMode::write;
+            }
+        }
 
         return AutomationMode::read;
     }
@@ -1497,12 +1500,13 @@ std::vector<AutomationLane> getLanes (const Song& song, TrackID track)
 
     for (const auto& child : findLanesState (song, track))
     {
-        const auto parameter = readLane (child);
-        const auto height = juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight,
-                                          (int) child.getProperty (schema::laneHeight, AutomationLane::defaultHeight));
+        const auto lane = readLaneValue (child); // the tracks' view's conversion (TracksOutside.h)
+        const ParameterRef parameter { lane.device, lane.parameter };
+        const auto height =
+            juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight, lane.height.value_or (AutomationLane::defaultHeight));
 
         if (isOnTrack (song, track, parameter))
-            lanes.push_back ({ parameter, height, (bool) child[schema::laneCollapsed] });
+            lanes.push_back ({ parameter, height, lane.collapsed });
     }
 
     // Automation never hides: a parameter with automation that the track keeps no lane for shows one after the others, by

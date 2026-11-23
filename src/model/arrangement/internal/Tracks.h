@@ -10,13 +10,75 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/TracksValue.h"
 
+#include <cstddef>
 #include <optional>
 #include <vector>
 
 namespace phazite
 {
 class CommandRegistry;
+
+//==============================================================================
+// The song's tracks as values, by their IDs (base/internal/TracksValue.h; roadmap step S5.20, the tracks' first piece). The
+// song's tree is still their storage: each reads it, through the conversion (a track's element found through the song's
+// index, SongIndex.h), and at the tracks' switch reads the tracks' area in its place, with the same results and the same
+// types.
+
+// A track, the master too, found by its ID: what findTrack() returns, used as `if (const auto track = findTrack (song, id))
+// track->name`. While the tree is the storage it holds the track's value read from its element (readTrackValue(), one whole
+// read, countTracksReadAsValues()); at the switch it holds a pointer into the tracks' area, valid until the area's next
+// change. So it is kept to the statement or the block that asked for it: it can be neither copied nor moved (a function
+// returns it as it is made, which C++ makes no copy of), nor made on the heap, and what it holds is reached through a named
+// lookup alone (its -> and * are refused on the lookup a call returns, so that `const auto& name = findTrack (...)->name`,
+// which would outlive it, doesn't compile). Cheap to make: one lookup in the index and the element's properties. What still
+// compiles and must not be written, since the language can't refuse it: a named lookup captured by reference in a lambda that
+// is kept (a callback, a std::function stored), a `static` lookup (`static const auto track = findTrack (...)`), and a
+// reference or a pointer to what a named one holds kept past it (`*track` or `&*track` returned by reference, `track->name`
+// bound to a reference that outlives the block); read the fields you need into values of their own instead.
+class TrackLookup
+{
+public:
+    TrackLookup (const TrackLookup&) = delete;
+    TrackLookup (TrackLookup&&) = delete;
+    TrackLookup& operator= (const TrackLookup&) = delete;
+    TrackLookup& operator= (TrackLookup&&) = delete;
+    ~TrackLookup() = default;
+
+    static void* operator new (std::size_t) = delete;
+    static void* operator new[] (std::size_t) = delete;
+
+    // Whether the song holds the track.
+    explicit operator bool() const noexcept { return value.has_value(); }
+    bool has_value() const noexcept { return value.has_value(); }
+
+    // The track's value, of a lookup that found one.
+    const TrackValue* operator->() const& noexcept;
+    const TrackValue& operator*() const& noexcept;
+    const TrackValue* operator->() const&& = delete;
+    const TrackValue& operator*() const&& = delete;
+
+private:
+    friend TrackLookup findTrack (const Song&, TrackID);
+    explicit TrackLookup (std::optional<TrackValue> found) noexcept;
+
+    std::optional<TrackValue> value {};
+};
+
+// A track by its ID, or the master by its: a lookup that found it or none (above). One whole read of its element, counted.
+TrackLookup findTrack (const Song&, TrackID);
+
+// Whether the song holds a track, or the master, by its ID: one lookup in the index, no value read.
+bool hasTrack (const Song&, TrackID);
+
+// Every track of the song and the master as values, read whole (readTracksValue(): a walk of the track list, each track
+// counted): for a pass, a comparison and the tests, never for a path that runs at every paint or tick.
+SongTracks getTracksValue (const Song&);
+
+// The tracks in the song's order and each one's place, from the song's index, as getTrackStates() orders them and
+// getTrackName() numbers them (the order the tracks' value makes: makeTrackOrder()).
+TrackOrder getTrackOrder (const Song&);
 
 //==============================================================================
 // The song's tracks as it holds them: a TRACK element for each (Schema.h), folders holding theirs, and the master's own
@@ -69,8 +131,10 @@ void setTrackSoloed (Song&, TrackID, bool);
 void setTrackName (Song&, TrackID, const juce::String&);
 void setTrackColour (Song&, TrackID, juce::Colour);
 
-// A track's color: its own, or else the palette's color for its row, so every track has one.
+// A track's color: its own, or else the palette's color for its row, so every track has one. And the same of a track's
+// own color as its value holds it (TrackValue::colour), for a reader that holds the value.
 juce::Colour getTrackColour (const Song&, TrackID, int row);
+juce::Colour getTrackColour (std::optional<juce::uint32> own, int row);
 
 // View settings the project keeps for each track, without undo steps; their on-screen meaning is the playlist's
 // (ui/playlist/TrackHeights.h).

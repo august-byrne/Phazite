@@ -16,8 +16,12 @@
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TempoMapValue.h"
+#include "model/base/internal/TrackSwitchesValue.h"
+#include "model/base/internal/TracksOutside.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
@@ -1432,6 +1436,153 @@ namespace
                 problems.push_back (text + " is written other than the song holds it, in its " + fields);
         }
     }
+
+    // The fields in which two values of one track differ, by name.
+    std::string findDifferingFields (const TrackValue& a, const TrackValue& b)
+    {
+        std::string fields;
+        const auto add = [&fields] (bool same, const char* field)
+        {
+            if (! same)
+                fields += (fields.empty() ? "" : ", ") + std::string (field);
+        };
+
+        add (a.id == b.id, "id");
+        add (a.kind == b.kind, "kind");
+        add (a.parent == b.parent, "folder");
+        add (a.name == b.name, "name");
+        add (a.colour == b.colour, "colour");
+        add (a.bus == b.bus, "bus");
+        add (juce::exactlyEqual (a.volume, b.volume), "volume");
+        add (juce::exactlyEqual (a.pan, b.pan), "pan");
+        add (a.fader == b.fader, "fader");
+        add (a.vca == b.vca, "vca");
+        add (a.key == b.key, "key");
+        add (a.input == b.input, "input");
+        add (a.monitoring == b.monitoring, "monitoring");
+        add (a.padDevice == b.padDevice, "pad's device");
+        add (a.pad == b.pad, "pad");
+        return fields;
+    }
+
+    // Whether a property of a TRACK or the MASTER is one the tracks' three values cover (their conversions read and write it).
+    bool isTracksProperty (const juce::ValueTree& element, const juce::Identifier& property)
+    {
+        static const std::vector<const schema::PropertyDescription*> properties {
+            &schema::trackID,        &schema::trackKind,   &schema::trackName,       &schema::trackColour,         &schema::folderBus,
+            &schema::channelVolume,  &schema::channelPan,  &schema::channelFader,    &schema::channelVCA,          &schema::keyRoot,
+            &schema::keyScale,       &schema::trackInput,  &schema::trackMonitoring, &schema::trackPadDevice,      &schema::trackPad,
+            &schema::trackMute,      &schema::trackSolo,   &schema::trackFrozen,     &schema::trackAutomationMode, &schema::trackHeight,
+            &schema::trackCollapsed, &schema::trackPinned, &schema::drumMode,        &schema::drumOrder,           &schema::drumHidden
+        };
+
+        return std::any_of (properties.begin(), properties.end(), [&element, &property] (const schema::PropertyDescription* each)
+                            { return each->getName() == property && each->isOn (element.getType()); });
+    }
+
+    // One track's or the master's element: the lenient readers (TracksValue.h: readTrackValue(); TrackSwitchesValue.h:
+    // readSwitchesOf(); TracksOutside.h: readViewOf()), as Phazite's code always read the tree, read it as the readers of what
+    // the song holds do (readHeldTrack(), readHeldSwitchesOf(), readHeldViewOf()); and the three values written back
+    // (writeTrackElement(), writeSwitchesInto(), writeViewInto()) give each property of it they cover as the same text, and
+    // its lanes, and no other, so that the loader's rules (keepTrackAsHeld(), keepSwitchesAsHeld(), keepViewAsHeld()) leave
+    // it as it is. A song that went through the loader holds each so; what a writer of the tracks' own code writes after it
+    // does too (no writer leaves a value the held readers read otherwise: a number off its range, a switch written off), but
+    // for a colour that reads as none, which is left out of the text's comparison (below), the readers agreeing on it.
+    void checkTrackElement (const juce::ValueTree& element, std::vector<std::string>& problems)
+    {
+        const auto text = (element.hasType (schema::MASTER) ? std::string ("values: the master ")
+                                                            : "values: track " + writeValue (element[schema::trackID]).toStdString() + " ");
+        const auto lenient = readTrackValue (element);
+        const auto held = readHeldTrack (element);
+
+        if (! lenient.has_value() || ! held.has_value())
+        {
+            problems.push_back (text + "is no track the song holds");
+            return;
+        }
+
+        if (const auto fields = findDifferingFields (*lenient, *held); ! fields.empty())
+            problems.push_back (text + "is read otherwise as Phazite's code read it and as the song holds it, in its " + fields);
+
+        TrackSwitches switches, heldSwitches;
+        readSwitchesOf (element, switches);
+        readHeldSwitchesOf (element, heldSwitches);
+
+        if (! (switches == heldSwitches))
+            problems.push_back (text + "has switches read otherwise as Phazite's code read them and as the song holds them");
+
+        const auto view = readViewOf (element);
+        const auto heldView = readHeldViewOf (element);
+
+        if (! (view == heldView))
+            problems.push_back (text + "has a view read otherwise as Phazite's code read it and as the song holds it");
+
+        auto written = writeTrackElement (*held);
+        writeSwitchesInto (written, heldSwitches);
+        writeViewInto (written, heldView);
+
+        for (int i = 0; i < element.getNumProperties(); ++i)
+        {
+            const auto property = element.getPropertyName (i);
+
+            // Left out: a colour that reads as none (transparent: "0"), which a writer of the tracks' own code still writes (a
+            // track's preset saved from a track without a colour, model/presets/Presets.cpp: makeTrackPreset(), holds "0",
+            // which loading it writes through setTrackColour()), and which every reader reads as none alike; the loader takes
+            // it away, and the writers' piece of the tracks' switch is to write none for it.
+            if (property == schema::trackColour.getName() && ! held->colour.has_value())
+                continue;
+
+            if (isTracksProperty (element, property)
+                && ! (written.hasProperty (property) && isSameValue (written[property], element[property])))
+                problems.push_back (text + "holds its " + property.toString().toStdString() + " otherwise than Phazite writes it");
+        }
+
+        for (int i = 0; i < written.getNumProperties(); ++i)
+            if (const auto property = written.getPropertyName (i); ! element.hasProperty (property))
+                problems.push_back (text + "lacks its " + property.toString().toStdString() + ", which Phazite writes");
+
+        // Its lanes, each the same, in its order; an empty LANES as none.
+        const auto lanes = element.getChildWithName (schema::LANES), writtenLanes = written.getChildWithName (schema::LANES);
+        auto sameLanes = lanes.getNumChildren() == writtenLanes.getNumChildren();
+
+        for (int i = 0; sameLanes && i < lanes.getNumChildren(); ++i)
+        {
+            const auto lane = lanes.getChild (i), writtenLane = writtenLanes.getChild (i);
+            sameLanes = lane.getNumProperties() == writtenLane.getNumProperties();
+
+            for (int p = 0; sameLanes && p < lane.getNumProperties(); ++p)
+            {
+                const auto property = lane.getPropertyName (p);
+                sameLanes = writtenLane.hasProperty (property) && isSameValue (writtenLane[property], lane[property]);
+            }
+        }
+
+        if (! sameLanes)
+            problems.push_back (text + "holds its lanes otherwise than Phazite writes them");
+    }
+
+    // The tracks' area, while the song's tree holds the tracks: each TRACK (in the track list and in each TRACK, a folder's
+    // tracks after it) and the MASTER read alike both ways and holding what Phazite writes of them (checkTrackElement()).
+    void checkTracksValue (const Song& song, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> visit = [&problems, &visit] (const juce::ValueTree& parent)
+        {
+            for (const auto& child : parent)
+            {
+                if (child.hasType (schema::TRACK))
+                {
+                    checkTrackElement (child, problems);
+                    visit (child);
+                }
+            }
+        };
+
+        visit (song.getState().getChildWithName (schema::TRACKS));
+
+        for (const auto& child : song.getState())
+            if (child.hasType (schema::MASTER))
+                checkTrackElement (child, problems);
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -1443,7 +1594,7 @@ std::vector<std::string> findValueProblems (const Song& song)
         return problems;
 
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
-    // lane, the MIDI links, the curves, the sections, modulation, the sends, the devices.
+    // lane, the MIDI links, the curves, the sections, modulation, the sends, the devices, the tracks.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
@@ -1454,6 +1605,7 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkModulationValue (song, *values, problems);
     checkSendsValue (song, *values, problems);
     checkDevicesValue (song, *values, problems);
+    checkTracksValue (song, problems);
     return problems;
 }
 

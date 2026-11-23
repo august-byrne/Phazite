@@ -171,11 +171,7 @@
     ],
     "MASTER": [
       "height",
-      "collapsed",
-      "pinned",
-      "drumMode",
-      "drumOrder",
-      "drumHidden"
+      "collapsed"
     ],
     "DEVICE": [
       "windowX",

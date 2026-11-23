@@ -16,6 +16,9 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/TrackSwitchesValue.h"
+#include "model/base/internal/TracksOutside.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
@@ -1534,6 +1537,32 @@ namespace
             }
 
             //==============================================================================
+            // Each track and the master as the song holds it, written as Phazite writes that, by the one rule of each of the
+            // tracks' three values, which their held readers share (TracksValue.h: keepTrackAsHeld(); TrackSwitchesValue.h:
+            // keepSwitchesAsHeld(); TracksOutside.h: keepViewAsHeld()), once its numbers are within their ranges and its words
+            // its descriptions' (keepNumbers()), its IDs its own (keepIDs()) and the lanes that name nothing are gone
+            // (keepNames()): of its own properties, none at its default (a volume of 0 dB, the master's of -3, a pan of 0, a bus
+            // switch off, an empty input), each number the float it is read as, a colour as Phazite writes it and none that is
+            // no colour, a key's scale where it has a root (major for none) and none without; a switch written off taken away;
+            // its view's and its lanes' properties as Phazite writes them. What Phazite doesn't know on a track stays (the
+            // tracks' switch takes it away). Only through the track list and its folders.
+            void keepTracksAsHeld (juce::ValueTree tree)
+            {
+                for (auto child : tree)
+                {
+                    if (child.hasType (schema::TRACK) || child.hasType (schema::MASTER))
+                    {
+                        keepTrackAsHeld (child);
+                        keepSwitchesAsHeld (child);
+                        keepViewAsHeld (child);
+                    }
+
+                    if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+                        keepTracksAsHeld (child);
+                }
+            }
+
+            //==============================================================================
             // Each curve's points at positions along the control's travel, 0 to 1, one without a position, or with one that is no
             // number, left out (0 would be silence on a volume's lane), and a curve that had points and is left without gone;
             // a curve's children of a type Phazite doesn't know left out, so that a curve's points are its children, counted
@@ -1806,6 +1835,7 @@ namespace
                 keepModulators (state);
                 keepSendsAsHeld (state);
                 keepDevicesAsHeld (state);
+                keepTracksAsHeld (state);
                 keepCurves();
                 keepMidiLinks();
                 keepPaths (state);

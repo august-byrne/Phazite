@@ -11,6 +11,7 @@
 #include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -870,7 +871,7 @@ void forgetWhatNamesTheGone (Song& song)
 
     for (auto state : getTrackStates (song))
     {
-        if (! state.hasProperty (schema::trackPad) || ids.contains (readID (state[schema::trackPadDevice])))
+        if (! readPad (state).has_value() || ids.contains (readPadDevice (state).getRaw())) // TracksValue.h
             continue;
 
         if (! hasClips (song, getTrackID (state)))
@@ -1055,9 +1056,7 @@ void setMixedAsBus (Song& song, TrackID folder, bool bus)
 
 DeviceID getFader (const Song& song, TrackID channel)
 {
-    const auto state = findChainState (song, channel);
-    const auto& property = state.hasProperty (schema::channelVCA) ? schema::channelVCA : schema::channelFader;
-    return DeviceID::fromRaw ((std::uint64_t) (juce::int64) state[property]);
+    return readVolumeDevice (findChainState (song, channel));
 }
 
 juce::String getVolumeParameterID (const Song& song, TrackID channel)
@@ -1067,7 +1066,7 @@ juce::String getVolumeParameterID (const Song& song, TrackID channel)
     if (state.hasType (schema::MASTER))
         return schema::masterVolume;
 
-    return state.hasProperty (schema::channelVCA) ? schema::vcaVolume : schema::faderVolume;
+    return readChannelVCA (state).isValid() ? schema::vcaVolume : schema::faderVolume;
 }
 
 juce::String getPanParameterID (const Song& song, TrackID channel)
@@ -1077,7 +1076,7 @@ juce::String getPanParameterID (const Song& song, TrackID channel)
     if (state.hasType (schema::MASTER))
         return schema::masterPan;
 
-    return state.hasProperty (schema::channelVCA) ? juce::String() : juce::String (schema::faderPan);
+    return readChannelVCA (state).isValid() ? juce::String() : juce::String (schema::faderPan);
 }
 
 juce::ValueTree findChannelOfFader (const Song& song, DeviceID fader)
@@ -1089,9 +1088,8 @@ juce::ValueTree findChannelOfFader (const Song& song, DeviceID fader)
     channels.push_back (song.getState().getChildWithName (schema::MASTER));
 
     for (const auto& channel : channels)
-        for (const auto* property : { &schema::channelFader, &schema::channelVCA })
-            if ((std::uint64_t) (juce::int64) channel.getProperty (*property, (juce::int64) 0) == fader.getRaw())
-                return channel;
+        if (readChannelFader (channel) == fader || readChannelVCA (channel) == fader)
+            return channel;
 
     return {};
 }
@@ -1116,13 +1114,12 @@ void setChannelPan (Song& song, TrackID channel, float pan)
 
 float getChannelVolume (const Song& song, TrackID channel)
 {
-    const auto state = findChainState (song, channel);
-    return (float) state.getProperty (schema::channelVolume, state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f);
+    return readChannelVolume (findChainState (song, channel));
 }
 
 float getChannelPan (const Song& song, TrackID channel)
 {
-    return (float) findChainState (song, channel).getProperty (schema::channelPan, 0.0f);
+    return readChannelPan (findChainState (song, channel));
 }
 
 TrackID getOutputBus (const Song& song, TrackID track)
