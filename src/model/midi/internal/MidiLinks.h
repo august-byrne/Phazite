@@ -156,7 +156,7 @@ private:
     void timerCallback() override;
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>&) override;
-    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>&) override;
+    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>&, const SongSends& now) override;
 
     JUCE_DECLARE_NON_COPYABLE (MidiLinker)
 };

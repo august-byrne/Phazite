@@ -564,7 +564,7 @@ void MidiLinker::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
         setLearning (std::nullopt);
 }
 
-void MidiLinker::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>&)
+void MidiLinker::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>&, const SongSends&)
 {
     // A learning send's level ends as the send is taken out (its ID the learned parameter's device's: Parameters.h), alone or
     // with its track, in this call, from what it is told alone.

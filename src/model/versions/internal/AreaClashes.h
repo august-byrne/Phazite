@@ -61,6 +61,11 @@ AreaChoice chooseSectionClash (Song&, const MergeClash&, int value, const MergeS
 // made, whose amount's clash has no value before, taken away for what was before (known bug 239's shape).
 AreaChoice chooseModulationClash (Song&, const MergeClash&, int value, const MergeSides&);
 
+// The sends' (model/mixer/Mixer.cpp): a path through a SEND of a track, which merge as items by their IDs: a property of one,
+// or one whole, through the sends' setters by the send's ID; a send both lines made under one ID, whose property's clash the
+// side chosen holds none of, taken away (known bug 239's shape).
+AreaChoice chooseSendClash (Song&, const MergeClash&, int value, const MergeSides&);
+
 AreaChoice chooseCurveClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseNoteClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSides&);

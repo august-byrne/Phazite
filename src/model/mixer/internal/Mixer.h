@@ -234,26 +234,28 @@ TrackID addNewReturnTrack (Song&, Selection*);
 // the track itself. Returns the return track, or none.
 TrackID addReturnWithEffect (Song&, TrackID sender, juce::ValueTree effect);
 
-// A track's sends (Schema.h: SEND), each to a return by the return's track, in their order; and adding one from a track to a
-// return: after the fader, or before it with preFader, its level starting at -6 dB. Returns none if the track can't send
-// there or the return isn't one. Joins the caller's step.
+// A track's sends (Schema.h: SEND; the song's sends' area, SongValues.h), each to a return by the return's track, in their
+// order; and adding one from a track to a return: after the fader, or before it with preFader, its level starting at -6 dB.
+// Returns none if the track can't send there or the return isn't one. Joins the caller's step.
 std::vector<DeviceID> getSends (const Song&, TrackID);
 DeviceID addSend (Song&, TrackID from, TrackID returnTrack, bool preFader);
 
 // The sends as values (model/base/internal/SendsValue.h), which every reader of a send reads them as: a send by its ID (none
-// for one the song hasn't), the track it is on (none for none), a track's sends in their order (none for a folder, the
-// master, or a track the song hasn't), and the return a send goes to. Each reads the song's tree for now, as the sends' code
-// always did (a walk of the tracks' sends for one by its ID, of the track's children for a track's), and the area of the
-// song's values once the sends leave the tree (roadmap step S5.20). A control's parameter that found its send looks for it on
-// the track it found it on alone, at each tick (model/devices/internal/Parameters.h: FoundParameter).
+// for one the song hasn't), the track it is on (none for none), a track's sends in their order (none for the master, or a
+// track the song hasn't or that sends nowhere), the return a send goes to, and a track's (first) send to a return, none for
+// none. Each a look in the sends' area of the song's values (SongValues.h: sends), by the send's ID or the track's; for a song
+// that holds no values (the loader's song, a check's copy), a walk of its tree. A control's parameter finds its send by its
+// ID, at each tick (model/devices/internal/Parameters.h: FoundParameter), and a strip's knob its track's send to a return
+// (findSendFromTo(): model/mixer/MixerModel.h, getSendLevelTo()), nothing allocated.
 std::optional<SendValue> getSendValue (const Song&, DeviceID send);
 TrackID getSendTrack (const Song&, DeviceID send);
 std::vector<SendValue> getSendValues (const Song&, TrackID);
+DeviceID findSendFromTo (const Song&, TrackID from, TrackID returnTrack);
 TrackID getSendTarget (const Song&, DeviceID send);
 bool isPreFader (const Song&, DeviceID send);
 void setPreFader (Song&, DeviceID send, bool); // as one undo step, "Change Send"
 
-// A send's level in decibels, the song's, in the caller's step.
+// A send's level in decibels, the song's, set in the caller's step within a fader's range, to a ten-thousandth.
 void setSendLevel (Song&, DeviceID send, float decibels);
 float getSendLevel (const Song&, DeviceID send);
 
@@ -262,6 +264,13 @@ float getSendLevel (const Song&, DeviceID send);
 DeviceID addSendTo (Song&, TrackID from, TrackID returnTrack);
 DeviceID addSendToNewReturn (Song&, TrackID from);
 void removeSend (Song&, DeviceID send);
+
+// Each copied track (by the copied IDs: a duplicate's, model/arrangement/internal/Tracks.h, duplicateTracks()) given its
+// original's sends, in their order, each with a new ID of the song's, which joins the copied IDs before what names a send's
+// level is copied by them (a modulation: Modulation.h, copyModulation(); a curve: Automation.h, copyCurves()); a send to a
+// return copied too goes to the copy, as a copy names what it holds. Nothing for a copy that holds sends already. In the
+// caller's undo step, the sends set once.
+void copySends (Song&, CopiedIDs& copied);
 
 // The mixer's commands: add a return track.
 void addMixerCommands (CommandRegistry&, Selection&);

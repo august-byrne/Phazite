@@ -13,6 +13,7 @@
 #include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TempoMapValue.h"
@@ -1177,6 +1178,52 @@ namespace
                 problems.push_back (text + " holds steps outside -1 to 1, too many, or zeros at the end");
         }
     }
+
+    // The sends' area: no SEND in the song's tree (its sends are the area's); the area's lists agree with its sends
+    // (SendsValue.h: holdsItsLists()); each send on a TRACK of the song's (a folder's send, or one to a track that isn't a
+    // return, which the loader keeps and the code never makes, aren't refused: what a file holds); its level within its
+    // description's range (Schema.h: sendLevel) and to a ten-thousandth, as the song holds one (SendsValue.h: readHeldSend());
+    // and the song's next ID past each send's.
+    void checkSendsValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> findElements = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::SEND))
+                    problems.push_back ("values: a SEND is an element in the song's tree");
+
+                findElements (child);
+            }
+        };
+
+        findElements (song.getState());
+        const auto sends = values.sends.get();
+
+        if (! holdsItsLists (sends))
+            problems.push_back ("values: the sends' lists don't hold its sends, or hold one twice");
+
+        const auto next = (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0);
+        const auto& range = schema::sendLevel.getRange();
+
+        for (const auto& [key, send] : sends.sends)
+        {
+            const auto text = "values: send " + std::to_string (key);
+
+            if (key >= next)
+                problems.push_back (text + " has an ID the song's next ID isn't past");
+
+            if (! findTrackState (song, send.from).hasType (schema::TRACK))
+                problems.push_back (text + " is on no track of the song's");
+
+            const auto level = (double) send.level;
+
+            if (! range.has_value() || ! (level >= range->low && level <= range->high))
+                problems.push_back (text + " has a level outside its description's range");
+            else if (std::abs (std::round (level * 1.0e4) / 1.0e4 - level) > 1.0e-6)
+                problems.push_back (text + " has a level finer than a ten-thousandth");
+        }
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -1188,7 +1235,7 @@ std::vector<std::string> findValueProblems (const Song& song)
         return problems;
 
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
-    // lane, the MIDI links, the curves, the sections, modulation.
+    // lane, the MIDI links, the curves, the sections, modulation, the sends.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
@@ -1197,6 +1244,7 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkCurvesValue (song, *values, problems);
     checkSectionsValue (song, *values, problems);
     checkModulationValue (song, *values, problems);
+    checkSendsValue (song, *values, problems);
     return problems;
 }
 

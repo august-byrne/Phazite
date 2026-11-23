@@ -285,25 +285,23 @@ void SongPlayer::modulationChanged (const std::vector<SongValues::ModulationChan
         mark (place);
 }
 
-void SongPlayer::sendsChanged (const std::vector<SongValues::SendChange>& changed, const std::vector<TrackID>& reordered)
+void SongPlayer::sendsChanged (const std::vector<SongValues::SendChange>& changed, const std::vector<TrackID>& reordered,
+                               const SongSends& now)
 {
-    // The channel a send was added to, taken out of, or came to and from, as a SEND added to its track or taken out of it
-    // marked the track's channel (markChange()); a route or a level in place none, as a property of a SEND marked none.
+    // The channel a send was added to, taken out of, or came to and from, as a child added to a channel's element or taken out
+    // of it marks it (markChange()); a route or a level in place none.
     using Change = SongValues::SendChange;
 
     for (const auto& send : changed)
-    {
         if (send.has (Change::made))
             for (const auto track : { send.fromBefore, send.fromAfter })
                 if (track.isValid())
                     changes.channels.insert ((std::int64_t) track.getRaw());
 
-        // What updateAudibility() reads, as the song holds it now.
-        heldSends = send.now != nullptr ? withSend (heldSends, *send.now) : withoutSend (heldSends, send.id);
-    }
-
     for (const auto track : reordered)
         changes.channels.insert ((std::int64_t) track.getRaw());
+
+    heldSends = now; // what updateAudibility() reads, as the song holds it now
 }
 
 namespace
@@ -379,8 +377,8 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
     // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsKept()), which marks
     // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats); the curves by
     // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter; the modulators and macros by
-    // modulationChanged() (the tree holds none of them), each by its channel; the sends by sendsChanged()
-    // (isHeardAsKept(), through isHeardAsSends()), by the tracks they were added to or taken out of. In a channel (a track, a
+    // modulationChanged() (the tree holds none of them), each by its channel; the sends by sendsChanged() (the tree holds
+    // none of them either), by the tracks they were added to or taken out of. In a channel (a track, a
     // folder, a return or the master), its devices' values are read again only for what can change them: a change at or under
     // a device, a container or a chain, or an element of the channel added, removed or moved; not the channel's
     // own properties (its height, mute, solo, volume, pan), which no device reads, nor a plug-in's own values (VALUE), which
@@ -609,7 +607,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     tapParts.clear();
     compilingAfresh = pathLengths.empty(); // the first plan, or the first for another rate or block size: no path is new
     compilingLive = live.has_value();
-    const auto channels = getChannels();
+    const auto songSends = getSendsValue (song); // the song's sends, read once for every channel's (getChannels())
+    const auto channels = getChannels (songSends);
     std::map<std::int64_t, int> places; // each channel's strip, by its ID
 
     // The pads on mixer channels of their own, by their samplers, which play each into an output of its own.
@@ -711,15 +710,9 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
             if (const auto kept = audio.find (id); kept == audio.end() || ! isOnDiskAsKept (kept->second))
                 addAudio (plan->strips[(size_t) places[id]], trackState, clipTempo);
 
-    // The channels' sends as this plan read them (getChannels()), which sendsChanged() brings up to date until the next plan,
-    // for what decides which send sends.
-    heldSends = {};
-
-    for (const auto& channel : channels)
-        for (const auto& send : channel.sends)
-            if (send.id.isValid())
-                heldSends = withSend (heldSends, send);
-
+    // The song's sends as this plan read them (getChannels()), which sendsChanged() brings up to date until the next plan, for
+    // what decides which send sends.
+    heldSends = songSends;
     updateAudibility();
 
     // The master adds up what goes to it: the tracks and buses in no bus, and the returns; or what a render plays of the
@@ -1253,7 +1246,7 @@ engine::ChainState* SongPlayer::findChain (std::int64_t id) const
     return found != chains.end() ? found->second.get() : nullptr;
 }
 
-std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
+std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels (const SongSends& songSends) const
 {
     // Each track's, bus's and return's: where it goes (the bus it is in, or the master), and what it takes in.
     std::vector<ChannelInfo> infos;
@@ -1270,7 +1263,10 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
                 if (parent.hasProperty (schema::channelFader))
                     info.output = getID (parent, schema::trackID);
 
-        info.sends = getSendValues (song, TrackID::fromRaw ((std::uint64_t) info.id));
+        if (const auto* list = songSends.tracks.find ((std::uint64_t) info.id))
+            for (const auto id : *list)
+                if (const auto* send = songSends.find (id))
+                    info.sends.push_back (*send);
 
         // A pad track plays its drum sampler's pad, after the sampler's track.
         if (state.hasProperty (schema::trackPad))

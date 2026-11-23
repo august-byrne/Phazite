@@ -8,6 +8,7 @@
 #include "internal/ModulationArea.h"
 #include "internal/Schema.h"
 #include "internal/SectionsArea.h"
+#include "internal/SendsArea.h"
 #include "internal/TempoMapArea.h"
 
 namespace phazite
@@ -41,6 +42,9 @@ namespace
         if (leadsToModulation (parent, child)) // a track, the master or a channel's container, for modulation
             return true;
 
+        if (leadsToSends (parent, child)) // the track list, a track or a folder's tracks, for the sends
+            return true;
+
         return false;
     }
 
@@ -60,6 +64,8 @@ namespace
         writeCurvesIn (element, kept);
         writeSectionsIn (element, kept);   // the sections in the song's SECTIONS: SectionsArea.h
         writeModulationIn (element, kept); // a TRACK's, the MASTER's or a CONTAINER's modulators and macros: ModulationArea.h
+        writeSendsIn (element, kept);      // a TRACK's sends, after its modulators and macros (the last of its
+                                           // children): SendsArea.h
 
         for (auto child : element)
             if (leadsToKept (element, child))
@@ -108,6 +114,7 @@ ValuesKept keepValues (const Song& song)
         kept.curves = values->curves.get();
         kept.sections = values->sections.get();
         kept.modulation = values->modulation.get();
+        kept.sends = values->sends.get();
     }
 
     return kept;
@@ -144,6 +151,9 @@ bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, con
         return false;
 
     if (! holdSameModulationOf (element, kept, otherElement, otherKept)) // then an owner's modulators and macros
+        return false;
+
+    if (! holdSameSendsOf (element, kept, otherElement, otherKept)) // then a track's sends
         return false;
 
     return true;

@@ -97,8 +97,8 @@ struct SongValues::ModulationKeeper
 // an owner of modulators or macros (the track list, a track, a folder's tracks, the master, a channel's container, from the
 // song's element down); and a copy's TRACK, MASTER or CONTAINER given its modulators and macros from the values kept (a
 // channel's own by its track's ID, the master's under 0, a container's by its ID), in their list's order, after its other
-// children but a track's sends (SEND), which stay last (the sends' area writes them after modulation, at its switch: roadmap
-// step S5.20). Nothing for another element.
+// children (a track's sends after them: the sends' area writes them after modulation, SendsArea.h). Nothing for another
+// element.
 bool leadsToModulation (const juce::ValueTree& parent, const juce::ValueTree& child);
 void writeModulationIn (juce::ValueTree& element, const ValuesKept&);
 

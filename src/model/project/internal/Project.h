@@ -430,15 +430,15 @@ private:
     bool areModulatorsAsSaved() const;
 
     // The sends that changed, by their IDs, and the tracks a send was added to, taken out of or came to and from, and those
-    // whose sends came in another order (SongValues.h: Listener::sendsChanged(); the tree's callbacks below leave the song's
-    // SEND elements alone, isHeardAsKept()): compared with savedState when asked, each against the saved copy's of its ID, by
-    // element while the trees hold them (SendsArea.h: findSendElement(), readTrackSendOrder()), so that a level turned and
-    // turned back is saved again, and a send taken out and put back at another place before the comparison compares by
-    // where it is among its track's. Bounded as toCompare is: past mostToCompare of them, the tracks whole.
+    // whose sends came in another order (SongValues.h: Listener::sendsChanged(); the song's tree holds none): compared with
+    // savedState when asked, each against the saved copy's of its ID, as values (WholeState.h: holdSameSend(),
+    // holdSameTrackSendOrder()), so that a level turned and turned back is saved again, and a send taken out and put back at
+    // another place before the comparison compares by where it is among its track's. Bounded as toCompare is: past
+    // mostToCompare of them, the sends whole (holdSameSends()), as the whole comparison compares them.
     std::vector<DeviceID> sendsToCompare;
     std::vector<TrackID> sendTracksToCompare;
     bool comparingSendsWhole = false;
-    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered) override;
+    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
     bool areSendsAsSaved() const;
 
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true

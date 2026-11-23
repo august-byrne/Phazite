@@ -74,20 +74,16 @@ namespace
         return names;
     }
 
-    // A track's send to a return (its first), or none.
+    // A track's send to a return (its first), or none: a look in its track's list in the sends' area, nothing allocated (a
+    // strip's knob asks it at each tick: Mixer.h, findSendFromTo()).
     std::optional<SendValue> findSendValueTo (const Song& song, TrackID from, TrackID returnTrack)
     {
-        for (const auto& send : getSendValues (song, from))
-            if (send.to == returnTrack)
-                return send;
-
-        return std::nullopt;
+        return getSendValue (song, findSendFromTo (song, from, returnTrack));
     }
 
     DeviceID findSendTo (const Song& song, TrackID from, TrackID returnTrack)
     {
-        const auto send = findSendValueTo (song, from, returnTrack);
-        return send.has_value() ? send->id : DeviceID();
+        return findSendFromTo (song, from, returnTrack);
     }
 
     // Whether one channel's sound reaches another's: through a send to a return, or by being in a bus folder.

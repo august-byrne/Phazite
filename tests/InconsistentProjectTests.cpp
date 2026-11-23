@@ -20,6 +20,7 @@
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/WholeState.h"
@@ -47,6 +48,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -2153,6 +2155,191 @@ TEST_CASE ("Modulators and macros open as the song holds them, written as Phazit
         REQUIRE (reopened->save().wasOk());
         CHECK (file.loadFileAsString() == saved);
     }
+}
+
+TEST_CASE ("Sends open as the song holds them, written as Phazite writes that, the same at every opening")
+{
+    // The loader kept what the song's held reading rounds or drops (SendsValue.h: readHeldSend()), so a song read a send one
+    // way and the versions' pass and a merge's choice another. Now each is made as the song holds it (keepSendAsHeld()): a
+    // level finer than a ten-thousandth is rounded to one, as setSendLevel() keeps one; a level of 0 dB and a preFader that is
+    // off are written as none; a level in more digits than a float keeps is written as the float's; what Phazite doesn't
+    // know on a send or in it goes. A send without an ID, and one with another's, are each given one of their own, as before.
+    Edited edited;
+    auto& song = *phazite::findSong (edited.s.context);
+    phazite::TrackID verb;
+
+    {
+        const phazite::UndoStep step (song, "Add Return");
+        verb = phazite::addReturnTrack (song, "Verb", nullptr);
+    }
+
+    REQUIRE (edited.s.getProject().save().wasOk());
+    const auto to = juce::String ((juce::int64) verb.getRaw());
+
+    auto project = edited.open (
+        [&] (juce::XmlElement& file)
+        {
+            auto* lead = Edited::findTrack (file, "Lead");
+            const auto add = [lead, &to] (const juce::String& id)
+            {
+                auto* send = lead->createNewChildElement ("SEND");
+
+                if (id.isNotEmpty())
+                    send->setAttribute ("id", id);
+
+                send->setAttribute ("to", to);
+                return send;
+            };
+
+            add ("880101")->setAttribute ("level", "-6.123456"); // finer than a ten-thousandth
+            auto* atZero = add ("880102");
+            atZero->setAttribute ("level", "0");
+            atZero->setAttribute ("preFader", "0");
+            add ("880103")->setAttribute ("level", "-6.0000001"); // more digits than a float keeps
+            auto* unknown = add ("880104");
+            unknown->setAttribute ("level", "-12");
+            unknown->setAttribute ("shape", "round"); // a property Phazite doesn't know
+            unknown->createNewChildElement ("OTHER");
+            auto* beyond = add ("880105");
+            beyond->setAttribute ("level", "7"); // past a fader's top
+            beyond->setAttribute ("preFader", "1");
+            add ({})->setAttribute ("level", "-3");       // no ID
+            add ("880101")->setAttribute ("level", "-4"); // another's ID
+        });
+
+    REQUIRE (project != nullptr);
+    const auto sends = phazite::getSendValues (project->getSong(), edited.lead);
+    REQUIRE (sends.size() == 7);
+    const auto whole = phazite::test::copyWholeSong (project->getSong()); // its sends as its file holds them
+    const auto find = [&whole] (std::uint64_t id)
+    {
+        for (const auto& each : findAll (whole, schema::SEND))
+            if (phazite::readID (each[schema::sendID]) == id)
+                return each;
+
+        return juce::ValueTree();
+    };
+
+    CHECK (phazite::writeValue (find (880101)[schema::sendLevel]) == "-6.1235");
+    CHECK (find (880102).getNumProperties() == 2); // its ID and its return
+    CHECK (phazite::writeValue (find (880103)[schema::sendLevel]) == "-6");
+    CHECK_FALSE (find (880104).hasProperty ("shape"));
+    CHECK (find (880104).getNumChildren() == 0);
+    CHECK (phazite::writeValue (find (880105)[schema::sendLevel]) == "6");
+    CHECK ((bool) find (880105)[schema::sendPreFader]);
+
+    // Each held once, read by the song's code the same as the song holds it, and written as it is held.
+    std::set<std::uint64_t> ids;
+
+    for (const auto& element : findAll (whole, schema::SEND))
+    {
+        ids.insert (phazite::readID (element[schema::sendID]));
+        REQUIRE (phazite::readHeldSend (element, edited.lead).has_value());
+        CHECK (phazite::readSendValue (element, edited.lead) == *phazite::readHeldSend (element, edited.lead));
+        CHECK (phazite::isSendWrittenAsHeld (element));
+    }
+
+    CHECK (ids.size() == 7);
+
+    // Saved, and opened and saved again, twice: the same text each time.
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+    const auto saved = file.loadFileAsString();
+
+    for (int opening = 0; opening < 2; ++opening)
+    {
+        juce::String error;
+        const auto reopened = phazite::Project::open (file, false, error);
+        REQUIRE (reopened != nullptr);
+        checkSong (reopened->getSong());
+        REQUIRE (reopened->save().wasOk());
+        CHECK (file.loadFileAsString() == saved);
+    }
+}
+
+TEST_CASE ("A send's level is kept by one rule, set by its knob or read from a file: in ten-thousandths, none written where it "
+           "rounds to 0")
+{
+    // The setter (Mixer.cpp: setSendLevel()) and the as-held reader (SendsValue.h: readHeldSend(), which the loader, the
+    // versions' pass and a merge's choice read through) keep a level alike (SendsValue.h: keepSendLevel()).
+    Edited edited;
+    auto& song = *phazite::findSong (edited.s.context);
+    phazite::TrackID verb;
+    phazite::DeviceID send;
+
+    {
+        const phazite::UndoStep step (song, "Add Send");
+        verb = phazite::addReturnTrack (song, "Verb", nullptr);
+        send = phazite::addSend (song, edited.lead, verb, false);
+    }
+
+    REQUIRE (send.isValid());
+    const auto findIn = [] (const juce::ValueTree& whole, std::uint64_t id)
+    {
+        for (const auto& each : findAll (whole, schema::SEND))
+            if (phazite::readID (each[schema::sendID]) == id)
+                return each;
+
+        return juce::ValueTree();
+    };
+
+    // Set by its knob, each written as the whole song holds it.
+    // The last two a ten-thousandth and a half as a double, a little less as the float the song holds.
+    const std::vector<std::pair<const char*, float>> levels { { "-0.00004", -0.00004f },
+                                                              { "0.00004", 0.00004f },
+                                                              { "-12.34565", -12.34565f },
+                                                              { "0.00005", 0.00005f },
+                                                              { "1.23455", 1.23455f } };
+    std::vector<juce::ValueTree> set;
+
+    for (const auto& level : levels)
+    {
+        {
+            const phazite::UndoStep step (song, "Change Send Level");
+            phazite::setSendLevel (song, send, level.second);
+        }
+
+        set.push_back (findIn (phazite::test::copyWholeSong (song), send.getRaw()).createCopy());
+        REQUIRE (set.back().isValid());
+    }
+
+    REQUIRE (edited.s.getProject().save().wasOk());
+    const auto to = juce::String ((juce::int64) verb.getRaw());
+
+    // Read from a file, each a send of its own.
+    auto project = edited.open (
+        [&] (juce::XmlElement& file)
+        {
+            auto* lead = Edited::findTrack (file, "Lead");
+            auto id = 880201;
+
+            for (const auto& level : levels)
+            {
+                auto* element = lead->createNewChildElement ("SEND");
+                element->setAttribute ("id", id++);
+                element->setAttribute ("to", to);
+                element->setAttribute ("level", level.first);
+            }
+        });
+
+    REQUIRE (project != nullptr);
+    const auto whole = phazite::test::copyWholeSong (project->getSong());
+
+    for (size_t i = 0; i < levels.size(); ++i)
+    {
+        INFO (std::string (levels[i].first));
+        const auto read = findIn (whole, (std::uint64_t) (880201 + i));
+        REQUIRE (read.isValid());
+        CHECK (read.hasProperty (schema::sendLevel) == set[i].hasProperty (schema::sendLevel));
+        CHECK (phazite::writeValue (read[schema::sendLevel]) == phazite::writeValue (set[i][schema::sendLevel]));
+    }
+
+    CHECK_FALSE (set[0].hasProperty (schema::sendLevel)); // -0.00004 is 0
+    CHECK_FALSE (set[1].hasProperty (schema::sendLevel)); // 0.00004 is 0
+    CHECK (phazite::writeValue (set[2][schema::sendLevel]) == "-12.3456");
+    CHECK_FALSE (set[3].hasProperty (schema::sendLevel)); // 0.00005 as a float is less: 0
+    CHECK (phazite::writeValue (set[4][schema::sendLevel]) == "1.2345");
 }
 
 TEST_CASE ("A track preset's volume beyond any fader's loads at the top of its range, and its sounds that aren't audio files stay out")

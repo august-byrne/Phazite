@@ -205,7 +205,8 @@ void PlaybackSession::modulationChanged (const std::vector<SongValues::Modulatio
         followAfterMove = true;
 }
 
-void PlaybackSession::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered)
+void PlaybackSession::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered,
+                                    const SongSends&)
 {
     // A send's level changed in place plays at once, from the value it is told; a send added, taken out, come to another
     // track or routed elsewhere (another return, before or after its fader), and sends in another order: a new plan, as the

@@ -1493,6 +1493,23 @@ namespace
             }
 
             //==============================================================================
+            // Each send as the song holds it, written as Phazite writes that (SendsValue.h: keepSendAsHeld(), the one rule, the
+            // held reader's), once each holds an ID of its own (keepIDs()) and what names a return the song hasn't is gone
+            // (keepSends()): its level to a ten-thousandth, none at 0 dB nor a preFader that is off, nothing Phazite doesn't know
+            // on it or in it. Where it is (a folder's send) and where it goes (a track that isn't a return) are its as the file
+            // has them. Only through the tracks, never through a clip's notes.
+            void keepSendsAsHeld (juce::ValueTree tree)
+            {
+                for (auto child : tree)
+                {
+                    if (child.hasType (schema::SEND))
+                        keepSendAsHeld (child);
+                    else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
+                        keepSendsAsHeld (child);
+                }
+            }
+
+            //==============================================================================
             // Each device, container and chain as the song holds it, written as Phazite writes it (DevicesValue.h:
             // keepDeviceAsHeld(), the one rule, the held reader's), once its numbers are within their ranges (keepNumbers()),
             // its values of parameters it has within theirs (keepDevices()) and one VALUES and one SOUNDS are left
@@ -1786,6 +1803,7 @@ namespace
                 forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
                 keepKeys (state);
                 keepModulators (state);
+                keepSendsAsHeld (state);
                 keepDevicesAsHeld (state);
                 keepCurves();
                 keepMidiLinks();
@@ -3447,9 +3465,9 @@ bool Project::areModulatorsAsSaved() const
                            [this, &now] (ModulatorID id) { return holdSameModulator (now, savedState.values, id); });
 }
 
-void Project::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered)
+void Project::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered, const SongSends&)
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare of them, the tracks
+    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare of them, the sends
     // whole.
     if (isWriting)
         return;
@@ -3504,37 +3522,19 @@ bool Project::areSendsAsSaved() const
     if (! comparingSendsWhole && sendsToCompare.empty() && sendTracksToCompare.empty())
         return true;
 
-    // While the trees hold the sends, by element: past mostToCompare, the tracks whole (holdTheSameProject(), which holds the
-    // sends); else each track's sends' order, then each send against the saved copy's of its ID, its track and its element,
-    // one compared each (a send gone from both is the same).
-    const auto state = song->getState();
+    // As values (WholeState.h), as the whole comparison compares them (holdTheSameProject(), each track's through
+    // holdSameKeptOf()): past mostToCompare, the song's sends whole; else each track's sends' order, then each send against the
+    // saved copy's of its ID, its track among it, one compared each (a send gone from both is the same).
     const auto now = keepValues (*song);
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
     if (comparingSendsWhole)
-    {
-        const auto element = state.getChildWithName (schema::TRACKS), saved = savedState.tree.getChildWithName (schema::TRACKS);
-        return element.isValid() == saved.isValid() && (! element.isValid() || holdTheSameProject (element, now, saved, savedState.values));
-    }
+        return holdSameSends (now, savedState.values);
 
-    for (const auto track : sendTracksToCompare)
-    {
-        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-
-        if (readTrackSendOrder (state, track) != readTrackSendOrder (savedState.tree, track))
-            return false;
-    }
-
-    return std::all_of (sendsToCompare.begin(), sendsToCompare.end(),
-                        [this, &state, &now] (DeviceID id)
-                        {
-                            const auto found = findSendElement (state, id);
-                            const auto saved = findSendElement (savedState.tree, id);
-
-                            if (! found.element.isValid() || ! saved.element.isValid())
-                                return found.element.isValid() == saved.element.isValid();
-
-                            return found.track == saved.track && holdTheSameProject (found.element, now, saved.element, savedState.values);
-                        });
+    return std::all_of (sendTracksToCompare.begin(), sendTracksToCompare.end(),
+                        [this, &now] (TrackID track) { return holdSameTrackSendOrder (now, savedState.values, track); })
+           && std::all_of (sendsToCompare.begin(), sendsToCompare.end(),
+                           [this, &now] (DeviceID id) { return holdSameSend (now, savedState.values, id); });
 }
 
 bool Project::holdSameClip (ClipID clip, const ValuesKept& now) const

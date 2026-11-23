@@ -924,8 +924,10 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
             if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
                 copyTrackClips (song, TrackID::fromRaw (found->second), getTrackID (state), copied, true);
 
-        // Its modulators and its containers' macros, through modulation's code, with their new IDs among the copied before the
-        // curves are copied, which name a macro's copy by its ID.
+        // Its sends, through the sends' code, then its modulators and its containers' macros, through modulation's code, each
+        // with their new IDs among the copied before what names them is copied: a modulation of a send's level names the
+        // send's copy by its ID, and a curve a send's copy or a macro's.
+        copySends (song, copied);
         copyModulation (song, copied);
         copyCurves (song, copied);
         copies.push_back (getTrackID (copy));

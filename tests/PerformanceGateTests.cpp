@@ -937,14 +937,80 @@ TEST_CASE ("Performance gate: the loader's rule for the devices allocates nothin
     CHECK (*allocations == 0);
 }
 
-TEST_CASE ("Performance gate: a tick of a send's level control reads as many sends however many tracks and sends the song has")
+TEST_CASE ("Performance gate: the loader's rule allocates nothing for a send Phazite wrote")
+{
+    // The loader makes every send as the song holds it (SendsValue.h: keepSendAsHeld()), each of a song's: one it wrote needs
+    // no change, which the rule finds by reading the send's numbers and comparing its properties' texts, nothing allocated.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 10);
+    std::vector<phazite::TrackID> returns;
+
+    for (const auto* name : { "A", "B", "C", "D" })
+        returns.push_back (phazite::addReturnTrack (*song, name, nullptr));
+
+    for (const auto track : tracks)
+    {
+        for (const auto returnTrack : returns)
+        {
+            const auto send = phazite::addSend (*song, track, returnTrack, returnTrack == returns.front());
+            phazite::setSendLevel (*song, send, -12.3456f);
+        }
+    }
+
+    // Saved and read as a file is.
+    juce::MemoryOutputStream text;
+    phazite::writeProjectText (text, phazite::test::copyWholeSong (*song));
+    const auto xml = juce::parseXML (text.toString());
+    REQUIRE (xml != nullptr);
+    const auto state = juce::ValueTree::fromXml (*xml);
+    std::vector<juce::ValueTree> elements;
+    const std::function<void (const juce::ValueTree&)> collect = [&collect, &elements] (const juce::ValueTree& tree)
+    {
+        for (const auto& child : tree)
+        {
+            if (child.hasType (phazite::schema::SEND))
+                elements.push_back (child);
+
+            collect (child);
+        }
+    };
+
+    collect (state);
+    REQUIRE (elements.size() == 40);
+    auto changed = false;
+    const auto allocations = phazite::test::countAllocations (
+        [&elements, &changed]
+        {
+            for (const auto& element : elements)
+                changed = phazite::keepSendAsHeld (element) || changed;
+        });
+
+    if (! allocations.has_value())
+        return; // nothing counted on this build, and nothing run
+
+    CHECK_FALSE (changed);
+    MESSAGE ("The loader's rule over " << elements.size() << " sends: " << *allocations << " allocations");
+
+    // Measured 2026-11-22: none.
+    CHECK (*allocations == 0);
+}
+
+TEST_CASE ("Performance gate: a tick of a send's level control reads no send from an element, and allocates as much however many "
+           "tracks and sends the song has")
 {
     // A send's knob shows its level at each of the display ticker's ticks. Its handle, having found the send's level once,
-    // checks that the send is still on the track it found it on and reads its level there, one look among that track's sends
-    // each (model/devices/internal/Parameters.h: FoundParameter), never a walk of the song's tracks; a strip's knob, whose
-    // send may not be there yet, also finds it among its track's sends first (model/mixer/MixerModel.h: getSendLevelTo()).
-    // Counted as sends read into values (SendsValue.h: countSendsRead()), on songs of 4 tracks and of 40, each sending to 4
-    // returns, for the last track's send to the third return: a strip's knob and a knob of the send by its ID.
+    // checks that the send is still there and reads its level, each a look in the sends' area by the send's ID
+    // (model/devices/internal/Parameters.h: FoundParameter), never a walk of the song's tracks; a strip's knob, whose send may
+    // not be there yet, also finds it in its track's list first (model/mixer/MixerModel.h: getSendLevelTo(); Mixer.h:
+    // findSendFromTo()). Counted as sends read into values from an element (SendsValue.h: countSendsRead()), none, as the
+    // looks in the sends' area (countSendLooks()), and as the allocations of the tick, on songs of 4 tracks and of 40, each
+    // sending to 4 returns, for the last track's send to the third return: a strip's knob and a knob of the send by its ID.
+    struct Tick
+    {
+        std::uint64_t read = 0, looks = 0;
+        std::optional<int> allocations {};
+    };
+
     const auto countFor = [] (int numTracks)
     {
         auto song = phazite::createSong();
@@ -976,9 +1042,14 @@ TEST_CASE ("Performance gate: a tick of a send's level control reads as many sen
             phazite::ui::ParameterAttachment attachment (knob);
             attachment.setParameter (std::move (handle));
             attachment.update(); // its first tick finds the send's level
+            Tick tick;
             const auto before = phazite::countSendsRead();
+            const auto looksBefore = phazite::countSendLooks();
             attachment.update();
-            return phazite::countSendsRead() - before;
+            tick.read = phazite::countSendsRead() - before;
+            tick.looks = phazite::countSendLooks() - looksBefore;
+            tick.allocations = phazite::test::countAllocations ([&attachment] { attachment.update(); });
+            return tick;
         };
 
         const auto counts = std::pair (countTick (phazite::getSendLevelTo (context, tracks.back(), returns[2])),
@@ -989,16 +1060,42 @@ TEST_CASE ("Performance gate: a tick of a send's level control reads as many sen
 
     const auto [smallStrip, smallByID] = countFor (4);
     const auto [bigStrip, bigByID] = countFor (40);
-    MESSAGE ("Sends read by a tick: a strip's knob " << smallStrip << " (4 tracks), " << bigStrip << " (40 tracks); by its ID " << smallByID
-                                                     << ", " << bigByID);
-    CHECK (bigStrip == smallStrip);
-    CHECK (bigByID == smallByID);
+    MESSAGE ("Sends read by a tick: a strip's knob "
+             << smallStrip.read << " (4 tracks), " << bigStrip.read << " (40 tracks); by its ID " << smallByID.read << ", " << bigByID.read
+             << "; allocations: a strip's knob " << smallStrip.allocations.value_or (-1) << ", " << bigStrip.allocations.value_or (-1)
+             << "; by its ID " << smallByID.allocations.value_or (-1) << ", " << bigByID.allocations.value_or (-1)
+             << "; looks: a strip's knob " << smallStrip.looks << ", " << bigStrip.looks << "; by its ID " << smallByID.looks << ", "
+             << bigByID.looks);
 
-    // Measured 2026-11-22: a tick asks for its parameter four times (ParameterAttachment::update()), each a look for the send
-    // on its track (one send read), and reads its level once (one more): 5 by its ID; a strip's knob also finds its send among
-    // its track's four at each ask (16 more): 21.
-    CHECK (smallStrip <= 21);
-    CHECK (smallByID <= 5);
+    // Measured 2026-11-22, the sends' switch: none read from an element (21 by a strip's knob, 5 by its ID, before, when the
+    // tree held the sends); each look in the area.
+    CHECK (smallStrip.read == 0);
+    CHECK (bigStrip.read == 0);
+    CHECK (smallByID.read == 0);
+    CHECK (bigByID.read == 0);
+
+    // And the looks in the sends' area (SendsValue.h: countSendLooks()), as many however many tracks and sends the song has,
+    // which a walk of them would not be. Measured 2026-11-22: 5 by its ID, a look by the send's ID each time the attachment's
+    // tick asks the handle for its parameter (its enabling, its modulation's range, whether it may set its value, its value:
+    // ParameterHandle.cpp, find(), isStillThere()), and one for its level (Parameters.cpp: getValueSetByHand()); 9 by a strip's
+    // knob, which also finds its send in its track's list at each of those four asks (Mixer.h: findSendFromTo()).
+    CHECK (bigStrip.looks == smallStrip.looks);
+    CHECK (bigByID.looks == smallByID.looks);
+    CHECK (smallStrip.looks <= 9);
+    CHECK (smallByID.looks <= 5);
+
+    if (! smallStrip.allocations.has_value() || ! bigStrip.allocations.has_value() || ! smallByID.allocations.has_value()
+        || ! bigByID.allocations.has_value())
+        return;
+
+    CHECK (*bigStrip.allocations == *smallStrip.allocations);
+    CHECK (*bigByID.allocations == *smallByID.allocations);
+
+    // Measured 2026-11-22: one each, none the sends' code's: the empty std::vector of modulations that the knob's ring asks for
+    // (model/modulation/internal/Modulation.h: findModulationsOf(), from ModulationModel.h's getModulationRange()), whose
+    // iterator-debugging proxy the Debug build of MSVC's standard library allocates (where a build doesn't, none).
+    CHECK (*smallStrip.allocations <= 1);
+    CHECK (*smallByID.allocations <= 1);
 }
 
 TEST_CASE ("Performance gate: what an edit repaints in the playlist")

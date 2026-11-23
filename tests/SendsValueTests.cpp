@@ -292,11 +292,12 @@ TEST_CASE ("Sends value: damaged sends read as the sends' code read them, writte
     const auto opened = phazite::getSendValues (*song, senderID);
 
     // The golden project's send, then each damaged one in its order but the one to a return the song hasn't (900005), which
-    // goes as the song opens: the levels kept within their range, and the one without an ID and the second with 900001 each
-    // given an ID of its own.
+    // goes as the song opens: the levels kept within their range and to a ten-thousandth, as the song holds a send (from the
+    // sends' switch: SendsValue.h, readHeldSend(), the loader's keepSendAsHeld()), and the one without an ID and the second
+    // with 900001 each given an ID of its own.
     REQUIRE (opened.size() == 6);
     const auto senderRaw = senderID.getRaw();
-    CHECK (opened[1] == makeSend (900001, senderRaw, returnRaw, -12.34567f, true));
+    CHECK (opened[1] == makeSend (900001, senderRaw, returnRaw, -12.3457f, true));
     CHECK (opened[2] == makeSend (900002, senderRaw, returnRaw, 6.0f));
     CHECK (opened[3] == makeSend (900003, senderRaw, returnRaw, 0.0f));
 

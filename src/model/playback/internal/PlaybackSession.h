@@ -271,12 +271,12 @@ private:
     // default (as its VALUES came or went), and modulators in another order: a new plan.
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
-    // The sends (SongValues.h; its tree callbacks above leave the song's SEND elements alone, isHeardAsKept()), by the parts
-    // that changed, as the tree's changes of them were taken: a level changed in place plays at once, from the value it is
+    // The sends (SongValues.h; the song's tree holds none), by the parts that changed, as the tree's changes of them were
+    // taken while it held them: a level changed in place plays at once, from the value it is
     // told (SongPlayer::takeSendLevel()), and while the history undoes or redoes, what a pass writing it writes from then
     // follows once the move is whole (historyMoved()); one added, taken out, come to another track or routed elsewhere,
     // and sends in another order: a new plan.
-    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered) override;
+    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
     // The song's history moved by hand, and the move is whole (Song.h: HistoryListener): what a pass writing automation writes
     // follows the values the move set by hand that play at once (AutomationWriter::followValuesSetByHand()), where the

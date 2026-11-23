@@ -93,13 +93,12 @@ float getCurrentValue (const Song&, const ParameterRef&, bool withModulation);
 //==============================================================================
 // A parameter found in the song, for what reads one often (a control, at each of the display ticker's ticks): what it is of,
 // its element (state), and for one of Phazite's own devices' parameters, its description. The element is the one that holds
-// its value set by hand, or where it is looked for: a device's or a plug-in's DEVICE, a fader's channel (its TRACK or the
-// MASTER), a container's chain's CHAIN, and for a send's level the TRACK the send is on, among whose sends alone it is looked
-// for by its ID (SendsValue.h: findTrackSend()), one look at each tick; none for a modulator's parameter and a macro's value,
-// which are looked for by their modulator's ID in modulation's area (model/modulation/internal/Modulation.h:
-// getModulatorValue()), the modulator's still of the kind it was found of. The functions above, given one, take it as found,
-// which holds while its element is the song's and still names it, for a send, still holds it, and for a modulator or a macro,
-// while the area holds it so (isStillThere()).
+// its value set by hand: a device's or a plug-in's DEVICE, a fader's channel (its TRACK or the MASTER), a container's chain's
+// CHAIN; none for a modulator's parameter and a macro's value, which are looked for by their modulator's ID in modulation's
+// area (model/modulation/internal/Modulation.h: getModulatorValue()), the modulator's still of the kind it was found of, nor
+// for a send's level, looked for by its send's ID in the sends' area (model/mixer/internal/Mixer.h: getSendValue()), one look
+// at each tick. The functions above, given one, take it as found, which holds while its element is the song's and still
+// names it, and for a modulator, a macro or a send, while its area holds it so (isStillThere()).
 struct FoundParameter
 {
     // Made by locateParameter() alone; a constructor of its own, so that a braced reference ({ device, "gain" }) is never
@@ -120,10 +119,10 @@ struct FoundParameter
 
 std::optional<FoundParameter> locateParameter (const Song&, const ParameterRef&);
 
-// The half of locateParameter() that looks in the song's tree alone, which it asks after its look in modulation's area: the
-// sources the tree holds (a device's, a plug-in's, a chain's and a fader's parameters and, until the sends' switch, a send's
-// level); none for a modulator's parameter and a macro's value. What a tree callback asks, which reads no area of the song's
-// values (MidiLinker's, model/midi/internal/MidiLinks.h).
+// The half of locateParameter() that looks in the song's tree alone, which it asks after its looks in modulation's area and,
+// for a send's level, the sends': the sources the tree holds (a device's, a plug-in's, a chain's and a fader's parameters);
+// none for a modulator's parameter, a macro's value and a send's level. What a tree callback asks, which reads no area of the
+// song's values (MidiLinker's, model/midi/internal/MidiLinks.h).
 std::optional<FoundParameter> locateParameterInTree (const Song&, const ParameterRef&);
 
 bool isStillThere (const Song&, const FoundParameter&);

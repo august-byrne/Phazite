@@ -595,21 +595,10 @@ void writeModulationIn (juce::ValueTree& element, const ValuesKept& kept)
     if (list == nullptr)
         return;
 
-    // After its other children, but before a track's sends, which stay last.
-    auto at = element.getNumChildren();
-
-    for (int i = 0; i < element.getNumChildren(); ++i)
-    {
-        if (element.getChild (i).hasType (schema::SEND))
-        {
-            at = i;
-            break;
-        }
-    }
-
+    // After its other children: a track's sends come after them (SendsArea.h: writeSendsIn(), which whole state asks after).
     for (const auto id : *list)
         if (const auto* value = kept.modulation.find (id))
-            element.addChild (writeModulatorElement (*value), at++, nullptr);
+            element.appendChild (writeModulatorElement (*value), nullptr);
 }
 
 bool holdSameModulation (const ValuesKept& a, const ValuesKept& b)

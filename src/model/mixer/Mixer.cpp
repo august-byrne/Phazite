@@ -9,6 +9,7 @@
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
@@ -17,6 +18,9 @@
 #include "model/modulation/internal/Modulation.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/versions/internal/AreaClashes.h"
+#include "model/versions/internal/SongMerge.h"
+#include "model/versions/internal/SongPieces.h"
 
 #include <algorithm>
 #include <atomic>
@@ -24,6 +28,8 @@
 #include <functional>
 #include <optional>
 #include <set>
+#include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -95,7 +101,7 @@ namespace
     // The IDs of the items that tracks, devices, chains and sends are (Schema.h: holdsID()), as what names one names it: the
     // tree's (its clips and its automation aside, which hold none that these name), and those the song's values hold of
     // items that something can name (IDsHeld.h: forEachNameableIDHeld(), a modulator's and a macro's once they leave the
-    // tree, which a MIDI link names).
+    // tree, which a MIDI link names, and a send's, which a curve, a MIDI link and a modulation name).
     std::set<std::uint64_t> getItemIDs (const Song& song)
     {
         std::set<std::uint64_t> ids;
@@ -119,32 +125,13 @@ namespace
         return ids;
     }
 
-    // Every element of a type under one, those in clips and the automation aside.
-    void findAll (const juce::ValueTree& tree, const juce::Identifier& type, std::vector<juce::ValueTree>& found)
+    // The song's sends as its area holds them (SongValues.h: sends), a pointer into the area's value as it is now, valid until
+    // its next change; none for a song that holds no values (the loader's song, a check's copy), whose tree holds them.
+    const SongSends* findHeldSends (const Song& song)
     {
-        for (const auto& child : tree)
-        {
-            if (child.hasType (schema::CLIP) || child.hasType (schema::AUTOMATION))
-                continue;
-
-            if (child.hasType (type))
-                found.push_back (child);
-
-            findAll (child, type, found);
-        }
-    }
-
-    // A send's element, which the sends' writers write (invalid for one the song hasn't): what they find it by until the sends
-    // leave the song's tree (roadmap step S5.20), as getSendValue() finds its value.
-    juce::ValueTree findSendState (const Song& song, DeviceID send)
-    {
-        if (send.isValid())
-            for (const auto& track : getTrackStates (song))
-                for (const auto& child : track)
-                    if (child.hasType (schema::SEND) && (std::uint64_t) (juce::int64) child[schema::sendID] == send.getRaw())
-                        return child;
-
-        return {};
+        countSendLook();
+        const auto* values = song.getValues();
+        return values != nullptr ? &values->sends.get() : nullptr;
     }
 
     // Sets a property without an undo step, only if its value is another (as a store of a plug-in's state does:
@@ -483,17 +470,22 @@ void forgetWhatNamesTheGone (Song& song)
     auto* undo = getUndo (song);
     auto ids = getItemIDs (song);
 
-    // A send to a return that is gone, with the ID it is known by.
-    std::vector<juce::ValueTree> sends;
-    findAll (song.getState(), schema::SEND, sends);
-
-    for (auto& send : sends)
+    // A send to a return that is gone, with the ID it is known by: the sends' next value worked out whole, then set once.
+    if (auto* values = song.getValues())
     {
-        if (ids.contains (readID (send[schema::sendTo])))
-            continue;
+        const auto held = values->sends.get();
+        auto next = held;
 
-        ids.erase (readID (send[schema::sendID]));
-        send.getParent().removeChild (send, undo);
+        for (const auto& [key, send] : held.sends)
+        {
+            if (ids.contains (send.to.getRaw()))
+                continue;
+
+            ids.erase (key);
+            next = withoutSend (next, send.id);
+        }
+
+        values->setAllSends (song, std::move (next));
     }
 
     // A modulation of a parameter of what is gone, a send's among them, through modulation's code.
@@ -891,6 +883,12 @@ TrackID addReturnWithEffect (Song& song, TrackID sender, juce::ValueTree effect)
 
 std::vector<DeviceID> getSends (const Song& song, TrackID track)
 {
+    if (const auto* held = findHeldSends (song))
+    {
+        const auto* list = held->tracks.find (track.getRaw());
+        return list != nullptr ? std::vector<DeviceID> (list->begin(), list->end()) : std::vector<DeviceID>();
+    }
+
     std::vector<DeviceID> sends;
 
     for (const auto& send : getSendValues (song, track))
@@ -901,10 +899,18 @@ std::vector<DeviceID> getSends (const Song& song, TrackID track)
 
 std::optional<SendValue> getSendValue (const Song& song, DeviceID send)
 {
-    if (send.isValid())
-        for (const auto& track : getTrackStates (song))
-            if (auto found = findTrackSend (track, send))
-                return found;
+    if (! send.isValid())
+        return std::nullopt;
+
+    if (const auto* held = findHeldSends (song))
+    {
+        const auto* found = held->find (send);
+        return found != nullptr ? std::optional<SendValue> (*found) : std::nullopt;
+    }
+
+    for (const auto& track : getTrackStates (song))
+        if (auto found = findTrackSend (track, send))
+            return found;
 
     return std::nullopt;
 }
@@ -917,7 +923,38 @@ TrackID getSendTrack (const Song& song, DeviceID send)
 
 std::vector<SendValue> getSendValues (const Song& song, TrackID track)
 {
+    if (const auto* held = findHeldSends (song))
+    {
+        std::vector<SendValue> sends;
+
+        if (const auto* list = held->tracks.find (track.getRaw()))
+            for (const auto id : *list)
+                if (const auto* send = held->find (id))
+                    sends.push_back (*send);
+
+        return sends;
+    }
+
     return readTrackSends (findTrackState (song, track));
+}
+
+DeviceID findSendFromTo (const Song& song, TrackID from, TrackID returnTrack)
+{
+    if (const auto* held = findHeldSends (song))
+    {
+        if (const auto* list = held->tracks.find (from.getRaw()))
+            for (const auto id : *list)
+                if (const auto* send = held->find (id); send != nullptr && send->to == returnTrack)
+                    return id;
+
+        return {};
+    }
+
+    for (const auto& send : getSendValues (song, from))
+        if (send.to == returnTrack)
+            return send.id;
+
+    return {};
 }
 
 TrackID getSendTarget (const Song& song, DeviceID send)
@@ -960,18 +997,16 @@ DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
             return {};
     }
 
-    const auto id = song.makeID();
-    juce::ValueTree send (schema::SEND);
-    send.setProperty (schema::sendID, (juce::int64) id, nullptr);
-    send.setProperty (schema::sendTo, (juce::int64) returnTrack.getRaw(), nullptr);
-    send.setProperty (schema::sendLevel, newSendDb, nullptr);
+    auto* values = song.getValues();
 
-    if (preFader)
-        send.setProperty (schema::sendPreFader, true, nullptr);
+    if (values == nullptr)
+        return {};
 
-    state.appendChild (send, getUndo (song));
+    // After the track's other sends, in the step in progress.
+    const auto id = DeviceID::fromRaw (song.makeID());
+    values->setSend (song, { .id = id, .from = from, .to = returnTrack, .level = newSendDb, .preFader = preFader });
     forgetSidechainLoops (song); // a sidechain on the track that listens to the return, say
-    return DeviceID::fromRaw (id);
+    return id;
 }
 
 bool isPreFader (const Song& song, DeviceID send)
@@ -982,23 +1017,26 @@ bool isPreFader (const Song& song, DeviceID send)
 
 void setPreFader (Song& song, DeviceID send, bool preFader)
 {
-    auto state = findSendState (song, send);
+    auto* values = song.getValues();
+    auto found = getSendValue (song, send);
 
-    if (! state.isValid() || isPreFader (song, send) == preFader)
+    if (values == nullptr || ! found.has_value() || found->preFader == preFader)
         return;
 
     const UndoStep step (song, "Change Send");
-
-    if (preFader)
-        state.setProperty (schema::sendPreFader, true, getUndo (song));
-    else
-        state.removeProperty (schema::sendPreFader, getUndo (song));
+    found->preFader = preFader;
+    values->setSend (song, *found);
 }
 
 void setSendLevel (Song& song, DeviceID send, float decibels)
 {
-    if (auto state = findSendState (song, send); state.isValid())
-        setChannelValue (state, schema::sendLevel, keepVolumeInRange (decibels), 0.0f, getUndo (song));
+    auto* values = song.getValues();
+
+    if (auto found = getSendValue (song, send); values != nullptr && found.has_value())
+    {
+        found->level = keepSendLevel (decibels);
+        values->setSend (song, *found); // nothing for the level it holds
+    }
 }
 
 float getSendLevel (const Song& song, DeviceID send)
@@ -1022,12 +1060,156 @@ DeviceID addSendToNewReturn (Song& song, TrackID from)
 
 void removeSend (Song& song, DeviceID send)
 {
-    if (auto state = findSendState (song, send); state.isValid())
+    if (auto* values = song.getValues(); values != nullptr && getSendValue (song, send).has_value())
     {
         const UndoStep step (song, "Remove Send");
-        state.getParent().removeChild (state, getUndo (song));
+        values->eraseSend (song, send);
         forgetWhatNamesTheGone (song);
     }
+}
+
+void copySends (Song& song, CopiedIDs& copied)
+{
+    auto* values = song.getValues();
+
+    if (values == nullptr)
+        return;
+
+    // The tracks copied whose copies hold none, by the sends' lists alone: each original's, onto its copy, gathered before
+    // any send's ID joins the copied.
+    auto next = values->sends.get();
+    std::vector<std::pair<TrackID, std::vector<SendValue>>> tracks;
+
+    for (const auto& [original, copy] : copied)
+    {
+        if (const auto* list = next.tracks.find (original); list != nullptr && next.tracks.find (copy) == nullptr)
+        {
+            std::vector<SendValue> sends;
+
+            for (const auto id : *list)
+                if (const auto* send = next.find (id))
+                    sends.push_back (*send);
+
+            tracks.emplace_back (TrackID::fromRaw (copy), std::move (sends));
+        }
+    }
+
+    // Each a new ID, in the copied IDs, before what names one (a modulation, a curve) is copied by them; its return the
+    // copy's where the return was copied too, as a copy names what it holds (Schema.h: giveNewIDs()).
+    for (const auto& [track, sends] : tracks)
+    {
+        for (auto copy : sends)
+        {
+            const auto original = copy.id;
+            copy.id = DeviceID::fromRaw (song.makeID());
+            copy.from = track;
+
+            if (const auto to = copied.find (copy.to.getRaw()); to != copied.end())
+                copy.to = TrackID::fromRaw (to->second);
+
+            copied[original.getRaw()] = copy.id.getRaw();
+            next = withSend (next, std::move (copy));
+        }
+    }
+
+    values->setAllSends (song, std::move (next));
+}
+
+AreaChoice chooseSendClash (Song& song, const MergeClash& clash, int value, const MergeSides& sides)
+{
+    // A path through a SEND ("TRACKS:", "TRACK:12", "SEND:44"): sends merge as items by their IDs, each property of theirs at
+    // a time (SongMerge.cpp); so a clash is a property of one, or one whole (added or taken out on a side).
+    int step = -1;
+
+    for (int i = 0; i < clash.path.size() && step < 0; ++i)
+        if (clash.path[i].startsWith (schema::SEND.toString() + ":"))
+            step = i;
+
+    if (step < 0)
+        return AreaChoice::notTheArea;
+
+    // Refused (nothing written) for what a merge of two songs Phazite holds never makes, but a commit's song may come from
+    // anyone (tests/FuzzTests.cpp chooses every clash of a damaged merge): a path past the send, one whose track the song
+    // hasn't (as the tree's choice found no place for it), a send the song holds on another track, its ID, a property that
+    // isn't a send's, an element of another type or ID, one that stands in for what its version couldn't read where it would
+    // be read (one chosen whole, or put back: SongPieces.h, holdsStandIn()), as modulation's and the curves' choosers refuse
+    // one, and a send the song would read otherwise than it was chosen (SendsValue.h: readHeldSend(): a level finer than a
+    // ten-thousandth).
+    auto* values = song.getValues();
+
+    if (step == 0 || clash.path.size() != step + 1 || ! juce::isPositiveAndBelow (value, 3) || values == nullptr)
+        return AreaChoice::refused;
+
+    auto ownerPath = clash.path;
+    ownerPath.removeRange (step, clash.path.size() - step);
+    const auto owner = findByPath (song.getState(), ownerPath);
+    const auto from = getTrackID (owner);
+    const auto id = DeviceID::fromRaw (readID (clash.path[step].fromFirstOccurrenceOf (":", false, false)));
+    const auto held = getSendValue (song, id);
+
+    if (! owner.hasType (schema::TRACK) || ! from.isValid() || ! id.isValid() || (held.has_value() && held->from != from))
+        return AreaChoice::refused;
+
+    const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+    const juce::var* chosenValues[] = { &clash.base, &clash.ours, &clash.theirs };
+
+    // Its own property: the value chosen given to it (SendsValue.h: setSendProperty(), a void value taking it away as the tree
+    // did). A send both lines made under one ID (only in a damaged commit's song: the merge renumbers what both lines add),
+    // whose property's clash the side chosen holds no send for, taken away rather than left without the property (known bug
+    // 239's shape), where that side's song can be read; and one the song holds none of (an earlier choice took it away) put
+    // back first as the side chosen holds it, as modulation's chooser puts back a modulation. Where the song holds the send,
+    // the side's element is asked only whether it is there (one that stands in is), never read, as modulation's chooser asks
+    // of a modulation: the value chosen goes to the send the song holds.
+    if (clash.property.isValid())
+    {
+        if (clash.property == schema::sendID)
+            return AreaChoice::refused;
+
+        const juce::ValueTree* songs[] = { &sides.base, &sides.before, &sides.theirs };
+        const auto& side = *songs[value];
+        const auto canRead = side.hasType (schema::PHAZITE);
+        const auto there = canRead ? findByPath (side, clash.path) : juce::ValueTree();
+
+        if (held.has_value() && canRead && ! there.isValid())
+        {
+            values->eraseSend (song, id);
+            return AreaChoice::chosen;
+        }
+
+        // One the song holds none of (an earlier choice took it away) put back first as the side chosen holds it.
+        const auto start = held.has_value() ? held : there.isValid() && ! holdsStandIn (there) ? readHeldSend (there, from) : std::nullopt;
+
+        if (! start.has_value() || start->id != id)
+            return AreaChoice::refused;
+
+        auto next = *start;
+
+        if (const auto read =
+                setSendProperty (next, clash.property, *chosenValues[value]) ? readHeldSend (writeSendElement (next), from) : std::nullopt;
+            ! read.has_value() || ! (*read == next))
+            return AreaChoice::refused;
+
+        values->setSend (song, next);
+        return AreaChoice::chosen;
+    }
+
+    // One whole: the side chosen's (read as the song holds one) made the song's, in its place or after the track's others, or
+    // the song's taken out where that side had none.
+    const auto& chosen = *elements[value];
+
+    if (! chosen.isValid())
+    {
+        values->eraseSend (song, id);
+        return AreaChoice::chosen;
+    }
+
+    const auto read = readHeldSendID (chosen) == id && ! holdsStandIn (chosen) ? readHeldSend (chosen, from) : std::nullopt;
+
+    if (! read.has_value())
+        return AreaChoice::refused;
+
+    values->setSend (song, *read);
+    return AreaChoice::chosen;
 }
 
 //==============================================================================

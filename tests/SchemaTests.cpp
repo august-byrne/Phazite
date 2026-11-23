@@ -307,19 +307,19 @@ struct Changed
         problemsBefore = findSongProblems (rawSong, tables);
 
         // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, a chord or a key change, a
-        // MIDI link, a curve or its point, a section, or a modulator, a macro or a modulation: the loader's part alone
+        // MIDI link, a curve or its point, a section, a modulator, a macro or a modulation, or a send: the loader's part alone
         // (makeConsistent()), on a song that keeps everything in its tree, since a song made by makeSong() holds its clips,
-        // their notes, its tempo map, its chord lane, its MIDI links, its curves, its sections and its modulation as values
-        // beside it (Song::holdValues()); and the song opened, whose values findOpened() reads back through whole state.
+        // their notes, its tempo map, its chord lane, its MIDI links, its curves, its sections, its modulation and its sends as
+        // values beside it (Song::holdValues()); and the song opened, whose values findOpened() reads back through whole state.
         if (isCurveElement (element))
             curveKey = schema::getElementKey (element.hasType (schema::CURVE) ? element : element.getParent());
 
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
             || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element)
-            || isCurveElement (element) || isSection (element) || isModulation (element))
+            || isCurveElement (element) || isSection (element) || isModulation (element) || isSend (element))
         {
             if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element) && ! isCurveElement (element)
-                && ! isSection (element) && ! isModulation (element))
+                && ! isSection (element) && ! isModulation (element) && ! isSend (element))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -373,9 +373,11 @@ struct Changed
         return element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO) || element.hasType (schema::MODULATES);
     }
 
-    // A modulator's, a macro's or a modulation's owner in the whole state of the opened song: the element of the original's
-    // parent's type and key (a track, the master or a container for a modulator or a macro; the modulator or the macro for a
-    // modulation), whose children the opened song holds as values, written in.
+    static bool isSend (const juce::ValueTree& element) { return element.hasType (schema::SEND); }
+
+    // A modulator's, a macro's, a modulation's or a send's owner in the whole state of the opened song: the element of the
+    // original's parent's type and key (a track, the master or a container for a modulator or a macro; the modulator or the
+    // macro for a modulation; a track for a send), whose children the opened song holds as values, written in.
     juce::ValueTree findModulationState() const
     {
         const std::function<juce::ValueTree (const juce::ValueTree&)> find = [&] (const juce::ValueTree& tree)
@@ -429,6 +431,7 @@ struct Changed
                                : isCurveElement (original)   ? findCurveState()
                                : isSection (original)        ? phazite::copyWholeSong (*opened).getChildWithName (schema::SECTIONS)
                                : isModulation (original)     ? findModulationState()
+                               : isSend (original)           ? findModulationState()
                                                              : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))
@@ -499,7 +502,9 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                 // A container's or a chain's own property kept at what Phazite's writer leaves out (a container's mix at 1, a
                 // chain's volume and pan at 0, a range at its end) is written as none, as the song holds them (DevicesValue.h:
                 // keepDeviceAsHeld()).
-                for (const auto& [element, at, none] : { std::tuple (&schema::CONTAINER, &schema::deviceMix.getName(), 1.0),
+                // A send's level kept at 0 dB is written as none too, as the song holds a send (SendsValue.h: keepSendAsHeld()).
+                for (const auto& [element, at, none] : { std::tuple (&schema::SEND, &schema::sendLevel.getName(), 0.0),
+                                                         std::tuple (&schema::CONTAINER, &schema::deviceMix.getName(), 1.0),
                                                          std::tuple (&schema::CHAIN, &schema::channelVolume.getName(), 0.0),
                                                          std::tuple (&schema::CHAIN, &schema::channelPan.getName(), 0.0),
                                                          std::tuple (&schema::CHAIN, &schema::chainLowKey.getName(), 0.0),

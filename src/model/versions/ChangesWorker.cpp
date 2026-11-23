@@ -6,6 +6,7 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/ModulationArea.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SendsArea.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/WholeState.h"
 
@@ -32,9 +33,10 @@ namespace
 
     // A track's own parts, or the master's: without the tracks in it (a folder's), which are parts of their own. Its clips
     // first, by their IDs (Clips.h), each whole with its notes (WholeState.h: copyWholeClip()), as the song holds them beside
-    // its tree; then its other parts, each whole (a container with its macros); then its modulators and macros, as whole state
-    // writes them (ModulationArea.h: writeModulationIn(), before its sends). A comparison finds a clip by its key, in no order
-    // among the rest (Schema.h: CLIP is in no order group), and a modulator by its ID, in the order of its kind.
+    // its tree; then its other parts, each whole (a container with its macros); then its modulators and macros, then its
+    // sends, as whole state writes them (ModulationArea.h: writeModulationIn(); SendsArea.h: writeSendsIn()). A comparison
+    // finds a clip by its key, in no order among the rest (Schema.h: CLIP is in no order group), and a modulator and a send by
+    // its ID, in the order of its kind.
     juce::ValueTree copyTrack (const Song& song, const juce::ValueTree& track)
     {
         juce::ValueTree copy (track.getType());
@@ -48,7 +50,9 @@ namespace
             if (! child.hasType (schema::TRACK))
                 copy.appendChild (copyWhole (song, child), nullptr);
 
-        writeModulationIn (copy, keepValues (song));
+        const auto kept = keepValues (song);
+        writeModulationIn (copy, kept);
+        writeSendsIn (copy, kept);
         return copy;
     }
 

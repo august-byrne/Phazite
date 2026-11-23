@@ -16,10 +16,6 @@ namespace phazite
 {
 namespace
 {
-    // Whether the song holds its sends beside its tree: not yet (the sends' first piece, roadmap step S5.20: the tree is
-    // their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
-    constexpr bool sendsHeldBesideTheTree = false;
-
     // Whether the song holds its devices, containers and chains beside its tree: not yet (the devices' first piece, roadmap
     // step S5.20: the tree is their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
     constexpr bool devicesHeldBesideTheTree = false;
@@ -38,22 +34,21 @@ std::uint64_t findLargestIDHeld (const Song& song)
     largest = std::max (largest, findLargestIDIn (values->notes.get()));
     largest = std::max (largest, findLargestIDIn (values->sections.get()));   // the sections' (each section's ID)
     largest = std::max (largest, findLargestIDIn (values->modulation.get())); // modulation's (each modulator's and macro's ID)
+    largest = std::max (largest, findLargestIDIn (values->sends.get()));      // the sends' (each send's ID)
     return largest;
 }
 
 void forEachNameableIDHeld (const Song& song, const std::function<void (std::uint64_t)>& each)
 {
-    // Each area whose value holds items that something can name, a line each, in no order that matters: modulation's (each
-    // modulator's and macro's: ModulationValue.h, what a MIDI link of a macro's value or of a modulator's parameter and a
-    // macro's value's curve name), from its area's value. The sends' (each send's ID: SendsValue.h, what a curve, a MIDI link
-    // and a modulation name a send's level by) only from their switch: until then the tree holds them (holdsID() of a SEND),
-    // which the caller's walk of the tree finds, and the sends' switch turns sendsHeldBesideTheTree on, getSendsValue() then
-    // reading the area's value.
+    // Each area whose value holds items that something can name, a line each, in no order that matters, each from its area's
+    // value: modulation's (each modulator's and macro's: ModulationValue.h, what a MIDI link of a macro's value or of a
+    // modulator's parameter and a macro's value's curve name), and the sends' (each send's ID: SendsValue.h, what a curve, a
+    // MIDI link and a modulation name a send's level by).
     if (const auto* values = song.getValues())
+    {
         forEachIDHeld (values->modulation.get(), each);
-
-    if constexpr (sendsHeldBesideTheTree)
-        forEachIDHeld (getSendsValue (song), each);
+        forEachIDHeld (values->sends.get(), each);
+    }
 
     // The devices' (each device's, container's and chain's ID: DevicesValue.h), the same: the tree holds them until their
     // switch (holdsID() of a DEVICE, a CONTAINER and a CHAIN), which turns devicesHeldBesideTheTree on and reads the area's

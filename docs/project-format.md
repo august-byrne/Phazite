@@ -248,6 +248,13 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   track's, the master's and a container's modulators and macros are written after its other children, in the order it
   holds them (modulators and macros together, as they were made), and before a track's sends; a file that held one
   elsewhere among them has it there from its first save.
+- **Sends:** each `SEND` is written as Phazite writes what the song holds of it, once its ID is its own and its return
+  is there: its `level` is rounded to a ten-thousandth of a decibel (as a send's knob sets one) and left out at 0 dB,
+  `preFader` is left out while it is off, a level written in more digits than the float it is read as is written as
+  that float, and a property or an element Phazite doesn't know on it goes. Where it is (a folder's send) and where it
+  goes (a track that isn't a return) stay as the file has them. A track's sends are written after all its other children,
+  its modulators and macros among them, in the order it holds them (the order they were added); a file that held one
+  elsewhere among them has it there from its first save.
 - **Devices, containers and chains:** each `DEVICE`, `CONTAINER` and `CHAIN` is written as Phazite writes what the song
   holds of it, where it holds anything else, once the ranges above have brought its numbers within theirs:
   - its own properties that the song's value of it covers (a device's `id`, `type`, `off` and `sidechain`; a plug-in's

@@ -1,81 +1,105 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The sends' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows), as far as it is built:
-// the song's sends are still the song's tree's (Schema.h: SEND under a TRACK), and their values and the conversion are
-// SendsValue.h's. Here: the sends' part of the keeper, which tells the values' listeners what the tree tells of them
-// (Listener::sendsChanged()), and what the unsaved check compares of them with the saved copy while the trees hold them.
-// Message thread, but for the comparisons' readers, which read only the trees they are given.
+// The sends' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): its parts, each of which
+// a list of SongValues.h's, WholeState.h's or IDsHeld.h's asks in turn, a line for each area. Its value and the conversion of
+// its elements are SendsValue.h's. It holds IDs (each send's). Message thread, but for whole state's parts and the
+// comparisons, which read only the values they are given.
+//
+// An area under an element that stays in the song's tree, a TRACK, as the clips are: so its keeper follows a track as it
+// comes and goes (alone, a folder with its tracks, the track list), as the clips' keeper does; no other element holds a send,
+// and no edit moves one to another track (a version's pass sets its track: model/versions/ApplySong.cpp, makeSendsLike()).
 #pragma once
 
 #include "model/base/IDs.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/WholeState.h"
 
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstdint>
-#include <unordered_map>
 #include <vector>
 
 namespace phazite
 {
 class Song;
 
-// The sends' part of the keeper (SongValues.h), while the song's tree holds the sends: for each of the tree's notifications of
-// the song's SEND elements (isHeardAsSends()), for a track given another ID or whose children came in another order, and for
-// each TRACK or track list that comes into the song or leaves it with sends on it, whatever the history does (an undo's and a
-// redo's, a write's outside the history), the values' listeners told at once, in one call, each send it changed
-// (Listener::sendsChanged()), so that a level set plays in the same call: exactly what differs between the song's sends as
-// the listeners were last told them (told, which is the song's tree read by readSendsValue() as the last notification left
-// it) and the tree read so now, whatever the tree holds (a send's ID on two tracks, or twice on one, a track without an ID or
-// two with one, as a version being applied may pass through). A property of a send changed: the send read again where it is
-// the element the song reads that send from (the first of its ID: elements), its parts compared (its return or its place
-// before the fader, its route; its level), and nothing for another element of its ID, which the song doesn't read. A send
-// added, taken out or given another ID, a track that holds sends (or a folder whose tracks do) added, taken out, given
-// another ID or its children in another order, and the track list in another order while the song has sends: the song's
-// SEND elements found again as readSendsValue() finds them (SendsValue.h: forEachTrackHeldSends(), a walk reading each one's
-// ID alone), each send read again whose element or track is another than before, and each that came, went or changed told;
-// each track whose list holds those it held before in another order told reordered. A call that changes nothing tells
-// nothing. Nothing of the song's values is read.
+// What the values' listeners are told of the sends (Listener::sendsChanged()): once for each change of its value, each send
+// whose value differs between the two (immer's diff, which skips what the two share), with the track it was on and is on,
+// the return it went to and goes to, the parts of it that changed and its value after; each track whose list holds those it
+// held before in another order; and the area's whole value after (cheap: it shares what it holds), which what plays keeps
+// for what decides which send sends (SongPlayer.h). It listens to the sends' area from its making to its end.
+struct SongValues::SendsTeller final : ValueArea<SongSends>::Listener
+{
+    SendsTeller (ValueArea<SongSends>&, juce::ListenerList<SongValues::Listener>&);
+    ~SendsTeller() override;
+
+    ValueArea<SongSends>& area;
+    juce::ListenerList<SongValues::Listener>& listeners;
+
+    void valueAreaChanged (const SongSends& before, const SongSends& after) override;
+
+    JUCE_DECLARE_NON_COPYABLE (SendsTeller)
+};
+
+// The sends' part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes:
+//   (a) a TRACK (alone, a folder with its tracks, the track list) taken out of the song's track list: each track's sends
+//       remembered with its element, in its list's order, and erased; what an element was remembered with at an earlier
+//       removal (taken out, and brought back by an undo since, which gave its sends back itself) replaced at every removal,
+//       or forgotten where it holds none now, so that it never brings back a send deleted since (as the clips' keeper does:
+//       ClipsArea.cpp); the same element back: given back, their track the element's ID then;
+//   (b) a TRACK that comes into the song's track list with SEND elements in it (a track chosen whole in a merge, a test's):
+//       each read as the song holds it (readHeldSend()), set, taken out of the tree, and counted (countSendsAdopted()); one
+//       of an ID the song holds already (given back, or another track's) dropped, the song's kept, as modulation's and the
+//       sections' keepers drop one; one on a track without an ID, and one readHeldSend() reads as none, only taken out;
+//   (c) a SEND added by itself to a track of the song's: refused in a step (a JUCE assertion: the step can't take it out
+//       again, as its Undo, taking the tree's change back first, would find it gone; JUCE workaround W62
+//       (docs/juce-workarounds.md)), and read in and taken out outside the history.
+// And the adoption from the loaded tree, which the song's holdValues() asks.
 struct SongValues::SendsKeeper
 {
     SendsKeeper (SongValues&, Song&);
 
-    // The keeper's callbacks, each for every element, whoever's it is, in an undo or a redo too: nothing, at once, but for
-    // what is the sends'.
-    void propertyChanged (const juce::ValueTree& tree, const juce::Identifier& property);
-    void childAdded (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void childRemoved (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void childOrderChanged (const juce::ValueTree& parent);
+    // A child added to an element of the song's tree, or taken out of one (the keeper's callbacks, but while the history
+    // undoes or redoes, for every element, whoever's it is): nothing, at once, but for what is the sends' (a track or the
+    // track list in the song's, a SEND on a track of the song's).
+    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
+    void childRemoved (juce::ValueTree& parent, juce::ValueTree& child);
+
+    // Every send of the tree the loader made consistent into the area, outside the history, as the song holds it (each
+    // track's in its order, read by readHeldSend(), each of which the loader left as the song holds it: asserted), and every
+    // SEND element out of the tree, those anywhere else too (SongValues.cpp: adopt()).
+    static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
     Song& song;
-    SongSends told {}; // the song's sends as the listeners were last told them (at the start: as the song holds them)
-    std::unordered_map<std::uint64_t, juce::ValueTree> elements {}; // each of told's sends' element, by its ID
+    juce::ValueTree state;
 
-    // What one notification changed, told in one call as it ends.
-    struct Heard
+    // A track taken out of the song with its sends as it went, in its list's order: given back if the same element comes
+    // back, let go of once nothing else holds the element (the history let go of the step that could bring it back) or it is
+    // back in the song by an undo, which brought them back itself.
+    struct Remembered
     {
-        std::vector<SendChange> changes {};
-        std::vector<TrackID> reordered {};
+        juce::ValueTree track {};
+        std::vector<SendValue> sends {};
     };
 
-    void reread (const juce::ValueTree& send, Heard&);
-    void settle (Heard&);
-    void tell (Heard&) const;
+    std::vector<Remembered> remembered {};
+    size_t sweepAt = 64;
+
+    bool isInTrackList (const juce::ValueTree& parent, const juce::ValueTree& child) const;
+    void sweep();
 
     JUCE_DECLARE_NON_COPYABLE (SendsKeeper)
 };
 
-// What the unsaved check compares of the sends with the saved copy (model/project/Project.cpp) while the song's tree and the
-// saved copy's hold them: a send's element in a song's tree (PHAZITE), by its ID, with the ID of the track it is on (the
-// first that readSendsValue() reads; an invalid tree for none); and a track's sends' IDs in its element's order, those
-// readSendsValue() reads, none for a track the tree hasn't. Reading only the trees given, no value whole.
-struct FoundSendElement
-{
-    juce::ValueTree element {};
-    TrackID track {};
-};
+// The sends' part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to a
+// track (the track list, a track, a folder's tracks, from the song's element down); and a copy's TRACK given its sends from
+// the values kept, by its ID, in their list's order, after its other children (its modulators and macros among them, which
+// modulation's part writes before: decision L.5 of roadmap step S5.20's design). Nothing for another element.
+bool leadsToSends (const juce::ValueTree& parent, const juce::ValueTree& child);
+void writeSendsIn (juce::ValueTree& element, const ValuesKept&);
 
-FoundSendElement findSendElement (const juce::ValueTree& song, DeviceID);
-std::vector<DeviceID> readTrackSendOrder (const juce::ValueTree& song, TrackID);
+// The sends' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
+// sends, the same in the same order, each the same value; true for another element.
+bool holdSameSendsOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
 } // namespace phazite

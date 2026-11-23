@@ -813,6 +813,132 @@ TEST_CASE ("A folder's line put back brings its tracks back with their modulator
     undo.walkBackAndForth();
 }
 
+TEST_CASE ("A line put back takes away the modulators and macros added to it since with their curves, the master's line the "
+           "master's")
+{
+    // The line's track's own element holds no MODULATOR or MACRO, which the song holds in modulation's area: the curves of
+    // what the line takes away are found there (ApplySong.cpp: makeTrackLikeIn()).
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    auto& context = s.context;
+    const auto track = s.firstTrack;
+    const auto master = phazite::getMasterID (song);
+    const auto version = phazite::test::copyWholeSong (song);
+
+    // Since: an LFO on the track, a container on it, an LFO on the master, each with a curve (the LFOs' rates, the
+    // container's first macro's value).
+    const auto lfo = s.addModulator (track, ModulatorType::lfo);
+    const auto container = phazite::addContainer (context, track);
+    REQUIRE (container.isValid());
+    const auto macro = phazite::getContainerMacros (song, container)[0];
+    const auto onMaster = s.addModulator (master, ModulatorType::lfo);
+    const std::vector<ParameterRef> onTrack { parameterOf (lfo, "rate"), valueOf (macro) };
+    const auto masterRate = parameterOf (onMaster, "rate");
+
+    {
+        const phazite::UndoStep step (song, "Since");
+
+        for (const auto& parameter : { onTrack[0], onTrack[1], masterRate })
+            phazite::addPoint (song, parameter, { .beat = {}, .position = 0.5f, .curve = 0.0f });
+    }
+
+    const auto hasCurves = [&song] (const std::vector<ParameterRef>& parameters)
+    {
+        return std::all_of (parameters.begin(), parameters.end(),
+                            [&song] (const ParameterRef& parameter) { return phazite::findCurve (song, parameter) != nullptr; });
+    };
+    const auto hasNoCurves = [&song] (const std::vector<ParameterRef>& parameters)
+    {
+        return std::none_of (parameters.begin(), parameters.end(),
+                             [&song] (const ParameterRef& parameter) { return phazite::findCurve (song, parameter) != nullptr; });
+    };
+    const auto trackHolds = [&]
+    { return phazite::getModulatorValue (song, lfo).has_value() && phazite::getModulatorValue (song, macro).has_value(); };
+    REQUIRE (hasCurves (onTrack));
+    REQUIRE (hasCurves ({ masterRate }));
+    phazite::test::UndoCheck undo (context);
+
+    // The track's line: its LFO, its container and their curves gone; the master's as they are.
+    undo.check ("Restore Track", inStep (song, "Restore Track", [&] { REQUIRE (phazite::makeTrackLike (song, track, version)); }));
+    CHECK_FALSE (phazite::getModulatorValue (song, lfo).has_value());
+    CHECK_FALSE (phazite::getModulatorValue (song, macro).has_value());
+    CHECK_FALSE (phazite::findDeviceState (song, container).isValid());
+    CHECK (hasNoCurves (onTrack));
+    CHECK (hasCurves ({ masterRate }));
+    phazite::test::checkSong (song);
+
+    phazite::undo (song);
+    CHECK (trackHolds());
+    CHECK (phazite::findDeviceState (song, container).isValid());
+    CHECK (hasCurves (onTrack));
+    phazite::redo (song);
+    CHECK_FALSE (phazite::getModulatorValue (song, lfo).has_value());
+    CHECK (hasNoCurves (onTrack));
+
+    // The master's line: its LFO and its curve gone.
+    undo.check ("Restore Master", inStep (song, "Restore Master", [&] { REQUIRE (phazite::makeTrackLike (song, master, version)); }));
+    CHECK_FALSE (phazite::getModulatorValue (song, onMaster).has_value());
+    CHECK (hasNoCurves ({ masterRate }));
+    phazite::test::checkSong (song);
+
+    phazite::undo (song);
+    CHECK (phazite::getModulatorValue (song, onMaster).has_value());
+    CHECK (hasCurves ({ masterRate }));
+    phazite::redo (song);
+    CHECK (hasNoCurves ({ masterRate }));
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("A folder's line put back brings its tracks' curves back with them")
+{
+    // A folder deleted takes the tracks in it, and their curves; its line put back brings the tracks back (ApplySong.cpp:
+    // makeTrackLikeIn(), the tracks that come back with it), and their devices', modulators' and sends' curves with them.
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    auto& context = s.context;
+    const auto inside = s.firstTrack;
+    const auto synth = s.setInstrument (inside, "phaziteSynth");
+    const auto folder = s.addBus ("Folder", { inside });
+    const auto macro = s.addModulator (inside, ModulatorType::macro);
+    const std::vector<ParameterRef> curves { { synth, "cutoff" }, valueOf (macro), s.getVolumeParameter (inside) };
+
+    {
+        const phazite::UndoStep step (song, "Curves");
+
+        for (const auto& parameter : curves)
+            phazite::addPoint (song, parameter, { .beat = {}, .position = 0.25f, .curve = 0.0f });
+    }
+
+    const auto version = phazite::test::copyWholeSong (song);
+    phazite::test::UndoCheck undo (context);
+
+    // Since: each curve given a second point, then the folder deleted with the track in it.
+    undo.check ("Since",
+                inStep (song, "Since",
+                        [&]
+                        {
+                            for (const auto& parameter : curves)
+                                phazite::addPoint (song, parameter,
+                                                   { .beat = phazite::BeatPosition::fromBeats (4.0), .position = 0.75f, .curve = 0.0f });
+                        }));
+    undo.check ("Delete Folder", inStep (song, "Delete Folder", [&] { phazite::deleteTracks (song, { folder }, nullptr); }));
+
+    // Put back: each curve as the version holds it, one point.
+    undo.check ("Restore Folder", inStep (song, "Restore Folder", [&] { REQUIRE (phazite::makeTrackLike (song, folder, version)); }));
+
+    for (const auto& parameter : curves)
+    {
+        INFO (parameter.parameter.toStdString());
+        const auto* curve = phazite::findCurve (song, parameter);
+        REQUIRE (curve != nullptr);
+        CHECK (curve->points.size() == 1);
+    }
+
+    CHECK (phazite::holdTheSame (phazite::test::copyWholeSong (song), version));
+    phazite::test::checkSong (song);
+    undo.walkBackAndForth();
+}
+
 TEST_CASE ("A channel's modulators copied onto another (a bounce's) are set as their originals, their copies' IDs among "
            "the copied, one exact undo step")
 {

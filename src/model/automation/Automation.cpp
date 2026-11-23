@@ -744,8 +744,9 @@ TrackID getParameterTrack (const Song& song, const ParameterRef& parameter)
             return getDeviceChannel (song, parameter.device); // a container's devices are on its channel
         case ParameterSource::volume:
         case ParameterSource::pan:
+            return getTrackID (found->state); // a fader's channel (FoundParameter::state)
         case ParameterSource::send:
-            return getTrackID (found->state); // a fader's channel, or the track a send is on (FoundParameter::state)
+            return getSendTrack (song, parameter.device); // the track a send is on, by its ID
         case ParameterSource::chainVolume:
         case ParameterSource::chainPan:
         case ParameterSource::crossover:

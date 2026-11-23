@@ -2093,8 +2093,8 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
 
 namespace
 {
-    // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net) but a track's clips and
-    // modulators (and a container's macros): the tempo
+    // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net) but a track's clips,
+    // modulators and sends (and a container's macros): the tempo
     // map's and the chord lane's choices set their values (chooseInAreas()), and no choice in the tree adds their entries;
     // checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp: NothingTakenIn). What the
     // keeper took in counted for every area that counts it but the clips, a line each, in the order of the areas: a track
@@ -2117,8 +2117,9 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            // Not modulation's, as not the clips': its choices set the values (chooseModulationClash()), but a track or a
-            // container chosen whole in the tree comes with its modulators or macros, which the keeper takes in, as its clips.
+            // Not modulation's nor the sends', as not the clips': their choices set the values (chooseModulationClash(),
+            // chooseSendClash()), but a track or a container chosen whole in the tree comes with its modulators or macros and
+            // its sends, which the keeper takes in, as its clips.
             return values->countTempoMapAdopted()    // the tempo map's
                    + values->countChordLaneAdopted() // the chord lane's
                    + values->countMidiLinksAdopted() // the MIDI links'
@@ -2134,7 +2135,7 @@ namespace
 
     // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
     // this order: the tempo map (a path into the song's TEMPOMAP), the chord lane (a path into the song's CHORDLANE), the MIDI
-    // links, the sections, modulation (a path through a modulator or a macro), a curve
+    // links, the sections, modulation (a path through a modulator or a macro), the sends (a path through a send), a curve
     // (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a
     // note's property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path
     // through a clip, refused). What the first whose path it is did with it; none of them (notTheArea) for a clash in the
@@ -2155,6 +2156,9 @@ namespace
 
         if (const auto choice = chooseModulationClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice; // a path through a MODULATOR or a MACRO
+
+        if (const auto choice = chooseSendClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice; // a path through a SEND
 
         if (const auto choice = chooseCurveClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;

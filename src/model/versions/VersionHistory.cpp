@@ -3214,7 +3214,8 @@ void VersionHistory::modulationChanged (const std::vector<SongValues::Modulation
     changesMayDiffer();
 }
 
-void VersionHistory::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered)
+void VersionHistory::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered,
+                                   const SongSends&)
 {
     // A change of the song as its tree's are, in sends: the lines of the tracks they were on and are on, and of those whose
     // sends came in another order, by their IDs (a listener of the song's values reads nothing of the song), as a change of a

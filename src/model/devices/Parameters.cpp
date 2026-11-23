@@ -145,6 +145,13 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
         return {};
     }
 
+    // A send's level, by the send's ID: a look in the sends' area (its FoundParameter holds no element: the song's tree holds
+    // no send). Its level is a send's one parameter (where it goes and whether it is before the fader are no parameters), and
+    // no chain or modulator has a send's ID, so only a reference to that parameter asks the sends.
+    if (ref.parameter == schema::sendLevelParameter)
+        if (getSendValue (song, ref.device).has_value())
+            return found (ref, ParameterSource::send, {});
+
     return locateParameterInTree (song, ref);
 }
 
@@ -189,14 +196,6 @@ std::optional<FoundParameter> locateParameterInTree (const Song& song, const Par
         return {};
     }
 
-    // A send's level, by the send's value: its element the send's track's, as a fader's is its channel's. Its level is a send's
-    // one parameter (where it goes and whether it is before the fader are no parameters), and no chain or modulator has a
-    // send's ID, so only a reference to that parameter asks the sends: one that names a chain's or a modulator's, or a
-    // device gone, reads no send (a tree callback that looks for it again, MidiLinker's, reaches no sends' reader).
-    if (ref.parameter == schema::sendLevelParameter)
-        if (const auto send = getSendValue (song, ref.device))
-            return found (ref, ParameterSource::send, findTrackState (song, send->from));
-
     // A container's chain's volume and pan, and a band's crossover.
     if (const auto chain = findContainerChain (song, ref.device); chain.isValid())
     {
@@ -229,6 +228,10 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
                                                           : modulator->kind.has_value() && isParameterOf (*modulator->kind, parameter.info);
     }
 
+    // A send's level by its send's ID, a look in the sends' area.
+    if (parameter.source == ParameterSource::send)
+        return getSendValue (song, parameter.ref.device).has_value();
+
     if (! parameter.state.isAChildOf (song.getState()))
         return false;
 
@@ -244,7 +247,6 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
         case ParameterSource::pan:
             return readID (parameter.state, schema::channelFader) == id || readID (parameter.state, schema::channelVCA) == id;
         case ParameterSource::send:
-            return findTrackSend (parameter.state, parameter.ref.device).has_value(); // on the track it was found on, one look
         case ParameterSource::modulator:
         case ParameterSource::macro:
             break; // above
@@ -404,7 +406,7 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
 
         case ParameterSource::send:
         {
-            const auto send = findTrackSend (state, parameter.ref.device); // on the track it was found on, one look
+            const auto send = getSendValue (song, parameter.ref.device); // a look in the sends' area, by its ID
             return engine::decibelsToFaderPosition (send.has_value() ? send->level : 0.0f);
         }
 

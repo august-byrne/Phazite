@@ -304,22 +304,18 @@ private:
     // channel), whatever part changed, a value the session takes at once (takeModulator()) too.
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
-    // The sends that changed (SongValues.h; its tree callbacks leave the song's SEND elements alone, isHeardAsKept()): the
-    // channels a send was added to, taken out of or came to and from, and those whose sends came in another order, their
-    // devices read again by the next compile (as a SEND added to or taken out of its track marked the track's channel); a
-    // send's route or level marks nothing (every plan reads every track's sends: getChannels()), and the session plays a
-    // level at once (takeSendLevel()). And the sends as they are now kept (heldSends) from each change's value after.
-    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered) override;
+    // The sends that changed (SongValues.h; the song's tree holds none): the channels a send was added to, taken out of or
+    // came to and from, and those whose sends came in another order, their devices read again by the next compile (as a
+    // send added to or taken out of its track marks the track's channel); a send's route or level marks nothing (every plan
+    // reads every track's sends: getChannels()), and the session plays a level at once (takeSendLevel()). And the song's sends
+    // as they are now kept (heldSends): the area's value the teller hands the listener.
+    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
     // The sends that decide which of them sends (updateAudibility(), which a track muted or soloed asks in the tree's callback,
-    // where nothing reads the song's sends: SongValues.h): each send of the channels the last plan played, with its track, its
-    // return, its level and whether it sends before its fader, by its ID and in each track's list. Made by each compile from
-    // the sends it read (getChannels()), before its audibility, and kept current between two plans by sendsChanged() from each
-    // change's value after (a send added, removed or switched before its fader and then a track soloed, before the plan the
-    // first asked for). Each track's list may hold its sends in another order than the song's (sendsChanged() puts a send
-    // that comes last, and leaves a track told reordered as it was): updateAudibility() asks of each send alone, in no order.
-    // Until the sends' switch (roadmap step S5.20, their third piece), when the area's value the teller hands the listener
-    // replaces it.
+    // where nothing reads the song's sends: SongValues.h): the song's sends as the last compile read them (the sends' area's
+    // value, read once for the plan), and as sendsChanged() was handed them since (a send added, removed or switched before
+    // its fader and then a track soloed, before the plan the first asked for). A copy of the area's value, which shares what it
+    // holds.
     SongSends heldSends;
 
     // Whether a part kept from the plan before is checked against the song now (setChecking()): all of them while the
@@ -400,7 +396,7 @@ private:
     {
         juce::ValueTree state {};
         std::int64_t id = 0, output = 0;
-        std::vector<SendValue> sends {}; // its sends, read once
+        std::vector<SendValue> sends {}; // its sends, from the song's sends read once for the plan
         std::vector<std::int64_t> needs {};
         std::set<std::int64_t> refused {};
         std::int64_t padDevice = 0; // a pad track's drum sampler, by its ID, and its pad (schema::trackPadDevice, trackPad)
@@ -410,7 +406,9 @@ private:
         bool refuses (std::int64_t other) const { return refused.contains (other); }
     };
 
-    std::vector<ChannelInfo> getChannels() const; // in an order in which each comes after what it takes in
+    // In an order in which each comes after what it takes in, each track's sends from the song's sends given (the compile's
+    // one reading of the sends' area: SendsValue.h, getSendsValue()).
+    std::vector<ChannelInfo> getChannels (const SongSends&) const;
     void addInputs (engine::Plan&, engine::Plan::Strip&, std::vector<engine::Plan::Input>);
     // One for every path (none for a render's that needs none): reading a strip's tap, or with a ring of its own. One that
     // doesn't come and go with what the song routes (a device's own sound held back) never fades in as a new path does.

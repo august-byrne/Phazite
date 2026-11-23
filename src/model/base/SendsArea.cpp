@@ -6,8 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <map>
-#include <unordered_map>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -16,71 +15,37 @@ namespace phazite
 namespace
 {
     using Change = SongValues::SendChange;
-
-    // A TRACK of the song's, as readSendsValue() reads their sends: one of its track list, or one in a track that is (a
-    // folder's).
-    bool isSongTrack (const juce::ValueTree& element)
-    {
-        if (! element.hasType (schema::TRACK))
-            return false;
-
-        const auto parent = element.getParent();
-
-        if (parent.hasType (schema::TRACKS))
-            return parent.getParent().hasType (schema::PHAZITE);
-
-        return isSongTrack (parent);
-    }
-
-    // The song's track list, or what holds it.
-    bool isSongTrackList (const juce::ValueTree& element)
-    {
-        return (element.hasType (schema::TRACKS) && element.getParent().hasType (schema::PHAZITE)) || element.hasType (schema::PHAZITE);
-    }
+    using SendList = immer::flex_vector<DeviceID>;
 
     TrackID readTrackID (const juce::ValueTree& track)
     {
-        return TrackID::fromRaw (readID (track[schema::trackID]));
+        return track.hasType (schema::TRACK) ? TrackID::fromRaw (readID (track[schema::trackID])) : TrackID();
     }
 
-    DeviceID readSendID (const juce::ValueTree& send)
+    // The tracks an element added to the song or taken out of it holds: itself, if a track; the tracks in it (a folder's),
+    // however deep; the track list's. As readSendsValue() reads a song's sends: a track's TRACK children, folder or not.
+    void collectTracks (const juce::ValueTree& element, std::vector<juce::ValueTree>& tracks)
     {
-        return DeviceID::fromRaw (readID (send[schema::sendID]));
+        if (element.hasType (schema::TRACK))
+            tracks.push_back (element);
+
+        if (element.hasType (schema::TRACK) || element.hasType (schema::TRACKS))
+            for (const auto& child : element)
+                if (child.hasType (schema::TRACK))
+                    collectTracks (child, tracks);
     }
 
-    // Whether an ID is one the song holds a send by (SendsValue.h: readHeldSend()).
-    bool isHeldID (DeviceID id)
+    // Every SEND element in an element and what it holds, taken out: what the adoption leaves of a file's anywhere in the
+    // song's tree once those of the song's tracks are the area's. So the song's tree holds none.
+    void dropSendElements (juce::ValueTree element)
     {
-        return id.isValid() && id.getRaw() < schema::maxID;
-    }
-
-    // The song's SEND an element is, or is in; an invalid tree for none. Looked for upwards only as far as what holds no send
-    // inside it, as a fader's change is heard often.
-    juce::ValueTree findSongSend (const juce::ValueTree& element)
-    {
-        for (auto each = element; each.isValid(); each = each.getParent())
+        for (auto i = element.getNumChildren(); --i >= 0;)
         {
-            if (each.hasType (schema::SEND))
-                return isSongTrack (each.getParent()) ? each : juce::ValueTree();
-
-            if (each.hasType (schema::TRACK) || each.hasType (schema::MASTER) || each.hasType (schema::CONTAINER)
-                || each.hasType (schema::DEVICE) || each.hasType (schema::CHAIN) || each.hasType (schema::MODULATOR)
-                || each.hasType (schema::MACRO) || each.hasType (schema::TRACKS) || each.hasType (schema::PHAZITE))
-                return {};
+            if (auto child = element.getChild (i); child.hasType (schema::SEND))
+                element.removeChild (i, nullptr);
+            else
+                dropSendElements (child);
         }
-
-        return {};
-    }
-
-    // Whether a TRACK, or the track list, holds a SEND, itself or in a track in it (a folder's): what can change the song's
-    // sends as it comes, goes, or is given another order.
-    bool holdsSendsIn (const juce::ValueTree& element)
-    {
-        for (const auto& child : element)
-            if (child.hasType (schema::SEND) || (child.hasType (schema::TRACK) && holdsSendsIn (child)))
-                return true;
-
-        return false;
     }
 
     // What of a send differs between two of its values (the same ID).
@@ -101,11 +66,81 @@ namespace
         return parts;
     }
 
-    // A change of a send from one value to another (none for one that wasn't there, or isn't), its value after given as it is
-    // told (tell()).
-    Change makeChange (DeviceID id, const SendValue* was, const SendValue* now, std::uint8_t parts)
+    // Two entries of the area alike: one send's, the same value (a send's value is small, with no identity of its own to
+    // compare), and two lists the same one.
+    struct SameSend
     {
-        Change change;
+        bool operator() (const std::pair<std::uint64_t, SendValue>& a, const std::pair<std::uint64_t, SendValue>& b) const noexcept
+        {
+            return a.first == b.first && a.second == b.second;
+        }
+    };
+
+    struct SameList
+    {
+        bool operator() (const std::pair<std::uint64_t, SendList>& a, const std::pair<std::uint64_t, SendList>& b) const noexcept
+        {
+            return a.first == b.first && a.second.identity() == b.second.identity();
+        }
+    };
+
+    // Whether a list holds those of another that it still holds in another order.
+    bool isReordered (const SendList& was, const SendList& now)
+    {
+        const auto holds = [] (const SendList& list, DeviceID id) { return std::find (list.begin(), list.end(), id) != list.end(); };
+        std::vector<DeviceID> keptBefore, keptNow;
+
+        for (const auto id : was)
+            if (holds (now, id))
+                keptBefore.push_back (id);
+
+        for (const auto id : now)
+            if (holds (was, id))
+                keptNow.push_back (id);
+
+        return keptBefore != keptNow;
+    }
+
+    void setArea (Song& song, ValueArea<SongSends>& area, SongSends next)
+    {
+        if (song.isWritingOutsideHistory())
+            area.setOutsideHistory (std::move (next));
+        else
+            area.set (std::move (next));
+    }
+
+    // A track's list in kept values, none for a track without one (an element that is no TRACK: none).
+    const SendList* findKeptList (const SongSends& sends, const juce::ValueTree& element)
+    {
+        return element.hasType (schema::TRACK) ? sends.tracks.find (readID (element[schema::trackID])) : nullptr;
+    }
+} // namespace
+
+//==============================================================================
+SongValues::SendsTeller::SendsTeller (ValueArea<SongSends>& a, juce::ListenerList<SongValues::Listener>& l)
+    : area (a),
+      listeners (l)
+{
+    area.addListener (this);
+}
+
+SongValues::SendsTeller::~SendsTeller()
+{
+    area.removeListener (this);
+}
+
+void SongValues::SendsTeller::valueAreaChanged (const SongSends& before, const SongSends& after)
+{
+    if (listeners.isEmpty() || before.isSameAs (after))
+        return;
+
+    // Each value after, in a copy of the value told, which stays while the listeners are told (cheap: it shares what it holds).
+    const auto now = after;
+    std::vector<SendChange> changes;
+
+    const auto make = [] (DeviceID id, const SendValue* was, const SendValue* is, std::uint8_t parts)
+    {
+        SendChange change;
         change.id = id;
         change.parts = parts;
 
@@ -115,289 +150,352 @@ namespace
             change.toBefore = was->to;
         }
 
-        if (now != nullptr)
+        if (is != nullptr)
         {
-            change.fromAfter = now->from;
-            change.toAfter = now->to;
+            change.fromAfter = is->from;
+            change.toAfter = is->to;
         }
 
         return change;
-    }
+    };
 
-    // Each TRACK under an element (the track list, a folder), a folder before the tracks in it, as readSendsValue() reads
-    // them; until `each` returns true, whether it did.
-    bool findTrack (const juce::ValueTree& parent, const std::function<bool (const juce::ValueTree&)>& each)
-    {
-        for (const auto& child : parent)
-            if (child.hasType (schema::TRACK) && (each (child) || findTrack (child, each)))
-                return true;
+    before.sends.impl().template diff<SameSend> (
+        now.sends.impl(), immer::make_differ ([&changes, &make] (const std::pair<std::uint64_t, SendValue>& added)
+                                              { changes.push_back (make (added.second.id, nullptr, &added.second, Change::made)); },
+                                              [&changes, &make] (const std::pair<std::uint64_t, SendValue>& removed)
+                                              { changes.push_back (make (removed.second.id, &removed.second, nullptr, Change::made)); },
+                                              [&changes, &make] (const std::pair<std::uint64_t, SendValue>& was,
+                                                                 const std::pair<std::uint64_t, SendValue>& is)
+                                              {
+                                                  if (const auto parts = findParts (was.second, is.second); parts != 0)
+                                                      changes.push_back (make (is.second.id, &was.second, &is.second, parts));
+                                              }));
 
-        return false;
-    }
-} // namespace
+    // Each track whose list holds those it held before in another order.
+    std::vector<TrackID> reordered;
+    const auto ignore = [] (const std::pair<std::uint64_t, SendList>&) {};
+
+    before.tracks.impl().template diff<SameList> (
+        now.tracks.impl(),
+        immer::make_differ (ignore, ignore,
+                            [&reordered] (const std::pair<std::uint64_t, SendList>& was, const std::pair<std::uint64_t, SendList>& is)
+                            {
+                                if (isReordered (was.second, is.second))
+                                    reordered.push_back (TrackID::fromRaw (is.first));
+                            }));
+
+    if (changes.empty() && reordered.empty())
+        return;
+
+    std::sort (changes.begin(), changes.end(), [] (const SendChange& a, const SendChange& b) { return a.id < b.id; });
+    std::sort (reordered.begin(), reordered.end());
+
+    for (auto& change : changes)
+        change.now = change.isThere() ? now.find (change.id) : nullptr;
+
+    listeners.call ([&changes, &reordered, &now] (SongValues::Listener& listener) { listener.sendsChanged (changes, reordered, now); });
+}
 
 //==============================================================================
 SongValues::SendsKeeper::SendsKeeper (SongValues& v, Song& s)
     : values (v),
-      song (s)
+      song (s),
+      state (s.getState())
 {
-    Heard heard;
-    settle (heard); // what the song holds at the start, which no one is told
 }
 
-void SongValues::SendsKeeper::propertyChanged (const juce::ValueTree& tree, const juce::Identifier& property)
+bool SongValues::SendsKeeper::isInTrackList (const juce::ValueTree& parent, const juce::ValueTree& child) const
 {
-    Heard heard;
+    if (child.hasType (schema::TRACKS))
+        return parent == state;
 
-    if (const auto send = findSongSend (tree); send.isValid())
-    {
-        // Given another ID: the song's sends found again. Anything else: itself.
-        if (send == tree && property == schema::sendID)
-            settle (heard);
-        else
-            reread (send, heard);
-    }
-    else if (property == schema::trackID && isSongTrack (tree) && holdsSendsIn (tree))
-    {
-        settle (heard); // a track given another ID (a merge's renumbering): its sends come to another track
-    }
+    for (auto element = parent; element.isValid(); element = element.getParent())
+        if (element.hasType (schema::TRACKS))
+            return element.getParent() == state;
 
-    tell (heard);
+    return false;
 }
 
-void SongValues::SendsKeeper::childAdded (const juce::ValueTree& parent, const juce::ValueTree& child)
+void SongValues::SendsKeeper::sweep()
 {
-    Heard heard;
-
-    if (child.hasType (schema::SEND) && isSongTrack (parent))
-        settle (heard); // one added to its track
-    else if (const auto send = findSongSend (parent); send.isValid())
-        reread (send, heard); // something in one, which a send's readers don't read
-    else if ((child.hasType (schema::TRACK) || child.hasType (schema::TRACKS)) && (isSongTrack (parent) || isSongTrackList (parent))
-             && holdsSendsIn (child))
-        settle (heard); // tracks that came with theirs
-
-    tell (heard);
-}
-
-void SongValues::SendsKeeper::childRemoved (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    Heard heard;
-
-    if (child.hasType (schema::SEND) && isSongTrack (parent))
-        settle (heard);
-    else if (const auto send = findSongSend (parent); send.isValid())
-        reread (send, heard);
-    else if ((child.hasType (schema::TRACK) || child.hasType (schema::TRACKS)) && (isSongTrack (parent) || isSongTrackList (parent))
-             && holdsSendsIn (child))
-        settle (heard); // tracks that went with theirs
-
-    tell (heard);
-}
-
-void SongValues::SendsKeeper::childOrderChanged (const juce::ValueTree& parent)
-{
-    Heard heard;
-
-    // A track's children (its sends among them, or a folder's tracks), or the song's tracks, in another order.
-    if ((isSongTrack (parent) || (parent.hasType (schema::TRACKS) && isSongTrackList (parent))) && holdsSendsIn (parent))
-        settle (heard);
-
-    tell (heard);
-}
-
-void SongValues::SendsKeeper::reread (const juce::ValueTree& send, Heard& heard)
-{
-    // Only the element the song reads its send from: another of its ID is read by no one (its ID didn't change: a change of it
-    // finds the song's sends again).
-    const auto id = readHeldSendID (send);
-    const auto element = elements.find (id.getRaw());
-    const auto* was = told.find (id);
-
-    if (element == elements.end() || element->second != send || was == nullptr)
+    if (remembered.size() < sweepAt)
         return;
 
-    auto now = readSendValue (send, was->from);
-
-    if (const auto parts = findParts (*was, now); parts != 0)
-    {
-        heard.changes.push_back (makeChange (id, was, &now, parts));
-        told.sends = told.sends.set (id.getRaw(), std::move (now));
-    }
+    std::erase_if (remembered,
+                   [this] (const Remembered& each) { return each.track.getReferenceCount() <= 1 || each.track.isAChildOf (state); });
+    sweepAt = std::max<size_t> (64, remembered.size() * 2);
 }
 
-void SongValues::SendsKeeper::settle (Heard& heard)
+void SongValues::SendsKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
-    // The song's SEND elements as readSendsValue() finds them: each send's element and track, in the song's order, and each
-    // track's list (a later track of the same ID holding sends replaces an earlier one's, as there).
-    struct Found
+    // A lone one, added to a track of the song's (c): refused in a step, read in and taken out outside the history.
+    if (child.hasType (schema::SEND))
     {
-        DeviceID id {};
-        juce::ValueTree element {};
-        TrackID from {};
-    };
+        if (! parent.hasType (schema::TRACK) || ! isInTrackList (parent, child))
+            return;
 
-    std::vector<Found> found;
-    std::unordered_map<std::uint64_t, size_t> foundAt;
-    std::map<std::uint64_t, std::vector<DeviceID>> lists;
+        if (! song.isWritingOutsideHistory())
+        {
+            jassertfalse; // a send's element on a track of the song's: the sends' code adds one (model/mixer/internal/Mixer.h)
+            return;
+        }
 
-    forEachTrackHeldSends (song.getState(),
-                           [&found, &foundAt, &lists] (const juce::ValueTree&, TrackID from, const std::vector<HeldSendElement>& held)
+        if (const auto from = readTrackID (parent); from.isValid())
+        {
+            if (auto value = readHeldSend (child, from); value.has_value() && values.sends.get().find (value->id) == nullptr)
+            {
+                ++values.sendsAdopted;
+                values.sends.setOutsideHistory (withSend (values.sends.get(), std::move (*value)));
+            }
+        }
+
+        parent.removeChild (child, nullptr);
+        return;
+    }
+
+    if (! (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS)) || ! isInTrackList (parent, child))
+        return;
+
+    // A track (or what holds tracks) put in the song's track list: what each was remembered with given back (a), and the SEND
+    // elements each holds read in (b), each track's in their order.
+    std::vector<juce::ValueTree> tracks;
+    collectTracks (child, tracks);
+    auto next = values.sends.get();
+    std::vector<juce::ValueTree> taken;
+    auto changed = false;
+
+    for (const auto& track : tracks)
+    {
+        const auto from = readTrackID (track);
+
+        if (const auto found =
+                std::find_if (remembered.begin(), remembered.end(), [&track] (const Remembered& each) { return each.track == track; });
+            found != remembered.end())
+        {
+            const auto given = std::exchange (found->sends, {});
+            remembered.erase (found);
+
+            for (auto value : given)
+            {
+                value.from = from;
+                next = withSend (next, std::move (value));
+                changed = true;
+            }
+        }
+
+        for (const auto& element : track)
+        {
+            if (! element.hasType (schema::SEND))
+                continue;
+
+            if (auto value = from.isValid() ? readHeldSend (element, from) : std::nullopt;
+                value.has_value() && next.find (value->id) == nullptr)
+            {
+                next = withSend (next, std::move (*value));
+                ++values.sendsAdopted;
+                changed = true;
+            }
+
+            taken.push_back (element);
+        }
+    }
+
+    if (changed)
+        values.setAllSends (song, std::move (next));
+
+    auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+
+    for (auto& element : taken)
+        element.getParent().removeChild (element, undo);
+
+    sweep();
+}
+
+void SongValues::SendsKeeper::childRemoved (juce::ValueTree& parent, juce::ValueTree& child)
+{
+    if (! (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS)) || ! isInTrackList (parent, child))
+        return;
+
+    // A track (or what holds tracks) taken out of the song's track list (a): each track's sends remembered with its element,
+    // in the place of what it was remembered with before, or that forgotten where it holds none now; and erased.
+    std::vector<juce::ValueTree> tracks;
+    collectTracks (child, tracks);
+    const auto before = values.sends.get();
+    auto next = before;
+
+    for (const auto& track : tracks)
+    {
+        const auto found =
+            std::find_if (remembered.begin(), remembered.end(), [&track] (const Remembered& each) { return each.track == track; });
+        const auto* list = next.tracks.find (readTrackID (track).getRaw());
+
+        if (list == nullptr)
+        {
+            if (found != remembered.end())
+                remembered.erase (found);
+
+            continue;
+        }
+
+        Remembered gone { track, {} };
+        const auto order = *list;
+
+        for (const auto id : order)
+        {
+            if (const auto* value = next.find (id))
+                gone.sends.push_back (*value);
+
+            next = withoutSend (next, id);
+        }
+
+        if (found != remembered.end())
+            *found = std::move (gone);
+        else
+            remembered.push_back (std::move (gone));
+    }
+
+    if (! next.isSameAs (before))
+        values.setAllSends (song, std::move (next));
+
+    sweep();
+}
+
+void SongValues::SendsKeeper::adopt (SongValues& into, Song& loaded)
+{
+    // Every send the loader made consistent into the area, outside the history, as the song holds each, in the elements'
+    // order (each track's, a folder's before those of the tracks in it, the first of an ID: readSendsValue()'s walk); what the
+    // loader left of each is what the song holds of it (SendsValue.h: keepSendAsHeld()), so the adoption changes nothing of
+    // what the file held. Then every SEND element out of the tree, those anywhere else too, which are no sends of the song's
+    // (dropSendElements()).
+    auto tree = loaded.getState();
+    auto sends = into.sends.get();
+
+    forEachTrackHeldSends (tree,
+                           [&sends] (const juce::ValueTree&, TrackID from, const std::vector<HeldSendElement>& held)
                            {
-                               if (held.empty())
-                                   return;
-
-                               auto& list = lists[from.getRaw()];
-                               list.clear();
-
                                for (const auto& each : held)
                                {
-                                   foundAt[each.id.getRaw()] = found.size();
-                                   found.push_back ({ .id = each.id, .element = each.element, .from = from });
-                                   list.push_back (each.id);
+                                   jassert (isSendWrittenAsHeld (each.element)); // the loader keeps each as held
+
+                                   if (auto value = readHeldSend (each.element, from))
+                                       sends = withSend (sends, std::move (*value));
                                }
                            });
 
-    auto next = told;
-
-    // Those it held that it holds no longer: taken out.
-    for (const auto& [key, was] : told.sends)
-    {
-        if (foundAt.count (key) > 0)
-            continue;
-
-        heard.changes.push_back (makeChange (was.id, &was, nullptr, Change::made));
-        next.sends = next.sends.erase (key);
-        elements.erase (key);
-    }
-
-    // Those that came, from nowhere or from another track, or are read from another element now: each read as it is now.
-    for (const auto& each : found)
-    {
-        const auto key = each.id.getRaw();
-        const auto* was = told.find (each.id);
-        const auto element = elements.find (key);
-
-        if (was != nullptr && was->from == each.from && element != elements.end() && element->second == each.element)
-            continue;
-
-        auto now = readSendValue (each.element, each.from);
-        const auto parts = was != nullptr ? findParts (*was, now) : (std::uint8_t) Change::made;
-
-        if (parts != 0)
-            heard.changes.push_back (makeChange (each.id, was, &now, parts));
-
-        elements[key] = each.element;
-        next.sends = next.sends.set (key, std::move (now));
-    }
-
-    // Each track's list in its element's order; reordered where those it held before are in another order.
-    for (const auto& [key, list] : told.tracks)
-        if (lists.count (key) == 0)
-            next.tracks = next.tracks.erase (key);
-
-    for (const auto& [key, order] : lists)
-    {
-        const auto* was = told.tracks.find (key);
-
-        if (was != nullptr && std::equal (was->begin(), was->end(), order.begin(), order.end()))
-            continue;
-
-        if (was != nullptr)
-        {
-            const std::vector<DeviceID> before (was->begin(), was->end());
-            const auto isIn = [] (const std::vector<DeviceID>& ids, DeviceID id)
-            { return std::find (ids.begin(), ids.end(), id) != ids.end(); };
-            std::vector<DeviceID> keptBefore, keptNow;
-
-            for (const auto id : before)
-                if (isIn (order, id))
-                    keptBefore.push_back (id);
-
-            for (const auto id : order)
-                if (isIn (before, id))
-                    keptNow.push_back (id);
-
-            if (keptBefore != keptNow)
-                heard.reordered.push_back (TrackID::fromRaw (key));
-        }
-
-        next.tracks = next.tracks.set (key, immer::flex_vector<DeviceID> (order.begin(), order.end()));
-    }
-
-    told = std::move (next);
-}
-
-void SongValues::SendsKeeper::tell (Heard& heard) const
-{
-    if (heard.changes.empty() && heard.reordered.empty())
-        return;
-
-    // Each value after, in a copy of what the listeners are told now, which stays while they are told whatever one of them
-    // changes meanwhile (cheap: it shares what it holds).
-    const auto now = told;
-
-    for (auto& change : heard.changes)
-        change.now = change.isThere() ? now.find (change.id) : nullptr;
-
-    values.listeners.call ([&heard] (SongValues::Listener& listener) { listener.sendsChanged (heard.changes, heard.reordered); });
+    jassert (holdsItsLists (sends));
+    into.sends.setOutsideHistory (std::move (sends));
+    dropSendElements (tree);
 }
 
 //==============================================================================
-bool isHeardAsSends (const juce::ValueTree& element)
+bool SongValues::setSend (Song& song, SendValue value, int index)
 {
-    return findSongSend (element).isValid();
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    if (! value.id.isValid())
+        return false;
+
+    if (const auto* was = sends.get().find (value.id); was != nullptr && *was == value)
+        return false;
+
+    setArea (song, sends, withSend (sends.get(), std::move (value), index));
+    return true;
 }
 
-bool isHeardAsSends (const juce::ValueTree& parent, const juce::ValueTree& child)
+bool SongValues::eraseSend (Song& song, DeviceID id)
 {
-    return (child.hasType (schema::SEND) && isSongTrack (parent)) || isHeardAsSends (parent);
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    if (sends.get().find (id) == nullptr)
+        return false;
+
+    setArea (song, sends, withoutSend (sends.get(), id));
+    return true;
+}
+
+bool SongValues::setTrackSendOrder (Song& song, TrackID track, immer::flex_vector<DeviceID> order)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    auto next = withTrackSendOrder (sends.get(), track, std::move (order));
+
+    if (next.isSameAs (sends.get()))
+        return false;
+
+    setArea (song, sends, std::move (next));
+    return true;
+}
+
+bool SongValues::setAllSends (Song& song, SongSends next)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    if (next.isSameAs (sends.get()) || next == sends.get())
+        return false;
+
+    jassert (holdsItsLists (next)); // a pass's, an edit's of several and the keeper's, each held together as it was worked out
+    setArea (song, sends, std::move (next));
+    return true;
 }
 
 //==============================================================================
-FoundSendElement findSendElement (const juce::ValueTree& song, DeviceID id)
+bool leadsToSends (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    FoundSendElement found;
-
-    if (! isHeldID (id))
-        return found;
-
-    findTrack (song.getChildWithName (schema::TRACKS),
-               [&found, id] (const juce::ValueTree& track)
-               {
-                   for (const auto& child : track)
-                   {
-                       if (child.hasType (schema::SEND) && readSendID (child) == id)
-                       {
-                           found = { .element = child, .track = readTrackID (track) };
-                           return true;
-                       }
-                   }
-
-                   return false;
-               });
-
-    return found;
+    return (parent.hasType (schema::PHAZITE) || parent.hasType (schema::TRACKS) || parent.hasType (schema::TRACK))
+           && (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK));
 }
 
-std::vector<DeviceID> readTrackSendOrder (const juce::ValueTree& song, TrackID track)
+void writeSendsIn (juce::ValueTree& element, const ValuesKept& kept)
 {
-    std::vector<DeviceID> order;
+    if (const auto* list = findKeptList (kept.sends, element))
+        for (const auto id : *list)
+            if (const auto* value = kept.sends.find (id))
+                element.appendChild (writeSendElement (*value), nullptr);
+}
 
-    findTrack (song.getChildWithName (schema::TRACKS),
-               [&order, track] (const juce::ValueTree& candidate)
-               {
-                   if (readTrackID (candidate) != track)
-                       return false;
+bool holdSameSends (const ValuesKept& a, const ValuesKept& b)
+{
+    return a.sends.isSameAs (b.sends) || a.sends == b.sends;
+}
 
-                   for (const auto& child : candidate)
-                       if (const auto id = readSendID (child);
-                           child.hasType (schema::SEND) && isHeldID (id) && std::find (order.begin(), order.end(), id) == order.end())
-                           order.push_back (id);
+bool holdSameSend (const ValuesKept& a, const ValuesKept& b, DeviceID id)
+{
+    const auto* first = a.sends.find (id);
+    const auto* second = b.sends.find (id);
 
-                   return true;
-               });
+    if (first == nullptr || second == nullptr)
+        return first == second;
 
-    return order;
+    return *first == *second;
+}
+
+bool holdSameTrackSendOrder (const ValuesKept& a, const ValuesKept& b, TrackID track)
+{
+    const auto* first = a.sends.tracks.find (track.getRaw());
+    const auto* second = b.sends.tracks.find (track.getRaw());
+
+    if (first == nullptr || second == nullptr)
+        return first == second;
+
+    return first->identity() == second->identity() || *first == *second;
+}
+
+bool holdSameSendsOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
+                      const ValuesKept& otherKept)
+{
+    const auto* list = findKeptList (kept.sends, element);
+    const auto* otherList = findKeptList (otherKept.sends, otherElement);
+
+    if (list == nullptr || otherList == nullptr)
+        return list == otherList;
+
+    if (! (*list == *otherList))
+        return false;
+
+    return std::all_of (list->begin(), list->end(), [&kept, &otherKept] (DeviceID id) { return holdSameSend (kept, otherKept, id); });
 }
 } // namespace phazite

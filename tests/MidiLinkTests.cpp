@@ -360,6 +360,12 @@ TEST_CASE ("A macro, a fader and a send the first change makes can be learned")
     s.link (send, { 1, 2 });
     sendController (1, 2, 0);
     CHECK (send.getValue() == doctest::Approx (0.0f));
+
+    // Its link names the track the send is on, as a fader's does (the send's by its ID, in the sends' area).
+    const auto links = phazite::getMidiLinks (s.song.context);
+    REQUIRE (links.size() == 2);
+    CHECK (links[1].track == s.song.firstTrack);
+    CHECK (links[1].turns.startsWith ("Track 1: Mixer: Send to "));
 }
 
 TEST_CASE ("A duplicated track has no links: its original keeps them")
@@ -652,8 +658,10 @@ TEST_CASE ("Learning a chain's volume ends as the chain goes, in that call, read
     phazite::startMidiLearn (volume);
     REQUIRE (phazite::isLearningMidi (volume));
     const auto sendsRead = phazite::countSendsRead();
+    const auto sendLooks = phazite::countSendLooks();
     phazite::removeChain (context, chain);
     CHECK (phazite::countSendsRead() == sendsRead);
+    CHECK (phazite::countSendLooks() == sendLooks); // nor a look in the sends' area, from the sends' switch on
     CHECK_FALSE (phazite::isLearningMidi (context));
 
     const auto level = phazite::getSendLevelTo (context, s.song.firstTrack, returnTrack);

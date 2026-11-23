@@ -162,12 +162,13 @@ namespace
         // to another track or sent to another return, which changes where sound can go, any channel (every strip's send knobs
         // follow the whole routing, as changesRouting() says of a device's sidechain). Not a level alone, a parameter's value,
         // which no view shows as a change (controls read values as they show them). A track whose sends came in another order:
-        // its channel, as a SEND moved past another was (markMoved()). Its tree callbacks below leave the song's SEND elements
-        // alone (isHeardAsKept()). A track that comes or goes with sends on it (added, removed, duplicated, moved into a
-        // folder, brought back by an Undo) tells them added or taken out, so the devices' group and any channel come beside what
-        // the tree raises for the track: more than the tree alone raised, for a rare edit (every strip shows its send knobs
-        // again), which the area can't tell from a send added or removed by itself after its switch either.
-        void sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered) override
+        // its channel, as a SEND moved past another was (markMoved()). The song's tree holds no send. A track that comes or
+        // goes with sends on it (added, removed, duplicated, moved into a folder, brought back by an Undo) tells them added or
+        // taken out, so the devices' group and any channel come beside what the tree raises for the track: more than the tree
+        // alone raised while it held the sends, for a rare edit (every strip shows its send knobs again), which the area can't
+        // tell from a send added or removed by itself.
+        void sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered,
+                           const SongSends&) override
         {
             using Change = SongValues::SendChange;
             auto changed = false;

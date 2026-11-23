@@ -5,9 +5,11 @@
 #include "internal/Schema.h"
 #include "internal/SongIndex.h"
 #include "internal/SongText.h"
+#include "internal/SongValues.h"
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <unordered_set>
@@ -29,7 +31,7 @@ bool SongSends::operator== (const SongSends& other) const
 //==============================================================================
 namespace
 {
-    std::atomic<std::uint64_t> sendsRead { 0 }; // countSendsRead(): a count alone, which orders nothing
+    std::atomic<std::uint64_t> sendsRead { 0 }, sendLooks { 0 }; // countSendsRead(), countSendLooks(): counts alone
 
     using SendList = immer::flex_vector<DeviceID>;
     using SendLists = immer::map<std::uint64_t, SendList>;
@@ -85,6 +87,42 @@ namespace
     float readLevel (const juce::var& held)
     {
         return (float) readDescribed (held, schema::sendLevel);
+    }
+
+    // Each property Phazite's writer writes of a send (writeSendElement()), given to `each` as its name and its value, in the
+    // writer's order: the one list of them, which the writer and the loader's rule (keepSendAsHeld()) both go by. Nothing
+    // allocated.
+    template <typename Each>
+    void forEachWrittenProperty (const SendValue& send, Each&& each)
+    {
+        each (schema::sendID.getName(), juce::var ((juce::int64) send.id.getRaw()));
+        each (schema::sendTo.getName(), juce::var ((juce::int64) send.to.getRaw()));
+
+        // None for 0 dB, as setSendLevel() keeps it (Mixer.cpp). The float the value holds, which a file's text holds as the
+        // fewest digits that read back as it (SongText.h: writeValue()).
+        if (! juce::exactlyEqual (send.level, 0.0f))
+            each (schema::sendLevel.getName(), juce::var (send.level));
+
+        if (send.preFader)
+            each (schema::sendPreFader.getName(), juce::var (true));
+    }
+
+    // Whether an element holds what the writer writes of a send and nothing else: each property as the same text
+    // (SongText.h: isSameValue()), no other, and no child. Nothing allocated.
+    bool holdsAsWritten (const juce::ValueTree& element, const SendValue& held)
+    {
+        auto written = 0;
+        auto same = element.getNumChildren() == 0;
+
+        forEachWrittenProperty (held,
+                                [&element, &written, &same] (const juce::Identifier& property, const juce::var& value)
+                                {
+                                    const auto* there = element.getPropertyPointer (property);
+                                    same = same && there != nullptr && isSameValue (*there, value);
+                                    ++written;
+                                });
+
+        return same && element.getNumProperties() == written;
     }
 
     // Each TRACK under an element (the track list, a folder), a folder before the tracks in it, as the song orders its tracks
@@ -224,32 +262,61 @@ std::uint64_t countSendsRead() noexcept
     return sendsRead.load (std::memory_order_relaxed);
 }
 
+std::uint64_t countSendLooks() noexcept
+{
+    return sendLooks.load (std::memory_order_relaxed);
+}
+
+void countSendLook() noexcept
+{
+    sendLooks.fetch_add (1, std::memory_order_relaxed);
+}
+
+float keepSendLevel (float decibels)
+{
+    // Its description's reading of the float (within its range, 0 for no finite number), in ten-thousandths: rounded from the
+    // float, so that a level set and the same level read from a file's text round alike.
+    const auto rounded = std::round (readDescribed (juce::var ((double) decibels), schema::sendLevel) * 1.0e4) / 1.0e4;
+    return std::abs (rounded) < 1.0e-4 ? 0.0f : (float) rounded;
+}
+
 std::optional<SendValue> readHeldSend (const juce::ValueTree& element, TrackID from)
 {
     if (! element.hasType (schema::SEND))
         return std::nullopt;
 
     auto send = readSendValue (element, from);
+    send.level = keepSendLevel (send.level); // as readSendValue() read it: its description's reading, as a float
     return isHeldID (send.id) ? std::optional<SendValue> (std::move (send)) : std::nullopt;
 }
 
 juce::ValueTree writeSendElement (const SendValue& send)
 {
     juce::ValueTree element (schema::SEND);
-    element.setProperty (schema::sendID, (juce::int64) send.id.getRaw(), nullptr);
-    element.setProperty (schema::sendTo, (juce::int64) send.to.getRaw(), nullptr);
-
-    // None for 0 dB, as setSendLevel() writes it (Mixer.cpp: setChannelValue(), which writes a level to a ten-thousandth and
-    // none for one that rounds to 0). The float the value holds, which a file's text holds as the fewest digits that read back
-    // as it (SongText.h: writeValue()): the text of every level setSendLevel() wrote, and of every level a file held in as
-    // many digits as a float keeps.
-    if (! juce::exactlyEqual (send.level, 0.0f))
-        element.setProperty (schema::sendLevel, send.level, nullptr);
-
-    if (send.preFader)
-        element.setProperty (schema::sendPreFader, true, nullptr);
-
+    forEachWrittenProperty (send, [&element] (const juce::Identifier& property, const juce::var& value)
+                            { element.setProperty (property, value, nullptr); });
     return element;
+}
+
+bool keepSendAsHeld (juce::ValueTree element)
+{
+    // Read as the song holds it (no allocation: its numbers, its switch), and written again only where it isn't so.
+    const auto held = readHeldSend (element, {});
+
+    if (! held.has_value() || holdsAsWritten (element, *held))
+        return false;
+
+    element.removeAllChildren (nullptr);
+    element.removeAllProperties (nullptr);
+    forEachWrittenProperty (*held, [&element] (const juce::Identifier& property, const juce::var& value)
+                            { element.setProperty (property, value, nullptr); });
+    return true;
+}
+
+bool isSendWrittenAsHeld (const juce::ValueTree& element)
+{
+    const auto held = readHeldSend (element, {});
+    return held.has_value() && holdsAsWritten (element, *held);
 }
 
 std::vector<SendValue> readTrackSends (const juce::ValueTree& track)
@@ -337,6 +404,11 @@ SongSends readSendsValue (const juce::ValueTree& song)
 
 SongSends getSendsValue (const Song& song)
 {
+    countSendLook();
+
+    if (const auto* values = song.getValues())
+        return values->sends.get();
+
     return readSendsValue (song.getState());
 }
 
@@ -344,6 +416,11 @@ bool holdsSend (const Song& song, DeviceID id)
 {
     if (! id.isValid())
         return false;
+
+    countSendLook();
+
+    if (const auto* values = song.getValues())
+        return values->sends.get().find (id) != nullptr;
 
     for (const auto& track : song.getIndex().getTracks())
         for (const auto& child : track)
