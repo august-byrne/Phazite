@@ -651,6 +651,9 @@ void ungroupFolder (Song& song, TrackID folder)
     if (! isFolderState (folderState))
         return;
 
+    // What its bus's devices hold of their own stored first (a plug-in's own settings), so that an undo brings it back as it is.
+    song.storeDeviceStates (folder.getRaw());
+
     // Its tracks go where it was, in their order, and it goes, with the sidechains that listened to it.
     forgetSidechainsOfBus (song, folder);
     auto parent = folderState.getParent();

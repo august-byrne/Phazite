@@ -216,3 +216,74 @@ TEST_CASE ("Duplicates, containers and presets take devices' states as they are,
     CHECK (storedGain() == doctest::Approx (0.3f));
     CHECK_FALSE (undoManager.canUndo());
 }
+
+TEST_CASE ("A folder ungrouped, or deleted, stores its bus's plug-ins' states first, so that its Undo brings them back as they were")
+{
+    TestPlugin testPlugin; // known while the song is
+    phazite::test::TestSong song;
+    auto& open = *phazite::findSong (song.context);
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+
+    // The stand-in on a folder made a bus around the first track.
+    phazite::TrackID folder;
+    phazite::DeviceID plugin;
+    {
+        const phazite::UndoStep step (open, "Group into Folder");
+        folder = phazite::groupIntoFolder (open, { song.firstTrack }, nullptr);
+        REQUIRE (folder.isValid());
+        plugin = TestPlugin::add (open, folder);
+        REQUIRE (plugin.isValid());
+    }
+
+    open.getUndoManager().clearUndoHistory();
+    session->update();
+    REQUIRE (phazite::findPluginInstance (open, plugin) != nullptr);
+
+    // The folder gone, the session updated: the plug-in has no instance any more.
+    const auto checkGone = [&]
+    {
+        CHECK_FALSE (phazite::isFolder (open, folder));
+        session->update();
+        REQUIRE (phazite::findPluginInstance (open, plugin) == nullptr);
+    };
+
+    // Undone, the plug-in is made again with its gain as its window last set it.
+    const auto checkUndone = [&]
+    {
+        phazite::undo (open);
+        song.waitForPlugins();
+        REQUIRE (phazite::isFolder (open, folder));
+        REQUIRE (phazite::findPluginInstance (open, plugin) != nullptr);
+        CHECK (TestPlugin::getGain (open, plugin) == doctest::Approx (0.75f));
+    };
+
+    for (const auto ungroup : { true, false })
+    {
+        CAPTURE (ungroup);
+
+        // Its gain turned in its window to a quarter, the song's devices stored, then its gain turned to three quarters,
+        // which nothing stored.
+        TestPlugin::setGain (open, plugin, 0.25f);
+        open.storeDeviceStates();
+        TestPlugin::setGain (open, plugin, 0.75f);
+
+        // Ungroup, or Delete Track, in one step.
+        {
+            const phazite::UndoStep step (open, ungroup ? "Ungroup" : "Delete Track");
+
+            if (ungroup)
+                phazite::ungroupFolders (open, { folder });
+            else
+                phazite::deleteTracks (open, { folder }, nullptr);
+        }
+
+        checkGone();
+        checkUndone();
+
+        // Redo, and Undo again: the same.
+        phazite::redo (open);
+        checkGone();
+        checkUndone();
+    }
+}
