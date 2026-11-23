@@ -9,7 +9,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -277,30 +280,57 @@ std::optional<SendValue> findTrackSend (const juce::ValueTree& track, DeviceID i
     return std::nullopt;
 }
 
+DeviceID readHeldSendID (const juce::ValueTree& sendElement)
+{
+    const auto id = DeviceID::fromRaw (readHeldID (sendElement[schema::sendID]));
+    return sendElement.hasType (schema::SEND) && isHeldID (id) ? id : DeviceID();
+}
+
+void forEachTrackHeldSends (const juce::ValueTree& song,
+                            const std::function<void (const juce::ValueTree&, TrackID, const std::vector<HeldSendElement>&)>& visit)
+{
+    std::unordered_set<std::uint64_t> seen;
+    std::vector<HeldSendElement> held;
+
+    forEachTrack (song.getChildWithName (schema::TRACKS),
+                  [&seen, &held, &visit] (const juce::ValueTree& track)
+                  {
+                      const auto from = TrackID::fromRaw (readHeldID (track[schema::trackID]));
+
+                      if (! from.isValid())
+                          return;
+
+                      held.clear();
+
+                      for (const auto& child : track)
+                          if (const auto id = readHeldSendID (child); id.isValid() && seen.insert (id.getRaw()).second)
+                              held.push_back ({ .id = id, .element = child });
+
+                      visit (track, from, held);
+                  });
+}
+
 SongSends readSendsValue (const juce::ValueTree& song)
 {
     auto sends = immer::map<std::uint64_t, SendValue>().transient();
     auto tracks = immer::map<std::uint64_t, SendList>().transient();
 
-    forEachTrack (song.getChildWithName (schema::TRACKS),
-                  [&sends, &tracks] (const juce::ValueTree& track)
-                  {
-                      const auto from = TrackID::fromRaw (readHeldID (track[schema::trackID]));
-                      auto list = SendList().transient();
+    forEachTrackHeldSends (song,
+                           [&sends, &tracks] (const juce::ValueTree&, TrackID from, const std::vector<HeldSendElement>& held)
+                           {
+                               if (held.empty())
+                                   return;
 
-                      for (const auto& child : track)
-                      {
-                          if (auto send = readHeldSend (child, from); send.has_value() && sends.find (send->id.getRaw()) == nullptr)
-                          {
-                              list.push_back (send->id);
-                              const auto key = send->id.getRaw();
-                              sends.set (key, std::move (*send));
-                          }
-                      }
+                               auto list = SendList().transient();
 
-                      if (list.size() > 0 && from.isValid())
-                          tracks.set (from.getRaw(), list.persistent());
-                  });
+                               for (const auto& each : held)
+                               {
+                                   list.push_back (each.id);
+                                   sends.set (each.id.getRaw(), readSendValue (each.element, from));
+                               }
+
+                               tracks.set (from.getRaw(), list.persistent());
+                           });
 
     return { sends.persistent(), tracks.persistent() };
 }

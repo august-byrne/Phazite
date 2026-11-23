@@ -331,9 +331,9 @@ TEST_CASE ("What listens to the song, on any of its elements, finds a change in 
     otherTrack.setProperty (phazite::schema::trackID, id(), nullptr);
     list.appendChild (otherTrack, undo); // a track added to the list and taken out
     list.removeChild (otherTrack, undo);
-    song->getUndoManager().undo(); // and all of it back, then again, as Undo and Redo make it
+    phazite::undo (*song); // and all of it back, then again, as Undo and Redo make it
     CHECK (phazite::findTrackState (*song, phazite::TrackID::fromRaw ((std::uint64_t) trackID)) == track);
-    song->getUndoManager().redo();
+    phazite::redo (*song);
     CHECK (phazite::findTrackState (*song, phazite::TrackID::fromRaw ((std::uint64_t) renamed)) == track);
 
     for (auto* asker : { &onList, &onRoot, &onFolder })

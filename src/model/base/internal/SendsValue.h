@@ -6,8 +6,8 @@
 // them as these values, from the tree for now, from an area of the song's values (SongValues.h) once the sends leave it.
 // Until then other code still names SEND: the sends' writers (model/mixer/Mixer.cpp: addSend(), setSendLevel(),
 // setPreFader(), removeSend(), forgetWhatNamesTheGone()) and the loader (model/project/Project.cpp), until the switch; the
-// tree's callbacks that hear a send change (model/playback/SongPlayer.cpp: SongPlayer::takeValue(); ProjectContext.cpp;
-// model/automation/Automation.cpp: isParameterValue()), until the sends' second piece; the compile's modulations
+// keeper's feed of what hears a send change (SendsArea.h: SongValues::SendsKeeper, which tells Listener::sendsChanged() from
+// the tree's notifications, and the unsaved check's comparison by element), until the switch too; the compile's modulations
 // (SongPlayer::addModulation()), until modulation's pieces; the versions' difference and merge, which compare whole copies
 // (model/versions/SongDiff.cpp, SongMerge.cpp); and the selection's walk for a curve's owner, which skips a SEND
 // (model/base/Selection.cpp).
@@ -122,9 +122,30 @@ juce::ValueTree writeSendElement (const SendValue&);
 std::vector<SendValue> readTrackSends (const juce::ValueTree& trackElement);
 std::optional<SendValue> findTrackSend (const juce::ValueTree& trackElement, DeviceID);
 
+// The song's SEND elements its sends are read from (readSendsValue()), from its tree (a PHAZITE element, or a whole copy of
+// one): each TRACK of its track list with an ID (a folder before the tracks in it), with that ID as held, and its SEND
+// elements with an ID the song holds a send by (readHeldSend()), each the first of its ID in the song, in the track's order
+// (a track's list, empty for one with none, valid during the call). A track without an ID holds none of the song's sends and
+// hides none (the loader gives every track one: a version being applied may pass through one). What readSendsValue() reads
+// the song's sends from, and what the sends' part of the keeper follows the elements with (SendsArea.h), so that the two read
+// the same tree the same way. A walk of the tracks' children, reading each SEND's ID alone.
+struct HeldSendElement
+{
+    DeviceID id {};
+    juce::ValueTree element {};
+};
+
+void forEachTrackHeldSends (
+    const juce::ValueTree& song,
+    const std::function<void (const juce::ValueTree& track, TrackID from, const std::vector<HeldSendElement>& sends)>&);
+
+// A SEND element's ID as the song's sends are read by (forEachTrackHeldSends()): none for one the song holds no send by.
+DeviceID readHeldSendID (const juce::ValueTree& sendElement);
+
 // Every send of a song read from its tree (a PHAZITE element, or a whole copy of one): each TRACK's in the track list,
 // a folder's before those of the tracks in it, each in its element's order, as the song holds them (readHeldSend()), one of
-// each ID (of two, the first stays). For a pass over the song's sends.
+// each ID (of two, the first stays), none of a track without an ID (forEachTrackHeldSends()). For a pass over the song's
+// sends.
 SongSends readSendsValue (const juce::ValueTree& song);
 
 // The song's sends whole, cheap to copy once the area holds them: read from its tree (readSendsValue()) while the tree holds

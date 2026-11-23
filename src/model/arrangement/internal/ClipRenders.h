@@ -209,7 +209,10 @@ private:
     // no modulator or macro moves any of it; the tree's callbacks above leave the song's MODULATOR and MACRO elements, added,
     // taken out or changed, alone (isHeardAsModulation()), where they looked for renders to make again at each of them (roadmap
     // step S5.20, modulation's second piece). A track or a container added or taken out with modulators in it is the tree's,
-    // looked at as before.
+    // looked at as before. Nor the sends (sendsChanged()): a send plays a track's sound after its clips, and no render is made
+    // of one; the tree's callbacks above leave the song's SEND elements, added, taken out or changed, alone
+    // (isHeardAsSends()), where they looked for renders to make again at a send added or taken out (roadmap step S5.20, the
+    // sends' second piece). A track added or taken out with sends on it is the tree's, looked at as before.
 
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };

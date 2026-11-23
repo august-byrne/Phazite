@@ -977,6 +977,11 @@ private:
     // ID, which it reads as the changes are next asked for (markHeard()), not as it is told.
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
     bool masterHeard = false; // the master's line, to mark by its ID (markHeard())
+
+    // The sends (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): the lines of the tracks each
+    // was on and is on, and of those whose sends came in another order, by their IDs, as a change of a SEND marked its
+    // track's line (none is the master's: a send is a track's).
+    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered) override;
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();

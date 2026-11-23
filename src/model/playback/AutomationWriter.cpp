@@ -335,9 +335,10 @@ void AutomationWriter::finishPart (const Pass& pass, std::vector<AutomationPoint
     part.points = std::move (points);
     waiting.push_back ({ std::move (part), end, ownStep });
 
-    // Finished by an undo or a redo (followValuesSetByHand()), during which nothing may write through the song's history
-    // (JUCE's UndoManager refuses it): once it has returned.
-    if (song.getUndoManager().isPerformingUndoRedo())
+    // Finished by an undo or a redo (followValuesSetByHand(), which follows it once it is whole), during which nothing may
+    // write through the song's history (JUCE's UndoManager refuses it): at the next turn of the message loop, in a step of
+    // its own.
+    if (song.getUndoManager().isPerformingUndoRedo() || followingMove)
         triggerAsyncUpdate();
     else if (! Gesture::isInProgress (song))
         writeWaiting();
@@ -545,6 +546,8 @@ void AutomationWriter::followValuesSetByHand()
     // the pass writes.
     if (settingValue || Gesture::isInProgress (song))
         return;
+
+    const juce::ScopedValueSetter<bool> following (followingMove, true);
 
     for (auto& pass : passes)
         if (const auto value = getValueSetByHand (song, pass.parameter);

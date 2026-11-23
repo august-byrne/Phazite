@@ -263,6 +263,57 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     CHECK (phazite::test::dispatchMessagesUntil ([&song] { return ! phazite::isFrozen (song.context, song.bass); }));
 }
 
+TEST_CASE ("A frozen track stays frozen as a send is added to it, its level turned and the send removed, and as each is undone "
+           "and redone")
+{
+    // A frozen track's file is the track before its fader, and its sends come after it: what keeps it frozen follows no send
+    // (SongValues.h: FreezeKeeper).
+    Song song;
+    auto& model = song.getSong();
+    TrackID delay;
+
+    {
+        const phazite::UndoStep step (model, "Add Return");
+        delay = phazite::addReturnTrack (model, "Delay", nullptr);
+    }
+
+    song.freeze();
+    DeviceID send;
+
+    {
+        const phazite::UndoStep step (model, "Add Send");
+        send = phazite::addSend (model, song.bass, delay, false);
+    }
+
+    REQUIRE (send.isValid());
+
+    {
+        const phazite::UndoStep step (model, "Change Send Level");
+        phazite::setSendLevel (model, send, -12.0f);
+    }
+
+    {
+        const phazite::UndoStep step (model, "Remove Send");
+        phazite::removeSend (model, send);
+    }
+
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::isFrozen (song.context, song.bass));
+
+    for (int i = 0; i < 3; ++i)
+        phazite::undo (model);
+
+    REQUIRE (phazite::getSends (model, song.bass).size() == 1); // its own, which the fixture made
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::isFrozen (song.context, song.bass));
+
+    for (int i = 0; i < 3; ++i)
+        phazite::redo (model);
+
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::isFrozen (song.context, song.bass));
+}
+
 TEST_CASE ("A frozen track unfreezes at the next turn of the message loop when its clip moves, a clip is added to it or an undo "
            "puts one back, and stays frozen through an undo and a redo of something else")
 {

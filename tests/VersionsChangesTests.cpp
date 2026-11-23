@@ -26,6 +26,7 @@
 
 #include <functional>
 #include <optional>
+#include <vector>
 
 namespace
 {
@@ -297,6 +298,58 @@ TEST_CASE ("A curve edited and nothing else changes its device's track's line al
     phazite::redo (song);
     REQUIRE (phazite::getChangesSinceLastVersion (withChangesIn (s.context)).size() == 1);
     checkChangesAreWhole (s.context, "the point's Redo");
+}
+
+TEST_CASE ("A send's change names its track's line alone, not its return's, as the whole songs compared do, and its Undo none")
+{
+    // The sends are heard from the song's values (SongValues.h: Listener::sendsChanged()), each marking the lines of the
+    // tracks it was on and is on (VersionHistory.cpp), as a change of a SEND marked its track's.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    auto& song = *phazite::findSong (s.context);
+    phazite::TrackID reverb;
+    phazite::DeviceID send;
+
+    {
+        const phazite::UndoStep step (song, "Add Send");
+        reverb = phazite::addReturnTrack (song, "Reverb", nullptr);
+        send = phazite::addSend (song, bass, reverb, false);
+    }
+
+    REQUIRE (send.isValid());
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::countChanges (withChangesIn (s.context)) == 0);
+
+    const auto linesOf = [&s]
+    {
+        std::vector<phazite::TrackID> tracks;
+
+        for (const auto& line : phazite::getChangesSinceLastVersion (withChangesIn (s.context)))
+            tracks.push_back (line.track);
+
+        return tracks;
+    };
+
+    const auto edit = [&] (const juce::String& name, const std::function<void()>& change)
+    {
+        INFO (name.toStdString());
+
+        {
+            const phazite::UndoStep step (song, name);
+            change();
+        }
+
+        CHECK (linesOf() == std::vector { bass });
+        checkChangesAreWhole (s.context, name);
+        phazite::undo (song);
+        CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
+        checkChangesAreWhole (s.context, name + ", undone");
+    };
+
+    edit ("Change Send Level", [&] { phazite::setSendLevel (song, send, -12.0f); });
+    edit ("Change Send", [&] { phazite::setPreFader (song, send, true); });
+    edit ("Remove Send", [&] { phazite::removeSend (song, send); });
+    edit ("Add Send", [&] { phazite::addSend (song, bass, reverb, true); });
 }
 
 TEST_CASE ("A curve's edits, its points all taken out and its curve given to another fader, name the line of the track it is on, "

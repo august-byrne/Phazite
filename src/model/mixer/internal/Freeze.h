@@ -162,6 +162,13 @@ private:
     // another order, marked and compared at the later moment, their modulators read and compared too (modulatorsAsFrozen).
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
+    // The sends (sendsChanged()): nothing, as no frozen track's file holds anything of them: a frozen file is its track before
+    // its fader, which its sends come after (its Holds keep its frozen devices, the song's values, its tempos, its frozen
+    // devices' curves and its modulators, no send, nor a send's level's curve: getFrozenCurveOwners()), and nothing of a
+    // send is read to compare it. The tree's callbacks below leave the song's SEND elements alone (isHeardAsKept()), where a
+    // send added, taken out or changed on a frozen track compared the track's holdings again for nothing (roadmap step
+    // S5.20, the sends' second piece). A track added or taken out with sends on it is the tree's, looked at as before.
+
     void handleAsyncUpdate() override { compareMarked(); }
     void writePending() override; // what is marked compared now, but during an undo or a redo (Song.h)
 

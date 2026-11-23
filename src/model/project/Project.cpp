@@ -13,6 +13,7 @@
 #include "model/base/internal/ModulationArea.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SendsArea.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
@@ -2731,6 +2732,9 @@ void Project::clearToCompare()
     comparingModulationWhole = false;
     modulatorsToCompare.clear();
     modulatorOwnersToCompare.clear();
+    comparingSendsWhole = false;
+    sendsToCompare.clear();
+    sendTracksToCompare.clear();
     toCompare.clear();
     notesToCompare.clear();
     clipsToCompare.clear();
@@ -2884,7 +2888,7 @@ void Project::compareWithSavedState()
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
     // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the
-    // sections, modulation), each asked only while all before it compare.
+    // sections, modulation, the sends), each asked only while all before it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
@@ -2893,6 +2897,7 @@ void Project::compareWithSavedState()
     same = same && areMidiLinksAsSaved();
     same = same && areSectionsAsSaved();
     same = same && areModulatorsAsSaved();
+    same = same && areSendsAsSaved();
 
     clearToCompare();
 
@@ -3442,6 +3447,96 @@ bool Project::areModulatorsAsSaved() const
 
                             return readModulatorPlace (element) == readModulatorPlace (saved)
                                    && holdTheSameProject (element, now, saved, savedState.values);
+                        });
+}
+
+void Project::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered)
+{
+    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare of them, the tracks
+    // whole.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+
+    if (comparingSendsWhole)
+        return;
+
+    const auto addTrack = [this] (TrackID track)
+    {
+        if (track.isValid() && std::find (sendTracksToCompare.begin(), sendTracksToCompare.end(), track) == sendTracksToCompare.end())
+            sendTracksToCompare.push_back (track);
+    };
+
+    // One added, taken out or come to another track: its tracks' order too, before and after, so that one taken out and put
+    // back at another place before the comparison compares by where it is among its track's others.
+    for (const auto& send : sends)
+    {
+        if (std::find (sendsToCompare.begin(), sendsToCompare.end(), send.id) == sendsToCompare.end())
+            sendsToCompare.push_back (send.id);
+
+        if (send.has (SongValues::SendChange::made))
+        {
+            addTrack (send.fromBefore);
+            addTrack (send.fromAfter);
+        }
+    }
+
+    for (const auto track : reordered)
+        addTrack (track);
+
+    if (sendsToCompare.size() + sendTracksToCompare.size() > mostToCompare)
+    {
+        comparingSendsWhole = true;
+        sendsToCompare.clear();
+        sendTracksToCompare.clear();
+    }
+}
+
+bool Project::areSendsAsSaved() const
+{
+    if (! comparingSendsWhole && sendsToCompare.empty() && sendTracksToCompare.empty())
+        return true;
+
+    // While the trees hold the sends, by element: past mostToCompare, the tracks whole (holdTheSameProject(), which holds the
+    // sends); else each track's sends' order, then each send against the saved copy's of its ID, its track and its element,
+    // one compared each (a send gone from both is the same).
+    const auto state = song->getState();
+    const auto now = keepValues (*song);
+
+    if (comparingSendsWhole)
+    {
+        const auto element = state.getChildWithName (schema::TRACKS), saved = savedState.tree.getChildWithName (schema::TRACKS);
+        return element.isValid() == saved.isValid() && (! element.isValid() || holdTheSameProject (element, now, saved, savedState.values));
+    }
+
+    for (const auto track : sendTracksToCompare)
+    {
+        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+
+        if (readTrackSendOrder (state, track) != readTrackSendOrder (savedState.tree, track))
+            return false;
+    }
+
+    return std::all_of (sendsToCompare.begin(), sendsToCompare.end(),
+                        [this, &state, &now] (DeviceID id)
+                        {
+                            const auto found = findSendElement (state, id);
+                            const auto saved = findSendElement (savedState.tree, id);
+
+                            if (! found.element.isValid() || ! saved.element.isValid())
+                                return found.element.isValid() == saved.element.isValid();
+
+                            return found.track == saved.track && holdTheSameProject (found.element, now, saved.element, savedState.values);
                         });
 }
 

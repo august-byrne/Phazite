@@ -253,8 +253,9 @@ private:
 bool isWritingAutomation (const Song&);
 
 // Whether a property of an element of the song is where a parameter keeps its value set by hand: a property of a device's
-// or a modulator's VALUES, a plug-in's VALUE's value, a channel's volume or pan, a send's level, or a macro's value. A knob
-// turned, a fader moved: controls read values as they show them, so views needn't hear of these
-// (model/project/ProjectContext.h).
+// or a modulator's VALUES, a plug-in's VALUE's value, a channel's volume or pan. A knob turned, a fader moved: controls read
+// values as they show them, so views needn't hear of these (model/project/ProjectContext.h). Not a macro's value, nor a
+// send's level, which the song's values tell (SongValues.h: Listener::modulationChanged(), sendsChanged(), SendChange::level),
+// where the views leave them alone too.
 bool isParameterValue (const juce::ValueTree&, const juce::Identifier& property);
 } // namespace phazite

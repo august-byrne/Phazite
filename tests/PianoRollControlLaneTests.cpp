@@ -6,6 +6,7 @@
 #include "TestHelpers.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
+#include "model/commands/internal/Undo.h"
 
 #include <algorithm>
 #include <cmath>
@@ -719,7 +720,7 @@ TEST_CASE ("The Delete tool's drag across a long take's bend, with its mod wheel
     CHECK (screen.valuesOf (take, bend).empty());
     CHECK (screen.valuesOf (take, modWheel) == modWheelBefore);
 
-    screen.getSong().getUndoManager().undo();
+    phazite::undo (screen.getSong());
     CHECK (screen.valuesOf (take, bend).size() == 50000);
     CHECK (screen.valuesOf (take, modWheel) == modWheelBefore);
 }

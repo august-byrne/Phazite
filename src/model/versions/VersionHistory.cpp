@@ -3214,6 +3214,35 @@ void VersionHistory::modulationChanged (const std::vector<SongValues::Modulation
     changesMayDiffer();
 }
 
+void VersionHistory::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered)
+{
+    // A change of the song as its tree's are, in sends: the lines of the tracks they were on and are on, and of those whose
+    // sends came in another order, by their IDs (a listener of the song's values reads nothing of the song), as a change of a
+    // SEND marked its track's line.
+    ++songChanges;
+    edited();
+
+    const auto mark = [this] (TrackID track)
+    {
+        sinceBase.markTrack (track.getRaw());
+        againstCompared.markTrack (track.getRaw());
+    };
+
+    for (const auto& send : sends)
+    {
+        if (send.fromBefore.isValid())
+            mark (send.fromBefore);
+
+        if (send.fromAfter.isValid() && send.fromAfter != send.fromBefore)
+            mark (send.fromAfter);
+    }
+
+    for (const auto track : reordered)
+        mark (track);
+
+    changesMayDiffer();
+}
+
 void VersionHistory::markCurve (const juce::String& key)
 {
     sinceBase.markCurve (key);

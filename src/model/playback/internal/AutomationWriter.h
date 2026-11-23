@@ -64,9 +64,10 @@ public:
     void gestureCancelled (const ParameterRef&);
 
     // A value set by hand changed by an undo or a redo while the song plays: each pass writes what plays from then (known
-    // bug 174). What that finishes (the loop gone round since the pass's last move) is written once the undo or the redo has
-    // returned, in a "Record Automation" step, as nothing may write through the song's history while it undoes or redoes.
-    // Message thread.
+    // bug 174). Asked once the history's move is whole (PlaybackSession.h: historyMoved()), in the call of the undo or the
+    // redo, so that it reads the song with the whole step back. What that finishes (the loop gone round since the pass's last
+    // move) is written at the next turn of the message loop, in a "Record Automation" step, as it was while the history
+    // undid or redid: a step of its own, never one joined to whatever the call that undid goes on to do. Message thread.
     void followValuesSetByHand();
 
     // The same by a plug-in's own window (the session tells it): what it writes as it is let go is one "Record
@@ -118,9 +119,10 @@ private:
         float position = 0.0f; // and its position then
     };
 
-    std::vector<Grab> grabs;   // the controls grabbed now (rememberGrab())
-    bool settingValue = false; // as a pass starts from its lane's value
-    int settingManyValues = 0; // as beginManyValues() and endManyValues() count
+    std::vector<Grab> grabs;    // the controls grabbed now (rememberGrab())
+    bool settingValue = false;  // as a pass starts from its lane's value
+    bool followingMove = false; // as it follows what an undo or a redo set (followValuesSetByHand())
+    int settingManyValues = 0;  // as beginManyValues() and endManyValues() count
 
     // What passes finished while a drag's step was open (Gesture), each a pass with the points it wrote and where it ended,
     // in order: at the loop's end or a jump, written as that parameter's own drag ends, into its step; the rest (another

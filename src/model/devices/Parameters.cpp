@@ -157,10 +157,13 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
         return {};
     }
 
-    // A send's level, by the send's value: its element the send's track's, as a fader's is its channel's.
-    if (const auto send = getSendValue (song, ref.device))
-        return ref.parameter == schema::sendLevelParameter ? found (ref, ParameterSource::send, findTrackState (song, send->from))
-                                                           : std::nullopt;
+    // A send's level, by the send's value: its element the send's track's, as a fader's is its channel's. Its level is a send's
+    // one parameter (where it goes and whether it is before the fader are no parameters), and no chain or modulator has a
+    // send's ID, so only a reference to that parameter asks the sends: one that names a chain's or a modulator's, or a
+    // device gone, reads no send (a tree callback that looks for it again, MidiLinker's, reaches no sends' reader).
+    if (ref.parameter == schema::sendLevelParameter)
+        if (const auto send = getSendValue (song, ref.device))
+            return found (ref, ParameterSource::send, findTrackState (song, send->from));
 
     // A container's chain's volume and pan, and a band's crossover.
     if (const auto chain = findContainerChain (song, ref.device); chain.isValid())

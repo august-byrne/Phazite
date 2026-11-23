@@ -57,8 +57,73 @@ public:
     static void setUndoSteps (int steps); // limited to the range above. Message thread
     static int getUndoSteps();
 
+    // What follows its history as it moves by hand, told once each move is whole, after JUCE's undo or redo has returned: an
+    // undo or a redo (model/commands/internal/Undo.h: undo(), redo()), a step taken back alone (a drag's Escape, a trial put
+    // back or tried again from its start) and each of a version's held steps done again or undone (Trial::holdHistory(),
+    // putBackHeld()). Told by the undo code alone, never as the tree or the song's values tell (during an undo the rest of
+    // the step may not be back yet): what reads the song for what a move set reads it here (model/playback/internal/
+    // PlaybackSession.h: what a pass writing automation writes from then). Message thread.
+    // So only phazite::undo(), redo() and the undo code (Undo.h: a gesture's roll-back, a trial, the held steps) move a song's
+    // history, never juce::UndoManager::undo() or redo() called on it directly, which would tell no one: what follows a move
+    // (these listeners: the automation writer, through the playback session) is told from there. And a listener begins no
+    // undo step and changes nothing of the song while it is told, nor moves the history again (History::tellMoved() asserts
+    // it): what it would write it writes later (AutomationWriter.h: what followValuesSetByHand() finishes, at the next turn of
+    // the message loop, in a step of its own).
+    struct HistoryListener
+    {
+        virtual ~HistoryListener() = default;
+        virtual void historyMoved() = 0;
+    };
+
+    void addHistoryListener (HistoryListener* listener) { undoManager.moveListeners.add (listener); }
+    void removeHistoryListener (HistoryListener* listener) { undoManager.moveListeners.remove (listener); }
+
     class History final : public juce::UndoManager
     {
+    public:
+        // What follows its moves (HistoryListener), told by the undo code once each is whole (tellMoved()).
+        juce::ListenerList<HistoryListener> moveListeners;
+        void tellMoved()
+        {
+            jassert (! tellingMoved); // a listener moved the history again while it was told
+            const juce::ScopedValueSetter<bool> telling (tellingMoved, true);
+           #if JUCE_DEBUG
+            const auto before = markHistory();
+           #endif
+            moveListeners.call ([] (HistoryListener& listener) { listener.historyMoved(); });
+           #if JUCE_DEBUG
+            jassert (markHistory().isSameAs (before)); // a listener began a step, or changed the song through its history
+           #endif
+        }
+
+    private:
+        bool tellingMoved = false;
+
+        // What a step begun or a change made through the history changes: the newest step's actions (a new step's, or one
+        // added to it), the name the next one takes, and whether there is a step to undo and one to redo (a change takes the
+        // redo steps away). For the assertion alone.
+        struct HistoryMark
+        {
+            juce::Array<const juce::UndoableAction*> actions {};
+            juce::String name {};
+            bool canUndo = false, canRedo = false;
+
+            bool isSameAs (const HistoryMark& other) const
+            {
+                return actions == other.actions && name == other.name && canUndo == other.canUndo && canRedo == other.canRedo;
+            }
+        };
+
+        [[maybe_unused]] HistoryMark markHistory() const
+        {
+            HistoryMark mark;
+            getActionsInCurrentTransaction (mark.actions);
+            mark.name = getCurrentTransactionName();
+            mark.canUndo = juce::UndoManager::canUndo();
+            mark.canRedo = juce::UndoManager::canRedo();
+            return mark;
+        }
+
     public:
         // How many of the redo steps JUCE holds, the last ones, are none of the song's: JUCE appends the redo steps it put
         // aside as a step began whenever a step is taken back alone (a drag's Escape, a trial put back), and those it put

@@ -68,6 +68,7 @@ PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
     plugins.setListener (this);
     player.readLive (host.getFileReader(), host.getEngine().getBlocksPlayed());
     song->addParameterListener (this);
+    song->addHistoryListener (this);
 
     if (auto* values = song->getValues())
         values->addListener (this);
@@ -94,6 +95,7 @@ PlaybackSession::~PlaybackSession()
     cancelPendingUpdate();
     songState.removeListener (this);
     song->removeParameterListener (this);
+    song->removeHistoryListener (this);
 
     if (auto* values = song->getValues())
         values->removeListener (this);
@@ -144,10 +146,10 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
         return;
 
     // A value set by hand plays at once, and an undo's or a redo's is what a pass writing it writes from then (known bug
-    // 174); anything else, in a new plan. One that changes a device's latency (a compressor's Look-Ahead) makes the device
-    // anew in the new plan, which starts it again from silence: while a gesture drags it (a knob's), the plan waits for the
-    // gesture's end, so that a drag remakes it once, and not at each of its steps (meanwhile it plays the value within the
-    // latency it has).
+    // 174), once the undo or the redo is whole (followAfterMove); anything else, in a new plan. One that changes a device's
+    // latency (a compressor's Look-Ahead) makes the device anew in the new plan, which starts it again from silence: while a
+    // gesture drags it (a knob's), the plan waits for the gesture's end, so that a drag remakes it once, and not at each of
+    // its steps (meanwhile it plays the value within the latency it has).
     if (! player.takeValue (tree, property))
     {
         if (tree.hasType (schema::VALUES) && Gesture::isInProgress (*song))
@@ -166,7 +168,7 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
         }
     }
     else if (song->getUndoManager().isPerformingUndoRedo())
-        writer.followValuesSetByHand();
+        followAfterMove = true;
 }
 
 void PlaybackSession::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators,
@@ -200,6 +202,42 @@ void PlaybackSession::modulationChanged (const std::vector<SongValues::Modulatio
         triggerAsyncUpdate();
 
     if (taken && song->getUndoManager().isPerformingUndoRedo())
+        followAfterMove = true;
+}
+
+void PlaybackSession::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered)
+{
+    // A send's level changed in place plays at once, from the value it is told; a send added, taken out, come to another
+    // track or routed elsewhere (another return, before or after its fader), and sends in another order: a new plan, as the
+    // tree's changes of them made one.
+    using Change = SongValues::SendChange;
+    auto plan = ! reordered.empty(), taken = false;
+
+    for (const auto& send : sends)
+    {
+        if (send.has (Change::made) || send.has (Change::route))
+            plan = true;
+
+        if (send.has (Change::level) && ! send.has (Change::made) && send.now != nullptr)
+        {
+            player.takeSendLevel (send.id, send.now->level);
+            taken = true;
+        }
+    }
+
+    if (plan)
+        triggerAsyncUpdate();
+
+    if (taken && song->getUndoManager().isPerformingUndoRedo())
+        followAfterMove = true;
+}
+
+void PlaybackSession::historyMoved()
+{
+    // What a pass writing automation writes from then (known bug 174): the values an undo or a redo set by hand, read once
+    // the step is whole, in the call that moved the history, never while its listeners are told (during an undo the rest of
+    // the step may not be back yet). Asked by what the move set that plays at once, as before.
+    if (std::exchange (followAfterMove, false))
         writer.followValuesSetByHand();
 }
 

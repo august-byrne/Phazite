@@ -123,6 +123,26 @@ namespace
             history->staleRedoSteps = juce::jmin (history->staleRedoSteps, countJuceRedoSteps (undoManager));
     }
 
+    // What follows the song's history as it moves (Song.h: HistoryListener), told once a move is whole: after each of JUCE's
+    // undo() and redo() and each step taken back alone has returned, never from inside one.
+    void tellMoved (juce::UndoManager& undoManager)
+    {
+        if (auto* history = findSongHistory (undoManager))
+            history->tellMoved();
+    }
+
+    void undoStep (juce::UndoManager& undoManager)
+    {
+        undoManager.undo();
+        tellMoved (undoManager);
+    }
+
+    void redoStep (juce::UndoManager& undoManager)
+    {
+        undoManager.redo();
+        tellMoved (undoManager);
+    }
+
     // A step taken back alone, the song's own redo steps as many as as it began: those JUCE appends past them aren't.
     void takeBackAlone (juce::UndoManager& undoManager, int redoStepsBefore)
     {
@@ -130,6 +150,8 @@ namespace
 
         if (auto* history = findSongHistory (undoManager))
             history->staleRedoSteps = juce::jmax (0, countJuceRedoSteps (undoManager) - redoStepsBefore);
+
+        tellMoved (undoManager);
     }
 
     // What startHistoryAgain() performs into the last step to make JUCE drop every step under it: nothing.
@@ -158,7 +180,7 @@ void undo (Song& song)
     Trial::keepOpenTrial (undoManager);
     settleRedoSteps (undoManager);
     noteHistoryMove (undoManager);
-    undoManager.undo();
+    undoStep (undoManager);
 }
 
 void redo (Song& song)
@@ -174,7 +196,7 @@ void redo (Song& song)
         return; // none of the song's
 
     noteHistoryMove (undoManager);
-    undoManager.redo();
+    redoStep (undoManager);
 }
 
 bool canUndo (const Song& song)
@@ -525,7 +547,7 @@ void Trial::undoHeld()
 {
     if (auto* undoManager = getUndoManager())
         for (; heldSets > 0; --heldSets)
-            undoManager->undo();
+            undoStep (*undoManager);
 }
 
 void Trial::rename (const juce::String& newName)
@@ -606,7 +628,7 @@ void Trial::holdHistory (Holder heldBy)
     // The song's redo steps done again, out of sight, so that its step goes on top of them and putBackHeld() takes everything
     // back with undos alone (JUCE workaround W56 (docs/juce-workarounds.md)).
     for (int i = 0; i < heldRedo; ++i)
-        undoManager.redo();
+        redoStep (undoManager);
 
     heldAt = countUndoSteps (undoManager);
 }
@@ -631,13 +653,13 @@ void Trial::putBackHeld (const std::function<void()>& whileHeld)
     const auto goesOnAs = stepOnTopName;
 
     for (auto above = countStepsOnTop(); above > 0; --above)
-        undoManager->undo();
+        undoStep (*undoManager);
 
     undoHeld();
     const auto ownRedoSteps = heldRedo;
 
     for (; heldRedo > 0; --heldRedo)
-        undoManager->undo();
+        undoStep (*undoManager);
 
     // The song's redo steps as they were: those it had (done again under its step, undone now), JUCE's past them none of its.
     if (auto* history = findSongHistory (*undoManager))

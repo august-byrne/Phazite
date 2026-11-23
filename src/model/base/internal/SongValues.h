@@ -102,7 +102,7 @@
 //      area says so in a comment beside its overrides. They are:
 //      - ClipRenders (model/arrangement/ClipRenders.cpp, internal/ClipRenders.h): rendersMayChange() where the area holds
 //        what a clip's render is made of (the clips', the tempo map's; not the notes', nor the curves': no render holds
-//        automation; nor modulation's, which moves nothing a render is made of).
+//        automation; nor modulation's, which moves nothing a render is made of; nor the sends', which play after a clip).
 //      - FreezeKeeper (model/mixer/Freeze.cpp, internal/Freeze.h): marks the frozen tracks whose file holds what changed
 //        (all of them for the tempo map) and compares them at its later moment. What a frozen track's file holds of an area is
 //        in its Holds (parts: copies of its elements, getWhatTheFreezeHolds(); values: ValuesKept; tempos; curves: its frozen
@@ -110,10 +110,15 @@
 //        getFrozenModulators()), compared in holdsWhatWasFrozen(): an area held in parts moves to its value there at its
 //        switch. An area whose value is read to compare it (the curves, the modulators) is read only for a track it told
 //        changed since its last comparison, at its first and as a version is applied (curvesAsFrozen, modulatorsAsFrozen).
+//        An area no frozen file holds anything of follows nothing (the sends': a frozen file is its track before its fader).
 //      - PlaybackSession (model/playback/internal/PlaybackSession.h): a new plan (triggerAsyncUpdate()); for an area no plan
 //        holds and something else the session feeds does (the MIDI links: the MIDI tap's controllers), that marked and
 //        brought up to date at a later moment of its own (followMidiLinks(), at the next turn of the message loop, or at once
-//        where a writer that is no tree callback must have it so: MidiLinker::learn()), no plan made.
+//        where a writer that is no tree callback must have it so: MidiLinker::learn()), no plan made. A value set by hand
+//        that plays at once is the one thing a listener sets from what it is told (the value after: modulation's
+//        SongPlayer::takeModulator(), a send's level SongPlayer::takeSendLevel()), no plan made; one an undo or a redo set
+//        is marked (followAfterMove), and what writes automation follows it once the history's move is whole, from the
+//        history's listener (Song.h: HistoryListener; PlaybackSession::historyMoved()), never while the area tells.
 //      - SongPlayer (model/playback/SongPlayer.cpp, internal/SongPlayer.h): marks what its next compile reads again (its
 //        changes: the tracks' notes and audio, the tempo, the curves by their parameters).
 //      - Project (model/project/Project.cpp, internal/Project.h): counts the change and marks what to compare (a member of
@@ -125,8 +130,9 @@
 //      - VersionHistory (model/versions/VersionHistory.cpp, internal/VersionHistory.h): counts the song's change
 //        (songChanges, edited()), marks the lines it is in (markTrack(), markSongOwn()) and calls changesMayDiffer().
 //      - MidiLinker (model/midi/MidiLinks.cpp, internal/MidiLinks.h): ends a learning whose parameter the area tells taken
-//        out, in that call (modulation's: a modulator or a macro by its ID); its tree callback asks only of the sources the
-//        tree still holds (isHeardFromTree()), where an area's leaves that list for an override of its own.
+//        out, in that call (modulation's: a modulator or a macro by its ID; the sends': a send's level by the send's ID); its
+//        tree callback asks only of the sources the tree still holds (isHeardFromTree()), where an area's leaves that list
+//        for an override of its own.
 //  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
 //      copyWholeSong(), copyWhole(), keepValues(), or a part's own whole copy, as copyWholeClip()): the changes' worker
 //      (model/versions/ChangesWorker.cpp: take(), makeSkeleton()); the saved copy (model/project/Project.cpp: savedState,
@@ -186,6 +192,7 @@
 #include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/SectionsValue.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/ValueArea.h"
 #include "model/devices/ParameterRef.h"
@@ -251,7 +258,8 @@ class Song;
 // the tree's own: so an undo puts the tree back first and the clips after (JUCE workaround W62 (docs/juce-workarounds.md)).
 // Modulation's part of the keeper (ModulationArea.h) changes nothing: while the tree still holds the song's modulators and
 // macros (roadmap step S5.20, modulation's second piece), it tells Listener::modulationChanged() from the tree's
-// notifications, at once, in an undo and a redo too.
+// notifications, at once, in an undo and a redo too. The sends' part (SendsArea.h) the same, of the song's sends, while the
+// tree holds them (the sends' second piece): Listener::sendsChanged().
 //
 // The rule for what listens to the song's tree, with no exception: a tree callback never reads the clips' area (nor the
 // notes'), directly or through anything that reads them (the clips' functions, Clips.h, AudioClips.h; the notes', Notes.h;
@@ -424,6 +432,32 @@ public:
         bool has (std::uint16_t part) const noexcept { return (parts & part) != 0; }
     };
 
+    // A send that changed (SendsValue.h): its ID; the track it was on and the one it is on (none before for one added, none
+    // after for one taken out, the same for one changed in place); the return it went to and the one it goes to (none where
+    // it wasn't, or isn't); the parts of it that changed; and its value after, for one that is there, valid during the call
+    // alone: what plays may set its level from it at once (PlaybackSession.h), as nothing else of the song is read meanwhile.
+    // Set its members by name: the sends' third piece of roadmap step S5.20 may add one.
+    struct SendChange
+    {
+        // The parts, as bits of parts: each its own, as what plays takes each its own way (PlaybackSession.h).
+        enum Part : std::uint8_t
+        {
+            made = 1 << 0,  // added, taken out, or come to another track
+            route = 1 << 1, // the return it goes to, or whether it sends before the fader
+            level = 1 << 2  // its level
+        };
+
+        DeviceID id {};
+        TrackID fromBefore {}, fromAfter {};
+        TrackID toBefore {}, toAfter {};
+        std::uint8_t parts = 0;
+        const SendValue* now = nullptr;
+
+        bool has (std::uint8_t part) const noexcept { return (parts & part) != 0; }
+        bool wasThere() const noexcept { return fromBefore.isValid(); }
+        bool isThere() const noexcept { return fromAfter.isValid(); }
+    };
+
     // What hears the song's values change, from one place: one listener for every area, a function for each, which does
     // nothing unless a listener overrides it, so that an area added changes only the listeners that care. Each registers
     // once (addListener()). A listener only marks what changed, and reads nothing of the song while it is told: during an
@@ -510,6 +544,25 @@ public:
         {
             juce::ignoreUnused (modulators, reordered);
         }
+
+        // The song's sends (SendsValue.h), by their IDs: each one added, taken out, come to another track or changed, each once
+        // in a call, with the track it was on and is on, the return it went to and goes to, the parts of it that changed
+        // (SendChange::Part) and its value after (SendChange::now); and each track that holds the sends it held before in
+        // another order. A track, a folder's tracks or the track list that comes into the song or leaves it with sends on it
+        // tells each of them as added or taken out. While the song's tree is still the sends' storage (roadmap step S5.20, the
+        // sends' second piece), the keeper tells it from the tree's notifications of the song's SEND elements and of the tracks
+        // that come or go with them (SendsArea.h: SendsKeeper), at once, one call for each notification that changes any (an
+        // undo's and a redo's too, as they come back one by one), so that a level set plays in the same call; from the sends'
+        // switch on, the area tells it once for each change of its value. Either way, what a step, its Undo or its Redo told
+        // in all is what differs in the song's sends before and after. What listens to the song's root leaves what its tree
+        // tells of the song's SEND elements (added, taken out or changed) alone (isHeardAsKept(), below, through
+        // isHeardAsSends()): a TRACK that comes or goes with sends on it, and a track's children in another order (its sends
+        // among them), are the tree's, heard as before, and its sends are told here, so the step is heard twice, and only
+        // marks twice.
+        virtual void sendsChanged (const std::vector<SendChange>& sends, const std::vector<TrackID>& reordered)
+        {
+            juce::ignoreUnused (sends, reordered);
+        }
     };
 
     void addListener (Listener*) const;
@@ -567,6 +620,7 @@ private:
     struct SectionsTeller;                          // SectionsArea.h
     struct SectionsKeeper;                          // SectionsArea.h
     struct ModulationKeeper;                        // ModulationArea.h: the tree's feed of modulationChanged(), until the switch
+    struct SendsKeeper;                             // SendsArea.h: the tree's feed of sendsChanged(), until the switch
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
     std::unique_ptr<ClipsTeller> clipsTeller;
@@ -659,11 +713,22 @@ bool isHeardAsSections (const juce::ValueTree& parent, const juce::ValueTree& ch
 bool isHeardAsModulation (const juce::ValueTree& element);
 bool isHeardAsModulation (const juce::ValueTree& parent, const juce::ValueTree& child);
 
+// Whether what the song's tree tells of an element (a property changed, a child added, taken out or moved in it) is the
+// sends', which a listener of the song's root hears from the values' listener alone (SongValues::Listener::sendsChanged())
+// and leaves alone in its tree callbacks: a SEND of the song's (one a TRACK of the song's track list holds, or a TRACK in a
+// folder of it: readSendsValue() reads it), or an element in one. And whether a child added to an element or taken out of it
+// is: a SEND added to such a track or taken out of it, or a child of an element that is. Not a TRACK or the track list added
+// or taken out with sends on it, nor a track's children in another order: the tree's, heard as any element's, whose sends the
+// keeper tells (SendsArea.h). While the tree is the sends' storage (roadmap step S5.20, their second piece), the keeper tells
+// what the tree tells here. In SendsArea.cpp.
+bool isHeardAsSends (const juce::ValueTree& element);
+bool isHeardAsSends (const juce::ValueTree& parent, const juce::ValueTree& child);
+
 // Whether what the song's tree tells is any area's of the song's values, which a listener of the song's root hears from the
 // values' listener alone (SongValues::Listener) and leaves alone in its tree callbacks: of an element (a property changed in
 // it, a child moved in it), and of a child added to an element or taken out of it. Each the OR of the areas' own functions
 // above (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, the curves', the
-// MIDI links', the sections', then modulation's.
+// MIDI links', the sections', modulation's, then the sends'.
 // What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12,
 // above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
 bool isHeardAsKept (const juce::ValueTree& element);

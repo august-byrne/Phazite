@@ -14,7 +14,9 @@
 namespace phazite
 {
 // Undo and redo for a song: a step back or forth in its history, which what plays follows, the values set by hand
-// included.
+// included. Once the step is back (or done again), what follows the history's moves is told (Song.h: HistoryListener), in
+// this call: as each step taken back alone (a gesture rolled back, a trial put back) and each of a version's held steps
+// done again or undone is (Trial below).
 void undo (Song&);
 void redo (Song&);
 

@@ -34,6 +34,7 @@ class Take;
 
 class PlaybackSession : private juce::ValueTree::Listener,
                         private Song::ParameterListener,
+                        private Song::HistoryListener,
                         private SongValues::Listener,
                         private PluginInstances::Listener,
                         private juce::AsyncUpdater,
@@ -181,6 +182,9 @@ private:
     juce::ValueTree songState;
     bool lentToRender = false;
     bool latencyWaits = false; // a new plan for a device's latency waits for the gesture that drags it (valueTreePropertyChanged())
+    // An undo or a redo set a value by hand that plays at once: what writes automation follows it once the move is whole
+    // (historyMoved()).
+    bool followAfterMove = false;
     PluginInstances plugins;
     std::unique_ptr<AudioRecorder> recorder;
     SongPlayer player;
@@ -262,10 +266,23 @@ private:
     // is in them alone, isHeardAsKept()), by the parts that changed, as the tree's changes of them were taken: one changed in
     // place in its values set by hand, its steps, its switch or a macro's value plays at once, from the value it is told
     // (SongPlayer::takeModulator()), and while the history undoes or redoes, what a pass writing it writes from then follows
-    // (known bug 174), as for a macro's name, which plays nothing; one added, taken out, come to another place or of another
-    // kind, its modulations, its first value set by hand or its last set back to its default (as its VALUES came or went),
-    // and modulators in another order: a new plan.
+    // (known bug 174) once the move is whole (historyMoved()), as for a macro's name, which plays nothing; one added, taken
+    // out, come to another place or of another kind, its modulations, its first value set by hand or its last set back to its
+    // default (as its VALUES came or went), and modulators in another order: a new plan.
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
+
+    // The sends (SongValues.h; its tree callbacks above leave the song's SEND elements alone, isHeardAsKept()), by the parts
+    // that changed, as the tree's changes of them were taken: a level changed in place plays at once, from the value it is
+    // told (SongPlayer::takeSendLevel()), and while the history undoes or redoes, what a pass writing it writes from then
+    // follows once the move is whole (historyMoved()); one added, taken out, come to another track or routed elsewhere,
+    // and sends in another order: a new plan.
+    void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered) override;
+
+    // The song's history moved by hand, and the move is whole (Song.h: HistoryListener): what a pass writing automation writes
+    // follows the values the move set by hand that play at once (AutomationWriter::followValuesSetByHand()), where the
+    // tree's callbacks or the values' listener heard one meanwhile (followAfterMove), for every area alike. Read here, never
+    // as they are told: during an undo the rest of its step may not be back yet.
+    void historyMoved() override;
 
     // The MIDI links (SongValues.h; its tree callbacks above leave what is in the song's MIDILINKS alone, isHeardAsKept(), and
     // the MIDILINKS's own coming and going too): no plan, as no plan holds them, but what the MIDI tap diverts, marked and

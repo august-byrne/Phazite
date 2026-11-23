@@ -13,6 +13,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/ParameterHandle.h"
@@ -624,6 +625,47 @@ TEST_CASE ("Learning a container's macro ends as the container goes, in that cal
 
     phazite::undo (song);
     REQUIRE (phazite::getModulator (context, macro).has_value());
+    CHECK_FALSE (phazite::isLearningMidi (context));
+}
+
+TEST_CASE ("Learning a chain's volume ends as the chain goes, in that call, reading no send; and a send's level as its return goes")
+{
+    // A chain's parameter goes as the song's tree tells of a child taken out, whose callback looks for it again
+    // (MidiLinks.h: MidiLinker): a reference that names no send's level asks nothing of the sends (Parameters.cpp:
+    // locateParameter()). The sends to a return go with it, in its step (Mixer.h: forgetWhatNamesTheGone()), as the song's
+    // values tell (SongValues.h: sendsChanged()): the learning of one's level ends at once.
+    SynthSong s;
+    auto& context = s.song.context;
+    auto& song = getSong (s.song);
+    const auto other = s.song.addTrack ("Other");
+    const auto returnTrack = s.song.addReturn (other, phazite::devices::Reverb::typeID);
+    auto send = phazite::getSendLevelTo (context, s.song.firstTrack, returnTrack);
+    send.setValue (0.5f); // the send its first change makes
+    REQUIRE (send.exists());
+
+    const auto container = phazite::addContainer (context, s.song.firstTrack);
+    REQUIRE (container.isValid());
+    const auto chain = phazite::addChain (context, container);
+    REQUIRE (chain.isValid());
+    const auto volume = phazite::getChainVolume (context, chain);
+    REQUIRE (volume.exists());
+    phazite::startMidiLearn (volume);
+    REQUIRE (phazite::isLearningMidi (volume));
+    const auto sendsRead = phazite::countSendsRead();
+    phazite::removeChain (context, chain);
+    CHECK (phazite::countSendsRead() == sendsRead);
+    CHECK_FALSE (phazite::isLearningMidi (context));
+
+    const auto level = phazite::getSendLevelTo (context, s.song.firstTrack, returnTrack);
+    phazite::startMidiLearn (level);
+    REQUIRE (phazite::isLearningMidi (level));
+
+    {
+        const phazite::UndoStep step (song, "Delete Track");
+        phazite::deleteTracks (song, { returnTrack }, nullptr);
+    }
+
+    CHECK (phazite::getSends (context, s.song.firstTrack).empty());
     CHECK_FALSE (phazite::isLearningMidi (context));
 }
 

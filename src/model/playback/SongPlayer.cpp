@@ -285,6 +285,27 @@ void SongPlayer::modulationChanged (const std::vector<SongValues::ModulationChan
         mark (place);
 }
 
+void SongPlayer::sendsChanged (const std::vector<SongValues::SendChange>& changed, const std::vector<TrackID>& reordered)
+{
+    // The channel a send was added to, taken out of, or came to and from, as a SEND added to its track or taken out of it
+    // marked the track's channel (markChange()); a route or a level in place none, as a property of a SEND marked none.
+    using Change = SongValues::SendChange;
+
+    for (const auto& send : changed)
+    {
+        if (send.has (Change::made))
+            for (const auto track : { send.fromBefore, send.fromAfter })
+                if (track.isValid())
+                    changes.channels.insert ((std::int64_t) track.getRaw());
+
+        // What updateAudibility() reads, as the song holds it now.
+        heldSends = send.now != nullptr ? withSend (heldSends, *send.now) : withoutSend (heldSends, send.id);
+    }
+
+    for (const auto track : reordered)
+        changes.channels.insert ((std::int64_t) track.getRaw());
+}
+
 namespace
 {
     std::atomic<bool> checking { false };
@@ -358,7 +379,8 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
     // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsKept()), which marks
     // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats); the curves by
     // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter; the modulators and macros by
-    // modulationChanged() (isHeardAsKept(), through isHeardAsModulation()), each by its channel. In a channel (a track, a
+    // modulationChanged() (isHeardAsKept(), through isHeardAsModulation()), each by its channel; the sends by sendsChanged()
+    // (isHeardAsKept(), through isHeardAsSends()), by the tracks they were added to or taken out of. In a channel (a track, a
     // folder, a return or the master), its devices' values are read again only for what can change them: a change at or under
     // a device, a container or a chain, or an element of the channel added, removed or moved; not the channel's
     // own properties (its height, mute, solo, volume, pan), which no device reads, nor a plug-in's own values (VALUE), which
@@ -688,6 +710,15 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         for (const auto& [id, trackState] : std::exchange (trustedForPlan, {}))
             if (const auto kept = audio.find (id); kept == audio.end() || ! isOnDiskAsKept (kept->second))
                 addAudio (plan->strips[(size_t) places[id]], trackState, clipTempo);
+
+    // The channels' sends as this plan read them (getChannels()), which sendsChanged() brings up to date until the next plan,
+    // for what decides which send sends.
+    heldSends = {};
+
+    for (const auto& channel : channels)
+        for (const auto& send : channel.sends)
+            if (send.id.isValid())
+                heldSends = withSend (heldSends, send);
 
     updateAudibility();
 
@@ -2231,22 +2262,24 @@ void SongPlayer::updateAudibility()
                || (! heard && ! getSwitches (state).muted && isSoloedReturn ((std::int64_t) send.to.getRaw()));
     };
 
-    // A track's sends, by its element's ID.
-    const auto getSendsOf = [this] (const juce::ValueTree& state)
-    { return getSendValues (song, TrackID::fromRaw ((std::uint64_t) getID (state, schema::trackID))); };
+    // A track's sends, by its element's ID, as the player holds them (heldSends: never the song's, as this runs in the tree's
+    // callback of a track muted or soloed, takeValue()), each in turn until `each` returns true; whether one did.
+    const auto anySendOf = [this] (const juce::ValueTree& state, const std::function<bool (const SendValue&)>& each)
+    {
+        if (const auto* list = heldSends.tracks.find ((std::uint64_t) getID (state, schema::trackID)))
+            for (const auto id : *list)
+                if (const auto* send = heldSends.find (id); send != nullptr && each (*send))
+                    return true;
+
+        return false;
+    };
 
     // Whether something still listens to a bus that isn't heard: a sidechain keyed from it, or a send of it that goes on
     // (one before its fader, while it is muted).
     const auto isListenedTo = [&] (const juce::ValueTree& bus)
     {
-        if (keys.contains (getID (bus, schema::trackID)))
-            return true;
-
-        for (const auto& send : getSendsOf (bus))
-            if (sendGoesOn (bus, send))
-                return true;
-
-        return false;
+        return keys.contains (getID (bus, schema::trackID))
+               || anySendOf (bus, [&] (const SendValue& send) { return sendGoesOn (bus, send); });
     };
 
     // A track that isn't heard plays on into a bus that something still listens to while that bus isn't heard either
@@ -2273,9 +2306,14 @@ void SongPlayer::updateAudibility()
             continue;
 
         // A track plays on, its devices too, whether it is heard or not; each of its sends as it goes on.
-        for (const auto& send : getSendsOf (state))
-            if (const auto found = sendLevels.find ((std::int64_t) send.id.getRaw()); found != sendLevels.end())
-                found->second->setCut (! sendGoesOn (state, send));
+        anySendOf (state,
+                   [&] (const SendValue& send)
+                   {
+                       if (const auto found = sendLevels.find ((std::int64_t) send.id.getRaw()); found != sendLevels.end())
+                           found->second->setCut (! sendGoesOn (state, send));
+
+                       return false;
+                   });
 
         strip->getChannel().setAudible (isHeard (state) || playsForListener (state));
     }
@@ -2287,19 +2325,18 @@ void SongPlayer::takeModulator (ModulatorID id, const ModulatorValue& value)
         setModulatorValues (*node, value);
 }
 
+void SongPlayer::takeSendLevel (DeviceID id, float decibels)
+{
+    if (const auto found = sendLevels.find ((std::int64_t) id.getRaw()); found != sendLevels.end())
+        found->second->setDecibels (decibels);
+}
+
 bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // (A modulator's parameter, steps or switch, and a macro's value: the song's values tell them, takeModulator().)
+    // (A modulator's parameter, steps or switch, and a macro's value: the song's values tell them, takeModulator(); a send's
+    // level too, takeSendLevel().)
 
-    // A send's level, and a container's mix: at once.
-    if (tree.hasType (schema::SEND) && property == schema::sendLevel)
-    {
-        if (const auto found = sendLevels.find (getID (tree, schema::sendID)); found != sendLevels.end())
-            found->second->setDecibels ((float) tree.getProperty (schema::sendLevel, 0.0f));
-
-        return true;
-    }
-
+    // A container's mix: at once.
     if (tree.hasType (schema::CONTAINER) && property == schema::deviceMix)
     {
         if (const auto found = containers.find (getID (tree, schema::deviceID)); found != containers.end())
@@ -2397,6 +2434,8 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
         return true;
     }
 
+    // A track muted or soloed: what is heard, and which sends send, from the sends the player holds (heldSends), as this is a
+    // tree's callback.
     if (tree.hasType (schema::TRACK) && (property == schema::trackMute || property == schema::trackSolo))
     {
         updateAudibility();

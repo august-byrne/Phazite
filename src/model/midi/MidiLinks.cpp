@@ -541,7 +541,6 @@ bool MidiLinker::isHeardFromTree (ParameterSource source)
         case ParameterSource::plugin:
         case ParameterSource::volume:
         case ParameterSource::pan:
-        case ParameterSource::send:
         case ParameterSource::chainVolume:
         case ParameterSource::chainPan:
         case ParameterSource::crossover:
@@ -549,6 +548,8 @@ bool MidiLinker::isHeardFromTree (ParameterSource source)
         case ParameterSource::modulator:
         case ParameterSource::macro:
             return false; // modulationChanged()
+        case ParameterSource::send:
+            return false; // sendsChanged()
     }
 
     return true;
@@ -556,12 +557,28 @@ bool MidiLinker::isHeardFromTree (ParameterSource source)
 
 void MidiLinker::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
 {
-    // Learning ends as its parameter goes: a device, a chain, a send or a fader, each still an element of the song's tree (or,
-    // a send's, found on its track's), so the linker stays a listener of the tree for them (the links themselves are a value:
-    // MidiLinks.h). It asks only of a source the tree holds (isHeardFromTree()): locateParameter() reads no area of the song's
-    // values for them.
+    // Learning ends as its parameter goes: a device, a chain or a fader, each still an element of the song's tree, so the
+    // linker stays a listener of the tree for them (the links themselves are a value: MidiLinks.h). It asks only of a source
+    // the tree holds (isHeardFromTree()): locateParameter() reads no area of the song's values for them.
     if (learning.has_value() && isHeardFromTree (learningSource) && ! locateParameter (*song, *learning).has_value())
         setLearning (std::nullopt);
+}
+
+void MidiLinker::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>&)
+{
+    // A learning send's level ends as the send is taken out (its ID the learned parameter's device's: Parameters.h), alone or
+    // with its track, in this call, from what it is told alone.
+    if (! learning.has_value() || learningSource != ParameterSource::send)
+        return;
+
+    for (const auto& send : sends)
+    {
+        if (! send.isThere() && send.id == learning->device)
+        {
+            setLearning (std::nullopt);
+            return;
+        }
+    }
 }
 
 void MidiLinker::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators, const std::vector<ModulatorPlace>&)

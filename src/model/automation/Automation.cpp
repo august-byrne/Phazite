@@ -1653,13 +1653,8 @@ bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& prop
     if (tree.hasType (schema::VALUE))
         return property == schema::valueSetByHand;
 
-    if (tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
-        return property == schema::channelVolume || property == schema::channelPan;
-
-    if (tree.hasType (schema::SEND))
-        return property == schema::sendLevel;
-
-    return tree.hasType (schema::MACRO) && property == schema::macroValue;
+    return (tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
+           && (property == schema::channelVolume || property == schema::channelPan);
 }
 
 //==============================================================================
