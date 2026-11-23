@@ -1219,6 +1219,46 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: edited while it plays: a container's chain's volume, pan and crossover and its mix, set at once from "
+               "what the song's values tell, and undone")
+    {
+        // What the devices' listener plays at once (SongPlayer::takeDevice(), from the values before and after the song's
+        // values tell: SongValues.h, devicesChanged()), with no plan: a chain's fader and crossover, a container's mix.
+        TestSong song;
+        auto& context = song.context;
+        const auto track = song.firstTrack;
+        addTone (song, track);
+        const auto bands = phazite::addContainer (context, track);
+        REQUIRE (phazite::addChain (context, bands).isValid());
+        phazite::setContainerSplit (context, bands, phazite::ContainerSplit::bands);
+        const auto chains = phazite::getChains (context, bands);
+        REQUIRE (chains.size() == 2);
+        phazite::addEffectToChain (context, chains[1].id, song.findDeviceType (phazite::devices::Equalizer::typeID));
+        auto& played = getSong (song);
+
+        const auto inStep = [&played] (const char* name, const std::function<void()>& change)
+        {
+            const phazite::UndoStep step (played, name);
+            change();
+        };
+
+        const auto m = playProjectAndMeasure (
+            context,
+            Playing { .edits = {
+                          { 10, "the second chain's volume turned down",
+                            [&] { inStep ("Volume", [&] { phazite::setChainVolume (played, chains[1].id, -9.0f); }); } },
+                          { 20, "its pan moved", [&] { inStep ("Pan", [&] { phazite::setChainPan (played, chains[1].id, -0.5f); }); } },
+                          { 30, "its crossover moved",
+                            [&] { inStep ("Crossover", [&] { phazite::setChainCrossover (played, chains[1].id, 1200.0f); }); } },
+                          { 40, "the container's mix", [&] { inStep ("Mix", [&] { phazite::setMix (played, bands, 0.6f); }); } },
+                          { 60, "undone", [&] { phazite::undo (played); } },
+                          { 70, "undone again", [&] { phazite::undo (played); } },
+                      } });
+        report ("Edited while it plays: a chain's volume, pan and crossover and a container's mix", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: Phazite's compressor, ducked by another track at 70 % mix, with its meters and its trail read")
     {
         using phazite::devices::Compressor;

@@ -39,6 +39,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/SavedValues.h"
@@ -1008,6 +1009,288 @@ TEST_CASE ("Performance gate: the loader's rule for the devices allocates nothin
 
     // Measured 2026-11-22: none.
     CHECK (*allocations == 0);
+}
+
+TEST_CASE ("Performance gate: a step of a knob's drag on a full drum sampler, among 40 tracks, reads no device whole and walks "
+           "nothing for what hears the devices change, and the song's devices are read once as it is made")
+{
+    // While the song's tree holds its devices, the devices' part of the keeper tells what hears them from the tree
+    // (model/base/internal/DevicesArea.h): for a property of a device's VALUES, the one value read from that one property and
+    // set in the value it keeps, the device read no more whole (countDevicesReadAsValues()) and the song walked nowhere
+    // (countDeviceWalks()); and as the song takes its values (makeSong()), each device, container and chain read once. On a
+    // song of 40 tracks with an instrument and an effect each, and a drum sampler of every field and sound set (3,329
+    // values, 1,024 sounds), in a project context (what plays it, its views' watcher): a step of a drag of a pad's field
+    // through its handle, as a control's drag makes one.
+    using dev::DrumSampler;
+    auto made = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*made, 40);
+
+    for (const auto track : tracks)
+    {
+        phazite::test::setOwnInstrument (*made, track, dev::Synth::typeID);
+        phazite::test::addOwnDevice (*made, track, dev::Equalizer::typeID);
+    }
+
+    phazite::test::OwnValues values;
+
+    for (const auto& info : DrumSampler::info.parameters)
+    {
+        auto value =
+            dev::constrain (info, info.defaultValue + (info.unit == dev::Unit::choice ? 1.0f : 0.25f * (info.maximum - info.minimum)));
+
+        if (phazite::isDefaultValue (info, value))
+            value =
+                dev::constrain (info, info.defaultValue - (info.unit == dev::Unit::choice ? 1.0f : 0.25f * (info.maximum - info.minimum)));
+
+        values.emplace_back (juce::String (info.id.data(), info.id.size()), value);
+    }
+
+    const auto drumsTrack = phazite::insertPlainTrack (*made, tracks.back());
+    const auto drums = phazite::test::setOwnInstrument (*made, drumsTrack, DrumSampler::typeID, values);
+
+    for (int pad = 0; pad < DrumSampler::numPads; ++pad)
+        for (int layer = 0; layer < DrumSampler::numLayers; ++layer)
+            phazite::test::writeDeviceSoundByHand (*made, drums, phazite::schema::getPadSound (pad, layer), "808 Kick");
+
+    // The song made from it, as a project opens one: each of its devices read whole once, as it takes its values.
+    const auto text = phazite::test::copyWholeSong (*made);
+    const auto readBefore = phazite::countDevicesReadAsValues();
+    const auto madeAt = juce::Time::getMillisecondCounterHiRes();
+    const auto song = phazite::makeSong (text);
+    const auto madeIn = juce::Time::getMillisecondCounterHiRes() - madeAt;
+    REQUIRE (song != nullptr);
+    const auto readAsMade = phazite::countDevicesReadAsValues() - readBefore;
+    const auto numDevices = phazite::getDevicesValue (*song).devices.size();
+
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    const auto& padField = DrumSampler::info.parameters[(size_t) DrumSampler::getParameterIndex (40, (DrumSampler::Field) 1)];
+    auto handle = phazite::makeDeviceHandle (*song, drums).getParameter (padField.id);
+    REQUIRE (handle.isValid());
+    const auto low = padField.minimum + 0.1f * (padField.maximum - padField.minimum);
+    const auto high = padField.minimum + 0.2f * (padField.maximum - padField.minimum);
+
+    handle.beginGesture();
+    handle.setValue (low); // the gesture's first step finds the parameter
+    phazite::test::dispatchPendingMessages();
+    const auto whole = phazite::countDevicesReadAsValues();
+    const auto walks = phazite::countDeviceWalks();
+    handle.setValue (high);
+    const auto readWhole = phazite::countDevicesReadAsValues() - whole;
+    const auto walked = phazite::countDeviceWalks() - walks;
+    auto toLow = true;
+    const auto allocations = phazite::test::countAllocations (
+        [&handle, &toLow, low, high]
+        {
+            handle.setValue (toLow ? low : high);
+            toLow = ! toLow;
+        });
+    handle.endGesture();
+    phazite::test::dispatchPendingMessages();
+    setSong (context, nullptr);
+
+    MESSAGE ("A step of a pad's drag on 40 tracks and a full drum sampler: devices read whole "
+             << readWhole << ", walks " << walked << ", allocations " << allocations.value_or (-1) << "; the song made: " << numDevices
+             << " devices read " << readAsMade << " times whole, in " << madeIn << " ms");
+    // Measured 2026-11-23 on Windows (MSVC's Debug build), before the devices' listener and with it: no device read whole
+    // at a step; one walk, the same before, which is the writer's (setValueSetByHand() finding the device's element), none
+    // the listener's; 239 allocations before, 246 with it (the value kept, one path of its map copied, and the change told);
+    // the song made in 114 ms before, reading no device whole, and in 171 ms with it, each of its 81 devices read once.
+    CHECK (readWhole == 0);
+    CHECK (walked <= 1);
+    CHECK (readAsMade <= (std::uint64_t) numDevices);
+
+    if (! allocations.has_value())
+        return; // nothing counted on this build, and nothing run
+
+#if JUCE_WINDOWS
+    CHECK (*allocations <= 250); // 239 before the devices' listener, 246 with it
+#endif
+}
+
+TEST_CASE ("Performance gate: an effect added into a chain, moved within it and removed reads that channel's devices alone for "
+           "what hears the devices change, and allocates no more, on 40 tracks than on 4")
+{
+    // While the song's tree holds its devices, the devices' part of the keeper tells what hears them from the tree
+    // (model/base/internal/DevicesArea.h): a device added to, taken out of or moved within its owner (a channel, a container,
+    // a chain) is told from that owner's channel walked again, its lists settled there alone, never the song's: a drag of a
+    // device within its chain makes one at each step. On songs of 4 tracks and of 40, each with an instrument and an effect,
+    // the first with a container whose chain holds two delays: an equalizer added into the chain, moved to its start and
+    // removed, each one step on a song alone (no project: what else listens costs the same on both). Counted: the device
+    // elements the keeper's walks looked at (countDeviceItemsWalked()), and what the edit allocates, the writer's among it:
+    // on the first track, as the writers still find a device by walking the tracks in their order (Mixer.h:
+    // findDeviceState(), a list made for each track it looks in, which the writers' piece of S5.20 replaces), so that what
+    // grows with the song is the listener's alone.
+    struct Edit
+    {
+        std::uint64_t items = 0;
+        std::optional<int> allocations {};
+    };
+
+    const auto countFor = [] (int numTracks)
+    {
+        auto song = phazite::createSong();
+        const auto tracks = phazite::ensureTracks (*song, numTracks);
+
+        for (const auto track : tracks)
+        {
+            phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+            phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
+        }
+
+        const auto container = phazite::addContainer (*song, tracks.front());
+        REQUIRE (container.isValid());
+        const auto chain = phazite::getChains (*song, container).front();
+        phazite::test::addOwnDeviceToChain (*song, chain, dev::Delay::typeID);
+        phazite::test::addOwnDeviceToChain (*song, chain, dev::Delay::typeID);
+
+        // One edit as a step: what the keeper walked for it, and what it allocated where that is counted (else run alone).
+        const auto measure = [&song] (const std::function<void()>& change)
+        {
+            const auto inStep = [&song, &change]
+            {
+                const phazite::UndoStep step (*song, "Edit");
+                change();
+            };
+
+            Edit edit;
+            const auto before = phazite::countDeviceItemsWalked();
+            edit.allocations = phazite::test::countAllocations (inStep);
+
+            if (! edit.allocations.has_value())
+                inStep();
+
+            edit.items = phazite::countDeviceItemsWalked() - before;
+            return edit;
+        };
+
+        phazite::DeviceID added;
+        const auto adding = measure ([&] { added = phazite::test::addOwnDeviceToChain (*song, chain, dev::Equalizer::typeID); });
+        REQUIRE (added.isValid());
+        const auto moving = measure ([&] { phazite::moveInChain (*song, added, 0); });
+        REQUIRE (phazite::getDevicesValue (*song).findList ({ .track = tracks.front(), .container = container, .chain = chain })->front()
+                 == added);
+        const auto removing = measure ([&] { phazite::removeDevice (*song, added); });
+        REQUIRE_FALSE (phazite::hasDevice (*song, added));
+
+        // What the removal's writer does beside it that grows with the song, alone (Mixer.h: forgetWhatNamesTheGone(), which
+        // makes a set of every ID the song holds), with nothing gone: no device element walked.
+        const auto forgetting = measure ([&] { phazite::forgetWhatNamesTheGone (*song); });
+        return std::array { adding, moving, removing, forgetting };
+    };
+
+    const auto small = countFor (4);
+    const auto big = countFor (40);
+    const std::array<std::string, 4> names { "an effect added into a chain", "moved within it", "removed",
+                                             "what names the gone forgotten alone" };
+
+    for (size_t i = 0; i < names.size(); ++i)
+        MESSAGE (names[i] << ": device elements walked " << small[i].items << " (4 tracks), " << big[i].items
+                          << " (40 tracks); allocations " << small[i].allocations.value_or (-1) << ", "
+                          << big[i].allocations.value_or (-1));
+
+    for (size_t i = 0; i < names.size(); ++i)
+    {
+        INFO (names[i]);
+        CHECK (big[i].items == small[i].items);
+        CHECK (small[i].items <= 24); // the first track's instrument, effect, container, chain and the devices in it, a few times at most
+    }
+
+    if (! small[0].allocations.has_value() || ! big[0].allocations.has_value())
+        return; // nothing counted on this build
+
+    for (size_t i = 0; i < names.size(); ++i)
+    {
+        INFO (names[i]);
+        REQUIRE (big[i].allocations.has_value());
+        REQUIRE (small[i].allocations.has_value());
+    }
+
+    // The removal's beside what its writer's forgetting of what names the gone makes, which grows with the song (not this
+    // listener's; the writers' piece of S5.20). Measured 2026-11-23 (MSVC's Debug build), 4 tracks / 40: added 78 / 74 (74 /
+    // 75 in a run after other tests), moved 61 / 61, removed 163 / 452 of which its writer's forgetting 63 / 351, so 100 / 101
+    // beside it; with the listener's first form, which walked the song's devices for each, on the last track 158 / 952,
+    // 133 / 745 and 292 / 1,913, and 13 / 85 device elements walked. Before the listener the tree's callbacks walked none.
+    // Within a few, which what ran before moves either way (a pool of names, the maps' layout): never one for each of the 36
+    // tracks more.
+    const auto listened = [] (const auto& counts) { return *counts[2].allocations - *counts[3].allocations; };
+    constexpr auto few = 4;
+    CHECK (*big[0].allocations <= *small[0].allocations + few);
+    CHECK (*big[1].allocations <= *small[1].allocations + few);
+    CHECK (listened (big) <= listened (small) + few);
+}
+
+TEST_CASE ("Performance gate: the unsaved check after devices' knobs turned and turned back reads each tree's devices once, "
+           "however many it compares, on 4 tracks and on 40")
+{
+    // The devices that changed are noted by their IDs (model/project/internal/Project.h: devicesToCompare) and compared with
+    // the saved copy's when the check is asked, by element while the trees hold them: each tree's devices indexed once by a
+    // walk (model/base/internal/DevicesArea.h), however many are compared, never a walk for each. On songs of 4 tracks and of
+    // 40, each with an instrument and an effect, saved: one effect's knob turned and turned back, then 30 (or each of the 4),
+    // the check asked after each. Counted: the device elements walked (countDeviceItemsWalked()).
+    struct Counts
+    {
+        std::uint64_t one = 0, many = 0, items = 0;
+    };
+
+    const auto countFor = [] (int numTracks)
+    {
+        phazite::test::TestSong s;
+        auto& song = getSong (s);
+        auto& project = s.getProject();
+        std::vector<phazite::DeviceID> effects;
+
+        for (const auto track : phazite::ensureTracks (song, numTracks))
+        {
+            phazite::test::setOwnInstrument (song, track, dev::Synth::typeID);
+            effects.push_back (phazite::test::addOwnDevice (song, track, dev::Equalizer::typeID));
+        }
+
+        REQUIRE (project.save().wasOk());
+        phazite::test::dispatchPendingMessages();
+        REQUIRE_FALSE (project.hasUnsavedChanges());
+
+        const auto& gain = dev::Equalizer::info.parameters[(size_t) dev::Equalizer::getParameterIndex (2, dev::Equalizer::gain)];
+        const auto gainID = juce::String (std::string (gain.id));
+
+        // So many effects' knobs turned in one step and turned back in another, and the check asked: the elements it walked.
+        const auto compare = [&] (size_t count)
+        {
+            for (const auto value : { 3.0f, gain.defaultValue })
+            {
+                const phazite::UndoStep step (song, "Turn");
+
+                for (size_t i = 0; i < count && i < effects.size(); ++i)
+                    phazite::setValueSetByHand (song, { effects[i], gainID }, value);
+            }
+
+            const auto before = phazite::countDeviceItemsWalked();
+            CHECK_FALSE (project.hasUnsavedChanges());
+            return phazite::countDeviceItemsWalked() - before;
+        };
+
+        Counts counts;
+        counts.one = compare (1);
+        counts.many = compare (30);
+        counts.items = (std::uint64_t) phazite::getDevicesValue (song).devices.size();
+        return counts;
+    };
+
+    const auto small = countFor (4);
+    const auto big = countFor (40);
+    MESSAGE ("The unsaved check: device elements walked for one knob " << small.one << " (4 tracks), " << big.one << " (40 tracks); for "
+                                                                       << "30 (or 4) " << small.many << ", " << big.many
+                                                                       << "; devices in the song " << small.items << ", " << big.items);
+
+    // Each tree's devices looked at once at most, the song's and the saved copy's, for one knob as for many. Measured
+    // 2026-11-23, 4 tracks / 40: one knob 16 / 160, 30 (or 4) 16 / 160; with a walk of each tree for each device compared
+    // and for each owner, 16 / 160 and 64 / 4,800.
+    for (const auto& counts : { small, big })
+    {
+        CHECK (counts.one > 0); // the knob compared: none would be a check skipped
+        CHECK (counts.one <= 2 * counts.items);
+        CHECK (counts.many == counts.one);
+    }
 }
 
 TEST_CASE ("Performance gate: the loader's rule allocates nothing for a send Phazite wrote")

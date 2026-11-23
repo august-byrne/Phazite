@@ -131,7 +131,9 @@
 //        brought up to date at a later moment of its own (followMidiLinks(), at the next turn of the message loop, or at once
 //        where a writer that is no tree callback must have it so: MidiLinker::learn()), no plan made. A value set by hand
 //        that plays at once is the one thing a listener sets from what it is told (the value after: modulation's
-//        SongPlayer::takeModulator(), a send's level SongPlayer::takeSendLevel()), no plan made; one an undo or a redo set
+//        SongPlayer::takeModulator(), a send's level SongPlayer::takeSendLevel(); the values before and after: a device's
+//        values set by hand, its sounds, a container's mix, a chain's fader and range, SongPlayer::takeDevice()), no plan
+//        made; one an undo or a redo set
 //        is marked (followAfterMove), and what writes automation follows it once the history's move is whole, from the
 //        history's listener (Song.h: HistoryListener; PlaybackSession::historyMoved()), never while the area tells.
 //      - SongPlayer (model/playback/SongPlayer.cpp, internal/SongPlayer.h): marks what its next compile reads again (its
@@ -145,7 +147,8 @@
 //      - VersionHistory (model/versions/VersionHistory.cpp, internal/VersionHistory.h): counts the song's change
 //        (songChanges, edited()), marks the lines it is in (markTrack(), markSongOwn()) and calls changesMayDiffer().
 //      - MidiLinker (model/midi/MidiLinks.cpp, internal/MidiLinks.h): ends a learning whose parameter the area tells taken
-//        out, in that call (modulation's: a modulator or a macro by its ID; the sends': a send's level by the send's ID); its
+//        out, in that call (modulation's: a modulator or a macro by its ID; the sends': a send's level by the send's ID; the
+//        devices': a device's, a plug-in's or a chain's parameter by its device's or chain's ID); its
 //        tree callback asks only of the sources the tree still holds (isHeardFromTree()), where an area's leaves that list
 //        for an override of its own.
 //  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
@@ -159,7 +162,10 @@
 //  12. The tree's listeners: each listener of step 10 leaves what the areas tell alone in its tree callbacks by asking
 //      isHeardAsKept() (below) once, where it returns early for it (ClipRenders.cpp, Freeze.cpp, internal/Freeze.h,
 //      PlaybackSession.cpp, SongPlayer.cpp, Project.cpp, internal/Project.h, ProjectContext.cpp, VersionHistory.cpp and
-//      internal/VersionHistory.h); a new area adds its line there (its isHeardAs<Area>()), not a line in each listener. A
+//      internal/VersionHistory.h); a new area adds its line there (its isHeardAs<Area>()), not a line in each listener; a
+//      property's callback asks it with the property (isHeardAsKept (tree, property)), as an area whose elements stay in
+//      the tree for what another piece keeps of them (the devices': a plug-in's state, a chain's mute and solo, the store's
+//      until its own switch) tells the two apart by the property's name. A
 //      listener that takes one area's notifications differently from another's says so in a comment where it does (the
 //      clip renders, which leave the chord lane's placeholder alone too). From the listener's piece (step 14) to the
 //      switch, the tree is still the area's storage, and the keeper feeds <area>Changed() from the tree's callbacks under
@@ -205,6 +211,7 @@
 #include "model/base/internal/ClipNotesValue.h"
 #include "model/base/internal/ClipsValue.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Immer.h"
 #include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/ModulationValue.h"
@@ -511,6 +518,42 @@ public:
         bool isThere() const noexcept { return fromAfter.isValid(); }
     };
 
+    // A device, a container or a chain that changed (DevicesValue.h): its ID and its form; where it was and where it is (an
+    // empty place where it wasn't, or isn't), whether it was there and whether it is (both, for one changed in place or come
+    // to another place); the parts of it that changed; and its value before and after, for one that was and is there, valid
+    // during the call alone: what plays may set its device's node from the two at once (PlaybackSession.h: the values that
+    // differ between them), as nothing else of the song is read meanwhile. Set its members by name. Only what the devices'
+    // value covers (DevicesValue.h): never a plug-in's VALUE, its state, program, format ID or version, a chain's mute or solo
+    // (the store's, which the tree still tells: DevicesArea.h), nor a window's place.
+    struct DeviceChange
+    {
+        // The parts, as bits of parts: each its own, as what plays takes each its own way (PlaybackSession.h).
+        enum Part : std::uint16_t
+        {
+            made = 1 << 0,              // added or taken out: alone, or with the track, the container or the chain it is in
+            place = 1 << 1,             // come to another place (its channel's track given another ID, another container, chain)
+            settings = 1 << 2,          // its switch, sidechain, type or plug-in, a container's or a chain's name, split, or kind
+            mix = 1 << 3,               // a plug-in's or a container's mix
+            values = 1 << 4,            // Phazite's own device's values set by hand, any of them
+            valuesAppeared = 1 << 5,    // and with them its first value set by hand, or its last set back to its default
+            sounds = 1 << 6,            // Phazite's own device's sounds, any of them
+            soundsAppeared = 1 << 7,    // and with them its first sound, or its last taken away
+            chainFader = 1 << 8,        // a chain's volume or pan
+            chainRange = 1 << 9,        // a chain's crossover, or the keys or velocities it plays
+            sidechainSwitched = 1 << 10 // a value set by hand that turns what its sidechain hears on or off (Sidechain.h)
+        };
+
+        DeviceID id {};
+        DeviceValue::Form form = DeviceValue::Form::own;
+        DevicePlace before {}, after {};
+        bool wasThere = false, isThere = false;
+        std::uint16_t parts = 0;
+        const DeviceValue* was = nullptr;
+        const DeviceValue* now = nullptr;
+
+        bool has (std::uint16_t part) const noexcept { return (parts & part) != 0; }
+    };
+
     // What hears the song's values change, from one place: one listener for every area, a function for each, which does
     // nothing unless a listener overrides it, so that an area added changes only the listeners that care. Each registers
     // once (addListener()). A listener only marks what changed, and reads nothing of the song while it is told: during an
@@ -607,6 +650,31 @@ public:
         {
             juce::ignoreUnused (sends, reordered, now);
         }
+
+        // The song's devices, containers and chains (DevicesValue.h), by their IDs: each one added, taken out, come to another
+        // place or changed, each once in a call, with where it was and is, the parts of it that changed (DeviceChange::Part)
+        // and its value before and after (DeviceChange::was, now); each owner (DevicePlace: a channel, a container, a chain)
+        // that holds those it held before in another order; and the song's devices whole after (now: a copy of what the
+        // keeper holds, valid during the call, the changes' values after in it), for what a change needs of the others: a
+        // chain's place among its container's (its default crossover, whether it has one at all). A track, a folder's
+        // tracks, the master, a container, a chain or the track list that comes into the song or leaves it with devices in
+        // it tells each of them as added or taken out (a track JUCE moves, taken out and put in again, tells each twice); a
+        // track given another ID in place (a merge's renumbering) tells each of them come to another place. The song's tree
+        // is still the devices' storage, so the devices' part of the keeper tells it from the tree (DevicesArea.h), once for
+        // each of the tree's notifications that changes what the value covers, in an undo and a redo too: so how many calls
+        // a step makes is the tree's until the devices' switch (a knob's drag, one each move; a preset loaded, one for each
+        // value), and only what they told in all is the step's (what differs in the song's devices before and after). What
+        // the value doesn't cover is the tree's still, which the listeners hear as before: a plug-in's VALUE children, its
+        // state, program, format ID and version, a chain's mute and solo (the store's: DevicesArea.cpp,
+        // isDeviceStoreProperty()), and a window's place. A TRACK that comes or goes with devices, or is given another ID in
+        // place, is the tree's too, heard as before, and its devices are told here, so the step is heard twice, and only
+        // marks twice: the views' watcher raises the devices' group for it (and any channel where one of them listens to a
+        // sidechain) beside what the tree raises for the track (ProjectContext.cpp).
+        virtual void devicesChanged (const std::vector<DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
+                                     const SongDevices& now)
+        {
+            juce::ignoreUnused (devices, reordered, now);
+        }
     };
 
     void addListener (Listener*) const;
@@ -658,6 +726,13 @@ public:
     // passes never leave to it.
     int countSendsAdopted() const noexcept { return sendsAdopted; }
 
+    // The song's devices, containers and chains as the devices' part of the keeper last told them (DevicesArea.h), while the
+    // song's tree holds them: read once as the song took its values, and kept since by what the tree told; nullptr before.
+    // What plays takes what decides what is heard from as it is made (SongPlayer.h: heldDevices), so that it holds what the
+    // listeners are told; and the tests' check compares it with the song's devices read again (tests/SongCheck.cpp). In
+    // SongValues.cpp.
+    const SongDevices* getDevicesAsTold() const noexcept;
+
 private:
     friend class Song;
 
@@ -679,6 +754,7 @@ private:
     struct ModulationKeeper;                        // ModulationArea.h
     struct SendsTeller;                             // SendsArea.h
     struct SendsKeeper;                             // SendsArea.h
+    struct DevicesKeeper;                           // DevicesArea.h: tells devicesChanged() from the tree, until the switch
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
     std::unique_ptr<ClipsTeller> clipsTeller;
@@ -763,13 +839,32 @@ bool isHeardAsMidiLinks (const juce::ValueTree& parent, const juce::ValueTree& c
 bool isHeardAsSections (const juce::ValueTree& element);
 bool isHeardAsSections (const juce::ValueTree& parent, const juce::ValueTree& child);
 
+// Whether what the song's tree tells is the devices', which a listener of the song's root hears from the values' listener
+// alone (SongValues::Listener::devicesChanged()) and leaves alone in its tree callbacks, while the tree is still their storage
+// (DevicesArea.h, whose part of the keeper tells them from the tree). A property changed: one the devices' value covers of a
+// DEVICE, a CONTAINER or a CHAIN of the song's (on a channel: a TRACK, the MASTER), or any of what is in one (its VALUES, its
+// SOUNDS, and what Phazite doesn't know there); not what the value doesn't cover, which the listeners hear from the tree as
+// before (DevicesArea.cpp: isDeviceStoreProperty(): a plug-in's state, program, format ID and version, a chain's mute and solo,
+// a window's place), nor anything of a plug-in's VALUE. Children in another order: those of a CONTAINER or a CHAIN of the
+// song's, or of what is in a VALUES or a SOUNDS; not a DEVICE's (its VALUES, SOUNDS and VALUEs, whose order the value holds
+// none of), nor a channel's, whose devices' order the devices' listener is told and whose other children's order is the
+// tree's. A child added or taken out: a DEVICE or a CONTAINER of a channel, a CHAIN of a container, a DEVICE of a chain, a
+// DEVICE's VALUES or SOUNDS, and anything added to or taken out of what is the devices' (but a plug-in's VALUE); not a
+// TRACK, the MASTER or the track list that comes or goes with devices in it, which is the tree's, heard as before. In
+// DevicesArea.cpp.
+bool isHeardAsDevices (const juce::ValueTree& element);
+bool isHeardAsDevices (const juce::ValueTree& element, const juce::Identifier& property);
+bool isHeardAsDevices (const juce::ValueTree& parent, const juce::ValueTree& child);
+
 // Whether what the song's tree tells is any area's of the song's values, which a listener of the song's root hears from the
-// values' listener alone (SongValues::Listener) and leaves alone in its tree callbacks: of an element (a property changed in
-// it, a child moved in it), and of a child added to an element or taken out of it. Each the OR of the areas' own functions
-// above (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, the curves', the
-// MIDI links', then the sections' (modulation's and the sends' went at their switches: the tree holds nothing of them).
-// What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12,
-// above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
+// values' listener alone (SongValues::Listener) and leaves alone in its tree callbacks: of an element (a child moved in it),
+// of a property changed (the element and the property: a DEVICE's or a CHAIN's properties are the devices' but for the
+// store's), and of a child added to an element or taken out of it. Each the OR of the areas' own functions above
+// (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, the curves', the MIDI
+// links', the sections', then the devices' (modulation's and the sends' went at their switches: the tree holds nothing of
+// them). What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step
+// 12, above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
 bool isHeardAsKept (const juce::ValueTree& element);
+bool isHeardAsKept (const juce::ValueTree& element, const juce::Identifier& property);
 bool isHeardAsKept (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

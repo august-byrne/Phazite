@@ -560,6 +560,41 @@ void FreezeKeeper::modulationChanged (const std::vector<SongValues::ModulationCh
         triggerAsyncUpdate();
 }
 
+void FreezeKeeper::devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
+                                   const SongDevices&)
+{
+    // The frozen tracks among the channels they were on and are on (none is the master), this one's own knowledge: compared at
+    // the later moment, as check() takes a change in a frozen track. But what this changes itself (unfreezing) and what
+    // keepThrough() compares as it applies, and anything while no track is frozen.
+    if (checking || frozen.empty())
+        return;
+
+    auto marked = false;
+    const auto mark = [this, &marked] (const DevicePlace& place)
+    {
+        if (! place.onMaster && frozen.contains (place.track))
+        {
+            waiting.tracks.insert (place.track);
+            marked = true;
+        }
+    };
+
+    for (const auto& device : devices)
+    {
+        if (device.wasThere)
+            mark (device.before);
+
+        if (device.isThere)
+            mark (device.after);
+    }
+
+    for (const auto& place : reordered)
+        mark (place);
+
+    if (marked)
+        triggerAsyncUpdate();
+}
+
 void FreezeKeeper::compareMarked()
 {
     if (checking)
@@ -784,7 +819,7 @@ void FreezeKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::
     // How tracks show and where windows were change nothing that plays; nor does the song's count of IDs, which every new
     // ID moves, or how it plays and its grid, on its root. The areas' of the song's values (isHeardAsKept()): the tempo map's,
     // tempoMapChanged(); the chord lane's, which no frozen file holds; the curves', curvesChanged().
-    if ((tree == state && schema::isUncountedProperty (tree, property)) || isHeardAsKept (tree))
+    if ((tree == state && schema::isUncountedProperty (tree, property)) || isHeardAsKept (tree, property))
         return;
 
     if (! schema::isTrackViewProperty (property) && ! isIgnoredProperty (property))

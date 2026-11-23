@@ -9,6 +9,9 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/Numbers.h"
+#include "model/base/internal/DevicesArea.h"
+#include "model/base/internal/DevicesValue.h"
+#include "model/base/internal/Immer.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
@@ -34,6 +37,7 @@
 #include <cmath>
 #include <cstdint>
 #include <set>
+#include <string_view>
 #include <vector>
 
 namespace phazite
@@ -233,6 +237,7 @@ SongPlayer::SongPlayer (Song& s, PluginInstances* p)
       plugins (p),
       songState (s.getState())
 {
+    holdDevices();
     songState.addListener (this);
 
     if (auto* values = song.getValues())
@@ -318,10 +323,73 @@ void SongPlayer::sendsChanged (const std::vector<SongValues::SendChange>& change
     heldSends = now; // what updateAudibility() reads, as the song holds it now
 }
 
+void SongPlayer::devicesChanged (const std::vector<SongValues::DeviceChange>& changed, const std::vector<DevicePlace>& reordered,
+                                 const SongDevices&)
+{
+    // The channel each was on and is on (the master's under 0), as a change at or under a device, a container or a chain
+    // marked the channel it is on (markChange()): every part, a value taken at once too (the next plan reads its channel's
+    // devices again either way).
+    using Change = SongValues::DeviceChange;
+
+    const auto mark = [this] (const DevicePlace& place)
+    {
+        if (place.onMaster)
+            changes.channels.insert (0);
+        else if (place.track.isValid())
+            changes.channels.insert ((std::int64_t) place.track.getRaw());
+    };
+
+    for (const auto& device : changed)
+    {
+        const auto id = (std::int64_t) device.id.getRaw();
+
+        if (device.wasThere)
+            mark (device.before);
+
+        if (device.isThere)
+            mark (device.after);
+
+        // Its sounds, which a kept node loads again: those of one that came, or whose first came or last went (as sounds
+        // that came whole or went); those set in place, which its session may have loaded at once (takeDevice()).
+        if (device.isThere && (device.has (Change::made) || device.has (Change::soundsAppeared)))
+            changes.sounds.insert (id);
+        else if (device.isThere && device.has (Change::sounds))
+            changes.soundsSet.insert (id);
+
+        // What decides what is heard: its sidechain's track and its channel, as the song holds them now.
+        if (device.now != nullptr && device.now->form != DeviceValue::Form::chain && device.now->form != DeviceValue::Form::container)
+            heldDevices[device.id.getRaw()] = { .sidechain = (std::int64_t) device.now->sidechain.getRaw(),
+                                                .channel = device.after.onMaster ? 0 : (std::int64_t) device.after.track.getRaw() };
+        else if (! device.isThere)
+            heldDevices.erase (device.id.getRaw());
+    }
+
+    for (const auto& place : reordered)
+        mark (place);
+}
+
+void SongPlayer::holdDevices()
+{
+    // Each device (its own or a plug-in, its containers' chains' too) by its ID: its sidechain's track and its channel, from
+    // the song's devices as the values' listeners were told them (SongValues.h: getDevicesAsTold()), so that what is held
+    // here and what devicesChanged() keeps up to date never disagree. Not in a callback: as the player is made.
+    heldDevices.clear();
+    const auto* values = song.getValues();
+    const auto* told = values != nullptr ? values->getDevicesAsTold() : nullptr;
+
+    if (told == nullptr)
+        return;
+
+    for (const auto& [id, device] : told->devices)
+        if (device.form == DeviceValue::Form::own || device.form == DeviceValue::Form::plugin)
+            heldDevices[id] = { .sidechain = (std::int64_t) device.sidechain.getRaw(),
+                                .channel = device.place.onMaster ? 0 : (std::int64_t) device.place.track.getRaw() };
+}
+
 namespace
 {
     std::atomic<bool> checking { false };
-    std::atomic<std::uint64_t> devicesRead { 0 }, curvesRead { 0 }, filesAsked { 0 };
+    std::atomic<std::uint64_t> devicesRead { 0 }, curvesRead { 0 }, filesAsked { 0 }, soundLoads { 0 };
 } // namespace
 
 void SongPlayer::setChecking (bool on) noexcept
@@ -347,6 +415,11 @@ std::uint64_t SongPlayer::countCurvesRead() noexcept
 std::uint64_t SongPlayer::countFilesAsked() noexcept
 {
     return filesAsked;
+}
+
+std::uint64_t SongPlayer::countSoundLoads() noexcept
+{
+    return soundLoads;
 }
 
 bool SongPlayer::isCheckedPart (std::uint64_t part, std::uint64_t plan, std::uint64_t every) noexcept
@@ -392,20 +465,17 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
     // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats); the curves by
     // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter; the modulators and macros by
     // modulationChanged() (the tree holds none of them), each by its channel; the sends by sendsChanged() (the tree holds
-    // none of them either), by the tracks they were added to or taken out of. In a channel (a track, a
-    // folder, a return or the master), its devices' values are read again only for what can change them: a change at or under
-    // a device, a container or a chain, or an element of the channel added, removed or moved; not the channel's
-    // own properties (its height, mute, solo, volume, pan), which no device reads, nor a plug-in's own values (VALUE), which
-    // the plug-in keeps, the engine reading none.
+    // none of them either), by the tracks they were added to or taken out of; the devices, containers and chains, as far as
+    // their value covers them, by devicesChanged() (isHeardAsKept(), through isHeardAsDevices()), by their channels, their
+    // sounds by their devices. In a channel (a track, a folder, a return or the master), its devices' values are read again
+    // only for what can change them: what the tree still tells at or under a device or a chain (a plug-in's state's format
+    // ID and version, a chain's mute and solo, a plug-in's first value set by hand: the store's), or an element of the
+    // channel added, removed or moved; not the channel's own properties (its height, mute, solo, volume, pan), which no
+    // device reads, nor a plug-in's own values (VALUE), which the plug-in keeps, the engine reading none.
     auto inDevice = structure;
 
     for (auto element = changed; element.isValid(); element = element.getParent())
     {
-        // A device's sounds (a pad's, an oscillator's table, a sampler's): loaded again by a kept node (getDevice()); one set by
-        // hand (a property of the SOUNDS element), unless its session loaded it at once (takeValue()).
-        if (element.hasType (schema::SOUNDS) && element.getParent().hasType (schema::DEVICE))
-            (! structure && element == changed ? changes.soundsSet : changes.sounds).insert (getID (element.getParent(), schema::deviceID));
-
         if (element.hasType (schema::VALUE) || schema::isUncountedElement (element.getParent(), element))
             return; // a plug-in's value, or view state (a track's lanes)
 
@@ -425,8 +495,8 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
 void SongPlayer::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     // The areas' (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's, which nothing played reads
-    // (chordLaneChanged(): SongPlayer follows none of it); the curves', curvesChanged().
-    if (isHeardAsKept (tree))
+    // (chordLaneChanged(): SongPlayer follows none of it); the curves', curvesChanged(); the devices', devicesChanged().
+    if (isHeardAsKept (tree, property))
         return;
 
     // A track's ID changed in place (a merge's renumbering): what the plan before kept under it may be another track's, and
@@ -460,25 +530,13 @@ void SongPlayer::markTracksIn (const juce::ValueTree& element)
                 markTracksIn (child);
 }
 
-void SongPlayer::markSoundsIn (const juce::ValueTree& element)
-{
-    // Sounds added whole, with what they hold (an undo, a song applied, a preset's element): no property of theirs changes.
-    if (element.hasType (schema::SOUNDS) && element.getParent().hasType (schema::DEVICE))
-        changes.sounds.insert (getID (element.getParent(), schema::deviceID));
-
-    if (element.hasType (schema::DEVICE))
-        changes.sounds.insert (getID (element, schema::deviceID));
-
-    for (const auto& child : element)
-        markSoundsIn (child);
-}
-
 void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
     // Something added to a channel; or tracks added, which may hold notes and devices already (an undo), or the master in
-    // place of another (a song applied). View state added (a track's lanes) changes nothing that plays. The areas'
-    // (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's, which nothing played reads; the curves',
-    // curvesChanged().
+    // place of another (a song applied): their devices' sounds are devicesChanged()'s, which tells each device that came with
+    // them. View state added (a track's lanes) changes nothing that plays. The areas' (isHeardAsKept()): the tempo map's,
+    // tempoMapChanged(); the chord lane's, which nothing played reads; the curves', curvesChanged(); the devices',
+    // devicesChanged().
     if (isHeardAsKept (parent, child))
         return;
 
@@ -486,17 +544,12 @@ void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& 
         markChange (parent, true);
 
     markTracksIn (child);
-    markSoundsIn (child);
 }
 
 void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
 {
     if (isHeardAsKept (parent, child))
-        return; // the areas': tempoMapChanged(); the chord lane's, which nothing played reads; curvesChanged()
-
-    // A device's sounds taken away whole: its own again.
-    if (child.hasType (schema::SOUNDS) && parent.hasType (schema::DEVICE))
-        changes.sounds.insert (getID (parent, schema::deviceID));
+        return; // the areas': tempoMapChanged(); the chord lane's, which nothing played reads; curvesChanged(); devicesChanged()
 
     if (! schema::isUncountedElement (parent, child))
         markChange (parent, true);
@@ -1270,6 +1323,29 @@ void SongPlayer::setChainValues (engine::ChainState& chain, const juce::ValueTre
     chain.setCrossover (readChainCrossover (chainState).value_or (getDefaultCrossover (index, count)));
     const auto keys = readChainKeys (chainState), velocities = readChainVelocities (chainState);
     chain.setNotes (keys.low, keys.high, velocities.low, velocities.high);
+}
+
+void SongPlayer::setChainValues (engine::ChainState& chain, const DeviceValue& value, const SongDevices& all)
+{
+    // As the song's values told it (takeDevice()): its fader's volume and pan; its crossover, the default for its place among
+    // its container's chains (as the song's devices handed whole say it) where it has none of its own; and the notes it plays.
+    auto& fader = chain.getFader();
+    fader.setVolume (std::max (value.volume, engine::Channel::silenceDb));
+    fader.setPan (value.pan);
+
+    auto index = 0, count = 1;
+
+    if (const auto* siblings = all.findList (getDeviceListPlace (value.place, value.form)))
+    {
+        count = (int) siblings->size();
+
+        for (size_t i = 0; i < siblings->size(); ++i)
+            if ((*siblings)[i] == value.id)
+                index = (int) i;
+    }
+
+    chain.setCrossover (value.crossover.value_or (getDefaultCrossover (index, count)));
+    chain.setNotes (value.keys.low, value.keys.high, value.velocities.low, value.velocities.high);
 }
 
 void SongPlayer::updateChainAudibility (const juce::ValueTree& containerState)
@@ -2109,6 +2185,7 @@ void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& de
 {
     // What a drum sampler's pads, a synth's oscillators and a sampler play: the song's SOUNDS name it as the
     // plug-in's state does.
+    soundLoads.fetch_add (1, std::memory_order_relaxed);
     const auto sounds = readDeviceSounds (deviceState);
     auto& processor = node.getRunner().getProcessor();
     const auto type = node.getDeviceInfo().typeID;
@@ -2126,51 +2203,6 @@ void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& de
         loadSamplerSound (static_cast<devices::Sampler&> (processor), song, sounds);
         loadSamplerSlices (static_cast<devices::Sampler&> (processor), sounds);
     }
-}
-
-void SongPlayer::loadSound (engine::DeviceNode& node, const juce::ValueTree& deviceState, const juce::Identifier& property)
-{
-    // Only the pad or the oscillator whose sound changed, as Swap changes one at each sound it tries; all of them for
-    // anything else.
-    const auto sounds = readDeviceSounds (deviceState);
-    auto& processor = node.getRunner().getProcessor();
-    const auto type = node.getDeviceInfo().typeID;
-
-    if (type == devices::DrumSampler::typeID)
-    {
-        for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-        {
-            for (int layer = 0; layer < devices::DrumSampler::numLayers; ++layer)
-            {
-                if (property == schema::getPadSound (pad, layer) || property == schema::getPadSoundFile (pad, layer))
-                {
-                    loadPadSound (static_cast<devices::DrumSampler&> (processor), song, sounds, pad);
-                    return;
-                }
-            }
-        }
-    }
-
-    if (type == devices::Synth::typeID)
-    {
-        for (int osc = 0; osc < devices::Synth::numOscillators; ++osc)
-        {
-            if (property == schema::getOscillatorWavetable (osc) || property == schema::getOscillatorWavetableFile (osc))
-            {
-                loadOscillatorTable (static_cast<devices::Synth&> (processor), song, sounds, osc);
-                return;
-            }
-        }
-    }
-
-    // A sampler's slices by hand, which change as they are dragged, without reading its sound again.
-    if (type == devices::Sampler::typeID && (property == schema::samplerSlices || property == schema::samplerSlicesRemoved))
-    {
-        loadSamplerSlices (static_cast<devices::Sampler&> (processor), sounds);
-        return;
-    }
-
-    loadSounds (node, deviceState);
 }
 
 void SongPlayer::setChannel (const juce::ValueTree& channelState, bool isMaster)
@@ -2212,33 +2244,22 @@ void SongPlayer::updateAudibility()
         return false;
     };
 
-    // What the song's sidechains listen to, the master's and those in containers too.
+    // What the song's sidechains listen to, the master's and those in containers too, from the devices the player holds
+    // (heldDevices: never the song's, as this runs in the tree's callback of a track muted or soloed, takeValue()).
     std::set<std::int64_t> keys;
-    const auto addKeys = [&keys] (const juce::ValueTree& chain, auto& addInside) -> void
-    {
-        for (const auto& device : chain)
-        {
-            if (device.hasType (schema::DEVICE))
-            {
-                if (const auto source = getID (device, schema::deviceSidechain); source != 0)
-                    keys.insert (source);
-            }
-            else if (device.hasType (schema::CONTAINER) || device.hasType (schema::CHAIN))
-            {
-                addInside (device, addInside);
-            }
-        }
-    };
 
-    for (const auto& state : trackStates)
-        addKeys (state, addKeys);
+    for (const auto& [id, device] : heldDevices)
+        if (device.sidechain != 0)
+            keys.insert (device.sidechain);
 
-    addKeys (song.getState().getChildWithName (schema::MASTER), addKeys);
-
-    // A pad's track goes with its sampler's track, whose mute and solo cover its pads on tracks of their own.
+    // A pad's track goes with its sampler's track, whose mute and solo cover its pads on tracks of their own (its sampler's
+    // channel as the player holds it; none on the master).
     const auto getSamplerTrack = [this] (const juce::ValueTree& padState)
     {
-        return findTrackState (song, getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) getID (padState, schema::trackPadDevice))));
+        const auto found = heldDevices.find ((std::uint64_t) getID (padState, schema::trackPadDevice));
+        return found != heldDevices.end() && found->second.channel != 0
+                   ? findTrackState (song, TrackID::fromRaw ((std::uint64_t) found->second.channel))
+                   : juce::ValueTree();
     };
 
     // Whether a track is muted or soloed, by its own switches or a folder's it is in.
@@ -2378,31 +2399,16 @@ void SongPlayer::takeSendLevel (DeviceID id, float decibels)
 bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier& property)
 {
     // (A modulator's parameter, steps or switch, and a macro's value: the song's values tell them, takeModulator(); a send's
-    // level too, takeSendLevel().)
+    // level too, takeSendLevel(); and what the devices' value covers of a device, a container or a chain, takeDevice().)
 
-    // A container's mix: at once.
-    if (tree.hasType (schema::CONTAINER) && property == schema::deviceMix)
-    {
-        if (const auto found = containers.find (getID (tree, schema::deviceID)); found != containers.end())
-            found->second->setMix ((float) tree.getProperty (schema::deviceMix, 1.0f));
-
-        return true;
-    }
-
-    // A container's chain's volume, pan and crossover, its mute and solo and the notes it plays, at once; its name changes
-    // nothing that plays, nor a container's.
+    // A container's chain's mute and solo (the store's, still the tree's), at once.
     if (tree.hasType (schema::CHAIN))
     {
         if (property == schema::chainMute || property == schema::chainSolo)
             updateChainAudibility (tree.getParent());
-        else if (const auto found = chains.find (getID (tree, schema::chainID)); found != chains.end())
-            setChainValues (*found->second, tree);
 
         return true;
     }
-
-    if (tree.hasType (schema::CONTAINER) && property == schema::containerName)
-        return true;
 
     // A plain folder's VCA turns the tracks in it.
     if (tree.hasType (schema::TRACK) && isFolderState (tree) && ! tree.hasProperty (schema::channelFader)
@@ -2424,24 +2430,6 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
         return true;
     }
 
-    // A parameter's value set by hand, or its default again; in a new plan, with the device made anew (getDevice()), if it
-    // makes the device's sound come later or sooner.
-    if (tree.hasType (schema::VALUES))
-    {
-        if (auto* node = findDevice (getID (tree.getParent(), schema::deviceID)))
-        {
-            const auto& info = node->getDeviceInfo();
-
-            if (const auto index = devices::findParameter (info, property.toString().toStdString()); index >= 0)
-                node->setValue (index, readSavedValue (info.parameters[(size_t) index], tree.getProperty (property)));
-
-            if (changesLatency (*node, readValuesSetByHand (*node)))
-                return false;
-        }
-
-        return true;
-    }
-
     // A plug-in's value set by hand, by its own ID; and its settings and program, which its instance takes
     // (model/plugins/internal/PluginInstances.h).
     if (tree.hasType (schema::VALUE))
@@ -2455,20 +2443,6 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
 
     if (tree.hasType (schema::DEVICE) && (property == schema::pluginState || property == schema::pluginProgram))
         return true;
-
-    // A pad's sound or an oscillator's table: loaded now into the node the next plan keeps, which doesn't load it again.
-    if (tree.hasType (schema::SOUNDS))
-    {
-        const auto id = getID (tree.getParent(), schema::deviceID);
-
-        if (auto* node = findDevice (id))
-        {
-            loadSound (*node, tree.getParent(), property);
-            changes.soundsTaken.insert (id);
-        }
-
-        return true;
-    }
 
     const auto isChannel = tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER);
 
@@ -2490,12 +2464,174 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
     if (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
         return true;
 
-    // A device switched: at once, and a new plan for the delays that line the tracks up, which its latency changes.
-    if (tree.hasType (schema::DEVICE) && property == schema::deviceOff)
-        if (auto* node = findDevice (getID (tree, schema::deviceID)))
-            node->setOn (! (bool) tree[schema::deviceOff]);
-
     return false;
+}
+
+SongPlayer::DeviceTaken SongPlayer::takeDevice (const SongValues::DeviceChange& change, const SongDevices& all)
+{
+    using Change = SongValues::DeviceChange;
+    using Form = DeviceValue::Form;
+    DeviceTaken taken;
+
+    if (change.was == nullptr || change.now == nullptr || change.has (Change::made) || change.has (Change::place))
+        return taken;
+
+    const auto& was = *change.was;
+    const auto& now = *change.now;
+    const auto id = (std::int64_t) change.id.getRaw();
+    auto* node = (now.form == Form::own || now.form == Form::plugin) ? findDevice (id) : nullptr;
+
+    // Its settings: a device switched plays at once, and needs a new plan for the delays that line the tracks up, which its
+    // latency changes; a container's or a chain's name alone changes nothing that plays; anything else (a sidechain, a type,
+    // which plug-in, a container's switch, split or kind) needs a plan.
+    if (change.has (Change::settings))
+    {
+        const auto nameAlone = was.form == now.form && was.off == now.off && was.sidechain == now.sidechain && was.type == now.type
+                               && was.plugin == now.plugin && was.split == now.split && was.instrument == now.instrument;
+
+        if (nameAlone)
+        {
+            taken.atOnce = true;
+        }
+        else
+        {
+            if (node != nullptr && was.off != now.off)
+                node->setOn (! now.off);
+
+            taken.needsPlan = true;
+        }
+    }
+
+    // A container's mix at once; a plug-in's in a new plan.
+    if (change.has (Change::mix))
+    {
+        if (now.form == Form::container)
+        {
+            if (const auto found = containers.find (id); found != containers.end())
+                found->second->setMix (now.mix);
+
+            taken.atOnce = true;
+        }
+        else
+        {
+            taken.needsPlan = true;
+        }
+    }
+
+    // Phazite's own device's values that differ, each at once (the parameter's default for one set back to it); in a new plan,
+    // with the device made anew (getDevice()), if they make its sound come later or sooner.
+    if (change.has (Change::values))
+    {
+        if (node != nullptr && now.form == Form::own)
+        {
+            const auto set = [node, &now] (std::uint32_t index) { node->setValue ((int) index, now.getParameterValue ((int) index)); };
+
+            immer::diff (
+                was.values, now.values, [&set] (const auto& entry) { set (entry.first); },
+                [&set] (const auto& entry) { set (entry.first); }, [&set] (const auto& entry, const auto&) { set (entry.first); });
+
+            taken.changesLatency = changesLatency (*node, readValuesSetByHand (*node));
+        }
+
+        taken.atOnce = taken.atOnce || ! taken.changesLatency; // one that waits for its plan was taken at once in part only
+    }
+
+    // Its sounds that differ: loaded now into the node the next plan keeps, which doesn't load them again. Not its first sound
+    // or its last (soundsAppeared: as its sounds came or went whole, an Undo's, a song applied), which the next plan loads
+    // (devicesChanged() marks them), as it always did: not at once as well.
+    if (change.has (Change::sounds) && ! change.has (Change::soundsAppeared))
+    {
+        if (node != nullptr && now.form == Form::own)
+        {
+            loadSoundsChanged (*node, was, now);
+            changes.soundsTaken.insert (id);
+        }
+
+        taken.atOnce = true;
+    }
+
+    // A container's chain's volume, pan and crossover and the notes it plays, at once.
+    if (change.has (Change::chainFader) || change.has (Change::chainRange))
+    {
+        if (const auto found = chains.find (id); found != chains.end())
+            setChainValues (*found->second, now, all);
+
+        taken.atOnce = true;
+    }
+
+    return taken;
+}
+
+void SongPlayer::loadSoundsChanged (engine::DeviceNode& node, const DeviceValue& was, const DeviceValue& now)
+{
+    // Which sounds differ, by their indices among the type's (DevicesValue.h: getSoundPropertiesOf()).
+    std::set<int> indices;
+    const auto add = [&indices] (std::uint16_t index) { indices.insert ((int) index); };
+    immer::diff (
+        was.sounds, now.sounds, [&add] (const auto& entry) { add (entry.first); }, [&add] (const auto& entry) { add (entry.first); },
+        [&add] (const auto& entry, const auto&) { add (entry.first); });
+
+    if (indices.empty())
+        return;
+
+    soundLoads.fetch_add (1, std::memory_order_relaxed);
+
+    // What a loader reads of the device's sounds, as an element made of the value after (those of the properties from `first`
+    // on, `count` of them), the song's tree read nowhere: the loaders take a SOUNDS element (DrumKit.h, Wavetables.h,
+    // SamplerSound.h).
+    const auto& properties = getSoundPropertiesOf (std::string_view (now.type.toRawUTF8()));
+    const auto makeSounds = [&properties, &now] (int first, int count)
+    {
+        juce::ValueTree sounds (schema::SOUNDS);
+
+        for (auto i = first; i < first + count && i < (int) properties.size(); ++i)
+            if (const auto* sound = now.sounds.find ((std::uint16_t) i))
+                sounds.setProperty (properties[(size_t) i], *sound, nullptr);
+
+        return sounds;
+    };
+
+    auto& processor = node.getRunner().getProcessor();
+    const auto type = node.getDeviceInfo().typeID;
+
+    // A pad's layers' sounds and files, an oscillator's table and file: each pad or oscillator whose sound changed, once, as
+    // Swap changes one at each sound it tries.
+    if (type == devices::DrumSampler::typeID)
+    {
+        constexpr auto perPad = devices::DrumSampler::numLayers * 2;
+        std::set<int> pads;
+
+        for (const auto index : indices)
+            pads.insert (index / perPad);
+
+        for (const auto pad : pads)
+            if (juce::isPositiveAndBelow (pad, devices::DrumSampler::numPads))
+                loadPadSound (static_cast<devices::DrumSampler&> (processor), song, makeSounds (pad * perPad, perPad), pad);
+    }
+
+    if (type == devices::Synth::typeID)
+    {
+        std::set<int> oscillators;
+
+        for (const auto index : indices)
+            oscillators.insert (index / 2);
+
+        for (const auto osc : oscillators)
+            if (juce::isPositiveAndBelow (osc, devices::Synth::numOscillators))
+                loadOscillatorTable (static_cast<devices::Synth&> (processor), song, makeSounds (osc * 2, 2), osc);
+    }
+
+    // A sampler's sound and its file (and with them its slices), or its slices by hand alone, which change as they are
+    // dragged, without reading its sound again.
+    if (type == devices::Sampler::typeID)
+    {
+        const auto sounds = makeSounds (0, (int) properties.size());
+
+        if (indices.contains (0) || indices.contains (1))
+            loadSamplerSound (static_cast<devices::Sampler&> (processor), song, sounds);
+
+        loadSamplerSlices (static_cast<devices::Sampler&> (processor), sounds);
+    }
 }
 
 //==============================================================================

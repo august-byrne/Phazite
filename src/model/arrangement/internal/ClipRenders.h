@@ -209,7 +209,12 @@ private:
     // no modulator or macro moves any of it; the song's tree holds none of them (roadmap step S5.20). A track or a container
     // added or taken out with modulators in it is the tree's, looked at as before. Nor the sends (sendsChanged()): a send
     // plays a track's sound after its clips, and no render is made of one; the song's tree holds none of them (roadmap step
-    // S5.20). A track added or taken out with sends on it is the tree's, looked at as before.
+    // S5.20). A track added or taken out with sends on it is the tree's, looked at as before. Nor the devices
+    // (devicesChanged()): a render is a clip's file, which no device, container or chain plays, and the tree's callbacks above
+    // leave a device, a container, a chain or what is in one, added or taken out, alone (isHeardAsKept(), through
+    // isHeardAsDevices()), where each made the renders look again for nothing (roadmap step S5.20, the devices' listener; a
+    // plug-in's VALUE added or taken out still does, the store's). A track added or taken out with devices in it is the
+    // tree's, looked at as before.
 
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };

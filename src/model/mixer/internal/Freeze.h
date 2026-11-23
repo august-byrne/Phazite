@@ -162,6 +162,14 @@ private:
     // another order, marked and compared at the later moment, their modulators read and compared too (modulatorsAsFrozen).
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
+    // The devices, containers and chains that changed (SongValues.h), what the devices' value covers of which the tree's
+    // callbacks below leave alone (isHeardAsKept(); the store's properties and a plug-in's VALUEs they look at as before): the
+    // frozen tracks they were on and are on, and those whose devices came in another order, marked and compared at the later
+    // moment, as check() takes a change in a frozen track. Its Holds keep copies of its frozen devices' elements still (they
+    // move to values at the devices' switch): compared whole there, as before.
+    void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
+                         const SongDevices& now) override;
+
     // The sends (sendsChanged()): nothing, as no frozen track's file holds anything of them: a frozen file is its track before
     // its fader, which its sends come after (its Holds keep its frozen devices, the song's values, its tempos, its frozen
     // devices' curves and its modulators, no send, nor a send's level's curve: getFrozenCurveOwners()), and nothing of a

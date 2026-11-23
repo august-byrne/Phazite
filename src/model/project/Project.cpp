@@ -10,6 +10,7 @@
 #include "model/base/Json.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
@@ -2777,6 +2778,9 @@ void Project::clearToCompare()
     comparingSendsWhole = false;
     sendsToCompare.clear();
     sendTracksToCompare.clear();
+    comparingDevicesWhole = false;
+    devicesToCompare.clear();
+    deviceOwnersToCompare.clear();
     toCompare.clear();
     notesToCompare.clear();
     clipsToCompare.clear();
@@ -2930,7 +2934,7 @@ void Project::compareWithSavedState()
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
     // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the
-    // sections, modulation, the sends), each asked only while all before it compare.
+    // sections, modulation, the sends, the devices), each asked only while all before it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
@@ -2940,6 +2944,7 @@ void Project::compareWithSavedState()
     same = same && areSectionsAsSaved();
     same = same && areModulatorsAsSaved();
     same = same && areSendsAsSaved();
+    same = same && areDevicesAsSaved();
 
     clearToCompare();
 
@@ -3515,6 +3520,114 @@ void Project::sendsChanged (const std::vector<SongValues::SendChange>& sends, co
         sendsToCompare.clear();
         sendTracksToCompare.clear();
     }
+}
+
+void Project::devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
+                              const SongDevices&)
+{
+    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare of them, the tracks
+    // and the master whole.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+
+    if (comparingDevicesWhole)
+        return;
+
+    using Change = SongValues::DeviceChange;
+
+    const auto addOwner = [this] (const DevicePlace& owner)
+    {
+        if (std::find (deviceOwnersToCompare.begin(), deviceOwnersToCompare.end(), owner) == deviceOwnersToCompare.end())
+            deviceOwnersToCompare.push_back (owner);
+    };
+
+    // One added, taken out or come to another place: its owners' lists too, before and after, so that one taken out and put
+    // back at another place before the comparison compares by where it is among its owner's others.
+    for (const auto& device : devices)
+    {
+        if (std::find (devicesToCompare.begin(), devicesToCompare.end(), device.id) == devicesToCompare.end())
+            devicesToCompare.push_back (device.id);
+
+        if (! device.wasThere || ! device.isThere || device.has (Change::made) || device.has (Change::place))
+        {
+            if (device.wasThere)
+                addOwner (getDeviceListPlace (device.before, device.form));
+
+            if (device.isThere)
+                addOwner (getDeviceListPlace (device.after, device.form));
+        }
+    }
+
+    for (const auto& owner : reordered)
+        addOwner (owner);
+
+    if (devicesToCompare.size() + deviceOwnersToCompare.size() > mostToCompare)
+    {
+        comparingDevicesWhole = true;
+        devicesToCompare.clear();
+        deviceOwnersToCompare.clear();
+    }
+}
+
+bool Project::areDevicesAsSaved() const
+{
+    if (! comparingDevicesWhole && devicesToCompare.empty() && deviceOwnersToCompare.empty())
+        return true;
+
+    // While the trees hold the devices, by element: past mostToCompare, the tracks and the master whole (holdTheSameProject(),
+    // which holds the devices); else each owner's list's order, then each device against the saved copy's of its ID, its place
+    // and its element, one compared each (one gone from both is the same).
+    const auto state = song->getState();
+    const auto now = keepValues (*song);
+
+    if (comparingDevicesWhole)
+    {
+        for (const auto* type : { &schema::TRACKS, &schema::MASTER })
+        {
+            const auto element = state.getChildWithName (*type), saved = savedState.tree.getChildWithName (*type);
+
+            if (element.isValid() != saved.isValid()
+                || (element.isValid() && ! holdTheSameProject (element, now, saved, savedState.values)))
+                return false;
+        }
+
+        return true;
+    }
+
+    // Each tree indexed once, however many are compared (a walk of each for each device was a walk of the song per knob).
+    const auto held = indexDeviceElementsIn (state);
+    const auto inSaved = indexDeviceElementsIn (savedState.tree);
+
+    for (const auto& owner : deviceOwnersToCompare)
+    {
+        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+
+        if (held.getOrder (owner) != inSaved.getOrder (owner))
+            return false;
+    }
+
+    return std::all_of (devicesToCompare.begin(), devicesToCompare.end(),
+                        [this, &held, &inSaved, &now] (DeviceID id)
+                        {
+                            const auto found = held.find (id);
+                            const auto saved = inSaved.find (id);
+
+                            if (! found.element.isValid() || ! saved.element.isValid())
+                                return found.element.isValid() == saved.element.isValid();
+
+                            return found.place == saved.place && holdTheSameProject (found.element, now, saved.element, savedState.values);
+                        });
 }
 
 bool Project::areSendsAsSaved() const

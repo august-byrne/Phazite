@@ -74,10 +74,28 @@ public:
     // is first needed and kept.
     void readLive (engine::FileReader&, const std::atomic<std::uint64_t>& blocksPlayed);
 
-    // Takes a change of the song that is a value set by hand into what plays at once; false for any other change, which
-    // needs a new plan. Not a modulator's nor a macro's, nor a send's, which the song's values tell (takeModulator(),
-    // takeSendLevel()).
+    // Takes a change of the song's tree that is a value set by hand into what plays at once; false for any other change, which
+    // needs a new plan. What the tree still holds that plays: a plug-in's VALUE, a chain's mute and solo, a channel's volume,
+    // pan, mute and solo. Not a modulator's nor a macro's, nor a send's, nor a device's, a container's or a chain's that the
+    // devices' value covers, which the song's values tell (takeModulator(), takeSendLevel(), takeDevice()).
     bool takeValue (const juce::ValueTree& tree, const juce::Identifier& property);
+
+    // A device, a container or a chain changed in place, as the song's values told it (SongValues::DeviceChange: its value
+    // before and after), into what plays it at once, if anything does: Phazite's own device's values that differ between the
+    // two (each set on its node, the parameter's default for one set back to it) and its sounds (each pad's, oscillator's or
+    // the sampler's that changed, loaded now, which the next plan doesn't load again); a container's mix; a chain's volume,
+    // pan, crossover and notes; a device's switch, which needs a plan too (the delays that line the tracks up). What it took
+    // at once (atOnce: what an undo's following looks at, PlaybackSession.h), whether what changed needs a plan now (its
+    // switch, sidechain, type or plug-in, a plug-in's mix, a container's switch, split or kind; not a name alone), and whether
+    // the values its node plays now would make its sound come later or sooner than the latency it was prepared with (the
+    // plan then waits for a gesture's end). Never for a change that is no change in place (made, place), which a plan takes.
+    // With the song's devices whole as they were handed with it (a chain's place among its container's).
+    struct DeviceTaken
+    {
+        bool atOnce = false, needsPlan = false, changesLatency = false;
+    };
+
+    DeviceTaken takeDevice (const SongValues::DeviceChange&, const SongDevices& now);
 
     // What plays a device (by its ID), a track's strip (by its ID; 0 for the master's) and a container's chain (by its ID),
     // for what shows them (meters, editors' displays); nullptr for none.
@@ -152,6 +170,10 @@ public:
     static std::uint64_t countDevicesRead() noexcept;
     static std::uint64_t countCurvesRead() noexcept;
     static std::uint64_t countFilesAsked() noexcept;
+
+    // How many times a device's node had its sounds loaded (all of them, or those that changed), by every player since the
+    // program started: for the tests that count a sound's loads.
+    static std::uint64_t countSoundLoads() noexcept;
 
     // Whether the checks look at a part (by its place among those a plan keeps) of a plan (by its number), checking one part
     // in every so many: any `every` plans in a row look at each part once. For the tests of the choice.
@@ -278,7 +300,6 @@ private:
     std::shared_ptr<const engine::NoteSequence> getNotes (const juce::ValueTree& trackState);
     void markChange (const juce::ValueTree& changed, bool structure); // an element added, removed or moved in it
     void markTracksIn (const juce::ValueTree& element);               // it, if a track or the master, and the tracks it holds
-    void markSoundsIn (const juce::ValueTree& element);               // the devices in it, as their sounds came with it
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
@@ -310,6 +331,35 @@ private:
     // reads every track's sends: getChannels()), and the session plays a level at once (takeSendLevel()). And the song's sends
     // as they are now kept (heldSends): the area's value the teller hands the listener.
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
+
+    // The devices, containers and chains that changed (SongValues.h; its tree callbacks leave what the devices' value covers
+    // alone, isHeardAsKept()): the channels each was on and is on (the master's under 0), and those whose devices came in
+    // another order, their devices read again by the next compile, whatever part changed, a value the session takes at once
+    // (takeDevice()) too, as a change at or under a device marked its channel; the sounds of each device that came (made) or
+    // whose first sound came or last went (Changes::sounds), and of each whose sounds were set in place (soundsSet). And what
+    // decides what is heard brought up to date (heldDevices).
+    void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
+                         const SongDevices& now) override;
+
+    // What decides what is heard between plans (updateAudibility(), which a track muted or soloed asks in the tree's callback,
+    // where nothing reads the song's devices: SongValues.h), of each device: the track its sidechain listens to (0 for none)
+    // and its channel (a track's ID, 0 for the master's). Read from the song's devices as the player is made, and kept as
+    // devicesChanged() tells them since.
+    struct HeldDevice
+    {
+        std::int64_t sidechain = 0, channel = 0;
+    };
+
+    std::map<std::uint64_t, HeldDevice> heldDevices;
+    void holdDevices(); // from the devices the keeper told (SongValues.h: getDevicesAsTold()), as the player is made
+
+    // A chain's values as the song's values told them (takeDevice()), its place among its container's from the song's devices
+    // handed whole (its default crossover: Containers.h, getDefaultCrossover()).
+    void setChainValues (engine::ChainState&, const DeviceValue& chain, const SongDevices& all);
+
+    // The sounds of Phazite's own device's node that differ between two values of it, loaded again (each pad's or oscillator's
+    // once; a sampler's sound, or its slices alone), each from a SOUNDS element made of the value after for what it reads.
+    void loadSoundsChanged (engine::DeviceNode&, const DeviceValue& was, const DeviceValue& now);
 
     // The sends that decide which of them sends (updateAudibility(), which a track muted or soloed asks in the tree's callback,
     // where nothing reads the song's sends: SongValues.h): the song's sends as the last compile read them (the sends' area's
@@ -440,7 +490,6 @@ private:
     void addModulation (engine::Plan::Strip&, const SongModulation&, const juce::ValueTree& channelState,
                         const std::vector<std::int64_t>& deviceIDs);
     void loadSounds (engine::DeviceNode&, const juce::ValueTree& deviceState);
-    void loadSound (engine::DeviceNode&, const juce::ValueTree& deviceState, const juce::Identifier& property); // its pad's or oscillator's
     void setChannel (const juce::ValueTree& channelState, bool isMaster);
     void updateAudibility();
 };

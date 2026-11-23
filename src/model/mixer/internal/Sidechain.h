@@ -10,6 +10,7 @@
 #include "model/base/Song.h"
 #include "model/mixer/SidechainChoice.h"
 
+#include <string_view>
 #include <vector>
 
 namespace phazite
@@ -35,9 +36,11 @@ SidechainChoice describeSidechainSource (const Song&, DeviceID);
 // Whether a device hears the track its sidechain listens to now, as the mixer shows it (a stripe of the track's colour, a
 // link to its channel): one that has a source does, but Phazite's compressor only while it compresses or ducks; shaping
 // transients (its Transient mode), it hears its own sound, its key kept for when it compresses or ducks again. And whether
-// a change of a device's value set by hand (a property of its VALUES) turns that on or off, as the compressor's mode does.
+// a change of a value set by hand of one of Phazite's own devices, by its type and its parameter's index among its
+// description's, turns that on or off, as the compressor's mode does: what the devices' part of the keeper asks of each value
+// that changed (model/base/internal/DevicesArea.h: DeviceChange::sidechainSwitched), so that no listener reads a device's type.
 bool hearsSidechain (const Song&, DeviceID);
-bool switchesSidechain (const juce::ValueTree& values, const juce::Identifier& property);
+bool switchesSidechain (std::string_view typeID, int parameterIndex);
 
 // Every track but one, in the song's order, with its colour, and why a device on that one couldn't listen to it: its sound
 // comes from that track, which would make a loop (getSidechainSources()), or it is a plain folder, with no sound of its own.

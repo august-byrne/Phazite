@@ -5,6 +5,8 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
+#include "devices/dynamics/Compressor.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/reverb/Reverb.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
@@ -14,7 +16,10 @@
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/mixer/ContainerModel.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 #include "model/plugins/internal/PluginHost.h"
@@ -26,6 +31,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -230,6 +236,114 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     phazite::setTrackName (*song, track, "Lead");
     setSong (context, nullptr);
     CHECK (hear().empty());
+    context.removeListener (&view);
+}
+
+TEST_CASE ("Views hear a sidechain set or cleared, a mode that switches what it hears and a device with one removed as any channel's "
+           "devices; a knob and a chain's volume as nothing; a chain's keys and the master's devices as their channel's")
+{
+    // The devices are heard from the song's values (SongValues.h: Listener::devicesChanged()): where sound can reach changes
+    // every strip's send knobs (a send that would make a loop has none), so a sidechain's change names any channel; a
+    // parameter's value is no change that views show; the notes a chain plays show on its channel, as the master's devices on
+    // the master's, named by its ID.
+    struct View : phazite::ProjectContext::Listener
+    {
+        void projectChanged() override {}
+        void songChanged (const phazite::SongChanges& changes) override { heard.push_back (changes); }
+
+        std::vector<phazite::SongChanges> heard;
+    };
+
+    namespace dev = phazite::devices;
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 3);
+    const auto bass = tracks[0], kick = tracks[1], keys = tracks[2];
+    const auto compressor = phazite::test::addOwnDevice (*song, bass, dev::Compressor::typeID);
+    const auto eq = phazite::test::addOwnDevice (*song, bass, dev::Equalizer::typeID);
+    REQUIRE (compressor.isValid());
+    REQUIRE (eq.isValid());
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+    setSong (context, song.get());
+    const auto container = phazite::addContainer (*song, bass);
+    const auto instruments = phazite::addInstrumentContainer (context, keys);
+    REQUIRE (container.isValid());
+    REQUIRE (instruments.isValid());
+    const auto chain = phazite::getChains (*song, container).front();
+    const auto keysChain = phazite::getChains (*song, instruments).front();
+    View view;
+    context.addListener (&view);
+    phazite::test::dispatchPendingMessages();
+    view.heard.clear();
+
+    // What the view heard of one edit, made as one step: one notification, or none.
+    const auto hear = [&] (const juce::String& name, const std::function<void()>& edit) -> std::optional<phazite::SongChanges>
+    {
+        {
+            const phazite::UndoStep step (*song, name);
+            edit();
+        }
+
+        phazite::test::dispatchPendingMessages();
+        auto heard = std::exchange (view.heard, {});
+        REQUIRE (heard.size() <= 1);
+        return heard.empty() ? std::nullopt : std::optional (heard.front());
+    };
+
+    const auto anyChannel = [&] (const juce::String& name, const std::function<void()>& edit)
+    {
+        INFO (name.toStdString());
+        const auto changes = hear (name, edit);
+        REQUIRE (changes.has_value());
+        CHECK (changes->devices);
+        CHECK (changes->deviceChannels.any);
+    };
+
+    const auto setMode = [&] (dev::Compressor::Mode to)
+    {
+        const auto& id = dev::Compressor::info.parameters[(size_t) dev::Compressor::mode].id;
+        phazite::setValueSetByHand (*song, { compressor, juce::String (id.data(), id.size()) }, (float) (int) to);
+    };
+
+    anyChannel ("Sidechain", [&] { phazite::setSidechainSource (*song, compressor, kick); });
+    anyChannel ("Transient Mode", [&] { setMode (dev::Compressor::Mode::transient); });
+    anyChannel ("Duck Mode", [&] { setMode (dev::Compressor::Mode::duck); });
+    anyChannel ("Clear Sidechain", [&] { phazite::setSidechainSource (*song, compressor, {}); });
+    phazite::setSidechainSource (*song, compressor, kick);
+    phazite::test::dispatchPendingMessages();
+    view.heard.clear();
+    anyChannel ("Remove Compressor", [&] { phazite::removeDevice (*song, compressor); });
+
+    // A knob, a chain's volume: nothing.
+    const auto& gain = dev::Equalizer::info.parameters[0].id;
+    CHECK_FALSE (
+        hear ("Turn", [&] { phazite::setValueSetByHand (*song, { eq, juce::String (gain.data(), gain.size()) }, 3.0f); }).has_value());
+    CHECK_FALSE (hear ("Chain Volume", [&] { phazite::setChainVolume (*song, chain, -6.0f); }).has_value());
+
+    // The keys a chain plays: its channel's devices, its channel named.
+    const auto ranged = hear ("Chain Keys", [&] { phazite::setChainKeys (*song, keysChain, { 12, 60 }); });
+    REQUIRE (ranged.has_value());
+    CHECK (ranged->devices);
+    CHECK_FALSE (ranged->deviceChannels.any);
+    CHECK (ranged->deviceChannels.named == std::vector<phazite::TrackID> { keys });
+
+    // A device on the master added and switched off: the master's channel, by its ID.
+    const auto master = phazite::getMasterID (*song);
+    phazite::DeviceID onMaster;
+
+    for (const auto& [name, edit] :
+         std::vector<std::pair<juce::String, std::function<void()>>> {
+             { "Add to Master", [&] { onMaster = phazite::test::addOwnDevice (*song, master, dev::Delay::typeID); } },
+             { "Turn Off", [&] { phazite::setDeviceOn (*song, onMaster, false); } } })
+    {
+        INFO (name.toStdString());
+        const auto changes = hear (name, edit);
+        REQUIRE (changes.has_value());
+        CHECK (changes->devices);
+        CHECK_FALSE (changes->deviceChannels.any);
+        CHECK (changes->deviceChannels.named == std::vector<phazite::TrackID> { master });
+    }
+
+    setSong (context, nullptr);
     context.removeListener (&view);
 }
 

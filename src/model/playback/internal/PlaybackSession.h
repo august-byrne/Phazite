@@ -278,6 +278,19 @@ private:
     // and sends in another order: a new plan.
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
+    // The devices, containers and chains (SongValues.h; its tree callbacks above leave what the devices' value covers alone,
+    // isHeardAsKept(): the store's, a plug-in's VALUE, state and program and a chain's mute and solo, are still the tree's,
+    // SongPlayer::takeValue()), by the parts that changed, as the tree's changes of them were taken: one changed in place in
+    // its values set by hand, its sounds, a container's mix or a chain's volume, pan, crossover or notes plays at once, from
+    // the values before and after it is told (SongPlayer::takeDevice()), and while the history undoes or redoes, what a pass
+    // writing it writes from then follows once the move is whole (historyMoved()), as for a name alone, which plays nothing;
+    // values that make its sound come later or sooner, a new plan, after the gesture that drags them if one does
+    // (latencyWaits); one added, taken out or come to another place, its switch (set at once too), sidechain, type or plug-in,
+    // a plug-in's mix, a container's switch, split or kind, its first value set by hand or its last set back to its default
+    // (as its VALUES came or went), its first sound or its last (as its SOUNDS did), and devices in another order: a new plan.
+    void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
+                         const SongDevices& now) override;
+
     // The song's history moved by hand, and the move is whole (Song.h: HistoryListener): what a pass writing automation writes
     // follows the values the move set by hand that play at once (AutomationWriter::followValuesSetByHand()), where the
     // tree's callbacks or the values' listener heard one meanwhile (followAfterMove), for every area alike. Read here, never

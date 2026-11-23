@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <string_view>
 
 namespace phazite
 {
@@ -295,11 +296,9 @@ bool hearsSidechain (const Song& song, DeviceID id)
            || devices::Compressor::getMode (readDeviceParameterValue (state, mode)) != devices::Compressor::Mode::transient;
 }
 
-bool switchesSidechain (const juce::ValueTree& values, const juce::Identifier& property)
+bool switchesSidechain (std::string_view typeID, int parameterIndex)
 {
-    const auto mode = devices::Compressor::info.parameters[(size_t) devices::Compressor::mode].id;
-    return values.hasType (schema::VALUES) && isCompressor (values.getParent())
-           && property.toString() == juce::String (mode.data(), mode.size());
+    return typeID == std::string_view (devices::Compressor::typeID) && parameterIndex == (int) devices::Compressor::mode;
 }
 
 SidechainChoice describeSidechainSource (const Song& song, DeviceID id)

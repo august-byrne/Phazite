@@ -3248,6 +3248,42 @@ void VersionHistory::sendsChanged (const std::vector<SongValues::SendChange>& se
     changesMayDiffer();
 }
 
+void VersionHistory::devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
+                                     const SongDevices&)
+{
+    // A change of the song as its tree's are, in devices: the lines of the channels they were on and are on, by their IDs (a
+    // listener of the song's values reads nothing of the song), as a change under a device marked its channel's line.
+    ++songChanges;
+    edited();
+
+    const auto mark = [this] (const DevicePlace& place)
+    {
+        if (place.onMaster)
+        {
+            masterHeard = true;
+        }
+        else if (place.track.isValid())
+        {
+            sinceBase.markTrack (place.track.getRaw());
+            againstCompared.markTrack (place.track.getRaw());
+        }
+    };
+
+    for (const auto& device : devices)
+    {
+        if (device.wasThere)
+            mark (device.before);
+
+        if (device.isThere)
+            mark (device.after);
+    }
+
+    for (const auto& place : reordered)
+        mark (place);
+
+    changesMayDiffer();
+}
+
 void VersionHistory::markCurve (const juce::String& key)
 {
     sinceBase.markCurve (key);
@@ -3271,8 +3307,8 @@ void VersionHistory::markOrder()
 
 void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (isHeardAsKept (tree))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
+    if (isHeardAsKept (tree, property))
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), ..., devicesChanged()
 
     ++songChanges;
 

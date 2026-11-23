@@ -10,12 +10,12 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/arrangement/internal/Transients.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/internal/Freeze.h"
-#include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -69,6 +69,7 @@ namespace
             cancelPendingUpdate();
             pending = {};
             notesChanged.clear();
+            masterDevices = false;
             ++version;
             song = newSong;
             state = song != nullptr ? song->getState() : juce::ValueTree();
@@ -88,6 +89,7 @@ namespace
         juce::ValueTree state;
         SongChanges pending;
         std::vector<ClipID> notesChanged; // named as the changes are delivered, with their tracks
+        bool masterDevices = false;       // the master's devices changed: its channel named as the changes are delivered
         int version = 0;                  // ProjectContext::getSongVersion()
 
         // A clip's notes and controllers' values, which the song holds beside its tree (SongValues.h): a change in the clip,
@@ -160,7 +162,7 @@ namespace
         // The sends (SongValues.h): the devices' group, as a SEND's change was, naming the tracks each was on and is on and the
         // returns it went to and goes to (a return's strip lists the tracks that send to it); and, for one added, taken out, come
         // to another track or sent to another return, which changes where sound can go, any channel (every strip's send knobs
-        // follow the whole routing, as changesRouting() says of a device's sidechain). Not a level alone, a parameter's value,
+        // follow the whole routing, as devicesChanged() says of a device's sidechain). Not a level alone, a parameter's value,
         // which no view shows as a change (controls read values as they show them). A track whose sends came in another order:
         // its channel, as a SEND moved past another was (markMoved()). The song's tree holds no send. A track that comes or
         // goes with sends on it (added, removed, duplicated, moved into a folder, brought back by an Undo) tells them added or
@@ -191,6 +193,87 @@ namespace
             for (const auto track : reordered)
             {
                 name (pending.deviceChannels, track);
+                changed = true;
+            }
+
+            if (changed)
+                add (pending.devices);
+        }
+
+        // The devices, containers and chains (SongValues.h): the devices' group, naming the channel each was on and is on, as a
+        // change in a DEVICE's or a CONTAINER's element was (mark()), and as one added, taken out or moved past another was
+        // (markRemoved(), markMoved()); and any channel where what sound can reach changed (every strip's send knobs follow
+        // the whole routing, a send that would make a loop has none): a sidechain set or cleared, or carried by one that came,
+        // went or moved (as the tree's callbacks said of an element added or taken out), and a value that switches what a
+        // sidechain hears (a compressor's mode: DeviceChange::sidechainSwitched). No group for a parameter's value alone (its
+        // values set by hand, its first or last of them), nor a chain's volume, pan or crossover: controls read values as they
+        // show them, and a knob's drag makes one at each move (docs/archive/performance-audit.md, U1). The master's channel is
+        // named by its ID as the changes are delivered (a listener of the values reads nothing of the song). A track that
+        // comes or goes with devices in it (added, removed, duplicated, moved into a folder, brought back by an Undo) tells
+        // them added or taken out, and a track given another ID in place (a merge's renumbering) tells them come to another
+        // place, so the devices' group comes beside what the tree raises for the track (and any channel, where one of them
+        // listens to a sidechain): one group more than the tree alone raised while it held the devices, for a rare edit (the
+        // devices' view and the strips of those channels show them again), which the area can't tell from a device added,
+        // removed or moved by itself.
+        void devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
+                             const SongDevices&) override
+        {
+            using Change = SongValues::DeviceChange;
+            auto changed = false;
+
+            const auto nameChannel = [this] (const DevicePlace& place)
+            {
+                if (place.onMaster)
+                    masterDevices = true;
+                else
+                    name (pending.deviceChannels, place.track);
+            };
+
+            const auto listens = [] (const DeviceValue* value) { return value != nullptr && value->sidechain.isValid(); };
+
+            for (const auto& device : devices)
+            {
+                auto shown = false;
+
+                if (! device.wasThere || ! device.isThere || device.has (Change::made) || device.has (Change::place))
+                {
+                    shown = true;
+
+                    if (listens (device.was) || listens (device.now))
+                        pending.deviceChannels.any = true;
+                }
+                else
+                {
+                    const auto& was = *device.was;
+                    const auto& now = *device.now;
+
+                    if (device.has (Change::settings) && was.sidechain != now.sidechain)
+                        pending.deviceChannels.any = true;
+
+                    if (device.has (Change::sidechainSwitched))
+                        pending.deviceChannels.any = true;
+
+                    // The notes a chain plays show; its crossover is a parameter's value, as its volume and pan.
+                    const auto rangeShown = device.has (Change::chainRange) && (was.keys != now.keys || was.velocities != now.velocities);
+                    shown = device.has (Change::settings) || device.has (Change::mix) || device.has (Change::sounds)
+                            || device.has (Change::sidechainSwitched) || rangeShown;
+                }
+
+                if (! shown)
+                    continue;
+
+                if (device.wasThere)
+                    nameChannel (device.before);
+
+                if (device.isThere)
+                    nameChannel (device.after);
+
+                changed = true;
+            }
+
+            for (const auto& owner : reordered)
+            {
+                nameChannel (owner);
                 changed = true;
             }
 
@@ -253,22 +336,8 @@ namespace
             name (pending.deviceChannels, channel.isValid() ? getTrackID (channel) : TrackID());
         }
 
-        // Whether an element added or removed changes where sound can go: a device whose sidechain listens to a track (in a
-        // container too; a send's: sendsChanged()). Every strip's send knobs follow the whole routing (a send that would make
-        // a loop has none), so then any channel may show other sends: rare edits, not drags.
-        static bool changesRouting (const juce::ValueTree& element)
-        {
-            if (element.hasProperty (schema::deviceSidechain))
-                return true;
-
-            for (const auto& child : element)
-                if (changesRouting (child))
-                    return true;
-
-            return false;
-        }
-
-        // The group a change to this element, or to something in it, belongs to.
+        // The group a change to this element, or to something in it, belongs to (what the devices' value covers:
+        // devicesChanged(); what the tree still tells of a device or a chain, the store's, the devices' group here).
         void mark (const juce::ValueTree& changed)
         {
             for (auto element = changed; element.isValid(); element = element.getParent())
@@ -311,6 +380,11 @@ namespace
         void handleAsyncUpdate() override
         {
             nameNotesChanged();
+
+            // The master's devices' channel, by the ID the master has now.
+            if (std::exchange (masterDevices, false) && song != nullptr)
+                name (pending.deviceChannels, getMasterID (*song));
+
             makeExact (pending.changedClips);
             makeExact (pending.clipTracks);
             makeExact (pending.deviceChannels);
@@ -329,75 +403,41 @@ namespace
                 add (pending.sections);
             else if (child.hasType (schema::CHORDLANE))
                 add (pending.chords);
-            else if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER))
-            {
-                nameChannelOf (parent);
-
-                if (changesRouting (child))
-                    pending.deviceChannels.any = true;
-
-                add (pending.devices);
-            }
             else if (isTrackElement (child))
                 add (pending.tracks);
             else
                 mark (parent);
         }
 
-        // A track or a device that moved past another, which changes their order: clips, sections and the tempo's changes
-        // have their places in time, which no order changes.
+        // A track that moved past another, which changes their order: clips, sections and the tempo's changes have their places
+        // in time, which no order changes. A device that moved past another: devicesChanged(), told the owner reordered.
         void markMoved (const juce::ValueTree& parent, int oldIndex, int newIndex)
         {
-            const auto moved = parent.getChild (newIndex);
-            const auto isTrack = isTrackElement (moved);
-            const auto isDevice = moved.hasType (schema::DEVICE) || moved.hasType (schema::CONTAINER) || moved.hasType (schema::CHAIN);
+            if (! isTrackElement (parent.getChild (newIndex)))
+                return;
 
             // The elements it passed: now between its new place and its old one.
             const auto first = newIndex < oldIndex ? newIndex + 1 : oldIndex;
             const auto last = newIndex < oldIndex ? oldIndex : newIndex - 1;
 
-            for (int i = first; i <= last && (isTrack || isDevice); ++i)
-            {
-                const auto passed = parent.getChild (i);
-
-                if (isTrack && isTrackElement (passed))
+            for (int i = first; i <= last; ++i)
+                if (isTrackElement (parent.getChild (i)))
                     return add (pending.tracks);
-
-                if (isDevice && (passed.hasType (schema::DEVICE) || passed.hasType (schema::CONTAINER) || passed.hasType (schema::CHAIN)))
-                {
-                    nameChannelOf (parent);
-                    return add (pending.devices);
-                }
-            }
         }
 
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
-            if (isHeardAsKept (tree))
-                return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
-
-            // A device's value that turns what its sidechain hears on or off (a compressor's mode) changes what the mixer
-            // shows of it.
-            if (switchesSidechain (tree, property))
-            {
-                pending.deviceChannels.any = true; // where sound can go, as changesRouting()
-                return add (pending.devices);
-            }
-
-            // A sidechain listening to another track changes where sound can go: any channel's send knobs may change
-            // (changesRouting(); a send to another return: sendsChanged()).
-            if (tree.hasType (schema::DEVICE) && property == schema::deviceSidechain)
-                pending.deviceChannels.any = true;
+            if (isHeardAsKept (tree, property))
+                return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), ..., devicesChanged()
 
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
-            // makes one at each move (docs/archive/performance-audit.md, U1); a channel's or a container's chain's volume and pan, a
-            // chain's crossover neither (a macro's value: modulationChanged(); a send's level: sendsChanged()). Nor is where a
-            // device's window was, which no view shows.
-            if (isParameterValue (tree, property) || tree.hasType (schema::VALUES) || tree.hasType (schema::VALUE)
+            // makes one at each move (docs/archive/performance-audit.md, U1); a channel's volume and pan neither (a macro's
+            // value: modulationChanged(); a send's level: sendsChanged(); a device's values, a chain's volume, pan and
+            // crossover: devicesChanged()). Nor is where a device's window was, which no view shows.
+            if (isParameterValue (tree, property) || tree.hasType (schema::VALUE)
                 || (tree.hasType (schema::DEVICE) && schema::isDeviceViewProperty (property))
-                || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER) || tree.hasType (schema::CHAIN))
-                    && (property == schema::channelVolume || property == schema::channelPan))
-                || (tree.hasType (schema::CHAIN) && property == schema::chainCrossover))
+                || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
+                    && (property == schema::channelVolume || property == schema::channelPan)))
                 return;
 
             // The project's notes, the song's own.
@@ -420,20 +460,17 @@ namespace
 
         void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
         {
-            // A device's first value set by hand, as its other values, is no change that views show; nor its last one set back
-            // to its default, which takes its VALUES away (keepValueSetByHand()). The areas' (isHeardAsKept()):
-            // tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged().
-            if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE) || isHeardAsKept (parent, child))
+            // A plug-in's first value set by hand, as its other values, is no change that views show (a device's: its VALUES,
+            // devicesChanged()). The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged(),
+            // midiLinksChanged(), devicesChanged().
+            if (child.hasType (schema::VALUE) || isHeardAsKept (parent, child))
                 return;
-
-            if ((child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)) && changesRouting (child))
-                pending.deviceChannels.any = true;
 
             mark (child);
         }
         void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
         {
-            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE) && ! isHeardAsKept (parent, child))
+            if (! child.hasType (schema::VALUE) && ! isHeardAsKept (parent, child))
                 markRemoved (parent, child);
         }
         void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override

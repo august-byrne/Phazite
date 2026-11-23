@@ -469,9 +469,9 @@ void ClipRenders::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&
         return; // the song's SECTIONS itself, of which no render is made (what is in it is the sections' area's)
 
     // Whatever was added but an area's of the song's values (isHeardAsKept(): a tempo change, tempoMapChanged(); what is in
-    // the chord lane; a curve's, a modulator's or a send's, which no render is made of: a render is a clip's file, stretched
-    // by its own settings along the tempo map; a clip comes as clipsChanged()), and but the song's CHORDLANE itself, of which no
-    // render is made (isChordLanePlaceholder()).
+    // the chord lane; a curve's, a modulator's, a send's or a device's, which no render is made of: a render is a clip's
+    // file, stretched by its own settings along the tempo map; a clip comes as clipsChanged()), and but the song's CHORDLANE
+    // itself, of which no render is made (isChordLanePlaceholder()).
     if (! isHeardAsKept (parent, child) && ! isChordLanePlaceholder (parent, child))
         rendersMayChange();
 }
@@ -482,7 +482,7 @@ void ClipRenders::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTre
         return; // the song's SECTIONS itself
 
     // Whatever was taken out but an area's of the song's values (isHeardAsKept(): a tempo change, tempoMapChanged(); what is
-    // in the chord lane; a curve's; a send's; a clip's last warp marker comes as clipsChanged()), and but the song's
+    // in the chord lane; a curve's; a send's; a device's; a clip's last warp marker comes as clipsChanged()), and but the song's
     // CHORDLANE itself (isChordLanePlaceholder()).
     if (! isHeardAsKept (parent, child) && ! isChordLanePlaceholder (parent, child))
         rendersMayChange();

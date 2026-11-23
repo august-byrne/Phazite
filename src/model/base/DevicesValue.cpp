@@ -1122,6 +1122,11 @@ std::optional<DeviceValue> readHeldDevice (const juce::ValueTree& element, const
     return value;
 }
 
+std::optional<DeviceValue> readHeldDeviceFields (const juce::ValueTree& element, const DevicePlace& place)
+{
+    return readHeldFields (element, place);
+}
+
 juce::ValueTree writeDeviceElement (const DeviceValue& value)
 {
     juce::ValueTree element (value.form == Form::container ? schema::CONTAINER

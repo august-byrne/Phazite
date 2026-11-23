@@ -225,6 +225,12 @@ std::optional<DeviceValue> readDeviceValue (const juce::ValueTree& element, cons
 // readDeviceValue() reads it; what else the element holds is no part of it. Counted (countDevicesReadAsValues()).
 std::optional<DeviceValue> readHeldDevice (const juce::ValueTree& element, const DevicePlace&);
 
+// What readHeldDevice() reads of an element but Phazite's own device's values set by hand and sounds, which it leaves empty:
+// its own properties as the song holds them, read without a map made, and not counted (countDevicesReadAsValues()). What the
+// devices' part of the keeper reads of an element whose property changed (DevicesArea.h), taking its values and sounds from
+// the value it keeps, and whether an element is one the song holds (none for what readHeldDevice() reads none of).
+std::optional<DeviceValue> readHeldDeviceFields (const juce::ValueTree& element, const DevicePlace&);
+
 // A device's, a container's or a chain's element, new, as Phazite's writers write one (model/mixer/Mixer.cpp,
 // Containers.cpp, model/devices/Parameters.cpp, model/presets/Presets.cpp), without what the value doesn't cover and without
 // the items in it (a container's CHAINs and a chain's DEVICEs come from the lists): its ID always; a DEVICE's type always

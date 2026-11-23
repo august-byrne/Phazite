@@ -441,6 +441,21 @@ private:
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
     bool areSendsAsSaved() const;
 
+    // The devices, containers and chains that changed, by their IDs, and the owners (a channel, a container, a chain) that one
+    // was added to, taken out of or came to and from, and those whose devices came in another order (SongValues.h:
+    // Listener::devicesChanged(); the tree's callbacks below leave what the devices' value covers alone, isHeardAsKept(), and
+    // count the store's properties and a plug-in's VALUEs as before): compared with savedState when asked, each against the
+    // saved copy's of its ID, by element while the trees hold them (DevicesArea.h: indexDeviceElementsIn(), each tree indexed
+    // once by a walk however many are compared), its place too, so that a knob turned and turned back is saved again, and a
+    // device taken out and put back at another place before the comparison compares by where it is among its owner's.
+    // Bounded as toCompare is: past mostToCompare of them, the tracks and the master whole, as toCompare's are.
+    std::vector<DeviceID> devicesToCompare;
+    std::vector<DevicePlace> deviceOwnersToCompare;
+    bool comparingDevicesWhole = false;
+    void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
+                         const SongDevices& now) override;
+    bool areDevicesAsSaved() const;
+
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
     // where nothing of it was marked.
     bool areNotesAsSaved() const;
@@ -539,7 +554,7 @@ public:
 private:
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
     {
-        if (! isHeardAsKept (tree)) // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
+        if (! isHeardAsKept (tree, property)) // the areas': tempoMapChanged(), chordLaneChanged(), ..., devicesChanged()
             markChanged (tree, property);
     }
 

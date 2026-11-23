@@ -8,6 +8,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/SavedValues.h"
@@ -1224,6 +1225,170 @@ namespace
                 problems.push_back (text + " has a level finer than a ten-thousandth");
         }
     }
+
+    // The song's devices read again from its tree, each as the song holds one (DevicesValue.h: readHeldDevice()), as the
+    // devices' part of the keeper read them as the song took its values (DevicesArea.h): each TRACK's (in the track list, a
+    // folder's before the tracks in it) and the MASTER's, each channel's DEVICEs and CONTAINERs in its element's order, each
+    // CONTAINER's CHAINs and each CHAIN's DEVICEs in theirs; of two with one ID the first, none of an ID the song can't count
+    // on, nor of a type Phazite doesn't play, nor what such a container or chain holds. Written here, apart from the keeper's
+    // walks, so that the check doesn't take the keeper's word for it.
+    SongDevices readDevicesAfresh (const juce::ValueTree& song)
+    {
+        SongDevices devices;
+
+        const auto add = [&devices] (const juce::ValueTree& element)
+        {
+            auto value = readHeldDevice (element, readDevicePlace (element));
+
+            if (! value.has_value() || devices.find (value->id) != nullptr)
+                return false;
+
+            devices = withDevice (devices, std::move (*value));
+            return true;
+        };
+
+        const auto onChannel = [&add] (const juce::ValueTree& channel)
+        {
+            for (const auto& child : channel)
+            {
+                if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)) || ! add (child)
+                    || ! child.hasType (schema::CONTAINER))
+                    continue;
+
+                for (const auto& chain : child)
+                    if (chain.hasType (schema::CHAIN) && add (chain))
+                        for (const auto& device : chain)
+                            if (device.hasType (schema::DEVICE))
+                                add (device);
+            }
+        };
+
+        const std::function<void (const juce::ValueTree&)> inTracks = [&] (const juce::ValueTree& parent)
+        {
+            for (const auto& track : parent)
+            {
+                if (! track.hasType (schema::TRACK))
+                    continue;
+
+                onChannel (track);
+
+                if (track[schema::trackKind].toString() == schema::trackIsFolder)
+                    inTracks (track);
+            }
+        };
+
+        inTracks (song.getChildWithName (schema::TRACKS));
+
+        if (const auto master = song.getChildWithName (schema::MASTER); master.isValid())
+            onChannel (master);
+
+        return devices;
+    }
+
+    // The fields in which two values of one item differ, by name.
+    std::vector<std::string> findDifferingFields (const DeviceValue& kept, const DeviceValue& read)
+    {
+        std::vector<std::string> fields;
+        const auto add = [&fields] (bool same, const char* field)
+        {
+            if (! same)
+                fields.emplace_back (field);
+        };
+
+        const auto sameValues = kept.values.size() == read.values.size()
+                                && std::all_of (kept.values.begin(), kept.values.end(),
+                                                [&read] (const auto& entry)
+                                                {
+                                                    const auto* other = read.values.find (entry.first);
+                                                    return other != nullptr && juce::exactlyEqual (*other, entry.second);
+                                                });
+        const auto sameCrossover = kept.crossover.has_value() == read.crossover.has_value()
+                                   && (! kept.crossover.has_value() || juce::exactlyEqual (*kept.crossover, *read.crossover));
+
+        add (kept.place == read.place, "place");
+        add (kept.form == read.form, "form");
+        add (kept.off == read.off, "off");
+        add (kept.sidechain == read.sidechain, "sidechain");
+        add (kept.type == read.type, "type");
+        add (sameValues, "values");
+        add (kept.sounds == read.sounds, "sounds");
+        add (kept.plugin == read.plugin, "plugin");
+        add (juce::exactlyEqual (kept.mix, read.mix), "mix");
+        add (kept.name == read.name, "name");
+        add (kept.split == read.split, "split");
+        add (kept.instrument == read.instrument, "instrument");
+        add (juce::exactlyEqual (kept.volume, read.volume), "volume");
+        add (juce::exactlyEqual (kept.pan, read.pan), "pan");
+        add (sameCrossover, "crossover");
+        add (kept.keys == read.keys, "keys");
+        add (kept.velocities == read.velocities, "velocities");
+        return fields;
+    }
+
+    // The devices' area, while the song's tree holds the devices: what the devices' part of the keeper keeps of them, which
+    // the listeners were told (SongValues.h: getDevicesAsTold()), is what the song holds, read again (readDevicesAfresh()),
+    // item by item (one kept and not held, or held and not kept; the fields that differ), and list by list, each in its order.
+    void checkDevicesValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const auto* kept = values.getDevicesAsTold();
+
+        if (kept == nullptr)
+        {
+            problems.push_back ("values: the keeper holds no devices");
+            return;
+        }
+
+        const auto read = readDevicesAfresh (song.getState());
+
+        if (! holdsItsLists (*kept))
+            problems.push_back ("values: the devices kept don't hold their lists");
+
+        for (const auto& [id, value] : kept->devices)
+        {
+            const auto text = "values: device " + std::to_string (id);
+
+            const auto* held = read.devices.find (id);
+
+            if (held == nullptr)
+            {
+                problems.push_back (text + " is kept but not in the song");
+                continue;
+            }
+
+            std::string fields;
+
+            for (const auto& field : findDifferingFields (value, *held))
+                fields += (fields.empty() ? "" : ", ") + field;
+
+            if (! fields.empty())
+                problems.push_back (text + " is kept other than the song holds it, in its " + fields);
+        }
+
+        for (const auto& [id, value] : read.devices)
+            if (kept->devices.find (id) == nullptr)
+                problems.push_back ("values: device " + std::to_string (id) + " is in the song but not kept");
+
+        // Each owner's list, in its order.
+        const auto compareLists = [&problems] (const auto& keptLists, const auto& readLists, const char* kind)
+        {
+            for (const auto& [key, list] : keptLists)
+            {
+                const auto* other = readLists.find (key);
+
+                if (other == nullptr || ! std::equal (list.begin(), list.end(), other->begin(), other->end()))
+                    problems.push_back ("values: " + std::string (kind) + " " + std::to_string (key) + "'s devices are kept other than "
+                                        + "the song holds them, or in another order");
+            }
+
+            for (const auto& [key, list] : readLists)
+                if (keptLists.find (key) == nullptr)
+                    problems.push_back ("values: " + std::string (kind) + " " + std::to_string (key) + "'s devices aren't kept");
+        };
+
+        compareLists (kept->channels, read.channels, "channel");
+        compareLists (kept->chains, read.chains, "container");
+        compareLists (kept->chainDevices, read.chainDevices, "chain");
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -1235,7 +1400,7 @@ std::vector<std::string> findValueProblems (const Song& song)
         return problems;
 
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
-    // lane, the MIDI links, the curves, the sections, modulation, the sends.
+    // lane, the MIDI links, the curves, the sections, modulation, the sends, the devices.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
@@ -1245,6 +1410,7 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkSectionsValue (song, *values, problems);
     checkModulationValue (song, *values, problems);
     checkSendsValue (song, *values, problems);
+    checkDevicesValue (song, *values, problems);
     return problems;
 }
 

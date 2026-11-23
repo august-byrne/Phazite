@@ -982,6 +982,13 @@ private:
     // those whose sends came in another order, by their IDs, as a change of a SEND marked its track's line (none is the
     // master's: a send is a track's).
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
+
+    // The devices, containers and chains (SongValues.h), what the devices' value covers of which the tree's callbacks below
+    // leave alone (isHeardAsKept(); the store's properties and a plug-in's VALUEs they mark as before): the lines of the
+    // channels each was on and is on, and of those whose devices came in another order, by their tracks' IDs, as a change at
+    // or under a device marked its channel's line; the master's by its own ID, as for modulation (masterHeard).
+    void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
+                         const SongDevices& now) override;
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();

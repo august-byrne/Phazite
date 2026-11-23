@@ -137,8 +137,8 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (isHeardAsKept (tree))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
+    if (isHeardAsKept (tree, property))
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), ..., devicesChanged()
 
     // Where playback starts is the transport's (movePlayhead() locates the engine itself), view state is how the song shows,
     // and where the song stands in its versions is the versions': nothing a plan holds.
@@ -146,13 +146,42 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
         return;
 
     // A value set by hand plays at once, and an undo's or a redo's is what a pass writing it writes from then (known bug
-    // 174), once the undo or the redo is whole (followAfterMove); anything else, in a new plan. One that changes a device's
-    // latency (a compressor's Look-Ahead) makes the device anew in the new plan, which starts it again from silence: while a
-    // gesture drags it (a knob's), the plan waits for the gesture's end, so that a drag remakes it once, and not at each of
-    // its steps (meanwhile it plays the value within the latency it has).
+    // 174), once the undo or the redo is whole (followAfterMove); anything else, in a new plan. (A device's values, its
+    // latency's wait among them: devicesChanged().)
     if (! player.takeValue (tree, property))
+        triggerAsyncUpdate();
+    else if (song->getUndoManager().isPerformingUndoRedo())
+        followAfterMove = true;
+}
+
+void PlaybackSession::devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
+                                      const SongDevices& now)
+{
+    using Change = SongValues::DeviceChange;
+    auto plan = ! reordered.empty(), taken = false, latency = false;
+
+    for (const auto& device : devices)
     {
-        if (tree.hasType (schema::VALUES) && Gesture::isInProgress (*song))
+        const auto inPlace = device.wasThere && device.isThere && ! device.has (Change::made) && ! device.has (Change::place);
+
+        if (! inPlace || device.has (Change::valuesAppeared) || device.has (Change::soundsAppeared))
+            plan = true;
+
+        if (! inPlace)
+            continue;
+
+        const auto took = player.takeDevice (device, now);
+        plan = plan || took.needsPlan;
+        taken = taken || took.atOnce;
+        latency = latency || took.changesLatency;
+    }
+
+    // Values that change a device's latency (a compressor's Look-Ahead) make the device anew in the new plan, which starts it
+    // again from silence: while a gesture drags them (a knob's), the plan waits for the gesture's end, so that a drag remakes
+    // it once, and not at each of its steps (meanwhile it plays the value within the latency it has).
+    if (latency)
+    {
+        if (Gesture::isInProgress (*song))
         {
             if (! std::exchange (latencyWaits, true))
                 Gesture::whenEnded (*song, this,
@@ -164,10 +193,14 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
         }
         else
         {
-            triggerAsyncUpdate();
+            plan = true;
         }
     }
-    else if (song->getUndoManager().isPerformingUndoRedo())
+
+    if (plan)
+        triggerAsyncUpdate();
+
+    if (taken && song->getUndoManager().isPerformingUndoRedo())
         followAfterMove = true;
 }
 
