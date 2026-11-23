@@ -1476,9 +1476,7 @@ TEST_CASE ("Performance gate: one track's line of a version a knob apart, restor
     const auto lineTaken = measure (restore);
     const auto songTaken = measure (bringBack);
     const auto allocations = phazite::test::countAllocations (restore);
-
-    if (allocations.has_value())
-        phazite::undo (*song);
+    phazite::undo (*song); // the work runs in every build (PerformanceCounts.h), counted or not
 
     const auto songAllocations = phazite::test::countAllocations (bringBack);
     MESSAGE ("One track's line a knob apart on 40 tracks and two full drum samplers: devices read whole "
@@ -1802,11 +1800,7 @@ TEST_CASE ("Performance gate: an effect added into a chain, moved within it and 
 
             Edit edit;
             const auto before = phazite::countDeviceItemsWalked();
-            edit.allocations = phazite::test::countAllocations (inStep);
-
-            if (! edit.allocations.has_value())
-                inStep();
-
+            edit.allocations = phazite::test::countAllocations (inStep); // run in every build, counted or not
             edit.items = phazite::countDeviceItemsWalked() - before;
             return edit;
         };
@@ -1935,11 +1929,7 @@ TEST_CASE ("Performance gate: a chain duplicated reads its own items whole and n
 
         Copy copy;
         const auto before = phazite::countDevicesReadAsValues();
-        copy.allocations = phazite::test::countAllocations (duplicate);
-
-        if (! copy.allocations.has_value())
-            duplicate();
-
+        copy.allocations = phazite::test::countAllocations (duplicate); // run in every build, counted or not
         copy.readWhole = phazite::countDevicesReadAsValues() - before;
         REQUIRE (phazite::getChains (*song, container).size() == 2);
         return copy;
