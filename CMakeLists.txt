@@ -481,6 +481,7 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/ContainerModel.h
     src/model/mixer/ContainerValues.h
     src/model/mixer/Containers.cpp
+    src/model/mixer/DeviceClashes.cpp
     src/model/mixer/DeviceType.h
     src/model/mixer/DeviceWriters.cpp
     src/model/mixer/Freeze.cpp
@@ -1385,6 +1386,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DeviceStoreValueTests.cpp
         tests/DeviceWritersTests.cpp
         tests/DevicesValueTests.cpp
+        tests/DevicesVersionsTests.cpp
         tests/DevicesViewTests.cpp
         tests/DragPointerTests.cpp
         tests/DrumRowTests.cpp

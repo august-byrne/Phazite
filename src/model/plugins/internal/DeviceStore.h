@@ -5,8 +5,9 @@
 // children); a chain's mute and solo (chainMute, chainSolo); and, outside the history alone, a device's window place
 // (deviceWindowX, deviceWindowY; model/base/internal/DevicesOutside.h). The one block of the model that reads and writes
 // them in a live song: the plug-ins' instances (PluginInstances.h), the parameters' code (model/devices/Parameters.cpp), the
-// containers' (model/mixer/Containers.cpp), a preset loaded into a plug-in (model/presets/Presets.cpp) and the plug-in's
-// window (src/app/PluginWindow.cpp) reach them here alone.
+// containers' (model/mixer/Containers.cpp), a preset loaded into a plug-in (model/presets/Presets.cpp), the versions
+// (model/versions/ApplySong.cpp, a merge's choice: model/mixer/DeviceClashes.cpp) and the plug-in's window
+// (src/app/PluginWindow.cpp) reach them here alone.
 //
 // While the song's tree is their storage, each does on the tree exactly what its callers did on it: the same property of
 // the same element, with the same undo manager or none, writing only what differs where they did (JUCE workaround W8), so
@@ -172,6 +173,35 @@ struct ChannelStore
 ChannelStore getChannelStore (const Song&, TrackID channel);
 DeviceStore renameStore (const DeviceStore&, const std::map<std::uint64_t, std::uint64_t>& copied);
 void writeStoreIntoMade (juce::ValueTree& made, const DeviceStore&, DeviceID);
+
+//==============================================================================
+// What the versions take along of the store (model/versions/ApplySong.cpp: makeDeviceStoreLike(), a version's devices made
+// the song's; model/mixer/DeviceClashes.cpp: a merge's clash on a plug-in's state, program, format ID or version, on one of
+// its values set by hand, or on a chain's mute or solo):
+//   - getStoreOf(): what the store holds of one item, as the song holds it (DeviceStoreValue.h: readHeldStoreOf()), none for
+//     one the song hasn't; and getPluginValueOrder(), a plug-in's values' parameters in the order the song holds them.
+//   - setStoreEntries(): what the store holds of one item made what entries hold of it (its own entries alone are looked
+//     at: those of other items are left out), in the mode of the moment (in the step in progress, or without an undo manager
+//     while the song is written outside its history: Song::OutsideHistory), each written only where it differs from what the
+//     song holds as held: a plug-in's state (in base 64), its program, its format ID and its version, each set or taken
+//     away; its values set by hand, each the entries hold none of taken away, each other set where it differs or made where
+//     the song has none, then all in the order given (the parameters as the other song holds them; one it doesn't name after
+//     them, in their order), as the passes over elements made a DEVICE's VALUE children the other's, a VALUE's own value as
+//     a float; a chain's mute and solo, each set while on and taken away while off. Until the store's switch the order is
+//     its VALUE children's; from then the store writes a plug-in's values sorted (DeviceStoreValue.h: writeStoreInto()), and
+//     the order given goes. Nothing for an item that is neither a plug-in nor a chain. Whether it changed the song.
+//   - readWindowPlace(): a window's place an element the caller holds (another song's, a version's) has, none for none; and
+//     forgetWindowPlace(), a device's taken away, as view state outside the history (a version without one made the song's).
+DeviceStore getStoreOf (const Song&, DeviceID);
+std::vector<juce::String> getPluginValueOrder (const Song&, DeviceID);
+bool setStoreEntries (Song&, DeviceID, const DeviceStore& entries, const std::vector<juce::String>& valueOrder);
+std::optional<WindowPlace> readWindowPlace (const juce::ValueTree& device);
+void forgetWindowPlace (Song&, DeviceID);
+
+// How many times setStoreEntries() listed where a plug-in's values stand among its element's children to put them in order,
+// by every song since the program started: once a call, and again after a move only where something else stands among them.
+// For the tests, which check that putting a plug-in's values in order costs no more than their count. Any thread.
+std::uint64_t countPluginValuePlacesBuilt() noexcept;
 
 //==============================================================================
 // Where a device's window was, for the next time it opens, none for one never moved; and set as it moves, as view state:

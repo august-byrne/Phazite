@@ -78,6 +78,7 @@
 #include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/ApplySong.h"
 #include "model/versions/internal/ChangesWorker.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/SongPieces.h"
@@ -1141,6 +1142,191 @@ TEST_CASE ("Performance gate: the plan after a device's knob moved on a song of 
     // library counts otherwise.
 #if JUCE_WINDOWS
     CHECK (*allocations <= 5840);
+#endif
+}
+
+TEST_CASE ("Performance gate: a version that differs from a song of 40 tracks by one knob, applied, writes that knob alone and "
+           "reads each of the version's devices once and none of the song's")
+{
+    // The versions' devices pass (model/versions/ApplySong.cpp: makeDevicesLike()) takes the song's devices from the devices'
+    // keeper (SongValues.h: getDevicesAsTold()), reading none, and reads the version's once each, as the song holds them
+    // (DevicesValue.h: readHeldDevice()), compares them as values and writes through the devices' setters only what differs:
+    // here one value set by hand, one
+    // property of one VALUES, the setter finding its device by one walk of the song (countDeviceWalks()) and reading it
+    // once more as it holds it. No element is added, taken out or moved, and the store's pass writes nothing (the song holds
+    // no plug-in or chain).
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 40);
+
+    for (const auto track : tracks)
+    {
+        phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+        phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
+    }
+
+    const auto equalizer = phazite::getEffects (*song, tracks.back()).front();
+    const phazite::ParameterRef knob { .device = equalizer, .parameter = "band4Gain" };
+    const auto turn = [&song, &knob] (float value)
+    {
+        const phazite::UndoStep step (*song, "Turn Knob");
+        phazite::setValueSetByHand (*song, knob, value);
+    };
+
+    turn (3.0f);
+    const auto version = phazite::copyWholeSong (*song);
+    turn (-6.0f);
+
+    // What the pass writes into the song's tree, which holds the devices still.
+    struct Writes : public juce::ValueTree::Listener
+    {
+        int properties = 0, children = 0;
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++properties; }
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++children; }
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++children; }
+        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++children; }
+    };
+
+    Writes writes;
+    auto state = song->getState(); // a listener belongs to the tree object it was added to
+    state.addListener (&writes);
+    const auto whole = phazite::countDevicesReadAsValues();
+    const auto walks = phazite::countDeviceWalks();
+
+    {
+        const phazite::UndoStep step (*song, "Bring Back");
+        phazite::makeSongLike (*song, version);
+    }
+
+    const auto readWhole = phazite::countDevicesReadAsValues() - whole;
+    const auto walked = phazite::countDeviceWalks() - walks;
+    state.removeListener (&writes);
+    const auto devices = (std::uint64_t) phazite::getDevicesValue (*song).devices.size();
+    MESSAGE ("A version a knob apart on 40 tracks: properties written " << writes.properties
+                                                                        << ", elements added, taken out or "
+                                                                           "moved "
+                                                                        << writes.children << ", devices read whole " << readWhole
+                                                                        << " (of " << devices << " on each side), walks " << walked);
+    CHECK (writes.properties == 1);
+    CHECK (writes.children == 0);
+    CHECK (readWhole == devices + 1); // the version's once each, the one set once more as it holds it; the song's none
+    CHECK (walked == 1);
+    CHECK (phazite::getValueSetByHand (*song, knob) == doctest::Approx (3.0f));
+}
+
+TEST_CASE ("Performance gate: one track's line of a version a knob apart, restored on a song of 40 tracks and two full drum "
+           "samplers, reads whole only that track's devices of the version's and none of the song's")
+{
+    // A line's devices pass (model/versions/ApplySong.cpp: makeDevicesLike() for one track) takes the song's devices from the
+    // devices' keeper (SongValues.h: getDevicesAsTold()), reading none, and reads whole only the version's devices of the
+    // line's channel; of the other channels, by their own fields alone, only what names an item the line's channel holds. On
+    // a song of 40 tracks with an instrument and an effect each, and two drum samplers of every field and sound set (3,329
+    // values and 1,024 sounds each) on tracks of their own: one track's line a knob apart restored, in a step.
+    using dev::DrumSampler;
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 40);
+
+    for (const auto track : tracks)
+    {
+        phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+        phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
+    }
+
+    phazite::test::OwnValues values;
+
+    for (const auto& info : DrumSampler::info.parameters)
+    {
+        auto value =
+            dev::constrain (info, info.defaultValue + (info.unit == dev::Unit::choice ? 1.0f : 0.25f * (info.maximum - info.minimum)));
+
+        if (phazite::isDefaultValue (info, value))
+            value =
+                dev::constrain (info, info.defaultValue - (info.unit == dev::Unit::choice ? 1.0f : 0.25f * (info.maximum - info.minimum)));
+
+        values.emplace_back (juce::String (info.id.data(), info.id.size()), value);
+    }
+
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto drumsTrack = phazite::insertPlainTrack (*song, tracks.front());
+        const auto drums = phazite::test::setOwnInstrument (*song, drumsTrack, DrumSampler::typeID, values);
+
+        for (int pad = 0; pad < DrumSampler::numPads; ++pad)
+            for (int layer = 0; layer < DrumSampler::numLayers; ++layer)
+                phazite::test::writeDeviceSoundByHand (*song, drums, phazite::schema::getPadSound (pad, layer), "808 Kick");
+    }
+
+    const auto line = tracks.back();
+    const auto lineDevices = (std::uint64_t) phazite::getChannelDeviceValues (*song, line).size();
+    const auto equalizer = phazite::getEffects (*song, line).front();
+    const phazite::ParameterRef knob { .device = equalizer, .parameter = "band4Gain" };
+    const auto turn = [&song, &knob] (float value)
+    {
+        const phazite::UndoStep step (*song, "Turn Knob");
+        phazite::setValueSetByHand (*song, knob, value);
+    };
+
+    turn (3.0f);
+    const auto version = phazite::copyWholeSong (*song);
+    turn (-6.0f);
+
+    // The line, and the whole song for the record (its gate is the one above), each in a step, each undone after.
+    const auto restore = [&song, line, &version]
+    {
+        const phazite::UndoStep step (*song, "Restore");
+        phazite::makeTrackLike (*song, line, version);
+    };
+
+    const auto bringBack = [&song, &version]
+    {
+        const phazite::UndoStep step (*song, "Bring Back");
+        phazite::makeSongLike (*song, version);
+    };
+
+    struct Taken
+    {
+        std::uint64_t readWhole = 0;
+        double milliseconds = 0.0;
+    };
+
+    const auto measure = [&song, &knob] (const std::function<void()>& apply)
+    {
+        Taken taken;
+        const auto whole = phazite::countDevicesReadAsValues();
+        const auto at = juce::Time::getMillisecondCounterHiRes();
+        apply();
+        taken.milliseconds = juce::Time::getMillisecondCounterHiRes() - at;
+        taken.readWhole = phazite::countDevicesReadAsValues() - whole;
+        CHECK (phazite::getValueSetByHand (*song, knob) == doctest::Approx (3.0f));
+        phazite::undo (*song);
+        REQUIRE (phazite::getValueSetByHand (*song, knob) == doctest::Approx (-6.0f));
+        return taken;
+    };
+
+    const auto lineTaken = measure (restore);
+    const auto songTaken = measure (bringBack);
+    const auto allocations = phazite::test::countAllocations (restore);
+
+    if (allocations.has_value())
+        phazite::undo (*song);
+
+    const auto songAllocations = phazite::test::countAllocations (bringBack);
+    MESSAGE ("One track's line a knob apart on 40 tracks and two full drum samplers: devices read whole "
+             << lineTaken.readWhole << " (the line's " << lineDevices << "), allocations " << allocations.value_or (-1) << ", in "
+             << lineTaken.milliseconds << " ms; the whole song's: devices read whole " << songTaken.readWhole << " (of "
+             << phazite::getDevicesValue (*song).devices.size() << "), allocations " << songAllocations.value_or (-1) << ", in "
+             << songTaken.milliseconds << " ms");
+    CHECK (lineTaken.readWhole <= lineDevices + 1); // the version's of the line's channel, and the one set once more as it holds it
+
+    if (! allocations.has_value())
+        return; // nothing counted on this build, and nothing run
+
+    CHECK (phazite::getValueSetByHand (*song, knob) == doctest::Approx (3.0f));
+#if JUCE_WINDOWS
+    // Measured 2026-11-23 on Windows (MSVC's Debug build): 38,707 allocations and 171 ms before (both sides' devices read
+    // whole, 165 of them); 2,361 and about 6 ms before the devices' versions pass; 1,439 and 4 ms with it (3 read whole).
+    // The whole song's, 42,294 allocations and 180 ms with both sides read whole (165), 22,928 and 93 ms with the version's
+    // alone (83: its 82, and the one set once more).
+    CHECK (*allocations <= 1500);
 #endif
 }
 

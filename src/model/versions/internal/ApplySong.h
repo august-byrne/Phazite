@@ -21,6 +21,8 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <cstdint>
+
 namespace phazite
 {
 // The whole song like the other.
@@ -59,4 +61,9 @@ void makeSongOwnLike (Song&, const juce::ValueTree& other);
 // from another can make together. Every apply of a version, a line, a merge or a merge's clash runs it, in its step; how
 // many it took away (of the pads' tracks, none).
 int removeBrokenReferences (Song&);
+
+// How many writes the passes above made of what the devices' store holds (ApplySong.cpp: makeDeviceStoreLike(): a plug-in's
+// state, program, format ID, version and values set by hand, a chain's mute and solo, a window's place), by every song since
+// the program started: for the tests, which check that a second pass writes nothing. Any thread.
+std::uint64_t countDeviceStorePassWrites() noexcept;
 } // namespace phazite

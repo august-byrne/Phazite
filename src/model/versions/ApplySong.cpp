@@ -7,6 +7,9 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DeviceStoreValue.h"
+#include "model/base/internal/DevicesOutside.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
@@ -20,9 +23,12 @@
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/DeviceStore.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -148,13 +154,23 @@ namespace
         return element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO);
     }
 
+    // Whether an element is a device's, a container's or a chain's (with what is in it: a device's VALUES, SOUNDS and VALUEs,
+    // a container's chains, a chain's devices), which the devices pass makes like the other's (makeDevicesLike(), below),
+    // through the devices' setters by their IDs (model/mixer/internal/Mixer.h) and the store's functions
+    // (model/plugins/internal/DeviceStore.h), never the passes over elements, though the song's tree holds them still.
+    bool isDeviceItem (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN);
+    }
+
     // Whether an element is an entry of an area the song holds beside its tree under an element that stays in it, which its
-    // area's pass makes like the other's, never the passes over elements: modulation's (isModulation()), and a track's SEND,
+    // area's pass makes like the other's, never the passes over elements: modulation's (isModulation()), a track's SEND,
     // which the sends pass makes like the other's (makeSendsLike(), below), through the sends' setters by their IDs
-    // (model/mixer/internal/Mixer.h).
+    // (model/mixer/internal/Mixer.h), and a device, a container or a chain (isDeviceItem()), which the song's tree still holds
+    // until the devices' switch, but which the devices pass alone makes like the other's.
     bool isKeptBeside (const juce::ValueTree& element)
     {
-        return isModulation (element) || element.hasType (schema::SEND);
+        return isModulation (element) || element.hasType (schema::SEND) || isDeviceItem (element);
     }
 
     // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read
@@ -164,7 +180,8 @@ namespace
     // the MIDI links, which the links pass gives it (makeMidiLinksLike()), nor its AUTOMATION's curves, which the curves
     // pass gives it (makeCurvesLike()), nor its SECTIONS' sections, which the sections pass gives it (makeSectionsLike()),
     // nor its channels' and containers' modulators and macros, which the modulation pass gives it (makeModulationLike()),
-    // nor its tracks' sends, which the sends pass gives it (makeSendsLike()).
+    // nor its tracks' sends, which the sends pass gives it (makeSendsLike()), nor its channels' devices and containers, which
+    // the devices pass gives it (makeDevicesLike()): a track that comes back comes without them.
     // The song hasn't the stand-ins, so what they held stays as it is now: not there. A stand-in is never part of a song
     // (Schema.h: schema::versions::missing).
     juce::ValueTree copyForSong (const juce::ValueTree& element)
@@ -194,7 +211,8 @@ namespace
     // pass's: makeMidiLinksLike()), nor its AUTOMATION or what is in it (the curves pass's: makeCurvesLike()), nor its
     // SECTIONS or what is in it (the sections pass's: makeSectionsLike()), nor a modulator or a macro (the modulation pass's:
     // makeModulationLike()) nor a send (the sends pass's: makeSendsLike()), which the song's tree holds none of (their areas'
-    // whole state writes them in a copy). The whole song's placeholders and places
+    // whole state writes them in a copy), nor a device, a container or a chain (the devices pass's: makeDevicesLike()), which
+    // stays where it is among its channel's elements. The whole song's placeholders and places
     // are put in the other's places after the areas' passes (placePlaceholdersLike()).
     bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, bool withTracks, Taken taken)
     {
@@ -303,11 +321,11 @@ namespace
     }
 
     // Where each item is in a song, or in a part of it (its parent's type and key), by its own type and ID: notes and clips
-    // aside (the clip pass moves clips: ClipPass, below), and, while withTracks is off, the tracks in it (a folder's, things
-    // of their own).
+    // aside (the clip pass moves clips: ClipPass, below), and what the areas' passes move (a modulator, a macro, a send, a
+    // device, a container, a chain): the tracks, then, which the passes over elements move between folders.
     using Places = std::map<juce::String, juce::String>;
 
-    Places findPlaces (const juce::ValueTree& tree, bool withTracks = true)
+    Places findPlaces (const juce::ValueTree& tree)
     {
         Places places;
         const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
@@ -315,9 +333,9 @@ namespace
             for (const auto& child : element)
             {
                 // A clip, the song's sections (the sections pass's: makeSectionsLike()), a modulator or a macro (the modulation
-                // pass's: makeModulationLike()), a send (the sends pass's: makeSendsLike()).
-                if ((! withTracks && child.hasType (schema::TRACK)) || child.hasType (schema::CLIP) || child.hasType (schema::SECTIONS)
-                    || isKeptBeside (child))
+                // pass's: makeModulationLike()), a send (the sends pass's: makeSendsLike()), a device, a container or a chain
+                // (the devices pass's: makeDevicesLike()).
+                if (child.hasType (schema::CLIP) || child.hasType (schema::SECTIONS) || isKeptBeside (child))
                     continue;
 
                 if (! child.hasType (schema::NOTE) && schema::holdsID (child, schema::trackID))
@@ -333,8 +351,9 @@ namespace
     }
 
     // The song's items that are somewhere else in the other song, or in the part of it about to be taken (a track moved
-    // into a folder, a device into a container), taken away first, to be put where the other has them: no ID is in the
-    // song twice, meanwhile or after. Not clips, which the clip pass moves (ClipPass, below).
+    // into a folder), taken away first, to be put where the other has them: no ID is in the song twice, meanwhile or after.
+    // Not clips, which the clip pass moves (ClipPass, below), nor devices, containers and chains, which the devices pass
+    // moves as the same elements (makeDevicesLike()), but where a track taken away here holds them.
     void removeMovedItems (juce::ValueTree live, const Places& otherPlaces, juce::UndoManager* undo,
                            const StandIns& standIns = noStandIns())
     {
@@ -343,7 +362,7 @@ namespace
         {
             for (const auto& child : element)
             {
-                if (child.hasType (schema::CLIP) || isKeptBeside (child)) // a modulator, a macro, a send: their passes'
+                if (child.hasType (schema::CLIP) || isKeptBeside (child)) // a modulator, a macro, a send, a device: their passes'
                     continue;
 
                 if (! child.hasType (schema::NOTE) && schema::holdsID (child, schema::trackID) && standIns.count (nameOf (child)) == 0)
@@ -365,94 +384,6 @@ namespace
 
         for (auto& tree : moved)
             tree.getParent().removeChild (tree, undo);
-    }
-
-    // What holds items in a song, by its type and key as findPlaces() names it ("TRACK:12", "CHAIN:40"): a track, the
-    // master, a chain; invalid if the song has none.
-    juce::ValueTree findHolder (const juce::ValueTree& song, const juce::String& place)
-    {
-        for (const auto& child : song)
-        {
-            if (child.hasType (schema::NOTE) || child.hasType (schema::CLIP) || isKeptBeside (child))
-                continue;
-
-            if (schema::holdsID (child, schema::trackID) && nameOf (child) == place)
-                return child;
-
-            if (const auto found = findHolder (child, place); found.isValid())
-                return found;
-        }
-
-        return {};
-    }
-
-    // Where an item goes among a holder's children to be where the other song has it among its holder's there: after the
-    // one before it there that this holder has; else before the others of its order (a chain's devices), or last.
-    int findIndexLike (const juce::ValueTree& home, const juce::ValueTree& item, const juce::ValueTree& homeThere)
-    {
-        std::map<juce::String, int> held;
-
-        for (int i = 0; i < home.getNumChildren(); ++i)
-            if (const auto child = home.getChild (i); schema::getElementKey (child).isNotEmpty())
-                held.emplace (nameOf (child), i);
-
-        juce::ValueTree there;
-
-        for (const auto& child : homeThere)
-            if (nameOf (child) == nameOf (item))
-                there = child;
-
-        for (auto before = there.getSibling (-1); before.isValid(); before = before.getSibling (-1))
-            if (const auto found = held.find (nameOf (before)); found != held.end())
-                return found->second + 1;
-
-        if (const auto group = schema::getOrderGroup (item); group.isNotEmpty())
-            for (int i = 0; i < home.getNumChildren(); ++i)
-                if (schema::getOrderGroup (home.getChild (i)) == group)
-                    return i;
-
-        return -1;
-    }
-
-    // What a track holds now that the other song holds somewhere else (a device moved since into a container on another
-    // track), sent there, as it is now, before the track is made like the other's or taken away: it would be on neither track
-    // otherwise. Where the song has nothing to hold it now (the track it was on deleted since), it goes with the rest, and
-    // that track's own line brings it back. Not its clips, which the clip pass sends (ClipPass::sendHome()).
-    void sendItemsHome (juce::ValueTree state, const juce::ValueTree& track, const juce::ValueTree& other, juce::UndoManager* undo)
-    {
-        const auto otherPlaces = findPlaces (other);
-        std::vector<std::pair<juce::ValueTree, juce::ValueTree>> going; // each with what holds it there, in the song
-        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::TRACK) || child.hasType (schema::NOTE) || child.hasType (schema::CLIP) || isKeptBeside (child))
-                    continue; // a modulator, a macro, a send: their passes' (makeModulationLike(), makeSendsLike())
-
-                if (schema::holdsID (child, schema::trackID))
-                {
-                    if (const auto found = otherPlaces.find (nameOf (child));
-                        found != otherPlaces.end() && found->second != nameOf (element))
-                    {
-                        if (const auto home = findHolder (state, found->second); home.isValid() && ! home.isAChildOf (child))
-                            going.emplace_back (child, home);
-
-                        continue;
-                    }
-                }
-
-                visit (child);
-            }
-        };
-
-        visit (track);
-
-        for (auto& [item, home] : going)
-        {
-            const auto index = findIndexLike (home, item, findHolder (other, nameOf (home)));
-            item.getParent().removeChild (item, undo);
-            home.addChild (item, index, undo);
-        }
     }
 
     juce::ValueTree findTrack (const juce::ValueTree& song, std::uint64_t id)
@@ -1054,6 +985,10 @@ namespace
                    + values->countSectionsAdopted()   // the sections'
                    + values->countModulationAdopted() // modulation's: no copy the passes add holds one (copyForSong())
                    + values->countSendsAdopted();     // the sends': nor a send (copyForSong())
+
+            // Not the devices': their part of the keeper (DevicesArea.h) tells what the tree holds and takes nothing in until
+            // the devices' switch, so it has no count; no copy the passes add holds a device, a container or a chain
+            // (copyForSong()), which the devices pass alone adds (makeDevicesLike()).
         }
 
         const Song& song;
@@ -1554,9 +1489,9 @@ namespace
         }
     };
 
-    // Where a send goes among a track's sends to be where the other song has it there, as the passes over elements placed an
-    // item they sent to another holder (findIndexLike()): after the one before it there that the track holds; else before
-    // the track's others (a send's order group); else after them, the first.
+    // Where a send goes among a track's sends to be where the other song has it there, as the devices pass places an item in
+    // a list (findDevicePlaceLike()): after the one before it there that the track holds; else before the track's others (a
+    // send's order group); else after them, the first.
     int findSendPlaceLike (const SongSends& sends, const OtherSends& theirs, TrackID track, DeviceID send)
     {
         const auto* list = sends.tracks.find (track.getRaw());
@@ -1681,6 +1616,679 @@ namespace
         return makeSendsLike (song, other, [] (TrackID) { return true; });
     }
 
+    //==============================================================================
+    // A channel by a place on it (DevicePlace): the master's, or a track's by its ID.
+    using ChannelKey = std::pair<bool, std::uint64_t>;
+
+    ChannelKey getChannelKey (const DevicePlace& place)
+    {
+        return { place.onMaster, place.onMaster ? 0 : place.track.getRaw() };
+    }
+
+    // The place of the list of what an item holds: a container's chains, a chain's devices.
+    DevicePlace getInsidePlace (const DeviceValue& item)
+    {
+        auto place = item.place;
+
+        if (item.form == DeviceValue::Form::container)
+            place.container = item.id;
+        else
+            place.chain = item.id;
+
+        return place;
+    }
+
+    bool holdsItems (const DeviceValue& item)
+    {
+        return item.form == DeviceValue::Form::container || item.form == DeviceValue::Form::chain;
+    }
+
+    // Whether two forms are of one kind of item: a device (one of Phazite's own, a plug-in), a container, a chain.
+    bool isOfOneKind (DeviceValue::Form a, DeviceValue::Form b)
+    {
+        const auto kind = [] (DeviceValue::Form form) { return form == DeviceValue::Form::plugin ? DeviceValue::Form::own : form; };
+        return kind (a) == kind (b);
+    }
+
+    // An item's name as the passes over elements named its element (nameOf()): "DEVICE:44", "CONTAINER:40", "CHAIN:41".
+    juce::String nameOfItem (const DeviceValue& item)
+    {
+        const auto& type = item.form == DeviceValue::Form::container ? schema::CONTAINER
+                           : item.form == DeviceValue::Form::chain   ? schema::CHAIN
+                                                                     : schema::DEVICE;
+        return type.getName().toString() + ":" + juce::String ((juce::int64) item.id.getRaw());
+    }
+
+    // Whether a child of an owner's element is in the owner's list: a channel's devices and containers, a container's chains,
+    // a chain's devices (DevicesValue.h: readDeviceList() lists the same).
+    bool isListedIn (const juce::ValueTree& owner, const juce::ValueTree& child)
+    {
+        if (owner.hasType (schema::TRACK) || owner.hasType (schema::MASTER))
+            return child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER);
+
+        if (owner.hasType (schema::CONTAINER))
+            return child.hasType (schema::CHAIN);
+
+        return owner.hasType (schema::CHAIN) && child.hasType (schema::DEVICE);
+    }
+
+    // What a store holds of one item (its own entries alone).
+    DeviceStore getEntriesOf (const DeviceStore& store, DeviceID id)
+    {
+        return renameStore (store, { { id.getRaw(), id.getRaw() } });
+    }
+
+    // Which channels' devices a devices pass makes like the other's, by a place on one (the song's, and the other's).
+    using DeviceChannelsTaken = std::function<bool (const DevicePlace&)>;
+
+    // The other song's devices as the devices pass reads them: each channel's devices and containers, each container's
+    // chains and each chain's devices, the first of an ID, each owner before what it holds (a channel's list, then its
+    // containers' chains, then their devices), the tracks' in the other's order, then the master's; each owner's list in its
+    // order; and what the other's version couldn't read: each channel that stands in for it (a track's piece), and each item
+    // that does (a device's or a container's piece, or a plug-in's state lost), which its owner's list names in its place,
+    // unread. Of the channels the pass takes (which: every one for the whole song; a line's own), each item read whole, as the
+    // song holds one (DevicesValue.h: readHeldDevice()), which everything that enters the devices' area reads, with what the
+    // store holds of it (DeviceStoreValue.h: readHeldStoreOf()), a plug-in's values' order and a window's place. Of the
+    // others, only what the pass may need, without a device read whole: each item's own fields (readHeldDeviceFields(),
+    // which reads the same items), its form kept by its ID (holds()), and, where the song holds its ID on a channel the pass
+    // takes (held: the song's devices), the item itself and its owner's list, for the pass to send the song's there as it is
+    // now.
+    struct OtherDevices
+    {
+        struct List
+        {
+            DevicePlace owner {};
+            std::vector<DeviceID> order {};
+        };
+
+        std::vector<DeviceValue> items {};
+        std::map<std::uint64_t, DeviceValue::Form> forms {}; // the items' forms, by their IDs
+        std::vector<List> lists {};
+        std::map<std::uint64_t, DevicePlace> standIns {}; // each item that stands in, with the place of the list naming it
+        std::set<ChannelKey> standInChannels {};
+        DeviceStore store {};
+        std::map<std::uint64_t, std::vector<juce::String>> valueOrders {};
+        std::map<std::uint64_t, WindowPlace> windows {};
+
+        OtherDevices (const juce::ValueTree& other, const DeviceChannelsTaken& which, const SongDevices& held)
+        {
+            auto channels = getTrackElements (other);
+            channels.push_back (other.getChildWithName (schema::MASTER));
+
+            // Whether the song holds an item of this ID on a channel the pass takes.
+            const std::function<bool (DeviceID)> isHeldThere = [&which, &held] (DeviceID id)
+            {
+                const auto* found = held.find (id);
+                return found != nullptr && which (found->place);
+            };
+
+            for (const auto& channel : channels)
+            {
+                if (! channel.isValid())
+                    continue;
+
+                const auto place = channel.hasType (schema::MASTER)
+                                       ? DevicePlace { .onMaster = true }
+                                       : DevicePlace { .track = TrackID::fromRaw (readID (channel[schema::trackID])) };
+
+                if (isStandIn (channel))
+                    standInChannels.insert (getChannelKey (place));
+                else
+                    readList (channel, place, which (place), isHeldThere);
+            }
+        }
+
+        // An owner's list, and those of what it holds: whole, of a channel taken; else each item's own fields alone.
+        void readList (const juce::ValueTree& owner, const DevicePlace& place, bool whole,
+                       const std::function<bool (DeviceID)>& isHeldThere)
+        {
+            List list;
+            list.owner = place;
+            auto kept = whole; // a list of a channel not taken is kept only where it names an item the song holds on one taken
+            std::vector<std::pair<juce::ValueTree, DevicePlace>> inside;
+
+            for (const auto& child : owner)
+            {
+                if (! isListedIn (owner, child))
+                    continue;
+
+                const auto id = readDeviceElementID (child);
+
+                if (! id.isValid() || forms.count (id.getRaw()) > 0 || standIns.count (id.getRaw()) > 0)
+                    continue;
+
+                if (isStandIn (child))
+                {
+                    standIns.emplace (id.getRaw(), place);
+                    list.order.push_back (id);
+                    continue;
+                }
+
+                auto value =
+                    whole ? readHeldDevice (child, readDevicePlace (child)) : readHeldDeviceFields (child, readDevicePlace (child));
+
+                if (! value.has_value())
+                    continue;
+
+                forms.emplace (id.getRaw(), value->form);
+                list.order.push_back (id);
+
+                if (holdsItems (*value))
+                    inside.emplace_back (child, getInsidePlace (*value));
+
+                if (! whole)
+                {
+                    if (isHeldThere (id))
+                    {
+                        kept = true;
+                        items.push_back (std::move (*value));
+                    }
+
+                    continue;
+                }
+
+                readHeldStoreOf (child, store);
+
+                if (value->isPlugin())
+                {
+                    auto& order = valueOrders[id.getRaw()];
+
+                    for (const auto& each : getPluginValues (child))
+                        order.push_back (each.parameter);
+                }
+
+                if (const auto window = readWindowPlace (child))
+                    windows.emplace (id.getRaw(), *window);
+
+                items.push_back (std::move (*value));
+            }
+
+            if (kept && ! list.order.empty())
+                lists.push_back (std::move (list));
+
+            for (const auto& [element, at] : inside)
+                readList (element, at, whole, isHeldThere);
+        }
+
+        const List* findList (const DevicePlace& owner) const
+        {
+            const auto found = std::find_if (lists.begin(), lists.end(), [&owner] (const List& each) { return each.owner == owner; });
+            return found != lists.end() ? &*found : nullptr;
+        }
+
+        // Whether the other holds an item of this ID, of this kind, read.
+        bool holds (DeviceID id, DeviceValue::Form form) const
+        {
+            const auto found = forms.find (id.getRaw());
+            return found != forms.end() && isOfOneKind (found->second, form);
+        }
+
+        // Whether the song's item of this ID at a place is one the other's version couldn't read: on a channel that stands in
+        // for it, in a container or a chain that does, or one the list it is in there names as one that does.
+        bool standsIn (DeviceID id, const DevicePlace& place) const
+        {
+            if (standInChannels.count (getChannelKey (place)) > 0)
+                return true;
+
+            for (const auto owner : { place.container, place.chain })
+                if (owner.isValid() && standIns.count (owner.getRaw()) > 0)
+                    return true;
+
+            const auto found = standIns.find (id.getRaw());
+            return found != standIns.end() && found->second == place;
+        }
+    };
+
+    // Whether the song holds what holds what is at a place: its chain (in its container, on its channel), its container (on
+    // its channel), or its channel (a track's, or the master).
+    bool holdsPlace (const Song& song, const SongDevices& now, const DevicePlace& place)
+    {
+        const auto isOnChannel = [&place] (const DeviceValue* item)
+        { return item != nullptr && getChannelKey (item->place) == getChannelKey (place); };
+
+        if (place.chain.isValid())
+        {
+            const auto* chain = now.find (place.chain);
+            return isOnChannel (chain) && chain->form == DeviceValue::Form::chain && chain->place.container == place.container;
+        }
+
+        if (place.container.isValid())
+        {
+            const auto* container = now.find (place.container);
+            return isOnChannel (container) && container->form == DeviceValue::Form::container;
+        }
+
+        return place.onMaster || findTrackState (song, place.track).hasType (schema::TRACK);
+    }
+
+    // Where an item goes in its list to be where the other song has it there: after the one before it there that the song's
+    // list holds; else first; -1 (after the others) for a list the song hasn't.
+    int findDevicePlaceLike (const SongDevices& now, const OtherDevices& theirs, const DeviceValue& item)
+    {
+        const auto* list = now.findList (item.place);
+        const auto* there = theirs.findList (item.place);
+
+        if (list == nullptr)
+            return -1;
+
+        if (there != nullptr)
+        {
+            const auto at = std::find (there->order.begin(), there->order.end(), item.id);
+
+            for (auto before = at; before != there->order.begin();)
+            {
+                --before;
+
+                for (size_t i = 0; i < list->size(); ++i)
+                    if ((*list)[i] == *before)
+                        return (int) i + 1;
+            }
+        }
+
+        return 0;
+    }
+
+    // The song's devices, containers and chains that which takes made like the other's (OtherDevices), through the devices'
+    // setters by their IDs and places, in the mode of the moment (model/mixer/internal/Mixer.h: setDevice(),
+    // setNewDevices(), eraseDevice(), setDeviceListOrder(), each of which writes nothing for what the song holds already),
+    // once the passes over elements put each channel where the other has it; now: the song's devices as the pass leaves
+    // them. In three rounds, so that what moves is the same element, a plug-in keeping its instance, its values, its state and
+    // its window's place (a device moved into a container on another track by a version comes home without being loaded
+    // again; a container taken apart since gets its devices back from the channel, one made since gives them back to it):
+    //   - each the other holds (its owners before what they hold), on a channel taken there or held by the song on one taken
+    //     here: set as the other holds it, at its place there (after the one before it there that the song's list holds),
+    //     which moves one the song holds in another list as the same element with all it holds; one the song hasn't (or holds
+    //     as another form of a device: a plug-in for one of Phazite's own) made with what the store holds of it, its state and
+    //     values, and its window's place, in the one action that puts it in (setNewDevices()), as the passes over elements
+    //     added the other's element whole; one the song holds as another kind of item under its ID (a device for a chain:
+    //     two computers can make the same ID) taken out first, wherever the song holds it: on a line's restore, even on a
+    //     track outside the line (a known limit, not a fault: it needs two computers that made the same ID, and a merge
+    //     gives what it adds IDs of its own). One the song holds on a channel taken that the other holds on
+    //     one not taken (a line's: what the line's track holds that the other holds on another track) sent there as it is now
+    //     where the song holds what holds it there, else taken out; one whose place there the song holds nothing to hold
+    //     (a track the song hasn't) left where it is;
+    //   - each the song holds on a channel taken that the other holds none of (of its kind) taken out with what it holds,
+    //     but one the other's version couldn't read (OtherDevices::standsIn(), or one the other holds as a stand-in somewhere
+    //     else that standIns names): left as the song has it;
+    //   - each list the other holds on a channel taken put in its order there, those it doesn't name (what the other's version
+    //     couldn't read) after them in theirs.
+    // What the store holds of each the other holds is its pass's (makeDeviceStoreLike()). The whole song's: every channel. A
+    // line's: its track's, and those of the tracks that come back with it (a folder's, gone since); the master's line the
+    // master's. A setter's refusal is none the pass can meet: it writes only where holdsPlace() found what holds the item,
+    // and erases only what the song holds where now says, so that each is asserted (the assertion net and the fuzz fail on
+    // a song that reaches one). How many writes it made.
+    int makeDeviceItemsLike (Song& song, const OtherDevices& theirs, const DeviceChannelsTaken& which, const StandIns& standIns,
+                             SongDevices& now)
+    {
+        auto writes = 0;
+        std::set<std::uint64_t> going; // sent where the song holds nothing to hold it: taken out
+
+        for (const auto& wanted : theirs.items)
+        {
+            const auto id = wanted.id;
+            const auto* found = now.find (id);
+            auto held = found != nullptr ? std::optional (*found) : std::nullopt;
+            const auto takenThere = which (wanted.place);
+
+            if (! takenThere && ! (held.has_value() && which (held->place)))
+                continue;
+
+            if (held.has_value() && ! isOfOneKind (held->form, wanted.form))
+            {
+                if (! takenThere)
+                    continue; // the song's, which the other holds none of: taken out below
+
+                const auto erased = eraseDevice (song, id, held->place);
+                jassert (erased); // held where now says
+                writes += erased ? 1 : 0;
+                now = withoutDevice (now, id);
+                held.reset();
+            }
+
+            auto next = wanted;
+
+            if (! takenThere)
+            {
+                next = *held; // sent home as it is now
+                next.place = wanted.place;
+            }
+
+            if (! holdsPlace (song, now, next.place))
+            {
+                if (! takenThere)
+                    going.insert (id.getRaw());
+
+                continue;
+            }
+
+            const auto index = findDevicePlaceLike (now, theirs, next);
+
+            if (held.has_value() && held->form == next.form)
+            {
+                if (*held == next)
+                    continue;
+
+                // Refused only where the song holds the ID as another kind (taken out above) or hasn't what holds its place
+                // (holdsPlace()); and what differs is written.
+                const auto set = setDevice (song, next, index);
+                jassert (set);
+                writes += set ? 1 : 0;
+                now = withDevice (now, std::move (next), index);
+                continue;
+            }
+
+            if (held.has_value())
+            {
+                const auto erased = eraseDevice (song, id, held->place);
+                jassert (erased); // held where now says
+                writes += erased ? 1 : 0;
+                now = withoutDevice (now, id);
+            }
+
+            MadeDevices made;
+            made.devices.push_back (next);
+            made.store = getEntriesOf (theirs.store, id);
+
+            // Refused only for nothing made or a place the song hasn't what holds (holdsPlace()).
+            const auto added = setNewDevices (song, made, index);
+            jassert (added);
+
+            if (! added)
+                continue;
+
+            ++writes;
+            now = withDevice (now, std::move (next), index);
+
+            if (const auto window = theirs.windows.find (id.getRaw()); window != theirs.windows.end())
+                setWindowPlace (song, id, window->second);
+        }
+
+        // Each the song holds on a channel taken that the other holds none of, top down: a container with what it holds.
+        const std::function<void (const DevicePlace&)> takeOutIn = [&] (const DevicePlace& owner)
+        {
+            const auto* list = now.findList (owner);
+
+            if (list == nullptr)
+                return;
+
+            const std::vector<DeviceID> ids (list->begin(), list->end());
+
+            for (const auto id : ids)
+            {
+                const auto* found = now.find (id);
+
+                if (found == nullptr)
+                    continue;
+
+                const auto item = *found;
+
+                if (going.count (id.getRaw()) > 0
+                    || (which (item.place) && ! theirs.holds (id, item.form) && ! theirs.standsIn (id, item.place)
+                        && standIns.count (nameOfItem (item)) == 0))
+                {
+                    const auto erased = eraseDevice (song, id, item.place);
+                    jassert (erased); // held where now says
+                    writes += erased ? 1 : 0;
+                    now = withoutDevice (now, id);
+                }
+                else if (holdsItems (item))
+                {
+                    takeOutIn (getInsidePlace (item));
+                }
+            }
+        };
+
+        std::vector<DevicePlace> channels;
+
+        for (const auto& channel : now.channels)
+            channels.push_back (channel.first == 0 ? DevicePlace { .onMaster = true }
+                                                   : DevicePlace { .track = TrackID::fromRaw (channel.first) });
+
+        for (const auto& channel : channels)
+            takeOutIn (channel);
+
+        // Each list the other holds on a channel taken in its order there: those it names first, in their order, the others
+        // after them in theirs.
+        for (const auto& list : theirs.lists)
+        {
+            const auto* held = which (list.owner) ? now.findList (list.owner) : nullptr;
+
+            if (held == nullptr)
+                continue;
+
+            std::vector<DeviceID> wanted;
+            const auto isWanted = [&wanted] (DeviceID id) { return std::find (wanted.begin(), wanted.end(), id) != wanted.end(); };
+
+            for (const auto id : list.order)
+                if (std::find (held->begin(), held->end(), id) != held->end() && ! isWanted (id))
+                    wanted.push_back (id);
+
+            for (const auto id : *held)
+                if (! isWanted (id))
+                    wanted.push_back (id);
+
+            if (const immer::flex_vector<DeviceID> order (wanted.begin(), wanted.end()); ! (order == *held))
+            {
+                // The list's own IDs, each once, in another order: refused never, and moved.
+                const auto ordered = setDeviceListOrder (song, list.owner, order);
+                jassert (ordered);
+                writes += ordered ? 1 : 0;
+                now = withListOrder (now, list.owner, order);
+            }
+        }
+
+        return writes;
+    }
+
+    // What the store holds of the devices and chains the other holds on a channel which takes, made what the other holds of
+    // them, once the devices pass put each where the other has it (now: the song's devices as it left them), through the
+    // store's functions by their IDs, in the mode of the moment (model/plugins/internal/DeviceStore.h: setStoreEntries(),
+    // which writes only what differs): a plug-in's state, program, format ID and version and its values set by hand, each in
+    // the other's order, and a chain's mute and solo, as the passes over elements made a DEVICE's and a CHAIN's properties and
+    // VALUE children the other's; and with taken everything, a window's place too (view state, which a version applied in
+    // the history leaves as it is). Each channel's store read once (getChannelStore(), no walk of the song); a plug-in that
+    // holds values set by hand compared there for their order too (a walk), so that the store's writer is asked only where
+    // something differs (an item's entries, or its values' order). What the other's version couldn't read (a stand-in) left
+    // as the song has it. How many writes it made.
+    int makeDeviceStoreLike (Song& song, const OtherDevices& theirs, const DeviceChannelsTaken& which, Taken taken, const SongDevices& now)
+    {
+        auto writes = 0;
+        std::map<ChannelKey, ChannelStore> channels; // each channel's store, read as the pass first comes to it
+        const std::vector<juce::String> noOrder;
+
+        for (const auto& item : theirs.items)
+        {
+            const auto* ours = now.find (item.id);
+            const auto isStored = item.form == DeviceValue::Form::plugin || item.form == DeviceValue::Form::chain;
+
+            if (! which (item.place) || ours == nullptr || ! (ours->place == item.place) || (! isStored && taken == Taken::counted))
+                continue;
+
+            const auto key = getChannelKey (item.place);
+            auto channel = channels.find (key);
+
+            if (channel == channels.end())
+                channel = channels.emplace (key, getChannelStore (song, item.place.onMaster ? TrackID() : item.place.track)).first;
+
+            if (isStored)
+            {
+                const auto wanted = getEntriesOf (theirs.store, item.id);
+                const auto held = getEntriesOf (channel->second.store, item.id);
+                const auto order = theirs.valueOrders.find (item.id.getRaw());
+                const auto& orderThere = order != theirs.valueOrders.end() ? order->second : noOrder;
+                const auto isSame = held == wanted && (held.pluginValues.empty() || getPluginValueOrder (song, item.id) == orderThere);
+
+                if (! isSame && setStoreEntries (song, item.id, wanted, orderThere))
+                    ++writes;
+            }
+
+            if (taken != Taken::everything)
+                continue;
+
+            std::optional<WindowPlace> window, windowThere;
+
+            for (const auto& [device, place] : channel->second.windows)
+                if (device == item.id)
+                    window = place;
+
+            if (const auto there = theirs.windows.find (item.id.getRaw()); there != theirs.windows.end())
+                windowThere = there->second;
+
+            if (window == windowThere)
+                continue;
+
+            if (windowThere.has_value())
+                setWindowPlace (song, item.id, *windowThere);
+            else
+                forgetWindowPlace (song, item.id);
+
+            ++writes;
+        }
+
+        return writes;
+    }
+
+    // The song's devices as the devices' keeper told them (SongValues.h: getDevicesAsTold()), kept up to date at each change
+    // of the tree, so that none is read (what tests/SongCheck.cpp compares with the song's devices read again); read whole only
+    // for a song that holds no values.
+    SongDevices getSongDevices (const Song& song)
+    {
+        if (const auto* values = song.getValues())
+            if (const auto* told = values->getDevicesAsTold())
+                return *told;
+
+        return getDevicesValue (song);
+    }
+
+    // The song's devices, containers and chains, and what the store holds of them, made like the other song's, through the
+    // devices' pass (makeDeviceItemsLike()) and then the store's (makeDeviceStoreLike()): the song's devices as its keeper
+    // holds them (getSongDevices(): none read), the other's read once, whole of the channels which takes alone
+    // (OtherDevices); for those channels, in the mode of the moment, what the other's version couldn't read left as the song
+    // has it. After the passes over elements, which leave the devices alone (isKeptBeside()), and before modulation's pass (a
+    // container's macros need their container) and the curves'. How many writes each made: the devices' (written in the undo
+    // history alone, but as a song opens), and the store's (written outside it too: a plug-in's own window, its state stored
+    // as the song saves, a chain soloed, a window moved).
+    struct DeviceWrites
+    {
+        int items = 0;
+        int store = 0;
+    };
+
+    std::atomic<std::uint64_t> storePassWrites { 0 }; // countDeviceStorePassWrites(): a count alone, which orders nothing
+
+    DeviceWrites makeDevicesLike (Song& song, const juce::ValueTree& other, const DeviceChannelsTaken& which, const StandIns& standIns,
+                                  Taken taken)
+    {
+        auto now = getSongDevices (song);
+        const OtherDevices theirs (other, which, now);
+        DeviceWrites writes;
+        writes.items = makeDeviceItemsLike (song, theirs, which, standIns, now);
+        writes.store = makeDeviceStoreLike (song, theirs, which, taken, now);
+        storePassWrites.fetch_add ((std::uint64_t) writes.store, std::memory_order_relaxed);
+        return writes;
+    }
+
+    // Whether a child of a folder is one placeTracksAmongDevices() (below) orders: a track, or one of the folder's devices and
+    // containers.
+    bool isPlacedHere (const juce::ValueTree& owner, const juce::ValueTree& child)
+    {
+        return child.hasType (schema::TRACK) || isListedIn (owner, child);
+    }
+
+    // A folder's tracks put among its devices and containers where the other song has them, after the areas' passes: the
+    // passes over elements place a track among the tracks alone, past the devices (isPlaced()), and the devices pass a device
+    // among the devices alone, the first of an empty list after its owner's other children (DeviceWriters.cpp:
+    // findChildIndex()), so that a
+    // folder whose tracks and devices stand among each other (a bus's effects before a track moved into it) would not stand
+    // as the other's. Its tracks moved alone, each the same element, in the mode of the moment (in the song's step, or
+    // without an undo manager outside the history): of those both hold (all of them, or the one given), in the other's
+    // order, each right before what follows, among those both hold, the one before it there (else right after that one; the
+    // first before the others), so that the folder's tracks and devices stand in the other's order, and nothing moves where
+    // they do already (a second pass moves nothing). This goes with the devices' switch: from then a whole copy writes a
+    // channel's devices before its tracks, always, and the tracks' places among the devices are no more. How many it moved.
+    int placeTracksAmongDevices (juce::ValueTree folder, const juce::ValueTree& there, juce::UndoManager* undo,
+                                 const juce::ValueTree& only = {})
+    {
+        if (! folder.getChildWithName (schema::TRACK).isValid())
+            return 0;
+
+        std::map<juce::String, juce::ValueTree> held;
+
+        for (const auto& child : folder)
+            if (isPlacedHere (folder, child))
+                held.emplace (nameOf (child), child);
+
+        // The folder's that the other holds too, in the other's order; nothing to place among tracks alone.
+        std::vector<juce::ValueTree> wanted;
+        std::set<juce::String> wantedNames;
+        auto withDevices = false;
+
+        for (const auto& child : there)
+        {
+            if (! isPlacedHere (there, child))
+                continue;
+
+            if (const auto found = held.find (nameOf (child)); found != held.end() && wantedNames.insert (found->first).second)
+            {
+                wanted.push_back (found->second);
+                withDevices = withDevices || ! child.hasType (schema::TRACK);
+            }
+        }
+
+        if (! withDevices)
+            return 0;
+
+        const auto isWanted = [&folder, &wantedNames] (const juce::ValueTree& child)
+        { return isPlacedHere (folder, child) && wantedNames.count (nameOf (child)) > 0; };
+
+        auto moves = 0;
+
+        for (size_t k = 0; k < wanted.size(); ++k)
+        {
+            const auto track = wanted[k];
+
+            if (! track.hasType (schema::TRACK) || (only.isValid() && track != only))
+                continue;
+
+            // What it goes before: the first after the one before it there (or the first of all) that both hold.
+            const auto index = folder.indexOf (track);
+            const auto before = k > 0 ? wanted[k - 1] : juce::ValueTree();
+            juce::ValueTree next;
+
+            for (int i = before.isValid() ? folder.indexOf (before) + 1 : 0; i < folder.getNumChildren() && ! next.isValid(); ++i)
+                if (const auto child = folder.getChild (i); child != track && isWanted (child))
+                    next = child;
+
+            if (! next.isValid() && ! before.isValid())
+                continue; // the only one both hold
+
+            const auto at = folder.indexOf (next.isValid() ? next : before);
+            const auto target = next.isValid() ? (at < index ? at : at - 1) : (at < index ? at + 1 : at);
+
+            if (target != index)
+            {
+                folder.moveChild (index, target, undo);
+                ++moves;
+            }
+        }
+
+        return moves;
+    }
+
+    // Every folder's tracks put among its devices where the other has them (placeTracksAmongDevices()), in the mode of the
+    // moment; a folder the other's version couldn't read left as it is. How many it moved.
+    int placeEveryFolderLike (Song& song, const juce::ValueTree& other)
+    {
+        auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+        auto moves = 0;
+
+        for (const auto& folder : getTrackElements (song.getState()))
+            if (const auto there = findTrack (other, readID (folder[schema::trackID])); there.isValid() && ! isStandIn (there))
+                moves += placeTracksAmongDevices (folder, there, undo);
+
+        return moves;
+    }
+
     // Every track's clips made like the other's, once the rest of the song is: how many writes it made.
     int makeClipsLike (Song& song, const juce::ValueTree& other, bool standInsStay)
     {
@@ -1690,14 +2298,22 @@ namespace
     }
 
     // The areas the song holds as values beside its tree made like the other's, once the rest of the song is, each through
-    // its pass, a line each, in this order: the clips with their notes (makeClipsLike()), then the tempo map
-    // (makeTempoMapLike()), then the chord lane (makeChordLaneLike()), then the MIDI links (makeMidiLinksLike()), then the
-    // curves (makeAllCurvesLike()), then the sections (makeSectionsLike()), then modulation (makeAllModulationLike()), then
-    // the sends (makeAllSendsLike()), none of which reads another's. How many writes they made (the tempo map's one, where it
-    // wrote; the chord lane's one, where it wrote).
-    int makeValuesLike (Song& song, const juce::ValueTree& other, bool standInsStay)
+    // its pass, a line each, in this order: the clips with their notes (makeClipsLike()), then the devices with what the
+    // store holds of them (makeDevicesLike(), every channel's: before modulation's pass, which gives a container's macros
+    // their container, and the curves'), then the tempo map (makeTempoMapLike()), then the chord lane (makeChordLaneLike()),
+    // then the MIDI links (makeMidiLinksLike()), then the curves (makeAllCurvesLike()), then the sections
+    // (makeSectionsLike()), then modulation (makeAllModulationLike()), then the sends (makeAllSendsLike()), none of which
+    // reads another's but modulation's the devices'. Taken and standIns as the passes over elements had them (the devices'
+    // store and a window's place; what the other's version couldn't read that stays where the song has it). How many writes
+    // they made (the tempo map's one, where it wrote; the chord lane's one, where it wrote), of what the undo history alone
+    // writes: not the devices' store's, which is written outside it too, and which a song made as copied takes back
+    // (makeSongAsCopied()), as the passes over elements took back a plug-in's state and a chain's solo. Then, once the
+    // devices are the other's, every folder's tracks put among its devices where the other has them
+    // (placeEveryFolderLike()), its moves counted with the writes.
+    int makeValuesLike (Song& song, const juce::ValueTree& other, bool standInsStay, Taken taken, const StandIns& standIns)
     {
         auto writes = makeClipsLike (song, other, standInsStay);
+        writes += makeDevicesLike (song, other, [] (const DevicePlace&) { return true; }, standIns, taken).items;
         writes += makeTempoMapLike (song, other) ? 1 : 0;
         writes += makeChordLaneLike (song, other) ? 1 : 0;
         writes += makeMidiLinksLike (song, other) ? 1 : 0; // the MIDI links' one, where it wrote
@@ -1705,6 +2321,7 @@ namespace
         writes += makeSectionsLike (song, other) ? 1 : 0; // the sections' one, where it wrote
         writes += makeAllModulationLike (song, other);
         writes += makeAllSendsLike (song, other);
+        writes += placeEveryFolderLike (song, other);
         return writes;
     }
 
@@ -1843,7 +2460,7 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
     const auto standIns = findStandIns (other);
     removeMovedItems (song.getState(), findPlaces (other), undo, standIns);
     makeLike (song, song.getState(), other, undo, true, Taken::counted, standIns);
-    makeValuesLike (song, other, true);
+    makeValuesLike (song, other, true, Taken::counted, standIns);
     placePlaceholdersLike (song, other, undo, Taken::counted);
     countIDsPast (song, other);
 }
@@ -1859,7 +2476,7 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     const auto next = std::max (findNextID (song), findNextID (other));
     removeMovedItems (song.getState(), findPlaces (other), nullptr);
     makeLike (song, song.getState(), other, nullptr, true, Taken::everything);
-    makeValuesLike (song, other, false);
+    makeValuesLike (song, other, false, Taken::everything, noStandIns());
     placePlaceholdersLike (song, other, nullptr, Taken::everything);
     song.getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
     song.getUndoManager().clearUndoHistory();
@@ -1872,10 +2489,12 @@ void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
 
     // Everything, outside the history, and its count of IDs as the copy's: what the history holds is the copy's already, so
     // that only what changed without it differs (a property set without a step, view state, the count of IDs). Its clips, its
-    // tempo map, its chord lane and its curves among what the history holds: every change of one is an undo step, so none
-    // differs (an Undo of a step below would lose what was written of one here: ValueArea.h); the passes write nothing.
+    // tempo map, its chord lane, its curves and its devices among what the history holds: every change of one is an undo step,
+    // so none differs (an Undo of a step below would lose what was written of one here: ValueArea.h); the passes write nothing
+    // of them. What the devices' store holds (a plug-in's state stored, a chain soloed) and a window's place are written
+    // outside the history too, and taken back here as they differ.
     makeLike (song, song.getState(), copy, nullptr, true, Taken::everything);
-    [[maybe_unused]] const auto valueWrites = makeValuesLike (song, copy, false);
+    [[maybe_unused]] const auto valueWrites = makeValuesLike (song, copy, false, Taken::everything, noStandIns());
     jassert (valueWrites == 0);
     placePlaceholdersLike (song, copy, nullptr, Taken::everything);
     song.getState().setProperty (schema::nextID, copy[schema::nextID], nullptr);
@@ -1912,20 +2531,23 @@ namespace
                 devices.insert (entry.first);
 
         // Its clips, and those of the tracks that come back with it, in a pass of their own once the rest is done: what the
-        // track holds that the other song holds on another track goes there, as it is now. And the tracks whose modulators,
-        // macros and sends the line carries (the modulation pass's and the sends pass's, below): its own, and those that come
-        // back with it.
+        // track holds that the other song holds on another track goes there, as it is now. And the tracks whose devices,
+        // modulators, macros and sends the line carries (the devices pass's, the modulation pass's and the sends pass's,
+        // below): its own, and those that come back with it; the master's line the master's.
         ClipPass clips (song, other, ClipPass::Elsewhere::sentThere, true);
         std::set<std::uint64_t> lineTracks { id.getRaw() };
         const auto isLineTrack = [&lineTracks] (TrackID track) { return lineTracks.count (track.getRaw()) > 0; };
+        const auto isLineChannel = [isMaster, &lineTracks] (const DevicePlace& place)
+        { return isMaster ? place.onMaster : ! place.onMaster && lineTracks.count (place.track.getRaw()) > 0; };
+        const auto standIns = then.isValid() ? findStandIns (then) : StandIns();
+        auto devicesDone = false;
+        juce::ValueTree cameBack; // the track, gone since, put back
 
         if (live.isValid() && then.isValid())
         {
-            // What it held then that is somewhere else now (a device moved into a container on another track) comes back from
-            // there, and what it holds now that the other song holds somewhere else goes there.
-            const auto standIns = findStandIns (then);
-            removeMovedItems (state, findPlaces (then, false), undo, standIns);
-            sendItemsHome (state, live, other, undo);
+            // Its own properties and elements; what it held then that is somewhere else now (a device moved into a container
+            // on another track) comes back from there, and what it holds now that the other song holds somewhere else goes
+            // there, by the devices pass (below).
             makeLike (song, live, then, undo, false, Taken::counted, standIns);
             clips.addTrack (id);
         }
@@ -1933,9 +2555,11 @@ namespace
         {
             // Added since: taken away. The tracks in it (a folder's) are things of their own, which stay: where it was, in
             // their order, as ungrouping a folder leaves them. And what it holds that the other song holds somewhere else (a
-            // clip moved onto it) goes there.
+            // clip moved onto it, a device moved into a container on another track) goes there first; the rest of its devices
+            // with it.
             clips.sendHome (id);
-            sendItemsHome (state, live, other, undo);
+            makeDevicesLike (song, other, isLineChannel, standIns, Taken::counted);
+            devicesDone = true;
             makeSendsLike (song, other, isLineTrack); // its sends the other holds on another track, sent there first
             auto parent = live.getParent();
             auto place = parent.indexOf (live) + 1;
@@ -1958,8 +2582,8 @@ namespace
         else
         {
             // Gone since: back where it was, after the track before it there, with the tracks it held that aren't elsewhere
-            // now, and what they held that is elsewhere now back from there; without what the other's version couldn't read
-            // (a clip of it), which isn't in the song now either.
+            // now, and what they held that is elsewhere now back from there (their devices by the devices pass, below);
+            // without what the other's version couldn't read (a clip of it), which isn't in the song now either.
             auto parent = findTrackParent (state, then.getParent());
             auto copy = copyForSong (then);
             removeTracksHeld (copy, state);
@@ -1977,9 +2601,11 @@ namespace
             }
 
             parent.addChild (copy, index, undo);
+            cameBack = copy;
 
-            // Its clips, and those of the tracks in it that came back with it; and their modulators and macros, which the copy
-            // holds none of (copyForSong()); and their automation, as the other song's elements of them hold what it is of.
+            // Its clips, and those of the tracks in it that came back with it; and their devices, modulators and macros, which
+            // the copy holds none of (copyForSong()); and their automation, as the other song's elements of them hold what it is
+            // of.
             const std::function<void (const juce::ValueTree&)> addTracks = [&] (const juce::ValueTree& track)
             {
                 clips.addTrack (TrackID::fromRaw (readID (track[schema::trackID])));
@@ -1993,6 +2619,13 @@ namespace
 
             addTracks (copy);
         }
+
+        // Its devices, containers and chains and what the store holds of them, and those of the tracks that came back with it,
+        // once the passes over elements put the tracks where the other has them, and before the curves' and modulation's
+        // passes (a container's macros need their container): as the line always carried a channel's DEVICE and CONTAINER
+        // elements, what it holds that the other holds on another track sent there as it is now.
+        if (! devicesDone)
+            makeDevicesLike (song, other, isLineChannel, standIns, Taken::counted);
 
         clips.run();
         makeCurvesLike (
@@ -2009,6 +2642,17 @@ namespace
         // master's line none.
         if (! isMaster)
             makeSendsLike (song, other, isLineTrack);
+
+        // Once its devices are the other's, the tracks of each of the line's folders put among its devices where the other has
+        // them, and the track, gone since, among its folder's (placeTracksAmongDevices()): as the passes put its tracks among
+        // the tracks alone, and a device back into an empty list after them.
+        for (const auto track : lineTracks)
+            if (const auto there = findTrack (other, track); there.isValid() && ! isStandIn (there))
+                if (const auto folder = findTrack (state, track); folder.isValid())
+                    placeTracksAmongDevices (folder, there, undo);
+
+        if (cameBack.isValid())
+            placeTracksAmongDevices (cameBack.getParent(), then.getParent(), undo, cameBack);
 
         return true;
     }
@@ -2105,7 +2749,6 @@ void makeSongOwnLike (Song& song, const juce::ValueTree& other)
 
 int removeBrokenReferences (Song& song)
 {
-    auto* undo = &song.getUndoManager();
     const auto state = song.getState();
     std::set<std::uint64_t> items, tracks;
     const std::function<void (const juce::ValueTree&)> collect = [&] (const juce::ValueTree& element)
@@ -2149,8 +2792,10 @@ int removeBrokenReferences (Song& song)
     // A modulation of a parameter of an item the song hasn't, through modulation's code.
     const auto modulations = (size_t) forgetModulationsOf (song, [&items] (DeviceID device) { return items.count (device.getRaw()) == 0; });
 
-    for (auto& device : sidechains)
-        device.removeProperty (schema::deviceSidechain, undo);
+    // A sidechain that listens to a track the song hasn't turned off through the devices' setter, on the element found
+    // (Mixer.h: setDeviceFields()).
+    for (const auto& device : sidechains)
+        setDeviceFields (song, device, [] (DeviceValue& value) { value.sidechain = {}; });
 
     // And what an edit takes away with what it names (model/mixer/internal/Mixer.h): a send to a return that is gone, with
     // what modulated it, and a pad's track whose drum sampler is gone; so that the song is as makeConsistent() leaves it.
@@ -2183,5 +2828,10 @@ int removeBrokenReferences (Song& song)
     forgetSidechainLoops (song);
 
     return (int) (modulations + sidechains.size()) + sendsBefore - countSends() + sidechainsBefore - count (hasSidechain);
+}
+
+std::uint64_t countDeviceStorePassWrites() noexcept
+{
+    return storePassWrites.load (std::memory_order_relaxed);
 }
 } // namespace phazite

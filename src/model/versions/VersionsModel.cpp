@@ -2119,7 +2119,9 @@ namespace
 
             // Not modulation's nor the sends', as not the clips': their choices set the values (chooseModulationClash(),
             // chooseSendClash()), but a track or a container chosen whole in the tree comes with its modulators or macros and
-            // its sends, which the keeper takes in, as its clips.
+            // its sends, which the keeper takes in, as its clips. Nor the devices': their choices set them through their
+            // setters (chooseDeviceClash(), chooseDeviceStoreClash()), and their part of the keeper only tells what the tree
+            // holds, taking nothing in, until the devices' switch.
             return values->countTempoMapAdopted()    // the tempo map's
                    + values->countChordLaneAdopted() // the chord lane's
                    + values->countMidiLinksAdopted() // the MIDI links'
@@ -2135,8 +2137,9 @@ namespace
 
     // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
     // this order: the tempo map (a path into the song's TEMPOMAP), the chord lane (a path into the song's CHORDLANE), the MIDI
-    // links, the sections, modulation (a path through a modulator or a macro), the sends (a path through a send), a curve
-    // (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a
+    // links, the sections, modulation (a path through a modulator or a macro: a container's macro's before the container's),
+    // the sends (a path through a send), the devices (a path through a device, a container or a chain: the store's first), a
+    // curve (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a
     // note's property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path
     // through a clip, refused). What the first whose path it is did with it; none of them (notTheArea) for a clash in the
     // song's tree.
@@ -2160,6 +2163,12 @@ namespace
         if (const auto choice = chooseSendClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice; // a path through a SEND
 
+        if (const auto choice = chooseDeviceStoreClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice; // a path to what the store holds of a DEVICE or a CHAIN
+
+        if (const auto choice = chooseDeviceClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice; // any other path through a DEVICE, a CONTAINER or a CHAIN
+
         if (const auto choice = chooseCurveClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;
 
@@ -2175,6 +2184,7 @@ namespace
     // A clash in the song's tree (no area's: chooseInAreas()), chosen in it, in the history of the choice's step: a property
     // given the value chosen, or taken away where that side had none; an element replaced whole by the side chosen's, in its
     // place, or taken out where that side had none. Whether it was chosen (false for a path that names nothing in the song).
+    // No path through a DEVICE, a CONTAINER or a CHAIN comes here: the devices' choosers take or refuse every one.
     bool chooseInTree (Song& song, const MergeClash& clash, int value)
     {
         auto* undo = &song.getUndoManager();

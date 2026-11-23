@@ -66,6 +66,16 @@ AreaChoice chooseModulationClash (Song&, const MergeClash&, int value, const Mer
 // side chosen holds none of, taken away (known bug 239's shape).
 AreaChoice chooseSendClash (Song&, const MergeClash&, int value, const MergeSides&);
 
+// The devices' (model/mixer/DeviceClashes.cpp): a path through a DEVICE, a CONTAINER or a CHAIN (its last such step names
+// the item, the steps before it its place), which merge as items by their IDs, each property at a time. What the store holds
+// of one (a plug-in's state, program, format ID or version, a value of its set by hand, a chain's mute or solo) through the
+// store's functions (model/plugins/internal/DeviceStore.h), its own chooser asked first; a property of the item's own, of its
+// VALUES or of its SOUNDS through the devices' setter (model/mixer/internal/Mixer.h: setDevice()). A plug-in's value both
+// lines set of a parameter the parting's song held none of, chosen as what was before, taken away (known bug 239's shape).
+// Any other path through one (an item whole, which a merge never reports for these, or what is deeper in one) refused.
+AreaChoice chooseDeviceStoreClash (Song&, const MergeClash&, int value, const MergeSides&);
+AreaChoice chooseDeviceClash (Song&, const MergeClash&, int value, const MergeSides&);
+
 AreaChoice chooseCurveClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseNoteClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSides&);

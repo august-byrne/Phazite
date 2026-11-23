@@ -196,7 +196,14 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   reads as 120. Fixed for modulation too (roadmap step S5.20, modulation's third piece, 2026-11-22): a modulation both
   lines made of one parameter from one modulator, chosen as what was before, is taken away where the parting's song can
   be read (`chooseModulationClash()`, `src/model/modulation/Modulation.cpp`), with a test in
-  `tests/ModulationWritersTests.cpp`. Any other keyed element both lines added with a clashing property is likely the
+  `tests/ModulationWritersTests.cpp`. Fixed for a plug-in's value set by hand too (roadmap step S5.20, the devices'
+  versions pass, 2026-11-23): both lines set a parameter the parting's song held no value of, and what was before left
+  a VALUE without a value, which every reader read as 0, now and at every load; a clash on one is chosen through the
+  store's functions (`chooseDeviceStoreClash()`, `src/model/mixer/DeviceClashes.cpp`), and what was before takes the
+  value away, so that the plug-in plays what its state holds, with a test in `tests/DevicesVersionsTests.cpp` (the
+  store's switch was to fix it, decision L.2 of the devices' design; its chooser made it one line here). A property of
+  a device, a container or a chain, of a device's VALUES or of its SOUNDS taken away means its default, which is
+  right. Any other keyed element both lines added with a clashing property is likely the
   same (a chord, a chord lane's key, a MIDI link). A section's property can be so only in a damaged commit's song:
   sections merge by their IDs, and the merge renumbers what both lines added under one ID, or joins it (`renumberAdditions()`,
   `src/model/versions/SongMerge.cpp`); and there a void length chosen is refused (`chooseSectionClash()`,
