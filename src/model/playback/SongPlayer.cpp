@@ -349,11 +349,11 @@ void SongPlayer::devicesChanged (const std::vector<SongValues::DeviceChange>& ch
         if (device.isThere)
             mark (device.after);
 
-        // Its sounds, which a kept node loads again: those of one that came, or whose first came or last went (as sounds
-        // that came whole or went); those set in place, which its session may have loaded at once (takeDevice()).
-        if (device.isThere && (device.has (Change::made) || device.has (Change::soundsAppeared)))
+        // Its sounds, which a kept node loads again: those of one that came; and those set in place, its first that came and
+        // its last that went among them, unless its session loaded them at once (takeDevice(), which says so: soundsTaken).
+        if (device.isThere && device.has (Change::made))
             changes.sounds.insert (id);
-        else if (device.isThere && device.has (Change::sounds))
+        else if (device.isThere && (device.has (Change::sounds) || device.has (Change::soundsAppeared)))
             changes.soundsSet.insert (id);
 
         // What decides what is heard: its sidechain's track and its channel, as the song holds them now.
@@ -2536,10 +2536,10 @@ SongPlayer::DeviceTaken SongPlayer::takeDevice (const SongValues::DeviceChange& 
         taken.atOnce = taken.atOnce || ! taken.changesLatency; // one that waits for its plan was taken at once in part only
     }
 
-    // Its sounds that differ: loaded now into the node the next plan keeps, which doesn't load them again. Not its first sound
-    // or its last (soundsAppeared: as its sounds came or went whole, an Undo's, a song applied), which the next plan loads
-    // (devicesChanged() marks them), as it always did: not at once as well.
-    if (change.has (Change::sounds) && ! change.has (Change::soundsAppeared))
+    // Its sounds that differ: loaded now into the node the next plan keeps, which doesn't load them again. Its first sound
+    // and its last too (soundsAppeared), which make a plan as well: what asks the node for its sound right after the sound
+    // was set (an editor's picture of it) finds it there, and the plan that follows doesn't load it a second time.
+    if (change.has (Change::sounds) || change.has (Change::soundsAppeared))
     {
         if (node != nullptr && now.form == Form::own)
         {

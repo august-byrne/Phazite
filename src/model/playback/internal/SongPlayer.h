@@ -335,8 +335,8 @@ private:
     // The devices, containers and chains that changed (SongValues.h; its tree callbacks leave what the devices' value covers
     // alone, isHeardAsKept()): the channels each was on and is on (the master's under 0), and those whose devices came in
     // another order, their devices read again by the next compile, whatever part changed, a value the session takes at once
-    // (takeDevice()) too, as a change at or under a device marked its channel; the sounds of each device that came (made) or
-    // whose first sound came or last went (Changes::sounds), and of each whose sounds were set in place (soundsSet). And what
+    // (takeDevice()) too, as a change at or under a device marked its channel; the sounds of each device that came (made:
+    // Changes::sounds), and of each whose sounds were set in place, its first and its last among them (soundsSet). And what
     // decides what is heard brought up to date (heldDevices).
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
