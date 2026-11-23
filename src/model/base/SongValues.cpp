@@ -19,8 +19,8 @@ namespace phazite
 //==============================================================================
 // What keeps the areas and the tree together for every change of the tree (SongValues.h), by asking every area's part of it
 // in turn, each doing nothing for what is not its own (ClipsArea.h, TempoMapArea.h, ChordLaneArea.h, CurvesArea.h,
-// MidiLinksArea.h, SectionsArea.h; and ModulationArea.h and SendsArea.h, which tell modulation's and the sends' listener from
-// the tree while the tree holds them, and change nothing). It changes the areas and the tree through the song's undo manager
+// MidiLinksArea.h, SectionsArea.h, ModulationArea.h; and SendsArea.h, which tells the sends' listener from the tree while the
+// tree holds them, and changes nothing). It changes the areas and the tree through the song's undo manager
 // from inside the tree's callbacks, which run inside the perform() of the tree's own action: JUCE refuses that only while it
 // undoes or redoes (when the keeper does nothing), and adds the inner actions to the step before the outer one, so that Undo
 // takes the tree's change back before the areas'. JUCE workaround W62 (docs/juce-workarounds.md).
@@ -53,24 +53,18 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     MidiLinksKeeper midiLinks;
     CurvesKeeper curves;
     SectionsKeeper sections;
-    ModulationKeeper modulation; // tells modulation's listener from the tree, in an undo and a redo too, until the switch
-    SendsKeeper sends;           // the same for the sends, until their switch
+    ModulationKeeper modulation;
+    SendsKeeper sends; // tells the sends' listener from the tree, in an undo and a redo too, until their switch
 
     bool isUndoingOrRedoing() const { return song.getUndoManager().isPerformingUndoRedo(); }
 
-    // A property changed, and children in another order: modulation's and the sends', each while the tree holds it
-    // (ModulationArea.h, SendsArea.h), in this order, neither reading the other's.
+    // A property changed, and children in another order: the sends', while the tree holds them (SendsArea.h).
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
     {
-        modulation.propertyChanged (tree, property);
         sends.propertyChanged (tree, property);
     }
 
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
-    {
-        modulation.childOrderChanged (parent);
-        sends.childOrderChanged (parent);
-    }
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { sends.childOrderChanged (parent); }
 
     // A child added: every area asked in turn, each doing nothing (and returning at once) for what is not its own, so that an
     // area whose elements sit inside another's (a track's, say) sees them come in with it. The tempo map's first (the song's
@@ -79,14 +73,13 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     // song's MIDILINKS, or one in it, which holds nothing of another area's), then the curves' (the song's AUTOMATION, or one
     // in it, which holds nothing of another area's), then the sections' (the song's SECTIONS, or one in it, which holds
     // nothing of another area's), then the clips' (a track, what holds tracks, a CLIP, in the song's track list: none of them
-    // the tempo map's, the chord lane's, the MIDI links', the curves' or the sections').
-    // Before them modulation's, in an undo and a redo too, which tells what came, takes nothing in and changes nothing of the
-    // tree: so it may come first (a track that comes in with modulators and clips has its modulators told as it comes, with
-    // its clips still in it, which modulation's part doesn't read). The sends' after it, the same way (a track's sends are
-    // neither its clips nor its modulators).
+    // the tempo map's, the chord lane's, the MIDI links', the curves' or the sections'), then modulation's (a track, what holds
+    // tracks, the master, a container, a MODULATOR or a MACRO, of the song's: a track's modulators are neither its clips nor
+    // anything in them, so the clips' and modulation's each take their own out of a track that came in with both).
+    // Before them the sends', in an undo and a redo too, which tells what came, takes nothing in and changes nothing of the
+    // tree: so it may come first (a track's sends are neither its clips nor its modulators).
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
-        modulation.childAdded (parent, child);
         sends.childAdded (parent, child);
 
         if (isUndoingOrRedoing())
@@ -98,21 +91,22 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
         curves.childAdded (parent, child);
         sections.childAdded (parent, child);
         clips.childAdded (parent, child);
+        modulation.childAdded (parent, child);
     }
 
-    // A child taken out: every area that acts there asked in turn, each doing nothing for what is not its own. The clips'
-    // alone (a track, or what holds tracks): the tempo map, the chord lane, the MIDI links, the curves and the sections do
-    // nothing as their elements leave. Before them modulation's, then the sends', in an undo and a redo too, which tell what
-    // went.
+    // A child taken out: every area that acts there asked in turn, each doing nothing for what is not its own. The clips' (a
+    // track, or what holds tracks), then modulation's (a track, what holds tracks, the master, a container): the tempo map,
+    // the chord lane, the MIDI links, the curves and the sections do nothing as their elements leave. Before them the sends',
+    // in an undo and a redo too, which tells what went.
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        modulation.childRemoved (parent, child);
         sends.childRemoved (parent, child);
 
         if (isUndoingOrRedoing())
             return;
 
         clips.childRemoved (parent, child);
+        modulation.childRemoved (parent, child);
     }
 };
 
@@ -125,13 +119,15 @@ SongValues::SongValues (Song& song)
       midiLinks (song.getUndoManager(), {}),
       curves (song.getUndoManager(), {}),
       sections (song.getUndoManager(), {}),
+      modulation (song.getUndoManager(), {}),
       clipsTeller (std::make_unique<ClipsTeller> (clips, listeners)),
       notesTeller (std::make_unique<NotesTeller> (notes, listeners)),
       tempoMapTeller (std::make_unique<TempoMapTeller> (tempoMap, listeners)),
       chordLaneTeller (std::make_unique<ChordLaneTeller> (chordLane, listeners)),
       midiLinksTeller (std::make_unique<MidiLinksTeller> (midiLinks, listeners)),
       curvesTeller (std::make_unique<CurvesTeller> (curves, listeners)),
-      sectionsTeller (std::make_unique<SectionsTeller> (sections, listeners))
+      sectionsTeller (std::make_unique<SectionsTeller> (sections, listeners)),
+      modulationTeller (std::make_unique<ModulationTeller> (modulation, listeners))
 {
     // Each area with its teller, in the order of the areas; the keeper comes once the tree is consistent (adopt()). The
     // macro's statement ended again here, so that the formatter reads a body that holds nothing else.
@@ -144,6 +140,7 @@ SongValues::~SongValues()
 
     // The keeper first, then each area's teller, in the reverse of their making.
     keeper = nullptr;
+    modulationTeller = nullptr;
     sectionsTeller = nullptr;
     curvesTeller = nullptr;
     midiLinksTeller = nullptr;
@@ -179,13 +176,14 @@ void SongValues::adopt (Song& song)
 {
     // What the tree the loader made consistent holds of each area, into the area, outside the history, and out of the tree:
     // each area in turn, in this order (the clips with their notes, then the tempo map, then the chord lane, then the MIDI
-    // links, then the curves, then the sections: none reads another's); then the keeper, from here on.
+    // links, then the curves, then the sections, then modulation: none reads another's); then the keeper, from here on.
     ClipsKeeper::adopt (*this, song);
     TempoMapKeeper::adopt (*this, song);
     ChordLaneKeeper::adopt (*this, song);
     MidiLinksKeeper::adopt (*this, song);
     CurvesKeeper::adopt (*this, song);
     SectionsKeeper::adopt (*this, song);
+    ModulationKeeper::adopt (*this, song);
     keeper = std::make_unique<Keeper> (*this, song);
 }
 
@@ -205,23 +203,21 @@ void Song::holdValues()
 // What of the tree's notifications the areas take: a line for each area, in the order of the areas.
 bool isHeardAsKept (const juce::ValueTree& element)
 {
-    return isHeardAsTempoMap (element)      // the song's TEMPOMAP, or an element in it
-           || isHeardAsChordLane (element)  // the song's CHORDLANE, or an element in it
-           || isHeardAsCurves (element)     // the song's AUTOMATION, or an element in it
-           || isHeardAsMidiLinks (element)  // the song's MIDILINKS, or an element in it
-           || isHeardAsSections (element)   // the song's SECTIONS, or an element in it
-           || isHeardAsModulation (element) // a MODULATOR or a MACRO of the song's, or an element in one
-           || isHeardAsSends (element);     // a SEND of the song's, or an element in one
+    return isHeardAsTempoMap (element)     // the song's TEMPOMAP, or an element in it
+           || isHeardAsChordLane (element) // the song's CHORDLANE, or an element in it
+           || isHeardAsCurves (element)    // the song's AUTOMATION, or an element in it
+           || isHeardAsMidiLinks (element) // the song's MIDILINKS, or an element in it
+           || isHeardAsSections (element)  // the song's SECTIONS, or an element in it
+           || isHeardAsSends (element);    // a SEND of the song's, or an element in one
 }
 
 bool isHeardAsKept (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    return isHeardAsTempoMap (parent, child)      // the TEMPOMAP itself, or a child of an element in it
-           || isHeardAsChordLane (parent, child)  // a child of the CHORDLANE or of an element in it (not the CHORDLANE itself)
-           || isHeardAsCurves (parent, child)     // the AUTOMATION itself, or a child of an element in it
-           || isHeardAsMidiLinks (parent, child)  // a child of the MIDILINKS or of an element in it (not the MIDILINKS itself)
-           || isHeardAsSections (parent, child)   // a child of the SECTIONS or of an element in it (not the SECTIONS itself)
-           || isHeardAsModulation (parent, child) // a MODULATOR or a MACRO added to its owner or taken out, or what is in one
-           || isHeardAsSends (parent, child);     // a SEND added to its track or taken out, or what is in one
+    return isHeardAsTempoMap (parent, child)     // the TEMPOMAP itself, or a child of an element in it
+           || isHeardAsChordLane (parent, child) // a child of the CHORDLANE or of an element in it (not the CHORDLANE itself)
+           || isHeardAsCurves (parent, child)    // the AUTOMATION itself, or a child of an element in it
+           || isHeardAsMidiLinks (parent, child) // a child of the MIDILINKS or of an element in it (not the MIDILINKS itself)
+           || isHeardAsSections (parent, child)  // a child of the SECTIONS or of an element in it (not the SECTIONS itself)
+           || isHeardAsSends (parent, child);    // a SEND added to its track or taken out, or what is in one
 }
 } // namespace phazite

@@ -379,7 +379,7 @@ void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
     // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsKept()), which marks
     // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats); the curves by
     // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter; the modulators and macros by
-    // modulationChanged() (isHeardAsKept(), through isHeardAsModulation()), each by its channel; the sends by sendsChanged()
+    // modulationChanged() (the tree holds none of them), each by its channel; the sends by sendsChanged()
     // (isHeardAsKept(), through isHeardAsSends()), by the tracks they were added to or taken out of. In a channel (a track, a
     // folder, a return or the master), its devices' values are read again only for what can change them: a change at or under
     // a device, a container or a chain, or an element of the channel added, removed or moved; not the channel's

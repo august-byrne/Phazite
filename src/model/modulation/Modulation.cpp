@@ -5,7 +5,7 @@
 #include "model/base/Numbers.h"
 #include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -14,9 +14,11 @@
 #include "model/versions/internal/SongPieces.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <functional>
 #include <iterator>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -24,53 +26,6 @@ namespace phazite
 {
 namespace
 {
-    // The song's tree written as the song is written now: in the step in progress, or outside the history.
-    juce::UndoManager* getTreeUndo (Song& song)
-    {
-        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-    }
-
-    //==============================================================================
-    // The elements, for the setters alone (setModulator(), eraseModulator(), setModulatorOrder()) and the rename of a
-    // modulation in place (renameModulated()), which write them while the song's tree is modulation's storage (roadmap step
-    // S5.20, until modulation's switch): every modulator's and macro's element (the tracks', the master's and the
-    // containers'); the ID an element names; what a MODULATES names.
-    std::vector<juce::ValueTree> getModulatorStates (const Song& song)
-    {
-        std::vector<juce::ValueTree> states;
-        auto channels = getTrackStates (song);
-        channels.push_back (findChainState (song, {}));
-
-        const auto collect = [&states] (const juce::ValueTree& owner)
-        {
-            for (const auto& child : owner)
-                if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
-                    states.push_back (child);
-        };
-
-        for (const auto& channel : channels)
-        {
-            collect (channel);
-
-            for (const auto& device : getDeviceStates (channel))
-                if (device.hasType (schema::CONTAINER))
-                    collect (device);
-        }
-
-        return states;
-    }
-
-    ModulatorID getModulatorID (const juce::ValueTree& modulatorState)
-    {
-        return ModulatorID::fromRaw (readID (modulatorState[schema::modulatorID]));
-    }
-
-    // As the song's readers read it (ModulationValue.h: readModulatorValue()).
-    ParameterRef getModulatedParameter (const juce::ValueTree& modulates)
-    {
-        return { DeviceID::fromRaw (readID (modulates[schema::modulatesDevice])), modulates[schema::modulatesParameter].toString() };
-    }
-
     // Whether a channel's element can hold modulators: a track's, a folder's or the master's; and macros: a track's or a
     // return's, which hold clips or take them in, not a folder's or the master's.
     bool canHoldModulators (const juce::ValueTree& channel)
@@ -83,11 +38,6 @@ namespace
         return (owner.hasType (schema::TRACK) && ! isFolderState (owner)) || owner.hasType (schema::CONTAINER);
     }
 
-    bool isModulatorElement (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO);
-    }
-
     // Whether two places have one owner (ModulationValue.h: ModulatorPlace): the same container where either names one,
     // else the same channel.
     bool isSameOwner (const ModulatorPlace& a, const ModulatorPlace& b)
@@ -98,20 +48,10 @@ namespace
         return a.onMaster == b.onMaster && (a.onMaster || a.track == b.track);
     }
 
-    // Where a place in an owner's list (from 0) is among its element's children: before its modulator or macro at that
-    // place; -1 (after all its children, as Phazite's writers always added one) for -1 and a place past its last.
-    int findChildIndex (const juce::ValueTree& owner, int index)
+    // Whether a place is on a channel: its own or a container's on it.
+    bool isOnChannel (const ModulatorPlace& place, const ModulatorPlace& channel)
     {
-        if (index < 0)
-            return -1;
-
-        int place = 0;
-
-        for (int i = 0; i < owner.getNumChildren(); ++i)
-            if (isModulatorElement (owner.getChild (i)) && place++ == index)
-                return i;
-
-        return -1;
+        return place.onMaster == channel.onMaster && (place.onMaster || place.track == channel.track);
     }
 
     // An amount as Phazite writes one: to a ten-thousandth.
@@ -120,20 +60,15 @@ namespace
         return std::round ((double) juce::jlimit (-1.0f, 1.0f, amount) * 1.0e4) / 1.0e4;
     }
 
-    void writeSteps (juce::ValueTree modulator, std::vector<float> steps, juce::UndoManager* undo)
+    std::atomic<std::uint64_t> looks { 0 }; // countModulationLooks(): a count alone, which orders nothing
+
+    // The song's modulation now: its area's value; for a song that holds no values (a check's copy, which holds everything in
+    // its tree: tests/SongCheck.cpp), read from its tree. A copy, which shares what it holds.
+    SongModulation getArea (const Song& song)
     {
-        while (! steps.empty() && std::abs (steps.back()) < 1.0e-4f)
-            steps.pop_back();
-
-        juce::StringArray values;
-
-        for (const auto step : steps)
-            values.add (juce::String (std::round ((double) step * 1.0e4) / 1.0e4));
-
-        if (values.isEmpty())
-            modulator.removeProperty (schema::modulatorSteps, undo);
-        else
-            modulator.setProperty (schema::modulatorSteps, values.joinIntoString (" "), undo);
+        looks.fetch_add (1, std::memory_order_relaxed);
+        const auto* values = song.getValues();
+        return values != nullptr ? values->modulation.get() : readModulationValue (song.getState());
     }
 
     //==============================================================================
@@ -161,223 +96,6 @@ namespace
             place.track = track;
 
         return place;
-    }
-
-    //==============================================================================
-    // A modulator's element made to hold the next value from the one it holds (held, as readModulatorValue() reads it), by
-    // what differs, as Phazite's writers wrote each part: its values set by hand as keepValueSetByHand() keeps them (one at
-    // its default taken away, the last taken away with its VALUES), by their parameters' names, so that another kind (a
-    // merge's choice of another type) keeps what its parameters of those names held. Whether it wrote.
-    bool writeValuesLike (juce::ValueTree element, const ModulatorValue& held, const ModulatorValue& next, juce::UndoManager* undo)
-    {
-        const auto heldParameters = devices::getModulatorParameters (*held.kind);
-        const auto nextParameters = devices::getModulatorParameters (*next.kind);
-        auto wrote = false;
-
-        // What it holds that the next holds none of, taken away.
-        for (const auto& [index, was] : held.values)
-        {
-            if (index >= heldParameters.size())
-                continue;
-
-            const auto& info = heldParameters[index];
-
-            if (const auto now = devices::findModulatorParameter (*next.kind, info.id);
-                now < 0 || next.values.find ((std::uint32_t) now) == nullptr)
-            {
-                keepValueSetByHand (element, info, info.defaultValue, undo);
-                wrote = true;
-            }
-        }
-
-        // What the next holds otherwise than it does, or that it holds none of, set.
-        for (const auto& [index, value] : next.values)
-        {
-            if (index >= nextParameters.size())
-                continue;
-
-            const auto& info = nextParameters[index];
-            const auto was = devices::findModulatorParameter (*held.kind, info.id);
-            const auto* heldValue = was >= 0 ? held.values.find ((std::uint32_t) was) : nullptr;
-
-            if (heldValue == nullptr || ! juce::exactlyEqual (*heldValue, value))
-            {
-                keepValueSetByHand (element, info, value, undo);
-                wrote = true;
-            }
-        }
-
-        return wrote;
-    }
-
-    bool isSameSteps (const immer::flex_vector<float>& a, const immer::flex_vector<float>& b)
-    {
-        if (a.size() != b.size())
-            return false;
-
-        for (size_t i = 0; i < a.size(); ++i)
-            if (! juce::exactlyEqual (a[i], b[i]))
-                return false;
-
-        return true;
-    }
-
-    // What it modulates made the next value's, as Phazite's writers wrote it: each MODULATES of a parameter the next modulates
-    // nothing of taken out; each the next keeps given its amount where it would write another text (SongText.h:
-    // isSameValue()); each the next modulates that it doesn't, made whole and added after the others (the only order an edit
-    // makes); then all of them in the next's order, which only a version's or a merge's next can make another. Whether it
-    // wrote.
-    bool writeModulationsLike (juce::ValueTree element, const ModulatorValue& next, juce::UndoManager* undo)
-    {
-        auto wrote = false;
-
-        for (int i = 0; i < element.getNumChildren();)
-        {
-            if (const auto child = element.getChild (i);
-                child.hasType (schema::MODULATES) && next.findModulation (getModulatedParameter (child)) == nullptr)
-            {
-                element.removeChild (i, undo);
-                wrote = true;
-            }
-            else
-            {
-                ++i;
-            }
-        }
-
-        std::vector<ParameterRef> held;
-
-        for (auto child : element)
-        {
-            if (! child.hasType (schema::MODULATES))
-                continue;
-
-            const auto parameter = getModulatedParameter (child);
-            const auto* modulation = next.findModulation (parameter);
-            held.push_back (parameter);
-
-            if (modulation == nullptr)
-                continue;
-
-            const juce::var amount (writeAmount (modulation->amount));
-
-            if (const auto* written = child.getPropertyPointer (schema::modulatesAmount);
-                written == nullptr || ! isSameValue (*written, amount))
-            {
-                child.setProperty (schema::modulatesAmount, amount, undo);
-                wrote = true;
-            }
-        }
-
-        for (const auto& modulation : next.modulations)
-        {
-            if (std::find (held.begin(), held.end(), modulation.parameter) != held.end())
-                continue;
-
-            // By the parameter's device's ID as a curve names it, and its own ID.
-            juce::ValueTree modulates (schema::MODULATES);
-            modulates.setProperty (schema::modulatesDevice, juce::String ((juce::int64) modulation.parameter.device.getRaw()), nullptr);
-            modulates.setProperty (schema::modulatesParameter, modulation.parameter.parameter, nullptr);
-            modulates.setProperty (schema::modulatesAmount, writeAmount (modulation.amount), nullptr);
-            element.appendChild (modulates, undo);
-            wrote = true;
-        }
-
-        // Each moved to the next place a MODULATES is at (the other children stay where they are).
-        int place = 0;
-
-        for (const auto& modulation : next.modulations)
-        {
-            int index = -1;
-
-            for (int i = 0; i < element.getNumChildren() && index < 0; ++i)
-                if (const auto child = element.getChild (i);
-                    child.hasType (schema::MODULATES) && getModulatedParameter (child) == modulation.parameter)
-                    index = i;
-
-            if (index < place)
-                continue;
-
-            while (place < element.getNumChildren() && ! element.getChild (place).hasType (schema::MODULATES))
-                ++place;
-
-            if (index != place)
-            {
-                element.moveChild (index, place, undo);
-                wrote = true;
-            }
-
-            ++place;
-        }
-
-        return wrote;
-    }
-
-    // A macro's value as Phazite's writers write it: only while not 0.
-    void writeMacroValue (juce::ValueTree macro, float value, juce::UndoManager* undo)
-    {
-        if (juce::exactlyEqual (value, 0.0f))
-            macro.removeProperty (schema::macroValue, undo);
-        else
-            macro.setProperty (schema::macroValue, value, undo);
-    }
-
-    // A modulator's or a macro's element made to hold the next value from the one it holds (held, of its kind: a macro's
-    // or a modulator's), by what differs, each property by its name as Phazite's writers wrote it: a macro's name always,
-    // its value only while not 0 (writeMacroValue()); a modulator's type, its switch only while off, its values set by hand
-    // (writeValuesLike()), its steps only while it has one (writeSteps()); then what it modulates (writeModulationsLike()).
-    // A list or a map the next holds as the held one does (the same, not looked inside: an edit of another part, which
-    // copied the value read) is left as it is written. Whether it wrote.
-    bool writeModulatorLike (juce::ValueTree element, const ModulatorValue& held, const ModulatorValue& next, juce::UndoManager* undo)
-    {
-        auto wrote = false;
-
-        if (next.isMacro())
-        {
-            if (held.name != next.name)
-            {
-                element.setProperty (schema::macroName, next.name, undo);
-                wrote = true;
-            }
-
-            if (! juce::exactlyEqual (held.value, next.value))
-            {
-                writeMacroValue (element, next.value, undo);
-                wrote = true;
-            }
-        }
-        else
-        {
-            if (held.kind != next.kind)
-            {
-                element.setProperty (schema::modulatorType, schema::preset::modulatorTypeNames[(size_t) *next.kind], undo);
-                wrote = true;
-            }
-
-            if (held.off != next.off)
-            {
-                if (next.off)
-                    element.setProperty (schema::deviceOff, true, undo);
-                else
-                    element.removeProperty (schema::deviceOff, undo);
-
-                wrote = true;
-            }
-
-            if (held.kind != next.kind || held.values.identity() != next.values.identity())
-                wrote = writeValuesLike (element, held, next, undo) || wrote;
-
-            if (held.steps.identity() != next.steps.identity() && ! isSameSteps (held.steps, next.steps))
-            {
-                writeSteps (element, std::vector<float> (next.steps.begin(), next.steps.end()), undo);
-                wrote = true;
-            }
-        }
-
-        if (held.modulations.identity() == next.modulations.identity())
-            return wrote;
-
-        return writeModulationsLike (element, next, undo) || wrote;
     }
 
     // An element's step in a merge's clash's path (model/versions/SongMerge.cpp): its type and key ("MODULATOR:93").
@@ -408,17 +126,10 @@ namespace
         return place;
     }
 
-    // Every modulator and macro of the song, in the song's order: each channel's (its tracks', in their order, then the
-    // master's), its own and then its containers', each owner's in its order.
-    std::vector<ModulatorValue> getEveryModulator (const Song& song)
+    // Each owner of modulators and macros the song has, in the song's order: each channel (its tracks', in their order, then
+    // the master's), its own and then its containers', whether or not it holds any.
+    void forEachOwner (const Song& song, const std::function<void (const ModulatorPlace&)>& each)
     {
-        std::vector<ModulatorValue> every;
-        const auto take = [&song, &every] (const ModulatorPlace& owner)
-        {
-            for (auto& value : getOwnedModulators (song, owner))
-                every.push_back (std::move (value));
-        };
-
         auto channels = getTrackStates (song);
         channels.push_back (findChainState (song, {}));
 
@@ -426,13 +137,24 @@ namespace
         {
             const auto place =
                 channel.hasType (schema::MASTER) ? ModulatorPlace { .onMaster = true } : ModulatorPlace { .track = getTrackID (channel) };
-            take (place);
+            each (place);
 
             for (const auto& device : getDeviceStates (channel))
                 if (device.hasType (schema::CONTAINER))
-                    take ({ .track = place.track, .onMaster = place.onMaster, .container = getDeviceID (device) });
+                    each ({ .track = place.track, .onMaster = place.onMaster, .container = getDeviceID (device) });
         }
+    }
 
+    // Every modulator and macro of the song, in the song's order (forEachOwner()), each owner's in its order.
+    std::vector<ModulatorValue> getEveryModulator (const Song& song)
+    {
+        std::vector<ModulatorValue> every;
+        forEachOwner (song,
+                      [&song, &every] (const ModulatorPlace& owner)
+                      {
+                          for (auto& value : getOwnedModulators (song, owner))
+                              every.push_back (std::move (value));
+                      });
         return every;
     }
 } // namespace
@@ -440,34 +162,72 @@ namespace
 //==============================================================================
 SongModulation getModulationValue (const Song& song)
 {
-    return readModulationValue (song.getState());
+    return getArea (song);
 }
 
 std::optional<ModulatorValue> getModulatorValue (const Song& song, ModulatorID id)
 {
-    const auto state = findModulatorState (song, id);
-    return state.isValid() ? readModulatorValue (state, readModulatorPlace (state)) : std::nullopt;
+    // A look in the area; for a song without values (one the loader makes consistent, a check's copy), its one element of
+    // the ID read from its tree, the others not (the loader's checks ask for each curve's and each link's parameter).
+    looks.fetch_add (1, std::memory_order_relaxed);
+
+    if (const auto* values = song.getValues())
+    {
+        const auto* value = values->modulation.get().find (id);
+        return value != nullptr ? std::optional<ModulatorValue> (*value) : std::nullopt;
+    }
+
+    return readModulatorValueIn (song.getState(), id);
+}
+
+std::uint64_t countModulationLooks() noexcept
+{
+    return looks.load (std::memory_order_relaxed);
 }
 
 std::vector<ModulatorValue> getOwnedModulators (const Song& song, const ModulatorPlace& owner)
 {
     std::vector<ModulatorValue> modulators;
+    const auto modulation = getArea (song);
 
-    for (const auto& child : findOwnerState (song, owner))
-        if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
-            if (auto value = readModulatorValue (child, readModulatorPlace (child)))
-                modulators.push_back (std::move (*value));
+    if (const auto* list = modulation.findList (owner))
+        for (const auto id : *list)
+            if (const auto* value = modulation.find (id))
+                modulators.push_back (*value);
 
     return modulators;
 }
 
 std::vector<Modulation> findModulationsOf (const Song& song, const ParameterRef& parameter)
 {
+    // A look at each modulator's modulations, none read from elements; those found put in the song's order only where there
+    // are several (a knob's ring has mostly none or one).
     std::vector<Modulation> modulations;
+    const auto modulation = getArea (song);
 
-    for (const auto& [modulator, amount] : readModulationsOf (song.getState(), parameter))
-        modulations.push_back ({ modulator, parameter, amount });
+    for (const auto& [id, value] : modulation.modulators)
+        if (const auto* entry = value.findModulation (parameter))
+            modulations.push_back ({ value.id, parameter, entry->amount });
 
+    if (modulations.size() < 2)
+        return modulations;
+
+    std::map<ModulatorID, int> order;
+    forEachOwner (song,
+                  [&modulation, &order] (const ModulatorPlace& owner)
+                  {
+                      if (const auto* list = modulation.findList (owner))
+                          for (const auto id : *list)
+                              order.emplace (id, (int) order.size());
+                  });
+
+    std::sort (modulations.begin(), modulations.end(),
+               [&order] (const Modulation& a, const Modulation& b)
+               {
+                   const auto first = order.find (a.modulator), second = order.find (b.modulator);
+                   return (first != order.end() ? first->second : (int) order.size())
+                          < (second != order.end() ? second->second : (int) order.size());
+               });
     return modulations;
 }
 
@@ -494,21 +254,12 @@ bool hasModulations (const Song& song, TrackID track)
     if (! track.isValid())
         return false;
 
-    const auto modulates = [] (const std::vector<ModulatorValue>& modulators)
-    { return std::any_of (modulators.begin(), modulators.end(), [] (const ModulatorValue& each) { return ! each.modulations.empty(); }); };
-
+    // Its own and its containers': each on its channel.
     const auto channel = getChannelPlace (song, track);
+    const auto modulation = getArea (song);
 
-    if (modulates (getOwnedModulators (song, channel)))
-        return true;
-
-    for (const auto& device : getDeviceStates (findChainState (song, track)))
-        if (device.hasType (schema::CONTAINER))
-            if (modulates (
-                    getOwnedModulators (song, { .track = channel.track, .onMaster = channel.onMaster, .container = getDeviceID (device) })))
-                return true;
-
-    return false;
+    return std::any_of (modulation.modulators.begin(), modulation.modulators.end(), [&channel] (const auto& each)
+                        { return isOnChannel (each.second.place, channel) && ! each.second.modulations.empty(); });
 }
 
 std::optional<ModulatorType> findModulatorType (const juce::String& name)
@@ -579,18 +330,6 @@ int getNumSteps (const ModulatorValue& value)
     return juce::jlimit (1, devices::Modulator::maxSteps, roundToNearestInt (numSteps, 1));
 }
 
-juce::ValueTree findModulatorState (const Song& song, ModulatorID id)
-{
-    if (! id.isValid())
-        return {};
-
-    for (const auto& state : getModulatorStates (song))
-        if (getModulatorID (state) == id)
-            return state;
-
-    return {};
-}
-
 //==============================================================================
 std::vector<ModulatorID> getModulators (const Song& song, TrackID track)
 {
@@ -628,12 +367,12 @@ DeviceID getModulatorContainer (const Song& song, ModulatorID id)
 
 juce::String getModulatorName (const Song& song, ModulatorID id)
 {
-    // Its element found once and read whole; its owner's others before it only by their kinds (readModulatorKind()), never
-    // whole: a channel's slots ask each of its modulators' names at each refresh.
-    const auto state = findModulatorState (song, id);
-    const auto value = state.isValid() ? readModulatorValue (state, readModulatorPlace (state)) : std::nullopt;
+    // Its value looked up once; its owner's others before it only by their kinds: a channel's slots ask each of its
+    // modulators' names at each refresh.
+    const auto modulation = getArea (song);
+    const auto* value = modulation.find (id);
 
-    if (! value.has_value())
+    if (value == nullptr)
         return {};
 
     // A macro has a name of its own, "Macro 1" at first.
@@ -643,13 +382,16 @@ juce::String getModulatorName (const Song& song, ModulatorID id)
     // Its place among its owner's of its kind.
     int number = 0;
 
-    for (const auto& each : state.getParent())
+    if (const auto* list = modulation.findList (value->place))
     {
-        if (value->isMacro() ? each.hasType (schema::MACRO) : readModulatorKind (each) == value->kind)
-            ++number;
+        for (const auto each : *list)
+        {
+            if (const auto* other = modulation.find (each); other != nullptr && other->kind == value->kind)
+                ++number;
 
-        if (each == state)
-            break;
+            if (each == id)
+                break;
+        }
     }
 
     return getModulatorTypeName (getModulatorType (*value)) + " " + juce::String (number);
@@ -659,69 +401,35 @@ juce::String getModulatorName (const Song& song, ModulatorID id)
 bool setModulator (Song& song, const ModulatorValue& value, int index)
 {
     // Where its place says, whatever it is (what a file holds and Phazite never makes, a macro on a folder, stays as it is: a
-    // version of it, a merge's choice); nothing for a place the song hasn't.
-    auto owner = findOwnerState (song, value.place);
+    // version of it, a merge's choice), a container's macro on the channel its container is on; nothing for a place the song
+    // hasn't.
+    auto* values = song.getValues();
+    const auto place = findOwnerPlace (song, value.place);
 
-    if (! value.id.isValid() || ! owner.isValid())
+    if (values == nullptr || ! value.id.isValid() || ! place.has_value())
         return false;
 
-    auto* undo = getTreeUndo (song);
-    auto element = findModulatorState (song, value.id);
-    const auto held = element.isValid() ? readModulatorValue (element, readModulatorPlace (element)) : std::nullopt;
-
-    // One the song hasn't (or holds as what no reader reads, or as a macro under a modulator's ID or the other way round):
-    // its element made whole, then added at its place, in one action.
-    if (! held.has_value() || held->isMacro() != value.isMacro())
-    {
-        if (element.isValid())
-            element.getParent().removeChild (element, undo);
-
-        owner.addChild (writeModulatorElement (value), findChildIndex (owner, index), undo);
-        return true;
-    }
-
-    // One that has another owner: moved to the place given in the new owner's list (a version's), then made the value.
-    auto wrote = false;
-
-    if (! isSameOwner (held->place, value.place))
-    {
-        element.getParent().removeChild (element, undo);
-        owner.addChild (element, findChildIndex (owner, index), undo);
-        wrote = true;
-    }
-
-    return writeModulatorLike (element, *held, value, undo) || wrote;
+    auto next = value;
+    next.place = *place;
+    return values->setModulator (song, std::move (next), index);
 }
 
 bool eraseModulator (Song& song, ModulatorID id)
 {
-    auto element = findModulatorState (song, id);
-
-    if (! element.isValid())
-        return false;
-
-    element.getParent().removeChild (element, getTreeUndo (song));
-    return true;
+    auto* values = song.getValues();
+    return values != nullptr && values->eraseModulator (song, id);
 }
 
 bool setModulatorOrder (Song& song, const ModulatorPlace& owner, const immer::flex_vector<ModulatorID>& order)
 {
-    // The places its modulators and macros are at among the owner's children, and which is at each.
-    auto element = findOwnerState (song, owner);
-    std::vector<int> places;
-    std::vector<ModulatorID> held;
+    auto* values = song.getValues();
+    const auto* list = values != nullptr ? values->modulation.get().findList (owner) : nullptr;
 
-    for (int i = 0; i < element.getNumChildren(); ++i)
-    {
-        if (const auto child = element.getChild (i); isModulatorElement (child))
-        {
-            places.push_back (i);
-            held.push_back (getModulatorID (child));
-        }
-    }
+    if (list == nullptr)
+        return false;
 
     // Those named, in their order (each once), then the others in theirs.
-    std::vector<ModulatorID> wanted;
+    std::vector<ModulatorID> held (list->begin(), list->end()), wanted;
     const auto isWanted = [&wanted] (ModulatorID id) { return std::find (wanted.begin(), wanted.end(), id) != wanted.end(); };
 
     for (const auto id : order)
@@ -732,25 +440,29 @@ bool setModulatorOrder (Song& song, const ModulatorPlace& owner, const immer::fl
         if (! isWanted (id))
             wanted.push_back (id);
 
-    if (wanted == held)
-        return false;
+    return values->setModulatorOrder (song, owner, immer::flex_vector<ModulatorID> (wanted.begin(), wanted.end()));
+}
 
-    // Each put at its place by changing places with the one there (two moves, which leave what is between them where it was),
-    // so that the owner's other children (its devices, lanes and sends) stay at theirs.
-    auto* undo = getTreeUndo (song);
+bool setAllModulation (Song& song, SongModulation next)
+{
+    auto* values = song.getValues();
+    return values != nullptr && values->setAllModulation (song, std::move (next));
+}
 
-    for (size_t k = 0; k < wanted.size(); ++k)
-    {
-        if (held[k] == wanted[k])
-            continue;
+std::optional<ModulatorPlace> findOwnerPlace (const Song& song, const ModulatorPlace& owner)
+{
+    // A container's: on the channel its element is on (the place as given for one whose channel the song's element doesn't
+    // say: a container in another's chain); a channel's own as given.
+    const auto state = findOwnerState (song, owner);
 
-        const auto j = (size_t) std::distance (held.begin(), std::find (held.begin() + (std::ptrdiff_t) k, held.end(), wanted[k]));
-        element.moveChild (places[j], places[k], undo);
-        element.moveChild (places[k] + 1, places[j], undo);
-        std::swap (held[k], held[j]);
-    }
+    if (! state.isValid())
+        return std::nullopt;
 
-    return true;
+    if (state.hasType (schema::CONTAINER))
+        if (const auto channel = readOwnerPlace (state))
+            return channel;
+
+    return owner;
 }
 
 //==============================================================================
@@ -808,7 +520,7 @@ ModulatorID addMacro (Song& song, TrackID track, const juce::String& name)
         ! channel.hasType (schema::TRACK) || ! canHoldMacros (channel))
         return {};
 
-    // Its value is 0 while its element has none (Schema.h: macroValue), so that redoing the step puts it back at 0 too.
+    // At 0, so that what it modulates doesn't move until it is turned.
     ModulatorValue value;
     value.id = ModulatorID::fromRaw (song.makeID());
     value.place = getChannelPlace (song, track);
@@ -868,7 +580,7 @@ void setModulatorStep (Song& song, ModulatorID id, int index, float step)
     steps.resize (std::max (steps.size(), (size_t) index + 1), 0.0f);
     steps[(size_t) index] = juce::jlimit (-1.0f, 1.0f, step);
 
-    // Without the zeros at the end, as its element writes them (writeSteps()).
+    // Without the zeros at the end, as the song holds them (ModulationValue.h: ModulatorValue::steps).
     while (! steps.empty() && std::abs (steps.back()) < 1.0e-4f)
         steps.pop_back();
 
@@ -876,30 +588,34 @@ void setModulatorStep (Song& song, ModulatorID id, int index, float step)
     setModulator (song, *value);
 }
 
-// A control's drag sets these at the mouse's rate: its element found once, and the one value read and written (setModulator()'s
-// write by what differs, of the one part an edit of the value changes), nothing else of it read whole.
+// A control's drag sets these at the mouse's rate: the value looked up once, its one value changed, and set (nothing for the
+// value it holds, which makes no undo step).
 void setModulatorValueSetByHand (Song& song, ModulatorID id, const devices::ParameterInfo& info, float set)
 {
-    auto element = findModulatorState (song, id);
+    auto value = getModulatorValue (song, id);
+    const auto index = value.has_value() && value->kind.has_value() ? devices::findModulatorParameter (*value->kind, info.id) : -1;
 
-    if (const auto kind = readModulatorKind (element); ! kind.has_value() || devices::findModulatorParameter (*kind, info.id) < 0)
+    if (index < 0)
         return;
 
-    // None at its default, as keepValueSetByHand() keeps it (model/devices/internal/Parameters.h); nothing where it holds that.
-    const auto held = readModulatorValueSetByHand (element, info);
-    const auto next = isDefaultValue (info, set) ? std::nullopt : std::optional<float> (set);
+    // None at its default, as the song holds a modulator's values (ModulationValue.h).
+    const auto* held = value->values.find ((std::uint32_t) index);
+    const auto atDefault = isDefaultValue (info, set);
 
-    if (held.has_value() == next.has_value() && (! held.has_value() || juce::exactlyEqual (*held, *next)))
+    if (atDefault ? held == nullptr : (held != nullptr && juce::exactlyEqual (*held, set)))
         return;
 
-    keepValueSetByHand (element, info, set, getTreeUndo (song));
+    value->values = atDefault ? value->values.erase ((std::uint32_t) index) : value->values.set ((std::uint32_t) index, set);
+    setModulator (song, *value);
 }
 
 void setMacroValue (Song& song, ModulatorID id, float set)
 {
-    if (auto element = findModulatorState (song, id);
-        element.hasType (schema::MACRO) && ! juce::exactlyEqual (readMacroValue (element), set))
-        writeMacroValue (element, set, getTreeUndo (song));
+    if (auto value = getModulatorValue (song, id); value.has_value() && value->isMacro() && ! juce::exactlyEqual (value->value, set))
+    {
+        value->value = set;
+        setModulator (song, *value);
+    }
 }
 
 //==============================================================================
@@ -990,70 +706,68 @@ void removeModulation (Song& song, ModulatorID id, const ParameterRef& parameter
 
 int forgetModulationsOf (Song& song, const std::function<bool (DeviceID)>& gone)
 {
-    // Those that modulate what is gone found without reading any modulator whole (as findModulationsOf() reads, while the
-    // tree is the storage: every removal of a device asks), then each of them read and set.
-    std::vector<ModulatorID> modulating;
-
-    for (const auto& modulator : getModulatorStates (song))
-    {
-        for (const auto& child : modulator)
-        {
-            if (child.hasType (schema::MODULATES) && gone (getModulatedParameter (child).device))
-            {
-                modulating.push_back (getModulatorID (modulator));
-                break;
-            }
-        }
-    }
-
+    // Each modulator's modulations looked at, and those of what is gone taken out, the song's modulation set once.
+    const auto held = getArea (song);
+    auto next = held;
     auto forgotten = 0;
 
-    for (const auto id : modulating)
+    for (const auto& [key, value] : held.modulators)
     {
-        auto value = getModulatorValue (song, id);
-
-        if (! value.has_value())
+        if (std::none_of (value.modulations.begin(), value.modulations.end(),
+                          [&gone] (const ModulationEntry& entry) { return gone (entry.parameter.device); }))
             continue;
 
+        auto changed = value;
         auto kept = immer::flex_vector<ModulationEntry>().transient();
 
-        for (const auto& modulation : value->modulations)
+        for (const auto& modulation : value.modulations)
             if (! gone (modulation.parameter.device))
                 kept.push_back (modulation);
 
-        forgotten += (int) (value->modulations.size() - kept.size());
-        value->modulations = kept.persistent();
-        setModulator (song, *value);
+        forgotten += (int) (value.modulations.size() - kept.size());
+        changed.modulations = kept.persistent();
+        next = withHeldModulator (next, std::move (changed));
     }
+
+    if (forgotten > 0)
+        setAllModulation (song, std::move (next));
 
     return forgotten;
 }
 
 void renameModulated (Song& song, const ParameterRef& from, const ParameterRef& to)
 {
-    // In place, each element's device and parameter written (a modulation set anew would go after the others).
-    auto* undo = getTreeUndo (song);
-    const auto device = juce::String ((juce::int64) to.device.getRaw());
+    // In place: the entry's parameter changed where it is among its modulator's (a modulation set anew would go after the
+    // others), the song's modulation set once.
+    const auto held = getArea (song);
+    auto next = held;
 
-    for (const auto& modulator : getModulatorStates (song))
+    for (const auto& [key, value] : held.modulators)
     {
-        for (auto modulates : modulator)
+        for (size_t i = 0; i < value.modulations.size(); ++i)
         {
-            if (modulates.hasType (schema::MODULATES) && getModulatedParameter (modulates) == from)
+            if (value.modulations[i].parameter == from)
             {
-                modulates.setProperty (schema::modulatesDevice, device, undo);
-                modulates.setProperty (schema::modulatesParameter, to.parameter, undo);
+                auto changed = value;
+                changed.modulations = value.modulations.set (i, { .parameter = to, .amount = value.modulations[i].amount });
+                next = withHeldModulator (next, std::move (changed));
+                break;
             }
         }
     }
+
+    setAllModulation (song, std::move (next));
 }
 
 void copyModulations (Song& song, const std::map<std::uint64_t, std::uint64_t>& copied)
 {
+    // Each modulator's modulations of the originals, each of its copy too where it modulates none of that copy's parameter
+    // yet, after the others, in their order: the song's modulation worked out whole and set once.
+    auto next = getArea (song);
+    auto changed = false;
+
     for (auto value : getEveryModulator (song))
     {
-        // Its modulations of the originals, each of its copy too where it modulates none of that copy's parameter yet, after
-        // the others, in their order.
         auto modulations = value.modulations;
 
         for (const auto& modulation : value.modulations)
@@ -1071,9 +785,13 @@ void copyModulations (Song& song, const std::map<std::uint64_t, std::uint64_t>& 
         if (modulations.size() != value.modulations.size())
         {
             value.modulations = modulations;
-            setModulator (song, value);
+            next = withHeldModulator (next, std::move (value));
+            changed = true;
         }
     }
+
+    if (changed)
+        setAllModulation (song, std::move (next));
 }
 
 void copyModulators (Song& song, TrackID from, TrackID to, CopiedIDs& copied)
@@ -1111,47 +829,59 @@ void copyModulators (Song& song, TrackID from, TrackID to, CopiedIDs& copied)
         copies.push_back (std::move (copy));
     }
 
+    if (copies.empty())
+        return;
+
     // Each copy's ID among the copied, once all of them are worked out, for what names a modulator's or a macro's parameter
     // (a macro's value's automation: Automation.h, copyCurves(), after this).
     for (const auto& [original, copy] : copiedModulators)
         copied[original] = copy;
 
-    for (const auto& copy : copies)
-        setModulator (song, copy);
+    auto next = getArea (song);
+
+    for (auto& copy : copies)
+        next = withHeldModulator (next, std::move (copy));
+
+    setAllModulation (song, std::move (next));
 }
 
 void copyModulation (Song& song, CopiedIDs& copied)
 {
-    // The owners that hold modulators or macros, found by their elements' places alone, none read whole: a duplicated
-    // track's copy holds its own while the song's tree is modulation's storage, so that nothing is read for it.
-    std::map<std::uint64_t, ModulatorPlace> channels, containers;
-
-    for (const auto& element : getModulatorStates (song))
-    {
-        if (const auto place = readModulatorPlace (element); place.container.isValid())
-            containers.emplace (place.container.getRaw(), place);
-        else if (! place.onMaster)
-            channels.emplace (place.track.getRaw(), place);
-    }
-
-    // The owners copied whose copies hold none: each original's own (a track's, a container's), its copy's place (a
-    // container's copy on its channel's copy, or on the channel itself).
+    // The owners copied whose copies hold none, by the song's modulation's lists alone, none read: each original's own (a
+    // track's, a container's), its copy's place (a container's copy on its channel's copy, or on the channel itself).
+    auto next = getArea (song);
     std::vector<std::pair<ModulatorPlace, std::vector<ModulatorValue>>> owners;
+
+    const auto ownedBy = [&next] (const immer::flex_vector<ModulatorID>& list)
+    {
+        std::vector<ModulatorValue> owned;
+
+        for (const auto id : list)
+            if (const auto* value = next.find (id))
+                owned.push_back (*value);
+
+        return owned;
+    };
 
     for (const auto& [original, copy] : copied)
     {
-        if (const auto found = channels.find (original); found != channels.end() && channels.count (copy) == 0)
-            owners.emplace_back (ModulatorPlace { .track = TrackID::fromRaw (copy) }, getOwnedModulators (song, found->second));
+        if (const auto* list = next.channels.find (original); list != nullptr && next.channels.find (copy) == nullptr)
+            owners.emplace_back (ModulatorPlace { .track = TrackID::fromRaw (copy) }, ownedBy (*list));
 
-        if (const auto found = containers.find (original); found != containers.end() && containers.count (copy) == 0)
+        if (const auto* list = next.containers.find (original); list != nullptr && next.containers.find (copy) == nullptr)
         {
-            auto place = found->second;
+            auto owned = ownedBy (*list);
+
+            if (owned.empty())
+                continue;
+
+            auto place = owned.front().place;
             place.container = DeviceID::fromRaw (copy);
 
             if (const auto channel = copied.find (place.track.getRaw()); ! place.onMaster && channel != copied.end())
                 place.track = TrackID::fromRaw (channel->second);
 
-            owners.emplace_back (place, getOwnedModulators (song, found->second));
+            owners.emplace_back (place, std::move (owned));
         }
     }
 
@@ -1186,8 +916,10 @@ void copyModulation (Song& song, CopiedIDs& copied)
         }
 
         copy.modulations = modulations.persistent();
-        setModulator (song, copy);
+        next = withHeldModulator (next, std::move (copy));
     }
+
+    setAllModulation (song, std::move (next));
 }
 
 //==============================================================================

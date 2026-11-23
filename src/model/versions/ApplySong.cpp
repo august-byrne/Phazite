@@ -1035,14 +1035,13 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            // Modulation's joins at its switch (roadmap step S5.20), with the keeper that takes in what comes into the song's
-            // tree: no copy the passes add holds a modulator or a macro (copyForSong()), so none is left to it.
-            return values->countAdopted()            // the clips', with their notes
-                   + values->countTempoMapAdopted()  // the tempo map's
-                   + values->countChordLaneAdopted() // the chord lane's
-                   + values->countMidiLinksAdopted() // the MIDI links'
-                   + values->countCurvesAdopted()    // the curves'
-                   + values->countSectionsAdopted(); // the sections'
+            return values->countAdopted()              // the clips', with their notes
+                   + values->countTempoMapAdopted()    // the tempo map's
+                   + values->countChordLaneAdopted()   // the chord lane's
+                   + values->countMidiLinksAdopted()   // the MIDI links'
+                   + values->countCurvesAdopted()      // the curves'
+                   + values->countSectionsAdopted()    // the sections'
+                   + values->countModulationAdopted(); // modulation's: no copy the passes add holds one (copyForSong())
         }
 
         const Song& song;
@@ -1381,16 +1380,31 @@ namespace
     // those of its channel and of the containers on it (in the song now, or in the other). How many writes it made.
     int makeModulationLike (Song& song, const juce::ValueTree& other, const ModulatorsTaken& which)
     {
+        // The song's next modulation worked out whole, then set once (modulation's area tells it once).
         const OtherModulation theirs (other);
         const auto ours = getModulationValue (song);
+        auto next = ours;
         auto writes = 0;
 
         for (const auto& [id, value] : ours.modulators)
-            if (which (value) && theirs.modulators.count (id) == 0 && ! theirs.standsIn (value) && eraseModulator (song, value.id))
+        {
+            if (which (value) && theirs.modulators.count (id) == 0 && ! theirs.standsIn (value))
+            {
+                next = withoutModulator (next, value.id);
                 ++writes;
+            }
+        }
 
         for (const auto& owner : theirs.owners)
         {
+            // The place the owner's take in the song: a container's macros on the channel the song's container is on, as
+            // setModulator() gives them (the passes put it where the other has it, but where they leave it elsewhere, its
+            // macros stay with it).
+            const auto place = findOwnerPlace (song, owner.place);
+
+            if (! place.has_value())
+                continue;
+
             auto taken = false;
 
             for (size_t i = 0; i < owner.order.size(); ++i)
@@ -1401,15 +1415,55 @@ namespace
                     continue;
 
                 taken = true;
+                auto value = found->second;
+                value.place = *place;
 
-                if (setModulator (song, found->second, (int) i))
-                    ++writes;
+                // One held as the other kind replaced whole at its place, as setModulator() replaces it.
+                const auto* held = next.find (value.id);
+
+                if (held != nullptr && held->isMacro() != value.isMacro())
+                    next = withoutModulator (next, value.id);
+                else if (held != nullptr && *held == value)
+                    continue;
+
+                next = withHeldModulator (next, std::move (value), (int) i);
+                ++writes;
             }
 
-            if (taken && setModulatorOrder (song, owner.place, owner.order))
-                ++writes;
+            if (! taken)
+                continue;
+
+            // Each owner's in the other's order: those named first, in their order, the others after them in theirs.
+            if (const auto* list = next.findList (owner.place))
+            {
+                std::vector<ModulatorID> wanted;
+                const auto isWanted = [&wanted] (ModulatorID id) { return std::find (wanted.begin(), wanted.end(), id) != wanted.end(); };
+
+                for (const auto id : owner.order)
+                    if (std::find (list->begin(), list->end(), id) != list->end() && ! isWanted (id))
+                        wanted.push_back (id);
+
+                for (const auto id : *list)
+                    if (! isWanted (id))
+                        wanted.push_back (id);
+
+                if (const immer::flex_vector<ModulatorID> order (wanted.begin(), wanted.end()); ! (order == *list))
+                {
+                    next = withOwnerOrder (next, owner.place, order);
+                    ++writes;
+                }
+            }
         }
 
+#if JUCE_DEBUG
+        // Every container's macro on the channel its container is on in the song.
+        for (const auto& [id, value] : next.modulators)
+            if (value.place.container.isValid())
+                if (const auto place = findOwnerPlace (song, value.place))
+                    jassert (*place == value.place);
+#endif
+
+        setAllModulation (song, std::move (next));
         return writes;
     }
 

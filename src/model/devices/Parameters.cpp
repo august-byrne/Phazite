@@ -65,11 +65,18 @@ namespace
         return readID (channel, schema::channelVCA) == fader.getRaw();
     }
 
-    // A modulator or a macro read as its value from its element, which a parameter found holds: that one element read,
-    // never another walk of the song (locateParameter() found it).
-    std::optional<ModulatorValue> readModulatorAt (const juce::ValueTree& state)
+    // A modulator or a macro of a parameter found (a modulator's parameter, a macro's value), by its ID: a look in modulation's
+    // area (model/modulation/internal/Modulation.h), as its FoundParameter holds no element of it.
+    std::optional<ModulatorValue> findModulatorOf (const Song& song, const ParameterRef& ref)
     {
-        return readModulatorValue (state, readModulatorPlace (state));
+        return getModulatorValue (song, ModulatorID::fromRaw (ref.device.getRaw()));
+    }
+
+    // Whether a parameter's description is one of a modulator kind's (a FoundParameter's info: the kind it was found of).
+    bool isParameterOf (devices::ModulatorKind kind, const devices::ParameterInfo* info)
+    {
+        const auto parameters = devices::getModulatorParameters (kind);
+        return std::any_of (parameters.begin(), parameters.end(), [info] (const devices::ParameterInfo& each) { return &each == info; });
     }
 
     std::optional<FoundParameter> found (const ParameterRef& ref, ParameterSource kind, const juce::ValueTree& state,
@@ -117,6 +124,30 @@ namespace
 
 //==============================================================================
 std::optional<FoundParameter> locateParameter (const Song& song, const ParameterRef& ref)
+{
+    if (! ref.isValid())
+        return {};
+
+    // A modulator's or a macro's first: a look in modulation's area by its ID (its FoundParameter holds no element: the song's
+    // tree holds none of it), which allocates nothing, before the tree's walks (locateParameterInTree()), which a macro's turn
+    // (the automation's watcher asks at each step) would otherwise pay for every track. A reference to a device, a chain or a
+    // fader looks there for an ID no modulator has (the song's IDs are each one item's), and finds none whatever the area holds.
+    if (const auto modulator = findModulatorOf (song, ref))
+    {
+        // A macro's one parameter has the macro's ID.
+        if (modulator->isMacro())
+            return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterSource::macro, {}) : std::nullopt;
+
+        if (const auto index = devices::findModulatorParameter (*modulator->kind, ref.parameter.toStdString()); index >= 0)
+            return found (ref, ParameterSource::modulator, {}, &devices::getModulatorParameters (*modulator->kind)[(size_t) index]);
+
+        return {};
+    }
+
+    return locateParameterInTree (song, ref);
+}
+
+std::optional<FoundParameter> locateParameterInTree (const Song& song, const ParameterRef& ref)
 {
     if (! ref.isValid())
         return {};
@@ -180,29 +211,23 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
         return {};
     }
 
-    // A modulator's or a macro's: its element found once (which setValueSetByHand() writes), read as its value from there.
-    if (const auto state = findModulatorState (song, ModulatorID::fromRaw (ref.device.getRaw())); state.isValid())
-    {
-        const auto modulator = readModulatorAt (state);
-
-        if (! modulator.has_value())
-            return {};
-
-        // A macro's one parameter has the macro's ID.
-        if (modulator->isMacro())
-            return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterSource::macro, state) : std::nullopt;
-
-        if (const auto index = devices::findModulatorParameter (*modulator->kind, ref.parameter.toStdString()); index >= 0)
-            return found (ref, ParameterSource::modulator, state, &devices::getModulatorParameters (*modulator->kind)[(size_t) index]);
-
-        return {};
-    }
-
     return {};
 }
 
 bool isStillThere (const Song& song, const FoundParameter& parameter)
 {
+    // A modulator's or a macro's by its ID, still of the kind it was found of (a merge's choice can give it another).
+    if (parameter.source == ParameterSource::modulator || parameter.source == ParameterSource::macro)
+    {
+        const auto modulator = findModulatorOf (song, parameter.ref);
+
+        if (! modulator.has_value())
+            return false;
+
+        return parameter.source == ParameterSource::macro ? modulator->isMacro()
+                                                          : modulator->kind.has_value() && isParameterOf (*modulator->kind, parameter.info);
+    }
+
     if (! parameter.state.isAChildOf (song.getState()))
         return false;
 
@@ -221,7 +246,7 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
             return findTrackSend (parameter.state, parameter.ref.device).has_value(); // on the track it was found on, one look
         case ParameterSource::modulator:
         case ParameterSource::macro:
-            return readID (parameter.state, schema::modulatorID) == id;
+            break; // above
         case ParameterSource::chainVolume:
         case ParameterSource::chainPan:
             return readID (parameter.state, schema::chainID) == id;
@@ -267,7 +292,7 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
 
         case ParameterSource::macro:
         {
-            const auto macro = readModulatorAt (state);
+            const auto macro = findModulatorOf (song, parameter.ref);
             return { parameter.source, macro.has_value() ? macro->name : juce::String(), { 0.0f, 1.0f }, 0.0f, {} };
         }
 
@@ -359,9 +384,8 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
 
         case ParameterSource::modulator:
         {
-            // Its value's, read from its element, by the parameter's place among its kind's; the parameter's default for one it
-            // hasn't.
-            const auto modulator = readModulatorAt (state);
+            // Its value's, by the parameter's place among its kind's; the parameter's default for one it hasn't.
+            const auto modulator = findModulatorOf (song, parameter.ref);
 
             if (! modulator.has_value() || modulator->isMacro())
                 return parameter.info->defaultValue;
@@ -385,7 +409,7 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
 
         case ParameterSource::macro:
         {
-            const auto macro = readModulatorAt (state);
+            const auto macro = findModulatorOf (song, parameter.ref);
             return macro.has_value() ? macro->value : 0.0f;
         }
 

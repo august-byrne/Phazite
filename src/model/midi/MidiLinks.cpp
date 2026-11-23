@@ -559,8 +559,8 @@ void MidiLinker::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
 {
     // Learning ends as its parameter goes: a device, a chain or a fader, each still an element of the song's tree, so the
     // linker stays a listener of the tree for them (the links themselves are a value: MidiLinks.h). It asks only of a source
-    // the tree holds (isHeardFromTree()): locateParameter() reads no area of the song's values for them.
-    if (learning.has_value() && isHeardFromTree (learningSource) && ! locateParameter (*song, *learning).has_value())
+    // the tree holds (isHeardFromTree()), and only the tree (locateParameterInTree(): no area of the song's values read).
+    if (learning.has_value() && isHeardFromTree (learningSource) && ! locateParameterInTree (*song, *learning).has_value())
         setLearning (std::nullopt);
 }
 

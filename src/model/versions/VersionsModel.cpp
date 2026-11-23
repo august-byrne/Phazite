@@ -2093,7 +2093,8 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
 
 namespace
 {
-    // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net) but a track's clips: the tempo
+    // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net) but a track's clips and
+    // modulators (and a container's macros): the tempo
     // map's and the chord lane's choices set their values (chooseInAreas()), and no choice in the tree adds their entries;
     // checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp: NothingTakenIn). What the
     // keeper took in counted for every area that counts it but the clips, a line each, in the order of the areas: a track
@@ -2116,9 +2117,8 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            // Modulation's joins at its switch (roadmap step S5.20), with the keeper that takes in what comes into the song's
-            // tree; its choices set the values (chooseModulationClash()), but a track or a container chosen whole in the tree
-            // comes with its modulators or macros, as with its clips.
+            // Not modulation's, as not the clips': its choices set the values (chooseModulationClash()), but a track or a
+            // container chosen whole in the tree comes with its modulators or macros, which the keeper takes in, as its clips.
             return values->countTempoMapAdopted()    // the tempo map's
                    + values->countChordLaneAdopted() // the chord lane's
                    + values->countMidiLinksAdopted() // the MIDI links'

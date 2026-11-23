@@ -15,10 +15,6 @@ namespace phazite
 {
 namespace
 {
-    // Whether the song holds its modulators and macros beside its tree: not yet (modulation's first piece, roadmap step
-    // S5.20: the tree is their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
-    constexpr bool modulationHeldBesideTheTree = false;
-
     // Whether the song holds its sends beside its tree: not yet (the sends' first piece, roadmap step S5.20: the tree is
     // their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
     constexpr bool sendsHeldBesideTheTree = false;
@@ -35,24 +31,21 @@ std::uint64_t findLargestIDHeld (const Song& song)
     std::uint64_t largest = 0;
     largest = std::max (largest, findLargestIDIn (values->clips.get()));
     largest = std::max (largest, findLargestIDIn (values->notes.get()));
-    largest = std::max (largest, findLargestIDIn (values->sections.get())); // the sections' (each section's ID)
+    largest = std::max (largest, findLargestIDIn (values->sections.get()));   // the sections' (each section's ID)
+    largest = std::max (largest, findLargestIDIn (values->modulation.get())); // modulation's (each modulator's and macro's ID)
     return largest;
 }
 
 void forEachNameableIDHeld (const Song& song, const std::function<void (std::uint64_t)>& each)
 {
-    // Each area whose value holds items that something can name, a line each, in no order that matters. Modulation's (each
-    // modulator's and macro's: ModulationValue.h) only once the song holds it beside its tree: until then the tree holds
-    // them, which the caller's walk of the tree finds (Schema.h: holdsID() of a MODULATOR and a MACRO), and reading them
-    // again here would cost every removal a read of the song's whole modulation. Modulation's switch (its third piece)
-    // turns modulationHeldBesideTheTree on and reads the area's value in place of the tree's. The sends' (each send's ID:
-    // SendsValue.h, what a curve, a MIDI link and a modulation name a send's level by) the same: until their switch the tree
-    // holds them (holdsID() of a SEND), and the sends' switch turns sendsHeldBesideTheTree on, getSendsValue() then reading
-    // the area's value.
-    juce::ignoreUnused (song, each);
-
-    if constexpr (modulationHeldBesideTheTree)
-        forEachIDHeld (readModulationValue (song.getState()), each);
+    // Each area whose value holds items that something can name, a line each, in no order that matters: modulation's (each
+    // modulator's and macro's: ModulationValue.h, what a MIDI link of a macro's value or of a modulator's parameter and a
+    // macro's value's curve name), from its area's value. The sends' (each send's ID: SendsValue.h, what a curve, a MIDI link
+    // and a modulation name a send's level by) only from their switch: until then the tree holds them (holdsID() of a SEND),
+    // which the caller's walk of the tree finds, and the sends' switch turns sendsHeldBesideTheTree on, getSendsValue() then
+    // reading the area's value.
+    if (const auto* values = song.getValues())
+        forEachIDHeld (values->modulation.get(), each);
 
     if constexpr (sendsHeldBesideTheTree)
         forEachIDHeld (getSendsValue (song), each);

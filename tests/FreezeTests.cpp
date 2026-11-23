@@ -675,11 +675,12 @@ TEST_CASE ("A frozen track's fader moved by hand is compared without reading its
     phazite::test::dispatchPendingMessages();
     CHECK (isFrozen());
 
-    // Its LFO changed: its comparison reads its modulators, and finds them changed.
+    // Its LFO changed: its comparison looks its modulators up in modulation's area (none read from an element: the song's
+    // tree holds none), and finds them changed.
     edit ("Change Rate", [&] { phazite::setValueSetByHand (model, rate (lfo), 5.0f); });
     const auto before = phazite::countModulatorsRead();
     model.writePending();
-    CHECK (phazite::countModulatorsRead() > before);
+    CHECK (phazite::countModulatorsRead() == before);
     CHECK_FALSE (isFrozen());
 }
 

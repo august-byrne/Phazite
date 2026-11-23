@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Modulation's writers on its values (roadmap step S5.20, modulation's third piece; model/modulation/internal/Modulation.h):
 // every edit of a modulator or a macro works its next value out and sets it through modulation's setters (setModulator(),
-// eraseModulator(), setModulatorOrder()), which, while the song's tree is modulation's storage, write its element by what
-// differs. Each edit leaves the element as Phazite's writers always left it (built here as they built it, on an element of
-// the test's own), as one exact undo step; a set as the song holds it writes nothing. And what copies, forgets or applies
+// eraseModulator(), setModulatorOrder(), setAllModulation()) into modulation's area. Each edit leaves the song, written whole
+// (WholeState.h), holding the element Phazite's writers always left (built here as they built it, on an element of the test's
+// own; its VALUES before its MODULATES, as whole state writes it), as one exact undo step; a set as the song holds it writes
+// nothing. And what copies, forgets or applies
 // modulation does it through them: a duplicated track (its macros' automation with them, its containers' too) and chain, a
 // bounce's copies, a folder made a bus and back, the versions' pass (a version applied each way, a track's line, a folder's
 // line that brings its tracks back, the master's line, the song as copied, a song opened from a file whose modulators the
@@ -188,17 +189,63 @@ namespace asBefore
     }
 } // namespace asBefore
 
-// A modulator's or a macro's element in the song as text, and whether it is the last of its owner's children (where every
-// edit adds one).
+// A modulator's or a macro's element in a whole copy of the song (phazite::test::copyWholeSong(): the song's tree holds none),
+// found by its ID; an invalid tree for none. Its parent is the copy's while the copy lives.
+juce::ValueTree findModulatorIn (const juce::ValueTree& whole, ModulatorID id)
+{
+    for (const auto& child : whole)
+    {
+        if ((child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
+            && phazite::readID (child[schema::modulatorID]) == id.getRaw())
+            return child;
+
+        if (const auto found = findModulatorIn (child, id); found.isValid())
+            return found;
+    }
+
+    return {};
+}
+
+// A modulator's or a macro's element in the song whole as text, and whether it is the last of its owner's children there
+// (where every edit adds one, its owner holding no send).
 juce::String written (const phazite::Song& song, ModulatorID id)
 {
-    return phazite::findModulatorState (song, id).toXmlString();
+    return findModulatorIn (phazite::test::copyWholeSong (song), id).toXmlString();
 }
 
 bool isLastChild (const phazite::Song& song, ModulatorID id)
 {
-    const auto element = phazite::findModulatorState (song, id);
+    const auto whole = phazite::test::copyWholeSong (song);
+    const auto element = findModulatorIn (whole, id);
     return element.isValid() && element.getParent().indexOf (element) == element.getParent().getNumChildren() - 1;
+}
+
+// An element of the test's own as the song writes it whole: a modulator's VALUES before its MODULATES (ModulationValue.h:
+// writeModulatorElement(); the old writers appended a VALUES made after a modulation after it, which the loader moves before
+// it as the song opens).
+juce::ValueTree asWhole (const juce::ValueTree& element)
+{
+    auto copy = element.createCopy();
+
+    if (auto values = copy.getChildWithName (schema::VALUES); values.isValid())
+    {
+        copy.moveChild (copy.indexOf (values), 0, nullptr);
+
+        // Its values in its kind's parameters' order, as whole state writes them (the old writers in the order first set).
+        if (const auto kind = phazite::readModulatorKind (copy))
+        {
+            juce::ValueTree ordered (schema::VALUES);
+
+            for (const auto& parameter : phazite::devices::getModulatorParameters (*kind))
+                if (const juce::Identifier name (juce::String (parameter.id.data(), parameter.id.size())); values.hasProperty (name))
+                    ordered.setProperty (name, values[name], nullptr);
+
+            values.removeAllProperties (nullptr); // so that each is set again, in this order
+            values.copyPropertiesFrom (ordered, nullptr);
+        }
+    }
+
+    return copy;
 }
 
 // A step of the test's own, around what isn't a change of its own (a setter, a pass, a choice).
@@ -236,84 +283,89 @@ TEST_CASE ("Modulation's writers: each edit leaves the element as Phazite's writ
     undo.check ("Add LFO", [&] { lfo = phazite::addModulator (context, track, ModulatorType::lfo); });
     REQUIRE (lfo.isValid());
     auto lfoBefore = asBefore::addModulator (lfo, ModulatorType::lfo);
-    CHECK (written (song, lfo) == lfoBefore.toXmlString());
+    CHECK (written (song, lfo) == asWhole (lfoBefore).toXmlString());
     CHECK (isLastChild (song, lfo));
 
     undo.check ("Add Step Sequencer", [&] { steps = phazite::addModulator (context, track, ModulatorType::steps); });
     REQUIRE (steps.isValid());
     auto stepsBefore = asBefore::addModulator (steps, ModulatorType::steps);
-    CHECK (written (song, steps) == stepsBefore.toXmlString());
+    CHECK (written (song, steps) == asWhole (stepsBefore).toXmlString());
     CHECK (isLastChild (song, steps));
 
     undo.check ("Add Macro", [&] { macro = phazite::addModulator (context, track, ModulatorType::macro); });
     REQUIRE (macro.isValid());
     auto macroBefore = asBefore::addMacro (macro, "Macro 1");
-    CHECK (written (song, macro) == macroBefore.toXmlString());
+    CHECK (written (song, macro) == asWhole (macroBefore).toXmlString());
     CHECK (isLastChild (song, macro));
 
     undo.check ("Rename Macro", [&] { phazite::renameMacro (context, macro, "  Air "); });
     macroBefore.setProperty (schema::macroName, "Air", nullptr);
-    CHECK (written (song, macro) == macroBefore.toXmlString());
+    CHECK (written (song, macro) == asWhole (macroBefore).toXmlString());
 
     // A macro turned, and back to 0: its value only while not 0.
     undo.check ("Change Macro", [&] { s.setMacroValue (macro, 0.75f); });
     asBefore::setMacroValue (macroBefore, 0.75f);
-    CHECK (written (song, macro) == macroBefore.toXmlString());
+    CHECK (written (song, macro) == asWhole (macroBefore).toXmlString());
     undo.check ("Change Macro Back", [&] { s.setMacroValue (macro, 0.0f); });
     asBefore::setMacroValue (macroBefore, 0.0f);
-    CHECK (written (song, macro) == macroBefore.toXmlString());
+    CHECK (written (song, macro) == asWhole (macroBefore).toXmlString());
 
-    // A modulator's values set by hand: one its VALUES has, then one of a modulator whose VALUES come after what it
-    // modulates, then that one set back to its default (its VALUES go with it).
+    // A modulator's values set by hand: one its VALUES has, then one of a modulator that modulates something already (its
+    // VALUES written before what it modulates, as the song writes it whole), then that one set back to its default (its VALUES
+    // go with it).
     undo.check ("Change Rate", [&] { s.setModulatorParameter (lfo, "rate", 2.0f); });
     asBefore::setValue (lfoBefore, phazite::devices::ModulatorKind::lfo, "rate", 2.0f);
-    CHECK (written (song, lfo) == lfoBefore.toXmlString());
+    CHECK (written (song, lfo) == asWhole (lfoBefore).toXmlString());
 
     undo.check ("Modulate Pan", [&] { phazite::modulate (context, steps, pan, 0.25f); });
     asBefore::setModulation (stepsBefore, pan, 0.25f);
-    CHECK (written (song, steps) == stepsBefore.toXmlString());
+    CHECK (written (song, steps) == asWhole (stepsBefore).toXmlString());
     undo.check ("Change Depth", [&] { s.setModulatorParameter (steps, "depth", 0.5f); });
     asBefore::setValue (stepsBefore, phazite::devices::ModulatorKind::steps, "depth", 0.5f);
-    CHECK (written (song, steps) == stepsBefore.toXmlString());
-    REQUIRE (phazite::findModulatorState (song, steps).getNumChildren() == 2);
-    CHECK (phazite::findModulatorState (song, steps).getChild (1).hasType (schema::VALUES));
+    CHECK (written (song, steps) == asWhole (stepsBefore).toXmlString());
+    {
+        const auto whole = phazite::test::copyWholeSong (song);
+        const auto element = findModulatorIn (whole, steps);
+        REQUIRE (element.getNumChildren() == 2);
+        CHECK (element.getChild (0).hasType (schema::VALUES));
+    }
     undo.check ("Change Depth Back", [&] { s.setModulatorParameter (steps, "depth", 1.0f); });
     asBefore::setValue (stepsBefore, phazite::devices::ModulatorKind::steps, "depth", 1.0f);
-    CHECK (written (song, steps) == stepsBefore.toXmlString());
-    CHECK_FALSE (phazite::findModulatorState (song, steps).getChildWithName (schema::VALUES).isValid());
+    CHECK (written (song, steps) == asWhole (stepsBefore).toXmlString());
+    CHECK_FALSE (findModulatorIn (phazite::test::copyWholeSong (song), steps).getChildWithName (schema::VALUES).isValid());
 
     // A step, one past the steps it has, and one set to 0 at the end.
     undo.check ("Change Step", [&] { phazite::setStep (context, steps, 3, 0.25f); });
     asBefore::setStep (stepsBefore, 3, 0.25f);
-    CHECK (written (song, steps) == stepsBefore.toXmlString());
+    CHECK (written (song, steps) == asWhole (stepsBefore).toXmlString());
     undo.check ("Change Step", inStep (song, "Change Step", [&] { phazite::setModulatorStep (song, steps, 20, -0.5f); }));
     asBefore::setStep (stepsBefore, 20, -0.5f);
-    CHECK (written (song, steps) == stepsBefore.toXmlString());
+    CHECK (written (song, steps) == asWhole (stepsBefore).toXmlString());
     undo.check ("Change Step", inStep (song, "Change Step", [&] { phazite::setModulatorStep (song, steps, 20, 0.0f); }));
     asBefore::setStep (stepsBefore, 20, 0.0f);
-    CHECK (written (song, steps) == stepsBefore.toXmlString());
+    CHECK (written (song, steps) == asWhole (stepsBefore).toXmlString());
 
     // Switched off and on: its switch only while off.
     undo.check ("Turn Modulator Off", [&] { phazite::setModulatorOn (context, lfo, false); });
     asBefore::setOn (lfoBefore, false);
-    CHECK (written (song, lfo) == lfoBefore.toXmlString());
+    CHECK (written (song, lfo) == asWhole (lfoBefore).toXmlString());
     undo.check ("Turn Modulator On", [&] { phazite::setModulatorOn (context, lfo, true); });
     asBefore::setOn (lfoBefore, true);
-    CHECK (written (song, lfo) == lfoBefore.toXmlString());
+    CHECK (written (song, lfo) == asWhole (lfoBefore).toXmlString());
 
     // What a macro modulates: made, a second, the first's amount changed in its place, the first taken away.
     undo.check ("Modulate Volume", [&] { phazite::modulate (context, macro, volume, 0.5f); });
     asBefore::setModulation (macroBefore, volume, 0.5f);
-    CHECK (written (song, macro) == macroBefore.toXmlString());
+    CHECK (written (song, macro) == asWhole (macroBefore).toXmlString());
     undo.check ("Modulate Pan", [&] { phazite::modulate (context, macro, pan, -0.123456f); });
     asBefore::setModulation (macroBefore, pan, -0.123456f);
-    CHECK (written (song, macro) == macroBefore.toXmlString());
+    CHECK (written (song, macro) == asWhole (macroBefore).toXmlString());
     undo.check ("Change Modulation", [&] { phazite::modulate (context, macro, volume, -0.3f); });
     asBefore::setModulation (macroBefore, volume, -0.3f);
-    CHECK (written (song, macro) == macroBefore.toXmlString());
+    CHECK (written (song, macro) == asWhole (macroBefore).toXmlString());
     undo.check ("Remove Modulation", [&] { phazite::removeModulation (context, macro, volume); });
     asBefore::removeModulation (macroBefore, volume);
-    CHECK (written (song, macro) == macroBefore.toXmlString());
+    CHECK (written (song, macro) == asWhole (macroBefore).toXmlString());
 
     // A set as the song holds it: no action, no step; each edit that changes nothing, the same.
     {
@@ -332,7 +384,8 @@ TEST_CASE ("Modulation's writers: each edit leaves the element as Phazite's writ
 
     // Removed: gone, with what it modulates.
     undo.check ("Remove Macro", [&] { phazite::removeModulator (context, macro); });
-    CHECK_FALSE (phazite::findModulatorState (song, macro).isValid());
+    CHECK_FALSE (phazite::getModulatorValue (song, macro).has_value());
+    CHECK_FALSE (findModulatorIn (phazite::test::copyWholeSong (song), macro).isValid());
     undo.walkBackAndForth();
 }
 
@@ -579,12 +632,13 @@ TEST_CASE ("A folder made a bus and back keeps what modulated its volume, rename
     s.modulate (lfo, s.getVolumeParameter (bus), 0.5f);
     const auto volumeIndex = [&song, lfo]
     {
-        const auto element = phazite::findModulatorState (song, lfo);
+        // Its place among the modulator's modulations, as the song holds them (and writes them, in their order).
+        const auto modulations = phazite::getModulatorValue (song, lfo)->modulations;
         int index = -1;
 
-        for (int i = 0; i < element.getNumChildren(); ++i)
-            if (element.getChild (i).hasType (schema::MODULATES) && element.getChild (i)[schema::modulatesAmount].toString() == "0.5")
-                index = i;
+        for (size_t i = 0; i < modulations.size(); ++i)
+            if (std::abs (modulations[i].amount - 0.5f) < 1.0e-6f)
+                index = (int) i;
 
         return index;
     };
@@ -835,7 +889,8 @@ TEST_CASE ("A song opened from a file whose modulators it holds otherwise than i
 
     for (const auto id : { lfo, steps, macro })
     {
-        const auto element = phazite::findModulatorState (song, id);
+        const auto whole = phazite::test::copyWholeSong (song);
+        const auto element = findModulatorIn (whole, id);
         REQUIRE (element.isValid());
         const auto place = phazite::readModulatorPlace (element);
         const auto held = phazite::readHeldModulator (element, place);
@@ -857,7 +912,7 @@ TEST_CASE ("A song opened from a file whose modulators it holds otherwise than i
     for (const auto& [id, parameter, value] :
          { std::tuple { lfo, juce::String ("rate"), 3.0f }, std::tuple { macro, valueOf (macro).parameter, 0.5f } })
     {
-        auto expected = phazite::findModulatorState (song, id).createCopy();
+        auto expected = findModulatorIn (phazite::test::copyWholeSong (song), id).createCopy();
 
         {
             const phazite::UndoStep step (song, "Change");
@@ -865,14 +920,14 @@ TEST_CASE ("A song opened from a file whose modulators it holds otherwise than i
             CHECK (song.getUndoManager().getNumActionsInCurrentTransaction() == 1);
         }
 
-        const auto element = phazite::findModulatorState (song, id);
+        const auto element = findModulatorIn (phazite::test::copyWholeSong (song), id);
 
         if (id == lfo)
             expected.getChildWithName (schema::VALUES).setProperty ("rate", element.getChildWithName (schema::VALUES)["rate"], nullptr);
         else
             expected.setProperty (schema::macroValue, element[schema::macroValue], nullptr);
 
-        CHECK (element.toXmlString() == expected.toXmlString());
+        CHECK (element.toXmlString() == asWhole (expected).toXmlString());
     }
 
     // The version applied each way, and made the song's whole: the song then holds the same as the other, and a second apply
@@ -1105,7 +1160,8 @@ TEST_CASE ("A merge's clash on a whole modulator, a whole modulation and a modul
         return path;
     };
 
-    const auto lfoElement = phazite::findModulatorState (song, lfo);
+    const auto songWhole = phazite::test::copyWholeSong (song); // the song's tree holds no modulator: its paths are the whole's
+    const auto lfoElement = findModulatorIn (songWhole, lfo);
     juce::ValueTree modulatesElement;
 
     for (const auto& child : lfoElement)
@@ -1113,8 +1169,8 @@ TEST_CASE ("A merge's clash on a whole modulator, a whole modulation and a modul
             modulatesElement = child;
 
     const auto modulatesPath = pathOf (modulatesElement);
-    const auto valuesPath = pathOf (phazite::findModulatorState (song, sequencer).getChildWithName (schema::VALUES));
-    const auto randomPath = pathOf (phazite::findModulatorState (song, random));
+    const auto valuesPath = pathOf (findModulatorIn (songWhole, sequencer).getChildWithName (schema::VALUES));
+    const auto randomPath = pathOf (findModulatorIn (songWhole, random));
 
     // Theirs changes what ours takes away: the LFO's modulation (its amount), the step sequencer's values (its depth, the one
     // it has: ours sets it back to its default, which takes its VALUES away), the random source (switched off there).

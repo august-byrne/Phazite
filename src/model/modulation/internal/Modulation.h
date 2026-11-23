@@ -5,12 +5,12 @@
 // engine plays them from the song (model/playback/internal/SongPlayer.h). The changes join the caller's undo step. Not for
 // the UI.
 //
-// Read as values (model/base/internal/ModulationValue.h: ModulatorValue, SongModulation; roadmap step S5.20, modulation's
-// first piece): every reader of the song's modulation reads it through the readers below, which read the song's tree, still
-// its storage, through the conversion. A reader that needs one modulator reads one (getModulatorValue()), one owner's its
-// list (getOwnedModulators()), and what modulates one parameter asks findModulationsOf(), which reads no modulator whole:
-// a knob asks it at each tick. The whole song's (getModulationValue()) is for what reads it all: the plan's compile, the
-// passes.
+// As values (model/base/internal/ModulationValue.h: ModulatorValue, SongModulation), which the song holds as modulation's
+// area (SongValues.h; roadmap step S5.20): every reader looks in the area through the readers below (one modulator by its
+// ID, an owner's list, what modulates one parameter, the whole value for the plan's compile and the passes), and every
+// writer works its next value out and sets it through the setters below, once for an edit. A song that holds no values (a
+// check's copy, which holds everything in its tree) is read from its tree, as the conversion reads one (ModulationValue.h:
+// readModulationValue()).
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -32,21 +32,26 @@
 namespace phazite
 {
 //==============================================================================
-// The song's modulation, every modulator and macro of it: read from its tree (a walk of every channel and container), for
-// what reads it all.
+// The song's modulation, every modulator and macro of it: the area's value, for what reads it all.
 SongModulation getModulationValue (const Song&);
 
 // A modulator or a macro by its ID, none for one the song hasn't (nor for a modulator of a type Phazite doesn't know, which
-// the loader takes away): one element found and read, as much as finding its element cost.
+// the loader takes away): a look in the area.
 std::optional<ModulatorValue> getModulatorValue (const Song&, ModulatorID);
+
+// How many times the readers here looked at the song's modulation (its area's value, or a song's tree without values) since
+// Phazite started: for the test that a tree callback looks at none (tests/SongValuesModulationTests.cpp), as no tree
+// callback may read an area (SongValues.h). A count alone, on the message thread.
+std::uint64_t countModulationLooks() noexcept;
 
 // An owner's modulators and macros (ModulationValue.h: ModulatorPlace, the container's where it names one, else the
 // channel's), in their order, modulators and macros together; none for an owner the song hasn't.
 std::vector<ModulatorValue> getOwnedModulators (const Song&, const ModulatorPlace& owner);
 
 // What modulates a parameter, whether or not the song has the parameter: each modulator's and macro's modulation of it, in
-// the order of the song's modulators (its tracks', each channel's own then its containers', then the master's). No
-// modulator read whole: what a knob asks at each tick (ModulationModel.h: getModulationRange()).
+// the order of the song's modulators (its tracks', each channel's own then its containers', then the master's). A look at
+// each modulator's modulations, the song's order worked out only for several: what a knob asks at each tick
+// (ModulationModel.h: getModulationRange()).
 std::vector<Modulation> findModulationsOf (const Song&, const ParameterRef&);
 
 // Whether one is a macro (none for one the song hasn't); a container's macros, in their order; and whether a track's
@@ -63,38 +68,33 @@ bool isModulatorOn (const ModulatorValue&);
 bool isBipolar (const ModulatorValue&);
 int getNumSteps (const ModulatorValue&);
 
-// A modulator's or a macro's element in the song, invalid for one the song hasn't: for the parameters' code, whose
-// FoundParameter holds it (model/devices/internal/Parameters.h), until modulation's switch (roadmap step S5.20). No reader
-// reads it, and no writer writes it but the setters below.
-juce::ValueTree findModulatorState (const Song&, ModulatorID);
-
 //==============================================================================
-// The song's modulation, one modulator or macro at a time, by its ID: what adds, changes, takes out or puts in order a
-// modulator or a macro does it through these, each working its next value out from the one getModulatorValue() reads, by
-// the rules of the edit, and setting it once; the rename of a modulation in place (renameModulated(), below), a control's
-// set of one value (setModulatorValueSetByHand(), setMacroValue(), below, which write that value as these would) and the
-// makers of a new container, which make it with its eight macros (model/mixer/internal/Containers.h: makeContainerState();
-// model/presets: a container preset's), aside. Each joins the caller's undo step, as the song is written now: in the
-// history's step in progress, or outside it while the song is written outside it (Song::OutsideHistory). While the song's
-// tree is modulation's storage (roadmap step S5.20, until modulation's switch, which replaces their bodies alone), each
-// writes the elements by what differs, so that every edit leaves the tree as Phazite's writers always left it. Whether it
-// wrote: a value equal to the one held writes nothing, and makes no action in the history; nor does one whose place names an
-// owner the song hasn't.
-//   - setModulator(): a modulator or a macro made this value. One the song hasn't is made whole and added at the place given
-//     in its owner's list (from 0; -1, as every edit adds one, after all the owner's elements), in one action. One it has
-//     keeps its place, its element written where it differs from the value: each property by its name, as Phazite's writers
-//     write it (a macro's value and a modulator's switch only while not 0 and on, its steps only while it has one); its
-//     values set by hand as keepValueSetByHand() keeps them (Parameters.h: none at its default, the VALUES with the last);
-//     what it modulates by the parameters: each it modulates no more taken out, each it keeps given its amount, each new
-//     one added after the others (the only order an edit makes), then in the value's order (a version's). One the value
-//     gives another owner (a version's) is moved to the place given in that owner's list first.
+// The song's modulation, one modulator or macro at a time, by its ID, or whole: what adds, changes, takes out or puts in
+// order a modulator or a macro does it through these, each working its next value out from the one the area holds, by the
+// rules of the edit, and setting it once (an edit that changes several, as a duplicated track's copies, its whole next value
+// once: setAllModulation()); the makers of a new container, which make it with its eight macros as elements that the song's
+// keeper takes in (model/mixer/internal/Containers.h: makeContainerState(); model/presets: a container preset's), aside.
+// Each joins the caller's undo step, as the song is written now: in the history's step in progress, or outside it while the
+// song is written outside it (Song::OutsideHistory), through modulation's area's setters (SongValues.h: setModulator() and
+// the three after it). Whether it changed the song's modulation: a value equal to the one held changes nothing, and makes no
+// action in the history; nor does one whose place names an owner the song hasn't.
+//   - setModulator(): a modulator or a macro made this value (ModulationValue.h: withHeldModulator(), a container's macro on
+//     the channel its container is on). One the song hasn't is added at the place given in its owner's list (from 0; -1, as
+//     every edit adds one, after the others); one it has keeps its place, but where the value gives it another owner (a
+//     version's), which it is moved to at the place given; one held as the other kind (a macro under a modulator's ID) is
+//     replaced at the place given.
 //   - eraseModulator(): one taken out, with what it modulates; whether it was there.
 //   - setModulatorOrder(): an owner's modulators and macros of these IDs put first, in this order (an ID it hasn't left
-//     out), the others after them in theirs, at the places its modulators and macros are at among its elements, its other
-//     elements (its devices, lanes and sends) staying at theirs.
+//     out), the others after them in theirs.
+//   - setAllModulation(): the whole value given (a pass's, an edit's of several), held together as setModulator() holds each
+//     one (ModulationValue.h: holdsTogether()); and the place a value on an owner a place names takes in the song
+//     (findOwnerPlace(): a container's on the channel the container is on now, as setModulator() gives it; a pass's, before
+//     it gives the owner a modulator), none for an owner the song hasn't.
 bool setModulator (Song&, const ModulatorValue&, int index = -1);
 bool eraseModulator (Song&, ModulatorID);
 bool setModulatorOrder (Song&, const ModulatorPlace& owner, const immer::flex_vector<ModulatorID>& order);
+bool setAllModulation (Song&, SongModulation);
+std::optional<ModulatorPlace> findOwnerPlace (const Song&, const ModulatorPlace& owner);
 
 //==============================================================================
 // A channel's modulators, in their order, then its macros: a track's, a folder's or the master's (by its ID, or none). A
@@ -130,8 +130,8 @@ void removeModulator (Song&, ModulatorID);
 // A modulator's parameter's value set by hand (one of its kind's parameters: devices::getModulatorParameters()), none kept at
 // its default; and a macro's value, 0 to 1. Nothing for one the song hasn't, or of the other kind, nor for the value it holds.
 // As the parameters' code sets them (model/devices/internal/Parameters.h: setValueSetByHand(), which brings the value within
-// its range first), at a control's drag's rate: so each finds the element once and reads and writes its one value, as
-// setModulator() writes that part by what differs, reading none of it whole (tests/PerformanceGateTests.cpp).
+// its range first), at a control's drag's rate: a look in the area and one value set, nothing read from an element
+// (tests/PerformanceGateTests.cpp).
 void setModulatorValueSetByHand (Song&, ModulatorID, const devices::ParameterInfo&, float value);
 void setMacroValue (Song&, ModulatorID, float value);
 
@@ -163,35 +163,34 @@ void removeModulation (Song&, ModulatorID, const ParameterRef&);
 
 // Every modulation of a parameter made one of another, in its place, as much (a folder's fader that becomes the other kind:
 // model/mixer/internal/Buses.h): the one edit that renames what a modulation names, in place (set anew, it would go after
-// the others), its element's device and parameter written while the song's tree is modulation's storage. In the caller's
-// undo step.
+// the others): each modulation's parameter changed where it is among its modulator's. In the caller's undo step.
 void renameModulated (Song&, const ParameterRef& from, const ParameterRef& to);
 
 // Takes every modulation of a parameter of what is gone out of the song (gone: by the parameter's device's ID, a device's, a
 // chain's, a fader's or a send's), each modulator's in one set: what names an item the song no longer holds
 // (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone(); model/versions/internal/ApplySong.h: removeBrokenReferences()). In
-// the caller's undo step. How many it took out. Only the modulators that modulate what is gone are read (a device removed asks
-// it: tests/PerformanceGateTests.cpp).
+// the caller's undo step, the song's modulation set once. How many it took out. Each modulator's modulations looked at, none
+// read from an element (a device removed asks it: tests/PerformanceGateTests.cpp).
 int forgetModulationsOf (Song&, const std::function<bool (DeviceID)>& gone);
 
 // What modulates the originals of copies modulates the copies too, as much, by the IDs a copy was given (giveNewIDs():
 // each original's to its copy's), after what it modulates, where it modulates none of the copy's parameter yet: for a copy
 // that the modulators aren't in, a container's chain's, whose macros are the container's and whose track's modulators are
-// the track's. In the caller's undo step.
+// the track's. In the caller's undo step, the song's modulation set once.
 void copyModulations (Song&, const std::map<std::uint64_t, std::uint64_t>& copied);
 
 // The same for copies on another channel, which its own modulators must move: each of a channel's modulators and macros
 // that modulates one of the originals is copied onto the other channel, set as it is, modulating the copies alone, as
-// much. For a channel that plays in another's place with a fader and sends like its own (a bounce's track:
-// model/mixer/internal/Freeze.h). Each copy's ID is added to copied, by its original's, before the copies' automation
-// (Automation.h: copyCurves()), which names a macro's copy by it. In the caller's undo step.
+// much, the song's modulation set once. For a channel that plays in another's place with a fader and sends like its own
+// (a bounce's track: model/mixer/internal/Freeze.h). Each copy's ID is added to copied, by its original's, before the
+// copies' automation (Automation.h: copyCurves()), which names a macro's copy by it. In the caller's undo step.
 void copyModulators (Song&, TrackID from, TrackID to, CopiedIDs& copied);
 
 // After a part of the song was copied with new IDs (giveNewIDs(), Schema.h: a duplicated track): each copied owner's
 // modulators and macros (a track's own, a container's) given to its copy, in their order, each with a new ID, which copied
-// gets too, what they modulate of the copied items renamed to the copies, in the caller's undo step; nothing for a copy
-// that holds some already (while the song's tree is modulation's storage, a copied element carries its modulators, as its
-// IDs given anew name them). Before the copies' automation (Automation.h: copyCurves()), which names a macro's copy by the
+// gets too, what they modulate of the copied items renamed to the copies, in the caller's undo step, the song's modulation
+// set once; nothing for a copy that holds some already (a copied element carries none: the song's tree holds no modulator).
+// Before the copies' automation (Automation.h: copyCurves()), which names a macro's copy by the
 // ID it gets here.
 void copyModulation (Song&, CopiedIDs& copied);
 } // namespace phazite

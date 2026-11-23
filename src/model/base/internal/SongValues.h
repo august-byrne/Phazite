@@ -10,13 +10,16 @@
 // (model/chords/internal/Chords.h) computes each edit on; the song's MIDI links (MidiLinksValue.h: each controller linked
 // to a parameter), which the MIDI links' code (model/midi/internal/MidiLinks.h) computes each edit on; the song's
 // automation (CurveValues.h: SongCurves, each automated parameter's curve with its points, in the order the song made them),
-// which automation's code (model/automation/internal/Automation.h) computes each edit on; and the song's sections
-// (SectionsValue.h: each by its ID), which the sections' code (model/arrangement/internal/Sections.h) computes each edit on.
-// All as plain values in Phazite's own types.
+// which automation's code (model/automation/internal/Automation.h) computes each edit on; the song's sections
+// (SectionsValue.h: each by its ID), which the sections' code (model/arrangement/internal/Sections.h) computes each edit on;
+// and the song's modulation (ModulationValue.h: SongModulation, each modulator and macro by its ID, each owner's in its
+// order), which modulation's code (model/modulation/internal/Modulation.h) computes each edit on. All as plain values in
+// Phazite's own types.
 //
 // The values are the storage: the song holds an area of each (SongValues) in its one undo history, and the song's tree holds
 // no CLIP element (nor a clip's NOTE, CONTROL or WARP elements), no TEMPO or TIMESIGNATURE element, no CHORD or CHORDKEY
-// element, no MIDILINK element, no CURVE or POINT element and no SECTION element: its TEMPOMAP element stays, empty, the
+// element, no MIDILINK element, no CURVE or POINT element, no SECTION element and no MODULATOR or MACRO element (nor a
+// MODULATES, nor a modulator's VALUES): its TEMPOMAP element stays, empty, the
 // place a whole copy writes the map in, its AUTOMATION too (which a whole copy writes only while the song has a curve), its
 // CHORDLANE, where it has one, empty too, the sign that it has a lane, and its MIDILINKS and its SECTIONS, where it has them
 // (added with the first link and the first section), empty too. Each area's value header holds the conversion between its
@@ -62,7 +65,18 @@
 //      tempo map's TEMPOMAP, the curves' AUTOMATION): its adopt() makes it where the loaded tree has none, nothing adds or
 //      takes it away after, isHeardAs<Area>() covers it whole (the element itself added or taken out too), and the passes
 //      over elements leave it alone (step 9); where files have held none of it while the area was empty (AUTOMATION, once
-//      added with the first curve), whole state leaves it out while the area is empty (CurvesArea.h: writeCurvesIn()).
+//      added with the first curve), whole state leaves it out while the area is empty (CurvesArea.h: writeCurvesIn()). An
+//      area whose entries sit under elements that stay in the tree (the clips under tracks; modulation under tracks, the
+//      master and containers: ModulationArea.h) has its keeper follow each kind of owner as it comes and goes: a track
+//      (alone, a folder with its tracks, the track list) and every other owner alone (a container, which a version moves to
+//      another channel), what each holds remembered with its element as it goes and given back, with the place it comes to,
+//      as the same element comes back; an owner that comes with the area's elements has them taken in; whole state writes an
+//      owner's entries in its element (writeModulationIn(): after its other children but those another area writes after
+//      it, a track's sends); and an entry keeps beside its owner each owner above it that a teller names (ModulatorPlace: a
+//      container's macro keeps its channel), so that what is told names it without reading the tree, which a redo may not
+//      have put back yet. The devices' area, under tracks and under containers and chains that it holds itself, needs the
+//      same for each: its keeper follows a TRACK, a CONTAINER and a CHAIN, and modulation's keeper then follows a container
+//      by the devices' area, not by the tree.
 //   3. Here, in SongValues: its area as a member (ValueArea<<Area>Value> <area>, after the others); its setter (set<Area>());
 //      a virtual <area>Changed() in Listener, empty by default; struct <Area>Teller and <Area>Keeper among the declarations
 //      below, and a std::unique_ptr<<Area>Teller> after the others; a count of what its keeper took in, if it takes any in
@@ -135,8 +149,9 @@
 //        for an override of its own.
 //  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
 //      copyWholeSong(), copyWhole(), keepValues(), or a part's own whole copy, as copyWholeClip()): the changes' worker
-//      (model/versions/ChangesWorker.cpp: take(), makeSkeleton()); the saved copy (model/project/Project.cpp: savedState,
-//      the tree with keepValues(), written with copyWhole()); the clipboard (model/arrangement/Clipboard.cpp); an export
+//      (model/versions/ChangesWorker.cpp: take(), makeSkeleton(), copyTrack(), which writes a track's modulation in as
+//      whole state does); the saved copy (model/project/Project.cpp: savedState, the tree with keepValues(), written with
+//      copyWhole()); the clipboard (model/arrangement/Clipboard.cpp); an export
 //      (model/project/Export.cpp, DawProject.cpp). What reads the area on the message thread reads it in place, by
 //      reference (Automation.h: getCurvesValue(), findCurve()), keeping no reference across a set; a song that holds no
 //      values (a check's copy) reads as one whose area is empty.
@@ -148,8 +163,8 @@
 //      clip renders, which leave the chord lane's placeholder alone too). From the listener's piece (step 14) to the
 //      switch, the tree is still the area's storage, and the keeper feeds <area>Changed() from the tree's callbacks under
 //      the area's elements. At the switch the feed goes (the teller tells), and the area's line in isHeardAsKept() goes
-//      with it where the tree then holds nothing of the area (the clips' went so); it stays where the area keeps a place in
-//      the tree that the keeper's safety net writes (the tempo map's TEMPOMAP, the chord lane's CHORDLANE).
+//      with it where the tree then holds nothing of the area (the clips' and modulation's went so); it stays where the
+//      area keeps a place in the tree that the keeper's safety net writes (the tempo map's TEMPOMAP, the chord lane's CHORDLANE).
 //  13. What an area must not do: no tree callback reads any area, directly or through what reads it (the root's listeners
 //      have no order among them, and an Undo puts the tree back before the areas: below); a listener told of an area's
 //      change only marks; a set equal to what is held makes no undo step (nothing, or ValueArea.h's setWithoutStep() where
@@ -214,24 +229,26 @@ class Song;
 //==============================================================================
 // The song's values, which the song holds once its tree is consistent (Song::holdValues(), as model/project/internal/
 // Project.h's makeSong() makes a song): the clips' area, the notes' area, the tempo map's, the chord lane's, the MIDI links',
-// the curves' and the sections', in the song's one undo history, and what keeps them and the tree together. Message thread
-// only, as the song's tree is: nothing on the audio thread reads it (what plays gets what the model compiles of it), and
-// what runs on another thread gets a copy (WholeState.h: copyWholeSong(), keepValues()).
+// the curves', the sections' and modulation's, in the song's one undo history, and what keeps them and the tree together.
+// Message thread only, as the song's tree is: nothing on the audio thread reads it (what plays gets what the model compiles
+// of it), and what runs on another thread gets a copy (WholeState.h: copyWholeSong(), keepValues()).
 //
 // Who changes the values: the clips' code (Clips.h: addClip(), setClip(), eraseClip() and the rest, through setClip(),
 // eraseClip() and setTrackClipOrder() below), the notes' code (Notes.h: setClipNotesValue(), which is setClipNotes() below),
 // the tempo map's code (Tempo.h: every edit of the tempo map, through setTempoMap() below), the chord lane's code (Chords.h:
 // every edit of the lane, through setChordLane() below), the MIDI links' code (MidiLinks.h: every edit of the links, through
 // setMidiLinks() below), automation's code (Automation.h: every edit of the curves, through setCurves() and its setters
-// below) and the sections' code (Sections.h: every edit of the sections, through setSections() below). The song takes in
+// below), the sections' code (Sections.h: every edit of the sections, through setSections() below) and modulation's code
+// (Modulation.h: through setModulator() and the three after it, below). The song takes in
 // what its file holds of each area as it holds its values (holdValues(): each area's adopt(), which reads it as the song
 // holds it, as TempoMapValue.h's readHeldTempoMap(), ChordLaneValue.h's readHeldChordLane(), MidiLinksValue.h's
-// readHeldMidiLinks(), CurveValues.h's readHeldCurves() and SectionsValue.h's readHeldSections() do), and empties its
+// readHeldMidiLinks(), CurveValues.h's readHeldCurves(), SectionsValue.h's readHeldSections() and ModulationValue.h's
+// readHeldModulation() do; the modulators and macros taken out of the tree), and empties its
 // TEMPOMAP and AUTOMATION elements (making each where its file had none), and its CHORDLANE, MIDILINKS and SECTIONS where it
 // has them, properties and children Phazite doesn't know too. A MIDI clip that joins an alias group takes the group's
 // notes, and one that leaves it keeps those it holds (setClip()). Everything else that changes the tree is heard by the
 // keeper, a listener of the song's root (each area's part of it in the area's file: ClipsArea.h, TempoMapArea.h,
-// ChordLaneArea.h, MidiLinksArea.h, CurvesArea.h, SectionsArea.h), which asks every area for
+// ChordLaneArea.h, MidiLinksArea.h, CurvesArea.h, SectionsArea.h, ModulationArea.h), which asks every area for
 // every element that comes into the tree or leaves it, each doing nothing for what is not its own: a track taken
 // out of the song (alone, in a folder, the track list) has its clips (their values, their order and their notes) remembered
 // with its element and erased from both areas; the same element put back (JUCE moves a track by taking it out and putting it
@@ -256,10 +273,14 @@ class Song;
 // step: the areas' own actions move them. The keeper performs its changes from inside JUCE's action for the tree's, which
 // JUCE adds to the step before
 // the tree's own: so an undo puts the tree back first and the clips after (JUCE workaround W62 (docs/juce-workarounds.md)).
-// Modulation's part of the keeper (ModulationArea.h) changes nothing: while the tree still holds the song's modulators and
-// macros (roadmap step S5.20, modulation's second piece), it tells Listener::modulationChanged() from the tree's
-// notifications, at once, in an undo and a redo too. The sends' part (SendsArea.h) the same, of the song's sends, while the
-// tree holds them (the sends' second piece): Listener::sendsChanged().
+// Modulation's part (ModulationArea.h) as the clips', for the modulators and macros of a channel (a track's, the master's)
+// and of a container: a track (or a folder, the track list) taken out has its channel's and its containers' remembered with
+// their elements, a container taken out of a channel its macros, each given back as the same element comes back (a
+// container's with the channel it comes to); one that comes in with MODULATOR or MACRO elements has them read in and taken
+// out (a new container's macros, which its makers build as elements: Containers.h, makeContainerState()); and a lone one is
+// refused in a step, read in outside the history. The sends' part (SendsArea.h) changes nothing: while the tree holds the
+// song's sends (the sends' second piece), it tells Listener::sendsChanged() from the tree's notifications, at once, in an
+// undo and a redo too.
 //
 // The rule for what listens to the song's tree, with no exception: a tree callback never reads the clips' area (nor the
 // notes'), directly or through anything that reads them (the clips' functions, Clips.h, AudioClips.h; the notes', Notes.h;
@@ -280,11 +301,12 @@ public:
 
     ValueArea<SongClips> clips;
     ValueArea<NotesByClip> notes;
-    ValueArea<TempoMapValue> tempoMap;   // each kind by beat, at least one of each (TempoMapValue.h)
-    ValueArea<ChordLaneValue> chordLane; // each kind in the lane's order, empty for a song without a lane (ChordLaneValue.h)
-    ValueArea<MidiLinksValue> midiLinks; // in the song's order, one of each controller and of each parameter (MidiLinksValue.h)
-    ValueArea<SongCurves> curves;        // by their parameters, in the order the song made them, each point keyed (CurveValues.h)
-    ValueArea<SectionsValue> sections;   // in the song's order, one of each ID (SectionsValue.h)
+    ValueArea<TempoMapValue> tempoMap;    // each kind by beat, at least one of each (TempoMapValue.h)
+    ValueArea<ChordLaneValue> chordLane;  // each kind in the lane's order, empty for a song without a lane (ChordLaneValue.h)
+    ValueArea<MidiLinksValue> midiLinks;  // in the song's order, one of each controller and of each parameter (MidiLinksValue.h)
+    ValueArea<SongCurves> curves;         // by their parameters, in the order the song made them, each point keyed (CurveValues.h)
+    ValueArea<SectionsValue> sections;    // in the song's order, one of each ID (SectionsValue.h)
+    ValueArea<SongModulation> modulation; // by ID, each owner's in its order, held together (ModulationValue.h)
 
     // A parameter's curve: none for a parameter without one. A pointer into the area's value as it is now, valid until the
     // area's next change (as findClip()).
@@ -379,6 +401,18 @@ public:
     // say, which the sections' code adds, and takes away, in the same step. In SectionsArea.cpp.
     void setSections (Song&, SectionsValue);
 
+    // Give the song's modulation a modulator or a macro (ModulationValue.h: withHeldModulator(), at a place in its owner's
+    // list, from 0, or after the others for -1; one it holds keeps its place where its owner stays), take one out, put an
+    // owner's in another order (the same IDs), or give it a whole value: modulation's code's ways to change it
+    // (model/modulation/internal/Modulation.h: setModulator(), eraseModulator(), setModulatorOrder(), setAllModulation(),
+    // which find the owner a place names in the song), in the song's undo history (the step in progress), or outside it while
+    // the song is written outside it. A value equal to what the song holds is no change, and writes nothing: no step, the
+    // value held kept. Whether it changed the song's. In ModulationArea.cpp.
+    bool setModulator (Song&, ModulatorValue, int index = -1);
+    bool eraseModulator (Song&, ModulatorID);
+    bool setModulatorOrder (Song&, const ModulatorPlace& owner, immer::flex_vector<ModulatorID> order);
+    bool setAllModulation (Song&, SongModulation);
+
     // The tempo map as Phazite's engine plays it (engine/core/TempoMap.h), made of the tempo map's value at a sample rate,
     // kept for the tempo map's code (model/transport/Tempo.cpp: getTempoMap()), so that it is made once for each change of
     // the value and each sample rate asked, not at every call (each conversion of a beat to seconds, each audio clip read):
@@ -406,7 +440,7 @@ public:
     // wasn't, or isn't), whether it was there and whether it is (both, for one changed in place or come to another place); the
     // parts of it that changed; and its value after, for one that is there, valid during the call alone: what plays may set
     // its modulator's node from it at once (PlaybackSession.h), as nothing else of the song is read meanwhile. Set its
-    // members by name: later pieces of roadmap step S5.20 may add one.
+    // members by name.
     struct ModulationChange
     {
         // The parts, as bits of parts: each its own, as what plays takes each its own way (PlaybackSession.h).
@@ -529,17 +563,12 @@ public:
         // or changed, each once in a call, with where it was and is, the parts of it that changed (ModulationChange::Part) and
         // its value after (ModulationChange::now); and each owner (ModulatorPlace: a channel, or a container) that holds those
         // it held before in another order. A track, a folder's tracks, a container or the track list that comes into the song
-        // or leaves it with modulators or macros in it tells each of them as added or taken out. While the song's tree is still
-        // modulation's storage (roadmap step S5.20, modulation's second piece), the keeper tells it from the tree's
-        // notifications under the song's modulators and macros (ModulationArea.h: ModulationKeeper), at once, one call for each
-        // notification that changes any (an undo's and a redo's too, as they come back one by one), so that a step that writes
-        // several of a modulator's properties tells several calls, as the tree did; from modulation's switch on, the area tells
-        // it once for each change of its value. Either way, what a step, its Undo or its Redo told in all is what differs in the
-        // song's modulation before and after. What listens to the song's root leaves what its tree tells of the song's
-        // MODULATOR and MACRO elements (added, taken out or changed) and of what is in them alone (isHeardAsKept(), below,
-        // through isHeardAsModulation()): a TRACK or a CONTAINER that comes or goes with modulators in it, and an owner's
-        // children in another order (its modulators among them), are the tree's, heard as before, and its modulators are told
-        // here, so the step is heard twice, and only marks twice.
+        // or leaves it with modulators or macros in it tells each of them as added or taken out. Modulation's area tells it
+        // (ModulationArea.h: ModulationTeller), once for each change of its value: a step's, an undo's or a redo's whole step,
+        // a write outside the history; so what a step, its Undo or its Redo told in all is what differs in the song's
+        // modulation before and after. The song's tree holds none of it: a TRACK or a CONTAINER that comes or goes with
+        // modulators is the tree's, heard as before, and its modulators are told here, so the step is heard twice, and only
+        // marks twice.
         virtual void modulationChanged (const std::vector<ModulationChange>& modulators, const std::vector<ModulatorPlace>& reordered)
         {
             juce::ignoreUnused (modulators, reordered);
@@ -602,6 +631,12 @@ public:
     // makeSectionsAs(), chooseSectionClash()), check they never leave to it.
     int countSectionsAdopted() const noexcept { return sectionsAdopted; }
 
+    // How many MODULATOR and MACRO elements the keeper took into modulation's area from the song's tree since the song held
+    // its values (the safety net, above, which takes in a new container's macros: Containers.h, makeContainerState(), and a
+    // container preset's): what the versions, which give the song its modulation through modulation's code (Modulation.h:
+    // makeModulationLike()'s setAllModulation(), chooseModulationClash()), check their passes never leave to it.
+    int countModulationAdopted() const noexcept { return modulationAdopted; }
+
 private:
     friend class Song;
 
@@ -619,7 +654,8 @@ private:
     struct CurvesKeeper;                            // CurvesArea.h
     struct SectionsTeller;                          // SectionsArea.h
     struct SectionsKeeper;                          // SectionsArea.h
-    struct ModulationKeeper;                        // ModulationArea.h: the tree's feed of modulationChanged(), until the switch
+    struct ModulationTeller;                        // ModulationArea.h
+    struct ModulationKeeper;                        // ModulationArea.h
     struct SendsKeeper;                             // SendsArea.h: the tree's feed of sendsChanged(), until the switch
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
@@ -630,12 +666,14 @@ private:
     std::unique_ptr<MidiLinksTeller> midiLinksTeller;
     std::unique_ptr<CurvesTeller> curvesTeller;
     std::unique_ptr<SectionsTeller> sectionsTeller;
+    std::unique_ptr<ModulationTeller> modulationTeller;
     std::unique_ptr<Keeper> keeper;
     int adopted = 0, tempoMapAdopted = 0;
     int chordLaneAdopted = 0;
     int midiLinksAdopted = 0;
     int curvesAdopted = 0;
     int sectionsAdopted = 0;
+    int modulationAdopted = 0;
     std::uint64_t nextPointKey = 1; // givePointKey(): outside the history, never undone, never saved
 
     // In the history, or outside it, as the song is written now; and a value alike to the area's, without a step of its own
@@ -701,18 +739,6 @@ bool isHeardAsMidiLinks (const juce::ValueTree& parent, const juce::ValueTree& c
 bool isHeardAsSections (const juce::ValueTree& element);
 bool isHeardAsSections (const juce::ValueTree& parent, const juce::ValueTree& child);
 
-// Whether what the song's tree tells of an element (a property changed, a child added, taken out or moved in it) is
-// modulation's, which a listener of the song's root hears from the values' listener alone (SongValues::Listener::
-// modulationChanged()) and leaves alone in its tree callbacks: a MODULATOR or a MACRO of the song's (one a channel of the
-// song holds, a track's or the master's, or a container on one: readModulationValue() reads it), or an element in one. And
-// whether a child added to an element or taken out of it is: a MODULATOR or a MACRO added to such a channel or container, or
-// taken out of it, or a child of an element that is. Not a TRACK, a CONTAINER or the track list added or taken out with
-// modulators in it: the tree's, heard as any element's, whose modulators the keeper tells (ModulationArea.h). While the tree
-// is modulation's storage (roadmap step S5.20, its second piece), the keeper tells what the tree tells here. In
-// ModulationArea.cpp.
-bool isHeardAsModulation (const juce::ValueTree& element);
-bool isHeardAsModulation (const juce::ValueTree& parent, const juce::ValueTree& child);
-
 // Whether what the song's tree tells of an element (a property changed, a child added, taken out or moved in it) is the
 // sends', which a listener of the song's root hears from the values' listener alone (SongValues::Listener::sendsChanged())
 // and leaves alone in its tree callbacks: a SEND of the song's (one a TRACK of the song's track list holds, or a TRACK in a
@@ -728,7 +754,7 @@ bool isHeardAsSends (const juce::ValueTree& parent, const juce::ValueTree& child
 // values' listener alone (SongValues::Listener) and leaves alone in its tree callbacks: of an element (a property changed in
 // it, a child moved in it), and of a child added to an element or taken out of it. Each the OR of the areas' own functions
 // above (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, the curves', the
-// MIDI links', the sections', modulation's, then the sends'.
+// MIDI links', the sections', then the sends' (modulation's went at its switch: the tree holds nothing of it).
 // What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12,
 // above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
 bool isHeardAsKept (const juce::ValueTree& element);

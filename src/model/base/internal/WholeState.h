@@ -12,7 +12,9 @@
 // chords then its key changes, each kind in its order, each written as ChordLaneValue.h's writeChordLane() writes it; and in
 // the song's MIDILINKS, where it has one, its MIDI links in their order, each written as MidiLinksValue.h's writeMidiLinks()
 // writes it; and in the song's AUTOMATION, while it has a curve (a song without one is written without an AUTOMATION), its
-// curves in their order, each written as CurveValues.h's writeCurves() writes it.
+// curves in their order, each written as CurveValues.h's writeCurves() writes it; and under each TRACK, the MASTER and each
+// CONTAINER, its modulators and macros in their order, after its other children but a track's sends, each written as
+// ModulationValue.h's writeModulatorElement() writes it.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -46,11 +48,12 @@ struct ValuesKept
 {
     NotesByClip notes;
     SongClips clips;
-    TempoMapValue tempoMap;   // none (no entry of either kind) kept of a song that holds no values
-    ChordLaneValue chordLane; // empty kept of a song that holds no values, and of one without chords or keys
-    MidiLinksValue midiLinks; // none kept of a song that holds no values, and of one without links
-    SongCurves curves;        // none kept of a song that holds no values, and of one without automation
-    SectionsValue sections;   // none kept of a song that holds no values, and of one without sections
+    TempoMapValue tempoMap;       // none (no entry of either kind) kept of a song that holds no values
+    ChordLaneValue chordLane;     // empty kept of a song that holds no values, and of one without chords or keys
+    MidiLinksValue midiLinks;     // none kept of a song that holds no values, and of one without links
+    SongCurves curves;            // none kept of a song that holds no values, and of one without automation
+    SectionsValue sections;       // none kept of a song that holds no values, and of one without sections
+    SongModulation modulation {}; // none kept of a song that holds no values, and of one without modulators or macros
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -109,12 +112,23 @@ bool holdSameCurves (const ValuesKept&, const ValuesKept&);
 // thread. In SectionsArea.cpp.
 bool holdSameSections (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
 
+// Whether two songs' kept values hold the same modulation, as values (ModulationValue.h): all of it; one modulator or macro
+// by its ID (none in both, or the same value in both, its place too); and an owner's list (a channel's or a container's:
+// ModulatorPlace), the same IDs in the same order, or none in both. Both of Project's comparisons with the saved copy compare
+// modulation so (the quick one, a modulator and an owner at a time, and the whole song's, each TRACK's, the MASTER's and each
+// CONTAINER's as holdSameKeptOf() asks them), so that the two agree. The trees hold none of it. In ModulationArea.cpp. Any
+// thread.
+bool holdSameModulation (const ValuesKept&, const ValuesKept&);
+bool holdSameModulator (const ValuesKept&, const ValuesKept&, ModulatorID);
+bool holdSameModulatorOrder (const ValuesKept&, const ValuesKept&, const ModulatorPlace& owner);
+
 // Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
 // what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips
 // (holdSameTrackClips()), then the tempo map of an element either of which holds a TEMPOMAP (holdSameTempoMap()), then the
 // chord lane of a song's element either of which holds a CHORDLANE (holdSameChordLane()), then the curves of two songs'
 // elements (holdSameCurves()), then the MIDI links of a song's element either of which holds a MIDILINKS
-// (holdSameMidiLinks()), then the sections of a song's element either of which holds a SECTIONS (holdSameSections()). What
+// (holdSameMidiLinks()), then the sections of a song's element either of which holds a SECTIONS (holdSameSections()), then
+// a TRACK's, the MASTER's or a CONTAINER's modulators and macros (ModulationArea.h: holdSameModulationOf()). What
 // Project's comparison of an element whole asks once the element's own properties compare (holdTheSameProject()). And
 // whether a child of an element is the place of what an area keeps (the song's TEMPOMAP, its CHORDLANE, its MIDILINKS, its
 // AUTOMATION, its SECTIONS), which that comparison leaves out of the elements it compares one by one. Any thread.

@@ -98,21 +98,6 @@ namespace
         return schema::isDeviceViewProperty (property) || property == schema::pluginState;
     }
 
-    // A frozen container's macros are its track's modulation, compared as values (Holds::modulators), not as its children.
-    bool isComparedChild (const juce::ValueTree& child)
-    {
-        return ! child.hasType (schema::MACRO);
-    }
-
-    // The place of an element's next child compared, from a place on (the number of its children for none).
-    int findComparedChild (const juce::ValueTree& element, int from)
-    {
-        while (from < element.getNumChildren() && ! isComparedChild (element.getChild (from)))
-            ++from;
-
-        return from;
-    }
-
     bool isSameSound (const juce::ValueTree& a, const juce::ValueTree& b)
     {
         if (a.getType() != b.getType())
@@ -135,27 +120,14 @@ namespace
             return false;
 
         // Their children compared in turn, in place (this runs at every change in a frozen track).
-        for (auto i = findComparedChild (a, 0), j = findComparedChild (b, 0);;
-             i = findComparedChild (a, i + 1), j = findComparedChild (b, j + 1))
-        {
-            if (i == a.getNumChildren() || j == b.getNumChildren())
-                return i == a.getNumChildren() && j == b.getNumChildren();
+        if (a.getNumChildren() != b.getNumChildren())
+            return false;
 
-            if (! isSameSound (a.getChild (i), b.getChild (j)))
+        for (int i = 0; i < a.getNumChildren(); ++i)
+            if (! isSameSound (a.getChild (i), b.getChild (i)))
                 return false;
-        }
-    }
 
-    // A part's copy as the freeze keeps it: without a container's macros (Holds::modulators keeps them).
-    juce::ValueTree copyPart (const juce::ValueTree& part)
-    {
-        auto copy = part.createCopy();
-
-        for (int i = copy.getNumChildren(); --i >= 0;)
-            if (! isComparedChild (copy.getChild (i)))
-                copy.removeChild (i, nullptr);
-
-        return copy;
+        return true;
     }
 
     // What a frozen track's file holds, as the song's tree has it: its frozen devices. Its clips, with their notes, are the
@@ -232,7 +204,7 @@ namespace
         juce::ValueTree copy ("FROZEN");
 
         for (const auto& part : getWhatTheFreezeHolds (song, track))
-            copy.appendChild (copyPart (part), nullptr);
+            copy.appendChild (part.createCopy(), nullptr);
 
         return { .parts = copy,
                  .values = keepValues (song),

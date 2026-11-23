@@ -142,12 +142,11 @@ namespace
         // The modulators and macros (SongValues.h): their group, for one added, taken out or come to another place, and for
         // any part of one but a value set by hand, its first or its last, and a macro's value, which no view shows as a
         // change (controls read values as they show them, as valueTreePropertyChanged() leaves a parameter's value alone);
-        // nothing for their order alone, which views show nowhere as a change (markMoved()). Its tree callbacks below leave the
-        // song's MODULATOR and MACRO elements and what is in them alone (isHeardAsKept()). A track or a container that comes or
-        // goes with modulators or macros in it (added, removed, duplicated, moved into a folder, brought back by an Undo) tells
-        // them added or taken out, so their group comes beside what the tree raises for the track or the device: one group more
-        // than the tree alone raised, for a rare edit (the devices' view shows its modulator slots again), which the area
-        // can't tell from a modulator added or removed by itself after its switch either.
+        // nothing for their order alone, which views show nowhere as a change (markMoved()). The song's tree holds none of
+        // them. A track or a container that comes or goes with modulators or macros in it (added, removed, duplicated, moved
+        // into a folder, brought back by an Undo) tells them added or taken out, so their group comes beside what the tree
+        // raises for the track or the device: one group more than the tree alone raised, for a rare edit (the devices' view
+        // shows its modulator slots again), which the area can't tell from a modulator added or removed by itself.
         void modulationChanged (const std::vector<SongValues::ModulationChange>& modulators, const std::vector<ModulatorPlace>&) override
         {
             using Change = SongValues::ModulationChange;

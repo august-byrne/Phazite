@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <iterator>
@@ -103,7 +104,8 @@ namespace
         return number.has_value() && std::isfinite (*number) ? *number : otherwise;
     }
 
-    // To a ten-thousandth, as Phazite writes a step and an amount (Modulation.cpp: writeSteps(), setModulation()).
+    // To a ten-thousandth, as the song holds a step and an amount (withHeldModulator()) and Phazite writes one
+    // (writeModulatorElement()).
     double toTenThousandth (double value)
     {
         return std::round (value * 1.0e4) / 1.0e4;
@@ -194,6 +196,12 @@ namespace
     float readAmount (const juce::ValueTree& modulates)
     {
         return toFloat (readNumber (modulates[schema::modulatesAmount], 0.0));
+    }
+
+    // A macro's value as Phazite's code always read it: its number, 0 for none and for what is no finite number.
+    float readMacroValue (const juce::ValueTree& macro)
+    {
+        return toFloat (readNumber (macro[schema::macroValue], 0.0));
     }
 
     // Each MODULATOR and MACRO element of a song's tree (PHAZITE), in the song's order: each track's (the track list's, in
@@ -450,6 +458,101 @@ bool holdsItsLists (const SongModulation& modulation)
            && listed.size() == modulation.modulators.size();
 }
 
+SongModulation withHeldModulator (const SongModulation& modulation, ModulatorValue value, int index)
+{
+    // One modulation of each parameter, the first, each amount within -1 to 1 to a ten-thousandth, as readHeldModulator()
+    // reads one: a list that holds them so already kept as it is.
+    {
+        auto kept = immer::flex_vector<ModulationEntry>().transient();
+        std::set<std::pair<std::uint64_t, juce::String>> modulated;
+        auto changed = false;
+
+        for (auto entry : value.modulations)
+        {
+            if (! modulated.insert ({ entry.parameter.device.getRaw(), entry.parameter.parameter }).second)
+            {
+                changed = true;
+                continue;
+            }
+
+            if (const auto amount = (float) toTenThousandth (juce::jlimit (-1.0, 1.0, (double) entry.amount));
+                ! juce::exactlyEqual (amount, entry.amount))
+            {
+                entry.amount = amount;
+                changed = true;
+            }
+
+            kept.push_back (entry);
+        }
+
+        if (changed)
+            value.modulations = kept.persistent();
+    }
+
+    // A modulator's steps as the song holds them (keepStepsHeld()), and none of its values at its parameter's default.
+    if (! value.isMacro())
+    {
+        if (! value.steps.empty())
+            if (const auto steps = keepStepsHeld (std::vector<float> (value.steps.begin(), value.steps.end()));
+                ! std::equal (steps.begin(), steps.end(), value.steps.begin(), value.steps.end(),
+                              [] (float a, float b) { return juce::exactlyEqual (a, b); }))
+                value.steps = toList (steps);
+
+        const auto parameters = devices::getModulatorParameters (*value.kind);
+        const auto values = value.values;
+
+        for (const auto& [parameter, held] : values)
+            if (parameter >= parameters.size() || isDefaultValue (parameters[parameter], held))
+                value.values = value.values.erase (parameter);
+    }
+
+    // A container's macro on its container's channel: the channel of another of its macros.
+    if (ownsByContainer (value.place))
+    {
+        if (const auto* list = modulation.containers.find (value.place.container.getRaw()))
+        {
+            for (const auto& other : *list)
+            {
+                if (const auto* held = modulation.find (other); held != nullptr && other != value.id)
+                {
+                    value.place.track = held->place.track;
+                    value.place.onMaster = held->place.onMaster;
+                    break;
+                }
+            }
+        }
+    }
+
+    return withModulator (modulation, std::move (value), index);
+}
+
+bool holdsTogether (const SongModulation& modulation)
+{
+    if (! holdsItsLists (modulation))
+        return false;
+
+    for (const auto& [key, value] : modulation.modulators)
+    {
+        std::set<std::pair<std::uint64_t, juce::String>> modulated;
+
+        for (const auto& entry : value.modulations)
+            if (! modulated.insert ({ entry.parameter.device.getRaw(), entry.parameter.parameter }).second)
+                return false;
+    }
+
+    for (const auto& [key, list] : modulation.containers)
+    {
+        const auto* first = modulation.find (list.front());
+
+        for (const auto& id : list)
+            if (const auto* each = modulation.find (id);
+                each->place.track != first->place.track || each->place.onMaster != first->place.onMaster)
+                return false;
+    }
+
+    return true;
+}
+
 //==============================================================================
 std::optional<devices::ModulatorKind> readModulatorKind (const juce::ValueTree& modulator)
 {
@@ -580,7 +683,7 @@ juce::ValueTree writeModulatorElement (const ModulatorValue& value)
         if (values.getNumProperties() > 0)
             element.appendChild (values, nullptr);
 
-        // Without the zeros at the end, each to a ten-thousandth (Modulation.cpp: writeSteps()).
+        // Without the zeros at the end, each to a ten-thousandth (as the song holds them: keepStepsHeld()).
         auto count = value.steps.size();
 
         while (count > 0 && std::abs (value.steps[count - 1]) < 1.0e-4f)
@@ -623,16 +726,10 @@ bool keepModulatorAsHeld (juce::ValueTree element)
     return true;
 }
 
-float readMacroValue (const juce::ValueTree& macro)
+bool isWrittenAsHeld (const juce::ValueTree& element, const ModulatorPlace& place)
 {
-    return toFloat (readNumber (macro[schema::macroValue], 0.0));
-}
-
-std::optional<float> readModulatorValueSetByHand (const juce::ValueTree& modulator, const devices::ParameterInfo& info)
-{
-    const auto saved = modulator.getChildWithName (schema::VALUES);
-    const juce::Identifier name (toString (info.id));
-    return saved.hasProperty (name) ? std::optional<float> (readSavedValue (info, saved[name])) : std::nullopt;
+    const auto held = readHeldModulator (element, place);
+    return held.has_value() && isWrittenAs (element, writeModulatorElement (*held));
 }
 
 SongModulation readModulationValue (const juce::ValueTree& song)
@@ -650,23 +747,42 @@ SongModulation readModulationValue (const juce::ValueTree& song)
     return modulation;
 }
 
-std::vector<std::pair<ModulatorID, float>> readModulationsOf (const juce::ValueTree& song, const ParameterRef& parameter)
+std::optional<ModulatorValue> readModulatorValueIn (const juce::ValueTree& song, ModulatorID id)
 {
-    std::vector<std::pair<ModulatorID, float>> modulations;
+    // The elements' walk of readModulationValue(), only the first of the ID read whole: the others' IDs looked at alone.
+    std::optional<ModulatorValue> found;
 
     forEachModulatorElement (song,
-                             [&modulations, &parameter] (const juce::ValueTree& element)
+                             [&found, id] (const juce::ValueTree& element)
                              {
-                                 if (! element.hasType (schema::MACRO) && ! readModulatorKind (element).has_value())
+                                 if (found.has_value() || readID (element[schema::modulatorID]) != id.getRaw())
                                      return;
 
-                                 for (const auto& child : element)
-                                     if (child.hasType (schema::MODULATES) && readModulated (child) == parameter)
-                                         modulations.emplace_back (ModulatorID::fromRaw (readID (element[schema::modulatorID])),
-                                                                   readAmount (child));
+                                 if (auto value = readModulatorValue (element, readModulatorPlace (element)); value.has_value())
+                                     found = std::move (value);
                              });
 
-    return modulations;
+    return found;
+}
+
+SongModulation readHeldModulation (const juce::ValueTree& song, const std::function<void (const juce::ValueTree&)>& each)
+{
+    SongModulation modulation;
+
+    forEachModulatorElement (song,
+                             [&modulation, &each] (const juce::ValueTree& element)
+                             {
+                                 if (auto value = readHeldModulator (element, readModulatorPlace (element));
+                                     value.has_value() && modulation.find (value->id) == nullptr)
+                                 {
+                                     if (each)
+                                         each (element);
+
+                                     modulation = withHeldModulator (modulation, std::move (*value));
+                                 }
+                             });
+
+    return modulation;
 }
 
 bool setModulatorProperty (ModulatorValue& value, const juce::Identifier& property, const juce::var& held)

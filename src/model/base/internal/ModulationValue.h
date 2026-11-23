@@ -3,9 +3,9 @@
 // MACRO), by its ID, with what it modulates (MODULATES) and a modulator's values set by hand (its VALUES); each owner's in
 // their order (a track's or the master's own, a container's macros); in Phazite's own types, with the helpers that alone
 // write it, and the conversion between the elements and the value, the one place that reads and writes those elements by
-// name. The song's tree is still the storage (modulation's first piece): the area's readers read the tree through this
-// conversion (model/modulation/internal/Modulation.h: getModulationValue(), getModulatorValue()), and the song holds no
-// area of it yet (SongValues.h).
+// name. The value is the storage: the song holds it as modulation's area (SongValues.h), and its tree holds no MODULATOR,
+// MACRO or MODULATES element; what a file holds is read in through this conversion (ModulationArea.h: the adoption and the
+// keeper), and a whole copy written from it (WholeState.h).
 //
 // Its own header, beside SongValues.h and the other areas' (one header for each area's values). It includes the devices'
 // modulators (devices/modulation/Modulators.h: a modulator's kind and parameters), which every layer may, and the parameter
@@ -24,8 +24,6 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
-#include <utility>
-#include <vector>
 
 namespace phazite
 {
@@ -128,6 +126,14 @@ SongModulation withOwnerOrder (const SongModulation&, const ModulatorPlace& owne
 // only those there, none of them empty. For the tests, and the assertions where it is cheap.
 bool holdsItsLists (const SongModulation&);
 
+// A modulator or a macro added or changed (withModulator()) with what must hold together kept so, the one rule of the
+// adoption, the keeper and the setters (SongValues.h: setModulator()): one modulation of each parameter (the first), and a
+// container's macro on the channel its container's other macros are on, where it has others. And whether a song's
+// modulation holds together so (holdsItsLists() too), for the check (tests/SongCheck.cpp) and the assertions of the
+// adoption and of the setter of the whole value (ModulationArea.cpp: SongValues::setAllModulation()).
+SongModulation withHeldModulator (const SongModulation&, ModulatorValue, int index = -1);
+bool holdsTogether (const SongModulation&);
+
 //==============================================================================
 // The conversion: the one place that reads and writes MODULATOR, MACRO and MODULATES elements and a MODULATOR's VALUES by
 // name.
@@ -146,7 +152,7 @@ ModulatorPlace readModulatorPlace (const juce::ValueTree& element);
 // its steps each within -1 to 1 (0 for what is no finite number), as many as it has; a macro's name and value (0 for none);
 // and every MODULATES, its device's ID as readID() reads one, its amount 0 for none. Numbers as the song reads one
 // (SongText.h: readValueNumber()). None for an element that is neither a MACRO nor a MODULATOR of a kind Phazite plays,
-// which every reader of the song left out. For a song whose tree is the storage, and for tests. Counted
+// which every reader of the song left out. For a song without values (a copy as it would open), and for tests. Counted
 // (countModulatorsRead()).
 std::optional<ModulatorValue> readModulatorValue (const juce::ValueTree& element, const ModulatorPlace&);
 
@@ -170,18 +176,15 @@ std::optional<ModulatorValue> readHeldModulator (const juce::ValueTree& element,
 // its VALUES), its properties and children are replaced by those, each property compared as text (SongText.h:
 // isSameValue()). Nothing for one that holds nothing else, or that readHeldModulator() reads none of. Whether it changed.
 // The loader's, for every modulator and macro (model/project/internal/Project.h: makeConsistent()), so that each of a song
-// that went through it reads the same as readModulatorValue() reads it and as readHeldModulator() does, and no setter
-// writes it where nothing differs (model/modulation/internal/Modulation.h). Counted (countModulatorsRead()).
+// that went through it reads the same as readModulatorValue() reads it and as readHeldModulator() does, and the adoption
+// takes in what the file holds unchanged (ModulationArea.h, which asserts it: isWrittenAsHeld()). Counted
+// (countModulatorsRead()).
 bool keepModulatorAsHeld (juce::ValueTree element);
 
-// One of a modulator's or a macro's own values read from its element as readModulatorValue() reads it, without reading the
-// rest (none counted: countModulatorsRead()): a macro's value (0 for none, and for what is no finite number); a modulator's
-// value set by hand of a parameter of its kind (its VALUES' property of the parameter's ID, as SavedValues.h's
-// readSavedValue() reads it), none where it holds none. What a control's drag compares the value it sets with
-// (model/modulation/internal/Modulation.h: setMacroValue(), setModulatorValueSetByHand()) while the song's tree is
-// modulation's storage.
-float readMacroValue (const juce::ValueTree& macro);
-std::optional<float> readModulatorValueSetByHand (const juce::ValueTree& modulator, const devices::ParameterInfo&);
+// Whether an element holds nothing else than writeModulatorElement() writes of what readHeldModulator() reads of it (at the
+// place given): what keepModulatorAsHeld() leaves every modulator and macro of a song it went through. For the adoption's
+// assertion (ModulationArea.h). Counted (countModulatorsRead()).
+bool isWrittenAsHeld (const juce::ValueTree& element, const ModulatorPlace&);
 
 // A modulator's or a macro's element, new, as Phazite's writers write one (model/modulation/Modulation.cpp,
 // model/devices/Parameters.cpp, model/mixer/Containers.cpp, model/presets/Presets.cpp): its ID always; a modulator's type
@@ -194,14 +197,18 @@ juce::ValueTree writeModulatorElement (const ModulatorValue&);
 // Every modulator and macro of a song's tree (PHAZITE), read as readModulatorValue() reads one: each TRACK's (in the track
 // list, folders' tracks too, in the song's order of its tracks) and the MASTER's, each channel's own and then those of each of
 // its CONTAINERs, each owner's in its element's order; of two with one ID (which the loader leaves none of), the first. What
-// reads the song's modulation while the tree is its storage (Modulation.h: getModulationValue()), and the tests.
+// reads a song without values (Modulation.h: getModulationValue(), for a check's copy), and the tests.
 SongModulation readModulationValue (const juce::ValueTree& song);
 
-// What modulates a parameter in a song's tree (PHAZITE): each modulator's and macro's modulation of it as
-// readModulatorValue() reads one (its ID, and the amount), in the order readModulationValue() reads the owners in, without
-// reading any modulator whole (none counted: countModulatorsRead()). What a knob asks at each tick while the tree is the
-// storage (Modulation.h: findModulationsOf()).
-std::vector<std::pair<ModulatorID, float>> readModulationsOf (const juce::ValueTree& song, const ParameterRef&);
+// One of them by its ID, as readModulationValue() holds it (the first of the ID that reads as one), the others not read into
+// values: what a song without values finds one with (Modulation.h: getModulatorValue(), which the loader's checks ask for each
+// parameter they look at, before the song holds its values). None for an ID no element has.
+std::optional<ModulatorValue> readModulatorValueIn (const juce::ValueTree& song, ModulatorID);
+
+// The same as the song holds it: each read as readHeldModulator() reads it, in the same order, held together as the setters
+// hold it (withHeldModulator()); of two with one ID, the first. What the adoption takes in (ModulationArea.h). Each element
+// read is given to `each` too (the adoption's assertion).
+SongModulation readHeldModulation (const juce::ValueTree& song, const std::function<void (const juce::ValueTree&)>& each = {});
 
 // A modulator or a macro with one of its own properties (Schema.h: modulatorID, modulatorType, deviceOff and modulatorSteps
 // of a modulator; modulatorID, macroName and macroValue of a macro) given a value as readHeldModulator() reads one, or taken
@@ -220,8 +227,9 @@ void forEachIDHeld (const SongModulation&, const std::function<void (std::uint64
 // each modulation, in no order. What finds what names an item that is gone.
 void forEachIDNamed (const SongModulation&, const std::function<void (std::uint64_t)>& each);
 
-// How many modulators and macros were read into values (readModulatorValue(), readHeldModulator()) since Phazite started, on
-// any thread: for the test that a knob's paint and a modulator's slot read only the modulators they show
-// (tests/PerformanceGateTests.cpp). Allocations can't tell it: immer takes its nodes from lists of freed ones.
+// How many modulators and macros were read into values from elements (readModulatorValue(), readHeldModulator()) since
+// Phazite started, on any thread: for the test that a knob's paint, a modulator's slot and an edit read none, the song's
+// readers looking in its area (tests/PerformanceGateTests.cpp). Allocations can't tell it: immer takes its nodes from lists
+// of freed ones.
 std::uint64_t countModulatorsRead() noexcept;
 } // namespace phazite

@@ -1646,7 +1646,7 @@ bool isWritingAutomation (const Song& song)
 
 bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // A device's and a modulator's values set by hand are their VALUES' properties, by the parameters' IDs.
+    // A device's values set by hand are its VALUES' properties, by the parameters' IDs (a modulator's are modulation's area's).
     if (tree.hasType (schema::VALUES))
         return true;
 

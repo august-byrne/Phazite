@@ -9,6 +9,8 @@
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/MidiLinksValue.h"
+#include "model/base/internal/ModulationValue.h"
+#include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SongIndex.h"
@@ -17,6 +19,7 @@
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 
 #include <algorithm>
@@ -24,6 +27,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <set>
@@ -1087,6 +1091,92 @@ namespace
             ++place;
         }
     }
+
+    // Modulation's area: no MODULATOR or MACRO (nor a MODULATES) in the song's tree (its modulators and macros are the area's);
+    // the area's lists agree with its modulators, one modulation of each parameter and a container's macros on one channel
+    // (ModulationValue.h: holdsTogether()); each place a track or the master of the song, a container's macro's its
+    // container's, on its container's channel (a macro on a folder, or a modulation of another channel's device, which the
+    // loader keeps and the code never makes, aren't refused: what a file holds); each modulator of a kind Phazite has, its
+    // values set by hand each of one of its kind's parameters, within its range and none at its default, its steps within -1
+    // to 1, at most devices::Modulator::maxSteps, without zeros at the end; a macro's value within 0 to 1, and no modulator's
+    // parts; each modulation's amount within -1 to 1; and the song's next ID past each modulator's and macro's.
+    void checkModulationValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> findElements = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO) || child.hasType (schema::MODULATES))
+                    problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
+
+                findElements (child);
+            }
+        };
+
+        findElements (song.getState());
+        const auto modulation = values.modulation.get();
+
+        if (! holdsTogether (modulation))
+            problems.push_back ("values: modulation's lists don't hold its modulators, or one modulates a parameter twice, or a "
+                                "container's macros are on two channels");
+
+        const auto next = (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0);
+
+        for (const auto& [key, value] : modulation.modulators)
+        {
+            const auto text = "values: modulator " + std::to_string (key);
+
+            if (key >= next)
+                problems.push_back (text + " has an ID the song's next ID isn't past");
+
+            // Its channel: the master, or a track of the song's; a container's, the container's own.
+            const auto channel = value.place.onMaster ? findChainState (song, {}) : findTrackState (song, value.place.track);
+
+            if (! (value.place.onMaster ? channel.hasType (schema::MASTER) : channel.hasType (schema::TRACK)))
+                problems.push_back (text + " is on no channel of the song's");
+
+            if (value.place.container.isValid())
+            {
+                const auto container = findDeviceState (song, value.place.container);
+
+                if (! container.hasType (schema::CONTAINER) || container.getParent() != channel)
+                    problems.push_back (text + " is a macro of a container that isn't on its channel");
+            }
+
+            for (const auto& entry : value.modulations)
+                if (! entry.parameter.isValid() || ! (std::abs (entry.amount) <= 1.0f))
+                    problems.push_back (text + " modulates no parameter, or by an amount outside -1 to 1");
+
+            if (value.isMacro())
+            {
+                if (! (value.value >= 0.0f && value.value <= 1.0f))
+                    problems.push_back (text + ", a macro, has a value outside 0 to 1");
+
+                if (value.off || ! value.values.empty() || ! value.steps.empty())
+                    problems.push_back (text + ", a macro, holds a modulator's switch, values or steps");
+
+                continue;
+            }
+
+            if ((int) *value.kind < 0 || (int) *value.kind >= (int) std::size (schema::preset::modulatorTypeNames))
+            {
+                problems.push_back (text + " is of no kind Phazite has");
+                continue;
+            }
+
+            const auto parameters = devices::getModulatorParameters (*value.kind);
+
+            for (const auto& [index, held] : value.values)
+                if (index >= parameters.size() || ! (held >= parameters[index].minimum && held <= parameters[index].maximum)
+                    || isDefaultValue (parameters[index], held))
+                    problems.push_back (text + " holds a value of no parameter of its kind's, outside its range or at its default");
+
+            if (value.steps.size() > (size_t) devices::Modulator::maxSteps
+                || std::any_of (value.steps.begin(), value.steps.end(), [] (float step) { return ! (std::abs (step) <= 1.0f); })
+                || (! value.steps.empty() && juce::exactlyEqual (value.steps.back(), 0.0f)))
+                problems.push_back (text + " holds steps outside -1 to 1, too many, or zeros at the end");
+        }
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -1098,7 +1188,7 @@ std::vector<std::string> findValueProblems (const Song& song)
         return problems;
 
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
-    // lane, the MIDI links, the curves, the sections.
+    // lane, the MIDI links, the curves, the sections, modulation.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
@@ -1106,6 +1196,7 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkMidiLinksValue (song, *values, problems);
     checkCurvesValue (song, *values, problems);
     checkSectionsValue (song, *values, problems);
+    checkModulationValue (song, *values, problems);
     return problems;
 }
 

@@ -97,9 +97,9 @@ std::optional<float> getValueAtControllerPosition (const Song&, const ParameterR
 // Learning ends as its parameter goes, in the call that tells of it: a modulator's or a macro's as the song's values tell it
 // taken out (SongValues::Listener::modulationChanged(), by its ID), and a send's level the same (sendsChanged(), by the send's
 // ID); any other's (a device's, a chain's, a fader's) as the song's tree tells of a child taken out, its source looked
-// for again (locateParameter()). Which of them a learned parameter is, is its source (ParameterSource), found as learning
-// starts: so that the tree's callback asks only of what the tree still holds (isHeardFromTree()), and reads no area of the
-// song's values.
+// for again in the tree alone (Parameters.h: locateParameterInTree()). Which of them a learned parameter is, is its source
+// (ParameterSource), found as learning starts: so that the tree's callback asks only of what the tree still holds
+// (isHeardFromTree()), and reads no area of the song's values.
 class MidiLinker final : private juce::Timer,
                          private juce::ValueTree::Listener,
                          private SongValues::Listener

@@ -55,6 +55,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/modulation/ModulationValues.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -1144,12 +1145,11 @@ TEST_CASE ("Performance gate: a modulated knob's ring and a modulator's slot rea
 {
     // A knob asks at each tick of the display ticker what modulates its parameter (ModulationModel.h: getModulationRange(), from
     // Controls.cpp's ParameterAttachment::update()), and a modulator's slot whether its modulator is on, its value and whether
-    // it goes both ways (ModulatorSlots.cpp: updateValues()). Each reads into a value only the modulators it shows, never the
-    // song's whole modulation (Modulation.h: findModulationsOf() reads none whole, getModulatorValue() one): counted as the
-    // modulators read (ModulationValue.h: countModulatorsRead()), the same for 4 modulators on the track as for 40. And the
-    // channel's slots, each with its name (ModulationModel.h: getModulators(), whose names count each slot's place among its
-    // kind's without reading the others whole: Modulation.h, getModulatorName()), a few reads for each slot, never one for
-    // each slot of each slot.
+    // it goes both ways (ModulatorSlots.cpp: updateValues()). Each looks in modulation's area (Modulation.h: findModulationsOf(),
+    // getModulatorValue()), reading no modulator from an element: counted as the modulators read (ModulationValue.h:
+    // countModulatorsRead()), none for 4 modulators on the track as for 40. And the channel's slots, each with its name
+    // (ModulationModel.h: getModulators(); Modulation.h, getModulatorName(), which counts each slot's place among its kind's
+    // by the area's list), none either.
     struct Counts
     {
         std::uint64_t knob = 0, slot = 0, still = 0, slots = 0;
@@ -1193,17 +1193,16 @@ TEST_CASE ("Performance gate: a modulated knob's ring and a modulator's slot rea
     const auto small = countsFor (4), large = countsFor (40);
     INFO ("4 modulators: " << small.knob << " read for the knob, " << small.slot << " for the slot; 40: " << large.knob << ", "
                            << large.slot);
-    CHECK (small.knob == 1); // its one modulation's modulator, once
+    CHECK (small.knob == 0); // looks in the area (1 while the tree held modulation: its one modulation's modulator)
     CHECK (large.knob == small.knob);
     CHECK (small.still == 0);
     CHECK (large.still == 0);
-    CHECK (small.slot <= 3); // its own modulator, once for each of its three questions
+    CHECK (small.slot == 0); // looks in the area (3 while the tree held modulation: once for each of its questions)
     CHECK (large.slot == small.slot);
-    // Measured 2026-11-22: 6 for each slot (the channel's list, then each slot's track, container, type, name and switch), 24
-    // for 4 and 240 for 40; when each name read its owner's modulators whole, 40 more for each slot of 40.
+    // Measured 2026-11-22: none, the area looked in (6 for each slot while the tree held modulation: 24 for 4 and 240 for 40).
     INFO ("slots: 4 modulators: " << small.slots << " read; 40: " << large.slots);
-    CHECK (small.slots <= 4 * 6);
-    CHECK (large.slots <= 40 * 6);
+    CHECK (small.slots == 0);
+    CHECK (large.slots == 0);
 }
 
 TEST_CASE ("Performance gate: removing an effect allocates no more for a song of many clips than for one of few, and reads no "
@@ -1264,13 +1263,11 @@ TEST_CASE ("Performance gate: a macro turned and a modulator's value set read no
            "for a song of many modulators")
 {
     // A control's drag sets a macro's value or a modulator's parameter at the mouse's rate, through its handle, which found the
-    // parameter once (ParameterHandle.h): modulation's code finds the element once and reads and writes that one value
-    // (Modulation.h: setMacroValue(), setModulatorValueSetByHand()), reading none of it whole: what reads it whole is the song's
-    // keeper as it hears the change (ModulationArea.h) and the automation's watcher of the parameter touched last, which finds
-    // the parameter to leave a modulator's alone (Automation.h: AutomationWatcher). And a duplicated track's copy holds its
-    // modulators while the song's tree holds modulation, which its copy (Modulation.h: copyModulation()) finds without reading
-    // any of the song's whole: counted as the modulators read (ModulationValue.h: countModulatorsRead()), on a song of 4
-    // tracks of one modulator each and of 40.
+    // parameter once (ParameterHandle.h): modulation's code looks the value up in its area and sets the one value changed
+    // (Modulation.h: setMacroValue(), setModulatorValueSetByHand()), and the automation's watcher of the parameter touched last
+    // finds the parameter there to leave a modulator's alone (Automation.h: AutomationWatcher). And a duplicated track's
+    // modulators are given to its copy from the area's lists (Modulation.h: copyModulation()): counted as the modulators read
+    // from elements (ModulationValue.h: countModulatorsRead()), none, on a song of 4 tracks of one modulator each and of 40.
     struct Counts
     {
         std::uint64_t macro = 0, modulator = 0, duplicate = 0;
@@ -1320,18 +1317,58 @@ TEST_CASE ("Performance gate: a macro turned and a modulator's value set read no
         return counts;
     };
 
-    // Measured 2026-11-22: 2, 2 and 1 for both songs (for a value the keeper's reading and the watcher's, for the copy the
-    // keeper's). Before, as counted from the code: each value's set read its modulator whole twice more (4 and 4), and the
-    // copy read the song's modulation whole (5 for 4 tracks, 41 for 40).
+    // Measured 2026-11-22: none for both songs, modulation's area looked in. While the tree held modulation: 2, 2 and 1 (for a
+    // value the keeper's reading and the watcher's, for the copy the keeper's); before its writers worked on values, 4, 4 and
+    // 5 for 4 tracks, 41 for 40.
     const auto small = countsFor (4), large = countsFor (40);
     INFO ("4 tracks: " << small.macro << ", " << small.modulator << ", " << small.duplicate << "; 40: " << large.macro << ", "
                        << large.modulator << ", " << large.duplicate);
-    CHECK (small.macro <= 2);
+    CHECK (small.macro == 0);
     CHECK (large.macro == small.macro);
-    CHECK (small.modulator <= 2);
+    CHECK (small.modulator == 0);
     CHECK (large.modulator == small.modulator);
-    CHECK (small.duplicate <= 1);
+    CHECK (small.duplicate == 0);
     CHECK (large.duplicate == small.duplicate);
+}
+
+TEST_CASE ("Performance gate: a macro turned allocates as much on a song of 200 tracks with a modulator each as on one of 4")
+{
+    // A step of a macro's drag sets its one value in modulation's area (Modulation.h: setMacroValue()): a look by its ID and a
+    // new value of the area that shares all else, told once (ModulationArea.h: ModulationTeller, which compares the two by
+    // identity, looking at the one entry that differs), whatever the song's count of modulators.
+    const auto allocationsFor = [] (int numTracks) -> std::optional<int>
+    {
+        phazite::test::TestSong s;
+        std::vector<phazite::TrackID> tracks { s.firstTrack };
+
+        while (tracks.size() < (size_t) numTracks)
+            tracks.push_back (s.addTrack ("Track"));
+
+        const auto macro = s.addModulator (tracks[0], phazite::ModulatorType::macro);
+
+        for (size_t i = 1; i < tracks.size(); ++i)
+            s.addModulator (tracks[i], phazite::ModulatorType::lfo);
+
+        auto turned = phazite::getModulatorParameter (s.context, macro, phazite::getModulatorParameters (s.context, macro).front().id);
+        REQUIRE (turned.exists());
+        turned.beginGesture();
+        turned.setValue (0.25f);
+        phazite::test::dispatchPendingMessages();
+        const auto allocations = phazite::test::countAllocations ([&turned] { turned.setValue (0.5f); });
+        turned.endGesture();
+        return allocations;
+    };
+
+    const auto few = allocationsFor (4), many = allocationsFor (200);
+    INFO ("4 tracks: " << few.value_or (-1) << " allocations; 200: " << many.value_or (-1));
+
+    if (! few.has_value() || ! many.has_value())
+        return; // nothing counted on this build, where the counted turn didn't run (PerformanceCounts.h)
+
+    // Measured 2026-11-22: 9 and 10 (immer's map one level deeper for 200 modulators); 28 and 421 while the parameter's
+    // lookup (Parameters.h: locateParameter(), which the automation's watcher asks at each step) walked the tree before
+    // modulation's area.
+    CHECK (*many <= *few + 2);
 }
 
 TEST_CASE ("Performance gate: an edit of a section and the playlist's paint that follows build one list of the sections for each "
@@ -2097,6 +2134,64 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
     juce::MemoryOutputStream after;
     phazite::writeProjectText (after, phazite::test::copyWholeSong (song));
     CHECK (after.toString() == text.toString());
+}
+
+TEST_CASE ("Performance gate: a song of 40 modulators and 200 automated parameters opened reads a few of its modulators for each, "
+           "not all of them for each curve")
+{
+    // The loader's checks look up each curve's parameter (Project.cpp, makeConsistent(): Parameters.h, locateParameter()),
+    // which looks in modulation's area first; a song the loader makes consistent holds no values yet, and a look there reads
+    // its tree (Modulation.h: getModulatorValue()): the one element of the ID alone, never every modulator of the song.
+    // Counted as the modulators read from elements (ModulationValue.h: countModulatorsRead()), through the loader and the
+    // adoption (makeSong()).
+    constexpr auto numTracks = 40;
+    phazite::test::TestSong s;
+    std::vector<phazite::TrackID> tracks { s.firstTrack };
+
+    while (tracks.size() < (size_t) numTracks)
+        tracks.push_back (s.addTrack ("Track"));
+
+    auto& made = getSong (s);
+    auto curves = 0;
+
+    for (const auto track : tracks)
+    {
+        const auto lfo = s.addModulator (track, phazite::ModulatorType::lfo);
+        s.modulate (lfo, s.getPanParameter (track), 0.5f);
+        std::vector<phazite::ParameterRef> automated { s.getVolumeParameter (track), s.getPanParameter (track) };
+
+        for (const auto& parameter : phazite::getModulatorParameters (s.context, lfo))
+            if (automated.size() < 5)
+                automated.push_back ({ phazite::DeviceID::fromRaw (lfo.getRaw()), parameter.id });
+
+        REQUIRE (automated.size() == 5);
+
+        for (const auto& parameter : automated)
+        {
+            REQUIRE (phazite::addPoint (made, parameter, { at (0.0), 0.25f }) >= 0);
+            REQUIRE (phazite::addPoint (made, parameter, { at (4.0), 0.75f }) >= 0);
+            ++curves;
+        }
+    }
+
+    REQUIRE (curves == 200);
+    juce::MemoryOutputStream text;
+    phazite::writeProjectText (text, phazite::test::copyWholeSong (made));
+    const auto xml = juce::parseXML (text.toString());
+    REQUIRE (xml != nullptr);
+    const auto state = juce::ValueTree::fromXml (*xml);
+
+    const auto before = phazite::countModulatorsRead();
+    const auto opened = phazite::makeSong (state);
+    const auto read = phazite::countModulatorsRead() - before;
+    REQUIRE (opened != nullptr);
+    CHECK (phazite::getModulationValue (*opened).modulators.size() == (size_t) numTracks);
+
+    // Measured 2026-11-22: 240 in a Debug build, 6 for each modulator: one for each curve of its own 3 parameters, the
+    // loader's keeping of it as held, the adoption's and the adoption's Debug assertion's. 8,120 while a look in a song
+    // without values read its whole modulation, all 40 for each curve.
+    INFO ("Modulators read: " << read << " for " << numTracks << " modulators and " << curves << " curves");
+    CHECK (read <= 8 * (std::uint64_t) numTracks);
 }
 
 TEST_CASE ("Performance gate: a drawn lane of 10,000 points taken into the song's values as it opens makes far fewer allocations "

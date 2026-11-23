@@ -10,7 +10,6 @@
 #include "model/base/Json.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
-#include "model/base/internal/ModulationArea.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
@@ -3408,46 +3407,19 @@ bool Project::areModulatorsAsSaved() const
     if (! comparingModulationWhole && modulatorsToCompare.empty() && modulatorOwnersToCompare.empty())
         return true;
 
-    // While the trees hold modulation, by element: past mostToCompare, the tracks and the master whole (holdTheSameProject(),
-    // which holds the modulators); else each owner's order, then each modulator against the saved copy's of its ID, its place
-    // and its element, one compared each (a modulator gone from both is the same).
-    const auto state = song->getState();
+    // As values (WholeState.h), as the whole comparison compares them (holdTheSameProject(), each owner's through
+    // holdSameKeptOf()): past mostToCompare, the song's modulation whole; else each owner's order, then each modulator against
+    // the saved copy's of its ID, its place among it, one compared each (a modulator gone from both is the same).
     const auto now = keepValues (*song);
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
     if (comparingModulationWhole)
-    {
-        for (const auto* type : { &schema::TRACKS, &schema::MASTER })
-        {
-            const auto element = state.getChildWithName (*type), saved = savedState.tree.getChildWithName (*type);
+        return holdSameModulation (now, savedState.values);
 
-            if (element.isValid() != saved.isValid()
-                || (element.isValid() && ! holdTheSameProject (element, now, saved, savedState.values)))
-                return false;
-        }
-
-        return true;
-    }
-
-    for (const auto& owner : modulatorOwnersToCompare)
-    {
-        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-
-        if (readOwnerOrder (state, owner) != readOwnerOrder (savedState.tree, owner))
-            return false;
-    }
-
-    return std::all_of (modulatorsToCompare.begin(), modulatorsToCompare.end(),
-                        [this, &state, &now] (ModulatorID id)
-                        {
-                            const auto element = findModulatorElement (state, id);
-                            const auto saved = findModulatorElement (savedState.tree, id);
-
-                            if (! element.isValid() || ! saved.isValid())
-                                return element.isValid() == saved.isValid();
-
-                            return readModulatorPlace (element) == readModulatorPlace (saved)
-                                   && holdTheSameProject (element, now, saved, savedState.values);
-                        });
+    return std::all_of (modulatorOwnersToCompare.begin(), modulatorOwnersToCompare.end(),
+                        [this, &now] (const ModulatorPlace& owner) { return holdSameModulatorOrder (now, savedState.values, owner); })
+           && std::all_of (modulatorsToCompare.begin(), modulatorsToCompare.end(),
+                           [this, &now] (ModulatorID id) { return holdSameModulator (now, savedState.values, id); });
 }
 
 void Project::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered)

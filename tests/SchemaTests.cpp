@@ -261,6 +261,8 @@ struct Changed
     phazite::ClipID clip;
     juce::String curveKey; // of a curve changed, or of the one a point changed is in
     juce::Identifier changedProperty;
+    juce::Identifier parentType {}; // of the element changed, and its key: where a modulation is found (findModulationState())
+    juce::String parentKey {};
 
     Changed (const schema::Element& type, const juce::Identifier& property, const juce::var& value,
              const schema::Tables& tables = schema::getTables())
@@ -270,25 +272,27 @@ struct Changed
         element = findFirstFor (raw, type, property);
         REQUIRE_MESSAGE (element.isValid(), "the representative project holds no " << type.toString());
         original = element.createCopy();
+        parentType = element.getParent().getType();
+        parentKey = schema::getElementKey (element.getParent());
         element.setProperty (property, value, nullptr);
 
         const phazite::Song rawSong { raw.createCopy() };
         problemsBefore = findSongProblems (rawSong, tables);
 
         // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, a chord or a key change, a
-        // MIDI link, a curve or its point, or a section: the loader's part alone (makeConsistent()), on a song that keeps
-        // everything in its tree, since a song made by makeSong() holds its clips, their notes, its tempo map, its chord lane,
-        // its MIDI links, its curves and its sections as values beside it (Song::holdValues()); and the song opened, whose
-        // values findOpened() reads back through whole state.
+        // MIDI link, a curve or its point, a section, or a modulator, a macro or a modulation: the loader's part alone
+        // (makeConsistent()), on a song that keeps everything in its tree, since a song made by makeSong() holds its clips,
+        // their notes, its tempo map, its chord lane, its MIDI links, its curves, its sections and its modulation as values
+        // beside it (Song::holdValues()); and the song opened, whose values findOpened() reads back through whole state.
         if (isCurveElement (element))
             curveKey = schema::getElementKey (element.hasType (schema::CURVE) ? element : element.getParent());
 
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
             || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element)
-            || isCurveElement (element) || isSection (element))
+            || isCurveElement (element) || isSection (element) || isModulation (element))
         {
             if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element) && ! isCurveElement (element)
-                && ! isSection (element))
+                && ! isSection (element) && ! isModulation (element))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -337,6 +341,33 @@ struct Changed
     static bool isMidiLink (const juce::ValueTree& element) { return element.hasType (schema::MIDILINK); }
     static bool isSection (const juce::ValueTree& element) { return element.hasType (schema::SECTION); }
 
+    static bool isModulation (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO) || element.hasType (schema::MODULATES);
+    }
+
+    // A modulator's, a macro's or a modulation's owner in the whole state of the opened song: the element of the original's
+    // parent's type and key (a track, the master or a container for a modulator or a macro; the modulator or the macro for a
+    // modulation), whose children the opened song holds as values, written in.
+    juce::ValueTree findModulationState() const
+    {
+        const std::function<juce::ValueTree (const juce::ValueTree&)> find = [&] (const juce::ValueTree& tree)
+        {
+            for (const auto& child : tree)
+            {
+                if (child.getType() == parentType && schema::getElementKey (child) == parentKey)
+                    return child;
+
+                if (const auto found = find (child); found.isValid())
+                    return found;
+            }
+
+            return juce::ValueTree();
+        };
+
+        return find (phazite::copyWholeSong (*opened));
+    }
+
     static bool isCurveElement (const juce::ValueTree& element)
     {
         return element.hasType (schema::CURVE) || element.hasType (schema::POINT);
@@ -370,6 +401,7 @@ struct Changed
                                : isMidiLink (original)       ? phazite::copyWholeSong (*opened).getChildWithName (schema::MIDILINKS)
                                : isCurveElement (original)   ? findCurveState()
                                : isSection (original)        ? phazite::copyWholeSong (*opened).getChildWithName (schema::SECTIONS)
+                               : isModulation (original)     ? findModulationState()
                                                              : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))

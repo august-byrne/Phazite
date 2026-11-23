@@ -2123,7 +2123,7 @@ TEST_CASE ("Modulators and macros open as the song holds them, written as Phazit
     CHECK (find (880002)[schema::modulatorSteps].toString() == "0.1235 0.5");
     CHECK (juce::StringArray::fromTokens (find (880003)[schema::modulatorSteps].toString(), " ", {}).size()
            == phazite::devices::Modulator::maxSteps);
-    CHECK (find (880004)[schema::macroValue].toString() == "0.3");
+    CHECK (phazite::writeValue (find (880004)[schema::macroValue]) == "0.3"); // as its file writes it (SongText.h)
 
     // Each read as the song's code reads it the same as the song holds it.
     const std::uint64_t ids[] = { 880001, 880002, 880003, 880004 };

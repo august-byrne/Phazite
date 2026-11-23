@@ -94,10 +94,12 @@ float getCurrentValue (const Song&, const ParameterRef&, bool withModulation);
 // A parameter found in the song, for what reads one often (a control, at each of the display ticker's ticks): what it is of,
 // its element (state), and for one of Phazite's own devices' parameters, its description. The element is the one that holds
 // its value set by hand, or where it is looked for: a device's or a plug-in's DEVICE, a fader's channel (its TRACK or the
-// MASTER), a container's chain's CHAIN, a modulator's or a macro's own element, and for a send's level the TRACK the send is
-// on, among whose sends alone it is looked for by its ID (SendsValue.h: findTrackSend()), one look at each tick. The functions
-// above, given one, take it as found, which holds while its element is the song's and still names it, or for a send, still
-// holds it (isStillThere()).
+// MASTER), a container's chain's CHAIN, and for a send's level the TRACK the send is on, among whose sends alone it is looked
+// for by its ID (SendsValue.h: findTrackSend()), one look at each tick; none for a modulator's parameter and a macro's value,
+// which are looked for by their modulator's ID in modulation's area (model/modulation/internal/Modulation.h:
+// getModulatorValue()), the modulator's still of the kind it was found of. The functions above, given one, take it as found,
+// which holds while its element is the song's and still names it, for a send, still holds it, and for a modulator or a macro,
+// while the area holds it so (isStillThere()).
 struct FoundParameter
 {
     // Made by locateParameter() alone; a constructor of its own, so that a braced reference ({ device, "gain" }) is never
@@ -117,6 +119,13 @@ struct FoundParameter
 };
 
 std::optional<FoundParameter> locateParameter (const Song&, const ParameterRef&);
+
+// The half of locateParameter() that looks in the song's tree alone, which it asks after its look in modulation's area: the
+// sources the tree holds (a device's, a plug-in's, a chain's and a fader's parameters and, until the sends' switch, a send's
+// level); none for a modulator's parameter and a macro's value. What a tree callback asks, which reads no area of the song's
+// values (MidiLinker's, model/midi/internal/MidiLinks.h).
+std::optional<FoundParameter> locateParameterInTree (const Song&, const ParameterRef&);
+
 bool isStillThere (const Song&, const FoundParameter&);
 
 ParameterDescription describeParameter (const Song&, const FoundParameter&);
@@ -129,13 +138,13 @@ void setValueSetByHand (Song&, const FoundParameter&, float value);
 float getCurrentValue (const Song&, const FoundParameter&, bool withModulation);
 
 //==============================================================================
-// A value of a parameter of one of Phazite's own devices or of a modulator, kept in its element's VALUES (Schema.h), in that
+// A value of a parameter of one of Phazite's own devices, kept in its element's VALUES (Schema.h), in that
 // undo history: none at the parameter's default, and no VALUES left without values, so that a value set back to its default
 // leaves the song as it was, no change in source control nor unsaved. Every writer of VALUES goes through it. (Whether a
 // value is the default, and its saved form: model/base/internal/SavedValues.h, isDefaultValue(), toSavedValue(),
 // readSavedValue().)
 void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo&, float value, juce::UndoManager*);
 
-// The value set by hand of a parameter of an element (a device's, a modulator's), as its VALUES keep it, or its default.
+// The value set by hand of a parameter of an element (a device's), as its VALUES keep it, or its default.
 float readValueSetByHand (const juce::ValueTree& element, const devices::ParameterInfo&);
 } // namespace phazite

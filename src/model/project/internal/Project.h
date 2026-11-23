@@ -419,11 +419,10 @@ private:
     void sectionsChanged (const std::vector<SectionID>&) override;
 
     // The modulators and macros that changed, by their IDs, and the owners whose modulators came in another order
-    // (SongValues.h: Listener::modulationChanged(); the tree's callbacks below leave the song's MODULATOR and MACRO elements
-    // and what is in them alone, isHeardAsKept()): compared with savedState when asked, each against the saved copy's of its
-    // ID, by element while the trees hold them (ModulationArea.h: findModulatorElement(), readOwnerOrder()), so that a
-    // macro turned and turned back is saved again. Bounded as toCompare is: past mostToCompare of them, the tracks and the
-    // master whole.
+    // (SongValues.h: Listener::modulationChanged(); the song's tree holds none of them): compared with savedState when asked,
+    // each against the saved copy's of its ID, as values (WholeState.h: holdSameModulator(), holdSameModulatorOrder()), so
+    // that a macro turned and turned back is saved again. Bounded as toCompare is: past mostToCompare of them, the song's
+    // modulation whole (holdSameModulation()).
     std::vector<ModulatorID> modulatorsToCompare;
     std::vector<ModulatorPlace> modulatorOwnersToCompare;
     bool comparingModulationWhole = false;

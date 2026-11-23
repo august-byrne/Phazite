@@ -244,7 +244,10 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   sequencer has are cut; one modulation of each parameter stays (the first), and one that names no parameter goes; a
   property or an element Phazite doesn't know in it goes; and its `VALUES` comes before its `MODULATES`, so a file
   that held them the other way round has them in that order from its first save. Where it is and what it modulates
-  stay as the file has them (a macro on a folder, a modulation of another channel's device, which plays nothing).
+  stay as the file has them (a macro on a folder, a modulation of another channel's device, which plays nothing). A
+  track's, the master's and a container's modulators and macros are written after its other children, in the order it
+  holds them (modulators and macros together, as they were made), and before a track's sends; a file that held one
+  elsewhere among them has it there from its first save.
 - **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values, and its audio clips play
   one file alike: they share their `file` (the path as written, compared as text, whether the file is there or not),
   `tempo`, `pitch`, `reversed` and `WARP` markers. Each keeps its own place, the part of the file it plays (`fileStart`,
