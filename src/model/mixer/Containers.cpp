@@ -8,6 +8,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/plugins/internal/DeviceStore.h"
 
 #include <algorithm>
 #include <cmath>
@@ -44,18 +45,6 @@ namespace
             chain.setProperty (property, value, undo);
     }
 
-    // A switch of a chain's, true or none, set without an undo step (as a track's mute and solo: Tracks.cpp).
-    void setChainSwitch (juce::ValueTree chain, const juce::Identifier& property, bool on)
-    {
-        if ((bool) chain[property] == on)
-            return;
-
-        if (on)
-            chain.setProperty (property, true, nullptr);
-        else
-            chain.removeProperty (property, nullptr);
-    }
-
     // The number the next chain is named with: one more than any "Chain" and a number there is, and more than the chains.
     int getNextChainNumber (const juce::ValueTree& container)
     {
@@ -85,10 +74,11 @@ namespace
         return readChainCrossover (chain).value_or (getDefaultCrossover (index, numChains));
     }
 
+    // Whether any of a container's chains is soloed, each read from its element (model/plugins/internal/DeviceStore.h).
     bool anySoloed (const juce::ValueTree& container)
     {
         const auto chains = getChainStates (container);
-        return std::any_of (chains.begin(), chains.end(), [] (const juce::ValueTree& chain) { return (bool) chain[schema::chainSolo]; });
+        return std::any_of (chains.begin(), chains.end(), [] (const juce::ValueTree& chain) { return isChainSoloed (chain); });
     }
 
     // The channel's element a device of it is on (its TRACK or MASTER), whose devices' states are stored before they move.
@@ -267,11 +257,7 @@ void removeChain (Song& song, DeviceID chain)
     // One chain left is heard: its mute or its solo would be the container's own switch. Switched off in this step, though a
     // switch alone is none, so that undoing it brings the switches back with the chain.
     if (const auto left = getChainStates (container); left.size() == 1)
-    {
-        auto chainLeft = left.front();
-        chainLeft.removeProperty (schema::chainMute, getUndo (song));
-        chainLeft.removeProperty (schema::chainSolo, getUndo (song));
-    }
+        clearChainSwitchesInStep (song, left.front());
 }
 
 DeviceID duplicateChain (Song& song, DeviceID chain)
@@ -328,32 +314,20 @@ void setChainName (Song& song, DeviceID chain, const juce::String& name)
         state.setProperty (schema::chainName, name.trim(), getUndo (song));
 }
 
-bool isChainMuted (const Song& song, DeviceID chain)
-{
-    return findContainerChain (song, chain)[schema::chainMute];
-}
-
-bool isChainSoloed (const Song& song, DeviceID chain)
-{
-    return findContainerChain (song, chain)[schema::chainSolo];
-}
-
 bool isChainHeard (const Song& song, DeviceID chain)
 {
     const auto state = findContainerChain (song, chain);
-    return state.isValid() && ! (bool) state[schema::chainMute] && (! anySoloed (state.getParent()) || (bool) state[schema::chainSolo]);
+    return state.isValid() && ! isChainMuted (state) && (! anySoloed (state.getParent()) || isChainSoloed (state));
 }
 
 void setChainMuted (Song& song, DeviceID chain, bool muted)
 {
-    if (auto state = findContainerChain (song, chain); state.isValid())
-        setChainSwitch (state, schema::chainMute, muted);
+    setChainSwitch (song, chain, ChainFlag::mute, muted);
 }
 
 void setChainSoloed (Song& song, DeviceID chain, bool soloed)
 {
-    if (auto state = findContainerChain (song, chain); state.isValid())
-        setChainSwitch (state, schema::chainSolo, soloed);
+    setChainSwitch (song, chain, ChainFlag::solo, soloed);
 }
 
 float getChainVolume (const Song& song, DeviceID chain)

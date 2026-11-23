@@ -13,6 +13,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/plugins/internal/PluginInstances.h"
 
 #include <algorithm>
@@ -40,12 +41,6 @@ namespace
         auto* instance = findPluginInstance (song, ref.device);
         const auto index = instance != nullptr ? instance->findParameter (ref.parameter) : -1;
         return { index >= 0 ? instance : nullptr, index };
-    }
-
-    // The VALUE of a plug-in's element that holds a parameter's value set by hand, if it has one.
-    juce::ValueTree findPluginValue (const juce::ValueTree& device, const juce::String& parameter)
-    {
-        return device.getChildWithProperty (schema::valueParameter, parameter);
     }
 
     // Whether two of a plug-in's values, from 0 to 1, are the same, to a millionth (as isDefaultValue() takes them).
@@ -182,7 +177,7 @@ std::optional<FoundParameter> locateParameterInTree (const Song& song, const Par
         if (isPluginState (device))
         {
             // One its instance has, or one the song keeps a value of (a plug-in that doesn't load keeps what refers to it).
-            const auto there = findPluginParameter (song, ref).first != nullptr || findPluginValue (device, ref.parameter).isValid();
+            const auto there = findPluginParameter (song, ref).first != nullptr || findPluginValue (device, ref.parameter).has_value();
             return there ? found (ref, ParameterSource::plugin, device) : std::nullopt;
         }
 
@@ -426,9 +421,9 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
             return getCrossover (state);
 
         case ParameterSource::plugin:
-            // The song's, where it sets one; else its instance's.
-            if (const auto stored = findPluginValue (state, parameter.ref.parameter); stored.isValid())
-                return (float) stored[schema::valueSetByHand];
+            // The song's, where it sets one (from the element found: model/plugins/internal/DeviceStore.h); else its instance's.
+            if (const auto stored = findPluginValue (state, parameter.ref.parameter))
+                return *stored;
 
             if (const auto [instance, index] = findPluginParameter (song, parameter.ref); instance != nullptr)
                 return instance->getParameterValue (index);
@@ -471,28 +466,21 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
 
         case ParameterSource::plugin:
         {
-            // A VALUE of the plug-in's element, which its instance takes (model/plugins/internal/PluginInstances.h), made
-            // holding the value the plug-in has, so that an undo takes it back there; none for the value it has already.
+            // The song's value of the parameter, in the element found (model/plugins/internal/DeviceStore.h), which its
+            // instance takes (model/plugins/internal/PluginInstances.h), made holding the value the plug-in has, so that an
+            // undo takes it back there; none for the value it has already.
             told = juce::jlimit (0.0f, 1.0f, value);
             moveOnlyPoint (song, ref, told);
-            auto stored = findPluginValue (state, ref.parameter);
 
-            if (! stored.isValid())
+            if (! findPluginValue (state, ref.parameter).has_value())
             {
-                const auto held = getValueSetByHand (song, parameter);
-
-                if (! isSamePluginValue (held, told))
-                {
-                    stored =
-                        juce::ValueTree (schema::VALUE, { { schema::valueParameter, ref.parameter }, { schema::valueSetByHand, held } });
-                    state.appendChild (stored, undo);
-                    stored.setProperty (schema::valueSetByHand, told, undo);
-                }
+                if (const auto held = getValueSetByHand (song, parameter); ! isSamePluginValue (held, told))
+                    setPluginValueSetByHand (song, state, ref.parameter, told, held);
 
                 break;
             }
 
-            stored.setProperty (schema::valueSetByHand, told, undo);
+            setPluginValueSetByHand (song, state, ref.parameter, told, told);
 
             // One set back to the parameter's default goes, as Phazite's own devices keep none at their defaults
             // (keepValueSetByHand()): the plug-in holds the value then, which its settings hold once the next save stores
@@ -500,7 +488,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             // which the versions would take its stored settings for a change of (model/base/Song.h).
             if (isPluginDefault (song, ref, told))
             {
-                state.removeChild (stored, undo);
+                removePluginValueSetByHand (song, state, ref.parameter);
                 song.markChangedOutsideHistory();
             }
 

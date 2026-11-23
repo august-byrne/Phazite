@@ -344,6 +344,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/CurvesArea.cpp
     src/model/base/CurveValues.cpp
     src/model/base/DevicesArea.cpp
+    src/model/base/DeviceStoreValue.cpp
     src/model/base/DevicesValue.cpp
     src/model/base/IDs.h
     src/model/base/IDsHeld.cpp
@@ -381,6 +382,8 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/ClipsValue.h
     src/model/base/internal/CurveValues.h
     src/model/base/internal/DevicesArea.h
+    src/model/base/internal/DeviceStoreValue.h
+    src/model/base/internal/DevicesOutside.h
     src/model/base/internal/DevicesValue.h
     src/model/base/internal/CurvesArea.h
     src/model/base/internal/IDsHeld.h
@@ -391,6 +394,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/ModulationArea.h
     src/model/base/internal/ModulationValue.h
     src/model/base/internal/NotesArea.h
+    src/model/base/internal/OutsideValue.h
     src/model/base/internal/SavedValues.h
     src/model/base/internal/Schema.h
     src/model/base/internal/SchemaDescription.h
@@ -523,10 +527,12 @@ target_sources(phazite_core PRIVATE
     src/model/playback/internal/PlaybackHost.h
     src/model/playback/internal/PlaybackSession.h
     src/model/playback/internal/SongPlayer.h
+    src/model/plugins/DeviceStore.cpp
     src/model/plugins/PluginHost.cpp
     src/model/plugins/PluginInstances.cpp
     src/model/plugins/SandboxedInstance.cpp
     src/model/plugins/SandboxedProcessor.cpp
+    src/model/plugins/internal/DeviceStore.h
     src/model/plugins/internal/PluginHost.h
     src/model/plugins/internal/PluginInstances.h
     src/model/plugins/internal/SandboxedInstance.h
@@ -1375,6 +1381,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DeviceInfoTests.cpp
         tests/DeviceReadersTests.cpp
         tests/DeviceStatesTests.cpp
+        tests/DeviceStoreValueTests.cpp
         tests/DevicesValueTests.cpp
         tests/DevicesViewTests.cpp
         tests/DragPointerTests.cpp

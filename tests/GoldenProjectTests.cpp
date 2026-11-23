@@ -49,6 +49,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/ProjectContents.h"
@@ -222,7 +223,7 @@ void addContainersAndDevices (phazite::Song& song, phazite::ProjectContext& cont
     phazite::setDeviceOn (context, phazite::getEffects (context, tracks.tone).back().id, false);
 
     phazite::addEffect (context, tracks.tone, findType (context, Equalizer::typeID));
-    phazite::rememberWindowPosition (song, phazite::getEffects (context, tracks.tone).back().id, { 120, 80 });
+    phazite::setWindowPlace (song, phazite::getEffects (context, tracks.tone).back().id, { .x = 120, .y = 80 });
 }
 
 // The drum sampler on Drums: a factory sound on its kick's pad (from a kit's preset), a sound file on its snare's, another

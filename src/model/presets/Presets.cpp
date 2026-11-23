@@ -18,6 +18,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -1463,15 +1464,12 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
         session->getPlugins().store (id);
 
     const UndoStep step (*song, stepName);
-    auto* undo = &song->getUndoManager();
 
+    // Into the element found above (model/plugins/internal/DeviceStore.h).
     if (saved.hasProperty (keys::program))
-        device.setProperty (schema::pluginProgram, (int) saved[keys::program], undo);
+        setPluginProgramInStep (*song, device, (int) saved[keys::program]);
 
-    if (const auto settings = saved[keys::state].toString(); settings.isNotEmpty())
-        device.setProperty (schema::pluginState, settings, undo);
-    else
-        device.removeProperty (schema::pluginState, undo);
+    setPluginStateInStep (*song, device, saved[keys::state].toString()); // none taken away
 
     if (saved.hasProperty (keys::mix))
         setMix (*song, id, toFloat (saved[keys::mix], 1.0f));

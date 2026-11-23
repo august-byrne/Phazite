@@ -3417,6 +3417,47 @@ TEST_CASE ("A store that isn't a save waits for no plug-in: what it gave last is
     CHECK (back.getParameterValue (back.findParameter ("60")) == doctest::Approx (0.25f));
 }
 
+TEST_CASE ("A store's answer that comes after its device was taken away and the Undo brought it back lands in the song's device, "
+           "which plays it")
+{
+    // The answer of the instance the store asked comes only once the device is gone and back (the store's readers and writers
+    // by ID, roadmap step S5.20: the answer for a device gone is kept where the Undo finds it).
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    const auto asked = session->getPlugins().find (slow); // held, so that it outlives its device's removal here
+    REQUIRE (asked != nullptr);
+    const auto level = asked->findParameter ("60");
+    asked->setParameterValue (level, 0.5f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! asked->isStateUnasked() && ! asked->isAskingState(); }, longWait));
+
+    // Set again while it can't answer, stored (the state it gave last, and asked), taken away, and brought back by Undo.
+    SlowGate gate;
+    asked->setParameterValue (level, 0.25f);
+    session->getPlugins().storeTrack (song.firstTrack);
+    CHECK (readLevel (phazite::test::copyDevice (getSong (song), slow)[phazite::schema::pluginState]) == doctest::Approx (0.5f));
+    REQUIRE (asked->isAskingState());
+    phazite::removeDevice (song.context, slow);
+    CHECK (turnMessageLoop (10));
+    phazite::undo (getSong (song));
+    CHECK (turnMessageLoop (10));
+    CHECK (asked->isAskingState());
+
+    // Its answer comes: into the song's device, which plays it.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! asked->isAskingState(); }, longWait));
+    song.waitForPlugins();
+    CHECK (turnMessageLoop (10));
+    CHECK (readLevel (phazite::test::copyDevice (getSong (song), slow)[phazite::schema::pluginState]) == doctest::Approx (0.25f));
+    auto& back = getSandboxed (song, slow);
+    CHECK (&back != asked.get());
+    const auto played = back.getRemote().getState (longWait); // the plug-in's own, its Level first
+    REQUIRE (played.has_value());
+    CHECK (juce::MemoryInputStream (*played, false).readFloat() == doctest::Approx (0.25f));
+}
+
 TEST_CASE ("A plug-in prepared for another sample rate waits for no helper: it is skipped until its channel has come")
 {
     // Known bug 166: the message thread waited for the helper to make the channel, behind whatever else it did, up to 10

@@ -55,6 +55,7 @@
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/ParameterHandle.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/EngineContext.h"
@@ -70,6 +71,8 @@
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/playback/internal/SongPlayer.h"
+#include "model/plugins/internal/DeviceStore.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
@@ -214,7 +217,7 @@ TEST_CASE ("Performance gate: each edit gives the engine one plan, however many 
         { "the playlist's grid changed", [&] { toggleSnap (song, phazite::GridOwner::playlist); }, 0 },
         { "the piano roll's grid changed, its first", [&] { toggleSnap (song, phazite::GridOwner::pianoRoll); }, 0 },
         { "the piano roll's grid changed again", [&] { toggleSnap (song, phazite::GridOwner::pianoRoll); }, 0 },
-        { "a device's window moved", [&] { phazite::rememberWindowPosition (song, equalizer, { 40, 60 }); }, 0 },
+        { "a device's window moved", [&] { phazite::setWindowPlace (song, equalizer, { .x = 40, .y = 60 }); }, 0 },
         { "an automation lane shown", [&] { phazite::showLane (song, track, { equalizer, output }); }, 0 },
     };
 
@@ -348,7 +351,7 @@ TEST_CASE ("Performance gate: a change no device reads leaves the next edit's pl
         { "a track's height", [&] { phazite::setSavedTrackHeight (song, track, 120); } },
         { "a track muted", [&] { phazite::toggleMute (s.context, track); } },
         { "a device's window moved",
-          [&] { phazite::rememberWindowPosition (song, phazite::getEffects (s.context, track)[0].id, { 10, 20 }); } },
+          [&] { phazite::setWindowPlace (song, phazite::getEffects (s.context, track)[0].id, { .x = 10, .y = 20 }); } },
         { "the plug-ins' states stored, as a save stores them", [&] { song.storeDeviceStates(); } },
         { "a plug-in's state written, as a store writes it",
           [&] { phazite::test::storePluginState (song, device, juce::String ("c3RhdGU=")); } },
@@ -830,6 +833,242 @@ TEST_CASE ("Performance gate: a tick of a device's knob, a chain's volume or a d
     }
 
     CHECK (small[3].whole == 0);
+}
+
+TEST_CASE ("Performance gate: a tick of a plug-in's control walks the song for none of its devices, and a drag event no more often "
+           "than before the devices' store, however many tracks the song has")
+{
+    // The devices' store (model/plugins/internal/DeviceStore.h) reads and writes a plug-in's values set by hand by its
+    // device's ID, which on the song's tree is a walk of the song (countDeviceWalks()); a control's handle keeps the element
+    // it found (model/devices/ParameterHandle.cpp, find()), which the store's forms that take the element read, so that
+    // neither a tick nor a drag walks the song more often than before the store. On songs of 4 tracks and of 40, the
+    // stand-in plug-in (TestPlugin.h) on the last: a tick of its Gain's knob (its attachment's update(): enabled, the
+    // modulation's range, its base value) and a handle's reading of its value, base value and text, before and after a value
+    // set by hand; and the events of a drag of it through its handle inside a gesture: the first set (which makes the song's
+    // value, holding what the plug-in held), another, and one to its default (which takes the song's value away).
+    const phazite::test::TestPlugin testPlugin;
+
+    struct Counts
+    {
+        std::uint64_t tickBefore = 0, tickAfter = 0;               // a tick, before and after a value set by hand
+        std::uint64_t firstSet = 0, anotherSet = 0, atDefault = 0; // a drag's events
+
+        bool operator== (const Counts&) const = default;
+    };
+
+    const auto countFor = [] (int numTracks)
+    {
+        phazite::test::TestSong s;
+        auto& song = getSong (s);
+        auto track = s.firstTrack;
+
+        for (int i = 1; i < numTracks; ++i)
+            track = s.addTrack ("Track " + juce::String (i + 1));
+
+        phazite::DeviceID plugin;
+
+        {
+            const phazite::UndoStep step (song, "Add Device");
+            plugin = phazite::test::TestPlugin::add (song, track);
+        }
+
+        REQUIRE (phazite::findPluginInstance (song, plugin) != nullptr);
+        const phazite::ParameterRef gain { plugin, phazite::test::TestPlugin::gainID };
+
+        const auto countTick = [&song, &gain]
+        {
+            phazite::ui::Knob knob ("Knob", 0.0);
+            phazite::ui::ParameterAttachment attachment (knob);
+            attachment.setParameter (phazite::makeParameterHandle (song, gain));
+            attachment.update(); // its first tick finds the parameter
+            const auto reader = phazite::makeParameterHandle (song, gain);
+            auto sum = reader.getValue(); // finds the parameter
+            const auto walks = phazite::countDeviceWalks();
+            attachment.update();
+            sum += reader.getValue() + reader.getBaseValue() + (float) reader.getText (reader.getBaseValue()).length();
+            const auto walked = phazite::countDeviceWalks() - walks;
+            CHECK (std::isfinite (sum));
+            return walked;
+        };
+
+        Counts counts;
+        counts.tickBefore = countTick();
+
+        auto handle = phazite::makeParameterHandle (song, gain);
+        REQUIRE (handle.exists());
+        const auto atDefault = handle.getDefaultValue();
+        REQUIRE (atDefault.has_value());
+        handle.beginGesture();
+
+        const auto countEvent = [&handle] (float value)
+        {
+            const auto walks = phazite::countDeviceWalks();
+            handle.setValue (value);
+            return phazite::countDeviceWalks() - walks;
+        };
+
+        counts.firstSet = countEvent (0.3f);
+        counts.anotherSet = countEvent (0.4f);
+        REQUIRE (phazite::findPluginValue (song, plugin, gain.parameter).has_value());
+        counts.tickAfter = countTick();
+        counts.atDefault = countEvent (*atDefault);
+        CHECK_FALSE (phazite::findPluginValue (song, plugin, gain.parameter).has_value());
+        handle.endGesture();
+        return counts;
+    };
+
+    const auto small = countFor (4);
+    const auto big = countFor (40);
+
+    MESSAGE ("A plug-in's control's walks of the song, on 4 tracks and on 40: a tick before a value set by hand "
+             << small.tickBefore << ", " << big.tickBefore << "; after " << small.tickAfter << ", " << big.tickAfter
+             << "; a drag's first set " << small.firstSet << ", " << big.firstSet << "; another " << small.anotherSet << ", "
+             << big.anotherSet << "; one to its default " << small.atDefault << ", " << big.atDefault);
+
+    CHECK (big == small);
+
+    // Before the devices' store (by the committed code): model/devices/Parameters.cpp's plug-in cases read and wrote the
+    // VALUE of the element the found parameter holds, ParameterHandle's find() walks nothing while that element is still
+    // the song's (isStillThere()), and PluginInstances::takeValueFromSong() read the element its tree callback names: no
+    // walk at a tick. At each event of the drag one walk, the automation's watcher's, which finds the parameter set by hand
+    // by its reference (model/automation/internal/Automation.h: AutomationWatcher, locateParameter()), the store's
+    // functions none.
+    CHECK (small.tickBefore == 0);
+    CHECK (small.tickAfter == 0);
+    CHECK (small.firstSet == 1);
+    CHECK (small.anotherSet == 1);
+    CHECK (small.atDefault == 1);
+}
+
+TEST_CASE ("Performance gate: a container editor's refresh walks the song as often for each chain, however many chains it has")
+{
+    // The editor's chains (model/mixer/ContainerModel.h: getChains(), one ChainInfo for each) read each chain by its ID, a
+    // walk of the song each time on the song's tree (countDeviceWalks()), a fixed number of them for each chain: whether it
+    // is heard (isChainHeard()) reads its container's other chains' solos from the elements it walks through, never each
+    // chain by its ID again (which made the refresh walk as the square of its chains). Containers of 2, 4 and 8 chains, split
+    // into layers, with nothing in their chains, one of 8 with a chain soloed.
+    phazite::test::TestSong s;
+    auto& song = getSong (s);
+    std::vector<phazite::DeviceID> containers;
+
+    for (const auto numChains : { 2, 4, 8, 8 })
+    {
+        const auto track = s.addTrack ("Track " + juce::String ((int) containers.size() + 2));
+        const auto container = phazite::addContainer (s.context, track);
+        REQUIRE (container.isValid());
+
+        while ((int) phazite::getChains (song, container).size() < numChains)
+            REQUIRE (phazite::addChain (s.context, container).isValid());
+
+        containers.push_back (container);
+    }
+
+    phazite::setChainSoloed (song, phazite::getChains (song, containers.back())[3], true);
+
+    const auto countRefresh = [&s] (phazite::DeviceID container)
+    {
+        const auto walks = phazite::countDeviceWalks();
+        const auto chains = phazite::getChains (s.context, container);
+        const auto walked = phazite::countDeviceWalks() - walks;
+        CHECK (! chains.empty());
+        return walked;
+    };
+
+    const auto two = countRefresh (containers[0]);
+    const auto four = countRefresh (containers[1]);
+    const auto eight = countRefresh (containers[2]);
+    const auto soloed = countRefresh (containers[3]);
+    const auto perChain = (four - two) / 2;
+
+    MESSAGE ("A container editor's refresh walks the song " << two << " times for 2 chains, " << four << " for 4, " << eight << " for 8, "
+                                                            << soloed << " for 8 with one soloed; " << perChain << " for each chain");
+
+    // As many for each chain whatever their number, and a chain soloed walks no more. The committed code before the devices'
+    // store walked 12 times for each chain (makeChainInfo(): its name, its container, its part (whether its container plays
+    // an instrument, its chains, its split), its mute, its solo, whether it is heard, its keys, its velocities, its
+    // instrument and its devices, each by its ID once) and once for the container's chains: 97 for 8 chains.
+    CHECK (eight - four == 4 * perChain);
+    CHECK (soloed == eight);
+    CHECK (perChain <= 12);
+    CHECK (eight <= 8 * 12 + 1);
+}
+
+TEST_CASE ("Performance gate: a store of a song's plug-ins, and opening it, walk the song no more often for each plug-in than "
+           "before the devices' store")
+{
+    // What the plug-ins' instances write into the song (model/plugins/internal/PluginInstances.h: store(), its answers) and
+    // read as they open (open(), setUp()), through the devices' store (model/plugins/internal/DeviceStore.h) on the element
+    // they hold, which they found once: a walk of the song for each plug-in a store writes (countDeviceWalks()), none for
+    // its answer, and none as one begins opening, as before the store. The walks of a song with 3 stand-in plug-ins
+    // (TestPlugin.h) and of one with 1: a store of all of them, as a save stores them (Song::storeDeviceStates()); and the
+    // song saved and opened again, each plug-in's walks the difference between the two songs' over two.
+    const phazite::test::TestPlugin testPlugin;
+
+    struct Counts
+    {
+        std::uint64_t store = 0, reopen = 0, loading = 0;
+    };
+
+    const auto countFor = [] (int numPlugins)
+    {
+        phazite::test::TestSong s;
+        auto& song = getSong (s);
+
+        for (int i = 0; i < numPlugins; ++i)
+        {
+            const phazite::UndoStep step (song, "Add Device");
+            phazite::test::TestPlugin::add (song, s.firstTrack);
+        }
+
+        // Every state asked for and stored once, as a save does, so that the store counted writes nothing that differs.
+        const auto storeAll = [&song]
+        {
+            auto in = false;
+            phazite::whenPluginStatesIn (song, true, [&in] (bool) { in = true; });
+            REQUIRE (phazite::test::dispatchMessagesUntil ([&in] { return in; }));
+        };
+
+        storeAll();
+        song.storeDeviceStates();
+        storeAll();
+
+        Counts counts;
+        auto walks = phazite::countDeviceWalks();
+        song.storeDeviceStates();
+        counts.store = phazite::countDeviceWalks() - walks;
+        storeAll();
+
+        // Saved (its plug-ins' states asked for and stored), opened again and its plug-ins begun opening (sync()): all on
+        // this thread, nothing else running meanwhile. Then their loading in the background, which the message loop brings
+        // in, beside the versions' timer, which walks the song for each plug-in still loading at each of its ticks
+        // (VersionHistory: takePluginsJoined()): a count that depends on how long they load, shown alone.
+        walks = phazite::countDeviceWalks();
+        s.reopen (false);
+        phazite::getSession (s.context)->update(); // its plug-ins begin opening (PluginInstances::sync())
+        counts.reopen = phazite::countDeviceWalks() - walks;
+        walks = phazite::countDeviceWalks();
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return ! phazite::getSession (s.context)->getPlugins().isLoading(); }));
+        counts.loading = phazite::countDeviceWalks() - walks;
+        return counts;
+    };
+
+    const auto one = countFor (1);
+    const auto three = countFor (3);
+    const auto opening = (three.reopen - one.reopen) / 2;
+
+    MESSAGE ("A store of 3 plug-ins walks the song " << three.store << " times (of 1, " << one.store << "); saving and opening "
+                                                     << "them " << three.reopen << " (1, " << one.reopen << "): " << opening
+                                                     << " for each plug-in; loading them " << three.loading << " (1, " << one.loading
+                                                     << ")");
+
+    // Before the devices' store (the committed code): a store walked once for each plug-in (store() finds its element,
+    // which write() wrote into), 3 for 3; saving and opening, twice for each: once as the save stored it (its answer written
+    // into the element held for it), once as the versions, made with the song, asked which plug-ins load
+    // (getPluginsLoading()), and none as sync() opened it (open() read the element sync() found). As each loads:
+    // finishOpening() finds it, once, and setUp() reads that element.
+    CHECK (three.store == 3);
+    CHECK (one.store == 1);
+    CHECK (opening == 2);
 }
 
 TEST_CASE ("Performance gate: the plan after a device's knob moved on a song of 40 tracks reads that channel's devices one field at a "

@@ -79,10 +79,9 @@ void moveChain (Song&, DeviceID chain, int newIndex);
 juce::String getChainName (const Song&, DeviceID chain);
 void setChainName (Song&, DeviceID chain, const juce::String&);
 
-// A chain's mute and solo, as a track's (no undo steps): a chain soloed silences its container's others that aren't. And
-// whether it is heard: neither muted nor silenced by another's solo.
-bool isChainMuted (const Song&, DeviceID chain);
-bool isChainSoloed (const Song&, DeviceID chain);
+// A chain's mute and solo, as a track's (no undo steps): a chain soloed silences its container's others that aren't (read
+// with isChainMuted() and isChainSoloed(), in the store's block: model/plugins/internal/DeviceStore.h). And whether it is
+// heard: neither muted nor silenced by another's solo.
 bool isChainHeard (const Song&, DeviceID chain);
 void setChainMuted (Song&, DeviceID chain, bool);
 void setChainSoloed (Song&, DeviceID chain, bool);

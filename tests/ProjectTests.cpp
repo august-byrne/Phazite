@@ -34,6 +34,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/SongPlayer.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ExampleSongs.h"
@@ -1887,7 +1888,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     phazite::showAllDrumRows (song, other);
     phazite::saveGridSettings (song, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 2 });
     phazite::saveGridSettings (song, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 10 });
-    phazite::rememberWindowPosition (song, plugin, { 140, 360 });
+    phazite::setWindowPlace (song, plugin, { .x = 140, .y = 360 });
     phazite::test::dispatchPendingMessages();
 
     // No unsaved change, nothing to undo, and nothing for autosave to write.
@@ -1922,7 +1923,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (phazite::getHiddenDrumRows (reopened, track) == std::vector<int> { 42 });
     CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::playlist).adaptiveOffset == 2);
     CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::pianoRoll).fixedLevel == 10);
-    CHECK (phazite::getWindowPosition (reopened, plugin) == std::optional<juce::Point<int>> (juce::Point<int> (140, 360)));
+    CHECK (phazite::getWindowPlace (reopened, plugin) == std::optional (phazite::WindowPlace { .x = 140, .y = 360 }));
 
     // Everything else is the song or state, which closing without saving would lose: each of these is an unsaved change.
     const auto isUnsavedChange = [&project] (const std::function<void()>& change)

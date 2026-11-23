@@ -7,6 +7,7 @@
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/presets/PresetModel.h"
 #include "services/Library.h"
@@ -274,9 +275,9 @@ namespace
 
         void moved() override
         {
-            // As view state, for the next time it opens (model/mixer/internal/Mixer.h).
+            // As view state, for the next time it opens (model/plugins/internal/DeviceStore.h).
             if (auto* shown = song.get(); keepMoves && shown != nullptr)
-                rememberWindowPosition (*shown, id, getPosition());
+                setWindowPlace (*shown, id, { .x = getX(), .y = getY() });
         }
 
     protected:
@@ -614,8 +615,8 @@ void DeviceWindows::place (DeviceID id, std::unique_ptr<juce::DocumentWindow> ma
     if (window == nullptr || song == nullptr || ! window->hasEditor())
         return; // a plug-in that makes no editor
 
-    const auto kept = getWindowPosition (*song, id);
-    window->place (openOver, kept.has_value() ? *kept : choosePosition (*window));
+    const auto kept = getWindowPlace (*song, id);
+    window->place (openOver, kept.has_value() ? juce::Point<int> (kept->x, kept->y) : choosePosition (*window));
     window->setVisible (true);
     window->toFront (false);
     windows[id] = std::move (made);

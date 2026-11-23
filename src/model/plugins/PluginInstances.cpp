@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PluginInstances.h"
 #include "devices/core/Clock.h"
+#include "internal/DeviceStore.h"
 #include "internal/PluginHost.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "sandbox/core/Vst3State.h"
@@ -21,31 +21,11 @@ namespace
     constexpr int lookMilliseconds = 10;   // how often what opens in the background, and the states asked for, are looked at
     constexpr size_t maxReportsKept = 256; // the changes a plug-in told that it hasn't given its state for, at most
 
-    // The program the song keeps a plug-in on, or -1 for none.
+    // The program the song keeps a plug-in on, or -1 for none (from the element its caller found: DeviceStore.h).
     int readPluginProgram (const juce::ValueTree& device)
     {
-        const auto* program = device.getPropertyPointer (schema::pluginProgram);
-        return program != nullptr ? std::max (0, (int) *program) : -1;
-    }
-
-    // Sets a property as ValueTree::setProperty() does with an undo manager, which leaves a value that is the same as JUCE
-    // compares values alone (a number read from a file is text), but without one. JUCE workaround W8
-    // (docs/juce-workarounds.md).
-    void storeProperty (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value)
-    {
-        if (const auto* stored = state.getPropertyPointer (property); stored == nullptr || *stored != value)
-            state.setProperty (property, value, nullptr);
-    }
-
-    // Its state's bytes, as the song keeps them in standard base 64 (model/base/internal/SongText.h); none for none, or for
-    // text that isn't base 64.
-    juce::MemoryBlock readPluginState (const juce::ValueTree& device)
-    {
-        if (const auto text = device[schema::pluginState].toString(); text.isNotEmpty())
-            if (auto bytes = readBytes (text))
-                return std::move (*bytes);
-
-        return {};
+        const auto program = getPluginProgram (device);
+        return program.has_value() ? std::max (0, *program) : -1;
     }
 
     // The plug-ins' elements in a part of the song (a track's element, with its containers' chains'), in their order.
@@ -256,7 +236,7 @@ PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTre
     // From the state the song keeps of it; where that left another program than the song's, the song's program, then the
     // state again, so that the settings are never overridden by a program set after them (a plug-in's state needn't say
     // which program it is on: PluginHost::open()); then the values the song sets by hand under its automation.
-    const auto stored = readPluginState (device);
+    const auto stored = getPluginState (device);
     const auto program = readPluginProgram (device);
 
     if (inBackground)
@@ -316,8 +296,8 @@ void PluginInstances::startOpening (Entry& entry, std::shared_ptr<Opening> openi
 void PluginInstances::setUp (SandboxedInstance& made, const juce::ValueTree& device, const juce::MemoryBlock& openedFrom, int openedProgram)
 {
     // What the song changed of it while it opened (an undo, a preset loaded): its program, then its settings, as the song has
-    // them now.
-    const auto stored = readPluginState (device);
+    // them now, from the element its caller found (DeviceStore.h).
+    const auto stored = getPluginState (device);
 
     if (const auto program = readPluginProgram (device); stored != openedFrom || program != openedProgram)
     {
@@ -329,10 +309,9 @@ void PluginInstances::setUp (SandboxedInstance& made, const juce::ValueTree& dev
     }
 
     // The values the song sets by hand under its automation, as it has them now.
-    for (const auto& child : device)
-        if (child.hasType (schema::VALUE))
-            if (const auto index = made.findParameter (child[schema::valueParameter].toString()); index >= 0)
-                made.setParameterValue (index, (float) child[schema::valueSetByHand]);
+    for (const auto& [parameter, value] : getPluginValues (device))
+        if (const auto index = made.findParameter (parameter); index >= 0)
+            made.setParameterValue (index, value);
 
     made.keepStateAsOpened();
 }
@@ -406,14 +385,8 @@ void PluginInstances::finishReloading (DeviceID id, Entry& entry)
             instance.setStateInformation (held.getData(), (int) held.getSize());
     }
 
-    for (const auto& child : device)
+    for (const auto& [parameter, value] : getPluginValues (device))
     {
-        if (! child.hasType (schema::VALUE))
-            continue;
-
-        const auto parameter = child[schema::valueParameter].toString();
-        const auto value = (float) child[schema::valueSetByHand];
-
         if (const auto before = opening->songValues.find (parameter);
             before == opening->songValues.end() || ! juce::exactlyEqual (before->second, value))
             if (const auto index = instance.findParameter (parameter); index >= 0)
@@ -625,16 +598,9 @@ void PluginInstances::listen (DeviceID id, SandboxedInstance& instance)
         if (! ref.isValid())
             return;
 
-        if (auto device = findDeviceState (song, id); device.isValid())
         {
-            for (auto child : device)
-            {
-                if (child.hasType (schema::VALUE) && child[schema::valueParameter].toString() == ref.parameter)
-                {
-                    const juce::ScopedValueSetter<bool> writing (storing, true);
-                    storeProperty (child, schema::valueSetByHand, value);
-                }
-            }
+            const juce::ScopedValueSetter<bool> writing (storing, true);
+            setPluginValueOutsideHistory (song, id, ref.parameter, value); // by ID: it holds no element
         }
 
         // A change of its own (the helper tells none it was given), which the next save stores: an unsaved change.
@@ -764,7 +730,7 @@ bool PluginInstances::reload (DeviceID id, Reloaded then)
         const auto own = keptAside ? *entry.ownState : instance.getLastState(); // its newer one, if it gave one since
         const auto fromSong =
             ! entry.reloadedFromSong && entry.reloadedTime.has_value() && now - *entry.reloadedTime < getSoonAfterReload();
-        const auto tried = fromSong ? readPluginState (device) : own;
+        const auto tried = fromSong ? getPluginState (device) : own;
         instance.setStateInformation (tried.getData(), (int) tried.getSize());
 
         auto opening = std::make_shared<Opening>();
@@ -775,9 +741,9 @@ bool PluginInstances::reload (DeviceID id, Reloaded then)
         opening->tried = tried;
         opening->songProgram = readPluginProgram (device);
 
-        for (const auto& child : device)
-            if (child.hasType (schema::VALUE))
-                opening->songValues[child[schema::valueParameter].toString()] = (float) child[schema::valueSetByHand];
+        for (const auto& [parameter, value] : getPluginValues (device))
+            opening->songValues[parameter] = value;
+
         const auto what = PluginHost::describeReopening (instance, tried);
         opening->sampleRate = what.sampleRate;
         opening->program = what.program; // the program it reloads at
@@ -889,10 +855,12 @@ void PluginInstances::takeAnswers()
 
         // Another instance plays the device now (an undo brought it back): the old one's answer is written and given to it
         // only while it is as it opened, from what its element still holds; one changed since keeps its own (known bug 166:
-        // the old answer overwrote what was set in the new one).
+        // the old answer overwrote what was set in the new one). Whether the song's device is the one the answer is for is
+        // the element's identity (the element held for it, the song's again after an Undo of its removal, not one a version
+        // brought in under its ID) until the store's switch, which has no element to tell them by.
         const auto isTheSongs = now != nullptr && waiting.device == findDeviceState (song, waiting.id);
 
-        if (now == nullptr || (isTheSongs && ! now->hasChangedSinceOpened() && readPluginState (waiting.device) == now->getLastState()))
+        if (now == nullptr || (isTheSongs && ! now->hasChangedSinceOpened() && getPluginState (waiting.device) == now->getLastState()))
         {
             write (waiting.id, waiting.device, *waiting.instance);
 
@@ -910,67 +878,58 @@ void PluginInstances::takeAnswers()
     }
 }
 
-void PluginInstances::write (DeviceID id, juce::ValueTree device, SandboxedInstance& instance)
+void PluginInstances::write (DeviceID id, const juce::ValueTree& device, SandboxedInstance& instance)
 {
     if (! device.isValid())
         return;
 
     const juce::ScopedValueSetter<bool> writing (storing, true);
+    StoredPlugin stored;
 
     // Its settings, as it last gave them, or as it last had them, if its helper went or didn't give them in time: then the
-    // song keeps what it holds rather than nothing. And its program.
+    // song keeps what it holds rather than nothing (none taken away but for a state of its own now). And its program.
     const auto& block = instance.getLastState();
-    const auto isNow = ! instance.isStateOlder();
 
-    if (block.getSize() > 0)
-        storeProperty (device, schema::pluginState, writeBytes (block));
-    else if (isNow)
-        device.removeProperty (schema::pluginState, nullptr);
+    if (block.getSize() > 0 || ! instance.isStateOlder())
+        stored.state = &block; // the instance's, for this call alone
 
     // How far it holds the changes the plug-in said it made: the versions count those after as still to commit (known bug
     // 166), as its answer, written in later, then shows.
     song.setDeviceChangesHeld (id.getRaw(), countReportsHeld (id, instance));
 
     // With it, the plug-in's ID in its format (a VST3's class ID, from its preset file), and the version of the plug-in that
-    // made it, which the versions name when it changes.
-    if (const auto classID = sandbox::readVst3ClassID (block); classID.isNotEmpty())
-        storeProperty (device, schema::pluginFormatID, classID);
+    // made it, which the versions name when it changes (each where there is one).
+    stored.formatID = sandbox::readVst3ClassID (block);
 
-    if (const auto known = findKnownPlugin (host, getPluginIdentity (device)); known.has_value() && known->version.isNotEmpty())
-        storeProperty (device, schema::pluginVersion, known->version);
+    if (const auto known = findKnownPlugin (host, getPluginIdentity (device)); known.has_value())
+        stored.version = known->version;
 
-    if (instance.getNumPrograms() > 1)
-        storeProperty (device, schema::pluginProgram, instance.getCurrentProgram());
-    else
-        device.removeProperty (schema::pluginProgram, nullptr);
+    stored.program = instance.getNumPrograms() > 1 ? instance.getCurrentProgram() : -1;
 
     // Its values set by hand that automation or modulation moves, which its settings don't hold as set by hand (the engine
     // plays the moved ones): each a VALUE, as the song keeps them. Those set by Phazite's controls are there already.
     auto* session = findSession (song);
-    const auto* node = session != nullptr ? session->getPlayer().findDevice ((std::int64_t) id.getRaw()) : nullptr;
 
-    if (node == nullptr)
-        return;
-
-    const auto& infos = instance.getParameterInfos();
-
-    for (size_t i = 0; i < infos.size(); ++i)
+    if (const auto* node = session != nullptr ? session->getPlayer().findDevice ((std::int64_t) id.getRaw()) : nullptr)
     {
-        const ParameterRef ref { id, infos[i].id };
+        const auto& infos = instance.getParameterInfos();
 
-        if (! session->getPlayer().isMoved (ref))
-            continue;
-
-        auto value = device.getChildWithProperty (schema::valueParameter, infos[i].id);
-
-        if (! value.isValid())
+        for (size_t i = 0; i < infos.size(); ++i)
         {
-            value = juce::ValueTree (schema::VALUE, { { schema::valueParameter, infos[i].id } });
-            device.appendChild (value, nullptr);
-        }
+            const ParameterRef ref { id, infos[i].id };
 
-        storeProperty (value, schema::valueSetByHand, node->getValue ((int) i));
+            if (session->getPlayer().isMoved (ref))
+                stored.values.push_back ({ .parameter = infos[i].id, .value = node->getValue ((int) i) });
+        }
     }
+
+    // Into the song's device, its element found by the caller (DeviceStore.h); for a device a step took out of the song
+    // meanwhile (an answer that came after it went), into its element held for the answer (Answering), which an Undo of the
+    // step brings back, until the store's switch writes such an answer by the device's ID into the store.
+    if (device.isAChildOf (song.getState()))
+        storePluginOutsideHistory (device, stored);
+    else
+        storePluginIntoHeld (device, stored);
 }
 
 void PluginInstances::storeTrack (TrackID track)
@@ -1020,7 +979,8 @@ void PluginInstances::changeListenerCallback (juce::ChangeBroadcaster*)
 void PluginInstances::takeFromSong (const juce::ValueTree& device, const juce::Identifier& property)
 {
     // A preset loaded into it, or an undo of one: its program, then its settings, whichever of them changed, so that the
-    // settings are never overridden by a program set after them (an undo takes back the settings first).
+    // settings are never overridden by a program set after them (an undo takes back the settings first). Both read from the
+    // element the callback names (DeviceStore.h).
     const auto found = entries.find (getDeviceID (device));
 
     if (found == entries.end() || found->second.instance == nullptr
@@ -1029,11 +989,10 @@ void PluginInstances::takeFromSong (const juce::ValueTree& device, const juce::I
 
     auto& instance = *found->second.instance;
 
-    if (device.hasProperty (schema::pluginProgram))
-        if (const auto wanted = (int) device[schema::pluginProgram]; wanted != instance.getCurrentProgram())
-            instance.setCurrentProgram (wanted);
+    if (const auto wanted = getPluginProgram (device); wanted.has_value() && *wanted != instance.getCurrentProgram())
+        instance.setCurrentProgram (*wanted);
 
-    const auto block = readPluginState (device);
+    const auto block = getPluginState (device);
     instance.setStateInformation (block.getData(), (int) block.getSize());
     lookSoon();
 }
@@ -1046,14 +1005,16 @@ void PluginInstances::giveSongState (DeviceID id)
 
 void PluginInstances::takeValueFromSong (const juce::ValueTree& value)
 {
-    const auto device = value.getParent();
-    const auto found = entries.find (getDeviceID (device));
+    // The value of the VALUE element the callback names (DeviceStore.h).
+    const auto found = entries.find (getDeviceID (value.getParent()));
 
     if (found == entries.end() || found->second.instance == nullptr)
         return;
 
-    if (const auto index = found->second.instance->findParameter (value[schema::valueParameter].toString()); index >= 0)
-        found->second.instance->setParameterValue (index, (float) value[schema::valueSetByHand]);
+    const auto set = readPluginValue (value);
+
+    if (const auto index = found->second.instance->findParameter (set.parameter); index >= 0)
+        found->second.instance->setParameterValue (index, set.value);
 
     lookSoon();
 }

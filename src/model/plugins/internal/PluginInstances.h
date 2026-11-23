@@ -195,7 +195,7 @@ private:
     void setUp (SandboxedInstance&, const juce::ValueTree& deviceState, const juce::MemoryBlock& openedFrom, int openedProgram);
     void listen (DeviceID, SandboxedInstance&);
     void store (const std::vector<DeviceID>&);
-    void write (DeviceID, juce::ValueTree device, SandboxedInstance&); // what it keeps, as it last gave it, into its element
+    void write (DeviceID, const juce::ValueTree& device, SandboxedInstance&); // what it keeps, as it last gave it, into the song
     void timerCallback() override;
     void lookSoon(); // the timer started, unless it runs
 
@@ -206,8 +206,11 @@ private:
     void pruneReports (DeviceID, const SandboxedInstance&);
     int countReportsHeld (DeviceID, const SandboxedInstance&);
 
-    // The answers a store asked for, still to come: for a device, to be written into its element (which an undo may bring
-    // back, if it goes meanwhile), from its instance (kept until then).
+    // The answers a store asked for, still to come: for a device, to be written into the song's element of it, held here
+    // (DeviceStore.h), which, if it goes meanwhile, an undo may bring back; from its instance (kept until then). The element
+    // is held, and tells the song's device from another of its ID, until the store's switch, which writes an answer for a
+    // device gone by its ID into the store, where the Undo finds it, and tells the devices by the identity of the store's
+    // state entry as it was when the answer was asked for (model/base/internal/DeviceStoreValue.h: for the store's switch).
     struct Answering
     {
         DeviceID id;

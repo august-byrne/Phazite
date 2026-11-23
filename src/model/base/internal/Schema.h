@@ -601,7 +601,7 @@ inline const IdentifierList& getGridProperties()
     return list;
 }
 
-// Written without the undo manager (model/mixer/internal/Mixer.h: rememberWindowPosition()).
+// Written without the undo manager (model/plugins/internal/DeviceStore.h: setWindowPlace()).
 inline const IdentifierList& getDeviceViewProperties()
 {
     static const IdentifierList list = findProperties (DEVICE, Kind::view);

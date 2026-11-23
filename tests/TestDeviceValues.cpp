@@ -9,6 +9,7 @@
 #include "model/mixer/DeviceType.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/plugins/internal/DeviceStore.h"
 
 namespace phazite::test
 {
@@ -173,7 +174,8 @@ void storePluginState (Song& song, DeviceID id, const juce::String& base64)
 
 void setPluginStateInStep (Song& song, DeviceID id, const juce::MemoryBlock& state)
 {
-    findDeviceToWrite (song, id).setProperty (schema::pluginState, writeBytes (state), &song.getUndoManager());
+    REQUIRE (state.getSize() > 0); // the model's takes an empty state away
+    phazite::setPluginStateInStep (song, id, state);
 }
 
 void writeDeviceSoundByHand (Song& song, DeviceID id, const juce::Identifier& property, const juce::String& value)

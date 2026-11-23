@@ -204,11 +204,8 @@ bool isDeviceOn (const Song&, DeviceID);
 // One of a device's files or tables (Schema.h: SOUNDS; empty for none), in the caller's undo step.
 void setDeviceSound (Song&, DeviceID, const juce::Identifier& property, const juce::String& value);
 
-// Where a device's own window was last (docs/design.md, section 9): view state in the song's element of the device
-// (Schema.h: deviceWindowX, deviceWindowY), written without an undo step, which the project saves, so that the window
-// opens there again.
-void rememberWindowPosition (Song&, DeviceID, juce::Point<int> topLeft);
-std::optional<juce::Point<int>> getWindowPosition (const Song&, DeviceID);
+// (Where a device's own window was last, view state the project saves so that the window opens there again (docs/design.md,
+// section 9), is in the store's block: model/plugins/internal/DeviceStore.h, getWindowPlace() and setWindowPlace().)
 
 // An effect's mix: how much of what it puts out is its effect, from 0 (only the sound that comes into it, "dry") to 1
 // (only the effect, "wet"), as FL Studio's mixer slots and REAPER's effect chains have for every effect: one of Phazite's

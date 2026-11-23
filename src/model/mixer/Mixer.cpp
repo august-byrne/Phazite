@@ -136,7 +136,7 @@ namespace
     }
 
     // Sets a property without an undo step, only if its value is another (as a store of a plug-in's state does:
-    // model/plugins/internal/PluginInstances.h). JUCE workaround W8 (docs/juce-workarounds.md).
+    // model/plugins/internal/DeviceStore.h). JUCE workaround W8 (docs/juce-workarounds.md).
     void store (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value)
     {
         if (const auto* stored = state.getPropertyPointer (property); stored == nullptr || *stored != value)
@@ -725,23 +725,6 @@ void setDeviceSound (Song& song, DeviceID id, const juce::Identifier& property, 
         else if (auto sounds = state.getChildWithName (schema::SOUNDS); sounds.isValid())
             sounds.removeProperty (property, getUndo (song));
     }
-}
-
-void rememberWindowPosition (Song& song, DeviceID id, juce::Point<int> topLeft)
-{
-    if (auto state = findDeviceState (song, id); state.isValid())
-    {
-        store (state, schema::deviceWindowX, topLeft.x);
-        store (state, schema::deviceWindowY, topLeft.y);
-    }
-}
-
-std::optional<juce::Point<int>> getWindowPosition (const Song& song, DeviceID id)
-{
-    if (const auto state = findDeviceState (song, id); state.hasProperty (schema::deviceWindowX))
-        return juce::Point<int> ((int) state[schema::deviceWindowX], (int) state[schema::deviceWindowY]);
-
-    return std::nullopt;
 }
 
 bool hasMix (const Song& song, DeviceID id)

@@ -80,7 +80,8 @@ juce::String getDeviceTypeOf (const Song&, DeviceID);
 void storePluginState (Song&, DeviceID, const juce::MemoryBlock&);
 void storePluginState (Song&, DeviceID, const juce::String& base64);
 
-// A plug-in's state given by the song in the caller's undo step, as a preset loaded into it gives one (Presets.h).
+// A plug-in's state of some bytes given by the song in the caller's undo step, as a preset loaded into it gives one
+// (Presets.h), through the model's (model/plugins/internal/DeviceStore.h).
 void setPluginStateInStep (Song&, DeviceID, const juce::MemoryBlock&);
 
 // One of a device's sounds (Schema.h: SOUNDS) written outside the history, as a sound file gone since the song took it.

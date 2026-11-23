@@ -27,6 +27,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/ProjectContext.h"
 

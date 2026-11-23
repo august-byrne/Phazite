@@ -22,6 +22,7 @@
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -221,7 +222,7 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     phazite::movePlayhead (*song, phazite::BeatPosition::fromBeats (2.0));
     phazite::setSavedTrackHeight (*song, track, 120);
     CHECK (hear() == "view");
-    phazite::rememberWindowPosition (*song, delay, { 200, 120 });
+    phazite::setWindowPlace (*song, delay, { .x = 200, .y = 120 });
     CHECK (hear().empty());
 
     // Nor is a parameter's value, which a knob's drag sets at each move: controls read it as they show it. A device

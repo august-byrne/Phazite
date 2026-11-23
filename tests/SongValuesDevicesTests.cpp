@@ -47,6 +47,7 @@
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/playback/internal/SongPlayer.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -736,7 +737,7 @@ TEST_CASE ("Song values' devices: another area's change and what the devices' va
         { "a plug-in's state", [&] { phazite::test::setPluginStateInStep (song, added, juce::MemoryBlock ("abc", 3)); } },
         { "a chain muted", [&] { phazite::setChainMuted (song, chain, true); } },
         { "a chain soloed", [&] { phazite::setChainSoloed (song, chain, true); } },
-        { "a window moved", [&] { phazite::rememberWindowPosition (song, synth, { 100, 120 }); } },
+        { "a window moved", [&] { phazite::setWindowPlace (song, synth, phazite::WindowPlace { .x = 100, .y = 120 }); } },
     };
 
     juce::ignoreUnused (reverb);
@@ -1191,10 +1192,10 @@ TEST_CASE ("Song values' devices: devices on the master, added, turned while pla
     context.removeListener (&view);
 }
 
-TEST_CASE ("Song values' devices: an Undo that brings back a sampler's only sound loads it once, in the plan it makes")
+TEST_CASE ("Song values' devices: an Undo that brings back a sampler's only sound loads it once, though it makes a plan")
 {
-    // Sounds that come or go whole (the first, the last, as the device's SOUNDS did) are loaded by the next plan, which the
-    // change makes, and not at once too (SongPlayer::takeDevice()); one set in place beside others, at once.
+    // A device's first sound and its last make a plan (as the device's SOUNDS coming and going did), and are loaded at once
+    // as every sound set in place is (SongPlayer::takeDevice()): the plan that follows doesn't load them a second time.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     const auto sampler = s.setInstrument (s.firstTrack, dev::Sampler::typeID);
@@ -1211,7 +1212,7 @@ TEST_CASE ("Song values' devices: an Undo that brings back a sampler's only soun
     CHECK (plans.take() == 1);
     CHECK (phazite::SongPlayer::countSoundLoads() - loads == 1);
 
-    // Its Redo takes it away again, as the plan loads it: once.
+    // Its Redo takes it away again: once, at once, and not a second time by the plan that follows.
     const auto again = phazite::SongPlayer::countSoundLoads();
     phazite::redo (song);
     CHECK (plans.take() == 1);
