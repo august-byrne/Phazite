@@ -1459,6 +1459,108 @@ TEST_CASE ("Performance gate: an effect added into a chain, moved within it and 
     CHECK (listened (big) <= listened (small) + few);
 }
 
+TEST_CASE ("Performance gate: a chain duplicated reads its own items whole and none of its channel's others, and allocates as "
+           "much beside a full drum sampler as beside a synth")
+{
+    // duplicateChain() (model/mixer/internal/Containers.h) reads the chain and the devices in it whole, to copy them, and none
+    // of its channel's other items: a full drum sampler (3,329 values, 1,024 sounds) on the same channel, read whole, would
+    // cost thousands of allocations for nothing. On a song alone (no project): a track with an instrument (a synth, or a full
+    // drum sampler) and a container whose chain holds a delay and an equalizer, the chain duplicated as one step. Counted:
+    // the devices read whole (countDevicesReadAsValues()), and what the step allocates.
+    using dev::DrumSampler;
+
+    struct Copy
+    {
+        std::uint64_t readWhole = 0;
+        std::optional<int> allocations {};
+    };
+
+    const auto countFor = [] (bool withSampler)
+    {
+        auto song = phazite::createSong();
+        const auto track = phazite::ensureTracks (*song, 1).front();
+
+        if (withSampler)
+        {
+            phazite::test::OwnValues values;
+
+            for (const auto& info : DrumSampler::info.parameters)
+            {
+                auto value = dev::constrain (info, info.defaultValue
+                                                       + (info.unit == dev::Unit::choice ? 1.0f : 0.25f * (info.maximum - info.minimum)));
+
+                if (phazite::isDefaultValue (info, value))
+                    value = dev::constrain (info, info.defaultValue
+                                                      - (info.unit == dev::Unit::choice ? 1.0f : 0.25f * (info.maximum - info.minimum)));
+
+                values.emplace_back (juce::String (info.id.data(), info.id.size()), value);
+            }
+
+            const auto drums = phazite::test::setOwnInstrument (*song, track, DrumSampler::typeID, values);
+
+            for (int pad = 0; pad < DrumSampler::numPads; ++pad)
+                for (int layer = 0; layer < DrumSampler::numLayers; ++layer)
+                    phazite::test::writeDeviceSoundByHand (*song, drums, phazite::schema::getPadSound (pad, layer), "808 Kick");
+        }
+        else
+        {
+            phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+        }
+
+        phazite::DeviceID container;
+
+        {
+            const phazite::UndoStep step (*song, "Add Container");
+            container = phazite::addContainer (*song, track);
+        }
+
+        REQUIRE (container.isValid());
+        const auto chain = phazite::getChains (*song, container).front();
+        phazite::test::addOwnDeviceToChain (*song, chain, dev::Delay::typeID);
+        phazite::test::addOwnDeviceToChain (*song, chain, dev::Equalizer::typeID);
+
+        const auto duplicate = [&song, chain]
+        {
+            const phazite::UndoStep step (*song, "Duplicate Chain");
+            phazite::duplicateChain (*song, chain);
+        };
+
+        Copy copy;
+        const auto before = phazite::countDevicesReadAsValues();
+        copy.allocations = phazite::test::countAllocations (duplicate);
+
+        if (! copy.allocations.has_value())
+            duplicate();
+
+        copy.readWhole = phazite::countDevicesReadAsValues() - before;
+        REQUIRE (phazite::getChains (*song, container).size() == 2);
+        return copy;
+    };
+
+    const auto beside = countFor (false);
+    const auto besideSampler = countFor (true);
+    MESSAGE ("A chain of two devices duplicated: devices read whole "
+             << beside.readWhole << " beside a synth, " << besideSampler.readWhole << " beside a full drum sampler; allocations "
+             << beside.allocations.value_or (-1) << ", " << besideSampler.allocations.value_or (-1));
+
+    // The chain and its two devices, each read whole once to be copied, and their copies once by what hears the devices change
+    // (model/base/internal/DevicesArea.h), whatever else is on the channel.
+    CHECK (besideSampler.readWhole == beside.readWhole);
+    CHECK (beside.readWhole <= 6);
+
+    if (! beside.allocations.has_value() || ! besideSampler.allocations.has_value())
+        return; // nothing counted on this build
+
+    // Measured 2026-11-23 (MSVC's Debug build): 6 read whole on both; 150 allocations beside a synth, 148 beside the drum
+    // sampler (with the channel read whole, as the copy first did, 11 read whole and 156 beside the synth, 9,599 beside the
+    // sampler, its values and sounds read for nothing). Within a few, which what ran before moves either way.
+    constexpr auto few = 4;
+    CHECK (*besideSampler.allocations <= *beside.allocations + few);
+#if JUCE_WINDOWS
+    CHECK (*beside.allocations <= 160); // 150
+#endif
+}
+
 TEST_CASE ("Performance gate: the unsaved check after devices' knobs turned and turned back reads each tree's devices once, "
            "however many it compares, on 4 tracks and on 40")
 {

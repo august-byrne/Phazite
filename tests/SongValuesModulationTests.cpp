@@ -1011,8 +1011,8 @@ TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a
     CHECK (phazite::getModulationValue (song) == before);
     CHECK (holdsNoElement());
 
-    // (c) A container from a preset of the one there: its eight macros, made as elements with it, taken in as it comes, in its
-    // one step, counted; its Undo and its Redo take them out and back.
+    // (c) A container from a preset of the one there: its eight macros, made as values with it and set by its inserter in its
+    // one step, none taken in by the keeper's safety net; its Undo and its Redo take them out and back.
     const auto preset = phazite::makeDevicePreset (song, container);
     const auto adoptedBefore = values.countModulationAdopted();
     phazite::DeviceID made;
@@ -1026,7 +1026,7 @@ TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a
     REQUIRE (made.isValid());
     const auto madeMacros = phazite::getContainerMacros (song, made);
     REQUIRE (madeMacros.size() == 8);
-    CHECK (values.countModulationAdopted() == adoptedBefore + 8);
+    CHECK (values.countModulationAdopted() == adoptedBefore);
     CHECK (phazite::getModulatorValue (song, madeMacros[0])->value == doctest::Approx (0.25f));
     CHECK (phazite::getModulatorValue (song, madeMacros[0])->place.track == other);
     CHECK (holdsNoElement());

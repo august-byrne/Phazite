@@ -97,31 +97,15 @@ namespace
     }
 
     // Points the sidechains that listen to any of these tracks back at the sound passing through each device, in containers
-    // too. Joins the caller's undo step.
+    // too, each through the devices' setter. Joins the caller's undo step.
     void forgetSidechainsListeningTo (Song& song, const std::set<juce::int64>& going)
     {
         if (going.empty())
             return;
 
-        auto chains = getTrackStates (song);
-        chains.push_back (song.getState().getChildWithName (schema::MASTER));
-
-        const auto forget = [&song, &going] (juce::ValueTree device)
-        {
-            if (going.contains ((juce::int64) device[schema::deviceSidechain]))
-                device.removeProperty (schema::deviceSidechain, &song.getUndoManager());
-        };
-
-        for (const auto& chain : chains)
-        {
-            for (const auto& device : getDeviceStates (chain))
-            {
-                forget (device);
-
-                for (const auto& inside : getDeviceStates (device))
-                    forget (inside);
-            }
-        }
+        for (const auto& device : getSongDeviceOutline (song))
+            if (device.sidechain.isValid() && going.contains ((juce::int64) device.sidechain.getRaw()))
+                setDeviceFields (song, device.id, [] (DeviceValue& value) { value.sidechain = {}; });
     }
 
     // Whether every parameter of a device's is still as it was made, as the song holds its values set by hand, but the one
@@ -155,11 +139,10 @@ namespace
     {
         using devices::Compressor, devices::Multiband;
         const auto state = findDeviceState (song, id);
-        auto* undo = &song.getUndoManager();
-        const auto setValue = [&state, undo] (const devices::DeviceInfo& info, std::string_view parameter, float value)
+        const auto setValue = [&song, &state] (const devices::DeviceInfo& info, std::string_view parameter, float value)
         {
             if (const auto index = devices::findParameter (info, parameter); index >= 0)
-                keepValueSetByHand (state, info.parameters[(size_t) index], value, undo);
+                setDeviceValue (song, state, info.parameters[(size_t) index], value);
         };
 
         if (isCompressor (state))
@@ -217,8 +200,7 @@ namespace
         const auto state = findDeviceState (song, id);
 
         if (readDeviceType (state) == juce::String (Vocoder::typeID))
-            keepValueSetByHand (state, Vocoder::info.parameters[(size_t) Vocoder::carrier], (float) Vocoder::Carrier::track,
-                                &song.getUndoManager());
+            setDeviceValue (song, state, Vocoder::info.parameters[(size_t) Vocoder::carrier], (float) Vocoder::Carrier::track);
     }
 } // namespace
 
@@ -351,12 +333,7 @@ void setSidechainSource (Song& song, DeviceID id, TrackID source)
         return;
 
     const UndoStep step (song, source.isValid() ? "Sidechain from " + getTrackName (song, source) : juce::String ("Turn Sidechain Off"));
-    auto* undo = &song.getUndoManager();
-
-    if (source.isValid())
-        state.setProperty (schema::deviceSidechain, (juce::int64) source.getRaw(), undo);
-    else
-        state.removeProperty (schema::deviceSidechain, undo);
+    setDeviceFields (song, state, [source] (DeviceValue& value) { value.sidechain = source; });
 
     if (source.isValid())
     {
@@ -374,7 +351,7 @@ DeviceID duckUnder (Song& song, TrackID ducked, TrackID key)
         return {};
 
     const UndoStep step (song, "Duck " + getTrackName (song, ducked) + " Under " + getTrackName (song, key));
-    const auto compressor = insertDeviceState (song, ducked, makeOwnDeviceState (song, devices::Compressor::typeID));
+    const auto compressor = insertDevice (song, ducked, makeOwnDevice (song, devices::Compressor::typeID));
 
     if (compressor.isValid())
         setSidechainSource (song, compressor, key);
@@ -405,19 +382,14 @@ void forgetSidechainsOfBus (Song& song, TrackID bus)
 void forgetSidechainLoops (Song& song)
 {
     // One at a time, so that of two devices listening to each other's tracks only the first lets go: the other's is no loop
-    // then. A device in a container has no sidechain (Containers.h).
-    auto chains = getTrackStates (song);
-    chains.push_back (song.getState().getChildWithName (schema::MASTER));
-
-    for (const auto& chain : chains)
+    // then. A device in a container has no sidechain (Containers.h), nor does the master's listen to a loop.
+    for (const auto& device : getSongDeviceOutline (song))
     {
-        for (auto device : getDeviceStates (chain))
-        {
-            const auto source = TrackID::fromRaw ((std::uint64_t) (juce::int64) device[schema::deviceSidechain]);
+        if (! device.sidechain.isValid() || device.container.isValid() || ! findTrackState (song, device.channel).hasType (schema::TRACK))
+            continue;
 
-            if (source.isValid() && chain.hasType (schema::TRACK) && contains (getTracksFedBy (song, getTrackID (chain)), source))
-                device.removeProperty (schema::deviceSidechain, &song.getUndoManager());
-        }
+        if (contains (getTracksFedBy (song, device.channel), device.sidechain))
+            setDeviceFields (song, device.id, [] (DeviceValue& value) { value.sidechain = {}; });
     }
 }
 } // namespace phazite

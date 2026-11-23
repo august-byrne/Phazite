@@ -48,8 +48,8 @@ struct SongValues::ModulationTeller final : ValueArea<SongModulation>::Listener
 //       element back: given back, their place's track the element's ID then;
 //   (b) a CONTAINER taken out of a channel: its macros remembered with its element and erased; the same element back, on any
 //       channel: given back, their place that channel's;
-//   (c) a TRACK, the MASTER or a CONTAINER that comes into the song with MODULATOR or MACRO elements in it (a container's
-//       maker's: Containers.h, makeContainerState(); a container preset's; a test's): each read as the song holds it
+//   (c) a TRACK, the MASTER or a CONTAINER that comes into the song with MODULATOR or MACRO elements in it (a safety net:
+//       a container's makers make its macros as values, Mixer.h: MadeDevices; a test's): each read as the song holds it
 //       (readHeldModulator()), set, taken out of the tree, and counted (countModulationAdopted());
 //   (d) a MODULATOR or a MACRO added by itself to an owner of the song's: refused in a step (a JUCE assertion: the step can't
 //       take it out again, as its Undo, taking the tree's change back first, would find it gone; JUCE workaround W62

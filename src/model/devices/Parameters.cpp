@@ -442,7 +442,6 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         return;
 
     const auto& ref = parameter.ref;
-    auto* undo = &song.getUndoManager();
     auto state = parameter.state;
     auto told = value;
 
@@ -450,9 +449,13 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
     {
         case ParameterSource::device:
         {
-            told = juce::jlimit (parameter.info->minimum, parameter.info->maximum, value);
+            // As the song holds it: within its range and on its steps (SavedValues.h: keepHeldValue()), through the devices'
+            // setter of one value on the element found (model/mixer/internal/Mixer.h: setDeviceValue()); and so on its steps
+            // to a curve's lone point too, and to what is told of it (since the devices' writers: within its range alone
+            // before).
+            told = devices::constrain (*parameter.info, value);
             moveOnlyPoint (song, ref, told);
-            keepValueSetByHand (state, *parameter.info, told, undo);
+            setDeviceValue (song, state, *parameter.info, told);
             break;
         }
 
@@ -483,9 +486,10 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             setPluginValueSetByHand (song, state, ref.parameter, told, told);
 
             // One set back to the parameter's default goes, as Phazite's own devices keep none at their defaults
-            // (keepValueSetByHand()): the plug-in holds the value then, which its settings hold once the next save stores
-            // them. A change outside the song's history, so that the project saves it; the song's, not the plug-in's own,
-            // which the versions would take its stored settings for a change of (model/base/Song.h).
+            // (model/mixer/internal/Mixer.h: setDeviceValue()): the plug-in holds the value then, which its settings hold
+            // once the next save stores them. A change outside the song's history, so that the project saves it; the
+            // song's, not the plug-in's own, which the versions would take its stored settings for a change of
+            // (model/base/Song.h).
             if (isPluginDefault (song, ref, told))
             {
                 removePluginValueSetByHand (song, state, ref.parameter);
@@ -684,20 +688,8 @@ float getCurrentValue (const Song& song, const ParameterRef& ref, bool withModul
 //==============================================================================
 void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& info, float value, juce::UndoManager* undo)
 {
-    const juce::Identifier parameter (toString (info.id));
-
-    if (! isDefaultValue (info, value))
-    {
-        element.getOrCreateChildWithName (schema::VALUES, undo).setProperty (parameter, toSavedValue (info, value), undo);
-        return;
-    }
-
-    if (auto values = element.getChildWithName (schema::VALUES); values.isValid())
-    {
-        values.removeProperty (parameter, undo);
-
-        if (values.getNumProperties() == 0 && values.getNumChildren() == 0)
-            element.removeChild (values, undo);
-    }
+    // The devices' writer of one value (DevicesValue.h), which leaves VALUES none at its default and none empty, the value as
+    // it is given (not on its steps).
+    writeDeviceValueOf (element, info, isDefaultValue (info, value) ? std::nullopt : std::optional<float> (value), undo);
 }
 } // namespace phazite

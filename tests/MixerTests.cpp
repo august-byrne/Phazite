@@ -293,8 +293,9 @@ TEST_CASE ("The device list offers Phazite's own devices, instruments first, the
             CHECK (type.description.manufacturerName == juce::String ("Phazite"));
 
             // Each makes a device of the song's, of its type.
-            const auto device = phazite::makeDeviceState (*mix.song, type);
-            CHECK (device[schema::deviceType].toString() == type.description.fileOrIdentifier);
+            const auto device = phazite::makeDevice (*mix.song, type);
+            REQUIRE (device.devices.size() == 1);
+            CHECK (device.devices.front().type == type.description.fileOrIdentifier);
         }
         else if (type.description.fileOrIdentifier == phazite::test::TestPlugin::getDescription().fileOrIdentifier)
         {
@@ -388,12 +389,13 @@ TEST_CASE ("A return with an effect comes in one step, named after the effect, w
     const auto second = phazite::test::addReturnWithOwnEffect (song, mix.b, Reverb::typeID);
     CHECK (phazite::getTrackName (song, second) == juce::String ("Reverb 2"));
 
-    auto plugin = phazite::makeDeviceState (song, phazite::makeDeviceType (phazite::test::TestPlugin::getDescription()));
-    plugin.setProperty (schema::deviceMix, 0.5f, nullptr);
-    const auto pluginReturn = phazite::addReturnWithEffect (song, mix.b, plugin);
+    auto plugin = phazite::makeDevice (song, phazite::makeDeviceType (phazite::test::TestPlugin::getDescription()));
+    plugin.devices.front().mix = 0.5f;
+    const auto pluginID = plugin.devices.front().id;
+    const auto pluginReturn = phazite::addReturnWithEffect (song, mix.b, std::move (plugin));
     REQUIRE (pluginReturn.isValid());
     CHECK (phazite::getTrackName (song, pluginReturn) == juce::String ("Test Effect"));
-    CHECK (phazite::getMix (song, phazite::getDeviceID (plugin)) == doctest::Approx (1.0f));
+    CHECK (phazite::getMix (song, pluginID) == doctest::Approx (1.0f));
 
     // Instruments don't go on returns.
     CHECK_FALSE (phazite::addReturnWith (song, mix.a, phazite::test::findOwnDeviceType (Synth::typeID)).isValid());

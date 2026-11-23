@@ -198,8 +198,8 @@ TEST_CASE ("A knob changed on both sides is a clash, this side's value kept, wit
 
 TEST_CASE ("Values set back to their defaults, one on each side, leave a device no values, as it was made")
 {
-    // The song keeps no value at its default, nor values without any (model/devices/internal/Parameters.h:
-    // keepValueSetByHand()), and a merge leaves none either.
+    // The song keeps no value at its default, nor values without any (model/mixer/internal/Mixer.h: setDeviceValue()), and a
+    // merge leaves none either.
     Sides sides;
     const auto device = phazite::test::addOwnDevice (*sides.base, sides.tracks[1], phazite::devices::Synth::typeID);
     const auto defaultOf = [] (std::string_view parameter)

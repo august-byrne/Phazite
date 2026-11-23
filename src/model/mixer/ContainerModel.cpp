@@ -459,7 +459,7 @@ void addEffectToChain (ProjectContext& context, DeviceID chain, const DeviceType
     if (auto* song = findSong (context); song != nullptr && isChain (*song, chain) && ! type.isInstrument)
     {
         const UndoStep step (*song, "Add " + type.name);
-        insertIntoChain (*song, chain, makeDeviceState (*song, type));
+        insertIntoChain (*song, chain, makeDevice (*song, type));
     }
 }
 
@@ -472,7 +472,7 @@ void chooseChainInstrument (ProjectContext& context, DeviceID chain, const Devic
         return;
 
     const UndoStep step (*song, (getChainInstrument (*song, chain).isValid() ? "Replace Instrument with " : "Add ") + type.name);
-    insertIntoChain (*song, chain, makeDeviceState (*song, type));
+    insertIntoChain (*song, chain, makeDevice (*song, type));
 }
 
 void moveEffectToChain (ProjectContext& context, DeviceID device, DeviceID chain, int index)

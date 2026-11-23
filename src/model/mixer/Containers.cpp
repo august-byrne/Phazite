@@ -17,32 +17,23 @@ namespace phazite
 {
 namespace
 {
-    juce::UndoManager* getUndo (Song& song)
-    {
-        return &song.getUndoManager();
-    }
-
     DeviceID getChainID (const juce::ValueTree& chain)
     {
         return readDeviceElementID (chain);
     }
 
-    // A value of a chain's, to a ten-thousandth, none where it is the one it has without (as a channel's: Mixer.cpp).
-    void setChainValue (juce::ValueTree chain, const juce::Identifier& property, float value, float none, juce::UndoManager* undo)
+    // A value of a chain's as the song keeps it: to a ten-thousandth, none (0) where it is that within a ten-thousandth (as
+    // a channel's: Mixer.cpp).
+    float keepChainLevel (float value)
     {
-        if (const auto rounded = std::round ((double) value * 1.0e4) / 1.0e4; std::abs (rounded - (double) none) < 1.0e-4)
-            chain.removeProperty (property, undo);
-        else
-            chain.setProperty (property, rounded, undo);
+        const auto rounded = std::round ((double) value * 1.0e4) / 1.0e4;
+        return std::abs (rounded) < 1.0e-4 ? 0.0f : (float) rounded;
     }
 
-    // A whole number of a chain's, none at its default.
-    void setChainNumber (juce::ValueTree chain, const juce::Identifier& property, int value, int none, juce::UndoManager* undo)
+    // A crossover as the song keeps it: to a hundredth of a hertz.
+    float keepCrossover (double hertz)
     {
-        if (value == none)
-            chain.removeProperty (property, undo);
-        else if ((int) chain.getProperty (property, none) != value)
-            chain.setProperty (property, value, undo);
+        return (float) (std::round (hertz * 100.0) / 100.0);
     }
 
     // The number the next chain is named with: one more than any "Chain" and a number there is, and more than the chains.
@@ -81,30 +72,76 @@ namespace
         return std::any_of (chains.begin(), chains.end(), [] (const juce::ValueTree& chain) { return isChainSoloed (chain); });
     }
 
-    // The channel's element a device of it is on (its TRACK or MASTER), whose devices' states are stored before they move.
-    void storeStatesOf (Song& song, const juce::ValueTree& element)
+    // The track a place's channel is, as the outline and the channels' readers name a channel: a track's ID, none for the
+    // master's.
+    TrackID getChannelOf (const DevicePlace& place)
     {
-        auto channel = element;
-
-        while (channel.isValid() && ! channel.hasType (schema::TRACK) && ! channel.hasType (schema::MASTER))
-            channel = channel.getParent();
-
-        song.storeDeviceStates (channel.hasType (schema::TRACK) ? getTrackID (channel).getRaw() : 0);
+        return place.onMaster ? TrackID() : place.track;
     }
 
-    // Takes devices' elements off where they are into a chain, in their order (with what they hold of their states, which an
-    // undo brings back): a sidechain that listened to another track off, as a device in a container hears what passes
-    // through it.
-    void moveInto (Song& song, juce::ValueTree chain, const std::vector<juce::ValueTree>& devices)
+    // The place of the list a container's chain holds its devices in, and of a container's chains.
+    DevicePlace inChain (const DevicePlace& chainPlace, DeviceID chain)
     {
-        auto* undo = getUndo (song);
+        return { .track = chainPlace.track, .onMaster = chainPlace.onMaster, .container = chainPlace.container, .chain = chain };
+    }
 
-        for (auto state : devices)
-        {
-            state.removeProperty (schema::deviceSidechain, undo);
-            state.getParent().removeChild (state, undo);
-            chain.appendChild (state, undo);
-        }
+    DevicePlace inContainer (const DevicePlace& containerPlace, DeviceID container)
+    {
+        return { .track = containerPlace.track, .onMaster = containerPlace.onMaster, .container = container };
+    }
+
+    // A chain's devices among its channel's outline (getDeviceOutline(): no walk of the song): each one's ID and whether it
+    // is an instrument, in their order.
+    std::vector<DeviceOutline> getChainOutline (const std::vector<DeviceOutline>& outline, DeviceID chain)
+    {
+        std::vector<DeviceOutline> devices;
+
+        for (const auto& each : outline)
+            if (each.chain == chain)
+                devices.push_back (each);
+
+        return devices;
+    }
+
+    // A chain and the devices in it read whole from its element (no walk), the chain first, then its devices in their order:
+    // what a copy of it is made from (duplicateChain()), none of its channel's other items read.
+    std::vector<DeviceValue> readChainWhole (const juce::ValueTree& chain)
+    {
+        std::vector<DeviceValue> values;
+
+        if (auto value = readDeviceValue (chain, readDevicePlace (chain)))
+            values.push_back (std::move (*value));
+
+        for (const auto& device : getDeviceStates (chain))
+            if (auto value = readDeviceValue (device, readDevicePlace (device)))
+                values.push_back (std::move (*value));
+
+        return values;
+    }
+
+    // Where an effect goes in a chain at a place among its devices (-1 for the end): never before the chain's instrument.
+    int findEffectIndex (const std::vector<DeviceOutline>& devices, int index)
+    {
+        const auto first = ! devices.empty() && devices.front().instrument ? 1 : 0;
+        return juce::isPositiveAndBelow (index, (int) devices.size()) ? std::max (index, first) : -1;
+    }
+
+    // Devices moved off where they are into a chain, after its devices, in their order, each the same element (with what it
+    // holds of its state, which an undo brings back): a sidechain that listened to another track off, as a device in a
+    // container hears what passes through it.
+    void moveInto (Song& song, const DevicePlace& from, const std::vector<DeviceID>& devices, const DevicePlace& chain)
+    {
+        moveDevices (song, devices, from, chain, -1, [] (DeviceValue& value) { value.sidechain = {}; });
+    }
+
+    // A made container's chain, the one it is made with.
+    DeviceID getMadeChain (const MadeDevices& made)
+    {
+        for (const auto& each : made.devices)
+            if (each.form == DeviceValue::Form::chain)
+                return each.id;
+
+        return {};
     }
 } // namespace
 
@@ -228,12 +265,16 @@ DeviceID addChain (Song& song, DeviceID container)
     if (! canAddChain (song, container))
         return {};
 
-    auto state = findDeviceState (song, container);
-    auto chain = makeChainState (song, getNextChainNumber (state));
-    const auto chains = getChainStates (state);
-    state.addChild (chain, state.indexOf (chains.back()) + 1, getUndo (song));
+    // After the container's chains, in the step.
+    const auto state = findDeviceState (song, container);
+    auto chain = makeChain (song, getNextChainNumber (state));
+    chain.place = inContainer (readDevicePlace (state), container);
+    const auto id = chain.id;
+    MadeDevices made;
+    made.devices.push_back (std::move (chain));
+    setNewDevices (song, made);
     keepCrossoversInOrder (song, container);
-    return getChainID (chain);
+    return id;
 }
 
 bool canRemoveChain (const Song& song, DeviceID chain)
@@ -248,39 +289,75 @@ void removeChain (Song& song, DeviceID chain)
         return;
 
     // What its plug-ins keep of their own stored first, so that an undo brings them back as they were.
-    auto state = findContainerChain (song, chain);
-    auto container = state.getParent();
-    storeStatesOf (song, container);
-    container.removeChild (state, getUndo (song));
+    const auto place = findChainPlace (song, chain);
+
+    if (! place.has_value())
+        return;
+
+    song.storeDeviceStates (getChannelOf (*place).getRaw());
+    eraseDevice (song, chain, *place);
     forgetWhatNamesTheGone (song); // what modulated the chain or its devices
 
     // One chain left is heard: its mute or its solo would be the container's own switch. Switched off in this step, though a
     // switch alone is none, so that undoing it brings the switches back with the chain.
-    if (const auto left = getChainStates (container); left.size() == 1)
+    if (const auto left = getChains (song, place->container); left.size() == 1)
         clearChainSwitchesInStep (song, left.front());
 }
 
 DeviceID duplicateChain (Song& song, DeviceID chain)
 {
-    const auto state = findContainerChain (song, chain);
-    const auto container = getOwningContainer (state);
+    // Found once (a walk), its place read from its element.
+    const auto element = findContainerChain (song, chain);
+    const auto place = element.isValid() ? std::optional (readDevicePlace (element)) : std::nullopt;
 
-    if (! state.isValid() || ! canAddChain (song, getDeviceID (container)))
+    if (! place.has_value() || ! canAddChain (song, place->container))
         return {};
 
-    // A copy of its element, with what its plug-ins keep of their own, every item in it given a new ID, and its parameters'
-    // automation and modulation copied, as a copy of a track keeps both; on a container split into bands, its band between
-    // its original's and the next.
-    storeStatesOf (song, container);
-    auto copy = state.createCopy();
-    const auto copied = giveNewIDs (song, copy);
-    copy.removeProperty (schema::chainCrossover, nullptr);
-    auto parent = container;
-    parent.addChild (copy, parent.indexOf (state) + 1, getUndo (song));
+    // A copy of it, with what its plug-ins keep of their own (stored first), every item in it given a new ID in the order a
+    // copy of its element was given them (Schema.h: giveNewIDs()), its chain's first, and its parameters' automation and
+    // modulation copied, as a copy of a track keeps both; on a container split into bands, its band between its original's
+    // and the next. Its own items alone read whole (the chain and its devices), none of its channel's others.
+    const auto channel = getChannelOf (*place);
+    song.storeDeviceStates (channel.getRaw());
+    const auto values = readChainWhole (element);
+
+    if (values.empty() || values.front().id != chain)
+        return {};
+
+    CopiedIDs copied;
+    MadeDevices made;
+    auto copy = values.front();
+    copy.id = DeviceID::fromRaw (song.makeID());
+    copy.crossover = std::nullopt;
+    copied[chain.getRaw()] = copy.id.getRaw();
+    made.devices.push_back (copy);
+
+    for (size_t i = 1; i < values.size(); ++i)
+    {
+        auto device = values[i];
+        device.id = DeviceID::fromRaw (song.makeID());
+        device.place = inChain (*place, copy.id);
+        copied[values[i].id.getRaw()] = device.id.getRaw();
+        made.devices.push_back (std::move (device));
+    }
+
+    // After its original among its container's chains.
+    const auto chains = getChainStates (element.getParent());
+    const auto index = (int) (std::find (chains.begin(), chains.end(), element) - chains.begin()) + 1;
+
+    const auto held = getChannelStore (song, channel);
+    made.store = renameStore (held.store, copied);
+    setNewDevices (song, made, index);
+
+    // Its devices' windows' places, view state outside the history, as a copy of its element carried them.
+    for (const auto& [id, window] : held.windows)
+        if (const auto found = copied.find (id.getRaw()); found != copied.end())
+            setWindowPlace (song, DeviceID::fromRaw (found->second), window);
+
     copyCurves (song, copied);
     copyModulations (song, copied); // the container's macros and the track's modulators move the copy's devices too
-    keepCrossoversInOrder (song, getDeviceID (container));
-    return getChainID (copy);
+    keepCrossoversInOrder (song, place->container);
+    return copy.id;
 }
 
 bool canMoveChains (const Song& song, DeviceID container)
@@ -291,16 +368,9 @@ bool canMoveChains (const Song& song, DeviceID container)
 
 void moveChain (Song& song, DeviceID chain, int newIndex)
 {
-    auto state = findContainerChain (song, chain);
-    auto container = state.getParent();
-
-    if (! state.isValid() || ! canMoveChains (song, getDeviceID (container)))
-        return;
-
     // To the place of the chain that is there now: after it when moving down, before it when moving up.
-    const auto chains = getChainStates (container);
-    const auto& target = chains[(size_t) juce::jlimit (0, (int) chains.size() - 1, newIndex)];
-    container.moveChild (container.indexOf (state), container.indexOf (target), getUndo (song));
+    if (const auto place = findChainPlace (song, chain); place.has_value() && canMoveChains (song, place->container))
+        moveInDeviceList (song, chain, newIndex, ListMove::chains);
 }
 
 juce::String getChainName (const Song& song, DeviceID chain)
@@ -310,8 +380,8 @@ juce::String getChainName (const Song& song, DeviceID chain)
 
 void setChainName (Song& song, DeviceID chain, const juce::String& name)
 {
-    if (auto state = findContainerChain (song, chain); state.isValid() && name.trim().isNotEmpty())
-        state.setProperty (schema::chainName, name.trim(), getUndo (song));
+    if (const auto trimmed = name.trim(); trimmed.isNotEmpty())
+        setChainFields (song, chain, [&trimmed] (DeviceValue& value) { value.name = trimmed; });
 }
 
 bool isChainHeard (const Song& song, DeviceID chain)
@@ -342,14 +412,14 @@ float getChainPan (const Song& song, DeviceID chain)
 
 void setChainVolume (Song& song, DeviceID chain, float decibels)
 {
-    if (auto state = findContainerChain (song, chain); state.isValid())
-        setChainValue (state, schema::channelVolume, keepVolumeInRange (decibels), 0.0f, getUndo (song));
+    const auto volume = keepChainLevel (keepVolumeInRange (decibels));
+    setChainFields (song, chain, [volume] (DeviceValue& value) { value.volume = volume; });
 }
 
 void setChainPan (Song& song, DeviceID chain, float pan)
 {
-    if (auto state = findContainerChain (song, chain); state.isValid())
-        setChainValue (state, schema::channelPan, std::isfinite (pan) ? juce::jlimit (-1.0f, 1.0f, pan) : 0.0f, 0.0f, getUndo (song));
+    const auto kept = keepChainLevel (std::isfinite (pan) ? juce::jlimit (-1.0f, 1.0f, pan) : 0.0f);
+    setChainFields (song, chain, [kept] (DeviceValue& value) { value.pan = kept; });
 }
 
 //==============================================================================
@@ -374,28 +444,20 @@ void setContainerSplit (Song& song, DeviceID container, ContainerSplit split)
     if (! canSplit (song, container, split) || getContainerSplit (song, container) == split)
         return;
 
-    auto state = findDeviceState (song, container);
-    auto* undo = getUndo (song);
+    const auto state = findDeviceState (song, container);
+    setDeviceFields (song, state, [split] (DeviceValue& value) { value.split = split; });
 
-    switch (split)
+    // The middle and the side, or the left and the right, are two parts: the second's chain is there too, after the others.
+    while ((int) getChainStates (state).size() < getFixedParts (split))
     {
-        case ContainerSplit::layers:
-            state.removeProperty (schema::containerSplit, undo);
-            break;
-        case ContainerSplit::bands:
-            state.setProperty (schema::containerSplit, schema::splitBands, undo);
-            break;
-        case ContainerSplit::midSide:
-            state.setProperty (schema::containerSplit, schema::splitMidSide, undo);
-            break;
-        case ContainerSplit::leftRight:
-            state.setProperty (schema::containerSplit, schema::splitLeftRight, undo);
+        auto chain = makeChain (song, getNextChainNumber (state));
+        chain.place = inContainer (readDevicePlace (state), container);
+        MadeDevices made;
+        made.devices.push_back (std::move (chain));
+
+        if (! setNewDevices (song, made))
             break;
     }
-
-    // The middle and the side, or the left and the right, are two parts: the second's chain is there too.
-    while ((int) getChainStates (state).size() < getFixedParts (split))
-        state.addChild (makeChainState (song, getNextChainNumber (state)), state.indexOf (getChainStates (state).back()) + 1, undo);
 
     keepCrossoversInOrder (song, container);
 }
@@ -439,41 +501,58 @@ float getChainCrossover (const Song& song, DeviceID chain)
 
 void setChainCrossover (Song& song, DeviceID chain, float hertz)
 {
-    if (auto state = findContainerChain (song, chain); state.isValid())
-        state.setProperty (schema::chainCrossover,
-                           std::round ((double) juce::jlimit (lowestCrossover, highestCrossover, hertz) * 100.0) / 100.0, getUndo (song));
+    const auto crossover = keepCrossover ((double) juce::jlimit (lowestCrossover, highestCrossover, hertz));
+    setChainFields (song, chain, [crossover] (DeviceValue& value) { value.crossover = crossover; });
 }
 
 void keepCrossoversInOrder (Song& song, DeviceID container)
 {
-    keepCrossoversInOrder (findDeviceState (song, container), getUndo (song));
-}
+    const auto state = findDeviceState (song, container);
 
-void keepCrossoversInOrder (juce::ValueTree state, juce::UndoManager* undo)
-{
     if (readSplit (state) != ContainerSplit::bands)
         return;
 
+    // Each chain's as its element holds it, put in order, and each that changed written on the element found.
+    const auto chains = getChainStates (state);
+    std::vector<std::optional<float>> crossovers;
+
+    for (const auto& chain : chains)
+        crossovers.push_back (readChainCrossover (chain));
+
+    auto kept = crossovers;
+    keepCrossoversInOrder (kept);
+
+    for (size_t i = 0; i < chains.size(); ++i)
+    {
+        const auto same =
+            kept[i].has_value() == crossovers[i].has_value() && (! kept[i].has_value() || juce::exactlyEqual (*kept[i], *crossovers[i]));
+
+        if (! same)
+            setDeviceFields (song, chains[i], [crossover = kept[i]] (DeviceValue& value) { value.crossover = crossover; });
+    }
+}
+
+void keepCrossoversInOrder (std::vector<std::optional<float>>& crossovers)
+{
     // Each chain's band above the one before it: a chain without a crossover, or with one no higher than the one before it
     // (chains moved while the container was split otherwise keep theirs), gets its place's default if that is between its
     // neighbours', else the middle between them, in octaves.
-    const auto chains = getChainStates (state);
-    const auto count = (int) chains.size();
+    const auto count = (int) crossovers.size();
     auto below = lowestCrossover;
 
     for (int i = 1; i < count; ++i)
     {
-        auto chain = chains[(size_t) i];
+        auto& crossover = crossovers[(size_t) i];
 
-        if (! chain.hasProperty (schema::chainCrossover) || (float) chain[schema::chainCrossover] <= below)
+        if (! crossover.has_value() || *crossover <= below)
         {
             auto above = highestCrossover;
 
             for (int j = i + 1; j < count; ++j)
             {
-                if (chains[(size_t) j].hasProperty (schema::chainCrossover) && (float) chains[(size_t) j][schema::chainCrossover] > below)
+                if (const auto& next = crossovers[(size_t) j]; next.has_value() && *next > below)
                 {
-                    above = (float) chains[(size_t) j][schema::chainCrossover];
+                    above = *next;
                     break;
                 }
             }
@@ -483,10 +562,10 @@ void keepCrossoversInOrder (juce::ValueTree state, juce::UndoManager* undo)
             if (value <= below || value >= above)
                 value = std::sqrt (below * above);
 
-            chain.setProperty (schema::chainCrossover, std::round ((double) value * 100.0) / 100.0, undo);
+            crossover = keepCrossover ((double) value);
         }
 
-        below = (float) chain[schema::chainCrossover];
+        below = *crossover;
     }
 }
 
@@ -502,24 +581,16 @@ NoteRange getChainVelocities (const Song& song, DeviceID chain)
 
 void setChainKeys (Song& song, DeviceID chain, NoteRange keys)
 {
-    if (auto state = findContainerChain (song, chain); state.isValid())
-    {
-        const auto low = juce::jlimit (allKeys.low, allKeys.high, keys.low);
-        const auto high = juce::jlimit (low, allKeys.high, keys.high);
-        setChainNumber (state, schema::chainLowKey, low, allKeys.low, getUndo (song));
-        setChainNumber (state, schema::chainHighKey, high, allKeys.high, getUndo (song));
-    }
+    const auto low = juce::jlimit (allKeys.low, allKeys.high, keys.low);
+    const NoteRange kept { low, juce::jlimit (low, allKeys.high, keys.high) };
+    setChainFields (song, chain, [kept] (DeviceValue& value) { value.keys = kept; });
 }
 
 void setChainVelocities (Song& song, DeviceID chain, NoteRange velocities)
 {
-    if (auto state = findContainerChain (song, chain); state.isValid())
-    {
-        const auto low = juce::jlimit (allVelocities.low, allVelocities.high, velocities.low);
-        const auto high = juce::jlimit (low, allVelocities.high, velocities.high);
-        setChainNumber (state, schema::chainLowVelocity, low, allVelocities.low, getUndo (song));
-        setChainNumber (state, schema::chainHighVelocity, high, allVelocities.high, getUndo (song));
-    }
+    const auto low = juce::jlimit (allVelocities.low, allVelocities.high, velocities.low);
+    const NoteRange kept { low, juce::jlimit (low, allVelocities.high, velocities.high) };
+    setChainFields (song, chain, [kept] (DeviceValue& value) { value.velocities = kept; });
 }
 
 //==============================================================================
@@ -551,47 +622,75 @@ DeviceID groupIntoContainer (Song& song, const std::vector<DeviceID>& devices)
         return {};
 
     // In their order on the channel, in the first one's place: with the instrument, an instrument container in its place.
-    auto channel = findDeviceState (song, devices.front()).getParent();
-    std::vector<juce::ValueTree> grouped;
+    const auto place = findDevicePlace (song, devices.front());
 
-    for (const auto& state : getDeviceStates (channel))
-        if (std::find (devices.begin(), devices.end(), getDeviceID (state)) != devices.end())
-            grouped.push_back (state);
+    if (! place.has_value())
+        return {};
 
-    const auto instrument = isInstrumentState (grouped.front());
-    storeStatesOf (song, channel);
-    auto container = makeContainerState (song, instrument);
-    channel.addChild (container, channel.indexOf (grouped.front()), getUndo (song));
-    moveInto (song, getChainStates (container).front(), grouped);
-    return getDeviceID (container);
+    const auto channel = getChannelOf (*place);
+    std::vector<DeviceID> grouped;
+    auto index = 0, at = -1;
+    auto instrument = false;
+
+    for (const auto& each : getDeviceOutline (song, channel))
+    {
+        if (each.container.isValid())
+            continue;
+
+        if (std::find (devices.begin(), devices.end(), each.id) != devices.end())
+        {
+            if (grouped.empty())
+            {
+                at = index;
+                instrument = each.instrument;
+            }
+
+            grouped.push_back (each.id);
+        }
+
+        ++index;
+    }
+
+    song.storeDeviceStates (channel.getRaw());
+    auto made = makeContainer (song, instrument);
+    const auto chain = getMadeChain (made);
+    const auto container = insertDevice (song, channel, std::move (made), at);
+
+    if (container.isValid())
+        moveInto (song, *place, grouped, inChain (inContainer (*place, container), chain));
+
+    return container;
 }
 
 DeviceID addContainer (Song& song, TrackID channel)
 {
-    return insertDeviceState (song, channel, makeContainerState (song));
+    return insertDevice (song, channel, makeContainer (song));
 }
 
 DeviceID addInstrumentContainer (Song& song, TrackID track)
 {
     // A chain holds devices: an instrument container already the track's would go into the new one's and play nothing.
-    const auto old = findDeviceState (song, getInstrument (song, track));
+    const auto old = getInstrument (song, track);
 
-    if (isContainerState (old))
+    if (old.isValid() && isContainer (song, old))
         return {};
 
-    auto container = makeContainerState (song, true);
+    auto made = makeContainer (song, true);
+    const auto chain = getMadeChain (made);
+    const auto container = insertDevice (song, track, std::move (made));
 
-    if (! insertDeviceState (song, track, container).isValid())
+    if (! container.isValid())
         return {};
 
     // The instrument the track had, first in its chain, the container in its place.
     if (old.isValid())
     {
-        storeStatesOf (song, old);
-        moveInto (song, getChainStates (container).front(), { old });
+        const auto place = getDeviceChannelPlace (song, track);
+        song.storeDeviceStates (track.getRaw());
+        moveInto (song, place, { old }, inChain (inContainer (place, container), chain));
     }
 
-    return getDeviceID (container);
+    return container;
 }
 
 bool canUngroupContainer (const Song& song, DeviceID container)
@@ -604,105 +703,117 @@ void ungroupContainer (Song& song, DeviceID id)
     if (! canUngroupContainer (song, id))
         return;
 
-    // Its devices' elements go back in its place, in their order, and it goes with its chain and its macros and what they
-    // modulated.
-    auto state = findDeviceState (song, id);
-    auto* undo = getUndo (song);
-    auto channel = state.getParent();
-    auto index = channel.indexOf (state);
-    storeStatesOf (song, channel);
+    const auto place = findDevicePlace (song, id);
 
-    for (auto inside : getDeviceStates (state))
+    if (! place.has_value())
+        return;
+
+    // Its chain and its devices, and its place among the channel's, by the channel's outline.
+    const auto channel = getChannelOf (*place);
+    DeviceID chain;
+    std::vector<DeviceID> inside;
+    auto index = 0, at = 0;
+
+    for (const auto& each : getDeviceOutline (song, channel))
     {
-        inside.getParent().removeChild (inside, undo);
-        channel.addChild (inside, index++, undo);
+        if (each.id == id)
+            at = index;
+
+        if (! each.container.isValid())
+            ++index;
+        else if (each.container == id && each.form == DeviceValue::Form::chain)
+            chain = each.id;
+        else if (each.container == id)
+            inside.push_back (each.id);
     }
 
-    channel.removeChild (state, undo);
+    // Its devices go back in its place, in their order, each the same element, and it goes with its chain and its macros and
+    // what they modulated.
+    song.storeDeviceStates (channel.getRaw());
+    moveDevices (song, inside, inChain (inContainer (*place, id), chain), *place, at);
+    eraseDevice (song, id, *place);
     forgetWhatNamesTheGone (song); // what modulated its chain
 }
 
 void setContainerName (Song& song, DeviceID id, const juce::String& name)
 {
-    if (auto state = findDeviceState (song, id); isContainerState (state))
-        state.setProperty (schema::containerName, name, &song.getUndoManager());
+    setDeviceFields (song, id,
+                     [&name] (DeviceValue& value)
+                     {
+                         if (value.form == DeviceValue::Form::container)
+                             value.name = name;
+                     });
 }
 
-namespace
+DeviceID insertIntoChain (Song& song, DeviceID chain, MadeDevices device, int index)
 {
-    // Whether a chain can take a device's element: for insertIntoChain() alone.
-    bool canHoldInChain (const Song& song, DeviceID chain, const juce::ValueTree& device)
-    {
-        const auto container = getOwningContainer (findContainerChain (song, chain));
-        return container.isValid() && device.hasType (schema::DEVICE)
-               && (! isInstrumentState (device) || readContainerInstrument (container));
-    }
-} // namespace
+    const auto place = findChainPlace (song, chain);
 
-DeviceID insertIntoChain (Song& song, DeviceID chain, juce::ValueTree device, int index)
-{
-    if (! canHoldInChain (song, chain, device))
+    if (device.devices.empty() || ! place.has_value())
         return {};
 
-    auto state = findContainerChain (song, chain);
-    auto* undo = getUndo (song);
+    // A device, and an instrument only into an instrument container's chain (the channel's outline says what each is).
+    auto& made = device.devices.front();
+    const auto id = made.id;
+    const auto instrument = made.isInstrument();
+    const auto outline = getDeviceOutline (song, getChannelOf (*place));
+    const auto container =
+        std::find_if (outline.begin(), outline.end(), [&place] (const DeviceOutline& each) { return each.id == place->container; });
+
+    if ((made.form != DeviceValue::Form::own && made.form != DeviceValue::Form::plugin) || container == outline.end()
+        || (instrument && ! container->instrument))
+        return {};
+
+    const auto devices = getChainOutline (outline, chain);
+    made.place = inChain (*place, chain);
 
     // An instrument first, in place of the chain's; an effect where it is put, after the chain's instrument.
-    if (isInstrumentState (device))
+    if (instrument)
     {
-        if (const auto old = getChainInstrument (song, chain); old.isValid())
+        if (! devices.empty() && devices.front().instrument)
         {
-            storeStatesOf (song, state);
-            state.removeChild (findDeviceState (song, old), undo);
+            song.storeDeviceStates (getChannelOf (*place).getRaw());
+            eraseDevice (song, devices.front().id, made.place);
             forgetWhatNamesTheGone (song);
         }
 
-        state.addChild (device, 0, undo);
-        return getDeviceID (device);
+        return setNewDevices (song, device, 0) ? id : DeviceID();
     }
 
-    const auto devices = getDeviceStates (state);
-    const auto first = ! devices.empty() && isInstrumentState (devices.front()) ? 1 : 0;
-    const auto at = juce::isPositiveAndBelow (index, (int) devices.size()) ? std::max (index, first) : (int) devices.size();
-    state.addChild (device, at < (int) devices.size() ? state.indexOf (devices[(size_t) at]) : -1, undo);
-    return getDeviceID (device);
+    return setNewDevices (song, device, findEffectIndex (devices, index)) ? id : DeviceID();
 }
 
 void moveInChain (Song& song, DeviceID device, int newIndex)
 {
-    auto state = findDeviceState (song, device);
-    auto chain = state.getParent();
-
-    if (! isChainState (chain) || isInstrumentState (state))
-        return;
-
     // To the place of the device that is there now: after it when moving later, before it when moving earlier; never
     // before the chain's instrument.
-    const auto devices = getDeviceStates (chain);
-    const auto first = isInstrumentState (devices.front()) ? 1 : 0;
-    const auto& target = devices[(size_t) juce::jlimit (first, (int) devices.size() - 1, newIndex)];
-    chain.moveChild (chain.indexOf (state), chain.indexOf (target), getUndo (song));
+    moveInDeviceList (song, device, newIndex, ListMove::inChain);
 }
 
 DeviceID moveToChain (Song& song, DeviceID device, DeviceID chain, int index)
 {
-    auto state = findDeviceState (song, device);
-    auto from = state.getParent();
-    auto to = findContainerChain (song, chain);
+    const auto from = findDevicePlace (song, device);
+    const auto to = findChainPlace (song, chain);
 
     // An effect, into another chain of its container.
-    if (! isChainState (from) || ! to.isValid() || from.getParent() != to.getParent() || isInstrumentState (state))
+    if (! from.has_value() || ! to.has_value() || ! from->chain.isValid() || from->container != to->container)
         return {};
 
-    if (from == to)
+    const auto outline = getDeviceOutline (song, getChannelOf (*from));
+    const auto moved = std::find_if (outline.begin(), outline.end(), [device] (const DeviceOutline& each) { return each.id == device; });
+
+    if (moved == outline.end() || moved->instrument)
+        return {};
+
+    if (from->chain == chain)
     {
         moveInChain (song, device, index);
         return device;
     }
 
-    storeStatesOf (song, from);
-    from.removeChild (state, getUndo (song));
-    return insertIntoChain (song, chain, state, index);
+    song.storeDeviceStates (getChannelOf (*from).getRaw());
+    moveDevices (song, { device }, *from, inChain (*to, chain), findEffectIndex (getChainOutline (outline, chain), index));
+    return device;
 }
 
 DeviceID getChainInstrument (const Song& song, DeviceID chain)
@@ -711,37 +822,40 @@ DeviceID getChainInstrument (const Song& song, DeviceID chain)
     return ! devices.empty() && isInstrumentState (devices.front()) ? getDeviceID (devices.front()) : DeviceID();
 }
 
-juce::ValueTree makeContainerState (Song& song, bool instrument)
+MadeDevices makeContainer (Song& song, bool instrument)
 {
-    juce::ValueTree container (schema::CONTAINER);
-    container.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
-    container.setProperty (schema::containerName, makeContainerName (song), nullptr);
+    DeviceValue container;
+    container.id = DeviceID::fromRaw (song.makeID());
+    container.form = DeviceValue::Form::container;
+    container.name = makeContainerName (song);
+    container.instrument = instrument;
 
-    if (instrument)
-        container.setProperty (schema::containerInstrument, true, nullptr);
+    auto chain = makeChain (song, 1);
+    chain.place.container = container.id;
 
-    container.appendChild (makeChainState (song, 1), nullptr);
+    MadeDevices made;
+    made.devices.push_back (container);
+    made.devices.push_back (std::move (chain));
 
-    // Its eight macros as MACRO elements of its own, made with it before it is the song's: with a container preset's
-    // (model/presets/Presets.cpp), the one maker of modulation's elements beside modulation's setters
-    // (model/modulation/internal/Modulation.h), until the devices' area (roadmap step S5.20); from modulation's switch, the
-    // keeper of the song's values takes them in as the container comes into the song.
+    // Its eight macros as modulation's values, which its inserter sets right after it is the song's (Mixer.h: insertDevice()).
     for (int number = 1; number <= macrosPerContainer; ++number)
     {
-        juce::ValueTree macro (schema::MACRO);
-        macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
-        macro.setProperty (schema::macroName, "Macro " + juce::String (number), nullptr);
-        container.appendChild (macro, nullptr);
+        ModulatorValue macro;
+        macro.id = ModulatorID::fromRaw (song.makeID());
+        macro.place.container = container.id;
+        macro.name = "Macro " + juce::String (number);
+        made.macros.push_back (std::move (macro));
     }
 
-    return container;
+    return made;
 }
 
-juce::ValueTree makeChainState (Song& song, int number)
+DeviceValue makeChain (Song& song, int number)
 {
-    juce::ValueTree chain (schema::CHAIN);
-    chain.setProperty (schema::chainID, (juce::int64) song.makeID(), nullptr);
-    chain.setProperty (schema::chainName, "Chain " + juce::String (number), nullptr);
+    DeviceValue chain;
+    chain.id = DeviceID::fromRaw (song.makeID());
+    chain.form = DeviceValue::Form::chain;
+    chain.name = "Chain " + juce::String (number);
     return chain;
 }
 

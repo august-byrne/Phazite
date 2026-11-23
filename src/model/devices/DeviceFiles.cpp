@@ -100,23 +100,27 @@ bool isSoundFileToTake (const juce::String& path)
     return getWhySoundNotTaken (path).isEmpty();
 }
 
-void copyDeviceFilesInto (Song& song, juce::ValueTree& state)
+void copyDeviceFilesInto (Song& song, DeviceValue& device)
 {
-    for (const auto& property : getFileProperties (state))
-    {
-        const auto path = state[property].toString();
+    // Each sound of the device's that names a file, in the order of its type's sounds (a copy's name can hang on the one
+    // before it: "Kick 2.wav").
+    const auto& properties = getSoundPropertiesOf (std::string_view (device.type.toRawUTF8()));
 
-        if (path.isEmpty())
+    for (size_t i = 0; i < properties.size(); ++i)
+    {
+        const auto index = (std::uint16_t) i;
+        const auto* sound = device.sounds.find (index);
+
+        if (sound == nullptr || ! schema::isSoundFileProperty (properties[i]))
             continue;
+
+        const auto path = *sound;
 
         // A file that isn't there any more, or that the device can't take: it plays its own sound.
         if (const juce::File file (isSoundFileToTake (path) ? path : juce::String()); file != juce::File())
-            state.setProperty (property, getProjectPath (song, copyIntoProject (song, file)), nullptr);
+            device.sounds = device.sounds.set (index, getProjectPath (song, copyIntoProject (song, file)));
         else
-            state.removeProperty (property, nullptr);
+            device.sounds = device.sounds.erase (index);
     }
-
-    for (auto child : state)
-        copyDeviceFilesInto (song, child);
 }
 } // namespace phazite

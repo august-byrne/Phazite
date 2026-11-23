@@ -7,6 +7,7 @@
 
 #include "devices/core/DeviceInfo.h"
 #include "model/base/Song.h"
+#include "model/base/internal/DevicesValue.h"
 
 #include <vector>
 
@@ -22,10 +23,8 @@ juce::String getProjectPath (const Song&, const juce::File&);
 juce::File findProjectFile (const Song&, const juce::String& path);
 
 // Devices' states as a preset holds them before it is written (model/presets/internal/Presets.h): their files by their full
-// paths, so that another project can copy them in (a preset's file names them from its own folder: PresetModel.h). And the other way, devices' states from a preset made a project's: their files copied
-// into its Audio folder, and those that aren't there any more left out, so that the device plays its own sound (a factory
-// sound, or a factory table). Each goes through a state and everything in it (a container's, a track's), and isn't an
-// undo step: the state isn't in a project.
+// paths, so that another project can copy them in (a preset's file names them from its own folder: PresetModel.h). It goes
+// through a state and everything in it (a container's, a track's), and isn't an undo step: the state isn't in a project.
 void writeDeviceFilePaths (const Song& from, juce::ValueTree& state);
 
 // Whether a path a preset names is a sound file a device can take from it: a full path to a file there, whose name says it
@@ -34,5 +33,9 @@ void writeDeviceFilePaths (const Song& from, juce::ValueTree& state);
 // as words that follow its name ("on a network share", "not found"), or nothing for one that is.
 bool isSoundFileToTake (const juce::String& path);
 juce::String getWhySoundNotTaken (const juce::String& path);
-void copyDeviceFilesInto (Song&, juce::ValueTree& state);
+
+// The other way, one of Phazite's own devices made from a preset (model/presets/Presets.cpp), its value not in the song yet:
+// its sounds' files copied into the project's Audio folder and named by their copies, and those that aren't there any more
+// left out, so that the device plays its own sound (a factory sound, or a factory table).
+void copyDeviceFilesInto (Song&, DeviceValue& device);
 } // namespace phazite

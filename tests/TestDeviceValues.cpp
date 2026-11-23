@@ -48,17 +48,17 @@ namespace
 
 DeviceID tryAddOwnDevice (Song& song, TrackID channel, std::string_view typeID, const OwnValues& values, int index)
 {
-    return insertDeviceState (song, channel, makeOwnDeviceState (song, typeID, values), index);
+    return insertDevice (song, channel, makeOwnDevice (song, typeID, values), index);
 }
 
 DeviceID trySetOwnInstrument (Song& song, TrackID track, std::string_view typeID, const OwnValues& values)
 {
-    return setInstrument (song, track, makeOwnDeviceState (song, typeID, values));
+    return setInstrument (song, track, makeOwnDevice (song, typeID, values));
 }
 
 DeviceID tryAddOwnDeviceToChain (Song& song, DeviceID chain, std::string_view typeID, int index)
 {
-    return insertIntoChain (song, chain, makeOwnDeviceState (song, typeID), index);
+    return insertIntoChain (song, chain, makeOwnDevice (song, typeID), index);
 }
 
 DeviceID addOwnDevice (Song& song, TrackID channel, std::string_view typeID, const OwnValues& values, int index)
@@ -84,7 +84,7 @@ DeviceID addOwnDeviceToChain (Song& song, DeviceID chain, std::string_view typeI
 
 DeviceID addPluginDevice (Song& song, TrackID channel, const juce::PluginDescription& description, int index)
 {
-    const auto id = insertDeviceState (song, channel, makeDeviceState (song, makeDeviceType (description)), index);
+    const auto id = insertDevice (song, channel, makeDevice (song, makeDeviceType (description)), index);
     REQUIRE (id.isValid());
     return id;
 }
@@ -92,9 +92,11 @@ DeviceID addPluginDevice (Song& song, TrackID channel, const juce::PluginDescrip
 DeviceID addPluginDevice (Song& song, TrackID channel, const juce::PluginDescription& description, const juce::MemoryBlock& state,
                           int index)
 {
-    auto device = makeDeviceState (song, makeDeviceType (description));
-    device.setProperty (schema::pluginState, writeBytes (state), nullptr);
-    const auto id = insertDeviceState (song, channel, device, index);
+    auto device = makeDevice (song, makeDeviceType (description));
+    const auto made = device.devices.front().id;
+    device.store.states =
+        device.store.states.set (made.getRaw(), PluginBytes { .bytes = std::make_shared<const juce::MemoryBlock> (state) });
+    const auto id = insertDevice (song, channel, std::move (device), index);
     REQUIRE (id.isValid());
     return id;
 }
@@ -113,7 +115,7 @@ DeviceType findOwnDeviceType (std::string_view typeID)
 
 TrackID addReturnWithOwnEffect (Song& song, TrackID sender, std::string_view typeID)
 {
-    const auto made = addReturnWithEffect (song, sender, makeOwnDeviceState (song, typeID));
+    const auto made = addReturnWithEffect (song, sender, makeOwnDevice (song, typeID));
     REQUIRE (made.isValid());
     return made;
 }

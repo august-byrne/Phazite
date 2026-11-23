@@ -10,9 +10,12 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Selection.h"
 #include "model/mixer/ContainerValues.h"
+#include "model/mixer/internal/Mixer.h"
 
+#include <optional>
 #include <vector>
 
 namespace phazite
@@ -34,11 +37,10 @@ DeviceID findContainerOf (const Song&, DeviceID device);
 // song hasn't; and the container's element a chain's, or a device's in a chain, is in (invalid for any other). For the
 // devices' own code alone, no reader outside it (roadmap step S5.20, the devices' second piece; a reader reads by ID below,
 // each of which reads its fields through the conversion: model/base/internal/DevicesValue.h). Their callers:
-// getChainStates() the containers' code, the parameters' (model/devices/Parameters.cpp) and a preset's makers (on the
-// elements they make); findContainerChain() the mixer's, the containers' and the parameters' code, and the loader
-// (model/project/Project.cpp, keepCurves()) and the tests' helpers; getOwningContainer() the containers' and the sidechains'
-// code. The other functions here that take an element (keepCrossoversInOrder(), insertIntoChain(), makeContainerState(),
-// makeChainState()) are the writers'.
+// getChainStates() the containers' code and the parameters' (model/devices/Parameters.cpp); findContainerChain() the
+// mixer's, the containers' and the parameters' code, the devices' setters (Mixer.h: setChainFields()), the store's, and the
+// loader (model/project/Project.cpp, keepCurves()) and the tests' helpers; getOwningContainer() the containers' and the
+// sidechains' code. None of them writes an element: the devices' setters do (Mixer.h).
 std::vector<juce::ValueTree> getChainStates (const juce::ValueTree& container);
 juce::ValueTree findContainerChain (const Song&, DeviceID chain);
 juce::ValueTree getOwningContainer (const juce::ValueTree& chainOrDevice);
@@ -106,13 +108,13 @@ void setContainerSplit (Song&, DeviceID container, ContainerSplit);
 // chain's from the bottom (0). Its default, by its place among so many chains, spreads the bands as multiband effects do
 // (120 Hz and 2.5 kHz for three). Setting one keeps it within 20 Hz and 20 kHz, in the caller's step. And giving each chain
 // after the first a crossover above the one before it, where it hasn't one, as a container's chains change: the song's, in
-// the caller's step, or an element made for it, through an undo manager or none.
+// the caller's step, or a list of chains' crossovers in their order (none for none: a preset's made container's).
 inline constexpr float lowestCrossover = 20.0f, highestCrossover = 20000.0f;
 float getDefaultCrossover (int chainIndex, int numChains);
 float getChainCrossover (const Song&, DeviceID chain);
 void setChainCrossover (Song&, DeviceID chain, float hertz);
 void keepCrossoversInOrder (Song&, DeviceID container);
-void keepCrossoversInOrder (juce::ValueTree container, juce::UndoManager*);
+void keepCrossoversInOrder (std::vector<std::optional<float>>& crossovers);
 
 // The notes an instrument container's chain plays: its keys (0 to 127) and its velocities (1 to 127), all at first; set in
 // the caller's step, each end kept within its range and the low at most the high.
@@ -149,24 +151,25 @@ void ungroupContainer (Song&, DeviceID container);
 // Renames a container (Schema.h: containerName). Joins the caller's step.
 void setContainerName (Song&, DeviceID container, const juce::String&);
 
-// In a chain: adding a device's element, an effect at a place among its devices (-1 for the end); or an instrument, into an
-// instrument container's chain, first, in place of the instrument it had. A container can't go in, nor an instrument into
-// a container of effects. Moving one to another place in its chain (an instrument stays first), or into another chain of
-// its container at a place among its devices (-1 for the end). Each joins the caller's step, and returns the device, or
-// none. (Removing one is removeDevice() in Mixer.h, as for any device.)
-DeviceID insertIntoChain (Song&, DeviceID chain, juce::ValueTree device, int index = -1);
+// In a chain: adding a device made (Mixer.h: MadeDevices), an effect at a place among its devices (-1 for the end); or an
+// instrument, into an instrument container's chain, first, in place of the instrument it had. A container can't go in, nor an
+// instrument into a container of effects. Moving one to another place in its chain (an instrument stays first), or into
+// another chain of its container at a place among its devices (-1 for the end). Each joins the caller's step, and returns
+// the device, or none. (Removing one is removeDevice() in Mixer.h, as for any device.)
+DeviceID insertIntoChain (Song&, DeviceID chain, MadeDevices device, int index = -1);
 void moveInChain (Song&, DeviceID device, int newIndex);
 DeviceID moveToChain (Song&, DeviceID device, DeviceID chain, int index = -1);
 
 // A chain's instrument, an instrument container's: its first device, if it is one; none for none.
 DeviceID getChainInstrument (const Song&, DeviceID chain);
 
-// A new container's element, in no channel yet: a new ID, its name (makeContainerName()), one chain with nothing in it, and
-// its eight macros, "Macro 1" to "Macro 8", each at 0; an instrument container if asked. A new chain's element, with a new ID
-// and a name, "Chain" and its place among so many. And a new container's name: "Container", or "Container 2" and on while
+// A new container, on no channel yet (Mixer.h: MadeDevices): a new ID, its name (makeContainerName()), one chain with nothing
+// in it, and its eight macros as modulation's values, "Macro 1" to "Macro 8", each at 0, which its inserter sets as it puts it
+// in (Mixer.h: insertDevice()); an instrument container if asked. A new chain's value, with a new ID and a name, "Chain" and
+// its place among so many, on no place yet. And a new container's name: "Container", or "Container 2" and on while
 // the song has one of that name.
-juce::ValueTree makeContainerState (Song&, bool instrument = false);
-juce::ValueTree makeChainState (Song&, int number);
+MadeDevices makeContainer (Song&, bool instrument = false);
+DeviceValue makeChain (Song&, int number);
 juce::String makeContainerName (const Song&);
 
 //==============================================================================

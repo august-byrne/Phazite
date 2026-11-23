@@ -911,6 +911,37 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
             for (const auto* property : { &schema::trackFrozen.getName(), &schema::trackPadDevice.getName(), &schema::trackPad.getName() })
                 state.removeProperty (*property, nullptr);
 
+        // Nor are its devices the copy's elements: the devices' code gives each copied track its original's
+        // (copyDevices()), by the IDs given them above, once the copy is the song's. A track's lanes (view state) that stood
+        // after its devices are put back after them, as the copy of its element held them.
+        std::vector<std::pair<juce::ValueTree, juce::ValueTree>> lanesAfter;
+
+        for (auto state : inside)
+        {
+            auto devicesSeen = false;
+
+            for (auto i = 0; i < state.getNumChildren();)
+            {
+                const auto child = state.getChild (i);
+
+                if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER))
+                {
+                    devicesSeen = true;
+                    state.removeChild (i, nullptr);
+                    continue;
+                }
+
+                if (devicesSeen && child.hasType (schema::LANES))
+                {
+                    lanesAfter.emplace_back (state, child);
+                    state.removeChild (i, nullptr);
+                    continue;
+                }
+
+                ++i;
+            }
+        }
+
         auto parent = original.getParent();
         parent.addChild (copy, parent.indexOf (original) + 1, &song.getUndoManager());
 
@@ -924,9 +955,15 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
             if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
                 copyTrackClips (song, TrackID::fromRaw (found->second), getTrackID (state), copied, true);
 
-        // Its sends, through the sends' code, then its modulators and its containers' macros, through modulation's code, each
-        // with their new IDs among the copied before what names them is copied: a modulation of a send's level names the
-        // send's copy by its ID, and a curve a send's copy or a macro's.
+        // Its devices, through the devices' code, its lanes back after them; then its sends, through the sends' code, then its
+        // modulators and its containers' macros, through modulation's code, each with their new IDs among the copied before
+        // what names them is copied: a modulation of a send's level names the send's copy by its ID, and a curve a send's copy
+        // or a macro's.
+        copyDevices (song, copied);
+
+        for (auto& [state, lanes] : lanesAfter)
+            state.appendChild (lanes, nullptr); // view state, without an undo step
+
         copySends (song, copied);
         copyModulation (song, copied);
         copyCurves (song, copied);

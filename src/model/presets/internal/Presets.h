@@ -7,6 +7,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
+#include "model/mixer/internal/Mixer.h"
 
 namespace phazite
 {
@@ -28,13 +29,14 @@ juce::var makeTrackPreset (Song&, TrackID);
 juce::var readPreset (const juce::File&);
 bool writePreset (const juce::var& preset, const juce::File&);
 
-// A device preset's device or a container preset's container as an element of the song's (with its devices, its macros
-// and what they modulate), with new IDs, on no channel yet: one of Phazite's own devices with its values and its sounds
-// (their files copied into the project), or a plug-in with its own settings and its mix; invalid for a plug-in that the
-// plug-in host doesn't know (not installed here), or for a preset of a track. The files are copied at once, on the calling
+// A device preset's device or a container preset's container as the devices' makers make one (model/mixer/internal/Mixer.h:
+// MadeDevices: with its chains and their devices, its macros and what they modulate), with new IDs, on no channel yet: one of
+// Phazite's own devices with its values and its sounds (their files copied into the project), or a plug-in with its own
+// settings (the store's entries of it) and its mix; none for a plug-in that the plug-in host doesn't know (not installed
+// here), or for a preset of a track. The files are copied at once, on the calling
 // thread (copyIntoProject()): loadPreset() (PresetModel.h) brings them into the project first, in the background, so that
 // this, and the two below, find each copy made without reading.
-juce::ValueTree makeDeviceFromPreset (Song&, const PluginHost&, const juce::var& preset);
+MadeDevices makeDeviceFromPreset (Song&, const PluginHost&, const juce::var& preset);
 
 // What a preset holds, made anew in the song: a device's or a container's on a channel (a track's, or the master's with
 // none) as a dropped device goes (Mixer.h: placeDevice()), and a track's as a new track after another (at the end with

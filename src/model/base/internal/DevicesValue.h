@@ -262,6 +262,31 @@ juce::ValueTree writeDeviceElement (const DeviceValue&);
 // readDeviceValue() reads it and as readHeldDevice() does, and is the element writeDeviceElement() writes of that.
 bool keepDeviceAsHeld (juce::ValueTree element);
 
+// The setters' writes (model/mixer/internal/Mixer.h: setDevice(), setNewDevices() and the narrow setters beside them), while
+// the song's tree is the devices' storage: each makes an element of the song's hold what a value says by what differs,
+// through the undo manager given (the step in progress) or none (the song written outside its history), so that a value
+// equal to what the element holds writes nothing and makes no action. With the readers above, the one place that writes
+// these elements' properties and their VALUES and SOUNDS by name; the store's (a plug-in's state, its VALUE children, a
+// chain's mute and solo), a window's place and what Phazite doesn't know are left as they are.
+//   - writeDeviceFields(): the element's own properties the value covers made those writeDeviceElement() writes of it, each
+//     set where it holds another text (SongText.h: isSameValue()), each the writer leaves out taken away; its values set by
+//     hand and its sounds not looked at. What the wide setter and the narrow setters of a device's own fields (its switch, a
+//     mix, a sidechain, a chain's fader and ranges, a name, a split) all write through, so that they can never disagree.
+//   - writeDeviceValueOf(): one of Phazite's own device's values set by hand, its VALUES' property of the parameter's ID,
+//     written as the song holds it (none: taken away, and VALUES with its last; one: as toSavedValue() writes it, VALUES made
+//     with the first, after the device's other children). The narrow setter of a value and the wide setter both write a
+//     value through it, the value given held by keepHeldValue() (SavedValues.h) first.
+//   - writeDeviceSoundOf(): one of its sounds, its SOUNDS' property: set, or for an empty text taken away, SOUNDS made with
+//     the first and taken away with the last (an empty SOUNDS is none).
+//   - writeDeviceLike(): a whole value, held as `held` was read from the element (readHeldDevice()): its own properties, and
+//     of one of Phazite's own devices each value and each sound that differs between the two (a type changed: every one of
+//     the type's before taken away first). Its place is the setter's.
+// Each returns whether it changed the element.
+bool writeDeviceFields (juce::ValueTree& element, const DeviceValue&, juce::UndoManager*);
+bool writeDeviceValueOf (juce::ValueTree& device, const devices::ParameterInfo&, std::optional<float> held, juce::UndoManager*);
+bool writeDeviceSoundOf (juce::ValueTree& device, const juce::Identifier& property, const juce::String& sound, juce::UndoManager*);
+bool writeDeviceLike (juce::ValueTree& element, const DeviceValue& held, const DeviceValue& next, juce::UndoManager*);
+
 // Every device, container and chain of a song's tree (PHAZITE), read as readDeviceValue() reads one: each TRACK's (in the
 // track list, a folder's before the tracks in it) and the MASTER's, each channel's DEVICEs and CONTAINERs in its element's
 // order, each CONTAINER's CHAINs and each CHAIN's DEVICEs in theirs; of two with one ID (which the loader leaves none of),

@@ -8,6 +8,7 @@
 #include "model/base/WholeFile.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/Devices.h"
@@ -30,6 +31,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -335,9 +337,9 @@ namespace
     }
 
     //==============================================================================
-    // One of Phazite's own devices' element made from a preset: the values it names, each as its parameter allows it (the
-    // others at their defaults), and its sounds, their files copied into the project.
-    juce::ValueTree makeOwnDevice (Song& song, const devices::DeviceInfo& info, const juce::var& saved)
+    // One of Phazite's own devices made from a preset (Mixer.h: MadeDevices): the values it names, each as its parameter allows
+    // it (the others at their defaults), and its sounds, their files copied into the project.
+    MadeDevices makeOwnFromPreset (Song& song, const devices::DeviceInfo& info, const juce::var& saved)
     {
         std::vector<std::pair<juce::String, float>> values;
         const auto named = saved[keys::parameters];
@@ -347,23 +349,22 @@ namespace
                 values.push_back (
                     { parameterID.toString(), devices::constrain (parameter, readSavedValue (parameter, named[parameterID])) });
 
-        auto state = makeOwnDeviceState (song, info.typeID, values);
-        juce::ValueTree sounds (schema::SOUNDS);
+        auto made = phazite::makeOwnDevice (song, info.typeID, values);
+        auto& device = made.devices.front();
+        const auto& properties = getSoundProperties (info);
 
-        for (const auto& property : getSoundProperties (info))
-            if (const auto sound = saved[keys::sounds][property].toString(); sound.isNotEmpty())
-                sounds.setProperty (property, sound, nullptr);
+        for (size_t i = 0; i < properties.size(); ++i)
+            if (const auto sound = saved[keys::sounds][properties[i]].toString(); sound.isNotEmpty())
+                device.sounds = device.sounds.set ((std::uint16_t) i, sound);
 
-        if (sounds.getNumProperties() > 0)
-            state.appendChild (sounds, nullptr);
-
-        copyDeviceFilesInto (song, state);
-        return state;
+        copyDeviceFilesInto (song, device);
+        return made;
     }
 
-    // A plug-in's element made from a preset: which plug-in it is, as scanning found it, what it keeps of its own (its state
-    // and its program, which its instance opens with) and an effect's mix; invalid for one the plug-in host doesn't know.
-    juce::ValueTree makePlugin (Song& song, const PluginHost& host, const juce::var& saved)
+    // A plug-in made from a preset: which plug-in it is, as scanning found it, what it keeps of its own (its state and its
+    // program, which its instance opens with, the store's entries of it) and an effect's mix; none for one the plug-in host
+    // doesn't know.
+    MadeDevices makePluginFromPreset (Song& song, const PluginHost& host, const juce::var& saved)
     {
         const auto description = findKnownPlugin (host, readIdentity (saved[keys::plugin]));
 
@@ -374,61 +375,75 @@ namespace
         type.name = description->name;
         type.description = *description;
         type.isInstrument = description->isInstrument;
-        auto state = makeDeviceState (song, type);
+        auto made = phazite::makeDevice (song, type);
+        auto& plugin = made.devices.front();
+        const auto id = plugin.id.getRaw();
 
         if (const auto settings = saved[keys::state].toString(); settings.isNotEmpty())
-            state.setProperty (schema::pluginState, settings, nullptr);
+            if (auto bytes = readBytes (settings))
+                made.store.states =
+                    made.store.states.set (id, PluginBytes { .bytes = std::make_shared<const juce::MemoryBlock> (std::move (*bytes)) });
 
         if (saved.hasProperty (keys::program))
-            state.setProperty (schema::pluginProgram, (int) saved[keys::program], nullptr);
+            made.store.programs = made.store.programs.set (id, (int) saved[keys::program]);
 
         if (const auto mix = juce::jlimit (0.0f, 1.0f, toFloat (saved.getProperty (keys::mix, 1.0f), 1.0f));
-            ! isInstrumentState (state) && mix < 1.0f)
-            state.setProperty (schema::deviceMix, mix, nullptr);
+            ! plugin.isInstrument() && mix < 1.0f)
+            plugin.mix = mix;
 
-        return state;
+        return made;
     }
 
-    // A device preset's device (Schema.h: DEVICE), one of Phazite's own or a plug-in.
-    juce::ValueTree makeDevice (Song& song, const PluginHost& host, const juce::var& saved)
+    // A device preset's device (Schema.h: DEVICE), one of Phazite's own or a plug-in; none for neither.
+    MadeDevices makeFromPreset (Song& song, const PluginHost& host, const juce::var& saved)
     {
         if (const auto* info = findOwnDevice (saved[keys::type].toString().toStdString()))
-            return makeOwnDevice (song, *info, saved);
+            return makeOwnFromPreset (song, *info, saved);
 
         if (saved[keys::plugin].isObject())
-            return makePlugin (song, host, saved);
+            return makePluginFromPreset (song, host, saved);
 
         return {};
     }
 
-    // Whether a device's element has a parameter a preset names: one of Phazite's own devices' by its description; any for a
+    // What a made device's store holds, added to another's (a container's, made with it).
+    void addStore (DeviceStore& into, const DeviceStore& from)
+    {
+        const auto add = [] (auto& to, const auto& entries)
+        {
+            for (const auto& [key, entry] : entries)
+                to = to.set (key, entry);
+        };
+
+        add (into.pluginValues, from.pluginValues);
+        add (into.states, from.states);
+        add (into.programs, from.programs);
+        add (into.formatIDs, from.formatIDs);
+        add (into.versions, from.versions);
+        add (into.chainMutes, from.chainMutes);
+        add (into.chainSolos, from.chainSolos);
+    }
+
+    // Whether a device made has a parameter a preset names: one of Phazite's own devices' by its description; any for a
     // plug-in, whose instance tells its parameters only once it plays (what names one it hasn't plays nothing).
-    bool hasParameter (const juce::ValueTree& device, const juce::String& parameterID)
+    bool hasParameter (const DeviceValue& device, const juce::String& parameterID)
     {
-        if (const auto* info = findOwnInfo (device))
-            return devices::findParameter (*info, parameterID.toStdString()) >= 0;
+        if (device.form == DeviceValue::Form::own)
+            if (const auto* info = findOwnDevice (std::string_view (device.type.toRawUTF8())))
+                return devices::findParameter (*info, parameterID.toStdString()) >= 0;
 
-        return isPluginState (device) && parameterID.isNotEmpty();
+        return device.isPlugin() && parameterID.isNotEmpty();
     }
 
-    // What a macro of an element not in the song yet modulates, as the song keeps it (Modulation.h: setModulation()).
-    void addModulates (juce::ValueTree macro, const ParameterRef& parameter, float amount)
-    {
-        juce::ValueTree modulates (schema::MODULATES);
-        modulates.setProperty (schema::modulatesDevice, juce::String ((juce::int64) parameter.device.getRaw()), nullptr);
-        modulates.setProperty (schema::modulatesParameter, parameter.parameter, nullptr);
-        modulates.setProperty (schema::modulatesAmount, std::round ((double) juce::jlimit (-1.0f, 1.0f, amount) * 1.0e4) / 1.0e4, nullptr);
-        macro.appendChild (modulates, nullptr);
-    }
-
-    // A container made from a preset (Schema.h: CONTAINER), with its chains and the devices they hold, by their places in the
-    // preset (none for a device that couldn't be made, so that the others keep their places: a plug-in that isn't installed,
-    // or an instrument where none can go: in a container of effects, or after a chain's first device).
+    // A container made from a preset (Schema.h: CONTAINER), with its chains and the devices they hold (Mixer.h: MadeDevices),
+    // and the IDs of its chains and of their devices by their places in the preset (none for a device that couldn't be made,
+    // so that the others keep their places: a plug-in that isn't installed, or an instrument where none can go: in a container
+    // of effects, or after a chain's first device), what modulates them is found by.
     struct MadeContainer
     {
-        juce::ValueTree state;
-        std::vector<DeviceID> chains;
-        std::vector<std::vector<DeviceID>> devices; // each chain's
+        MadeDevices made {};
+        std::vector<DeviceID> chains {};
+        std::vector<std::vector<DeviceID>> devices {}; // each chain's
     };
 
     // What a target names among a made container's chains (locateInChains()): a chain's own parameter, or one of its devices'
@@ -449,110 +464,134 @@ namespace
         return juce::isPositiveAndBelow (device, (int) devices.size()) ? ParameterRef { devices[(size_t) device], id } : ParameterRef();
     }
 
-    // A chain's whole number from a preset, kept in its range, none at its default.
-    void setChainNumber (juce::ValueTree chain, const juce::Identifier& property, const juce::var& saved, NoteRange range, int none)
+    // A chain's whole number from a preset, kept in its range; its range's end for none.
+    int readChainNumber (const juce::var& saved, NoteRange range, int none)
     {
-        if (saved.isVoid())
-            return;
-
-        if (const auto value = juce::jlimit (range.low, range.high, (int) saved); value != none)
-            chain.setProperty (property, value, nullptr);
+        return saved.isVoid() ? none : juce::jlimit (range.low, range.high, (int) saved);
     }
 
-    MadeContainer makeContainer (Song& song, const PluginHost& host, const juce::var& saved)
+    MadeContainer makeContainerFromPreset (Song& song, const PluginHost& host, const juce::var& saved)
     {
         MadeContainer made;
         const auto instrument = (bool) saved[keys::instrument];
-        made.state = juce::ValueTree (schema::CONTAINER);
-        made.state.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
+        DeviceValue container;
+        container.id = DeviceID::fromRaw (song.makeID());
+        container.form = DeviceValue::Form::container;
         const auto name = saved[keys::name].toString();
-        made.state.setProperty (schema::containerName, name.isNotEmpty() ? name : makeContainerName (song), nullptr);
+        container.name = name.isNotEmpty() ? name : makeContainerName (song);
+        container.instrument = instrument;
 
-        if (instrument)
-            made.state.setProperty (schema::containerInstrument, true, nullptr);
-        else if (const auto mix = juce::jlimit (0.0f, 1.0f, toFloat (saved.getProperty (keys::mix, 1.0f), 1.0f)); mix < 1.0f)
-            made.state.setProperty (schema::deviceMix, mix, nullptr);
+        if (const auto mix = juce::jlimit (0.0f, 1.0f, toFloat (saved.getProperty (keys::mix, 1.0f), 1.0f)); ! instrument && mix < 1.0f)
+            container.mix = mix;
 
-        // Its chains, one at least, as many as a container holds.
+        // Its split, one a container of effects can have: the middle and side, or the left and right, of two chains.
         const auto* chainPresets = saved[keys::chains].getArray();
         const auto numChains = juce::jlimit (1, maximumChains, chainPresets != nullptr ? chainPresets->size() : 0);
 
+        if (const auto split = saved[keys::split].toString(); ! instrument)
+        {
+            if (split == schema::splitBands)
+                container.split = ContainerSplit::bands;
+            else if (split == schema::splitMidSide && numChains == 2)
+                container.split = ContainerSplit::midSide;
+            else if (split == schema::splitLeftRight && numChains == 2)
+                container.split = ContainerSplit::leftRight;
+        }
+
+        made.made.devices.push_back (container);
+        std::vector<size_t> chainPlaces; // each chain's place among the made devices
+
+        // Its chains, one at least, as many as a container holds.
         for (int c = 0; c < numChains; ++c)
         {
             const auto chainPreset = chainPresets != nullptr && c < chainPresets->size() ? chainPresets->getReference (c) : juce::var();
-            auto chain = makeChainState (song, c + 1);
+            auto chain = makeChain (song, c + 1);
+            chain.place.container = container.id;
 
             if (const auto chainName = chainPreset[keys::name].toString().trim(); chainName.isNotEmpty())
-                chain.setProperty (schema::chainName, chainName, nullptr);
+                chain.name = chainName;
 
             if (const auto volume = keepVolumeInRange (toFloat (chainPreset.getProperty (keys::volume, 0.0f)));
                 std::abs (volume) >= 1.0e-4f)
-                chain.setProperty (schema::channelVolume, volume, nullptr);
+                chain.volume = volume;
 
             if (const auto pan = toFloat (chainPreset.getProperty (keys::pan, 0.0f)); std::abs (pan) >= 1.0e-4f)
-                chain.setProperty (schema::channelPan, juce::jlimit (-1.0f, 1.0f, pan), nullptr);
+                chain.pan = juce::jlimit (-1.0f, 1.0f, pan);
 
-            for (const auto& [property, key] :
-                 { std::pair { &schema::chainMute, &keys::mute }, std::pair { &schema::chainSolo, &keys::solo } })
-                if ((bool) chainPreset[*key])
-                    chain.setProperty (*property, true, nullptr);
+            // Its mute and solo, the store's (DeviceStore.h).
+            if ((bool) chainPreset[keys::mute])
+                made.made.store.chainMutes = made.made.store.chainMutes.set (chain.id.getRaw(), true);
+
+            if ((bool) chainPreset[keys::solo])
+                made.made.store.chainSolos = made.made.store.chainSolos.set (chain.id.getRaw(), true);
 
             if (chainPreset.hasProperty (keys::crossover))
-                chain.setProperty (
-                    schema::chainCrossover,
-                    juce::jlimit (lowestCrossover, highestCrossover, toFloat (chainPreset[keys::crossover], lowestCrossover)), nullptr);
+                chain.crossover = juce::jlimit (lowestCrossover, highestCrossover, toFloat (chainPreset[keys::crossover], lowestCrossover));
 
-            setChainNumber (chain, schema::chainLowKey, chainPreset[keys::lowKey], allKeys, allKeys.low);
-            setChainNumber (chain, schema::chainHighKey, chainPreset[keys::highKey], allKeys, allKeys.high);
-            setChainNumber (chain, schema::chainLowVelocity, chainPreset[keys::lowVelocity], allVelocities, allVelocities.low);
-            setChainNumber (chain, schema::chainHighVelocity, chainPreset[keys::highVelocity], allVelocities, allVelocities.high);
+            chain.keys = { readChainNumber (chainPreset[keys::lowKey], allKeys, allKeys.low),
+                           readChainNumber (chainPreset[keys::highKey], allKeys, allKeys.high) };
+            chain.velocities = { readChainNumber (chainPreset[keys::lowVelocity], allVelocities, allVelocities.low),
+                                 readChainNumber (chainPreset[keys::highVelocity], allVelocities, allVelocities.high) };
 
+            const auto chainID = chain.id;
+            chainPlaces.push_back (made.made.devices.size());
+            made.made.devices.push_back (std::move (chain));
             std::vector<DeviceID> devices;
+            auto held = 0;
 
             if (const auto* devicePresets = chainPreset[keys::devices].getArray())
             {
                 for (const auto& device : *devicePresets)
                 {
-                    const auto state = makeDevice (song, host, device);
-                    const auto fits = state.isValid() && (! isInstrumentState (state) || (instrument && chain.getNumChildren() == 0));
-                    devices.push_back (fits ? getDeviceID (state) : DeviceID());
+                    auto inside = makeFromPreset (song, host, device);
+                    const auto fits = ! inside.devices.empty() && (! inside.devices.front().isInstrument() || (instrument && held == 0));
+                    devices.push_back (fits ? inside.devices.front().id : DeviceID());
 
-                    if (fits)
-                        chain.appendChild (state, nullptr);
+                    if (! fits)
+                        continue;
+
+                    auto& value = inside.devices.front();
+                    value.place.container = container.id;
+                    value.place.chain = chainID;
+                    made.made.devices.push_back (std::move (value));
+                    ++held;
+
+                    // What the store holds of it (a plug-in's state and program), beside the others'.
+                    addStore (made.made.store, inside.store);
                 }
             }
 
-            made.chains.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) chain[schema::chainID]));
+            made.chains.push_back (chainID);
             made.devices.push_back (std::move (devices));
-            made.state.appendChild (chain, nullptr);
         }
 
-        // Its split, one a container of effects can have: the middle and side, or the left and right, of two chains.
-        if (const auto split = saved[keys::split].toString(); ! instrument)
+        // Its bands' crossovers in order (Containers.h).
+        if (container.split == ContainerSplit::bands)
         {
-            if (split == schema::splitBands || ((split == schema::splitMidSide || split == schema::splitLeftRight) && numChains == 2))
-                made.state.setProperty (schema::containerSplit, split, nullptr);
+            std::vector<std::optional<float>> crossovers;
 
-            keepCrossoversInOrder (made.state, nullptr);
+            for (const auto place : chainPlaces)
+                crossovers.push_back (made.made.devices[place].crossover);
+
+            keepCrossoversInOrder (crossovers);
+
+            for (size_t i = 0; i < chainPlaces.size(); ++i)
+                made.made.devices[chainPlaces[i]].crossover = crossovers[i];
         }
 
-        // Its eight macros, as a new container's (Containers.h: makeContainerState()), named and set as the preset's, with
-        // what they modulate in it: MACRO elements of the container's, made with it before it is the song's, the one maker
-        // of modulation's elements beside modulation's setters (model/modulation/internal/Modulation.h), as a new
-        // container's are, until the devices' area (roadmap step S5.20); from modulation's switch, the keeper of the song's
-        // values takes them in as the container comes into the song.
+        // Its eight macros, as a new container's (Containers.h: makeContainer()), named and set as the preset's, with what they
+        // modulate in it, as modulation's values, which its inserter sets as it puts it in (Mixer.h: insertDevice()).
         const auto* macros = saved[keys::macros].getArray();
 
         for (int i = 0; i < macrosPerContainer; ++i)
         {
             const auto preset = macros != nullptr && i < macros->size() ? macros->getReference (i) : juce::var();
             const auto macroName = preset[keys::name].toString();
-            juce::ValueTree macro (schema::MACRO);
-            macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
-            macro.setProperty (schema::macroName, macroName.isNotEmpty() ? macroName : "Macro " + juce::String (i + 1), nullptr);
-
-            if (const auto value = juce::jlimit (0.0f, 1.0f, toFloat (preset[keys::value])); value > 0.0f)
-                macro.setProperty (schema::macroValue, value, nullptr);
+            ModulatorValue macro;
+            macro.id = ModulatorID::fromRaw (song.makeID());
+            macro.place.container = container.id;
+            macro.name = macroName.isNotEmpty() ? macroName : "Macro " + juce::String (i + 1);
+            macro.value = juce::jlimit (0.0f, 1.0f, toFloat (preset[keys::value]));
 
             if (const auto* targets = preset[keys::modulates].getArray())
             {
@@ -563,23 +602,23 @@ namespace
                     if (! parameter.isValid())
                         continue;
 
-                    // A chain's own volume, pan or crossover, or a parameter of one of its devices.
+                    // A chain's own volume, pan or crossover, or a parameter of one of its devices: one modulation of each
+                    // parameter, the first, as the song holds them (ModulationValue.h: withHeldModulator()).
                     const auto isChain = std::find (made.chains.begin(), made.chains.end(), parameter.device) != made.chains.end();
-                    auto device = juce::ValueTree();
-
-                    for (const auto& chain : getChainStates (made.state))
-                        if (const auto found = chain.getChildWithProperty (schema::deviceID, (juce::int64) parameter.device.getRaw());
-                            found.isValid())
-                            device = found;
+                    const auto device = std::find_if (made.made.devices.begin(), made.made.devices.end(),
+                                                      [&parameter] (const DeviceValue& each) { return each.id == parameter.device; });
 
                     if (isChain ? (parameter.parameter == schema::chainVolumeParameter || parameter.parameter == schema::chainPanParameter
                                    || parameter.parameter == schema::crossoverParameter)
-                                : hasParameter (device, parameter.parameter))
-                        addModulates (macro, parameter, juce::jlimit (-1.0f, 1.0f, toFloat (target[keys::amount])));
+                                : (device != made.made.devices.end() && hasParameter (*device, parameter.parameter)))
+                        macro.modulations = macro.modulations.push_back (
+                            { .parameter = parameter,
+                              .amount = (float) (std::round ((double) juce::jlimit (-1.0f, 1.0f, toFloat (target[keys::amount])) * 1.0e4)
+                                                 / 1.0e4) });
                 }
             }
 
-            made.state.appendChild (macro, nullptr);
+            made.made.macros.push_back (std::move (macro));
         }
 
         return made;
@@ -613,14 +652,14 @@ namespace
         }
 
         // Its sounds as a device of its type off the song holds them, so that their files are copied in.
-        juce::ValueTree device (schema::DEVICE), sounds (schema::SOUNDS);
-        device.setProperty (schema::deviceType, toString (info.typeID), nullptr);
+        DeviceValue device;
+        device.form = DeviceValue::Form::own;
+        device.type = toString (info.typeID);
+        const auto& properties = getSoundProperties (info);
 
-        for (const auto& property : getSoundProperties (info))
-            if (const auto sound = saved[keys::sounds][property].toString(); sound.isNotEmpty())
-                sounds.setProperty (property, sound, nullptr);
-
-        device.appendChild (sounds, nullptr);
+        for (size_t i = 0; i < properties.size(); ++i)
+            if (const auto sound = saved[keys::sounds][properties[i]].toString(); sound.isNotEmpty())
+                device.sounds = device.sounds.set ((std::uint16_t) i, sound);
 
         if (copyFiles)
         {
@@ -629,18 +668,18 @@ namespace
         else
         {
             // Where they are, but those that aren't there any more, as copying leaves them out.
-            for (const auto& property : getSoundProperties (info))
-                if (const auto path = sounds[property].toString(); schema::isSoundFileProperty (property) && ! isSoundFileToTake (path))
-                    sounds.removeProperty (property, nullptr);
+            const auto sounds = device.sounds;
+
+            for (const auto& [index, path] : sounds)
+                if (schema::isSoundFileProperty (properties[index]) && ! isSoundFileToTake (path))
+                    device.sounds = device.sounds.erase (index);
         }
 
-        const auto copied = device.getChildWithName (schema::SOUNDS);
-
-        for (const auto& property : getSoundProperties (info))
-            if (copied.hasProperty (property))
-                setDeviceSound (song, id, property, copied[property].toString());
-            else if (! saved[keys::sounds].hasProperty (property))
-                setDeviceSound (song, id, property, {}); // its own sound again
+        for (size_t i = 0; i < properties.size(); ++i)
+            if (const auto* sound = device.sounds.find ((std::uint16_t) i))
+                setDeviceSound (song, id, properties[i], *sound);
+            else if (! saved[keys::sounds].hasProperty (properties[i]))
+                setDeviceSound (song, id, properties[i], {}); // its own sound again
     }
 
     //==============================================================================
@@ -1099,23 +1138,23 @@ bool writePreset (const juce::var& preset, const juce::File& file)
     return writeWholeFile (file, text.toRawUTF8(), text.getNumBytesAsUTF8()).wasOk();
 }
 
-juce::ValueTree makeDeviceFromPreset (Song& song, const PluginHost& host, const juce::var& preset)
+MadeDevices makeDeviceFromPreset (Song& song, const PluginHost& host, const juce::var& preset)
 {
     const auto kind = findKind (preset[keys::kind].toString());
 
     if (kind == PresetKind::container)
-        return makeContainer (song, host, preset[keys::container]).state;
+        return makeContainerFromPreset (song, host, preset[keys::container]).made;
 
     if (kind == PresetKind::device)
-        return makeDevice (song, host, preset[keys::device]);
+        return makeFromPreset (song, host, preset[keys::device]);
 
     return {};
 }
 
 DeviceID addDeviceFromPreset (Song& song, const PluginHost& host, TrackID channel, const juce::var& preset, Selection* selection)
 {
-    const auto device = makeDeviceFromPreset (song, host, preset);
-    return device.isValid() ? placeDevice (song, channel, device, selection) : DeviceID();
+    auto device = makeDeviceFromPreset (song, host, preset);
+    return ! device.devices.empty() ? placeDevice (song, channel, std::move (device), selection) : DeviceID();
 }
 
 TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, const juce::var& preset, Selection* selection)
@@ -1159,17 +1198,21 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
     {
         if (const auto container = device[keys::container]; container.isObject())
         {
-            if (auto made = makeContainer (song, host, container); (instrument = setInstrument (song, track, made.state)).isValid())
-                instrumentContainer = std::move (made);
+            auto made = makeContainerFromPreset (song, host, container);
+            instrumentContainer.chains = made.chains;
+            instrumentContainer.devices = made.devices;
+
+            if (instrument = setInstrument (song, track, std::move (made.made)); ! instrument.isValid())
+                instrumentContainer = {};
         }
-        else if (const auto state = makeDevice (song, host, device); state.isValid())
+        else if (auto made = makeFromPreset (song, host, device); ! made.devices.empty())
         {
-            instrument = setInstrument (song, track, state);
+            instrument = setInstrument (song, track, std::move (made));
         }
     }
 
     std::vector<DeviceID> effects;
-    std::vector<MadeContainer> containers; // each effect's, for a container's chains
+    std::vector<MadeContainer> containers; // each effect's chains and their devices, for what modulates them
 
     if (const auto* effectPresets = saved[keys::effects].getArray())
     {
@@ -1180,14 +1223,16 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
 
             if (const auto container = effect[keys::container]; container.isObject())
             {
-                auto made = makeContainer (song, host, container);
+                auto made = makeContainerFromPreset (song, host, container);
+                inside.chains = made.chains;
+                inside.devices = made.devices;
 
-                if (! isInstrumentState (made.state) && (added = insertDeviceState (song, track, made.state)).isValid())
-                    inside = std::move (made);
+                if (made.made.devices.front().isInstrument() || ! (added = insertDevice (song, track, std::move (made.made))).isValid())
+                    inside = {};
             }
-            else if (const auto state = makeDevice (song, host, effect); state.isValid() && ! isInstrumentState (state))
+            else if (auto made = makeFromPreset (song, host, effect); ! made.devices.empty() && ! made.devices.front().isInstrument())
             {
-                added = insertDeviceState (song, track, state);
+                added = insertDevice (song, track, std::move (made));
             }
 
             effects.push_back (added);

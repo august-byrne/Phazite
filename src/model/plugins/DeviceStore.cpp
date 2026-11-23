@@ -2,11 +2,13 @@
 #include "internal/DeviceStore.h"
 #include "model/base/Numbers.h"
 #include "model/base/Song.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 
+#include <functional>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -301,6 +303,70 @@ void clearChainSwitchesInStep (Song& song, juce::ValueTree chain)
         chain.removeProperty (schema::chainMute, &song.getUndoManager());
         chain.removeProperty (schema::chainSolo, &song.getUndoManager());
     }
+}
+
+//==============================================================================
+ChannelStore getChannelStore (const Song& song, TrackID channel)
+{
+    ChannelStore held;
+
+    // An item's entries and its window's place, then what it holds: a container's chains, a chain's devices.
+    const std::function<void (const juce::ValueTree&)> readItem = [&held, &readItem] (const juce::ValueTree& item)
+    {
+        readStoreOf (item, held.store);
+
+        if (item.hasProperty (schema::deviceWindowX))
+            held.windows.emplace_back (readDeviceElementID (item), WindowPlace { .x = toWhole<int> (item[schema::deviceWindowX]),
+                                                                                 .y = toWhole<int> (item[schema::deviceWindowY]) });
+
+        for (const auto& child : item)
+            if (child.hasType (schema::CHAIN) || child.hasType (schema::DEVICE))
+                readItem (child);
+    };
+
+    for (const auto& child : findChainState (song, channel))
+        if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER))
+            readItem (child);
+
+    return held;
+}
+
+DeviceStore renameStore (const DeviceStore& from, const std::map<std::uint64_t, std::uint64_t>& copied)
+{
+    DeviceStore renamed;
+
+    // Each map's entries of an item copied, under its copy's ID.
+    const auto rename = [&copied] (const auto& entries, auto& into)
+    {
+        for (const auto& [key, entry] : entries)
+            if (const auto found = copied.find (key); found != copied.end())
+                into = into.set (found->second, entry);
+    };
+
+    rename (from.states, renamed.states);
+    rename (from.programs, renamed.programs);
+    rename (from.formatIDs, renamed.formatIDs);
+    rename (from.versions, renamed.versions);
+    rename (from.chainMutes, renamed.chainMutes);
+    rename (from.chainSolos, renamed.chainSolos);
+
+    for (const auto& [key, entry] : from.pluginValues)
+    {
+        if (const auto found = copied.find (key.device.getRaw()); found != copied.end())
+        {
+            auto copy = key;
+            copy.device = DeviceID::fromRaw (found->second);
+            renamed.pluginValues = renamed.pluginValues.set (copy, entry);
+        }
+    }
+
+    return renamed;
+}
+
+void writeStoreIntoMade (juce::ValueTree& made, const DeviceStore& store, DeviceID id)
+{
+    jassert (! made.getParent().isValid()); // an element not in a song yet
+    writeStoreInto (made, store, id);
 }
 
 //==============================================================================

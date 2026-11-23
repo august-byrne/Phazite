@@ -289,11 +289,12 @@ class Song;
 // and of a container: a track (or a folder, the track list) taken out has its channel's and its containers' remembered with
 // their elements, a container taken out of a channel its macros, each given back as the same element comes back (a
 // container's with the channel it comes to); one that comes in with MODULATOR or MACRO elements has them read in and taken
-// out (a new container's macros, which its makers build as elements: Containers.h, makeContainerState()); and a lone one is
-// refused in a step, read in outside the history. The sends' part (SendsArea.h) as the clips', for a track's sends: a track
-// (or a folder, the track list) taken out has its sends remembered with its element and given back as the same element comes
-// back; one that comes in with SEND elements (a track a merge's choice brings in whole) has them read in and taken out, one
-// of an ID the song holds already dropped; and a lone one is refused in a step, read in outside the history.
+// out (a safety net: a container's makers make its macros as values, which its inserter sets: Mixer.h, insertDevice());
+// and a lone one is refused in a step, read in outside the history. The sends' part (SendsArea.h) as the clips', for a
+// track's sends: a track (or a folder, the track list) taken out has its sends remembered with its element and given back
+// as the same element comes back; one that comes in with SEND elements (a track a merge's choice brings in whole) has them
+// read in and taken out, one of an ID the song holds already dropped; and a lone one is refused in a step, read in outside
+// the history.
 //
 // The rule for what listens to the song's tree, with no exception: a tree callback never reads the clips' area (nor the
 // notes'), directly or through anything that reads them (the clips' functions, Clips.h, AudioClips.h; the notes', Notes.h;
@@ -715,9 +716,10 @@ public:
     int countSectionsAdopted() const noexcept { return sectionsAdopted; }
 
     // How many MODULATOR and MACRO elements the keeper took into modulation's area from the song's tree since the song held
-    // its values (the safety net, above, which takes in a new container's macros: Containers.h, makeContainerState(), and a
-    // container preset's): what the versions, which give the song its modulation through modulation's code (Modulation.h:
-    // makeModulationLike()'s setAllModulation(), chooseModulationClash()), check their passes never leave to it.
+    // its values (the safety net, above: a container's makers make its macros as values, which its inserter sets, Mixer.h:
+    // insertDevice(), so that a container made or loaded from a preset leaves it none): what the versions and the inserters,
+    // which give the song its modulation through modulation's code (Modulation.h: makeModulationLike()'s setAllModulation(),
+    // chooseModulationClash()), check they never leave to it.
     int countModulationAdopted() const noexcept { return modulationAdopted; }
 
     // How many SEND elements the keeper took into the sends' area from the song's tree since the song held its values (the

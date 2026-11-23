@@ -72,8 +72,8 @@ int getNumSteps (const ModulatorValue&);
 // The song's modulation, one modulator or macro at a time, by its ID, or whole: what adds, changes, takes out or puts in
 // order a modulator or a macro does it through these, each working its next value out from the one the area holds, by the
 // rules of the edit, and setting it once (an edit that changes several, as a duplicated track's copies, its whole next value
-// once: setAllModulation()); the makers of a new container, which make it with its eight macros as elements that the song's
-// keeper takes in (model/mixer/internal/Containers.h: makeContainerState(); model/presets: a container preset's), aside.
+// once: setAllModulation()), the inserter of a new container among them, which sets its eight macros made as values with it
+// (model/mixer/internal/Mixer.h: MadeDevices, insertDevice()).
 // Each joins the caller's undo step, as the song is written now: in the history's step in progress, or outside it while the
 // song is written outside it (Song::OutsideHistory), through modulation's area's setters (SongValues.h: setModulator() and
 // the three after it). Whether it changed the song's modulation: a value equal to the one held changes nothing, and makes no

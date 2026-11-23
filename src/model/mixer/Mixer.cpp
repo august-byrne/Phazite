@@ -8,6 +8,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
+#include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
@@ -17,6 +18,7 @@
 #include "model/devices/internal/Parameters.h"
 #include "model/midi/internal/MidiLinks.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/versions/internal/AreaClashes.h"
@@ -73,30 +75,66 @@ namespace
         return juce::String (info.name.data(), info.name.size());
     }
 
-    // Puts a device's element among a chain's, before the one at a place, or after the last.
-    void addDeviceState (Song& song, juce::ValueTree chain, const juce::ValueTree& device, int deviceIndex)
-    {
-        const auto devices = getDeviceStates (chain);
-        auto index = chain.getNumChildren();
-
-        if (juce::isPositiveAndBelow (deviceIndex, (int) devices.size()))
-            index = chain.indexOf (devices[(size_t) deviceIndex]);
-        else if (! devices.empty())
-            index = chain.indexOf (devices.back()) + 1;
-
-        chain.addChild (device, index, getUndo (song));
-    }
-
     // Takes a device out of the song (in the caller's undo step), with what its channel's devices hold of their states
     // stored first, so that an undo brings it back as it was.
     void removeDeviceState (Song& song, DeviceID id)
     {
-        if (auto state = findDeviceState (song, id); state.isValid())
+        // Found once, and taken out at its place (no walk again).
+        if (const auto place = findDevicePlace (song, id))
         {
-            song.storeDeviceStates (getDeviceChannel (song, id).getRaw());
-            state.getParent().removeChild (state, getUndo (song));
+            song.storeDeviceStates ((place->onMaster ? getMasterID (song) : place->track).getRaw());
+            eraseDevice (song, id, *place);
             forgetWhatNamesTheGone (song);
         }
+    }
+
+    // What a maker made given the place it is put at: the first's, the channel of the rest (a container's chains and their
+    // devices, a chain's devices) with the container and the chain they are in, and a container's macros on its channel.
+    void placeMade (MadeDevices& made, const DevicePlace& place)
+    {
+        if (made.devices.empty())
+            return;
+
+        auto& first = made.devices.front();
+        first.place = place;
+
+        for (size_t i = 1; i < made.devices.size(); ++i)
+        {
+            auto& inside = made.devices[i];
+            inside.place.track = place.track;
+            inside.place.onMaster = place.onMaster;
+
+            if (first.form == DeviceValue::Form::chain)
+            {
+                inside.place.container = place.container;
+                inside.place.chain = first.id;
+            }
+            else
+            {
+                inside.place.container = first.id;
+            }
+        }
+
+        for (auto& macro : made.macros)
+            macro.place = { .track = place.track, .onMaster = place.onMaster, .container = first.id };
+    }
+
+    // A made container's macros, set through modulation's setter of the whole value in the caller's step, once the container
+    // is in the song (Modulation.h: setAllModulation(), which finds no owner by walking the song, as setModulator() would
+    // for each).
+    void setMadeMacros (Song& song, const std::vector<ModulatorValue>& macros)
+    {
+        auto* values = song.getValues();
+
+        if (macros.empty() || values == nullptr)
+            return;
+
+        auto next = values->modulation.get();
+
+        for (const auto& macro : macros)
+            next = withHeldModulator (next, macro);
+
+        setAllModulation (song, std::move (next));
     }
 
     // The IDs of the items that tracks, devices, chains and sends are (Schema.h: holdsID()), as what names one names it: the
@@ -133,14 +171,6 @@ namespace
         countSendLook();
         const auto* values = song.getValues();
         return values != nullptr ? &values->sends.get() : nullptr;
-    }
-
-    // Sets a property without an undo step, only if its value is another (as a store of a plug-in's state does:
-    // model/plugins/internal/DeviceStore.h). JUCE workaround W8 (docs/juce-workarounds.md).
-    void store (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value)
-    {
-        if (const auto* stored = state.getPropertyPointer (property); stored == nullptr || *stored != value)
-            state.setProperty (property, value, nullptr);
     }
 
     // A value of a channel's in the song, to a ten-thousandth (a volume comes back from a fader's position a little off),
@@ -559,57 +589,235 @@ juce::ValueTree copyWholeDevice (const Song& song, DeviceID id)
 }
 
 //==============================================================================
-juce::ValueTree makeOwnDeviceState (Song& song, std::string_view typeID, const std::vector<std::pair<juce::String, float>>& values)
+std::optional<DevicePlace> findDevicePlace (const Song& song, DeviceID id)
 {
-    juce::ValueTree state (schema::DEVICE);
-    state.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
-    state.setProperty (schema::deviceType, juce::String (typeID.data(), typeID.size()), nullptr);
-
-    // Its values, but for those at their defaults, which the song keeps none of (keepValueSetByHand()).
-    if (const auto* own = findOwnInfo (state))
-        for (const auto& [parameter, value] : values)
-            if (const auto index = devices::findParameter (*own, parameter.toStdString()); index >= 0)
-                keepValueSetByHand (state, own->parameters[(size_t) index], value, nullptr);
-
-    return state;
+    const auto element = findDeviceState (song, id);
+    return element.isValid() ? std::optional (readDevicePlace (element)) : std::nullopt;
 }
 
-juce::ValueTree makeDeviceState (Song& song, const DeviceType& type)
+std::optional<DevicePlace> findChainPlace (const Song& song, DeviceID chain)
+{
+    const auto element = findContainerChain (song, chain);
+    return element.isValid() ? std::optional (readDevicePlace (element)) : std::nullopt;
+}
+
+std::vector<DeviceValue> getChannelDeviceValues (const Song& song, TrackID channel)
+{
+    std::vector<DeviceValue> values;
+
+    // Each read whole at its place, then what it holds, in the outline's order.
+    const std::function<void (const juce::ValueTree&)> add = [&values, &add] (const juce::ValueTree& element)
+    {
+        if (auto value = readDeviceValue (element, readDevicePlace (element)))
+        {
+            const auto form = value->form;
+            values.push_back (std::move (*value));
+
+            if (form == DeviceValue::Form::container || form == DeviceValue::Form::chain)
+                for (const auto& child : element)
+                    if (child.hasType (form == DeviceValue::Form::container ? schema::CHAIN : schema::DEVICE))
+                        add (child);
+        }
+    };
+
+    for (const auto& child : findChainState (song, channel))
+        if (isDeviceElement (child))
+            add (child);
+
+    return values;
+}
+
+juce::String getDeviceName (const DeviceValue& value)
+{
+    switch (value.form)
+    {
+        case DeviceValue::Form::own:
+            if (const auto* own = findOwnDevice (std::string_view (value.type.toRawUTF8())))
+                return getOwnName (*own);
+
+            return {};
+
+        case DeviceValue::Form::plugin:
+            return value.plugin.name;
+        case DeviceValue::Form::container:
+            return value.name;
+        case DeviceValue::Form::chain:
+            break;
+    }
+
+    return {};
+}
+
+DevicePlace getDeviceChannelPlace (const Song& song, TrackID channel)
+{
+    if (findChainState (song, channel).hasType (schema::MASTER))
+        return { .onMaster = true };
+
+    return { .track = channel };
+}
+
+MadeDevices makeOwnDevice (Song& song, std::string_view typeID, const std::vector<std::pair<juce::String, float>>& values)
+{
+    DeviceValue device;
+    device.id = DeviceID::fromRaw (song.makeID());
+    device.form = DeviceValue::Form::own;
+    device.type = juce::String (typeID.data(), typeID.size());
+
+    // Its values as the song holds them: none at its default, each within its range and on its steps (SavedValues.h).
+    if (const auto* own = findOwnDevice (typeID))
+    {
+        for (const auto& [parameter, value] : values)
+        {
+            if (const auto index = devices::findParameter (*own, parameter.toStdString()); index >= 0)
+            {
+                if (const auto held = keepHeldValue (own->parameters[(size_t) index], value))
+                    device.values = device.values.set ((std::uint32_t) index, *held);
+                else
+                    device.values = device.values.erase ((std::uint32_t) index);
+            }
+        }
+    }
+
+    MadeDevices made;
+    made.devices.push_back (std::move (device));
+    return made;
+}
+
+MadeDevices makeDevice (Song& song, const DeviceType& type)
 {
     if (type.isBuiltIn)
-        return makeOwnDeviceState (song, type.description.fileOrIdentifier.toStdString());
+        return makeOwnDevice (song, type.description.fileOrIdentifier.toStdString());
 
-    juce::ValueTree state (schema::DEVICE);
-    state.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
-    state.setProperty (schema::deviceType, schema::deviceIsPlugin, nullptr);
-    setPluginIdentity (state, type.description);
-    return state;
+    DeviceValue plugin;
+    plugin.id = DeviceID::fromRaw (song.makeID());
+    plugin.form = DeviceValue::Form::plugin;
+    plugin.plugin = fromDescription (type.description);
+
+    MadeDevices made;
+    made.devices.push_back (std::move (plugin));
+    return made;
 }
 
-DeviceID insertDeviceState (Song& song, TrackID channel, juce::ValueTree device, int index)
+PluginIdentity fromDescription (const juce::PluginDescription& description)
+{
+    return { .format = description.pluginFormatName,
+             .name = description.name,
+             .maker = description.manufacturerName,
+             .identifier = description.fileOrIdentifier,
+             .uid = description.uniqueId,
+             .instrument = description.isInstrument };
+}
+
+DeviceID insertDevice (Song& song, TrackID channel, MadeDevices made, int index)
 {
     auto chain = findChainState (song, channel);
 
-    if (! chain.isValid() || ! isDeviceElement (device) || (isInstrumentState (device) && ! canHoldInstrument (chain)))
+    if (made.devices.empty() || ! chain.isValid() || made.devices.front().form == DeviceValue::Form::chain)
+        return {};
+
+    const auto id = made.devices.front().id;
+    const auto instrument = made.devices.front().isInstrument();
+
+    if (instrument && ! canHoldInstrument (chain))
         return {};
 
     // A plain folder mixes its tracks through its devices as a bus.
     if (isFolderState (chain) && ! isBus (song, channel))
         makeBus (song, channel);
 
-    addDeviceState (song, chain, device, isInstrumentState (device) ? 0 : index); // instruments come first
-    return getDeviceID (device);
+    placeMade (made, getDeviceChannelPlace (song, channel));
+
+    if (! setNewDevices (song, made, instrument ? 0 : index)) // instruments come first
+        return {};
+
+    setMadeMacros (song, made.macros);
+    return id;
 }
 
-DeviceID setInstrument (Song& song, TrackID track, juce::ValueTree instrument)
+DeviceID setInstrument (Song& song, TrackID track, MadeDevices instrument)
 {
-    if (! isInstrumentState (instrument) || ! canHoldInstrument (findTrackState (song, track)))
+    if (instrument.devices.empty() || ! instrument.devices.front().isInstrument() || ! canHoldInstrument (findTrackState (song, track)))
         return {};
 
     if (const auto old = getInstrument (song, track); old.isValid())
         removeDeviceState (song, old);
 
-    return insertDeviceState (song, track, instrument, 0);
+    return insertDevice (song, track, std::move (instrument), 0);
+}
+
+void copyDevices (Song& song, CopiedIDs& copied)
+{
+    // The tracks copied whose copies hold no device, each original's devices read once from its element, gathered before any
+    // device's ID joins the copied.
+    std::vector<std::pair<TrackID, TrackID>> channels;
+
+    for (const auto& [original, copy] : copied)
+    {
+        const auto from = TrackID::fromRaw (original), to = TrackID::fromRaw (copy);
+
+        if (findTrackState (song, from).hasType (schema::TRACK) && findTrackState (song, to).hasType (schema::TRACK)
+            && ! getDevices (song, from).empty() && getDevices (song, to).empty())
+            channels.emplace_back (from, to);
+    }
+
+    for (const auto& [from, to] : channels)
+    {
+        const auto values = getChannelDeviceValues (song, from);
+        const auto held = getChannelStore (song, from);
+
+        // Each by the ID the copied give it (a duplicate's: Schema.h, giveNewIDs()), else a new one of the song's, given it.
+        const auto copyOf = [&song, &copied] (DeviceID id)
+        {
+            if (const auto found = copied.find (id.getRaw()); found != copied.end())
+                return DeviceID::fromRaw (found->second);
+
+            const auto fresh = DeviceID::fromRaw (song.makeID());
+            copied[id.getRaw()] = fresh.getRaw();
+            return fresh;
+        };
+
+        for (const auto& value : values)
+            copyOf (value.id);
+
+        // Each device or container of the channel, with what it holds, one element put after the others.
+        const auto store = renameStore (held.store, copied);
+        MadeDevices made;
+
+        const auto put = [&song, &store, &made, to]
+        {
+            if (made.devices.empty())
+                return;
+
+            made.store = store;
+            placeMade (made, getDeviceChannelPlace (song, to));
+            setNewDevices (song, made);
+            made = {};
+        };
+
+        for (const auto& value : values)
+        {
+            auto copy = value;
+            copy.id = copyOf (value.id);
+            copy.place.container = value.place.container.isValid() ? copyOf (value.place.container) : DeviceID();
+            copy.place.chain = value.place.chain.isValid() ? copyOf (value.place.chain) : DeviceID();
+
+            // A sidechain that listens to a track copied too listens to the copy, as a copy names what it holds.
+            if (const auto source = copied.find (value.sidechain.getRaw()); value.sidechain.isValid() && source != copied.end())
+                copy.sidechain = TrackID::fromRaw (source->second);
+
+            if (! value.place.container.isValid())
+                put();
+
+            made.devices.push_back (std::move (copy));
+        }
+
+        put();
+
+        // Their windows' places, view state outside the history, as a copy of their elements carried them.
+        for (const auto& [id, place] : held.windows)
+            if (const auto found = copied.find (id.getRaw()); found != copied.end())
+                setWindowPlace (song, DeviceID::fromRaw (found->second), place);
+    }
 }
 
 void removeDevice (Song& song, DeviceID id)
@@ -681,19 +889,13 @@ void forgetWhatNamesTheGone (Song& song)
 
 void moveDevice (Song& song, DeviceID id, int newIndex)
 {
-    auto state = findDeviceState (song, id);
-
-    if (! state.isValid())
+    if (! findDeviceState (song, id).isValid())
         return;
 
+    // To the place of the device that is there now: after it when moving down, before it when moving up. Lanes and a
+    // folder's tracks can sit between devices in the track's element.
     const UndoStep step (song, "Move Device");
-
-    // To the place of the device that is there now: after it when moving down, before it when moving up. Clips, lanes
-    // and a folder's tracks can sit between devices in the track's element.
-    auto chain = state.getParent();
-    const auto devices = getDeviceStates (chain);
-    const auto& target = devices[(size_t) juce::jlimit (0, (int) devices.size() - 1, newIndex)];
-    chain.moveChild (chain.indexOf (state), chain.indexOf (target), getUndo (song));
+    moveInDeviceList (song, id, newIndex);
 }
 
 void setDeviceOn (Song& song, DeviceID id, bool on)
@@ -704,27 +906,12 @@ void setDeviceOn (Song& song, DeviceID id, bool on)
         return;
 
     const UndoStep step (song, on ? "Turn Device On" : "Turn Device Off");
-
-    if (on)
-        state.removeProperty (schema::deviceOff, getUndo (song));
-    else
-        state.setProperty (schema::deviceOff, true, getUndo (song));
+    setDeviceFields (song, state, [on] (DeviceValue& value) { value.off = ! on; });
 }
 
 bool isDeviceOn (const Song& song, DeviceID id)
 {
     return ! readDeviceOff (findDeviceState (song, id));
-}
-
-void setDeviceSound (Song& song, DeviceID id, const juce::Identifier& property, const juce::String& value)
-{
-    if (auto state = findDeviceState (song, id); state.isValid())
-    {
-        if (value.isNotEmpty())
-            state.getOrCreateChildWithName (schema::SOUNDS, getUndo (song)).setProperty (property, value, getUndo (song));
-        else if (auto sounds = state.getChildWithName (schema::SOUNDS); sounds.isValid())
-            sounds.removeProperty (property, getUndo (song));
-    }
 }
 
 bool hasMix (const Song& song, DeviceID id)
@@ -766,29 +953,14 @@ void setMix (Song& song, DeviceID id, float mix)
     if (! hasMix (song, id))
         return;
 
-    auto state = findDeviceState (song, id);
+    // One of Phazite's own effects' mix parameter, or a plug-in's or a container's mix, on the element found.
+    const auto state = findDeviceState (song, id);
     const auto wet = juce::jlimit (0.0f, 1.0f, mix);
 
     if (const auto* own = findOwnInfo (state))
-        keepValueSetByHand (state, own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)], wet, getUndo (song));
-    else if (wet < 1.0f)
-        state.setProperty (schema::deviceMix, wet, getUndo (song));
+        setDeviceValue (song, state, own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)], wet);
     else
-        state.removeProperty (schema::deviceMix, getUndo (song));
-}
-
-void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription& description)
-{
-    store (device, schema::pluginFormat, description.pluginFormatName);
-    store (device, schema::pluginName, description.name);
-    store (device, schema::pluginMaker, description.manufacturerName);
-    store (device, schema::pluginIdentifier, description.fileOrIdentifier);
-    store (device, schema::pluginUid, description.uniqueId);
-
-    if (description.isInstrument)
-        store (device, schema::pluginInstrument, true);
-    else if (device.hasProperty (schema::pluginInstrument))
-        device.removeProperty (schema::pluginInstrument, nullptr);
+        setDeviceFields (song, state, [wet] (DeviceValue& value) { value.mix = wet; });
 }
 
 juce::PluginDescription getPluginIdentity (const juce::ValueTree& device)
@@ -812,16 +984,16 @@ juce::PluginDescription toDescription (const PluginIdentity& identity)
 DeviceID addDeviceTo (Song& song, TrackID track, const DeviceType& type, Selection* selection)
 {
     const UndoStep step (song, "Add " + type.name);
-    return placeDevice (song, track, makeDeviceState (song, type), selection);
+    return placeDevice (song, track, makeDevice (song, type), selection);
 }
 
-DeviceID placeDevice (Song& song, TrackID track, juce::ValueTree device, Selection* selection)
+DeviceID placeDevice (Song& song, TrackID track, MadeDevices device, Selection* selection)
 {
-    if (! isDeviceElement (device))
+    if (device.devices.empty() || device.devices.front().form == DeviceValue::Form::chain)
         return {};
 
-    if (! isInstrumentState (device))
-        return insertDeviceState (song, track, device);
+    if (! device.devices.front().isInstrument())
+        return insertDevice (song, track, std::move (device));
 
     // An instrument would silence a track's audio clips, so a track with audio gets one next to it instead, and so does a
     // folder, a return or none.
@@ -834,32 +1006,32 @@ DeviceID placeDevice (Song& song, TrackID track, juce::ValueTree device, Selecti
         if (! target.isValid())
             return {};
 
-        const auto name = getDeviceName (device);
+        const auto name = getDeviceName (device.devices.front());
         setTrackName (song, target, name);
 
         if (const auto colour = getColourForName (name))
             setTrackColour (song, target, *colour);
     }
 
-    return setInstrument (song, target, device);
+    return setInstrument (song, target, std::move (device));
 }
 
 DeviceID chooseInstrument (Song& song, TrackID track, const DeviceType& type)
 {
     const UndoStep step (song, (getInstrument (song, track).isValid() ? "Replace Instrument with " : "Add ") + type.name);
-    return setInstrument (song, track, makeDeviceState (song, type));
+    return setInstrument (song, track, makeDevice (song, type));
 }
 
 DeviceID addEffect (Song& song, TrackID channel, const DeviceType& type)
 {
     const UndoStep step (song, "Add " + type.name);
-    return insertDeviceState (song, channel, makeDeviceState (song, type));
+    return insertDevice (song, channel, makeDevice (song, type));
 }
 
 TrackID addReturnWith (Song& song, TrackID sender, const DeviceType& type)
 {
     const UndoStep step (song, "Add " + type.name + " Return");
-    return addReturnWithEffect (song, sender, makeDeviceState (song, type));
+    return addReturnWithEffect (song, sender, makeDevice (song, type));
 }
 
 //==============================================================================
@@ -995,9 +1167,9 @@ TrackID addNewReturnTrack (Song& song, Selection* selection)
     return addReturnTrack (song, "Return " + juce::String ((int) getReturnTracks (song).size() + 1), selection);
 }
 
-TrackID addReturnWithEffect (Song& song, TrackID sender, juce::ValueTree effect)
+TrackID addReturnWithEffect (Song& song, TrackID sender, MadeDevices effect)
 {
-    if (! isDeviceElement (effect) || isInstrumentState (effect))
+    if (effect.devices.empty() || effect.devices.front().form == DeviceValue::Form::chain || effect.devices.front().isInstrument())
         return {};
 
     // Named after the effect: "Reverb", or "Reverb 2" if there is one already.
@@ -1005,8 +1177,8 @@ TrackID addReturnWithEffect (Song& song, TrackID sender, juce::ValueTree effect)
     const auto isTaken = [&song, &returns] (const juce::String& candidate)
     { return std::any_of (returns.begin(), returns.end(), [&] (TrackID other) { return getTrackName (song, other) == candidate; }); };
 
-    const auto* own = findOwnInfo (effect);
-    const auto effectName = own != nullptr ? getOwnName (*own) : readPluginIdentity (effect).name;
+    const auto& made = effect.devices.front();
+    const auto effectName = made.form == DeviceValue::Form::own ? getDeviceName (made) : made.plugin.name;
     auto name = effectName;
 
     for (auto number = 2; isTaken (name); ++number)
@@ -1017,7 +1189,7 @@ TrackID addReturnWithEffect (Song& song, TrackID sender, juce::ValueTree effect)
     if (! created.isValid())
         return {};
 
-    const auto device = insertDeviceState (song, created, effect);
+    const auto device = insertDevice (song, created, std::move (effect));
 
     // The dry sound reaches the master through the track itself, so a return plays only its effect.
     if (hasMix (song, device))

@@ -25,12 +25,16 @@
 #pragma once
 
 #include "model/base/IDs.h"
+#include "model/base/internal/DeviceStoreValue.h"
 #include "model/base/internal/DevicesOutside.h"
 
 #include <juce_core/juce_core.h>
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <cstdint>
+#include <map>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -149,6 +153,25 @@ void clearChainSwitchesInStep (Song&, DeviceID chain);
 // The same into a chain's element the caller holds (removeChain(), which has its container's chains in hand): the caller's
 // element until the store's switch; by ID from then.
 void clearChainSwitchesInStep (Song&, juce::ValueTree chain);
+
+//==============================================================================
+// What a copy of devices takes along of the store (the devices' writers: model/mixer/internal/Mixer.h, copyDevices();
+// model/mixer/internal/Containers.h, duplicateChain()): what the store holds of every device, container and chain on a
+// channel (a track's by its ID, the master's by its or none), its containers' chains and their devices, and each one's
+// window's place where it has one, read from the channel's element alone (no walk of the song); and of a store's entries,
+// those of the items copied, under their copies' IDs (none of another item's). And the store's entries of an item written
+// into its element made for the song and not in it yet (DeviceStoreValue.h: writeStoreInto()), which the devices' setter of
+// new devices writes as one element with them (Mixer.h: setNewDevices()), so that a device comes in with its state in the
+// one action that puts it in.
+struct ChannelStore
+{
+    DeviceStore store {};
+    std::vector<std::pair<DeviceID, WindowPlace>> windows {};
+};
+
+ChannelStore getChannelStore (const Song&, TrackID channel);
+DeviceStore renameStore (const DeviceStore&, const std::map<std::uint64_t, std::uint64_t>& copied);
+void writeStoreIntoMade (juce::ValueTree& made, const DeviceStore&, DeviceID);
 
 //==============================================================================
 // Where a device's window was, for the next time it opens, none for one never moved; and set as it moves, as view state:

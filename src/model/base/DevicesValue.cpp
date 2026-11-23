@@ -1227,6 +1227,161 @@ bool keepDeviceAsHeld (juce::ValueTree element)
     return changed;
 }
 
+bool writeDeviceFields (juce::ValueTree& element, const DeviceValue& value, juce::UndoManager* undo)
+{
+    // Each compared as the file writes it before it is set, so that with no undo manager (the song written outside its
+    // history) the same value as another type (a number over its text) is no change. JUCE workaround W8
+    // (docs/juce-workarounds.md).
+    auto changed = false;
+
+    forEachWrittenProperty (value,
+                            [&element, &changed, undo] (const juce::Identifier& property, const juce::var& written)
+                            {
+                                if (const auto* there = element.getPropertyPointer (property);
+                                    there == nullptr || ! isSameValue (*there, written))
+                                {
+                                    element.setProperty (property, written, undo);
+                                    changed = true;
+                                }
+                            });
+
+    // Those the writer leaves out, looked for without a list made (a chain's fader is set at a drag's rate).
+    for (auto i = element.getNumProperties(); --i >= 0;)
+    {
+        const auto property = element.getPropertyName (i);
+
+        if (! isCovered (value.form, property))
+            continue;
+
+        auto written = false;
+        forEachWrittenProperty (value, [&property, &written] (const juce::Identifier& each, const juce::var&)
+                                { written = written || each == property; });
+
+        if (! written)
+        {
+            element.removeProperty (property, undo);
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+bool writeDeviceValueOf (juce::ValueTree& device, const devices::ParameterInfo& info, std::optional<float> held, juce::UndoManager* undo)
+{
+    const juce::Identifier parameter (toString (info.id));
+    auto values = device.getChildWithName (schema::VALUES);
+
+    if (held.has_value())
+    {
+        const auto saved = toSavedValue (info, *held);
+
+        if (const auto* there = values.isValid() ? values.getPropertyPointer (parameter) : nullptr;
+            there != nullptr && isSameValue (*there, saved))
+            return false;
+
+        device.getOrCreateChildWithName (schema::VALUES, undo).setProperty (parameter, saved, undo);
+        return true;
+    }
+
+    if (! values.isValid() || ! values.hasProperty (parameter))
+        return false;
+
+    values.removeProperty (parameter, undo);
+
+    if (values.getNumProperties() == 0 && values.getNumChildren() == 0)
+        device.removeChild (values, undo);
+
+    return true;
+}
+
+bool writeDeviceSoundOf (juce::ValueTree& device, const juce::Identifier& property, const juce::String& sound, juce::UndoManager* undo)
+{
+    auto sounds = device.getChildWithName (schema::SOUNDS);
+
+    if (sound.isNotEmpty())
+    {
+        if (const auto* there = sounds.isValid() ? sounds.getPropertyPointer (property) : nullptr;
+            there != nullptr && there->toString() == sound)
+            return false;
+
+        device.getOrCreateChildWithName (schema::SOUNDS, undo).setProperty (property, sound, undo);
+        return true;
+    }
+
+    if (! sounds.isValid() || ! sounds.hasProperty (property))
+        return false;
+
+    sounds.removeProperty (property, undo);
+
+    // None left: none (a SOUNDS left empty made a file differ from its saved copy with nothing changed).
+    if (sounds.getNumProperties() == 0 && sounds.getNumChildren() == 0)
+        device.removeChild (sounds, undo);
+
+    return true;
+}
+
+bool writeDeviceLike (juce::ValueTree& element, const DeviceValue& held, const DeviceValue& next, juce::UndoManager* undo)
+{
+    auto changed = writeDeviceFields (element, next, undo);
+
+    if (next.form != Form::own)
+        return changed;
+
+    const auto* info = findInfo (next.type);
+
+    if (info == nullptr)
+        return changed;
+
+    // Another type's values and sounds are none of this one's: each taken away first (a merge's choice of the type).
+    const auto sameType = held.form == Form::own && held.type == next.type;
+
+    if (! sameType)
+    {
+        for (const auto* type : { &schema::VALUES, &schema::SOUNDS })
+        {
+            if (auto child = element.getChildWithName (*type); child.isValid())
+            {
+                element.removeChild (child, undo);
+                changed = true;
+            }
+        }
+    }
+
+    const auto noValues = immer::map<std::uint32_t, float>();
+    const auto noSounds = immer::map<std::uint16_t, juce::String>();
+    const auto& heldValues = sameType ? held.values : noValues;
+    const auto& heldSounds = sameType ? held.sounds : noSounds;
+
+    // Each value that differs, by its index (immer's maps looked through, no element read again); those gone first.
+    for (const auto& [index, value] : heldValues)
+        if (next.values.find (index) == nullptr && index < info->parameters.size())
+            changed = writeDeviceValueOf (element, info->parameters[index], std::nullopt, undo) || changed;
+
+    for (const auto& [index, value] : next.values)
+    {
+        if (index >= info->parameters.size())
+            continue;
+
+        if (const auto* was = heldValues.find (index); was == nullptr || ! juce::exactlyEqual (*was, value))
+            changed =
+                writeDeviceValueOf (element, info->parameters[index], keepHeldValue (info->parameters[index], value), undo) || changed;
+    }
+
+    // Each sound that differs, by its index among the type's.
+    const auto& properties = getSoundPropertiesOf (std::string_view (next.type.toRawUTF8()));
+
+    for (const auto& [index, sound] : heldSounds)
+        if (next.sounds.find (index) == nullptr && index < properties.size())
+            changed = writeDeviceSoundOf (element, properties[index], {}, undo) || changed;
+
+    for (const auto& [index, sound] : next.sounds)
+        if (const auto* was = heldSounds.find (index); index < properties.size() && (was == nullptr || *was != sound))
+            changed = writeDeviceSoundOf (element, properties[index], sound, undo) || changed;
+
+    return changed;
+}
+
 SongDevices readDevicesValue (const juce::ValueTree& song)
 {
     SongDevices devices;

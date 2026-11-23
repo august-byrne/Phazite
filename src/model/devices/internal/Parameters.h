@@ -137,10 +137,13 @@ void setValueSetByHand (Song&, const FoundParameter&, float value);
 float getCurrentValue (const Song&, const FoundParameter&, bool withModulation);
 
 //==============================================================================
-// A value of a parameter of one of Phazite's own devices, kept in its element's VALUES (Schema.h), in that
-// undo history: none at the parameter's default, and no VALUES left without values, so that a value set back to its default
-// leaves the song as it was, no change in source control nor unsaved. Every writer of VALUES goes through it. (Whether a
-// value is the default, and its saved form: model/base/internal/SavedValues.h, isDefaultValue(), toSavedValue(),
+// A value of a parameter written into an element's VALUES (Schema.h), a device's or a modulator's, through an undo manager or
+// none: none at the parameter's default, and no VALUES left without values, the value as it is given otherwise (not brought
+// to its steps), through the devices' writer of one value (model/base/internal/DevicesValue.h: writeDeviceValueOf()). No
+// writer of the song's calls it: the devices' setters write a live song's (model/mixer/internal/Mixer.h: setDeviceValue()),
+// and modulation's its own values. Its callers are the tests' builders of elements by hand alone
+// (tests/ModulationWritersTests.cpp, tests/SongTextTests.cpp), which write an element a song then opens: it stays for them.
+// (Whether a value is the default, and its saved form: model/base/internal/SavedValues.h, isDefaultValue(), toSavedValue(),
 // readSavedValue().)
 void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo&, float value, juce::UndoManager*);
 } // namespace phazite

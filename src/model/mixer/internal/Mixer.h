@@ -10,7 +10,9 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/DeviceStoreValue.h"
 #include "model/base/internal/DevicesValue.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SendsValue.h"
@@ -18,6 +20,7 @@
 #include "model/mixer/internal/Buses.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -163,20 +166,122 @@ std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song&);
 juce::ValueTree copyWholeDevice (const Song&, DeviceID);
 
 //==============================================================================
-// New devices' elements, with IDs of the song's: one of Phazite's own (by its type ID), with values set by hand by its
-// parameters' IDs (Schema.h: VALUES); or a device of a type the browser and the menus offer (DeviceType.h): one of
-// Phazite's own, or a plug-in by its description (Schema.h: pluginFormat to pluginInstrument).
-juce::ValueTree makeOwnDeviceState (Song&, std::string_view typeID, const std::vector<std::pair<juce::String, float>>& values = {});
-juce::ValueTree makeDeviceState (Song&, const DeviceType&);
+// The devices' setters (roadmap step S5.20, the devices' writers): every writer of a device, a container or a chain of a live
+// song works its next value out and sets it through these, the only functions (with the versions' passes, until they move,
+// and the store's, model/plugins/internal/DeviceStore.h) that write a DEVICE, CONTAINER or CHAIN element of a live song.
+// While the song's tree is the devices' storage, each writes the elements by what differs, through the conversion
+// (DevicesValue.h: writeDeviceFields(), writeDeviceValueOf(), writeDeviceSoundOf(), writeDeviceLike()), in the mode of the
+// moment: in the step in progress, or without an undo manager while the song is written outside its history
+// (Song::OutsideHistory). A value equal to what the song holds writes nothing, and makes no action. None begins a step. The
+// devices' switch changes what is inside them, and nothing else. Each returns whether it changed the song.
+//   - setDevice(): a device, a container or a chain made this value: one the song hasn't added at its place, at the index
+//     given in its list (-1: after the others there), as setNewDevices() adds one; one it has keeps its place in its list,
+//     but where the value's place is another list, to which it moves as the same element (taken out and put in again at the
+//     index given, with all it holds: a container's chains and their devices, a plug-in's values and state, its window's
+//     place), its own fields, values and sounds written where they differ. One held as another form of a device (one of
+//     Phazite's own for a plug-in, or the other way) is made anew; one whose ID the song holds as another kind of item (a
+//     device, a container, a chain: each against the other two) is refused, the song left as it was, as it can't hold two
+//     items of one ID.
+//   - setNewDevices(): what a maker made (MadeDevices), new: the first at its place, at the index given in its list, the
+//     rest in it (a container's chains, their devices; a chain's devices), each in its list in their order, written as one
+//     element with the store's entries of each (a plug-in's state and program, a chain's mute and solo), in one action.
+//   - eraseDevice(): one taken out, with what it holds; found by its ID (a walk), or at its place (findDevicePlace()).
+//     (Its owner found from its channel's element: no walk.)
+//   - setDeviceListOrder(): an owner's list (a channel's devices, a container's chains, a chain's devices) given an order of
+//     the same IDs (else nothing), each moved as the same element; one moved alone in one move.
+//   setDevice(), setDeviceListOrder() and eraseDevice() by its ID are called by the tests alone today: they are the forms the
+//   devices' switch and the versions' pass (the next piece of S5.20) call; the writers call the narrower ones below.
+//   - moveInDeviceList(): one moved within its list to the place of the one there (after it moving later, before it moving
+//     earlier), in one move; inChain, only a device in a chain, never before its instrument nor an instrument itself.
+//   - moveDevices(): several moved from one owner's list into another's at an index (-1: after those there), in their order,
+//     each the same element, each with its fields edited too (a sidechain turned off: setDeviceFields()); the owners found by
+//     their places, not by walking the song.
+//   - setDeviceFields(), setChainFields(): a device's or a container's (a chain's) own fields edited, read without its values
+//     and sounds (DevicesValue.h: readHeldDeviceFields()) and written by what differs: its switch, a mix, a sidechain, a
+//     name, a split, a chain's fader and ranges. With the element the caller holds, or by its ID.
+//   - setDeviceValue(): one of Phazite's own device's values set by hand, held as the song holds it (SavedValues.h:
+//     keepHeldValue(): within its range, on its steps, none at its default): by its index among its type's parameters, or by
+//     its description on the element the caller holds (a control's found parameter: model/devices/internal/Parameters.h).
+//     A value off its parameter's steps is so written on them (before this piece, as given: what plays didn't change, the
+//     engine stepping every value it is given); and setValueSetByHand() (Parameters.h) passes the value so held on to a
+//     curve's lone point it moves (model/automation/internal/Automation.h: moveOnlyPoint()) and to what is told of it, so
+//     that a lone point is written on the steps too.
+//   - setDeviceSound() (below): one of its sounds, empty for none.
+// The narrow ones write the one property an edit changes, at a drag's rate, without the device read whole, through the same
+// rules as setDevice(), so that the two can never disagree.
+struct MadeDevices;
 
-// Puts a device's element on a channel, at a place among its devices (-1: after them), an instrument first; a plain folder
-// becomes a bus first. What plays it is made from it. Joins the caller's step. Returns its ID, or none for a channel that
-// can't hold it.
-DeviceID insertDeviceState (Song&, TrackID channel, juce::ValueTree device, int index = -1);
+bool setDevice (Song&, DeviceValue, int index = -1);
+bool setNewDevices (Song&, const MadeDevices&, int index = -1);
+bool eraseDevice (Song&, DeviceID);
+bool eraseDevice (Song&, DeviceID, const DevicePlace& at);
+bool setDeviceListOrder (Song&, const DevicePlace& owner, immer::flex_vector<DeviceID> order);
+
+enum class ListMove
+{
+    anywhere, // a device or a container on its channel, or a device in its chain
+    inChain,  // a device in its chain, never its instrument nor before it
+    chains    // a chain among its container's
+};
+
+bool moveInDeviceList (Song&, DeviceID, int newIndex, ListMove = ListMove::anywhere);
+bool moveDevices (Song&, const std::vector<DeviceID>&, const DevicePlace& from, const DevicePlace& to, int index = -1,
+                  const std::function<void (DeviceValue&)>& edit = {});
+bool setDeviceFields (Song&, DeviceID, const std::function<void (DeviceValue&)>& edit);
+bool setDeviceFields (Song&, juce::ValueTree element, const std::function<void (DeviceValue&)>& edit);
+bool setChainFields (Song&, DeviceID chain, const std::function<void (DeviceValue&)>& edit);
+bool setDeviceValue (Song&, DeviceID, int parameterIndex, float value);
+bool setDeviceValue (Song&, juce::ValueTree device, const devices::ParameterInfo&, float value);
+
+// Where a device or a container is, and a chain, as findDevice() reads a place, without its value made: one walk of the
+// song (countDeviceWalks()); none for one the song hasn't. A channel's devices, containers, chains and the devices in them
+// read whole, in the outline's order (getDeviceOutline()), from the channel's element (no walk): for a copy of them
+// (copyDevices()). And a device's name as getDeviceName() gives one, of its value.
+std::optional<DevicePlace> findDevicePlace (const Song&, DeviceID);
+std::optional<DevicePlace> findChainPlace (const Song&, DeviceID chain);
+std::vector<DeviceValue> getChannelDeviceValues (const Song&, TrackID channel);
+juce::String getDeviceName (const DeviceValue&);
+
+// The place of a channel's devices' list, by its track's ID, the master's by its ID or none.
+DevicePlace getDeviceChannelPlace (const Song&, TrackID channel);
+
+//==============================================================================
+// What a maker makes, on no channel yet, with IDs of the song's: the devices (the first is what is placed; the rest are in it,
+// each placed in its own container and chain: a container's chains, each followed by its devices), the store's entries of
+// any of them (a preset's plug-in's state and program, a chain's mute and solo), and a container's eight macros as
+// modulation's values (ModulationValue.h), which its inserter sets through modulation's setter in the same step, right after
+// the container is in the song. Moved into an inserter, which places it: read nothing of it after.
+struct MadeDevices
+{
+    std::vector<DeviceValue> devices {};
+    DeviceStore store {};
+    std::vector<ModulatorValue> macros {};
+};
+
+// One of Phazite's own devices (by its type ID), with values set by hand by its parameters' IDs, each held as the song holds
+// it (SavedValues.h: keepHeldValue()); or a device of a type the browser and the menus offer (DeviceType.h): one of
+// Phazite's own, or a plug-in by its description (Schema.h: pluginFormat to pluginInstrument). And a plug-in's identity of a
+// description.
+MadeDevices makeOwnDevice (Song&, std::string_view typeID, const std::vector<std::pair<juce::String, float>>& values = {});
+MadeDevices makeDevice (Song&, const DeviceType&);
+PluginIdentity fromDescription (const juce::PluginDescription&);
+
+// Puts what a maker made on a channel, at a place among its devices (-1: after them), an instrument first; a plain folder
+// becomes a bus first; a container's macros set right after it. What plays it is made from it. Joins the caller's step.
+// Returns its ID, or none for a channel that can't hold it.
+DeviceID insertDevice (Song&, TrackID channel, MadeDevices, int index = -1);
 
 // Puts an instrument on a track, in place of the one it had, in the caller's step. Returns it, or none if the track can't
 // hold one (a folder, a return or the master).
-DeviceID setInstrument (Song&, TrackID, juce::ValueTree instrument);
+DeviceID setInstrument (Song&, TrackID, MadeDevices instrument);
+
+// Each copied track (by the copied IDs: a duplicate's, model/arrangement/internal/Tracks.h, duplicateTracks()) given its
+// original's devices, containers and chains and what they hold, in their order, each by the ID the copied IDs give it (a new
+// one of the song's where they give none, added to them), a sidechain that listens to a track copied too listening to the
+// copy, what the store holds of each and its window's place copied (DeviceStore.h); before what names them is copied by the
+// copied IDs (the sends, modulation with a container's macros, the curves). Nothing for a copy that holds devices. In the
+// caller's undo step.
+void copyDevices (Song&, CopiedIDs& copied);
 
 // Removes a device, as one undo step named after it: a container with what it holds (Containers.h), and a device in a
 // container from its row, what it holds of its own stored first (Song::storeDeviceStates()), so that an undo brings it
@@ -216,11 +321,9 @@ float getMix (const Song&, DeviceID);        // 1 for a device without a mix
 float getDefaultMix (const Song&, DeviceID); // its mix parameter's default (a reverb's 0.25), else 1
 void setMix (Song&, DeviceID, float mix);
 
-// Which plug-in a device is, on its element in the song (Schema.h: pluginFormat to pluginInstrument), as its description
-// says, written outside the undo history where it differs (for writers only); and the description of the plug-in an
-// element names, as the element has it (read through the conversion: DevicesValue.h, readPluginIdentity()), and of a
-// plug-in's identity as the devices' values hold it.
-void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription&);
+// The description of the plug-in an element names, as the element has it (read through the conversion: DevicesValue.h,
+// readPluginIdentity(); for the plug-ins' instances, PluginInstances.h), and of a plug-in's identity as the devices' values
+// hold it (fromDescription() above the other way).
 juce::PluginDescription getPluginIdentity (const juce::ValueTree& device);
 juce::PluginDescription toDescription (const PluginIdentity&);
 
@@ -232,8 +335,8 @@ juce::PluginDescription toDescription (const PluginIdentity&);
 // device, or none.
 DeviceID addDeviceTo (Song&, TrackID, const DeviceType&, Selection*);
 
-// The same for a device's element made already (from a preset), joining the caller's step.
-DeviceID placeDevice (Song&, TrackID, juce::ValueTree device, Selection*);
+// The same for a device made already (from a preset), joining the caller's step.
+DeviceID placeDevice (Song&, TrackID, MadeDevices device, Selection*);
 
 // The device menus' choices (ui/devices/DeviceMenus.h), each one undo step named after the device: an instrument for a
 // track, in place of the one it had ("Add Synth", or "Replace Instrument with Synth"); an effect after a track's
@@ -293,7 +396,7 @@ TrackID addNewReturnTrack (Song&, Selection*);
 // In one step, as Studio One does: a return track holding an effect, named after it, and a send to it from a track,
 // after the track's fader. The effect plays only its effect, at a mix of 100 %: the dry sound reaches the master through
 // the track itself. Returns the return track, or none.
-TrackID addReturnWithEffect (Song&, TrackID sender, juce::ValueTree effect);
+TrackID addReturnWithEffect (Song&, TrackID sender, MadeDevices effect);
 
 // A track's sends (Schema.h: SEND; the song's sends' area, SongValues.h), each to a return by the return's track, in their
 // order; and adding one from a track to a return: after the fader, or before it with preFader, its level starting at -6 dB.

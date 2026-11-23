@@ -41,18 +41,26 @@ std::optional<float> readHeldSavedValue (const devices::ParameterInfo& info, con
     if (saved.isVoid())
         return std::nullopt;
 
-    auto held = std::optional<float>();
-
     if (info.unit == devices::Unit::choice && saved.isString())
     {
         if (const auto name = saved.toString(); const auto choice = devices::findChoice (info, std::string_view (name.toRawUTF8())))
-            held = devices::constrain (info, info.minimum + (float) *choice);
-    }
-    else if (const auto number = readValueNumber (saved); number.has_value() && std::isfinite (*number))
-    {
-        held = devices::constrain (info, toFloat (*number));
+            return keepHeldValue (info, info.minimum + (float) *choice);
+
+        return std::nullopt;
     }
 
-    return held.has_value() && ! isDefaultValue (info, *held) ? held : std::nullopt;
+    if (const auto number = readValueNumber (saved); number.has_value() && std::isfinite (*number))
+        return keepHeldValue (info, toFloat (*number));
+
+    return std::nullopt;
+}
+
+std::optional<float> keepHeldValue (const devices::ParameterInfo& info, float value)
+{
+    if (! std::isfinite (value))
+        return std::nullopt;
+
+    const auto held = devices::constrain (info, value);
+    return isDefaultValue (info, held) ? std::nullopt : std::optional<float> (held);
 }
 } // namespace phazite

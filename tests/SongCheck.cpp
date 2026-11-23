@@ -1388,6 +1388,31 @@ namespace
         compareLists (kept->channels, read.channels, "channel");
         compareLists (kept->chains, read.chains, "container");
         compareLists (kept->chainDevices, read.chainDevices, "chain");
+
+        // What a writer wrote is what the song holds (the devices' writers: model/mixer/internal/Mixer.h): the lenient reader,
+        // as Phazite's code always read the tree (DevicesValue.h: readDevicesValue()), reads each item as the reader of what the
+        // song holds does; a value written off its steps, at its default or out of its range would read otherwise.
+        const auto lenient = readDevicesValue (song.getState());
+
+        for (const auto& [id, value] : read.devices)
+        {
+            const auto text = "values: device " + std::to_string (id);
+            const auto* asRead = lenient.devices.find (id);
+
+            if (asRead == nullptr)
+            {
+                problems.push_back (text + " is held but not read as Phazite's code always read it");
+                continue;
+            }
+
+            std::string fields;
+
+            for (const auto& field : findDifferingFields (*asRead, value))
+                fields += (fields.empty() ? "" : ", ") + field;
+
+            if (! fields.empty())
+                problems.push_back (text + " is written other than the song holds it, in its " + fields);
+        }
     }
 } // namespace
 

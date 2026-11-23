@@ -436,15 +436,15 @@ void replaceEffect (ProjectContext& context, DeviceID id, const DeviceType& type
         return;
 
     const UndoStep step (*song, "Replace " + getDeviceName (*song, id) + " with " + type.name);
-    const auto replacement = makeDeviceState (*song, type);
+    auto replacement = makeDevice (*song, type);
     const auto indexOf = [] (const std::vector<DeviceID>& devices, DeviceID device)
     { return (int) std::distance (devices.begin(), std::find (devices.begin(), devices.end(), device)); };
 
     // The new one where the old one is, then the old one out (a bus keeps a device all along).
     if (const auto chain = findChainOf (*song, id); chain.isValid())
-        insertIntoChain (*song, chain, replacement, indexOf (getChainDevices (*song, chain), id));
+        insertIntoChain (*song, chain, std::move (replacement), indexOf (getChainDevices (*song, chain), id));
     else if (const auto channel = getDeviceChannel (*song, id); channel.isValid())
-        insertDeviceState (*song, channel, replacement, indexOf (getDevices (*song, channel), id));
+        insertDevice (*song, channel, std::move (replacement), indexOf (getDevices (*song, channel), id));
 
     removeDevice (*song, id);
 }

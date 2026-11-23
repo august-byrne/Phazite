@@ -87,13 +87,15 @@ void makePlainFolder (Song& song, TrackID folder)
     if (! isBus (song, folder))
         return;
 
-    // A VCA of its own in place of its fader, at the folder's volume; its devices go from the song too, and the sidechains
-    // that listened to it hear the sound passing through them again.
+    // A VCA of its own in place of its fader, at the folder's volume; its devices go from the song too (what its plug-ins keep
+    // of their own stored first, so that an undo brings them back as they were), and the sidechains that listened to it hear
+    // the sound passing through them again.
     auto* undo = &song.getUndoManager();
     auto state = findTrackState (song, folder);
+    song.storeDeviceStates (folder.getRaw());
 
-    for (const auto& device : getDeviceStates (state))
-        state.removeChild (device, undo);
+    for (const auto device : getDevices (song, folder))
+        eraseDevice (song, device, getDeviceChannelPlace (song, folder));
 
     forgetSidechainsOfBus (song, folder);
 

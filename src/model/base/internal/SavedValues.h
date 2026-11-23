@@ -31,4 +31,11 @@ float readSavedValue (const devices::ParameterInfo&, const juce::var& saved);
 // for one at its default, which the song keeps none of. What the song's values read a device's and a modulator's values with
 // as the song holds them (DevicesValue.h: readHeldDevice(); ModulationValue.h: readHeldModulator()).
 std::optional<float> readHeldSavedValue (const devices::ParameterInfo&, const juce::var& saved);
+
+// The same rule for a value as a writer has it: within its parameter's range and on its steps (devices::constrain()), none
+// for what is no finite number and for one at its default. The one rule for one value that readHeldSavedValue() reads by,
+// and so the loader (DevicesValue.h: keepDeviceAsHeld()), and that every writer of a device's values writes by
+// (model/mixer/internal/Mixer.h: setDeviceValue(), setDevice() and the makers), so that what a writer writes is what the
+// song holds.
+std::optional<float> keepHeldValue (const devices::ParameterInfo&, float value);
 } // namespace phazite
