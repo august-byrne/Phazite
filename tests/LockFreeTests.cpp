@@ -671,9 +671,13 @@ TEST_CASE (
             {
                 if (i % asksPerBlock == asksPerBlock - 1)
                 {
+                    // The blocks played are read before the group is counted: read after, the audio thread could have
+                    // played every block the new group allows already, and both threads waited for each other for
+                    // ever (CI's Linux Clang job, 2026-11-23: the case ran until ctest's time limit).
+                    const auto seen = blocksPlayed.load();
                     groupsAsked.fetch_add (1);
 
-                    for (const auto seen = blocksPlayed.load(); blocksPlayed.load() == seen && ! audioDone.load();)
+                    while (blocksPlayed.load() == seen && ! audioDone.load())
                         std::this_thread::yield();
                 }
 
