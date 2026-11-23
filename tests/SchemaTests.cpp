@@ -5,6 +5,7 @@
 #include "SongCheck.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/DevicesValue.h"
@@ -34,22 +35,29 @@ TEST_CASE ("A song numbers its items from its own count, which goes past every I
     CHECK ((juce::int64) song.getState()[phazite::schema::nextID] == 3);
 
     // An item with a larger ID than the count (as a song read from a file can hold): counting the IDs moves the count past
-    // it, and the next ID comes after it.
-    juce::ValueTree tracks (phazite::schema::TRACKS);
-    juce::ValueTree track (phazite::schema::TRACK);
-    track.setProperty (phazite::schema::trackID, (juce::int64) 10, nullptr);
-    track.setProperty (phazite::schema::channelFader, (juce::int64) 11, nullptr);
-    tracks.appendChild (track, nullptr);
-    song.getState().appendChild (tracks, nullptr);
-    CHECK (phazite::findNextID (song.getState()) == 12);
-    phazite::countIDs (song);
-    CHECK ((juce::int64) song.getState()[phazite::schema::nextID] == 12);
-    CHECK (song.makeID() == 12);
+    // it, and the next ID comes after it. The song opened from such a file (Project.h: makeSong()), its count set back.
+    namespace schema = phazite::schema;
+    juce::ValueTree file (schema::PHAZITE, { { schema::nextID, (juce::int64) 3 } });
+    file.appendChild (juce::ValueTree (schema::MASTER, { { schema::trackID, (juce::int64) 1 }, { schema::channelFader, (juce::int64) 2 } }),
+                      nullptr);
+    file.appendChild (juce::ValueTree (schema::TRACKS, {},
+                                       { juce::ValueTree (schema::TRACK, { { schema::trackID, (juce::int64) 10 },
+                                                                           { schema::trackKind, schema::trackIsTrack },
+                                                                           { schema::channelFader, (juce::int64) 11 } }) }),
+                      nullptr);
+    CHECK (phazite::findNextID (file) == 12);
+    const auto opened = phazite::makeSong (file);
+    REQUIRE (phazite::test::hasTrack (*opened, phazite::TrackID::fromRaw (10)));
+    opened->getState().setProperty (schema::nextID, (juce::int64) 3, nullptr);
+    CHECK (phazite::findNextID (*opened) == 12);
+    phazite::countIDs (*opened);
+    CHECK ((juce::int64) opened->getState()[schema::nextID] == 12);
+    CHECK (opened->makeID() == 12);
 
     // A count further on than every ID stays where it is.
-    song.getState().setProperty (phazite::schema::nextID, (juce::int64) 50, nullptr);
-    phazite::countIDs (song);
-    CHECK (song.makeID() == 50);
+    opened->getState().setProperty (schema::nextID, (juce::int64) 50, nullptr);
+    phazite::countIDs (*opened);
+    CHECK (opened->makeID() == 50);
 }
 
 TEST_CASE ("A live song's next ID is past every ID its values hold beside its tree: a note's, a clip's, an alias group's, as it "

@@ -7,16 +7,19 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UndoCheck.h"
 #include "devices/reverb/Reverb.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/UndoHistory.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
@@ -26,6 +29,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -377,7 +381,7 @@ TEST_CASE ("The undo check passes a change that is one exact undo step, and one 
     // Back through every step and forth: the song at each as it was, and at the end all of it, the mute too.
     check.walkBackAndForth();
     CHECK (phazite::ensureTracks (*song, 1).size() == 2);
-    CHECK ((bool) phazite::findTrackState (*song, track)[phazite::schema::trackMute]);
+    CHECK ((bool) phazite::test::getTrackProperty (*song, track, phazite::schema::trackMute));
 }
 
 TEST_CASE ("The undo check fails a change that Undo doesn't take back whole, and what makes a later Undo take the wrong thing")
@@ -517,11 +521,11 @@ TEST_CASE ("The undo check's texts leave out what no undo step keeps, and nothin
 {
     using phazite::test::SongPart;
     using phazite::test::writeSong;
+    phazite::test::TemporaryFolder temp;
     auto song = newSong();
     const auto track = phazite::ensureTracks (*song, 1).front();
     auto state = song->getState();
-    auto trackState = phazite::findTrackState (*song, track);
-    REQUIRE (trackState.isValid());
+    REQUIRE (phazite::test::hasTrack (*song, track));
 
     const auto whole = writeSong (*song, SongPart::whole);
     const auto undoable = writeSong (*song, SongPart::undoable);
@@ -530,31 +534,37 @@ TEST_CASE ("The undo check's texts leave out what no undo step keeps, and nothin
     CHECK_FALSE (undoable.contains ("nextID="));
 
     // View settings, how the song plays and what the project remembers outside the history: in the whole song only.
-    trackState.setProperty (phazite::schema::trackHeight, 96, nullptr);
-    trackState.getOrCreateChildWithName (phazite::schema::LANES, nullptr).appendChild (juce::ValueTree (phazite::schema::LANE), nullptr);
+    phazite::setSavedTrackHeight (*song, track, 96);
+    phazite::showLane (*song, track, { phazite::getFader (*song, track), phazite::getVolumeParameterID (*song, track) });
     state.setProperty (phazite::schema::loop, true, nullptr);
     state.getOrCreateChildWithName (phazite::schema::LASTKEY, nullptr).setProperty (phazite::schema::keyRoot, 2, nullptr);
-    trackState.setProperty (phazite::schema::trackFrozen, true, nullptr);
+    phazite::freezeFromFile (*song, track, phazite::test::writeSound (temp.folder.getChildFile ("Frozen.wav"), 0.1));
+    REQUIRE ((bool) phazite::test::getTrackProperty (*song, track, phazite::schema::trackFrozen));
     CHECK (writeSong (*song, SongPart::whole) != whole);
     CHECK (writeSong (*song, SongPart::undoable) == undoable);
     CHECK (writeSong (*song, SongPart::undoableWithoutSwitches) == withoutSwitches);
 
     // The switches that are no undo steps: compared around one change, left out between steps.
-    trackState.setProperty (phazite::schema::trackMute, true, nullptr);
-    trackState.setProperty (phazite::schema::trackSolo, true, nullptr);
-    trackState.setProperty (phazite::schema::trackAutomationMode, phazite::schema::automationTouch, nullptr);
+    phazite::setTrackMuted (*song, track, true);
+    phazite::setTrackSoloed (*song, track, true);
+    phazite::setAutomationMode (*song, track, phazite::AutomationMode::touch);
     CHECK (writeSong (*song, SongPart::undoable) != undoable);
     CHECK (writeSong (*song, SongPart::undoableWithoutSwitches) == withoutSwitches);
 
     // Anything else is the song's: a name, and the order of a parent's elements.
-    trackState.setProperty (phazite::schema::trackName, "Lead", nullptr);
+    {
+        const phazite::UndoStep step (*song, "Rename Track");
+        phazite::setTrackName (*song, track, "Lead");
+    }
+
     CHECK (writeSong (*song, SongPart::undoableWithoutSwitches) != withoutSwitches);
 
     const auto second = phazite::insertPlainTrack (*song, track);
     REQUIRE (second.isValid());
     const auto inOrder = writeSong (*song, SongPart::undoableWithoutSwitches);
-    auto tracks = trackState.getParent();
-    tracks.moveChild (0, 1, nullptr);
+
+    phazite::moveTracksAfter (*song, { track }, second);
+    REQUIRE (phazite::getTrackIDs (*song) == std::vector { second, track });
     const auto swapped = writeSong (*song, SongPart::undoableWithoutSwitches);
     CHECK (swapped != inOrder);
     CHECK_FALSE (phazite::test::describeSongDifferences (inOrder, swapped).isEmpty());

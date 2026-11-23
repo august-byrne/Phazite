@@ -95,21 +95,10 @@ namespace
         std::vector<TrackID> found;
 
         for (const auto track : getTrackIDs (song))
-            if (findTrackState (song, track)[schema::trackKind].toString() == schema::trackIsTrack)
+            if (! isFolder (song, track) && ! isReturnTrack (song, track))
                 found.push_back (track);
 
         return found;
-    }
-
-    size_t countTracks (const juce::ValueTree& track)
-    {
-        size_t tracks = 1;
-
-        for (const auto& child : track)
-            if (child.hasType (schema::TRACK))
-                tracks += countTracks (child);
-
-        return tracks;
     }
 
     // The kinds of edit of notes, controllers' values and clips one by one (RandomEdits::editNotesOrClips()).
@@ -566,8 +555,8 @@ void RandomEdits::edit()
             }
             break;
 
-        case 11: // a track or folder deleted, while another stays
-            if (tracks.size() > countTracks (findTrackState (song, track)))
+        case 11:                                                            // a track or folder deleted, while another stays
+            if (tracks.size() > 1 + getTracksInFolder (song, track).size()) // itself and the tracks in it
                 deleteTracks (song, { track }, nullptr);
             break;
 
@@ -972,7 +961,7 @@ void RandomEdits::edit()
         case 42: // a track frozen from a file, or unfrozen (where asked: freezes)
             if (freezes && song.getCacheFolder() != juce::File() && sound.existsAsFile() && ! isFolder (song, track))
             {
-                if ((bool) findTrackState (song, track)[schema::trackFrozen])
+                if (const auto frozen = getFrozenTracks (song); std::find (frozen.begin(), frozen.end(), track) != frozen.end())
                 {
                     unfreeze (song, track);
                 }

@@ -3026,7 +3026,13 @@ TEST_CASE ("Performance gate: the check for unsaved changes compares no element 
 
     for (int i = 0; i < 20; ++i)
     {
-        phazite::findTrackState (song, built.tracks[5]).sendPropertyChangeMessage (phazite::schema::trackName);
+        // A notification that changes nothing: the track renamed, the rename undone.
+        {
+            const phazite::UndoStep step (song, "Rename Track");
+            phazite::setTrackName (song, built.tracks[5], "Renamed");
+        }
+
+        phazite::undo (song);
         CHECK_FALSE (project.hasUnsavedChanges());
     }
 

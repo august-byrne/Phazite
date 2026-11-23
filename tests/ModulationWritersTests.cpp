@@ -14,6 +14,7 @@
 #include "SongCheck.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UndoCheck.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
@@ -407,8 +408,9 @@ TEST_CASE ("Modulation's setters: a modulator added at a place in its owner's li
     const auto othersOf = [&song] (TrackID id)
     {
         juce::StringArray others;
+        const auto element = phazite::test::copyTrack (song, id);
 
-        for (const auto& child : phazite::findTrackState (song, id))
+        for (const auto& child : element)
             if (! child.hasType (schema::MODULATOR) && ! child.hasType (schema::MACRO))
                 others.add (child.getType().toString() + ":" + schema::getElementKey (child));
 

@@ -8,6 +8,7 @@
 #include "TestClips.h"
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/dynamics/Compressor.h"
@@ -204,7 +205,7 @@ TEST_CASE ("Freezing renders a track up to its fader in the background, and play
     // Unfreezing plays it live again, and leaves the file until the project closes.
     phazite::toggleFreeze (song.context, song.host);
     CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
-    CHECK_FALSE (phazite::findTrackState (model, song.bass).hasProperty (phazite::schema::trackFrozen));
+    CHECK_FALSE (phazite::test::copyTrack (model, song.bass).hasProperty (phazite::schema::trackFrozen));
     CHECK_FALSE (phazite::isFrozenDevice (model, song.stereo));
     CHECK_FALSE (phazite::canUndo (model));
     const auto frozenFile = song.frozenFile();
@@ -831,7 +832,7 @@ TEST_CASE ("A frozen track deleted and brought back by Undo is still frozen")
     }
 
     phazite::test::dispatchPendingMessages();
-    REQUIRE_FALSE (phazite::findTrackState (model, song.bass).isValid());
+    REQUIRE_FALSE (phazite::test::hasTrack (model, song.bass));
     phazite::undo (model);
     phazite::test::dispatchPendingMessages();
     CHECK (isFrozen());
@@ -852,7 +853,7 @@ TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unf
     REQUIRE (song.project->save().wasOk());
 
     // Frozen in the song (Schema.h: trackFrozen): a song made from its state alone plays the file too.
-    CHECK ((bool) phazite::findTrackState (song.getSong(), song.bass)[phazite::schema::trackFrozen]);
+    CHECK ((bool) phazite::test::getTrackProperty (song.getSong(), song.bass, phazite::schema::trackFrozen));
 
     {
         const auto copy =
@@ -882,7 +883,7 @@ TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unf
     song.open();
     CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
     CHECK_FALSE (phazite::isFrozenDevice (song.getSong(), song.stereo));
-    CHECK_FALSE (phazite::findTrackState (song.getSong(), song.bass).hasProperty (phazite::schema::trackFrozen));
+    CHECK_FALSE (phazite::test::copyTrack (song.getSong(), song.bass).hasProperty (phazite::schema::trackFrozen));
 }
 
 TEST_CASE ("Freezing stops before a device that listens to a sidechain; a send before the fader sends what the file plays")

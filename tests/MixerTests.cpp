@@ -3,6 +3,7 @@
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "TestTracks.h"
 #include "devices/delay/Delay.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
@@ -156,20 +157,20 @@ TEST_CASE ("A new folder is a bus; a plain one becomes a bus with its first devi
     auto& song = *mix.song;
     const auto folder = phazite::groupIntoFolder (song, { mix.a, mix.b }, nullptr);
     REQUIRE (folder.isValid());
-    const auto folderState = phazite::findTrackState (song, folder);
+    const auto folderState = [&song, folder] { return phazite::test::copyTrack (song, folder); };
 
     // A bus from the start (design question 11): its tracks' sound goes through its own fader and meter.
     CHECK (phazite::isBus (song, folder));
-    CHECK (folderState.hasProperty (schema::channelFader));
-    CHECK_FALSE (folderState.hasProperty (schema::channelVCA));
+    CHECK (folderState().hasProperty (schema::channelFader));
+    CHECK_FALSE (folderState().hasProperty (schema::channelVCA));
     CHECK (mix.hasMeter (folder));
     CHECK (phazite::isBus (song, phazite::insertFolder (song, {}, nullptr)));
 
     // Made plain with its switch, its volume scales its tracks' volumes instead, as a VCA does.
     phazite::setMixedAsBus (song, folder, false);
     CHECK_FALSE (phazite::isBus (song, folder));
-    REQUIRE (folderState.hasProperty (schema::channelVCA));
-    CHECK_FALSE (folderState.hasProperty (schema::channelFader));
+    REQUIRE (folderState().hasProperty (schema::channelVCA));
+    CHECK_FALSE (folderState().hasProperty (schema::channelFader));
     phazite::setChannelVolume (song, folder, -3.0f);
     CHECK_FALSE (mix.hasMeter (folder)); // a plain folder has no sound of its own
     REQUIRE (mix.findPlayedChannel (mix.a) != nullptr);
@@ -178,19 +179,19 @@ TEST_CASE ("A new folder is a bus; a plain one becomes a bus with its first devi
     const auto compressor = mix.add (folder, Compressor::typeID);
     REQUIRE (compressor.isValid());
     CHECK (phazite::isBus (song, folder));
-    CHECK_FALSE (folderState.hasProperty (schema::channelVCA));
-    REQUIRE (folderState.hasProperty (schema::channelFader));
+    CHECK_FALSE (folderState().hasProperty (schema::channelVCA));
+    REQUIRE (folderState().hasProperty (schema::channelFader));
     CHECK (phazite::getChannelVolume (song, folder) == doctest::Approx (-3.0f));
     CHECK (mix.hasMeter (folder));
     CHECK (phazite::getDevices (song, folder).size() == 1);
-    CHECK (phazite::getFader (song, folder) == idOf (folderState, schema::channelFader));
+    CHECK (phazite::getFader (song, folder) == idOf (folderState(), schema::channelFader));
     REQUIRE (mix.findPlayedChannel (folder) != nullptr);
     CHECK (mix.findPlayedChannel (folder)->getVolume() == doctest::Approx (-3.0f));
     CHECK (std::abs (mix.findPlayedChannel (mix.a)->getVolume()) < 1.0e-4f); // its own fader alone again
 
     phazite::removeDevice (song, compressor);
     CHECK_FALSE (phazite::isBus (song, folder));
-    REQUIRE (folderState.hasProperty (schema::channelVCA));
+    REQUIRE (folderState().hasProperty (schema::channelVCA));
     CHECK (phazite::getChannelVolume (song, folder) == doctest::Approx (-3.0f));
 }
 
@@ -198,26 +199,26 @@ TEST_CASE ("A channel's fader is the song's, by its ID, which what plays the cha
 {
     Mix mix;
     auto& song = *mix.song;
-    const auto a = phazite::findTrackState (song, mix.a);
-    const auto master = phazite::getMasterState (song);
+    const auto a = phazite::test::copyTrack (song, mix.a);
+    const auto master = phazite::test::copyTrack (song, phazite::getMasterID (song));
     CHECK (idOf (a, schema::channelFader).isValid());
     CHECK (phazite::getFader (song, mix.a) == idOf (a, schema::channelFader));
     CHECK (phazite::getFader (song, {}) == idOf (master, schema::channelFader));
     CHECK (phazite::getFader (song, mix.a) != phazite::getFader (song, {}));
-    CHECK (phazite::findChannelOfFader (song, phazite::getFader (song, mix.a)) == a);
+    CHECK (phazite::getTrackID (phazite::findChannelOfFader (song, phazite::getFader (song, mix.a))) == mix.a);
 
     // A folder starts as a bus, with a fader; made plain, a VCA of its own takes the fader's place and its meter goes, and
     // undo brings them back.
     const auto folder = phazite::groupIntoFolder (song, { mix.b }, nullptr);
     REQUIRE (folder.isValid());
-    const auto folderState = phazite::findTrackState (song, folder);
-    const auto fader = idOf (folderState, schema::channelFader);
+    const auto folderState = [&song, folder] { return phazite::test::copyTrack (song, folder); };
+    const auto fader = idOf (folderState(), schema::channelFader);
     CHECK (fader.isValid());
     CHECK (mix.hasMeter (folder));
 
     phazite::setMixedAsBus (song, folder, false);
-    CHECK_FALSE (folderState.hasProperty (schema::channelFader));
-    const auto vca = idOf (folderState, schema::channelVCA);
+    CHECK_FALSE (folderState().hasProperty (schema::channelFader));
+    const auto vca = idOf (folderState(), schema::channelVCA);
     CHECK (vca.isValid());
     CHECK (vca != fader);
     CHECK (phazite::getFader (song, folder) == vca);
@@ -225,8 +226,8 @@ TEST_CASE ("A channel's fader is the song's, by its ID, which what plays the cha
     CHECK_FALSE (mix.hasMeter (folder));
 
     phazite::undo (song);
-    CHECK (idOf (folderState, schema::channelFader) == fader);
-    CHECK_FALSE (folderState.hasProperty (schema::channelVCA));
+    CHECK (idOf (folderState(), schema::channelFader) == fader);
+    CHECK_FALSE (folderState().hasProperty (schema::channelVCA));
     CHECK (phazite::getFader (song, folder) == fader);
     CHECK (mix.hasMeter (folder));
 
@@ -351,7 +352,7 @@ TEST_CASE ("A folder's bus switch makes it a bus that stays one, and plain again
     phazite::removeDevice (song, reverb);
     phazite::setMixedAsBus (song, folder, false);
     CHECK_FALSE (phazite::isBus (song, folder));
-    REQUIRE (phazite::findTrackState (song, folder).hasProperty (schema::channelVCA));
+    REQUIRE (phazite::test::copyTrack (song, folder).hasProperty (schema::channelVCA));
 
     // A bus that became one by getting an effect turns plain again without it, as before.
     const auto delay = mix.add (folder, Delay::typeID);

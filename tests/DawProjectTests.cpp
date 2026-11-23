@@ -6,6 +6,7 @@
 #include "TestClips.h"
 #include "TestDeviceValues.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "app/ProjectSession.h"
 #include "devices/eq/Equalizer.h"
@@ -645,7 +646,7 @@ TEST_CASE ("A DAWproject opens as a new song: its tracks with their notes, audio
     REQUIRE (tracks.count ("Drums") == 1);
     CHECK (phazite::getChannelVolume (imported, tracks["Bass"]) == doctest::Approx (-6.0f).epsilon (0.001));
     CHECK (phazite::getChannelPan (imported, tracks["Bass"]) == doctest::Approx (0.5f));
-    CHECK (phazite::findTrackState (imported, tracks["Lead"])[phazite::schema::trackMute]); // muted, beside its bounce
+    CHECK (phazite::test::getTrackProperty (imported, tracks["Lead"], phazite::schema::trackMute)); // muted, beside its bounce
 
     // Bass's notes; Drums' audio, copied out into the song's Audio folder.
     const auto riff = phazite::getClipValues (imported, tracks["Bass"]);

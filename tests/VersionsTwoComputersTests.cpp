@@ -96,7 +96,7 @@ struct TwoComputers
         return false;
     }
 
-    bool songIsBs() { return hasBassOnB (phazite::findSong (s.context)->getState()); }
+    bool songIsBs() { return hasBassOnB (phazite::test::copyWholeSong (*phazite::findSong (s.context))); }
 
     // B's version on a branch of B's, "theirs": A's first with Bass renamed "Bass on B", seen by A as it opens again.
     juce::String saveOnB()

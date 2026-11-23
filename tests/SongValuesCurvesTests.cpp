@@ -16,6 +16,7 @@
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UndoCheck.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Arrangement.h"
@@ -732,9 +733,9 @@ TEST_CASE ("Song values' curves: a track's line made a version's, and put back, 
                     phazite::deleteTracks (song, { track }, nullptr);
                     phazite::addPoint (song, volume, { at (12.0), 0.1f });
                 });
-    REQUIRE_FALSE (phazite::findTrackState (song, track).isValid());
+    REQUIRE_FALSE (phazite::test::hasTrack (song, track));
     restore ("Put Back the Track");
-    REQUIRE (phazite::findTrackState (song, track).isValid());
+    REQUIRE (phazite::test::hasTrack (song, track));
     isTheVersions();
 
     undo.walkBackAndForth();

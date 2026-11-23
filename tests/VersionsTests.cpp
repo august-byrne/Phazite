@@ -4,6 +4,7 @@
 #include "TestDeviceValues.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
@@ -170,9 +171,8 @@ TEST_CASE ("View state and how the song plays are no change since the last versi
     keepVersion (s.context);
 
     auto& song = *phazite::findSong (s.context);
-    auto state = phazite::findTrackState (song, track);
-    state.setProperty (schema::trackHeight, 120, nullptr);
-    state.setProperty (schema::trackCollapsed, true, nullptr);
+    phazite::setSavedTrackHeight (song, track, 120);
+    phazite::setCollapsed (song, track, true);
     song.getState().setProperty (schema::loop, true, nullptr);
     song.getState().setProperty (schema::metronome, true, nullptr);
     song.getState().setProperty (schema::gridStep, "1 bar", nullptr);
@@ -631,9 +631,8 @@ TEST_CASE ("The differences between two songs match items by their IDs, wherever
     const auto then = phazite::test::copyWholeSong (*before);
 
     // The second track moved above the first: the song's order, no track's own change.
-    auto list = phazite::getTrackList (*before);
-    const auto second = phazite::findTrackState (*before, tracks[1]);
-    list.moveChild (list.indexOf (second), 0, nullptr);
+    phazite::moveTracksAfter (*before, { tracks[1] }, {});
+    REQUIRE (phazite::getTrackIDs (*before) == std::vector { tracks[1], tracks[0] });
     const auto moved = findChanges (then, phazite::test::copyWholeSong (*before));
     REQUIRE (moved.size() == 1);
     CHECK (moved[0].where == phazite::SongChange::Where::song);
@@ -986,7 +985,7 @@ TEST_CASE ("A project's last commit is read from its Versions folder without the
     REQUIRE (commit.isValid());
     CHECK (name == "Kept");
     CHECK (commit.hasType (schema::PHAZITE));
-    CHECK (phazite::getTrackElements (commit).size() == phazite::getTrackElements (song.getState()).size());
+    CHECK (phazite::getTrackElements (commit).size() == phazite::getTrackElements (phazite::test::copyWholeSong (song)).size());
 }
 
 TEST_CASE ("Save Version can run only while there is something to save, and says what it would be named while no name is typed")
@@ -1318,7 +1317,7 @@ TEST_CASE ("A song another tool wrote with switches as true and false and IDs as
     INFO (describeChanges (s.context).toStdString());
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::getSnapshots (s.context).empty());
-    const auto bassState = phazite::findTrackState (*phazite::findSong (s.context), bass);
+    const auto bassState = phazite::test::copyTrack (*phazite::findSong (s.context), bass);
     REQUIRE (bassState.isValid());
     CHECK (bassState[schema::trackMute].toString() == "1");
     CHECK (bassState[schema::trackID].toString() == juce::String ((juce::int64) bass.getRaw()));

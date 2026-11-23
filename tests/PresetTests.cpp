@@ -9,6 +9,7 @@
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/dynamics/Compressor.h"
@@ -248,7 +249,7 @@ TEST_CASE ("A track's preset whose volume and pan are no finite number leaves th
 
     for (const auto id : phazite::getTrackIDs (second.getSong()))
         if (std::find (before.begin(), before.end(), id) == before.end())
-            added = phazite::findTrackState (second.getSong(), id);
+            added = phazite::test::copyTrack (second.getSong(), id);
 
     REQUIRE (added.isValid());
     CHECK_FALSE (added.hasProperty (phazite::schema::channelVolume));

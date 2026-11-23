@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "TestTracks.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -80,7 +81,7 @@ struct Tracks
     // A track's own color, as the song keeps it: transparent while it has none.
     juce::Colour getOwnColour (phazite::TrackID track) const
     {
-        return juce::Colour::fromString (phazite::findTrackState (*song, track)[phazite::schema::trackColour].toString());
+        return juce::Colour::fromString (phazite::test::getTrackProperty (*song, track, phazite::schema::trackColour).toString());
     }
 
     // How the playlist shows a track's height, through the model's row of it.

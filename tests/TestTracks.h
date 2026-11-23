@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Tracks and the master read by the tests by the song and IDs, never by the live song's elements of them, as
+// TestDeviceValues.h does for devices: the tracks are moving beside the song's tree (roadmap step S5.20), after which the
+// live tree holds no TRACK or MASTER, and what a test reads through these keeps working as they move. Their bodies are what
+// the steps that move the tracks change; a test never reads or writes a live song's TRACKS, TRACK, MASTER, LANES or LANE
+// element itself. What a test sets (a name, a volume, a height, a mute, a lane shown) it sets through the model's functions
+// by ID (model/arrangement/internal/Tracks.h, model/mixer/internal/Mixer.h, model/automation/internal/Automation.h), and a
+// state no model function makes it opens from a whole copy edited by hand (findTrackIn(), then makeSong()).
+#pragma once
+
+#include "TestHelpers.h"
+#include "model/base/IDs.h"
+#include "model/base/Song.h"
+
+namespace phazite::test
+{
+// What the song holds of a track as its element, written whole (model/base/internal/WholeState.h: copyWholeSong(), the
+// element found in it by the track's ID; the MASTER's for the master's ID): what a test reads a property (a name, a volume, a
+// fader's ID, a key, a height, a mute, a frozen switch) or a child (its LANES) of. An invalid tree for a track the song
+// hasn't. A copy: what a test writes into it changes nothing in the song. Its body is what the tracks' pieces change.
+juce::ValueTree copyTrack (const Song&, TrackID);
+
+// Whether the song holds a track (or is the master's): the presence check of a track that a version, an Undo or a merge
+// brings back or takes away. Its body (today's model functions by ID) is what the tracks' pieces change.
+bool hasTrack (const Song&, TrackID);
+
+// One property of what the song holds of a track (copyTrack()), void where it hasn't it: for the one-liners.
+juce::var getTrackProperty (const Song&, TrackID, const juce::Identifier&);
+
+// A track's element (or the master's) in a whole copy of a song, or in a song's text read, by its ID: invalid for none. What
+// a test changes by hand in it (a property out of its range) for a song opened from that copy
+// (model/project/internal/Project.h: makeSong(), or TestSong::openSong()), as a song opens any file; a live song's own
+// elements are never written so.
+juce::ValueTree findTrackIn (const juce::ValueTree& wholeSong, TrackID);
+
+// Whether the live song's own tree holds an element of a type anywhere (a CLIP, which the clips' area holds beside it, never
+// there): what a test that checks the tree holds none asks, in place of looking through a live track's elements.
+bool treeHolds (const Song&, const juce::Identifier& type);
+} // namespace phazite::test

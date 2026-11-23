@@ -8,6 +8,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/Clips.h"
@@ -335,7 +336,7 @@ TEST_CASE ("Song values' clips: what listens to the song's tree hears nothing of
     Watched w;
     const auto clip = w.s.addMidiClip (w.s.firstTrack, 0.0, 4.0);
     REQUIRE (clip.isValid());
-    CHECK_FALSE (phazite::findTrackState (w.song, w.s.firstTrack).getChildWithName (phazite::schema::CLIP).isValid());
+    CHECK_FALSE (phazite::test::treeHolds (w.song, phazite::schema::CLIP));
 
     // Everything a listener of the song's root hears.
     struct TreeHeard final : juce::ValueTree::Listener

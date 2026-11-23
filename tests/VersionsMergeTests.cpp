@@ -476,20 +476,21 @@ TEST_CASE ("A line merged again after a merge gave its additions new IDs merges 
     // Each side adds a track, both counting on from the same place: one ID for two tracks.
     phazite::ensureTracks (*sides.ours, 3);
     phazite::ensureTracks (*sides.theirs, 3);
-    auto ourTrack = phazite::getTrackElements (sides.ours->getState()).back();
-    auto theirTrack = phazite::getTrackElements (sides.theirs->getState()).back();
-    REQUIRE (ourTrack[schema::trackID] == theirTrack[schema::trackID]);
-    ourTrack.setProperty (schema::trackName, "Lead", nullptr);
-    theirTrack.setProperty (schema::trackName, "Pad", nullptr);
+    const auto ourTrack = phazite::getTrackIDs (*sides.ours).back();
+    const auto theirTrack = phazite::getTrackIDs (*sides.theirs).back();
+    REQUIRE (ourTrack == theirTrack);
+    const juce::var ourTrackID ((juce::int64) ourTrack.getRaw());
+    phazite::setTrackName (*sides.ours, ourTrack, "Lead");
+    phazite::setTrackName (*sides.theirs, theirTrack, "Pad");
 
     const auto first = sides.merge();
     REQUIRE_FALSE (first.renumbered.empty());
     const auto padID = findTrack (first.song, "Pad")[schema::trackID];
-    CHECK (padID != ourTrack[schema::trackID]);
+    CHECK (padID != ourTrackID);
 
     // The other line goes on from what was merged in: its Pad renamed.
     const auto parted = phazite::test::copyWholeSong (*sides.theirs);
-    findTrack (sides.theirs->getState(), "Pad").setProperty (schema::trackName, "Pad 2", nullptr);
+    phazite::setTrackName (*sides.theirs, theirTrack, "Pad 2");
 
     // Merged again, the parting's and the other side's songs numbered as this side's through what the first merge recorded.
     auto base = parted.createCopy(), theirs = phazite::test::copyWholeSong (*sides.theirs);
@@ -501,7 +502,7 @@ TEST_CASE ("A line merged again after a merge gave its additions new IDs merges 
     const auto second = phazite::mergeSongs (base, phazite::test::copyWholeSong (*ours), theirs, [&ours] { return ours->makeID(); });
 
     CHECK (second.clashes.empty());
-    CHECK (findTrack (second.song, "Lead")[schema::trackID] == ourTrack[schema::trackID]);
+    CHECK (findTrack (second.song, "Lead")[schema::trackID] == ourTrackID);
     CHECK (findTrack (second.song, "Pad 2")[schema::trackID] == padID);
     CHECK_FALSE (findTrack (second.song, "Pad").isValid());
     CHECK (phazite::getTrackElements (second.song).size() == phazite::getTrackElements (first.song).size());

@@ -7,6 +7,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/drums/DrumSampler.h"
@@ -209,10 +210,16 @@ TEST_CASE ("The project file holds each property on a line of its own, in the or
     // Set against the order of their names, which the file follows instead.
     state.setProperty (schema::patternsKeepTheirSpeed, true, nullptr);
     state.setProperty (schema::outline, "Electronic", nullptr);
-    auto track = phazite::getTrackList (project->getSong()).getChild (0);
-    track.setProperty (schema::trackName, "Bass", nullptr);
-    track.setProperty (schema::channelVolume, -6.0, nullptr);
-    track.setProperty (schema::trackColour, "ff336699", nullptr);
+
+    {
+        auto& song = project->getSong();
+        const auto track = phazite::getTrackIDs (song).front();
+        const phazite::UndoStep step (song, "Edit Track");
+        phazite::setTrackName (song, track, "Bass");
+        phazite::setChannelVolume (song, track, -6.0f);
+        phazite::setTrackColour (song, track, juce::Colour (0xff336699));
+    }
+
     REQUIRE (project->save().wasOk());
 
     for (const auto& line : juce::StringArray::fromLines (project->getFile().loadFileAsString()))
@@ -240,7 +247,7 @@ TEST_CASE ("The project file holds each property on a line of its own, in the or
     const auto file = project->getFile();
     project = nullptr;
     auto reopened = openProject (file);
-    const auto reopenedTrack = phazite::getTrackList (reopened->getSong()).getChild (0);
+    const auto reopenedTrack = phazite::test::copyTrack (reopened->getSong(), phazite::getTrackIDs (reopened->getSong()).front());
     CHECK (reopened->getSong().getState()[schema::outline].toString() == "Electronic");
     CHECK (reopenedTrack[schema::trackName].toString() == "Bass");
     CHECK (juce::approximatelyEqual ((double) reopenedTrack[schema::channelVolume], -6.0));
@@ -262,14 +269,14 @@ TEST_CASE ("The song numbers its items itself, each new one past every ID it hol
         const phazite::UndoStep step (song, "Add Track");
         const auto track = phazite::insertTrack (song, {}, nullptr);
         REQUIRE (track.isValid());
-        return phazite::findTrackState (song, track);
+        return phazite::test::copyTrack (song, track);
     };
 
     // Past the first track's, its fader's and the master's.
-    const auto first = phazite::getTrackStates (song).front();
+    const auto first = phazite::test::copyTrack (song, phazite::getTrackIDs (song).front());
     CHECK (next() > idOf (first, schema::trackID));
     CHECK (next() > idOf (first, schema::channelFader));
-    CHECK (next() > idOf (phazite::getMasterState (song), schema::channelFader));
+    CHECK (next() > idOf (phazite::test::copyTrack (song, phazite::getMasterID (song)), schema::channelFader));
 
     // A new track takes the next IDs, which an undo doesn't give back: the track after it gets new ones.
     auto before = next();
@@ -988,13 +995,22 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     REQUIRE_FALSE (project->hasUnsavedChanges());
 
     auto& song = project->getSong();
-    auto trackState = phazite::findTrackState (song, trackID);
     const auto clipValue = phazite::getClipValue (song, clipID);
-    REQUIRE (trackState.isValid());
+    REQUIRE (phazite::test::hasTrack (song, trackID));
     REQUIRE (clipValue.has_value());
 
-    // Notifications that change nothing; and a clip set to the value it holds, which tells nobody (its area's value is the
-    // same).
+    // Notifications that change nothing (a track renamed and the rename undone, which makes the project compare itself with
+    // its saved copy); and a clip set to the value it holds, which tells nobody (its area's value is the same).
+    const auto renameAndUndo = [&song, trackID]
+    {
+        {
+            const phazite::UndoStep step (song, "Rename Track");
+            phazite::setTrackName (song, trackID, "Renamed");
+        }
+
+        phazite::undo (song);
+    };
+
     struct Told final : phazite::SongValues::Listener
     {
         int calls = 0;
@@ -1005,12 +1021,15 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     phazite::setClip (song, *clipValue);
     song.getValues()->removeListener (&told);
     CHECK (told.calls == 0);
-    trackState.sendPropertyChangeMessage (phazite::schema::trackName);
+    renameAndUndo();
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // The same value written as another type (the file holds text).
-    REQUIRE (trackState[phazite::schema::keyRoot].isString());
-    trackState.setProperty (phazite::schema::keyRoot, 2, nullptr);
+    // The same value written as another type (the file holds text): the track's key chosen as the one it has, which the model
+    // writes again outside the history as the key set last (Notes.h: setTrackKey(); the track's own, the same value, through
+    // the history, is no change).
+    REQUIRE (song.getState().getChildWithName (phazite::schema::LASTKEY)[phazite::schema::keyRoot].isString());
+    phazite::chooseTrackKey (song, trackID, phazite::Key { 2, phazite::Scale::minor });
+    REQUIRE_FALSE (song.getState().getChildWithName (phazite::schema::LASTKEY)[phazite::schema::keyRoot].isString());
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // A note taken out and put back as it was (by Undo).
@@ -1026,19 +1045,22 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 
     // Where the playhead is.
     phazite::movePlayhead (song, beats (4.0));
-    trackState.sendPropertyChangeMessage (phazite::schema::trackName);
+    renameAndUndo();
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // A change taken back before anything asked.
-    trackState.setProperty (phazite::schema::keyRoot, 5, nullptr);
-    trackState.setProperty (phazite::schema::keyRoot, 2, nullptr);
+    phazite::chooseTrackKey (song, trackID, phazite::Key { 5, phazite::Scale::minor });
+    phazite::chooseTrackKey (song, trackID, phazite::Key { 2, phazite::Scale::minor });
     CHECK_FALSE (project->hasUnsavedChanges());
     REQUIRE (project->autosave().wasOk());
     CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
 
     // Each property compared at its place in the saved copy, among the elements that count: a lane shown first in the
     // track (view state) moves nothing there.
+    // No model function places the LANES among a track's elements: the live track's element is moved by hand, which goes with
+    // the tracks' view leaving the tree (roadmap step S5.20).
     phazite::showLane (song, trackID, { phazite::getFader (song, trackID), phazite::getVolumeParameterID (song, trackID) });
+    auto trackState = phazite::findTrackState (song, trackID);
     auto lanes = trackState.getChildWithName (phazite::schema::LANES);
     REQUIRE (lanes.isValid());
     trackState.moveChild (trackState.indexOf (lanes), 0, nullptr);
@@ -1150,7 +1172,10 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    trackState.setProperty (phazite::schema::keyRoot, 3, nullptr);
+    // And a change to what the song holds made without an undo step: the key new tracks get (Notes.h: setLastKey()).
+    const auto undoSteps = song.getUndoManager().getUndoDescriptions();
+    phazite::setLastKey (song, phazite::Key { 3, phazite::Scale::minor });
+    REQUIRE (song.getUndoManager().getUndoDescriptions() == undoSteps);
     CHECK (project->hasUnsavedChanges());
 }
 
@@ -1897,9 +1922,14 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     REQUIRE (project->autosave().wasOk());
     CHECK_FALSE (phazite::Project::getAutosaveFile (project->getFile()).exists());
 
-    // A notification that changes nothing, which makes the project compare itself with its saved copy, doesn't count them
-    // either; a change to the song still counts.
-    phazite::findTrackState (song, track).sendPropertyChangeMessage (schema::trackName);
+    // A notification that changes nothing (a track renamed and the rename undone, which leaves nothing to undo), which makes
+    // the project compare itself with its saved copy, doesn't count them either; a change to the song still counts.
+    {
+        const phazite::UndoStep step (song, "Rename Track");
+        phazite::setTrackName (song, track, "Renamed");
+    }
+
+    phazite::undo (song);
     CHECK_FALSE (project->hasUnsavedChanges());
     song.getState().setProperty (schema::outline, "pop", nullptr);
     CHECK (project->hasUnsavedChanges());
@@ -1911,8 +1941,8 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     project = nullptr;
     project = openProject (file);
     auto& reopened = project->getSong();
-    REQUIRE (phazite::findTrackState (reopened, track).isValid());
-    REQUIRE (phazite::findTrackState (reopened, other).isValid());
+    REQUIRE (phazite::test::hasTrack (reopened, track));
+    REQUIRE (phazite::test::hasTrack (reopened, other));
     REQUIRE (phazite::isFolder (reopened, folder));
     CHECK (phazite::getSavedTrackHeight (reopened, track).value_or (0) == 200);
     CHECK (phazite::isCollapsed (reopened, other));

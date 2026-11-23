@@ -1276,7 +1276,7 @@ TEST_CASE ("The loader's checks change nothing in a song Phazite wrote, read bac
     juce::String error;
     const auto project = phazite::Project::open (file, false, error);
     REQUIRE (project != nullptr);
-    const auto& song = project->getSong().getState();
+    const auto song = phazite::test::copyWholeSong (project->getSong()); // the song whole, as a version holds it
     const auto pieces = phazite::splitSong (song);
     const auto joined = phazite::joinSong (
         pieces.song,

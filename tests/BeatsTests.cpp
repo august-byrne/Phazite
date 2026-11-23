@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's own beats and IDs (src/model/base/Beats.h and IDs.h), which the model's functions and the UI pass.
 #include "TestHelpers.h"
+#include "TestTracks.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/project/internal/Project.h"
 
@@ -80,7 +81,7 @@ TEST_CASE ("A song's items have IDs, each kind its own type, which order and has
     REQUIRE (tracks.size() == 1);
     const auto id = tracks.front();
     CHECK (id.isValid());
-    CHECK (phazite::findTrackState (*song, id).isValid());
+    CHECK (phazite::test::hasTrack (*song, id));
     CHECK_FALSE (phazite::TrackID().isValid());
 
     // Each kind of item has an ID type of its own; IDs order and hash as numbers.

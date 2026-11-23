@@ -10,7 +10,9 @@
 #include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestHelpers.h"
+#include "TestTracks.h"
 #include "model/arrangement/internal/ClipRenders.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
@@ -64,26 +66,30 @@ void leaveOutWhatNamesNothing (phazite::Song& song)
         phazite::forgetCurvesOfGoneDevices (song, [] (const phazite::ParameterRef&) { return true; });
     }
 
+    // The items (the tracks, the master, their faders and devices) of the song whole, never of its live tree alone, which
+    // holds less as the song's areas move beside it (roadmap step S5.20).
     std::set<std::uint64_t> items;
-    findIDProblems (song.getState(), &items);
+    findIDProblems (phazite::test::copyWholeSong (song), &items);
 
-    const std::function<void (juce::ValueTree)> visit = [&] (juce::ValueTree tree)
+    // The lanes, through automation's functions by each track's ID (the master's too), read from what the song holds of it.
+    auto channels = phazite::getTrackIDs (song);
+    channels.push_back (phazite::getMasterID (song));
+
+    for (const auto channel : channels)
     {
-        for (auto i = tree.getNumChildren(); --i >= 0;)
-        {
-            auto child = tree.getChild (i);
+        // Each channel among the items found, so that the lanes are never all left out unseen: an empty list would have every
+        // lane name nothing, and the comparison after this compare no lanes.
+        INFO ("channel " << channel.getRaw() << " isn't among the song's items");
+        REQUIRE (items.count (channel.getRaw()) == 1);
 
-            if (child.hasType (phazite::schema::LANE) && items.count (phazite::readID (child[phazite::schema::laneDevice])) == 0)
-            {
-                tree.removeChild (i, nullptr);
-                continue;
-            }
+        const auto lanes = phazite::test::copyTrack (song, channel).getChildWithName (phazite::schema::LANES);
 
-            visit (child);
-        }
-    };
-
-    visit (song.getState());
+        for (const auto& lane : lanes)
+            if (lane.hasType (phazite::schema::LANE) && items.count (phazite::readID (lane[phazite::schema::laneDevice])) == 0)
+                phazite::removeLane (song, channel,
+                                     { phazite::DeviceID::fromRaw (phazite::readID (lane[phazite::schema::laneDevice])),
+                                       lane[phazite::schema::laneParameter].toString() });
+    }
 }
 
 phazite::Song::Ptr makeRandomSong (juce::int64 seed, const juce::File& sounds, int edits = editsPerSong)

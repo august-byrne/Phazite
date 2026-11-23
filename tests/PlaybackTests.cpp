@@ -4,8 +4,10 @@
 #include "TestClips.h"
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Clips.h"
@@ -26,6 +28,7 @@
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
+#include "model/versions/internal/ApplySong.h"
 
 #include <algorithm>
 #include <vector>
@@ -532,23 +535,65 @@ juce::String comparePlans (phazite::SongPlayer& kept, phazite::Song& song)
 }
 } // namespace
 
-TEST_CASE ("Two tracks whose IDs are swapped in place play as a whole compile of the song does, notes and devices")
+TEST_CASE ("Two tracks moved past each other, a version applied whose tracks hold each other's contents, and a master given another "
+           "ID by a version play as a whole compile of the song does, notes and devices")
 {
-    // Known bug 145's review: a track's notes and audio are kept by its ID; an ID that changes in place (as a merge's
-    // renumbering or a load's repair gives one) named another track at the plan before, whose kept notes the plan would
-    // have played on this one.
+    // Known bug 145's review: a track's notes and audio are kept by its ID, and the plan after an edit must be the one a whole
+    // compile makes. Three edits, each checked so: two tracks moved past each other (their places swapped, their IDs kept); a
+    // version applied whose two tracks hold each other's contents (the versions' pass matches tracks by ID in place, so the
+    // tracks keep their IDs and their names, devices and clips move between them); and the master given another ID by a
+    // version applied, the one ID a version sets in place (ApplySong.cpp: makeLike()).
+    // This case once swapped two live tracks' IDs in place, which no code in src/ does: only a new element comes with a
+    // track's ID, and a version sets the master's alone. So the player's branch for a TRACK's ID changed in place
+    // (SongPlayer.cpp, the trackID case of valueTreePropertyChanged()) is now run by no test and by no code path; it goes with
+    // the tracks' pieces (roadmap step S5.20).
     TwoSynths two;
-    phazite::SongPlayer kept (*two.song);
-    REQUIRE (comparePlans (kept, *two.song).isEmpty());
+    auto& song = *two.song;
+    phazite::SongPlayer kept (song);
+    REQUIRE (comparePlans (kept, song).isEmpty());
 
-    auto first = phazite::findTrackState (*two.song, two.tracks[0]);
-    auto second = phazite::findTrackState (*two.song, two.tracks[1]);
-    const auto a = first[phazite::schema::trackID], b = second[phazite::schema::trackID];
-    first.setProperty (phazite::schema::trackID, (juce::int64) two.song->makeID(), nullptr);
-    second.setProperty (phazite::schema::trackID, a, nullptr);
-    first.setProperty (phazite::schema::trackID, b, nullptr);
+    // Their places swapped.
+    phazite::moveTracksAfter (song, { two.tracks[0] }, two.tracks[1]);
+    REQUIRE (phazite::getTrackIDs (song) == std::vector { two.tracks[1], two.tracks[0] });
+    auto differences = comparePlans (kept, song);
+    CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
 
-    const auto differences = comparePlans (kept, *two.song);
+    // A version in which each track's contents are under the other's ID, applied: each track keeps its ID, and takes what the
+    // other held, its notes and devices.
+    auto version = phazite::test::copyWholeSong (song);
+    auto first = phazite::test::findTrackIn (version, two.tracks[0]);
+    auto second = phazite::test::findTrackIn (version, two.tracks[1]);
+    REQUIRE (first.isValid());
+    REQUIRE (second.isValid());
+    first.setProperty (phazite::schema::trackID, (juce::int64) two.tracks[1].getRaw(), nullptr);
+    second.setProperty (phazite::schema::trackID, (juce::int64) two.tracks[0].getRaw(), nullptr);
+
+    {
+        const phazite::UndoStep step (song, "Apply Version");
+        phazite::makeSongLike (song, version);
+    }
+
+    REQUIRE (phazite::getDevices (song, two.tracks[0]) == std::vector { two.synths[1] });
+    REQUIRE (phazite::getDevices (song, two.tracks[1]) == std::vector { two.synths[0] });
+    differences = comparePlans (kept, song);
+    CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
+
+    // The master, with an effect, given another ID by a version applied.
+    phazite::test::addOwnDevice (song, phazite::getMasterID (song), phazite::devices::Equalizer::typeID);
+    REQUIRE (comparePlans (kept, song).isEmpty());
+    const auto otherID = phazite::TrackID::fromRaw (song.makeID());
+    version = phazite::test::copyWholeSong (song);
+    auto master = phazite::test::findTrackIn (version, phazite::getMasterID (song));
+    REQUIRE (master.hasType (phazite::schema::MASTER));
+    master.setProperty (phazite::schema::trackID, (juce::int64) otherID.getRaw(), nullptr);
+
+    {
+        const phazite::UndoStep step (song, "Apply Version");
+        phazite::makeSongLike (song, version);
+    }
+
+    REQUIRE (phazite::getMasterID (song) == otherID);
+    differences = comparePlans (kept, song);
     CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
 }
 

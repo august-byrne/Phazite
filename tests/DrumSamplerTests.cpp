@@ -12,6 +12,7 @@
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
 #include "engine/nodes/DeviceRunner.h"
@@ -988,7 +989,7 @@ TEST_CASE ("A drum pad on a track of its own plays there, leaving its sampler's 
     CHECK (phazite::getPlayedPad (model, padTrack)->first == sampler);
     CHECK (phazite::getPlayedPad (model, padTrack)->second == 36);
     CHECK (phazite::getTrackIDs (model)[1] == padTrack);
-    CHECK (phazite::findTrackState (model, padTrack)[phazite::schema::trackName].toString() == juce::String ("Kick"));
+    CHECK (phazite::test::getTrackProperty (model, padTrack, phazite::schema::trackName).toString() == juce::String ("Kick"));
 
     auto [onItsOwn, snareStill] = peaks();
     CHECK (onItsOwn == doctest::Approx (kick).epsilon (0.01));

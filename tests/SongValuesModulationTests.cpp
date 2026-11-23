@@ -19,6 +19,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UndoCheck.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Clips.h"
@@ -1273,7 +1274,9 @@ TEST_CASE ("Song values' modulation: a container sent to another track by a line
                            phazite::removeBrokenReferences (song);
                        });
 
-    REQUIRE (phazite::findDeviceState (song, container).getParent() == phazite::findTrackState (song, other));
+    REQUIRE (phazite::test::copyTrack (song, other)
+                 .getChildWithProperty (phazite::schema::deviceID, (juce::int64) container.getRaw())
+                 .hasType (phazite::schema::CONTAINER)); // among its elements
     REQUIRE (phazite::getContainerMacros (song, container) == macros);
 
     for (const auto id : macros)
@@ -1325,6 +1328,7 @@ TEST_CASE ("Song values' modulation: a track deleted and brought back by Undo, w
 
 TEST_CASE ("Song values' modulation: a lone modulator added to a track in a step is refused")
 {
+    // The keeper's own: goes with the keepers (S5.20, the tracks' switch).
     // As a lone macro is (the keeper's case (d)): the element can't be taken out in the step that adds it (JUCE workaround
     // W62, docs/juce-workarounds.md), so it is refused, the song's modulation as it was; its step's Undo takes it out again.
     phazite::test::TestSong s;
@@ -1351,6 +1355,52 @@ TEST_CASE ("Song values' modulation: a lone modulator added to a track in a step
     phazite::undo (song);
     CHECK_FALSE (trackState.getChildWithName (phazite::schema::MODULATOR).isValid());
     CHECK (phazite::getModulationValue (song) == held);
+    phazite::test::checkSong (song);
+}
+
+TEST_CASE ("Song values' modulation: a track deleted, then its line brought back from a version, comes back with its modulators "
+           "and its container's macros as they were, and Undo and Redo take them back and forth")
+{
+    // What the keeper does with a track that comes in with its modulators (the case above refuses a lone one), as someone does
+    // it, through the model: so that it holds unchanged once the tracks leave the song's tree (roadmap step S5.20).
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    auto& context = s.context;
+    const auto track = s.firstTrack;
+    s.addTrack ("Other");
+    const auto lfo = s.addModulator (track, ModulatorType::lfo);
+    s.modulate (lfo, s.getPanParameter (track), 0.5f);
+    const auto container = phazite::addContainer (context, track);
+    REQUIRE (container.isValid());
+    const auto macros = phazite::getContainerMacros (song, container);
+    REQUIRE (macros.size() == 8);
+    s.setMacroValue (macros[0], 0.25f);
+    const auto before = phazite::getModulationValue (song);
+    const auto version = phazite::test::copyWholeSong (song);
+    phazite::test::UndoCheck undo (context);
+
+    undo.checkSeveral ("Delete Track", [&] { phazite::deleteTracks (song, { track }, nullptr); });
+    CHECK (phazite::getModulationValue (song).modulators.empty());
+    phazite::test::checkSong (song);
+
+    undo.checkSeveral ("Restore Track",
+                       [&]
+                       {
+                           const phazite::UndoStep step (song, "Restore Track");
+                           REQUIRE (phazite::makeTrackLike (song, track, version));
+                           phazite::removeBrokenReferences (song);
+                       });
+    CHECK (phazite::getModulationValue (song) == before);
+    CHECK (phazite::getModulators (song, track) == std::vector { lfo });
+    CHECK (phazite::getContainerMacros (song, container) == macros);
+    phazite::test::checkSong (song);
+
+    undo.stepBackOrForth ("Undo Restore Track", [&] { phazite::undo (song); });
+    CHECK (phazite::getModulationValue (song).modulators.empty());
+    undo.stepBackOrForth ("Redo Restore Track", [&] { phazite::redo (song); });
+    CHECK (phazite::getModulationValue (song) == before);
+    undo.walkBackAndForth();
+    CHECK (phazite::getModulationValue (song) == before);
     phazite::test::checkSong (song);
 }
 

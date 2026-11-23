@@ -656,6 +656,17 @@ namespace
         return "values: clip " + std::to_string (id);
     }
 
+    // The song's tracks (folders and returns too, not the master) by their IDs, made once for a check that asks of many.
+    std::set<std::uint64_t> getTrackIDSet (const Song& song)
+    {
+        std::set<std::uint64_t> ids;
+
+        for (const auto track : getTrackIDs (song))
+            ids.insert (track.getRaw());
+
+        return ids;
+    }
+
     // The clips' area: no clip in the song's tree (its clips are the area's); the area's lists agree with its clips, and no
     // alias group is of one clip; each clip on a track of the song that can hold it; and the audio clips of an alias group
     // hold ONE sound (the same, not two alike).
@@ -684,11 +695,15 @@ namespace
             problems.push_back ("values: an alias group holds one clip alone");
 
         std::map<std::uint64_t, ClipID> firstOfGroups;
+        std::set<std::uint64_t> holders; // the song's tracks that hold clips (no folder, return or master), by their IDs
+
+        for (const auto track : getTrackIDs (song))
+            if (! isFolder (song, track) && ! isReturnTrack (song, track))
+                holders.insert (track.getRaw());
 
         for (const auto& [id, clip] : clips.clips)
         {
-            if (const auto track = findTrackState (song, clip.track);
-                ! track.hasType (schema::TRACK) || isFolderState (track) || isReturnState (track))
+            if (holders.count (clip.track.getRaw()) == 0)
                 problems.push_back (clipText (id) + " is on track " + std::to_string (clip.track.getRaw())
                                     + ", which isn't a track of the song's that holds clips");
 
@@ -1122,6 +1137,7 @@ namespace
             problems.push_back ("values: modulation's lists don't hold its modulators, or one modulates a parameter twice, or a "
                                 "container's macros are on two channels");
 
+        const auto songTracks = getTrackIDSet (song);
         const auto next = (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0);
 
         for (const auto& [key, value] : modulation.modulators)
@@ -1131,17 +1147,18 @@ namespace
             if (key >= next)
                 problems.push_back (text + " has an ID the song's next ID isn't past");
 
-            // Its channel: the master, or a track of the song's; a container's, the container's own.
-            const auto channel = value.place.onMaster ? findChainState (song, {}) : findTrackState (song, value.place.track);
-
-            if (! (value.place.onMaster ? channel.hasType (schema::MASTER) : channel.hasType (schema::TRACK)))
+            // Its channel: the master, or a track of the song's; a container's, the container's own, among that channel's
+            // devices.
+            if (! value.place.onMaster && songTracks.count (value.place.track.getRaw()) == 0)
                 problems.push_back (text + " is on no channel of the song's");
 
             if (value.place.container.isValid())
             {
-                const auto container = findDeviceState (song, value.place.container);
+                const auto container = findDevice (song, value.place.container);
+                const DevicePlace onChannel { .track = value.place.onMaster ? TrackID() : value.place.track,
+                                              .onMaster = value.place.onMaster };
 
-                if (! container.hasType (schema::CONTAINER) || container.getParent() != channel)
+                if (! container.has_value() || container->form != DeviceValue::Form::container || container->place != onChannel)
                     problems.push_back (text + " is a macro of a container that isn't on its channel");
             }
 
@@ -1204,6 +1221,7 @@ namespace
         if (! holdsItsLists (sends))
             problems.push_back ("values: the sends' lists don't hold its sends, or hold one twice");
 
+        const auto songTracks = getTrackIDSet (song);
         const auto next = (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0);
         const auto& range = schema::sendLevel.getRange();
 
@@ -1214,7 +1232,7 @@ namespace
             if (key >= next)
                 problems.push_back (text + " has an ID the song's next ID isn't past");
 
-            if (! findTrackState (song, send.from).hasType (schema::TRACK))
+            if (songTracks.count (send.from.getRaw()) == 0)
                 problems.push_back (text + " is on no track of the song's");
 
             const auto level = (double) send.level;
@@ -1462,15 +1480,12 @@ void checkSong (const Song& song)
 
 Song::Ptr copyAsOpened (const Song& song)
 {
-    Song::Ptr copy (new Song (phazite::test::copyWholeSong (song)));
-    forgetCurvesOfGoneDevices (*copy);
-
-    // A song left without curves is written without an AUTOMATION (CurvesArea.h: writeCurvesIn()), as the song opened is.
-    if (auto automation = copy->getState().getChildWithName (schema::AUTOMATION); automation.isValid() && automation.getNumChildren() == 0)
-        copy->getState().removeChild (automation, nullptr);
-    copy->getState().removeProperty (schema::playStart, nullptr);
+    // The lanes of devices gone left out of the song whole, before a song is made of it: a whole copy holds every channel's
+    // LANES, which the song's own tree won't once the tracks are values beside it (roadmap step S5.20). The items (the
+    // tracks, the master, their faders and devices) are those of the same whole copy.
+    auto whole = phazite::test::copyWholeSong (song);
     std::set<std::uint64_t> items;
-    findIDProblems (copy->getState(), &items);
+    findIDProblems (whole, &items);
 
     const std::function<void (juce::ValueTree)> visit = [&] (juce::ValueTree tree)
     {
@@ -1488,7 +1503,15 @@ Song::Ptr copyAsOpened (const Song& song)
         }
     };
 
-    visit (copy->getState());
+    visit (whole);
+
+    Song::Ptr copy (new Song (whole));
+    forgetCurvesOfGoneDevices (*copy);
+
+    // A song left without curves is written without an AUTOMATION (CurvesArea.h: writeCurvesIn()), as the song opened is.
+    if (auto automation = copy->getState().getChildWithName (schema::AUTOMATION); automation.isValid() && automation.getNumChildren() == 0)
+        copy->getState().removeChild (automation, nullptr);
+    copy->getState().removeProperty (schema::playStart, nullptr);
     return copy;
 }
 } // namespace phazite::test

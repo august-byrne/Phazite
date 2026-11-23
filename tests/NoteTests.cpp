@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UndoCheck.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
@@ -534,7 +535,7 @@ TEST_CASE ("A track has no key until one is chosen, and new tracks get the key c
     const auto key = phazite::getTrackKey (*song, track);
     REQUIRE (key.has_value());
     CHECK (phazite::describeKey (*key) == juce::String ("A minor"));
-    CHECK (phazite::findTrackState (*song, track)[phazite::schema::keyScale].toString() == juce::String ("minor")); // by name
+    CHECK (phazite::test::getTrackProperty (*song, track, phazite::schema::keyScale).toString() == juce::String ("minor")); // by name
 
     // A new track gets it.
     const auto added = phazite::insertTrack (*song, track, nullptr);

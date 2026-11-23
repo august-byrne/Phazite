@@ -5,6 +5,7 @@
 #include "SongIDs.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/dynamics/Compressor.h"
@@ -572,9 +573,9 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     phazite::finishMerge (b.s.context);
     REQUIRE (phazite::isMerging (b.s.context));
     checkIDs (song);
-    CHECK_FALSE (phazite::findTrackState (song, folder).isValid());
-    CHECK (phazite::findTrackState (song, b.bass).isValid());
-    CHECK (phazite::findTrackState (song, b.drums).isValid());
+    CHECK_FALSE (phazite::test::hasTrack (song, folder));
+    CHECK (phazite::test::hasTrack (song, b.bass));
+    CHECK (phazite::test::hasTrack (song, b.drums));
     CHECK (phazite::getParentFolder (song, b.bass) == phazite::TrackID());
     CHECK (phazite::getClips (song, b.bass).empty());
     REQUIRE (phazite::getClips (song, b.drums) == std::vector { clip });
@@ -597,7 +598,7 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishMerge (b.s.context);
     checkIDs (song);
-    CHECK_FALSE (phazite::findTrackState (song, folder).isValid());
+    CHECK_FALSE (phazite::test::hasTrack (song, folder));
     CHECK (phazite::getClips (song, b.drums) == std::vector { clip });
 
     // Committed, and opened again: each ID once.
@@ -637,7 +638,7 @@ TEST_CASE ("A merge leaves out a send the other side added to a return this side
     phazite::finishMerge (b.s.context);
 
     auto& merged = *phazite::findSong (b.s.context);
-    CHECK_FALSE (phazite::findTrackState (merged, reverb).isValid());
+    CHECK_FALSE (phazite::test::hasTrack (merged, reverb));
     CHECK (phazite::getSends (merged, b.drums).empty());
     checkIDs (phazite::test::copyWholeSong (merged));
 }
@@ -709,8 +710,9 @@ TEST_CASE ("A merge's conflict answered for the other side leaves out what that 
     REQUIRE (clashes.size() == 1);
     UndoCheck undoCheck (b.s.context);
     undoCheck.check ("Take the Other Branch's", [&b] { REQUIRE (phazite::chooseClash (b.s.context, 0, 2)); });
-    CHECK_FALSE (phazite::findTrackState (song, snare).isValid());
-    CHECK_FALSE (song.getState().toXmlString().contains ("sidechain=\"" + juce::String ((juce::uint64) snare.getRaw()) + "\""));
+    CHECK_FALSE (phazite::test::hasTrack (song, snare));
+    CHECK_FALSE (
+        phazite::test::copyWholeSong (song).toXmlString().contains ("sidechain=\"" + juce::String ((juce::uint64) snare.getRaw()) + "\""));
     CHECK_FALSE (phazite::getSidechainSource (song, compressor).isValid());
     CHECK (phazite::getClashes (b.s.context)[0].chosen == 2);
 

@@ -7,6 +7,7 @@
 #include "GoldenFiles.h"
 #include "SongCheck.h"
 #include "TestHelpers.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "model/arrangement/PlaylistModel.h"
@@ -454,7 +455,7 @@ TEST_CASE ("Write modes are each track's, the song's, and changing one is no und
     phazite::setAutomationMode (context, a, AutomationMode::touch);
     CHECK (phazite::getAutomationMode (context, a) == AutomationMode::touch);
     CHECK (phazite::getAutomationMode (context, b) == AutomationMode::read);
-    CHECK (phazite::findTrackState (*song.song, a)[phazite::schema::trackAutomationMode].toString() == juce::String ("touch"));
+    CHECK (phazite::test::getTrackProperty (*song.song, a, phazite::schema::trackAutomationMode).toString() == juce::String ("touch"));
     CHECK (phazite::isWritingAutomation (*song.song));
     CHECK_FALSE (song.song->getUndoManager().canUndo());
 

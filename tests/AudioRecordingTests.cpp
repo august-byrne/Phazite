@@ -104,7 +104,7 @@ TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is on
     phazite::undo (*song);
     CHECK (phazite::getTrackInput (context, track).isEmpty());
     CHECK_FALSE (phazite::isArmed (context, track));
-    CHECK_FALSE (song->getState().toXmlString().contains ("armed"));
+    CHECK_FALSE (phazite::test::copyWholeSong (*song).toXmlString().contains ("armed")); // the song whole, as it is saved
 
     // A track with an instrument plays what is played on MIDI instead.
     phazite::setTrackInput (context, track, "1");

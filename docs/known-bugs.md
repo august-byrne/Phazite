@@ -24,7 +24,7 @@ found by reading while the automation's curves were made values (2026-11-22), an
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
 the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
-onto another's beat does.
+onto another's beat does. 244 was found by a test the design of the tracks' values asked for (the same step, 2026-11-23).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -206,6 +206,32 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `chooseClash()` is told that the parting held none; the tempo map does it through its value (`chooseTempoMapClash()`),
   and each other area can as it becomes a value (roadmap step S5.20). `tests/VersionsMergeWaitingTests.cpp` checks the
   tempo map's (the case of a conflict on a tempo's bpm, ramp and a tempo both branches added, "chosen each way").
+
+- **244. After a version applied gives the master another ID, the changes since the last version list no master line,
+  then list the master as added, never as changed.** A version sets the master's ID in place (`makeLike()`,
+  `src/model/versions/ApplySong.cpp`). The changes since the last version, worked out by `ChangesWorker`
+  (`src/model/versions/ChangesWorker.cpp`), then list no master line at all, where the whole songs compared
+  (`findChanges()`, `src/model/versions/SongDiff.cpp`) list the master as changed ("settings"); and once anything
+  refreshes the worker's copy of the song's outline (a track moved, a change of the song's own, or the full round after
+  the project is opened again), they list the master as "added", with nothing named, and stay so after its EQ is turned
+  (the whole songs: "settings, EQ"). Why: the worker keys the reference's tracks and its master by their IDs
+  (`referenceTracks`), and the master's ID changing only marks the master under its new ID (`VersionHistory::markTrack()`,
+  from `markChanged()`): `compareTrack()` finds no reference under that ID and stores an "added" line there. That line is
+  listed only under the master's ID read from the outline (`masterNow`, from `skeleton`), which `index()` sets to the
+  reference and which the ID's change doesn't refresh: so at first `masterNow` is the old ID, which has no line, and
+  nothing shows; after a refresh it is the new ID, and its "added" line shows. `findChanges()` compares the two songs'
+  MASTER elements as one, whatever their IDs. To fix (about 10 to 15 lines): key the master as the master, by one fixed
+  key, in `ChangesWorker` (its `referenceTracks`, `compareTrack()`, `lines` and `addLine()`) and in
+  `VersionHistory::markTrack()` (a MASTER marked by that key, not by its ID), and name its line by the master's ID now.
+  How a person gets there: by bringing back a version saved before a load renumbered the song's IDs (a damaged file, or
+  one another tool wrote); a merge doesn't, as both sides share the master's ID. Nothing in the song is lost: the list
+  (and a version's name made from it) is wrong until the next Save Version. Found by the test the design of the tracks'
+  values asked for (roadmap step S5.20, the tracks' first piece, 2026-11-23), whose steps make its test in
+  `tests/VersionsChangesTests.cpp`, built as its cases are: two tracks and an EQ on the master, a version kept; a copy of
+  the song whole whose MASTER's ID is set to one the song made, applied with `makeSongLike()` and
+  `removeBrokenReferences()` in a step; the changes compared with the whole songs' (`checkChangesAreWhole()`): no master
+  line against "changed master: settings"; a track moved past the other: "added master" against "changed master:
+  settings"; the EQ's output turned: "added master" against "changed master: settings, EQ". The fix makes them equal.
 
 ## Devices and playback
 

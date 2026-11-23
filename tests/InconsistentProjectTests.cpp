@@ -8,6 +8,7 @@
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UndoCheck.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -426,7 +427,7 @@ TEST_CASE ("A clip anywhere but on a track, in an element Phazite doesn't know t
     CHECK (phazite::getClips (song, edited.lead).size() == 1);
 
     // What Phazite doesn't know stays, without the clip.
-    CHECK (phazite::findTrackState (song, edited.lead).getChildWithName ("FUTURE").isValid());
+    CHECK (phazite::test::copyTrack (song, edited.lead).getChildWithName ("FUTURE").isValid());
     CHECK (song.getState().getChildWithName ("ELSEWHERE").isValid());
 }
 
@@ -561,7 +562,7 @@ TEST_CASE ("The loader's checks alone leave the song's count of IDs past every I
     phazite::Song song (juce::ValueTree::fromXml (*xml));
     phazite::makeConsistent (song);
     const auto counted = (std::uint64_t) (juce::int64) song.getState()[schema::nextID];
-    CHECK (phazite::findNextID (song.getState()) <= counted);
+    CHECK (phazite::findNextID (phazite::test::copyWholeSong (song)) <= counted); // past all it holds, its tree and values
     CHECK (counted < 900000);
 }
 
@@ -678,7 +679,7 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
             const auto sends = phazite::getSendValues (again, added);
             REQUIRE (sends.size() == 1);
             CHECK (sends.front().to == returned);
-            CHECK (findAll (phazite::findTrackState (again, added), schema::LANE).size() == 1);
+            CHECK (findAll (phazite::test::copyTrack (again, added), schema::LANE).size() == 1);
             const phazite::ParameterRef volumeAgain { phazite::getFader (again, added), phazite::getVolumeParameterID (again, added) };
             CHECK (phazite::getPoints (again, volumeAgain).size() == 1);
             CHECK (findDucker (again) == findKey (again).getRaw());
@@ -694,10 +695,10 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
 
 namespace
 {
-// The tracks' and their clips' elements of a song, in order: a track's by its name.
+// What the song holds of a track as its element, written whole (TestTracks.h), a track's by its name.
 juce::ValueTree findNamedTrack (const phazite::Song& song, const juce::String& name)
 {
-    for (const auto& track : findAll (song.getState(), schema::TRACK))
+    for (const auto& track : findAll (phazite::test::copyWholeSong (song), schema::TRACK))
         if (track[schema::trackName].toString() == name)
             return track;
 
@@ -1147,7 +1148,7 @@ TEST_CASE ("A macro, and the master's fader and VCA, past the mark, are given an
 
     // The master's fader and VCA, given anew, its volume's curve following.
     const auto masterID = phazite::getMasterID (song);
-    const auto masterState = phazite::findTrackState (song, masterID);
+    const auto masterState = phazite::test::copyTrack (song, masterID);
     const auto fader = phazite::DeviceID::fromRaw (phazite::readID (masterState[schema::channelFader])); // not its VCA
     CHECK (fader.getRaw() < phazite::schema::maxCountedID);
     CHECK (phazite::readID (masterState[schema::channelVCA]) < phazite::schema::maxCountedID);

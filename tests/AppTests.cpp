@@ -1091,7 +1091,7 @@ DamagedProject makeDamagedProject (const juce::File& parentFolder, bool keepBack
     REQUIRE (result->wasOk());
     REQUIRE (phazite::test::waitForVersionHistory (s.context));
     phazite::test::waitForVersionsWrites();
-    made.tracks = phazite::getTrackElements (phazite::findSong (s.context)->getState()).size();
+    made.tracks = phazite::getTrackIDs (*phazite::findSong (s.context)).size();
 
     const auto folder = s.getProject().getFile().getParentDirectory();
     const auto copy = parentFolder.getChildFile (folder.getFileName());
@@ -1164,7 +1164,7 @@ TEST_CASE ("A project file that won't open offers its branch's last commit, read
         REQUIRE (session->getProject() != nullptr);
         CHECK (session->getProject()->getFile() == damaged.file);
         CHECK (session->getProject()->hasUnsavedChanges());
-        CHECK (phazite::getTrackElements (session->getProject()->getSong().getState()).size() == damaged.tracks);
+        CHECK (phazite::getTrackIDs (session->getProject()->getSong()).size() == damaged.tracks);
         CHECK (errors.isEmpty());
     }
 

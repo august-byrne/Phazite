@@ -8,6 +8,7 @@
 #include "TestClips.h"
 #include "TestDeviceValues.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/dynamics/Compressor.h"
@@ -790,7 +791,7 @@ TEST_CASE ("Restoring a line from a damaged commit takes what it can, and nothin
         line.name = "Bass";
         line.track = bass;
         CHECK_FALSE (phazite::test::finished (s.context, [&] { return phazite::restoreFromVersion (s.context, damaged, line); }));
-        CHECK (phazite::findTrackState (song, bass).isValid());
+        CHECK (phazite::test::hasTrack (song, bass));
         CHECK (phazite::getRestoreProblem (s.context).contains ("Low end"));
         CHECK (phazite::getRestoreProblem (s.context).contains ("can't be read"));
 
@@ -833,7 +834,7 @@ TEST_CASE ("Restoring a line from a damaged commit takes what it can, and nothin
         line.name = "Extra";
         line.track = extra;
         CHECK (phazite::test::finished (s.context, [&] { return phazite::restoreFromVersion (s.context, keysOnly, line); }));
-        CHECK_FALSE (phazite::findTrackState (song, extra).isValid());
+        CHECK_FALSE (phazite::test::hasTrack (song, extra));
         CHECK_FALSE (phazite::getRestoreProblem (s.context).contains ("Couldn't restore"));
     }
 
@@ -852,7 +853,7 @@ TEST_CASE ("Restoring a line from a damaged commit takes what it can, and nothin
         line.isSong = true;
         phazite::test::finished (s.context, [&] { return phazite::restoreFromVersion (s.context, damaged, line); });
         CHECK (phazite::test::copyWholeSong (song).getChildWithName (schema::TEMPOMAP).isEquivalentTo (mapBefore));
-        CHECK_FALSE (song.getState().toXmlString().contains (schema::versions::missing.toString()));
+        CHECK_FALSE (phazite::test::copyWholeSong (song).toXmlString().contains (schema::versions::missing.toString()));
     }
 }
 

@@ -2040,7 +2040,13 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
 
     for (int i = 0; i < 100; ++i)
     {
-        phazite::findTrackState (song, tracks[5]).sendPropertyChangeMessage (phazite::schema::trackName);
+        // A notification that changes nothing: the track renamed, the rename undone.
+        {
+            const phazite::UndoStep step (song, "Rename Track");
+            phazite::setTrackName (song, tracks[5], "Renamed");
+        }
+
+        phazite::undo (song);
         checks.push_back (millisecondsOf ([&] { REQUIRE_FALSE (project->hasUnsavedChanges()); }));
     }
 

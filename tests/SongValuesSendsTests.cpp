@@ -21,6 +21,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/eq/Equalizer.h"
@@ -1447,6 +1448,7 @@ TEST_CASE ("Song values' sends: a track deleted and brought back by Undo, whose 
 TEST_CASE ("Song values' sends: a lone send added to a track in a step is refused and one outside the history read in; a track "
            "that comes in with sends has them taken in, one of an ID the song holds dropped")
 {
+    // The keeper's own: goes with the keepers (S5.20, the tracks' switch).
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& context = s.context;
@@ -1522,6 +1524,53 @@ TEST_CASE ("Song values' sends: a lone send added to a track in a step is refuse
     phazite::test::checkSong (song);
     undo.walkBackAndForth();
     CHECK (phazite::getSends (song, came).size() == 1);
+    phazite::test::checkSong (song);
+}
+
+TEST_CASE ("Song values' sends: a track deleted, then its line brought back from a version, comes back with its sends as they "
+           "were, and Undo and Redo take them back and forth")
+{
+    // What the keeper does with a track that comes in with its sends (the case above), as someone does it, through the model:
+    // so that it holds unchanged once the tracks leave the song's tree (roadmap step S5.20).
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.firstTrack;
+    DeviceID toReverb, toDelay;
+
+    {
+        const phazite::UndoStep step (song, "Add Sends");
+        toReverb = phazite::addSend (song, track, phazite::addReturnTrack (song, "Reverb", nullptr), false);
+        toDelay = phazite::addSend (song, track, phazite::addReturnTrack (song, "Delay", nullptr), true);
+        phazite::setSendLevel (song, toDelay, -9.0f);
+    }
+
+    REQUIRE (phazite::getSends (song, track) == std::vector { toReverb, toDelay });
+    const auto before = phazite::getSendsValue (song);
+    const auto version = phazite::test::copyWholeSong (song);
+    phazite::test::UndoCheck undo (s.context);
+
+    undo.checkSeveral ("Delete Track", [&] { phazite::deleteTracks (song, { track }, nullptr); });
+    CHECK_FALSE (phazite::getSendValue (song, toReverb).has_value());
+    CHECK_FALSE (phazite::getSendValue (song, toDelay).has_value());
+    phazite::test::checkSong (song);
+
+    undo.checkSeveral ("Restore Track",
+                       [&]
+                       {
+                           const phazite::UndoStep step (song, "Restore Track");
+                           REQUIRE (phazite::makeTrackLike (song, track, version));
+                           phazite::removeBrokenReferences (song);
+                       });
+    CHECK (phazite::getSendsValue (song) == before);
+    CHECK_FALSE (holdsSendElement (song.getState()));
+    phazite::test::checkSong (song);
+
+    undo.stepBackOrForth ("Undo Restore Track", [&] { phazite::undo (song); });
+    CHECK_FALSE (phazite::getSendValue (song, toReverb).has_value());
+    undo.stepBackOrForth ("Redo Restore Track", [&] { phazite::redo (song); });
+    CHECK (phazite::getSendsValue (song) == before);
+    undo.walkBackAndForth();
+    CHECK (phazite::getSendsValue (song) == before);
     phazite::test::checkSong (song);
 }
 

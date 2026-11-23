@@ -577,7 +577,7 @@ TEST_CASE ("Song values' sections: a pasted section's ID is past every ID the so
     CHECK (phazite::findLargestIDHeld (song) >= verse.getRaw());
     CHECK (phazite::findNextID (song) > verse.getRaw());
 
-    const auto largestBefore = std::max (phazite::findLargestIDHeld (song), phazite::findLargestID (song.getState()));
+    const auto largestBefore = std::max (phazite::findLargestIDHeld (song), phazite::findLargestID (phazite::test::copyWholeSong (song)));
     SectionID copy;
 
     {

@@ -11,9 +11,14 @@
 #include "GoldenFiles.h"
 #include "SongCheck.h"
 #include "TestClips.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
+#include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UndoCheck.h"
+#include "devices/eq/Equalizer.h"
+#include "devices/sampler/Sampler.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -21,10 +26,15 @@
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/SamplerSound.h"
+#include "model/mixer/ContainerModel.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/AudioRecorder.h"
+#include "model/versions/internal/ApplySong.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -119,8 +129,7 @@ struct GoldenClips
             auto project = phazite::Project::open (file, false, error);
             REQUIRE_MESSAGE (project != nullptr, error.toStdString());
 
-            for (const auto& track : phazite::getTrackStates (project->getSong()))
-                CHECK_FALSE (track.getChildWithName (schema::CLIP).isValid()); // the song's own tree holds none
+            CHECK_FALSE (phazite::test::treeHolds (project->getSong(), schema::CLIP)); // the song's own tree holds none
 
             for (const auto& clip : phazite::getClipPlacements (project->getSong()))
             {
@@ -237,7 +246,7 @@ TEST_CASE ("Song values: a clip's notes made by the model, every value a note ca
     }
 
     phazite::setClipNotes (*song, clip, made);
-    CHECK_FALSE (phazite::findTrackState (*song, track).getChildWithName (schema::CLIP).isValid());
+    CHECK_FALSE (phazite::test::treeHolds (*song, schema::CLIP));
     const auto whole = phazite::copyWholeClip (*song, clip);
     const auto value = phazite::getClipNotesValue (*song, clip);
     REQUIRE (value.notes.size() == 200);
@@ -409,6 +418,7 @@ TEST_CASE ("Song values: a song opened holds its clips' notes beside its tree, t
 TEST_CASE ("Song values: a track that comes into the song with its clips' elements has them read into the values and taken out "
            "of the tree, in the step, and Undo and Redo take both back and forth")
 {
+    // The keeper's own: goes with the keepers (S5.20, the tracks' switch).
     Kept k;
     const auto adoptedBefore = k.song->getValues()->countAdopted();
 
@@ -575,6 +585,7 @@ TEST_CASE ("Song values: a clip's copies share its value, an alias joins its gro
 TEST_CASE ("Song values: what is written outside the history is no undo step, and a track taken out is remembered with its clips "
            "only while something can bring it back")
 {
+    // The keeper's own: goes with the keepers (S5.20, the tracks' switch).
     Kept k;
     const auto value = k.get (k.clip);
     const auto clipValue = phazite::getClipValue (*k.song, k.clip);
@@ -642,6 +653,135 @@ TEST_CASE ("Song values: what is written outside the history is no undo step, an
     const auto last = phazite::insertMidiClip (*k.song, k.tracks[2], { phazite::test::at (400.0), phazite::test::at (402.0) }, nullptr);
     CHECK (k.find (last) != nullptr);
     phazite::test::checkValues (*k.song);
+}
+
+TEST_CASE ("A track deleted and brought back by Undo has its clips, sends, modulators, macros and devices; moved into a folder and "
+           "out, and its line brought back from a version, it keeps them")
+{
+    // What the song's keeper does with a track's element taken out and put in again (the two cases above), as someone does it,
+    // through the model: so that it holds unchanged once the tracks leave the song's tree (roadmap step S5.20). Its devices
+    // hold a value off its default (the EQ's output), a sound (the sampler's) and a plug-in's own state set in its window and
+    // stored, so that what is compared whole covers a VALUES, a SOUNDS and a plug-in's state.
+    phazite::test::TestPlugin plugin; // before the song that holds one
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.firstTrack;
+    const auto other = s.addTrack ("Other");
+    const auto sampler = s.setInstrument (track, phazite::devices::Sampler::typeID);
+    REQUIRE (phazite::setSampleFile (song, sampler, phazite::test::writeSound (s.getSoundsFolder().getChildFile ("Kick.wav"), 0.1)));
+    const auto eq = s.addEffect (track, phazite::devices::Equalizer::typeID);
+    const auto outputID = phazite::devices::Equalizer::info.parameters[(size_t) phazite::devices::Equalizer::outputParameter].id;
+    const juce::String output (outputID.data(), outputID.size());
+    s.setParameter (eq, output, -3.0f);
+    phazite::DeviceID effect;
+
+    {
+        const phazite::UndoStep step (song, "Add Plug-in");
+        effect = phazite::test::TestPlugin::add (song, track);
+    }
+
+    REQUIRE (effect.isValid());
+    s.waitForPlugins();
+    phazite::test::TestPlugin::setGain (song, effect, 0.5f);
+    song.storeDeviceStates();
+    const auto clip = s.addMidiClip (track, 0.0, 4.0);
+    s.addNote (clip, 60, 0.0, 1.0);
+    s.addNote (clip, 64, 1.0, 1.0);
+    const auto alias = s.copyClip (clip, 8.0, true);
+    s.addReturn (track, "phaziteReverb");
+    const auto lfo = s.addModulator (track, phazite::ModulatorType::lfo);
+    s.modulate (lfo, s.getPanParameter (track), 0.5f);
+    const auto container = phazite::addContainer (s.context, track);
+    REQUIRE (container.isValid());
+    const auto macros = phazite::getContainerMacros (song, container);
+    REQUIRE_FALSE (macros.empty());
+    s.setMacroValue (macros[0], 0.25f);
+
+    // What it holds, written whole (TestTracks.h), and by the model's functions.
+    const auto whole = phazite::test::copyTrack (song, track);
+    const auto devices = phazite::getDevices (song, track);
+    const auto sends = phazite::getSends (song, track);
+    REQUIRE (std::find (devices.begin(), devices.end(), eq) != devices.end());
+    REQUIRE (std::find (devices.begin(), devices.end(), container) != devices.end());
+    REQUIRE (std::find (devices.begin(), devices.end(), effect) != devices.end());
+    REQUIRE (sends.size() == 1);
+    REQUIRE ((float) phazite::test::copyDevice (song, eq).getChildWithName (schema::VALUES)[juce::Identifier (output)]
+             == doctest::Approx (-3.0f));
+    REQUIRE (phazite::test::copyDevice (song, sampler).getChildWithName (schema::SOUNDS).isValid());
+    REQUIRE (phazite::test::copyDevice (song, effect)[schema::pluginState].toString().isNotEmpty());
+
+    const auto holdsAll = [&]
+    {
+        CHECK (phazite::test::copyTrack (song, track).isEquivalentTo (whole));
+        CHECK (phazite::getClips (song, track) == std::vector { clip, alias });
+        CHECK (phazite::getAliasClips (song, clip) == std::vector { clip, alias });
+        CHECK (phazite::getClipNotes (song, alias).size() == 2);
+        CHECK (phazite::getDevices (song, track) == devices);
+        CHECK (phazite::getSends (song, track) == sends);
+        CHECK (phazite::getModulators (song, track) == std::vector { lfo });
+        CHECK (phazite::getContainerMacros (song, container) == macros);
+        REQUIRE (phazite::getModulatorValue (song, macros[0]).has_value());
+        CHECK (phazite::getModulatorValue (song, macros[0])->value == doctest::Approx (0.25f));
+        phazite::test::checkSong (song);
+
+        // The plug-in, opened again in the background where it came back, from the state the song holds of it.
+        s.waitForPlugins();
+        CHECK (phazite::test::TestPlugin::getGain (song, effect) == doctest::Approx (0.5f));
+    };
+
+    const auto holdsNone = [&]
+    {
+        CHECK_FALSE (phazite::test::hasTrack (song, track));
+        CHECK_FALSE (phazite::getClipValue (song, clip).has_value());
+        CHECK_FALSE (phazite::getClipValue (song, alias).has_value());
+        CHECK_FALSE (phazite::getSendValue (song, sends[0]).has_value());
+        CHECK_FALSE (phazite::getModulatorValue (song, lfo).has_value());
+        CHECK_FALSE (phazite::getModulatorValue (song, macros[0]).has_value());
+        CHECK_FALSE (phazite::test::hasDevice (song, eq));
+        CHECK_FALSE (phazite::test::hasDevice (song, container));
+        CHECK_FALSE (phazite::test::hasDevice (song, effect));
+        CHECK_FALSE (phazite::test::hasDevice (song, sampler));
+        phazite::test::checkSong (song);
+    };
+
+    holdsAll();
+    phazite::test::UndoCheck undo (s.context);
+
+    // Deleted, brought back by Undo, deleted again by Redo, and back.
+    undo.checkSeveral ("Delete Track", [&] { phazite::deleteTracks (song, { track }, nullptr); });
+    holdsNone();
+    undo.stepBackOrForth ("Undo Delete Track", [&] { phazite::undo (song); });
+    holdsAll();
+    undo.stepBackOrForth ("Redo Delete Track", [&] { phazite::redo (song); });
+    holdsNone();
+    undo.stepBackOrForth ("Undo Delete Track again", [&] { phazite::undo (song); });
+    holdsAll();
+
+    // Moved into a folder, and out again as the folder is ungrouped.
+    phazite::TrackID folder;
+    undo.checkSeveral ("a folder", [&] { folder = phazite::insertFolder (song, other, nullptr); });
+    undo.checkSeveral ("Into the Folder", [&] { phazite::moveTrackIntoFolder (song, track, folder); });
+    REQUIRE (phazite::getParentFolder (song, track) == folder);
+    holdsAll();
+    undo.checkSeveral ("Ungroup Folder", [&] { phazite::ungroupFolder (song, folder); });
+    REQUIRE_FALSE (phazite::getParentFolder (song, track).isValid());
+    holdsAll();
+
+    // Deleted, and its line brought back from a version that has it: it comes back with everything it held there.
+    const auto version = phazite::test::copyWholeSong (song);
+    undo.checkSeveral ("Delete Track", [&] { phazite::deleteTracks (song, { track }, nullptr); });
+    holdsNone();
+    undo.checkSeveral ("Restore Track",
+                       [&]
+                       {
+                           const phazite::UndoStep step (song, "Restore Track");
+                           REQUIRE (phazite::makeTrackLike (song, track, version));
+                           phazite::removeBrokenReferences (song);
+                       });
+    holdsAll();
+
+    undo.walkBackAndForth();
+    holdsAll();
 }
 
 TEST_CASE ("Song values: its listeners are told the clips whose values changed, by a step, an undo and a redo alike")

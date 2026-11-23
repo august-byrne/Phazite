@@ -10,6 +10,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/eq/Equalizer.h"
@@ -263,14 +264,14 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
     s.addTrack ("Strings");
     s.setTempo (128.0);
     s.rename (bass, "Low");
-    phazite::findTrackState (song, bass).setProperty (schema::trackHeight, 140, nullptr);
+    phazite::setSavedTrackHeight (song, bass, 140);
     const auto changed = phazite::test::copyWholeSong (song);
     REQUIRE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, verse); }));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::findChanges (then, phazite::test::copyWholeSong (song)).empty());
-    CHECK ((int) phazite::findTrackState (song, bass)[schema::trackHeight] == 140); // view state stays
+    CHECK ((int) phazite::test::getTrackProperty (song, bass, schema::trackHeight) == 140); // view state stays
     CHECK (phazite::describeUndo (&song) == "Undo Restore \"Verse\"");
     CHECK (phazite::getVersions (s.context).size() == 2); // the history keeps every commit, the initial one too
 
@@ -351,7 +352,7 @@ TEST_CASE (
     REQUIRE (findLine (phazite::getListedChanges (withChangesIn (s.context)), "Folder").has_value());
     REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Folder")));
     checkIDs (song);
-    CHECK_FALSE (phazite::findTrackState (song, folder).isValid());
+    CHECK_FALSE (phazite::test::hasTrack (song, folder));
     CHECK (phazite::getTrackIDs (song) == std::vector { s.firstTrack, bass, keys });
     CHECK (phazite::getClips (song, keys) == std::vector { clip });
     CHECK (changes().isEmpty());
@@ -518,7 +519,7 @@ TEST_CASE ("The line of the track a clip was moved onto, discarded or restored a
     moveTo (strings);
     REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Strings")));
     checkIDs (song);
-    CHECK_FALSE (phazite::findTrackState (song, strings).isValid());
+    CHECK_FALSE (phazite::test::hasTrack (song, strings));
     CHECK (phazite::getClips (song, keys) == std::vector { clip });
     CHECK (changes().isEmpty());
 }
@@ -551,13 +552,13 @@ TEST_CASE ("What is restored into a song opened again as it was saved before it 
 
         s.openSong (saved);
         REQUIRE (waitForVersionHistory (s.context));
-        REQUIRE_FALSE (phazite::findTrackState (*phazite::findSong (s.context), keys).isValid());
+        REQUIRE_FALSE (phazite::test::hasTrack (*phazite::findSong (s.context), keys));
     };
 
     const auto checkNextItems = [] (TestSong& s, phazite::TrackID keys)
     {
         auto& song = *phazite::findSong (s.context);
-        REQUIRE (phazite::findTrackState (song, keys).isValid());
+        REQUIRE (phazite::test::hasTrack (song, keys));
         checkIDs (song);
 
         const auto strings = s.addTrack ("Strings");
@@ -819,7 +820,7 @@ TEST_CASE ("A track brought back from a commit whose clip can't be read comes ba
 
     const auto check = [&]
     {
-        const auto bass = phazite::findTrackState (*song, tracks[0]);
+        const auto bass = phazite::test::copyTrack (*song, tracks[0]);
         REQUIRE (bass.isValid());
         CHECK (bass[schema::trackName].toString() == "Bass");
         CHECK (phazite::getClips (*song, tracks[0]).empty());              // what the clip held stays as it is now: not there
@@ -836,7 +837,7 @@ TEST_CASE ("A track brought back from a commit whose clip can't be read comes ba
 
     check();
     phazite::undo (*song);
-    REQUIRE_FALSE (phazite::findTrackState (*song, tracks[0]).isValid());
+    REQUIRE_FALSE (phazite::test::hasTrack (*song, tracks[0]));
 
     // Its line alone.
     {
@@ -1417,10 +1418,10 @@ TEST_CASE ("A clip moved onto a track the version hasn't, from one it has that t
     // The whole song: the track it was on back, with it; the track it is on gone, and back, with it.
     bringBackChecked (*song, undo, before, "Before");
     CHECK (phazite::getClips (*song, gone) == std::vector { clip });
-    CHECK_FALSE (phazite::findTrackState (*song, added).isValid());
+    CHECK_FALSE (phazite::test::hasTrack (*song, added));
     bringBackChecked (*song, undo, after, "After");
     CHECK (phazite::getClips (*song, added) == std::vector { clip });
-    CHECK_FALSE (phazite::findTrackState (*song, gone).isValid());
+    CHECK_FALSE (phazite::test::hasTrack (*song, gone));
 
     // The gone track's line: it comes back, its clip from the track it is on now. The added track's line: it goes, and the
     // clip with it, as the song hasn't the track the version has it on.
@@ -1433,7 +1434,7 @@ TEST_CASE ("A clip moved onto a track the version hasn't, from one it has that t
     takeLineChecked (*song, undo, added, before, "The added track's line",
                      [&]
                      {
-                         CHECK_FALSE (phazite::findTrackState (*song, added).isValid());
+                         CHECK_FALSE (phazite::test::hasTrack (*song, added));
                          CHECK_FALSE (phazite::getClipValue (*song, clip).has_value());
                      });
 

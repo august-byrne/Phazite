@@ -6,6 +6,7 @@
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/synth/Synth.h"
@@ -424,8 +425,8 @@ TEST_CASE ("A channel's volume and pan are the song's, which its fader plays; th
     auto& context = tracks.context;
     auto& song = *tracks.song;
     const auto a = tracks.a;
-    const auto track = phazite::findTrackState (song, a);
-    const auto master = phazite::findTrackState (song, phazite::getMasterID (song));
+    const auto track = [&song, a] { return phazite::test::copyTrack (song, a); };
+    const auto master = [&song] { return phazite::test::copyTrack (song, phazite::getMasterID (song)); };
     const auto played = [&tracks] (phazite::TrackID channel)
     {
         auto* fader = tracks.findPlayedChannel (channel);
@@ -434,9 +435,9 @@ TEST_CASE ("A channel's volume and pan are the song's, which its fader plays; th
     };
 
     // Nothing in the song for a new track's 0 dB at the centre, nor for a new song's master at -3 dB, which it plays.
-    CHECK_FALSE (track.hasProperty (schema::channelVolume));
-    CHECK_FALSE (track.hasProperty (schema::channelPan));
-    CHECK_FALSE (master.hasProperty (schema::channelVolume));
+    CHECK_FALSE (track().hasProperty (schema::channelVolume));
+    CHECK_FALSE (track().hasProperty (schema::channelPan));
+    CHECK_FALSE (master().hasProperty (schema::channelVolume));
     CHECK (phazite::getChannelVolume (song, {}) == doctest::Approx (-3.0f));
     CHECK (phazite::faderPositionToDecibels (phazite::getMasterVolume (context).getValue()) == doctest::Approx (-3.0f).epsilon (0.01));
     CHECK (played ({}).first == doctest::Approx (-3.0f));
@@ -446,9 +447,9 @@ TEST_CASE ("A channel's volume and pan are the song's, which its fader plays; th
     phazite::getVolume (context, a).setValue (phazite::decibelsToFaderPosition (-6.0f));
     phazite::getPan (context, a).setValue (-0.5f);
     phazite::getMasterVolume (context).setValue (phazite::decibelsToFaderPosition (0.0f));
-    CHECK ((double) track[schema::channelVolume] == doctest::Approx (-6.0));
-    CHECK ((double) track[schema::channelPan] == doctest::Approx (-0.5));
-    CHECK (std::abs ((double) master[schema::channelVolume]) < 1.0e-4);
+    CHECK ((double) track()[schema::channelVolume] == doctest::Approx (-6.0));
+    CHECK ((double) track()[schema::channelPan] == doctest::Approx (-0.5));
+    CHECK (std::abs ((double) master()[schema::channelVolume]) < 1.0e-4);
     CHECK (played (a).first == doctest::Approx (-6.0f).epsilon (0.01));
     CHECK (played (a).second == doctest::Approx (-0.5f));
     CHECK (std::abs (played ({}).first) < 0.01f);
@@ -456,8 +457,8 @@ TEST_CASE ("A channel's volume and pan are the song's, which its fader plays; th
     phazite::undo (song);
     phazite::undo (song);
     phazite::undo (song);
-    CHECK_FALSE (track.hasProperty (schema::channelVolume));
-    CHECK_FALSE (master.hasProperty (schema::channelVolume));
+    CHECK_FALSE (track().hasProperty (schema::channelVolume));
+    CHECK_FALSE (master().hasProperty (schema::channelVolume));
     CHECK (std::abs (played (a).first) < 0.01f);
     CHECK (played ({}).first == doctest::Approx (-3.0f));
     phazite::redo (song);

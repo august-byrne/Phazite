@@ -12,6 +12,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UndoCheck.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -379,8 +380,8 @@ TEST_CASE (
 
     const auto checkGone = [&]
     {
-        CHECK_FALSE (phazite::findTrackState (song, kick).isValid());
-        CHECK (phazite::findTrackState (song, snare).isValid());
+        CHECK_FALSE (phazite::test::hasTrack (song, kick));
+        CHECK (phazite::test::hasTrack (song, snare));
         CHECK_FALSE (phazite::getPlayedPad (song, snare).has_value());
         checkIDs (song);
     };
