@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What takes a track out of the song erases what it holds in the song's areas beside its tree first, in its own step
 // (model/arrangement/internal/Tracks.h: eraseTrackHoldings(); roadmap step S5.20, the tracks' keepers' end): its clips with
-// their notes, its channel's modulators and macros and its containers' macros, its sends. So the keeper of the song's values,
-// which still erases what a track taken out of its tree holds and remembers it with the element, finds nothing
-// (SongValues::countHoldingsLeftWithKeepers(), 0), and each area's own undo action brings its things back with the track's.
+// their notes, its channel's modulators and macros and its containers' macros, its sends; and each area's own undo action
+// brings its things back with the track's.
 // Each remover: Delete (a track with a return, a folder with its tracks), Ungroup (the folder alone), a version's line of a
 // track added since, a version applied whole (a track gone, a track moved), and a merge's choice of a whole track or the
 // master, which gives the side's track its things through each area's code, leaving no adoption to the keeper.
@@ -20,7 +19,6 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/ContainerModel.h"
@@ -159,14 +157,12 @@ struct Holdings
                 CHECK (value.from != id);
         }
 
-        CHECK (values().countHoldingsLeftWithKeepers() == 0);
         phazite::test::checkSong (song);
     }
 
     int countAdopted() const
     {
-        return values().countAdopted() + values().countModulationAdopted() + values().countSendsAdopted()
-               + values().countDeviceStoreAdopted();
+        return values().countTracksAdopted() + values().countModulationAdopted() + values().countDeviceStoreAdopted();
     }
 
     // A remover, as one named undo step (an UndoCheck around it), then Undo, Redo and Undo again: nothing of what goes left
@@ -195,8 +191,6 @@ struct Holdings
             const auto isUndo = juce::String (step).startsWith ("Undo");
             undo.stepBackOrForth (step, [this, isUndo] { isUndo ? phazite::undo (song) : phazite::redo (song); });
             INFO (step);
-            CHECK (values().countHoldingsLeftWithKeepers() == 0);
-
             phazite::test::checkSong (song);
 
             const auto now = phazite::test::writeSong (song, phazite::test::SongPart::whole);
@@ -259,7 +253,6 @@ TEST_CASE ("Track holdings: deleting a track and a return erases what they hold,
     CHECK_FALSE (phazite::getModulatorValue (h.song, h.lfo).has_value());
     CHECK_FALSE (phazite::getModulatorValue (h.song, h.macro).has_value());
     CHECK_FALSE (phazite::getModulatorValue (h.song, h.returnLfo).has_value());
-    CHECK (h.values().countHoldingsLeftWithKeepers() == 0);
 }
 
 TEST_CASE ("Track holdings: deleting a folder erases what it and the tracks in it hold, a bus inside it too")
@@ -287,7 +280,6 @@ TEST_CASE ("Track holdings: ungrouping a folder erases what the folder holds alo
     CHECK (phazite::getClips (h.song, h.inner) == std::vector { h.innerClip });
     CHECK (phazite::getModulators (h.song, h.sub) == std::vector { h.subLfo });
     CHECK_FALSE (phazite::getModulatorValue (h.song, h.groupLfo).has_value());
-    CHECK (h.values().countHoldingsLeftWithKeepers() == 0);
 }
 
 TEST_CASE ("Track holdings: a version's line of a track added since takes it away with what it holds, its folder's tracks staying")

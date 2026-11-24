@@ -53,7 +53,7 @@
 // again: the write leaves the step's entries and their before and after as they were, so the kept changes stay true.
 //
 // Listeners are told of every change, a step's, an undo's and a redo's alike, with the value left and the value come to:
-// what the song's index, what plays the song and its views compare to know what changed. A listener only marks what
+// what plays the song and its views compare to know what changed. A listener only marks what
 // changed, and reads nothing else of the song while it is told: the spikes found that during an undo the rest of the step
 // (the tree's changes, the other areas') may not be back yet when an area's turn comes. Nor does it change the area.
 //

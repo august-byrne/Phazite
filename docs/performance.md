@@ -867,8 +867,9 @@ a call that is slow on this test machine's desktop. Each icon is now read once a
 
 Known bug 122: the model found each track, clip and note by looking through the song at every call, several times for each
 note an edit touched, and the piano roll read every note of its clips, and the other tracks' notes, at each move of the
-mouse. Since 2026-11-15 the song keeps an index of where its tracks, clips and notes are by their IDs
-(`src/model/base/internal/SongIndex.h`), and the piano roll finds what is under the mouse among the notes it paints.
+mouse. Since 2026-11-15 the song keeps an index of where its tracks, clips and notes are by their IDs (an index of
+the tree then; since roadmap step S5.20 the song's values hold them by their IDs, `src/model/base/internal/SongValues.h`),
+and the piano roll finds what is under the mouse among the notes it paints.
 
 The first table: the piano roll in a window (`PianoRollScreen`), a clip of 5,000 notes, four a beat over twelve rows,
 with another track's 5,000 as ghosts; each through the mouse or the command, the song's changes delivered after it, the
@@ -1168,7 +1169,7 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
   tracks compares, measured 2026-11-15 (`countElementsCompared()`; known bug 126).
 - a step of a drag of notes looks at as many elements as it moves notes, whatever the song and the clip: ten times the
   notes in a clip of ten times as many, under twenty times the elements; ten times the tracks, under twice
-  (`SongIndex::countElementsVisited()`; known bug 122: 623, 6,203 and 623 measured 2026-11-15, the model's walks of a
+  (`countElementsVisited()`, `src/model/base/internal/Visits.h`; known bug 122: 623, 6,203 and 623 measured 2026-11-15, the model's walks of a
   track's and a clip's elements counted too (`countVisited()`); 14,988, 1,229,268 and 22,368 before, the walks by ID alone);
   and a step of a drag of 500 notes, or a paste of 500 past the clip's end, looks through its track's clips once, not
   once for each note: on a track of 200 clips under 1,000 elements more than on one of 20 (2,521 and 2,701 for the drag

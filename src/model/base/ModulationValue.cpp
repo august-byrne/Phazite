@@ -179,7 +179,8 @@ namespace
     }
 
     // Each MODULATOR and MACRO element of a song's tree (PHAZITE), in the song's order: each track's (the track list's, in
-    // the order of the song's tracks, a folder's tracks after it: SongIndex.h), each channel's own and then its CONTAINERs',
+    // the order of the song's tracks, a folder's tracks after it: TracksValue.h, listTrackElements()), each channel's own
+    // and then its CONTAINERs',
     // each in its element's order; then the master's.
     void forEachModulatorElement (const juce::ValueTree& song, const std::function<void (const juce::ValueTree&)>& each)
     {

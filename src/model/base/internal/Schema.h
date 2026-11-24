@@ -612,12 +612,6 @@ inline bool isAmong (const juce::Identifier& p, const IdentifierList& list)
 // The properties described on an element type of a kind, in their order.
 IdentifierList findProperties (const juce::Identifier& type, Kind);
 
-inline const IdentifierList& getTrackViewProperties()
-{
-    static const IdentifierList list = findProperties (TRACK, Kind::view);
-    return list;
-}
-
 // Written without the undo manager (model/plugins/internal/DeviceStore.h: setWindowPlace()).
 inline const IdentifierList& getDeviceViewProperties()
 {
@@ -625,20 +619,9 @@ inline const IdentifierList& getDeviceViewProperties()
     return list;
 }
 
-inline bool isTrackViewProperty (const juce::Identifier& p)
-{
-    return isAmong (p, getTrackViewProperties());
-}
 inline bool isDeviceViewProperty (const juce::Identifier& p)
 {
     return isAmong (p, getDeviceViewProperties());
-}
-
-// An element of a track's that is view state, with everything in it: one that isn't counted, in a track (LANES).
-inline bool isTrackViewElement (const juce::ValueTree& element)
-{
-    const auto* described = getTables().findElement (element.getType());
-    return described != nullptr && ! described->isCounted() && described->goesIn (TRACK);
 }
 
 // What a project saves that is no change to it: view state (above); how the song plays rather than the song (design question

@@ -22,6 +22,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "app/ProjectSession.h"
 #include "devices/delay/Delay.h"
@@ -51,11 +52,11 @@
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SendsValue.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TracksArea.h"
 #include "model/base/internal/TracksValue.h"
+#include "model/base/internal/Visits.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
@@ -261,7 +262,7 @@ TEST_CASE ("Performance gate: each edit gives the engine one plan, however many 
         CHECK (plans.take() == edit.plans);
     }
 
-    CHECK (song.getIndex().isExact()); // the checks of every lookup are off in the gates: the whole index checked here
+    CHECK (phazite::test::holdsExactTrackOrder (song)); // the checks of every ask are off in the gates: the whole order checked here
 }
 
 TEST_CASE ("Performance gate: a new plan keeps what didn't change, a track's notes and every device")
@@ -292,7 +293,7 @@ TEST_CASE ("Performance gate: a new plan keeps what didn't change, a track's not
         CHECK (after.devices.at (id) == before.devices.at (id));
     }
 
-    CHECK (getSong (s).getIndex().isExact());
+    CHECK (phazite::test::holdsExactTrackOrder (getSong (s)));
 }
 
 TEST_CASE ("Performance gate: an edit's plan reads the values of the devices on the channel it changed, and the curves it changed")
@@ -350,7 +351,7 @@ TEST_CASE ("Performance gate: an edit's plan reads the values of the devices on 
     phazite::undo (song);
     check ("Undo", phazite::getEffects (s.context, track).size() + 1, 0);
 
-    CHECK (song.getIndex().isExact());
+    CHECK (phazite::test::holdsExactTrackOrder (song));
 }
 
 TEST_CASE ("Performance gate: a change no device reads leaves the next edit's plan reading no device's values")
@@ -403,7 +404,7 @@ TEST_CASE ("Performance gate: a change no device reads leaves the next edit's pl
         CHECK (phazite::SongPlayer::countDevicesRead() == read);
     }
 
-    CHECK (song.getIndex().isExact());
+    CHECK (phazite::test::holdsExactTrackOrder (song));
 }
 
 TEST_CASE ("Performance gate: an edit's plan asks the disk about the files of the track it changed, each once")
@@ -570,7 +571,7 @@ TEST_CASE ("Performance gate: the playlist makes components for what is in view,
                 REQUIRE (phazite::insertMidiClip (*screen.song, track, { at (c * 16.0), at (c * 16.0 + 16.0) }, nullptr).isValid());
 
         phazite::test::deliverChanges();
-        CHECK (screen.song->getIndex().isExact());
+        CHECK (phazite::test::holdsExactTrackOrder (*screen.song));
         return std::tuple (phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist).size(),
                            phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist).size(),
                            phazite::test::findAll<juce::Component> (screen.playlist).size());
@@ -1278,12 +1279,13 @@ TEST_CASE ("Performance gate: the plan after a device's knob moved on a song of 
 TEST_CASE ("Performance gate: the plan after a track's rename, colour, mute, height or volume on a song of 40 tracks reads its "
            "channels' fields one at a time, and no more than it did")
 {
-    // The plan's compile reads each channel's fields (its kind, fader, volume, pan, pad, input, mute and solo) from the element
-    // the song's index gives it, through the tracks' readers of one field (model/base/internal/TracksValue.h), never a track
-    // whole (countTracksReadAsValues()). A track's own property marks no channel (model/playback/SongPlayer.cpp: markChange()),
-    // so the plan after a rename, a colour, a mute or a height reads no device's values again, and one after a volume set
-    // reads none either: what the compile reads of the channels stays what it read before the tracks' readers outside their
-    // area moved onto the tracks' readers (roadmap step S5.20, the tracks' second piece).
+    // The plan's compile reads each channel's fields (its kind, fader, volume, pan, pad, input, mute and solo) from the tracks'
+    // value in the song's order (getTrackOrder(), made once), through the tracks' readers of one field
+    // (model/base/internal/TracksValue.h), never a track whole (countTracksReadAsValues()). A track's own property marks no
+    // channel (model/playback/SongPlayer.cpp: markChange()), so the plan after a rename, a colour, a mute or a height reads no
+    // device's values again, and one after a volume set reads none either: what the compile reads of the channels stays what
+    // it read before the tracks' readers outside their area moved onto the tracks' readers (roadmap step S5.20, the tracks'
+    // second piece).
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 40);
 
@@ -1308,14 +1310,14 @@ TEST_CASE ("Performance gate: the plan after a track's rename, colour, mute, hei
         edit();
         const auto devices = phazite::SongPlayer::countDevicesRead();
         const auto whole = phazite::countTracksReadAsValues();
-        const auto visited = phazite::SongIndex::countElementsVisited();
+        const auto visited = phazite::countElementsVisited();
         std::unique_ptr<phazite::engine::Plan> plan;
         Counts counts;
         counts.allocations = phazite::test::countAllocations ([&player, &plan] { plan = player.compile (44100.0, 512, std::nullopt); });
         REQUIRE (plan != nullptr);
         counts.devices = phazite::SongPlayer::countDevicesRead() - devices;
         counts.whole = phazite::countTracksReadAsValues() - whole;
-        counts.visited = phazite::SongIndex::countElementsVisited() - visited;
+        counts.visited = phazite::countElementsVisited() - visited;
         return counts;
     };
 
@@ -2629,7 +2631,7 @@ TEST_CASE ("Performance gate: what an edit repaints in the playlist")
         }
     }
 
-    CHECK (screen.song->getIndex().isExact());
+    CHECK (phazite::test::holdsExactTrackOrder (*screen.song));
 }
 
 TEST_CASE ("Performance gate: a note added to one clip among thousands shows that clip again, and no other")
@@ -2786,7 +2788,7 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
                               phazite::writeProjectText (text, phazite::test::copyWholeSong (song));
                           })
                           .value_or (0);
-        CHECK (song.getIndex().isExact());
+        CHECK (phazite::test::holdsExactTrackOrder (song));
         return counts;
     };
 
@@ -2842,7 +2844,7 @@ TEST_CASE ("Performance gate: selecting automation points and finding them by th
         REQUIRE (selected.has_value());
         CHECK (selected->indices.size() == (size_t) numPoints + 1);
         CHECK (selection.getNumObjectsSelected() == numPoints + 1);
-        CHECK (document.getIndex().isExact());
+        CHECK (phazite::test::holdsExactTrackOrder (document));
         return used;
     };
 
@@ -3085,7 +3087,7 @@ TEST_CASE ("Performance gate: a track deleted erases what it holds reading as mu
     // (Tracks.h: eraseTrackHoldings()): its clips' list, its channel's and its containers' lists of modulators and its sends'
     // list each looked in alone, and each area set once. No modulator or send read from an element (ModulationValue.h:
     // countModulatorsRead(), SendsValue.h: countSendsRead()), no more looks at the sends (countSendLooks()) and no more of the
-    // song's elements visited (SongIndex.h: countElementsVisited(), which counts the clips' lists walked too) for 40 tracks of
+    // song's elements visited (Visits.h: countElementsVisited(), which counts the clips' lists walked too) for 40 tracks of
     // 3 clips, a modulator and a send each than for 4; and the allocations the same but for what immer's maps allocate for
     // the depth of their trees, what hears the areas change included (the project's). Each area's part alone is stated for a
     // song of no project, which nothing hears. The whole Delete Track allocates more for the larger song, for what names the
@@ -3127,12 +3129,12 @@ TEST_CASE ("Performance gate: a track deleted erases what it holds reading as mu
             const auto modulatorsBefore = phazite::countModulatorsRead();
             const auto sendsBefore = phazite::countSendsRead();
             const auto looksBefore = phazite::countSendLooks();
-            const auto visitedBefore = phazite::SongIndex::countElementsVisited();
+            const auto visitedBefore = phazite::countElementsVisited();
             counts.erase = phazite::test::countAllocations ([&song, victim] { phazite::eraseTrackHoldings (song, { victim }); });
             counts.modulatorsRead = phazite::countModulatorsRead() - modulatorsBefore;
             counts.sendsRead = phazite::countSendsRead() - sendsBefore;
             counts.sendLooks = phazite::countSendLooks() - looksBefore;
-            counts.visited = phazite::SongIndex::countElementsVisited() - visitedBefore;
+            counts.visited = phazite::countElementsVisited() - visitedBefore;
         }
 
         CHECK (phazite::getClips (song, victim).empty());
@@ -3392,10 +3394,10 @@ TEST_CASE ("Performance gate: a step of a drag of notes looks at as many element
         };
 
         step (0.25); // the first, as the song is first asked for its notes
-        const auto before = phazite::SongIndex::countElementsVisited();
+        const auto before = phazite::countElementsVisited();
         step (0.5);
-        const auto visited = phazite::SongIndex::countElementsVisited() - before;
-        CHECK (song->getIndex().isExact());
+        const auto visited = phazite::countElementsVisited() - before;
+        CHECK (phazite::test::holdsExactTrackOrder (*song));
         phazite::setSong (context, nullptr);
         return visited;
     };
@@ -3496,10 +3498,9 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
 
         const auto removed = inTheBeat();
         const auto notesBefore = phazite::countNotesRead();
-        const auto visitedBefore = phazite::SongIndex::countElementsVisited();
+        const auto visitedBefore = phazite::countElementsVisited();
         step (8.0);
-        const Counts counts { phazite::countNotesRead() - notesBefore, phazite::SongIndex::countElementsVisited() - visitedBefore,
-                              heard.changes };
+        const Counts counts { phazite::countNotesRead() - notesBefore, phazite::countElementsVisited() - visitedBefore, heard.changes };
         root.removeListener (&heard);
         song->getValues()->notes.removeListener (&heard);
 
@@ -3542,10 +3543,10 @@ TEST_CASE ("Performance gate: a step of a note's drag in the piano roll doesn't 
         mouse.press (screen.at (1.5));
         mouse.dragTo (screen.at (2.5));
         phazite::test::dispatchPendingMessages();
-        const auto before = phazite::SongIndex::countElementsVisited();
+        const auto before = phazite::countElementsVisited();
         mouse.dragTo (screen.at (3.5));
         phazite::test::dispatchPendingMessages();
-        const auto visited = phazite::SongIndex::countElementsVisited() - before;
+        const auto visited = phazite::countElementsVisited() - before;
         mouse.release();
         phazite::test::dispatchPendingMessages();
 
@@ -3615,9 +3616,9 @@ TEST_CASE ("Performance gate: a drag or a paste of many notes looks through its 
 
         Visited visited;
         step (0.25); // the first, as the song is first asked for its notes
-        auto before = phazite::SongIndex::countElementsVisited();
+        auto before = phazite::countElementsVisited();
         step (0.5);
-        visited.drag = phazite::SongIndex::countElementsVisited() - before;
+        visited.drag = phazite::countElementsVisited() - before;
 
         // A paste past the clip's end, which grows the clip to hold the notes, as the paste makes them (Clipboard.cpp:
         // pasteNotes()).
@@ -3626,11 +3627,11 @@ TEST_CASE ("Performance gate: a drag or a paste of many notes looks through its 
         for (int i = 0; i < numPasted; ++i)
             pasted.push_back ({ .clip = clip, .pitch = 60, .start = at (clipEnd + i * 0.5), .length = lasting (0.25) });
 
-        before = phazite::SongIndex::countElementsVisited();
+        before = phazite::countElementsVisited();
         const auto made = phazite::replaceNotes (*song, {}, pasted);
-        visited.paste = phazite::SongIndex::countElementsVisited() - before;
+        visited.paste = phazite::countElementsVisited() - before;
         CHECK (made.size() == (size_t) numPasted);
-        CHECK (song->getIndex().isExact());
+        CHECK (phazite::test::holdsExactTrackOrder (*song));
         phazite::setSong (context, nullptr);
         return visited;
     };
@@ -3703,7 +3704,7 @@ TEST_CASE ("Performance gate: the piano roll's hover and selection rectangle fin
     // the clip's: all ten of them less than the clip's notes once (measured 2026-11-15: 362 of 500, and 9,181 before).
     CHECK (band < (std::uint64_t) count);
     CHECK (compared < selected * 20); // each note chosen once, not compared with every other
-    CHECK (song.getIndex().isExact());
+    CHECK (phazite::test::holdsExactTrackOrder (song));
 }
 
 //==============================================================================
@@ -3776,7 +3777,7 @@ TEST_CASE (
     CHECK (noteAdded * 8 < wholeSong);
     CHECK (pluginChanged > 0);
     CHECK (pluginChanged * 8 < wholeSong);
-    CHECK (song.getIndex().isExact());
+    CHECK (phazite::test::holdsExactTrackOrder (song));
 }
 
 TEST_CASE ("Performance gate: an edit has the versions copy and compare the one track it changed, on the history's thread, never "
@@ -3892,9 +3893,9 @@ TEST_CASE ("Performance gate: a round of the versions' changes after a rename on
 {
     // A rename marks its track and the tracks' names (VersionHistory.cpp: markTrack()), so the round copies that track and the
     // song's skeleton (ChangesWorker.cpp: makeSkeleton(): each track's ID, kind and name, in its folder, and the master's ID),
-    // on the message thread. The skeleton reads those three fields one at a time from the elements the song's index gives,
-    // through the tracks' readers of one field (model/base/internal/TracksValue.h), never a track whole
-    // (countTracksReadAsValues()), and allocates no more than the walk of the elements it replaced did.
+    // on the message thread. The skeleton reads those three fields one at a time from the tracks' value in the song's
+    // order (getTrackOrder(), made once), through the tracks' readers of one field (model/base/internal/TracksValue.h),
+    // never a track whole (countTracksReadAsValues()), and allocates no more than the walk of the elements it replaced did.
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 40);
 
@@ -4995,10 +4996,10 @@ TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks
 TEST_CASE ("Performance gate: the check for unsaved changes after a track's rename looks at as many tracks' elements on 20 "
            "tracks as on 200")
 {
-    // A track that changed is compared with the saved copy's of its ID (Project.h: areTracksAsSaved()): found in the song by
-    // the song's index, and in the saved copy by an index made once as the copy is taken, so that one rename looks at one
-    // element on each side (Project::countTrackElementsWalkedWithSaved()). Found 2026-11-23: both trees' tracks were indexed
-    // by a walk at each comparison.
+    // A track that changed is compared with the saved copy's of its ID (Project.h: areTracksAsSaved()): found by its ID in the
+    // song's tracks' value and in the saved copy's, so that one rename looks at one track on each side
+    // (Project::countTrackElementsWalkedWithSaved()). Found 2026-11-23: both trees' tracks were indexed by a walk at each
+    // comparison.
     const auto run = [] (int numTracks)
     {
         phazite::test::TestSong s;

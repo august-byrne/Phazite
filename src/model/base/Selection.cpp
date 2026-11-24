@@ -84,7 +84,7 @@ bool Selection::isThere (Item item) const
     if (song == nullptr || item.id == 0)
         return false;
 
-    // A clip in the song's values; a track by the tracks' (one lookup in the song's index); a device (in a track's chain, the
+    // A clip in the song's values; a track by the tracks' (one lookup in their area); a device (in a track's chain, the
     // master's or a container's) looked for.
     if (item.kind == Kind::clip)
     {
@@ -95,7 +95,7 @@ bool Selection::isThere (Item item) const
     if (item.kind == Kind::device)
         return holdsDevice (*song, DeviceID::fromRaw (item.id));
 
-    // The master's by its ID too (model/arrangement/internal/Tracks.h: hasTrack(), which the song's index checks as it looks).
+    // The master's by its ID too (model/arrangement/internal/Tracks.h: hasTrack()).
     return hasTrack (*song, TrackID::fromRaw (item.id));
 }
 

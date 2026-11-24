@@ -78,7 +78,6 @@ void checkTracksAsIn (const phazite::Song& song, const juce::ValueTree& whole)
 {
     CHECK (phazite::getTracksValue (song) == phazite::readHeldTracks (whole));
     CHECK (phazite::holdTheSame (phazite::test::copyWholeSong (song), whole));
-    CHECK (song.getValues()->countHoldingsLeftWithKeepers() == 0);
     phazite::test::checkSong (song);
 }
 

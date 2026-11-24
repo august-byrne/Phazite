@@ -8,8 +8,8 @@
 #include "model/base/internal/ClipsValue.h"
 #include "model/base/internal/NotesArea.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/Visits.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
@@ -46,12 +46,12 @@ namespace
 
     // The song's clips as its clips' area holds them now; none for a song that holds no values (one made to be read or checked
     // keeps everything in its tree, which nothing reads clips of by their IDs: Song::getValues()). Each answer counts as one
-    // look, and each clip of a list walked as one more, for the speed gates (SongIndex::countVisited(), as a walk of a
+    // look, and each clip of a list walked as one more, for the speed gates (countVisited(), as a walk of a
     // track's elements counted).
     const SongClips& getSongClips (const Song& song)
     {
         static const SongClips none;
-        SongIndex::countVisited (1);
+        countVisited (1);
 
         if (const auto* values = song.getValues())
             return values->clips.get();
@@ -77,7 +77,7 @@ namespace
 
         if (const auto* list = clips.tracks.find (track.getRaw()))
         {
-            SongIndex::countVisited (list->size());
+            countVisited (list->size());
             places.reserve (list->size());
 
             for (const auto id : *list)
@@ -114,7 +114,7 @@ namespace
         for (const auto track : getTrackIDs (song))
             if (const auto* list = clips.tracks.find (track.getRaw()))
             {
-                SongIndex::countVisited (list->size());
+                countVisited (list->size());
 
                 for (const auto id : *list)
                     if (const auto* clip = clips.find (id))
@@ -543,7 +543,7 @@ std::vector<ClipValue> getClipValues (const Song& song, TrackID track)
 
     if (const auto* list = clips.tracks.find (track.getRaw()))
     {
-        SongIndex::countVisited (list->size());
+        countVisited (list->size());
         values.reserve (list->size());
 
         for (const auto id : *list)
@@ -572,7 +572,7 @@ std::vector<ClipID> getClips (const Song& song, TrackID track)
 {
     if (const auto* list = getSongClips (song).tracks.find (track.getRaw()))
     {
-        SongIndex::countVisited (list->size());
+        countVisited (list->size());
         return { list->begin(), list->end() };
     }
 

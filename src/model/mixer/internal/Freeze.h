@@ -198,18 +198,20 @@ private:
     // devices' curves and its modulators, no send, nor a send's level's curve: getFrozenCurveOwners()), and nothing of a
     // send is read to compare it. The tree's callbacks below leave the song's SEND elements alone (isHeardAsKept()), where a
     // send added, taken out or changed on a frozen track compared the track's holdings again for nothing (roadmap step
-    // S5.20, the sends' second piece). A track added or taken out with sends on it is the tree's, looked at as before.
+    // S5.20, the sends' second piece).
 
     // The song's own (songOwnChanged(), songStandingChanged(), songOutsideChanged()): nothing, as no frozen track's file holds
     // anything of it. The tree's callbacks below leave the root's own properties and its LASTKEY, PIANOROLL and MERGING alone
     // (isHeardAsKept()), where a counted one (the notes, an outline, a key set last, a merge waiting) compared every frozen
-    // track's holdings again for nothing (roadmap step S5.20, the song's own). Its count of IDs, the root's nextID, which
-    // every new ID moves, is still left alone below, as uncounted.
+    // track's holdings again for nothing (roadmap step S5.20, the song's own).
 
     void handleAsyncUpdate() override { compareMarked(); }
     void writePending() override; // what is marked compared now, but during an undo or a redo (Song.h)
 
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
+    // The tree's callbacks: what a live song's tree still tells is a placeholder (CHORDLANE, MIDILINKS, SECTIONS) coming or
+    // going, its elements put in another order, and an element a safety net refused in a step, left where it was put until
+    // the step's Undo; no property is written to it but a safety net's, which the areas take (isHeardAsKept()): no callback
+    // for one.
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
         if (! isHeardAsKept (parent, child))

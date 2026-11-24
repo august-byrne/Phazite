@@ -2905,7 +2905,7 @@ void Project::backUpProjectFile()
 
 void Project::clearToCompare()
 {
-    mayHaveChanged = comparingWhole = comparingClipsWhole = tempoToCompare = false;
+    mayHaveChanged = comparingClipsWhole = tempoToCompare = false;
     chordLaneToCompare = false;
     songOwnToCompare = false;
     midiLinksToCompare = false;
@@ -3006,10 +3006,8 @@ void Project::compareStoredStates()
 
     for (const auto* type : { &schema::TRACKS, &schema::MASTER })
         if (const auto element = state.getChildWithName (*type);
-            element.isValid()
-            && std::none_of (toCompare.begin(), toCompare.end(),
-                             [&element] (const ToCompare& each) { return each.element == element && each.property.isNull(); }))
-            toCompare.push_back ({ element, {} });
+            element.isValid() && std::find (toCompare.begin(), toCompare.end(), element) == toCompare.end())
+            toCompare.push_back (element);
 }
 
 juce::int64 Project::countElementsCompared()
@@ -3040,27 +3038,22 @@ juce::ValueTree Project::findSavedCopy (const juce::ValueTree& element) const
     return copy;
 }
 
-bool Project::isAsSaved (const ToCompare& entry) const
+bool Project::isAsSaved (const juce::ValueTree& element) const
 {
     // One no longer in the song: what it was taken out of notified, and is compared whole.
     const auto state = song->getState();
 
-    if (! (entry.element == state || entry.element.isAChildOf (state)))
+    if (! (element == state || element.isAChildOf (state)))
         return true;
 
     // At the same place in the copy: where an element was added, removed or moved, its parent notified, and is compared
     // whole, which finds the difference; or there is none, and the places below are the same in both.
-    const auto copy = findSavedCopy (entry.element);
+    const auto copy = findSavedCopy (element);
 
-    if (! copy.isValid() || copy.getType() != entry.element.getType())
+    if (! copy.isValid() || copy.getType() != element.getType())
         return false;
 
-    if (entry.property.isNull())
-        return holdTheSameProject (entry.element, keepValues (*song), copy, savedState.values);
-
-    const auto* now = entry.element.getPropertyPointer (entry.property);
-    const auto* saved = copy.getPropertyPointer (entry.property);
-    return now == nullptr || saved == nullptr ? now == saved : isSameValue (*now, *saved);
+    return holdTheSameProject (element, keepValues (*song), copy, savedState.values);
 }
 
 void Project::compareWithSavedState()
@@ -3082,7 +3075,7 @@ void Project::compareWithSavedState()
     if (! mayHaveChanged || changedSinceSave)
         return;
 
-    auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
+    auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const juce::ValueTree& entry) { return isAsSaved (entry); });
     same = same && isSongOwnAsSaved(); // the song's own, by its values while the tree holds them
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
@@ -3110,7 +3103,7 @@ void Project::compareWithSavedState()
     }
 }
 
-void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& property)
+void Project::markChanged (const juce::ValueTree& tree)
 {
     if (isWriting)
         return;
@@ -3119,7 +3112,7 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
     // songOwnChanged().)
     const auto state = song->getState();
 
-    if (! (tree == state || tree.isAChildOf (state)) || ! schema::isCounted (tree, property))
+    if (! (tree == state || tree.isAChildOf (state)) || ! schema::isCounted (tree, {}))
         return;
 
     // Another song shown in place (a version open) changes nothing of the project's: noted below, to compare once it went.
@@ -3132,41 +3125,13 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
         return;
     }
 
-    // Perhaps nothing changed: compared with savedState when asked, what notified (a property, or an element whose elements
-    // changed) or, past mostToCompare of them, the track (or the song's element) each is in, whole.
+    // Perhaps nothing changed: compared with savedState when asked, what notified (an element whose elements changed: what a
+    // live song's tree tells is its own element's, a placeholder come or gone or its elements in another order, and the
+    // master's, where a step left an element a safety net refused until its Undo), once.
     mayHaveChanged = true;
 
-    const auto wholeAround = [&state] (const juce::ValueTree& changed)
-    {
-        auto element = changed;
-
-        // Up to its track, or the song's element it is in.
-        for (auto parent = element.getParent(); parent.isValid() && parent != state && ! parent.hasType (schema::TRACKS);
-             parent = element.getParent())
-            element = parent;
-
-        return element;
-    };
-
-    // Looked for from the last: one edit's notifications come one after another, mostly from one element.
-    const auto add = [this] (const ToCompare& entry)
-    {
-        if (std::none_of (toCompare.rbegin(), toCompare.rend(),
-                          [&entry] (const ToCompare& each) { return each.element == entry.element && each.property == entry.property; }))
-            toCompare.push_back (entry);
-    };
-
-    if (! comparingWhole && toCompare.size() >= mostToCompare)
-    {
-        comparingWhole = true;
-
-        // Those taken out of the song since they notified are compared no more (isAsSaved()): let go of here.
-        for (const auto& each : std::exchange (toCompare, {}))
-            if (each.element == state || each.element.isAChildOf (state))
-                add ({ wholeAround (each.element), {} });
-    }
-
-    add (comparingWhole ? ToCompare { wholeAround (tree), {} } : ToCompare { tree, property });
+    if (std::find (toCompare.begin(), toCompare.end(), tree) == toCompare.end())
+        toCompare.push_back (tree);
 }
 
 void Project::versionsMoved()
@@ -3284,7 +3249,9 @@ void Project::clipNotesChanged (const std::vector<ClipID>& clips)
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged().
+    // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged(). What is left
+    // is the song's own element's: a placeholder come or gone, which counts (and an element a safety net refused in a step,
+    // until that step's Undo: one that doesn't count is no change).
     if (! schema::isUncountedElement (parent, child) && ! isHeardAsKept (parent, child))
         markChanged (parent);
 }
@@ -3508,8 +3475,8 @@ void Project::clipsChanged (const std::vector<SongValues::ClipChange>& clips, co
 
 bool Project::isComparedWhole (const juce::ValueTree& element) const
 {
-    return std::any_of (toCompare.begin(), toCompare.end(), [&element] (const ToCompare& entry)
-                        { return entry.property.isNull() && (entry.element == element || element.isAChildOf (entry.element)); });
+    return std::any_of (toCompare.begin(), toCompare.end(),
+                        [&element] (const juce::ValueTree& entry) { return entry == element || element.isAChildOf (entry); });
 }
 
 bool Project::isTrackComparedWhole (TrackID track) const

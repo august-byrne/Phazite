@@ -354,18 +354,10 @@ private:
     SongCopy savedState;
     bool mayHaveChanged = false;
 
-    struct ToCompare
-    {
-        juce::ValueTree element;
-        juce::Identifier property; // none: the element whole
-    };
-
-    // An element noted here and then taken out of the song stays alive with what it holds until the next comparison (the
-    // song's undo history keeps it anyway, for an undo to put back), and is no longer compared: where it was taken from
-    // notified, and is compared whole. Bounded: at most mostToCompare notes, and past them only what is still in the song,
-    // each track or song's element once (dropping those taken out is for memory only: they compare as the same).
-    std::vector<ToCompare> toCompare;
-    bool comparingWhole = false; // past mostToCompare: each one's track, or the song's element, whole
+    // What the tree told, each once, each element compared whole: the song's element (a placeholder come or gone, its elements
+    // in another order), its MASTER (an element a safety net refused in a step, left there until its Undo), and its TRACKS and
+    // MASTER as a store of the devices' states asks (compareStoredStates()): a few at most.
+    std::vector<juce::ValueTree> toCompare;
     void clearToCompare();
 
     // The clips whose notes and controllers' values changed (the song holds them beside its tree: SongValues.h), compared
@@ -377,7 +369,7 @@ private:
     // What the values' listener told of the clips (SongValues.h: Listener::clipsChanged()), compared with savedState when
     // asked: each clip changed in place (a property, a warp marker), with the track it was told on, against the saved copy's
     // clip of its ID (holdSameClip()); and each track a clip was added to, taken out of or moved on, and each whose clips came
-    // in another order, whole (holdSameTrackClips()). Bounded as toCompare is: past mostToCompare clips, the track each was
+    // in another order, whole (holdSameTrackClips()). Bounded: past mostToCompare clips, the track each was
     // on, whole. A clip gone compares as its track does; a track gone as what it was taken out of, which notified.
     std::map<ClipID, TrackID> clipsToCompare;
     std::set<TrackID> tracksToCompare;
@@ -412,7 +404,7 @@ private:
     // The curves that changed, by their parameters (SongValues.h: Listener::curvesChanged(); the tree's callbacks below leave
     // the curves' elements alone, isHeardAsKept()): compared with savedState's when asked, each as a value, and the curves'
     // order with it (WholeState.h: holdSameCurve(), holdSameCurveOrder()), so that a point moved and moved back is saved
-    // again. Bounded as toCompare is: past mostToCompare of them, every curve (holdSameCurves()).
+    // again. Bounded: past mostToCompare of them, every curve (holdSameCurves()).
     std::vector<ParameterRef> curvesToCompare;
     bool comparingCurvesWhole = false;
     void curvesChanged (const std::vector<ParameterRef>&) override;
@@ -435,7 +427,7 @@ private:
     // The modulators and macros that changed, by their IDs, and the owners whose modulators came in another order
     // (SongValues.h: Listener::modulationChanged(); the song's tree holds none of them): compared with savedState when asked,
     // each against the saved copy's of its ID, as values (WholeState.h: holdSameModulator(), holdSameModulatorOrder()), so
-    // that a macro turned and turned back is saved again. Bounded as toCompare is: past mostToCompare of them, the song's
+    // that a macro turned and turned back is saved again. Bounded: past mostToCompare of them, the song's
     // modulation whole (holdSameModulation()).
     std::vector<ModulatorID> modulatorsToCompare;
     std::vector<ModulatorPlace> modulatorOwnersToCompare;
@@ -447,7 +439,7 @@ private:
     // whose sends came in another order (SongValues.h: Listener::sendsChanged(); the song's tree holds none): compared with
     // savedState when asked, each against the saved copy's of its ID, as values (WholeState.h: holdSameSend(),
     // holdSameTrackSendOrder()), so that a level turned and turned back is saved again, and a send taken out and put back at
-    // another place before the comparison compares by where it is among its track's. Bounded as toCompare is: past
+    // another place before the comparison compares by where it is among its track's. Bounded: past
     // mostToCompare of them, the sends whole (holdSameSends()), as the whole comparison compares them.
     std::vector<DeviceID> sendsToCompare;
     std::vector<TrackID> sendTracksToCompare;
@@ -461,7 +453,7 @@ private:
     // saved copy's of its ID, as values (WholeState.h: holdSameDevice(), holdSameDeviceOrder(), each a look in the two
     // values by its ID), its place too, so that a knob turned and turned back is saved again, and a device taken out and put
     // back at another place before the comparison compares by where it is among its owner's.
-    // Bounded as toCompare is: past mostToCompare of them, the tracks and the master whole, as toCompare's are.
+    // Bounded: past mostToCompare of them, the tracks and the master whole, as toCompare's are.
     std::vector<DeviceID> devicesToCompare;
     std::vector<DevicePlace> deviceOwnersToCompare;
     bool comparingDevicesWhole = false;
@@ -474,7 +466,7 @@ private:
     // of an item the song holds (a held value alone, and an answer written for a device a step took away, count nothing),
     // and compared with savedState when asked, each against the saved copy's entries of its ID, as values (WholeState.h:
     // holdSameDeviceStore()), so that a knob a plug-in's window turned and turned back is saved again. A plug-in's own change
-    // in its window counts besides, as the song counts it (getOwnChangesOutsideHistory()). Bounded as toCompare is: past
+    // in its window counts besides, as the song counts it (getOwnChangesOutsideHistory()). Bounded: past
     // mostToCompare of them, the tracks and the master whole.
     std::vector<DeviceID> storeToCompare;
     bool comparingStoreWhole = false;
@@ -490,7 +482,7 @@ private:
     // holdSameMaster(), holdSameTrackList()), a track found in the song's kept values and the saved copy's by its ID (one
     // look each, however many tracks the song has: countTrackElementsWalkedWithSaved()), its value and its switches against
     // the saved copy's of its ID (so that a mute toggled and toggled back is saved again), and each list's tracks in their
-    // order. Bounded as toCompare is: past mostToCompare of them, the tracks and the master whole. The view
+    // order. Bounded: past mostToCompare of them, the tracks and the master whole. The view
     // (tracksViewChanged()) counts nothing.
     std::vector<TrackID> trackOwnToCompare, trackListsToCompare;
     bool masterOwnToCompare = false, comparingTracksWhole = false;
@@ -527,7 +519,7 @@ private:
     // compared whole at the next check, as a plug-in may have changed its state without saying so. Kept while the project
     // has unsaved changes, for a save in the background that may yet make an older copy the saved one.
     void compareStoredStates();
-    bool isAsSaved (const ToCompare&) const;
+    bool isAsSaved (const juce::ValueTree& element) const;
     juce::ValueTree findSavedCopy (const juce::ValueTree& element) const;
 
     // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated, Renders and Cache folders, and
@@ -571,7 +563,7 @@ private:
     void rememberSavedState (SongCopy copy); // or a copy of it taken since its last change (what save() wrote)
     void forgetSavedState();                 // the project file doesn't hold the song: unsaved until a save
     void compareWithSavedState();
-    void markChanged (const juce::ValueTree&, const juce::Identifier& property = {});
+    void markChanged (const juce::ValueTree&);
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
 
     // What isn't a change (Schema.h: schema::isUncountedProperty() and isUncountedElement(): view state, how the song plays,
@@ -602,12 +594,6 @@ public:
     bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), keepValues (*song), savedState.tree, savedState.values); }
 
 private:
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
-    {
-        if (! isHeardAsKept (tree, property)) // the areas': tempoMapChanged(), chordLaneChanged(), ..., devicesChanged()
-            markChanged (tree, property);
-    }
-
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markChildChanged (parent, child); }
 

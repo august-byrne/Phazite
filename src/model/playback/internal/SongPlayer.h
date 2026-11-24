@@ -316,7 +316,6 @@ private:
     juce::ValueTree songState;
     std::shared_ptr<const engine::NoteSequence> getNotes (const TrackValue& trackState);
     void markChange (const juce::ValueTree& changed); // an element added, removed or moved in it
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex) override;

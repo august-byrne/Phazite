@@ -3,9 +3,9 @@
 #include "Song.h"
 #include "internal/IDsHeld.h"
 #include "internal/Schema.h"
-#include "internal/SongIndex.h"
 #include "internal/SongText.h"
 #include "internal/SongValues.h"
+#include "internal/TracksValue.h"
 
 #include <algorithm>
 #include <atomic>
@@ -422,7 +422,7 @@ bool holdsSend (const Song& song, DeviceID id)
     if (const auto* values = song.getValues())
         return values->sends.get().find (id) != nullptr;
 
-    for (const auto& track : song.getIndex().getTracks())
+    for (const auto& track : listTrackElements (song.getState()))
         for (const auto& child : track)
             if (child.hasType (schema::SEND) && readHeldID (child[schema::sendID]) == id.getRaw())
                 return true;

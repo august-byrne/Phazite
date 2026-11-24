@@ -36,4 +36,9 @@ juce::ValueTree findTrackIn (const juce::ValueTree& wholeSong, TrackID);
 // Whether the live song's own tree holds an element of a type anywhere (a CLIP, which the clips' area holds beside it, never
 // there): what a test that checks the tree holds none asks, in place of looking through a live track's elements.
 bool treeHolds (const Song&, const juce::Identifier& type);
+
+// Whether the order of its tracks the song keeps (SongValues::getTrackOrder()) is the one its tracks make afresh
+// (TracksValue.h: makeTrackOrder()), the lists holding together (holdsItsLists()): true for a song that holds no values.
+// What the end of a performance gate, the long run and the undo check ask, whose asks are not checked one by one.
+bool holdsExactTrackOrder (const Song&);
 } // namespace phazite::test

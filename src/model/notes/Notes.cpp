@@ -8,12 +8,12 @@
 #include "model/base/Toggles.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TracksOutside.h"
 #include "model/base/internal/TracksValue.h"
+#include "model/base/internal/Visits.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -200,7 +200,7 @@ namespace
         // None for a clip that isn't a MIDI clip of the song's. Valid for as long as this is.
         const ClipValue* find (ClipID clip) const
         {
-            SongIndex::countVisited (1); // a look, for the speed gates, as the clips' storage counts one (Clips.cpp)
+            countVisited (1); // a look, for the speed gates, as the clips' storage counts one (Clips.cpp)
 
             if (const auto found = grown.find (clip.getRaw()); found != grown.end())
                 return &found->second;

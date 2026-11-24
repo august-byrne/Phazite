@@ -1018,8 +1018,8 @@ TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a
     phazite::redo (song);
     phazite::undo (song);
 
-    // (a) The track, with its modulators and its container, moved into a folder and out: the same values, the same element
-    // given them back each time (JUCE takes a track out and puts it in again), their place its ID.
+    // (a) The track, with its modulators and its container, moved into a folder and out: the same values (a move changes the
+    // track's place alone), their place its ID.
     phazite::TrackID folder;
     undo.checkSeveral ("a folder", [&] { folder = phazite::insertFolder (song, other, nullptr); });
     undo.checkSeveral ("Into the Folder", [&] { phazite::moveTrackIntoFolder (song, track, folder); });
@@ -1316,7 +1316,7 @@ TEST_CASE ("Song values' modulation: a track deleted and brought back by Undo, w
 
 TEST_CASE ("Song values' modulation: a lone modulator added to the master in a step is refused")
 {
-    // The keeper's own: goes with the keepers (S5.20). On the master, the one channel whose element the song's tree holds (a
+    // The keeper's own, which stays: on the master, the one channel whose element the song's tree holds (a
     // place: the tracks are values since the tracks' switch).
     // As a lone macro is (the keeper's case (d)): the element can't be taken out in the step that adds it (JUCE workaround
     // W62, docs/juce-workarounds.md), so it is refused, the song's modulation as it was; its step's Undo takes it out again.

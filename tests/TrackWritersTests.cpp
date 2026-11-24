@@ -147,8 +147,8 @@ int countTakenIn (const phazite::Song& song)
 {
     const auto* values = song.getValues();
     REQUIRE (values != nullptr);
-    return values->countAdopted() + values->countTempoMapAdopted() + values->countChordLaneAdopted() + values->countMidiLinksAdopted()
-           + values->countCurvesAdopted() + values->countSectionsAdopted() + values->countModulationAdopted() + values->countSendsAdopted()
+    return values->countTracksAdopted() + values->countTempoMapAdopted() + values->countChordLaneAdopted() + values->countMidiLinksAdopted()
+           + values->countCurvesAdopted() + values->countSectionsAdopted() + values->countModulationAdopted()
            + values->countDeviceStoreAdopted() + values->countDevicesAdopted() + values->countTrackLeavesAdopted();
 }
 } // namespace

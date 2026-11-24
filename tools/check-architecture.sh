@@ -72,10 +72,8 @@
 #                             area.getHeight() / 2.0f) aren't counted. Its budget is the one above 0, today's count,
 #                             and only falls, as each literal moves into the tokens.
 #   song-listeners            listeners on a song's elements rather than its root, in src/model, src/services, src/ui
-#                             and src/app, but the song's index (src/model/base/SongIndex.cpp), which listens to the
-#                             track list so that it hears of every change to the tracks, clips and notes first
-#                             (src/model/base/Song.h): addListener on an element found in the song (getChild...,
-#                             getParent, find...State) or named for one (track..., clip..., note..., lane...,
+#                             and src/app (src/model/base/Song.h): addListener on an element found in the song
+#                             (getChild..., getParent, find...State) or named for one (track..., clip..., note..., lane...,
 #                             device..., folder..., ...State but songState), and getPropertyAsValue, CachedValue and
 #                             referTo, which listen to an element's property. By the names the model gives its
 #                             handles: a handle named otherwise isn't seen.
@@ -209,7 +207,6 @@ function setup(    i, n, s, parts) {
     reSongListener = reSongListener "|[A-Za-z0-9_]*State" reAddListener
     reSongListener = reSongListener "|(getChildWithName|getOrCreateChildWithName|getChild|getParent|find[A-Za-z]*State)[[:blank:]]*[(][^;]*[)]" reAddListener ")"
     reRootListener = W "songState" reAddListener
-    songIndexCode = "src/model/base/SongIndex.cpp"
 
     n = split(undo_implementation, parts, " ")
     for (i = 1; i <= n; i++) isUndoCode[parts[i]] = 1
@@ -244,8 +241,8 @@ function setup(    i, n, s, parts) {
     instead["thread-kills"] = "stop a thread with stopThread (-1), once whatever it waits on is woken or cancelled, and run jobs with phazite::BackgroundJobs (src/model/base/BackgroundJobs.h): on Windows a thread ended by force can leave a lock it held held for ever."
     what["ui-design-literals"] = "colours, font sizes and corner radii written as literals in src/ui and src/app outside src/ui/theme: juce::Colours names (but transparent ones), juce::Colour from a number, a number as a font" q "s size or a rounded rectangle" q "s corner, and constants named for corners or text sizes set to a number"
     instead["ui-design-literals"] = "take it from the design tokens (src/ui/theme/DesignTokens.h, read with ui::getPalette (component)), adding a token where none fits. This budget only falls: never raise it."
-    what["song-listeners"] = "listeners on a song" q "s elements rather than its root in src/model, src/services, src/ui and src/app (but the song" q "s index, src/model/base/SongIndex.cpp): addListener on an element found in the song or named for one (track..., clip..., note..., ...State), and juce::Value or CachedValue of an element" q "s property"
-    instead["song-listeners"] = "listen to the song" q "s root (what Song::getState() returns) and tell the element from the tree the callback names: the song" q "s index listens to its track list so that it hears of every change first (src/model/base/Song.h)."
+    what["song-listeners"] = "listeners on a song" q "s elements rather than its root in src/model, src/services, src/ui and src/app: addListener on an element found in the song or named for one (track..., clip..., note..., ...State), and juce::Value or CachedValue of an element" q "s property"
+    instead["song-listeners"] = "listen to the song" q "s root (what Song::getState() returns) and tell the element from the tree the callback names (src/model/base/Song.h)."
     what["immer-outside-model"] = "includes of the immer library" q "s headers (immer/...) in src/ outside src/model"
     instead["immer-outside-model"] = "keep the song" q "s values inside the model (src/model/base/internal/ValueArea.h): add a model function that takes and returns Phazite" q "s own types (IDs, plain values, handles) for what the layer above needs."
 }
@@ -415,7 +412,7 @@ function treeLine(line,    path, lineno, text, s, n) {
         hitLine("ui-undo-steps", path, lineno, text, count(s, reUiUndo))
         if (index(path, "src/ui/theme/") != 1) hitLine("ui-design-literals", path, lineno, text, designLiterals(s))
     }
-    if ((curLayer == "model" || curLayer == "services" || curLayer == "ui" || curLayer == "app") && path != songIndexCode &&
+    if ((curLayer == "model" || curLayer == "services" || curLayer == "ui" || curLayer == "app") &&
         (index(s, "Listener") || index(s, "Value") || index(s, "referTo")))
         hitLine("song-listeners", path, lineno, text, count(s, reSongListener) - count(s, reRootListener))
 }

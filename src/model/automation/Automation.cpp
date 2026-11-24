@@ -1684,14 +1684,6 @@ bool isWritingAutomation (const Song& song)
                         { return entry.first == 0 || getTracksValue (song).tracks.find (entry.first) != nullptr; });
 }
 
-bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)
-{
-    // A channel's volume and pan (a device's of Phazite's own, its VALUES' properties, are the devices' area's, a plug-in's the
-    // devices' store's, which the song's values tell; a modulator's modulation's area's).
-    return (tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
-           && (property == schema::channelVolume || property == schema::channelPan);
-}
-
 //==============================================================================
 std::optional<PointSelection> getSelectedPoints (const Selection& selection)
 {

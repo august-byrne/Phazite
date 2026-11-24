@@ -62,19 +62,20 @@
 //      that the selection, holding keys, follows the entries through edits, undo and redo.
 //   2. Its area: internal/<Area>Area.h and model/base/<Area>Area.cpp (as TempoMapArea.h), including this header: its teller
 //      (struct SongValues::<Area>Teller, a ValueArea listener that adds itself to the area and tells Listener of a change of
-//      its value); its part of the keeper (struct SongValues::<Area>Keeper: childAdded() and, where it acts there,
-//      childRemoved(), asked for every element that comes into the song's tree or leaves it, whoever's it is, each returning
-//      at once for what is not the area's, and for what is, reading the area and setting it through its setter in the mode
-//      of the moment; its refusal of a lone element of the area (step 13); and a static adopt() that takes what the loaded
-//      tree holds of it in, outside the history); its setter, a member of SongValues defined there; its whole state's part
-//      (leadsTo<Area>(), write<Area>In()); its comparison of two kept values (holdSame<Area>(), declared in WholeState.h) and
+//      its value); its part of the keeper (struct SongValues::<Area>Keeper: childAdded(), asked for every element that comes
+//      into the song's tree, whoever's it is, returning at once for what is not the area's, and for what is, reading the area
+//      and setting it through its setter in the mode of the moment; its refusal of a lone element of the area (step 13);
+//      and a static adopt() that takes what the loaded tree holds of it in, outside the history); its setter, a member of
+//      SongValues defined there; its whole state's part (leadsTo<Area>(), write<Area>In()); its comparison of two kept
+//      values (holdSame<Area>(), declared in WholeState.h) and
 //      of two elements with their kept values (holdSame<Area>Of(), is<Area>Place()); and, if it holds IDs,
 //      findLargestIDIn (const <Area>Value&) (IDsHeld.h). Each new file listed in CMakeLists.txt (phazite_core) and in
 //      src/model/README.md. An area whose element's presence means something (the chord lane's CHORDLANE: a song without
 //      one takes its keys from the key set last), or only is written into the song's file and compared with the saved copy
 //      (the MIDI links' MIDILINKS, added with the first link and kept once the last goes): the element stays as an empty
 //      placeholder where the song has one, and only the area's code adds or takes it away, in the step that changes the
-//      value: the element first when adding, the value first when taking away, so that the value never says more than the element; isHeardAs<Area>() covers only
+//      value: the element first when adding, the value first when taking away, so that the value never says more than the
+//      element; isHeardAs<Area>() covers only
 //      what is inside it, and its own adding and taking away stays the tree's (the listeners hear it as a child of the
 //      root); holdSame<Area>() and the check (step 7) compare whether each has the element too; and whole state writes an
 //      empty placeholder as an empty element. An area whose element is a place every song that holds its values has (the
@@ -82,17 +83,14 @@
 //      takes it away after, isHeardAs<Area>() covers it whole (the element itself added or taken out too), and the passes
 //      over elements leave it alone (step 9); where files have held none of it while the area was empty (AUTOMATION, once
 //      added with the first curve), whole state leaves it out while the area is empty (CurvesArea.h: writeCurvesIn()). An
-//      area whose entries sit under elements that stay in the tree (the clips under tracks; modulation under tracks, the
-//      master and containers: ModulationArea.h) has its keeper follow each kind of owner as it comes and goes: a track
-//      (alone, a folder with its tracks, the track list) and every other owner alone (a container, which a version moves to
-//      another channel), what each holds remembered with its element as it goes and given back, with the place it comes to,
-//      as the same element comes back; an owner that comes with the area's elements has them taken in; whole state writes an
-//      owner's entries in its element (writeModulationIn(): after its other children but those another area writes after
-//      it, a track's sends); and an entry keeps beside its owner each owner above it that a teller names (ModulatorPlace: a
+//      area whose entries sit under an owner (the clips under tracks; modulation under tracks, the master and containers;
+//      the devices under channels, containers and chains) names each owner by its ID in its entries, so that nothing follows
+//      an owner as it moves, and what removes an owner erases its entries first (model/arrangement/internal/Tracks.h:
+//      eraseTrackHoldings(); model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()); whole state writes an owner's
+//      entries in its element (writeModulationIn(): after its other children but those another area writes after it, a
+//      track's sends); and an entry keeps beside its owner each owner above it that a teller names (ModulatorPlace: a
 //      container's macro keeps its channel), so that what is told names it without reading the tree, which a redo may not
-//      have put back yet. The devices' area, under tracks and under containers and chains that it holds itself, needs the
-//      same for each: its keeper follows a TRACK, a CONTAINER and a CHAIN, and modulation's keeper then follows a container
-//      by the devices' area, not by the tree.
+//      have put back yet.
 //   3. Here, in SongValues: its area as a member (ValueArea<<Area>Value> <area>, after the others); its setter (set<Area>());
 //      a virtual <area>Changed() in Listener, empty by default; struct <Area>Teller and <Area>Keeper among the declarations
 //      below, and a std::unique_ptr<<Area>Teller> after the others; a count of what its keeper took in, if it takes any in
@@ -289,26 +287,27 @@ struct SongOwnChange;
 // TEMPOMAP and AUTOMATION elements (making each where its file had none), and its CHORDLANE, MIDILINKS and SECTIONS where it
 // has them, properties and children Phazite doesn't know too. A MIDI clip that joins an alias group takes the group's
 // notes, and one that leaves it keeps those it holds (setClip()). Everything else that changes the tree is heard by the
-// keeper, a listener of the song's root (each area's part of it in the area's file: ClipsArea.h, TempoMapArea.h,
-// ChordLaneArea.h, MidiLinksArea.h, CurvesArea.h, SectionsArea.h, ModulationArea.h, SendsArea.h), which asks every area for
-// every element that comes into the tree or leaves it, each doing nothing for what is not its own. The tree holds no track
+// keeper, a listener of the song's root (each area's part of it in the area's file: TracksArea.h, TempoMapArea.h,
+// ChordLaneArea.h, MidiLinksArea.h, CurvesArea.h, SectionsArea.h, ModulationArea.h, DeviceStoreArea.h, DevicesArea.h,
+// SongOwnArea.h), which asks every area that has a part for every element that comes into the tree, each doing nothing for
+// what is not its own. The tree holds no track
 // since the tracks' switch (TracksArea.h): the tracks' part, asked first, takes them in as the song takes its values (each
 // read once) and catches a TRACK added to the song's TRACKS or a property written to its MASTER: refused in a step (a JUCE
 // assertion: the tracks' setters set a track), and outside the history read in with what it holds, through each area's
 // reader (its clips with their notes, its devices and containers with the store's entries, its modulators and macros, its
-// sends, its switches and view), and taken out (countTracksAdopted()). The other parts' cases of a TRACK that comes or goes
-// see none (they go with the next piece of roadmap step S5.20). A CLIP element added by itself is no clip of the song's (a
-// JUCE assertion: the clips' functions add a clip), as the step that adds it can't take it out again (its Undo would find it
-// gone). The
+// sends, its switches and view), and taken out (countTracksAdopted()). No other part has a case of a track: none follows
+// a track as it comes, goes or moves (each area names its track by ID, and each remover erases what a track holds first:
+// model/arrangement/internal/Tracks.h, eraseTrackHoldings()), and the clips' and the sends' areas have no part. The
 // same safety net for the tempo map, which the versions don't use either (model/versions/ApplySong.cpp, VersionsModel.cpp):
 // a TEMPOMAP that comes into the song with TEMPO or TIMESIGNATURE elements in it has them read into the tempo map's area,
 // as its whole map, and is emptied as holdValues() empties the song's own (what Phazite doesn't know of it goes too); and
 // a TEMPO or a TIMESIGNATURE added to the song's TEMPOMAP by itself while the song is written outside the history is read
 // into the map (TempoMapValue.h: withEntryTaken()) and taken out again. One
-// added by itself in a step is refused as a lone CLIP is, for the same reason (a JUCE assertion: the tempo map's functions
-// change the map). The chord lane's alike (ChordLaneArea.h): a CHORDLANE that comes in with CHORD or CHORDKEY elements has
-// them read in as the song's lane and is emptied, a lone one added outside the history is read in and taken out, and one
-// added in a step is refused; the MIDI links' alike (MidiLinksArea.h), for a MIDILINKS that comes in with MIDILINK
+// added by itself in a step is refused (a JUCE assertion: the tempo map's functions change the map), as the step that adds
+// it can't take it out again (its Undo would find it gone). The chord lane's alike (ChordLaneArea.h): a CHORDLANE that comes
+// in with CHORD or CHORDKEY elements has them read in as the song's lane and is emptied, a lone one added outside the
+// history is read in and taken out, and one added in a step is refused; the MIDI links' alike (MidiLinksArea.h), for a
+// MIDILINKS that comes in with MIDILINK
 // elements and a lone MIDILINK, and the sections' (SectionsArea.h), for a SECTIONS that comes in with SECTION elements and
 // a lone SECTION; and the curves' (CurvesArea.h) for a lone CURVE, each point read in given a key, while an AUTOMATION
 // added to the song, a second beside the one it has from holdValues() on, is refused (a JUCE assertion), its curves unread,
@@ -317,16 +316,14 @@ struct SongOwnChange;
 // step: the areas' own actions move them. The keeper performs its changes from inside JUCE's action for the tree's, which
 // JUCE adds to the step before
 // the tree's own: so an undo puts the tree back first and the clips after (JUCE workaround W62 (docs/juce-workarounds.md)).
-// Modulation's part (ModulationArea.h) for the modulators and macros of the master and of a container: a container taken
-// out of a channel has its macros remembered, given back as the same element comes back; one that comes in with MODULATOR
-// or MACRO elements has them read in and taken out (a safety net: a container's makers make its macros as values, which its
-// inserter sets: Mixer.h, insertDevice()); and a lone one is refused in a step, read in outside the history. The sends'
-// part (SendsArea.h): a lone SEND is refused in a step, read in outside the history. The devices' part (DevicesArea.h): the
-// master that comes in with DEVICE or CONTAINER elements has them read in and taken out (a safety net no path of Phazite's
-// relies on); and a lone DEVICE, CONTAINER, CHAIN, VALUES or SOUNDS is refused in a step, read in (a device or a container
-// on a channel) and taken out outside the history. The tracks' switches' and view's part (TracksArea.h: TrackLeavesKeeper):
-// a lone LANES on the master is refused in a step and read in outside the history; a track taken out leaves its switches'
-// and view's entries where they are, for an Undo. The song's own part (SongOwnArea.h: SongOwnKeeper): a property of the
+// Modulation's part (ModulationArea.h) for the modulators and macros of the master: a container added to it outside the
+// history with MACRO elements has them read in and taken out (a safety net: a container's makers make its macros as values,
+// which its inserter sets: Mixer.h, insertDevice()); and a lone one is refused in a step, read in outside the history. The
+// devices' part (DevicesArea.h): a lone DEVICE, CONTAINER, CHAIN, VALUES or SOUNDS is refused in a step, read in (a device
+// or a container on the master) and taken out outside the history (a safety net no path of Phazite's relies on). The
+// tracks' switches' and view's part (TracksArea.h: TrackLeavesKeeper): a lone LANES on the master is refused in a step and
+// read in outside the history; a track taken out leaves its switches' and view's entries where they are, for an Undo. The
+// song's own part (SongOwnArea.h: SongOwnKeeper): a property of the
 // root's own or its count of IDs written to the song's root, or a LASTKEY, PIANOROLL or MERGING added to it, is refused in a
 // step and read in and taken out outside the history (a safety net no path of Phazite's relies on: countSongOwnAdopted());
 // and as the song holds its values, the root's every property and those elements are read in and taken out, and what
@@ -407,13 +404,6 @@ public:
     // it changed the area. In ModulationArea.cpp and SendsArea.cpp.
     bool eraseModulators (Song&, const std::vector<ModulatorID>&);
     bool eraseSends (Song&, const std::vector<DeviceID>&);
-
-    // A test hook: how many of what the keeper remembers of an element taken out of the song (each area's part: the clips',
-    // with their notes, modulation's, the sends') holds something for an element that is not in the song: a TRACK or the
-    // MASTER not in it, or a CONTAINER that left with its channel. None since the tracks' switch, as no TRACK leaves the tree
-    // (roadmap step S5.20's next piece takes it away with the parts' TRACK cases); tests/SongCheck.cpp, checkSong(), and
-    // tests/UndoCheck.cpp check it is 0. In SongValues.cpp.
-    int countHoldingsLeftWithKeepers() const;
 
     // Gives a MIDI clip of the song and each MIDI clip of its alias group this value of notes, as setClip() sets: the one way
     // to change a clip's notes. Notes equal to those each holds are no change, and make no action in the history: nothing
@@ -576,6 +566,12 @@ public:
     // where the lists differ or a track came to be a folder or stopped being one (immer's diff of the tracks' map since,
     // O(changed)), as playedTempoMaps is kept. Valid until the area's next change: what holds it longer copies it.
     const TrackOrder& getTrackOrder() const;
+
+    // Whether each ask of getTrackOrder() is compared with an order made afresh of the tracks (makeTrackOrder()), a JUCE
+    // assertion where they differ: every ask while the song has at most 512 tracks, a share of them in a bigger song, so that
+    // the checks cost about as much again as the asks. Off unless set, as the tests set it (tests/TestMain.cpp); any thread.
+    static void setCheckingTrackOrder (bool) noexcept;
+    static bool isCheckingTrackOrder() noexcept;
 
     // Give the song's own its next values (SongOwnValue.h), their setters' one way to change them (SongOwnValue.h:
     // setSongOwn(), setSongStanding(), storeStandingOutsideHistory(), setSongOutside(), which call these):
@@ -938,15 +934,6 @@ public:
     void addListener (Listener*) const;
     void removeListener (Listener*) const;
 
-    // How many CLIP elements the keeper took into the areas from the song's tree since the song held its values (the safety
-    // net, above): what the versions, which give a track its clips through the clips' functions, check they never leave to it
-    // (model/versions/ApplySong.cpp). And whether the keeper remembers a track's element with its clips, taken out of the
-    // song, and the IDs of the tracks it remembers: for the keeper's tests, which check that it lets go of what nothing can
-    // bring back.
-    int countAdopted() const noexcept { return adopted; }
-    bool remembers (const juce::ValueTree& track) const;
-    std::vector<TrackID> getRemembered() const;
-
     // How many TEMPO and TIMESIGNATURE elements the keeper took into the tempo map's area from the song's tree since the song
     // held its values (the safety net, above): what the versions, which give the song its tempo map through setTempoMap(),
     // check they never leave to it.
@@ -978,12 +965,6 @@ public:
     // which give the song its modulation through modulation's code (Modulation.h: makeModulationLike()'s setAllModulation(),
     // chooseModulationClash()), check they never leave to it.
     int countModulationAdopted() const noexcept { return modulationAdopted; }
-
-    // How many SEND elements the keeper took into the sends' area from the song's tree since the song held its values (the
-    // safety net, above, which takes in the sends of a track a merge's choice brings in whole): what the versions, which give
-    // the song its sends through the sends' code (Mixer.h: chooseSendClash(); ApplySong.cpp, makeSendsLike()), check their
-    // passes never leave to it.
-    int countSendsAdopted() const noexcept { return sendsAdopted; }
 
     // How many DEVICE and CHAIN elements that came into the song with what the store holds (a store's property, a VALUE, a
     // window's place) the keeper took it out of since the song held its values, and how many lone VALUE elements it took in
@@ -1026,7 +1007,7 @@ private:
     struct ClipsTeller;                             // ClipsArea.h
     struct NotesTeller;                             // NotesArea.h
     struct TempoMapTeller;                          // TempoMapArea.h
-    struct ClipsKeeper;                             // ClipsArea.h: the clips', with their notes
+    struct ClipsKeeper;                             // ClipsArea.h: the clips' adoption, with their notes
     struct TempoMapKeeper;                          // TempoMapArea.h
     struct ChordLaneTeller;                         // ChordLaneArea.h
     struct ChordLaneKeeper;                         // ChordLaneArea.h
@@ -1039,7 +1020,7 @@ private:
     struct ModulationTeller;                        // ModulationArea.h
     struct ModulationKeeper;                        // ModulationArea.h
     struct SendsTeller;                             // SendsArea.h
-    struct SendsKeeper;                             // SendsArea.h
+    struct SendsKeeper;                             // SendsArea.h: the adoption
     struct DeviceStoreTeller;                       // DeviceStoreArea.h
     struct DeviceStoreKeeper;                       // DeviceStoreArea.h
     struct DevicesTeller;                           // DevicesArea.h
@@ -1073,13 +1054,12 @@ private:
     std::unique_ptr<SongStandingTeller> songStandingTeller;
     std::unique_ptr<SongOutsideTeller> songOutsideTeller;
     std::unique_ptr<Keeper> keeper;
-    int adopted = 0, tempoMapAdopted = 0;
+    int tempoMapAdopted = 0;
     int chordLaneAdopted = 0;
     int midiLinksAdopted = 0;
     int curvesAdopted = 0;
     int sectionsAdopted = 0;
     int modulationAdopted = 0;
-    int sendsAdopted = 0;
     int deviceStoreAdopted = 0;
     int devicesAdopted = 0;
     int trackLeavesAdopted = 0;

@@ -135,19 +135,17 @@ struct SongValues::TracksKeeper
 {
     TracksKeeper (SongValues&, Song&);
 
-    // A child added to an element of the song's tree, a property changed, and a child taken out (the keeper's callbacks, but
-    // while the history undoes or redoes, for every element, whoever's it is): whether it was the tracks' (a), which the
-    // keeper then asks no other area's part of. A child taken out is the tracks' only as the keeper's own taking out of what
-    // it read in.
+    // A child added to an element of the song's tree and a property changed (the keeper's callbacks, but while the history
+    // undoes or redoes, for every element, whoever's it is): whether it was the tracks' (a), which the keeper then asks no
+    // other area's part of.
     bool childAdded (juce::ValueTree& parent, juce::ValueTree& child);
     bool propertyChanged (juce::ValueTree& tree, const juce::Identifier& property);
-    bool childRemoved (const juce::ValueTree& parent, const juce::ValueTree& child) const;
 
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
     Song& song;
-    juce::ValueTree takingOut {}; // the element the keeper takes out as it is told, which no other part is asked of
+    juce::ValueTree takingOut {}; // what the keeper takes out (or takes properties out of) as it is told: none of its own to read
 
     JUCE_DECLARE_NON_COPYABLE (TracksKeeper)
 };
@@ -190,13 +188,8 @@ struct SongValues::TracksViewTeller final : OutsideValue<TracksOutside>::Listene
 };
 
 // The switches' and the view's part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes
-// or redoes:
-//   (a) a TRACK, the track list or the MASTER that comes into the song with a switch, a view property or a LANES in it, or in
-//       a track in it: each such element's switches read as the song holds them (readHeldSwitchesOf()), made its key's in the
-//       switches (the song's entries of its ID replaced: the element is what the track holds), its view made its row's
-//       (readHeldViewOf()), all of it taken out of the element, each element counted (countTrackLeavesAdopted()). The tracks'
-//       part of the keeper takes every TRACK, TRACKS and MASTER that comes in itself, its switches and view with it, and asks
-//       this of none (TracksKeeper): this case is left for the next piece of roadmap step S5.20 to take away;
+// or redoes (a TRACK, the track list or the MASTER that comes in with a switch, a view property or a LANES is the tracks' part
+// of the keeper's, which reads them in with it: TracksKeeper):
 //   (b) a lone LANES added to the MASTER, or a lone LANE to its LANES: refused in a step, whose Undo, taking the tree's change
 //       back first, would find it gone (a JUCE assertion: the lanes' functions change the lanes,
 //       model/automation/internal/Automation.h; JUCE workaround W62 (docs/juce-workarounds.md)); read in outside the history

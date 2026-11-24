@@ -4,8 +4,8 @@
 // draw, two clips shown, and the lane each clip opens on.
 #include "EditorScreens.h"
 #include "TestHelpers.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/Visits.h"
 #include "model/commands/internal/Undo.h"
 
 #include <algorithm>
@@ -510,9 +510,9 @@ TEST_CASE ("A controller lane reads a long take's 100,000 values once for each c
 
     // Painted again, it reads nothing from the song, which didn't change: what it draws was read once for it.
     const auto first = screen.lane->createComponentSnapshot (screen.lane->getLocalBounds());
-    const auto before = phazite::SongIndex::countElementsVisited();
+    const auto before = phazite::countElementsVisited();
     const auto again = screen.lane->createComponentSnapshot (screen.lane->getLocalBounds());
-    CHECK (phazite::SongIndex::countElementsVisited() == before);
+    CHECK (phazite::countElementsVisited() == before);
     CHECK (first.getWidth() == again.getWidth());
 }
 

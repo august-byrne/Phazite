@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The devices' part of the keeper (roadmap step S5.20, the devices' switch: model/base/internal/DevicesArea.h), now that the
 // song's devices, containers and chains are its values' (SongValues.h: devices) and its tree holds none: a track's devices go
-// with it and come back with it, a removal remembered once and forgotten at the next, a container's macros go with the
-// container (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()), and what is made, copied or chosen gives the song its
+// with it and come back with it, a container's macros go with the container (model/mixer/internal/Mixer.h:
+// forgetWhatNamesTheGone()), and what is made, copied or chosen gives the song its
 // devices through the devices' setters, never through the keeper's safety net (countDevicesAdopted()), which takes in a
 // track that comes in with them and refuses a lone one in a step. Each change one exact undo step (UndoCheck.h).
 //   phazite_tests.exe --test-case="Devices' keeper*"
@@ -104,13 +104,11 @@ TEST_CASE ("Devices' keeper: a track's devices go with its deletion and come bac
         CHECK_FALSE (phazite::hasDevice (song, id));
 
     CHECK (phazite::getContainerMacros (song, container).empty());
-    CHECK (values.countHoldingsLeftWithKeepers() == 0);
     undo.stepBackOrForth ("Undo", [&] { phazite::undo (song); });
     CHECK (phazite::getDevicesValue (song) == before);
     CHECK (phazite::getModulationValue (song) == modulationBefore);
 
-    // (a) Moved into a folder and out: the same devices on the same track, the same element given them back each time (JUCE
-    // takes a track out and puts it in again).
+    // (a) Moved into a folder and out: the same devices on the same track (a move changes the track's place alone).
     TrackID folder;
     undo.checkSeveral ("a folder", [&] { folder = phazite::insertFolder (song, other, nullptr); });
     undo.checkSeveral ("Into the Folder", [&] { phazite::moveTrackIntoFolder (song, track, folder); });
@@ -169,9 +167,8 @@ TEST_CASE ("Devices' keeper: a track's devices go with its deletion and come bac
 TEST_CASE ("Devices' keeper: a track deleted and brought back by Undo, whose device is then removed, is moved into a folder "
            "without it")
 {
-    // The keeper remembers a deleted track's devices with its element (none, as the deletion erased them first: Tracks.h,
-    // eraseTrackHoldings()), and the Undo (which it leaves alone) brings them back itself: what it remembered must not come
-    // back with the next move of the same element, once the device is gone.
+    // The deletion erases a deleted track's devices first (Tracks.h: eraseTrackHoldings()), and its Undo brings them back:
+    // none must come back with the next move of the track, once the device is gone.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& context = s.context;

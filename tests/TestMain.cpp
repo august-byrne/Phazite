@@ -7,7 +7,7 @@
 #include "AudioThreadMonitor.h"
 #include "StallReport.h"
 #include "TestHelpers.h"
-#include "model/base/internal/SongIndex.h"
+#include "model/base/internal/SongValues.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/playback/internal/SongPlayer.h"
@@ -550,10 +550,10 @@ namespace
 // Says where a test case that takes too long is, where the environment asks (StallReport.h): main()'s, while it runs.
 phazite::test::StallReport* stallReport = nullptr;
 
-// Tells the net, and the stall report, which test case runs, as doctest starts and ends each. And has each answer of the
-// songs' indexes compared with a walk through the song (model/base/internal/SongIndex.h), which asserts where they
-// differ, in every test case but those that time or count what they do (the benchmarks, the benchmark gates, the long run
-// and the performance gates).
+// Tells the net, and the stall report, which test case runs, as doctest starts and ends each. And has each ask of the order
+// of their tracks the songs keep compared with one made afresh (model/base/internal/SongValues.h: getTrackOrder()), which
+// asserts where they differ, in every test case but those that time or count what they do (the benchmarks, the benchmark
+// gates, the long run and the performance gates).
 struct AssertionNetListener final : public doctest::IReporter
 {
     explicit AssertionNetListener (const doctest::ContextOptions&) {}
@@ -565,12 +565,12 @@ struct AssertionNetListener final : public doctest::IReporter
         if (stallReport != nullptr)
             stallReport->testCaseStarted (data.m_name);
 
-        // Nor in the performance gates, which count the work Phazite does (the checks' walks would count with it): each of
-        // those compares its songs' whole indexes with a walk at its end instead (isExact()).
+        // Nor in the performance gates, which count the work Phazite does (the checks would count with it): each of those
+        // compares its songs' orders at its end instead (TestTracks.h: holdsExactTrackOrder()).
         const std::string suite = data.m_test_suite != nullptr ? data.m_test_suite : "";
         const auto isGate = std::string (data.m_name).rfind ("Performance gate:", 0) == 0;
         const auto check = ! isGate && suite != "benchmark" && suite != "benchmark-gate" && suite != "long-run";
-        phazite::SongIndex::setChecking (check);
+        phazite::SongValues::setCheckingTrackOrder (check);
 
         // And what each plan keeps from the plan before compared with the song (model/playback/internal/SongPlayer.h), so that
         // every test that plays the song holds the plans it compiles from what changed to those a whole compile would give:

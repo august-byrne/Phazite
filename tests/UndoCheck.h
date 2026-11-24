@@ -13,9 +13,10 @@
 //
 // A failure says what differs, by its place in the song: "PHAZITE/TRACKS/TRACK#1004/CLIP#1012: missing".
 //
-// With each comparison it checks that the song's index answers as a walk does, and that the keeper of the song's values holds
-// nothing of a track out of the song (SongValues::countHoldingsLeftWithKeepers(): what takes a track out erases what it holds
-// first, model/arrangement/internal/Tracks.h: eraseTrackHoldings()).
+// With each comparison it checks that the order of its tracks the song keeps is the one they make afresh
+// (TestTracks.h: holdsExactTrackOrder()), and that the song's values hold together (SongCheck.h: findValueProblems()):
+// among them, that no area holds anything of a track out of the song but the kept entries of the keyed and outside values
+// (what takes a track out erases what it holds first, model/arrangement/internal/Tracks.h: eraseTrackHoldings()).
 //
 // It also keeps a player of the song and compiles its plan after each change, Undo and Redo, as a render does: while the
 // tests' checking is on, what a plan keeps from the plan before is compared with the song (SongPlayer::setChecking()).

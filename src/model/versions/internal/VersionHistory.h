@@ -938,10 +938,10 @@ private:
     void keepLeft (Switch&);
     void setBaseline (juce::ValueTree song, PluginParameterValues, ReportCounts, bool songIsIt = false);
 
-    // What the song's notifications say changed, marked for the next rounds of the changes (ChangesWorker.h): a track (and
-    // the tracks in it, for one added or taken away), the master, an automation curve, the song's own, the tracks' order and
-    // names, or anything.
-    void markChanged (const juce::ValueTree&, const juce::Identifier& property);
+    // What the song's tree says changed, marked for the next rounds of the changes (ChangesWorker.h): the song's own line (a
+    // placeholder come or gone, its elements in another order), or the master's or a track's (an element a safety net
+    // refused in a step, left there until the step's Undo).
+    void markChanged (const juce::ValueTree&);
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
 
     // A track's line or the master's, from the tree's callbacks by its element (the TRACK or the MASTER nearest what changed),
@@ -1048,7 +1048,6 @@ private:
     PluginParameterValues readKnobs (const std::set<std::uint64_t>& devices) const;
     PluginParameterValues readBaseKnobs (const std::set<std::uint64_t>& devices);
     void timerCallback() override;
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
 
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {

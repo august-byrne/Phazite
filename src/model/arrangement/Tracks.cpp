@@ -6,7 +6,6 @@
 #include "model/base/internal/DeviceStoreValue.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
@@ -352,14 +351,14 @@ TrackLookup findTrack (const Song& song, TrackID id)
     if (const auto* values = song.getValues())
         return TrackLookup (values->tracks.get().find (id));
 
-    // A song without values: the one track's element read, through the song's index (none read whole but that one).
+    // A song without values: the one track's element read, found by a walk of its tree (none read whole but that one).
     if (! id.isValid())
         return TrackLookup (std::optional<TrackValue>());
 
     if (const auto master = song.getState().getChildWithName (schema::MASTER); readTrackElementID (master) == id)
         return TrackLookup (readTrackValue (master));
 
-    return TrackLookup (readTrackValue (song.getIndex().findTrack (id.getRaw())));
+    return TrackLookup (readTrackValue (findTrackElementByID (song.getState(), id)));
 }
 
 bool hasTrack (const Song& song, TrackID id)
@@ -400,7 +399,7 @@ TrackOrder readTrackOrderWithoutValues (const Song& song)
     TrackOrder order;
     int number = 0;
 
-    for (const auto& element : song.getIndex().getTracks())
+    for (const auto& element : listTrackElements (song.getState()))
     {
         const auto id = readTrackElementID (element);
         const auto folder = readTrackKind (element) == TrackValue::Kind::folder;
@@ -736,7 +735,7 @@ TrackView getTrackView (const Song& song, TrackID id)
         if (const auto master = song.getState().getChildWithName (schema::MASTER); readTrackElementID (master) == id)
             return readViewOf (master);
 
-        return readViewOf (song.getIndex().findTrack (id.getRaw()));
+        return readViewOf (findTrackElementByID (song.getState(), id));
     }
 
     if (isMaster (song, id))
@@ -1551,8 +1550,8 @@ void eraseTrackHoldings (Song& song, const std::vector<TrackID>& tracks)
 
 namespace
 {
-    // The tracks of a TRACK element, itself first and then those in it, depth first, as the keeper's parts walk one that comes
-    // into the song (model/base/ClipsArea.cpp, SendsArea.cpp: collectTracks()).
+    // The tracks of a TRACK element, itself first and then those in it, depth first: those of a side's track a merge's choice
+    // brings in whole, whose holdings each area's code takes in (giveHoldingsOf(), below).
     void collectTrackElements (const juce::ValueTree& element, std::vector<juce::ValueTree>& tracks)
     {
         if (! element.hasType (schema::TRACK))
@@ -1564,9 +1563,9 @@ namespace
             collectTrackElements (child, tracks);
     }
 
-    // The owners of modulators and macros in a channel's element, as modulation's part of the keeper walks one that comes into
-    // the song (model/base/ModulationArea.cpp: childAdded()): the channel, then each of its containers and, a folder's, each
-    // of its tracks with theirs, in its elements' order.
+    // The owners of modulators and macros in a channel's element, as modulation's reader of a whole channel takes them
+    // (model/base/ModulationArea.cpp: takeChannelModulatorsIn()): the channel, then each of its containers and, a folder's,
+    // each of its tracks with theirs, in its elements' order.
     void collectModulationOwners (const juce::ValueTree& owner, std::vector<juce::ValueTree>& owners)
     {
         owners.push_back (owner);

@@ -15,7 +15,6 @@
 namespace phazite
 {
 struct ParameterRef;
-class SongIndex;
 class SongValues;
 
 class Song final : public juce::ReferenceCountedObject
@@ -28,15 +27,9 @@ public:
 
     // Whatever listens to the song listens to this, its root (a juce::ValueTree::Listener added to what this returns), and
     // finds the element a change was made to from what the callback names: never to one of its elements' handles, nor
-    // through a juce::Value or CachedValue of an element's property. The song's index (below) listens to its track list,
-    // and JUCE tells a change to the listeners of the elements below first, so it hears of every change to the tracks before
-    // anything else asks it about one (tools/check-architecture.sh counts: song-listeners). Its clips and their notes are
-    // values beside it (getValues()), which tell their own listeners.
+    // through a juce::Value or CachedValue of an element's property (tools/check-architecture.sh counts: song-listeners). What
+    // it holds is values beside it (getValues()), which tell their own listeners.
     juce::ValueTree getState() const noexcept { return state; }
-
-    // Where its tracks are, by their IDs, which the model's functions that take IDs find them by
-    // (model/base/internal/SongIndex.h): kept from its state, which stays the only truth of them.
-    const SongIndex& getIndex() const noexcept { return *index; }
 
     // What it holds beside its tree as values (model/base/internal/SongValues.h): its clips, and its MIDI clips' notes and
     // controllers' values, which its tree then doesn't hold. None until holdValues(), which makeSong() calls once the song
@@ -257,7 +250,6 @@ public:
 
 private:
     juce::ValueTree state;
-    std::unique_ptr<SongIndex> index;
     History undoManager;
     juce::File file, cacheFolder;
     mutable juce::File ownCacheFolder; // in the temporary folder, while no other is given

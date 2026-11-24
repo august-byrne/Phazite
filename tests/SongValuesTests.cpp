@@ -419,11 +419,10 @@ TEST_CASE ("Song values: a song opened holds its clips' notes beside its tree, t
 TEST_CASE ("Song values: a track that comes into the song with its clips' elements outside the history has them read into the "
            "values and taken out of the tree by the tracks' safety net")
 {
-    // The keeper's own (S5.20). Since the tracks' switch a TRACK that comes into the song's TRACKS is the tracks' part of the
+    // The tracks' safety net. Since the tracks' switch a TRACK that comes into the song's TRACKS is the tracks' part of the
     // keeper's (TracksArea.h), which reads its clips through the clips' reader of a track (ClipsArea.h: takeTrackClipsIn()),
-    // outside the history alone (in a step it is refused: SongValuesTracksKeeperTests.cpp), counting them as the clips' keeper does.
+    // outside the history alone (in a step it is refused: SongValuesTracksKeeperTests.cpp), counting it as a track taken in.
     Kept k;
-    const auto adoptedBefore = k.song->getValues()->countAdopted();
     const auto tracksBefore = k.song->getValues()->countTracksAdopted();
 
     // A clip's element with notes and values, and a property and a child Phazite doesn't know, which the song keeps none of.
@@ -466,7 +465,6 @@ TEST_CASE ("Song values: a track that comes into the song with its clips' elemen
     CHECK (phazite::getClips (*k.song, added) == std::vector<ClipID> { firstID, secondID, id });
     CHECK_FALSE (phazite::test::treeHolds (*k.song, schema::CLIP));
     CHECK_FALSE (phazite::test::treeHolds (*k.song, schema::TRACK));
-    CHECK (k.song->getValues()->countAdopted() == adoptedBefore + 3);
     CHECK (k.song->getValues()->countTracksAdopted() == tracksBefore + 1);
     REQUIRE (k.find (id) != nullptr);
     CHECK (*k.find (id) == expected);
@@ -492,7 +490,7 @@ TEST_CASE ("Song values: a track that comes into the song with its clips' elemen
     CHECK (k.find (copiedClips[0])->isSameAs (*k.find (firstID)));
     CHECK (k.find (copiedClips[1])->isSameAs (*k.find (firstID)));
     CHECK (k.find (copiedClips[2])->isSameAs (*k.find (id)));
-    CHECK (k.song->getValues()->countAdopted() == adoptedBefore + 3); // the model gives the copy its clips itself
+    CHECK (k.song->getValues()->countTracksAdopted() == tracksBefore + 1); // the model gives the copy its clips itself
 
     k.check.walkBackAndForth();
 }

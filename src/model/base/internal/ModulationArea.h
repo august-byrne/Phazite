@@ -4,9 +4,8 @@
 // conversion of its elements are ModulationValue.h's. It holds IDs (each modulator's and macro's). Message thread, but for
 // whole state's parts, which read only the values they are given.
 //
-// An area under two kinds of owner: a channel (a TRACK, the MASTER), an element that stays in the song's tree, and a
-// container on a channel, the devices' area's (DevicesArea.h). So its keeper follows a channel as it comes and goes (as the
-// clips' keeper follows a track), with its containers' macros by their places; a container that comes to another channel
+// An area under two kinds of owner, each named by its ID: a channel (a track, the master), and a container on a channel, the
+// devices' area's (DevicesArea.h); so nothing of it follows an owner as it moves. A container that comes to another channel
 // does so by a version's pass (ApplySong.cpp), which gives its macros their place. A container's macros keep their channel
 // beside their container (ModulatorPlace), so that what is told of them names it without reading anything.
 #pragma once
@@ -19,7 +18,6 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstdint>
-#include <vector>
 
 namespace phazite
 {
@@ -42,29 +40,27 @@ struct SongValues::ModulationTeller final : ValueArea<SongModulation>::Listener
     JUCE_DECLARE_NON_COPYABLE (ModulationTeller)
 };
 
-// Modulation's part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes:
-//   (a) a TRACK (alone, a folder with its tracks, the track list) or the MASTER taken out of the song: its channel's modulators
-//       and the macros of each container on it (found by their places: the song's tree holds no container, the devices' area
-//       does) remembered with its element, and erased; the same element back: given back, their place's track the element's
-//       ID then, each macro keeping its container;
-//   (b) a TRACK or the MASTER that comes into the song with MODULATOR or MACRO elements in it, its CONTAINERs' too (a safety
-//       net: a container's makers make its macros as values, Mixer.h: MadeDevices; a test's): each read as the song holds it
-//       (readHeldModulator()), set, taken out of the tree, and counted (countModulationAdopted());
-//   (c) a MODULATOR or a MACRO added by itself to a channel of the song's: refused in a step (a JUCE assertion: the step can't
-//       take it out again, as its Undo, taking the tree's change back first, would find it gone; JUCE workaround W62
+// Modulation's part of the keeper (SongValues.h), outside the history or refused in a step, nothing while the history undoes
+// or redoes. The one channel whose element the song's tree holds is the master (no track is in it: the tracks' safety net
+// reads a TRACK's modulators, takeChannelModulatorsIn(), below):
+//   (a) a CONTAINER added by itself to the master outside the history, with MACRO elements in it (the devices' safety net,
+//       DevicesArea.h, which takes the container in after this; a container's makers make its macros as values, which its
+//       inserter sets: Mixer.h, insertDevice()): each read as the song holds it (readHeldModulator()), set, taken out of the
+//       container, and counted (countModulationAdopted());
+//   (b) a MODULATOR or a MACRO added by itself to the master: refused in a step (a JUCE assertion: the step can't take it out
+//       again, as its Undo, taking the tree's change back first, would find it gone; JUCE workaround W62
 //       (docs/juce-workarounds.md)), and read in and taken out outside the history.
-// A container that leaves the song alone (removed, ungrouped) leaves its macros to the step that took it out
-// (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()).
+// A container that leaves the song (removed, ungrouped) leaves its macros to the step that took it out
+// (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()), and a track's removal its channel's (eraseTrackHoldings()).
 // And the adoption from the loaded tree, which the song's holdValues() asks.
 struct SongValues::ModulationKeeper
 {
     ModulationKeeper (SongValues&, Song&);
 
-    // A child added to an element of the song's tree, or taken out of one (the keeper's callbacks, but while the history
-    // undoes or redoes, for every element, whoever's it is): nothing, at once, but for what is modulation's (a track, what
-    // holds tracks, the master, a container, a modulator or a macro, of the song's).
+    // A child added to an element of the song's tree (the keeper's callback, but while the history undoes or redoes, for every
+    // element, whoever's it is): nothing, at once, but for what is modulation's (a lone container, modulator or macro on a
+    // channel of the song's).
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-    void childRemoved (juce::ValueTree& parent, juce::ValueTree& child);
 
     // Every modulator and macro of the tree the loader made consistent into the area, outside the history, as the song holds
     // them (ModulationValue.h: readHeldModulation(), each of which the loader left as the song holds it: asserted), and every
@@ -73,23 +69,6 @@ struct SongValues::ModulationKeeper
 
     SongValues& values;
     Song& song;
-    juce::ValueTree state;
-
-    // An owner taken out of the song (a TRACK, the MASTER, a CONTAINER) with what it held as it went, in its list's order: given
-    // back if the same element comes back, let go of once nothing else holds the element (the history let go of the step that
-    // could bring it back) or it is back in the song by an undo, which brought them back itself.
-    struct Remembered
-    {
-        juce::ValueTree owner {};
-        std::vector<ModulatorValue> modulators {};
-    };
-
-    std::vector<Remembered> remembered;
-    size_t sweepAt = 64;
-
-    void remember (const juce::ValueTree& owner, SongModulation& next);
-    bool giveBack (const juce::ValueTree& owner, const ModulatorPlace& place, SongModulation& next);
-    void sweep();
 
     JUCE_DECLARE_NON_COPYABLE (ModulationKeeper)
 };

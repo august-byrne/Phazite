@@ -44,9 +44,9 @@ struct SongValues::DeviceStoreTeller final : ValueArea<DeviceStore>::Listener
 };
 
 // The store's part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes:
-//   (a) a DEVICE, a CONTAINER, a CHAIN, a TRACK, the MASTER or the track list that comes into the song with what the store
-//       holds in a DEVICE or a CHAIN in it (a track a merge's choice brings in whole, a test's: DeviceStoreValue.h,
-//       holdsStoreIn()): each such item's entries read as the song holds them (readHeldStoreOf()), made the item's in the
+//   (a) a DEVICE, a CONTAINER or a CHAIN that comes into the song by itself with what the store holds in a DEVICE or a CHAIN
+//       in it (a test's, on the master: DeviceStoreValue.h, holdsStoreIn(); a TRACK's is the tracks' safety net's,
+//       takeChannelStoreIn()): each such item's entries read as the song holds them (readHeldStoreOf()), made the item's in the
 //       store (its song's entries replaced: the element is what the item holds), its window's place given, all of it taken
 //       out of the element, each item counted (countDeviceStoreAdopted());
 //   (b) nothing for a VALUE by itself: none comes, as the song's tree holds no DEVICE (the devices' part of the keeper takes

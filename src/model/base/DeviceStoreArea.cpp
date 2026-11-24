@@ -159,8 +159,9 @@ SongValues::DeviceStoreKeeper::DeviceStoreKeeper (SongValues& v, Song& s)
 void SongValues::DeviceStoreKeeper::childAdded (juce::ValueTree&, juce::ValueTree& child)
 {
     // (A lone VALUE (b) never comes: the song's tree holds no DEVICE for one to be added to, as the devices' part of the keeper
-    // takes one out as it comes in, DevicesArea.h.)
-    if (! isDeviceOrChain (child) && ! mayHoldDevices (child))
+    // takes one out as it comes in, DevicesArea.h. Nor does a TRACK, the track list or the MASTER with devices in it: the
+    // tracks' part of the keeper takes those, TracksArea.h.)
+    if (! isDeviceOrChain (child) && ! child.hasType (schema::CONTAINER))
         return;
 
     // What came in with what the store holds (a): each item's entries made the store's, its window's place given, all of it

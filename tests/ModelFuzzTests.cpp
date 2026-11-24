@@ -14,11 +14,11 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/commands/internal/Undo.h"
 #include "model/playback/internal/SongPlayer.h"
 #include "model/project/internal/ProjectContext.h"
@@ -91,7 +91,7 @@ void checkEditedSong (const phazite::Song& song)
 {
     checkSong (*copyAsOpened (song));
     checkValues (song);
-    CHECK (song.getIndex().isExact());
+    CHECK (phazite::test::holdsExactTrackOrder (song));
 }
 
 // One song's run: its operations, each from the seed, checked as they go.

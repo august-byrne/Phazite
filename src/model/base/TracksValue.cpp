@@ -4,6 +4,7 @@
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/Visits.h"
 
 #include <juce_graphics/juce_graphics.h>
 
@@ -559,8 +560,8 @@ namespace
         return false;
     }
 
-    // Each TRACK under an element (the track list, a folder) in its order, a folder before the tracks in it, as the song's
-    // index orders them (SongIndex.h: getTracks(): only a folder's TRACKs are looked through).
+    // Each TRACK under an element (the track list, a folder) in its order, a folder before the tracks in it (only a folder's
+    // TRACKs are looked through): the song's order (makeTrackOrder()).
     void forEachTrackElement (const juce::ValueTree& parent, const std::function<bool (const juce::ValueTree&)>& visit)
     {
         for (const auto& child : parent)
@@ -991,6 +992,48 @@ std::optional<TrackValue::Kind> readTrackKind (const juce::ValueTree& element)
         return Kind::master;
 
     return element.hasType (schema::TRACK) ? std::optional (readKindWord (element[schema::trackKind])) : std::nullopt;
+}
+
+std::vector<juce::ValueTree> listTrackElements (const juce::ValueTree& song)
+{
+    std::vector<juce::ValueTree> found;
+    forEachTrackElement (song.getChildWithName (schema::TRACKS),
+                         [&found] (const juce::ValueTree& track)
+                         {
+                             found.push_back (track);
+                             return true;
+                         });
+
+    countVisited (found.size());
+    return found;
+}
+
+juce::ValueTree findTrackElementByID (const juce::ValueTree& song, TrackID id)
+{
+    if (! id.isValid())
+        return {};
+
+    const std::function<juce::ValueTree (const juce::ValueTree&)> findIn = [id, &findIn] (const juce::ValueTree& parent)
+    {
+        for (const auto& child : parent)
+        {
+            if (! child.hasType (schema::TRACK))
+                continue;
+
+            countVisited (1);
+
+            if (readTrackElementID (child) == id)
+                return child;
+
+            if (readKindWord (child[schema::trackKind]) == Kind::folder)
+                if (auto found = findIn (child); found.isValid())
+                    return found;
+        }
+
+        return juce::ValueTree();
+    };
+
+    return findIn (song.getChildWithName (schema::TRACKS));
 }
 
 std::uint64_t countTracksReadAsValues() noexcept

@@ -3,6 +3,8 @@
 
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
 
 #include <functional>
@@ -64,5 +66,18 @@ bool treeHolds (const Song& song, const juce::Identifier& type)
     };
 
     return holds (song.getState());
+}
+
+bool holdsExactTrackOrder (const Song& song)
+{
+    const auto* values = song.getValues();
+
+    if (values == nullptr)
+        return true;
+
+    const auto& tracks = values->tracks.get();
+    const auto fresh = makeTrackOrder (tracks);
+    const auto& kept = values->getTrackOrder();
+    return holdsItsLists (tracks) && fresh.order == kept.order && fresh.places == kept.places;
 }
 } // namespace phazite::test

@@ -2,9 +2,10 @@
 #include "UndoCheck.h"
 #include "GoldenFiles.h"
 #include "PlanCheck.h"
+#include "SongCheck.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
@@ -172,14 +173,22 @@ int UndoCheck::getDepth() const
 
 void UndoCheck::compare (const juce::String& what, const juce::String& when, const juce::String& expected, const juce::String& actual)
 {
-    // What finds the song's items by their IDs holds what the song does, after each change, undo and redo.
-    if (! song.getIndex().isExact())
-        fail (what + ": " + when + ": the song's index (model/base/internal/SongIndex.h) differs from a walk through the song");
+    // The order of its tracks the song keeps is the one its tracks make, after each change, undo and redo.
+    if (! phazite::test::holdsExactTrackOrder (song))
+        fail (what + ": " + when + ": the tracks' order the song keeps (SongValues::getTrackOrder()) differs from one made afresh");
 
-    // What took a track out of the song erased what it held in the song's areas first (model/arrangement/internal/Tracks.h:
-    // eraseTrackHoldings()), so that the keeper of the song's values remembers nothing of a track out of the song.
-    if (const auto* values = song.getValues(); values != nullptr && values->countHoldingsLeftWithKeepers() != 0)
-        fail (what + ": " + when + ": a track was taken out of the song without eraseTrackHoldings(), the keeper erasing what it held");
+    // The song's values hold together, each area's by its rule (SongCheck.h: findValueProblems()): among them, no area holds
+    // anything of a track the song doesn't hold but the kept entries of the keyed and outside values, as what takes a track
+    // out erases what it held first (model/arrangement/internal/Tracks.h: eraseTrackHoldings()).
+    if (const auto problems = findValueProblems (song); ! problems.empty())
+    {
+        juce::StringArray lines;
+
+        for (const auto& problem : problems)
+            lines.add (juce::String (problem));
+
+        fail (what + ": " + when + ": " + lines.joinIntoString ("; "));
+    }
 
     if (expected == actual)
         return;

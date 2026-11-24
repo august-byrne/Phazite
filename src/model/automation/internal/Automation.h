@@ -258,11 +258,4 @@ private:
 
 // Whether any of the song's tracks writes automation (a mode other than read).
 bool isWritingAutomation (const Song&);
-
-// Whether a property of an element of the song's tree is where a parameter keeps its value set by hand: a channel's volume or
-// pan. A fader moved: controls read values as they show them, so views needn't hear of these (model/project/ProjectContext.h).
-// Not a macro's value, a send's level, nor Phazite's own device's values, a plug-in's or a chain's volume and pan, which the
-// song's values tell (SongValues.h: Listener::modulationChanged(), sendsChanged(), devicesChanged(), deviceStoreChanged()),
-// where the views leave them alone too.
-bool isParameterValue (const juce::ValueTree&, const juce::Identifier& property);
 } // namespace phazite

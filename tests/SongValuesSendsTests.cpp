@@ -1459,7 +1459,7 @@ TEST_CASE ("Song values' sends: a track deleted and brought back by Undo, whose 
 TEST_CASE ("Song values' sends: a track that comes in with sends outside the history has them taken in by the tracks' safety net, "
            "one of an ID the song holds dropped")
 {
-    // The keeper's own: goes with the keepers (S5.20). Since the tracks' switch the song's tree holds no TRACK, so no lone SEND
+    // The tracks' safety net. Since the tracks' switch the song's tree holds no TRACK, so no lone SEND
     // can be added to one; a TRACK that comes in is the tracks' part of the keeper's (TracksArea.h), which reads its sends
     // through the sends' reader of a track (SendsArea.h: takeTrackSendsIn()), outside the history alone.
     phazite::test::TestSong s;
@@ -1491,7 +1491,6 @@ TEST_CASE ("Song values' sends: a track that comes in with sends outside the his
 
     REQUIRE (sendsIn == 2);
     const auto came = phazite::readTrackElementID (incoming);
-    const auto adoptedBefore = values.countSendsAdopted();
     const auto tracksBefore = values.countTracksAdopted();
 
     {
@@ -1499,7 +1498,6 @@ TEST_CASE ("Song values' sends: a track that comes in with sends outside the his
         song.getState().getChildWithName (phazite::schema::TRACKS).appendChild (incoming, nullptr);
     }
 
-    CHECK (values.countSendsAdopted() == adoptedBefore + 1);
     CHECK (values.countTracksAdopted() == tracksBefore + 1);
     REQUIRE (phazite::getSends (song, came).size() == 1);
     CHECK (phazite::getSendTrack (song, held) == track);

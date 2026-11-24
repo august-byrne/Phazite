@@ -122,9 +122,7 @@ Exports, freezes and bounces compile the song the same way and play it offline, 
 - **Values that change many times a second are polled**, never stored in the project or sent as change messages, and a
   display repaints only when what it draws moved, so that a quiet song costs nothing to show.
 - **Whatever listens to a song listens to its root** (`Song::getState()`), never to one of its elements nor through a
-  `juce::Value` of an element's property. The song's index, which finds tracks by their IDs, listens to
-  the track list, and JUCE tells a change to the elements below first, so it hears of every change there before anything
-  else can ask it about one.
+  `juce::Value` of an element's property.
 
 `tools/check-architecture.sh` counts what breaks these rules, and more: includes that point up a layer, window modules
 and classes below the UI, undo steps begun outside the undo code or in the UI, include loops in the model and the

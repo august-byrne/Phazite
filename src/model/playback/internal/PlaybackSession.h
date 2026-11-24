@@ -233,11 +233,11 @@ private:
     void timerCallback() override;
     void jump (BeatPosition, bool keepsPlace); // locate() and returnTo()
 
-    // A change of the song, but of view state (how it shows), which no plan holds: a new plan. Not the tempo map's, the chord
-    // lane's nor the curves', which the song's values tell (tempoMapChanged(), chordLaneChanged(), curvesChanged();
-    // SongValues.h: isHeardAsKept()).
+    // A change of the song's own elements (a placeholder that came or went, its elements in another order; an element a safety
+    // net refused in a step), but its MIDILINKS: a new plan. Not the areas', which the song's values tell (SongValues.h:
+    // isHeardAsKept()). No property is written to a
+    // live song's tree but a safety net's, which the areas take.
     void changed (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent, {}); }

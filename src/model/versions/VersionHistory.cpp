@@ -3057,14 +3057,16 @@ void VersionHistory::changesWorked (bool compared, const ChangesWorker::Result& 
 }
 
 //==============================================================================
-void VersionHistory::markChanged (const juce::ValueTree& tree, const juce::Identifier& property)
+void VersionHistory::markChanged (const juce::ValueTree& tree)
 {
-    if (! schema::isCounted (tree, property))
+    if (! schema::isCounted (tree, {}))
         return;
 
     edited();
 
-    // The track (or the master) it is in, nearest first, or else the song's own (its curves: curvesChanged()).
+    // The track (or the master) it is in, nearest first: an element a safety net refused in a step, left where it was put
+    // until the step's Undo (a track's line otherwise: tracksChanged()). Or else the song's own: a placeholder come or gone,
+    // its elements in another order (its curves: curvesChanged()).
     for (auto element = tree; element.isValid(); element = element.getParent())
     {
         if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
@@ -3087,7 +3089,7 @@ void VersionHistory::markChildChanged (const juce::ValueTree& parent, const juce
     edited();
 
     // (A track, the track list or the master added or taken away: tracksChanged().)
-    markChanged (parent, {});
+    markChanged (parent);
 }
 
 void VersionHistory::markTrack (const juce::ValueTree& track)
@@ -3450,25 +3452,13 @@ void VersionHistory::markOrder()
     changesMayDiffer();
 }
 
-void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
-{
-    if (isHeardAsKept (tree, property))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), ..., devicesChanged()
-
-    ++songChanges;
-
-    // (A track's ID, name or kind, which change what the lines are called: tracksChanged(). A conflict switched in a merge
-    // waiting, and where the song stands in its versions: songOwnChanged(), songStandingChanged().)
-    markChanged (tree, property);
-}
-
 void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
 {
     if (isHeardAsKept (parent))
         return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged(), tracksChanged()
 
     ++songChanges;
-    markChanged (parent, {}); // (tracks in another order: tracksChanged())
+    markChanged (parent); // (tracks in another order: tracksChanged())
 }
 
 void VersionHistory::markAllChanged()

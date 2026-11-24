@@ -662,27 +662,15 @@ void SongPlayer::markChange (const juce::ValueTree& changed)
     // state's format ID and version, a chain's mute and solo, a plug-in's first value set by hand) by deviceStoreChanged():
     // the song's tree holds none of them. In a channel (a track, a folder, a return or the master), its devices' values are
     // read again only for an element of the channel added, removed or moved; not for the channel's own properties (its
-    // height, mute, solo, volume, pan), which no device reads (valueTreePropertyChanged() marks nothing here).
+    // height, mute, solo, volume, pan), which no device reads (a live song's tree holds no property: no callback for one).
     for (auto element = changed; element.isValid(); element = element.getParent())
     {
-        if (schema::isUncountedElement (element.getParent(), element))
-            return; // view state (a track's lanes)
-
         if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
         {
             changes.channels.insert (element.hasType (schema::MASTER) ? 0 : getID (element, schema::trackID));
             return;
         }
     }
-}
-
-void SongPlayer::valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&)
-{
-    // Nothing that plays is marked from a property of the tree. The areas tell theirs (isHeardAsKept()): the tempo map's,
-    // tempoMapChanged(); the chord lane's, which nothing played reads (chordLaneChanged(): SongPlayer follows none of it); the
-    // curves', curvesChanged(); the devices', devicesChanged() (the tree holds none of them); the tracks', tracksChanged()
-    // (a track's ID given anew in place is told as one track taken out and another added). What is left (a property Phazite
-    // doesn't know) plays nothing.
 }
 
 void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)

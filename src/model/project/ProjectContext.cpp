@@ -35,11 +35,6 @@ namespace phazite
 {
 namespace
 {
-    bool isTrackElement (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::TRACK);
-    }
-
     //==============================================================================
     // Listens to the open song and tells the context's listeners which groups changed, once per turn of the message loop. A
     // plug-in whose helper went, or that was reloaded, changes what its device shows (model/plugins/internal/PluginHost.h).
@@ -145,7 +140,7 @@ namespace
 
         // The modulators and macros (SongValues.h): their group, for one added, taken out or come to another place, and for
         // any part of one but a value set by hand, its first or its last, and a macro's value, which no view shows as a
-        // change (controls read values as they show them, as valueTreePropertyChanged() leaves a parameter's value alone);
+        // change (controls read values as they show them);
         // nothing for their order alone, which views show nowhere as a change. The song's tree holds none of
         // them. A track or a container that comes or goes with modulators or macros in it (added, removed, duplicated, moved
         // into a folder, brought back by an Undo) tells them added or taken out, so their group comes beside what the tree
@@ -363,10 +358,7 @@ namespace
                 if (element.hasType (schema::MIDILINKS))
                     return add (pending.midiLinks);
 
-                if (schema::isTrackViewElement (element))
-                    return add (pending.view);
-
-                // The master's own element: its write mode (its lanes are view state, above).
+                // The master's own element: an element a safety net refused in a step, left there until the step's Undo.
                 if (element.hasType (schema::MASTER))
                     return add (pending.tracks);
 
@@ -375,9 +367,6 @@ namespace
 
                 if (element.hasType (schema::CHORDLANE))
                     return add (pending.chords);
-
-                if (isTrackElement (element))
-                    return add (pending.tracks);
             }
         }
 
@@ -415,22 +404,6 @@ namespace
                 add (pending.chords);
             else
                 mark (parent);
-        }
-
-        void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
-        {
-            if (isHeardAsKept (tree, property))
-                return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), ..., devicesChanged()
-
-            // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
-            // makes one at each move (docs/archive/performance-audit.md, U1) (a macro's value: modulationChanged(); a send's
-            // level: sendsChanged(); a device's values, a chain's volume, pan and crossover: devicesChanged(); a plug-in's:
-            // deviceStoreChanged(); a channel's volume and pan: tracksChanged()).
-            if (isParameterValue (tree, property))
-                return;
-
-            // (The project's notes, the song's own: songOwnChanged().)
-            mark (tree);
         }
 
         // What the song holds of its own (SongValues.h; the tree callbacks here leave the root's own properties and its

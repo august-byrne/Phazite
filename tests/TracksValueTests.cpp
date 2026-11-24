@@ -23,12 +23,12 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
 #include "model/base/internal/TracksValue.h"
 #include "model/base/internal/ValueArea.h"
+#include "model/base/internal/Visits.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Buses.h"
@@ -493,14 +493,14 @@ void checkOpenedAsVersion (phazite::Song& song)
     CHECK_FALSE (song.getUndoManager().canUndo());
 }
 
-// What a piece of work looks at in the song's index, reads of its tracks whole, and allocates (the second time it runs).
+// What a piece of work looks at (Visits.h), reads of its tracks whole, and allocates (the second time it runs).
 Counted count (const std::function<void()>& work)
 {
     Counted counted;
-    const auto visits = phazite::SongIndex::countElementsVisited();
+    const auto visits = phazite::countElementsVisited();
     const auto whole = phazite::countTracksReadAsValues();
     work();
-    counted.visits = phazite::SongIndex::countElementsVisited() - visits;
+    counted.visits = phazite::countElementsVisited() - visits;
     counted.whole = phazite::countTracksReadAsValues() - whole;
     counted.allocations = phazite::test::countAllocations (work).value_or (-1);
     return counted;
@@ -1263,8 +1263,8 @@ TEST_CASE ("Tracks' values gate: a playlist's rows, a row, a paint, a tick, a mu
     // (TracksValue.h: the readers of one field), and so does a row of the playlist (PlaylistModel.cpp: makeRow()), which the
     // audio clip editor makes at every paint and a drag at every event. On songs of 20 tracks and of 200, each with a clip
     // and a folder of two: the playlist's rows, a row, a strip's channel and a folder's, a switch's mute and solo, a track's clips as a paint shows them, a mute's click and a
-    // rename. Counted: the tracks read whole (countTracksReadAsValues()), the elements the song's index looked at
-    // (SongIndex::countElementsVisited()) and the allocations. Measured before the tracks' values (2026-11-23), elements
+    // rename. Counted: the tracks read whole (countTracksReadAsValues()), the elements looked at
+    // (countElementsVisited(), Visits.h) and the allocations. Measured before the tracks' values (2026-11-23), elements
     // looked at / allocations: rows 230 / 407 at 20 tracks, 2,210 / 4,670 at 200; a row 12 / 25, 12 / 35; a strip's channel
     // 55 / 37, 415 / 52; a folder's 52 / 24, 412 / 34; mute and solo 47 / 12, 407 / 17; clips 7 / 28, 7 / 38; a mute's
     // click 88 / 40, 808 / 50; a rename 44 / 30, 404 / 35. After (2026-11-23): the rows 146 and 1,406, a row 8, the others

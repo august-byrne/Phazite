@@ -5,6 +5,7 @@
 #include "TestClips.h"
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
+#include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/stereo/Stereo.h"
@@ -14,7 +15,6 @@
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/FreezeModel.h"
@@ -307,12 +307,12 @@ TEST_CASE ("The steps of a join over part of a MIDI clip, each checked: the note
         const phazite::UndoStep step (model, "Join by Hand");
         phazite::clearClipsIn (model, song.keys, range);
         CHECK (phazite::getClips (model, song.keys).size() == 2);
-        CHECK (model.getIndex().isExact());
+        CHECK (phazite::test::holdsExactTrackOrder (model));
 
         const auto joined = phazite::insertMidiClip (model, song.keys, range, nullptr, "Joined");
         REQUIRE (joined.isValid());
         CHECK (phazite::getClips (model, song.keys).size() == 3);
-        CHECK (model.getIndex().isExact());
+        CHECK (phazite::test::holdsExactTrackOrder (model));
         REQUIRE (phazite::getClipValue (model, joined).has_value());
         CHECK (phazite::getClipTrack (model, joined) == song.keys);
         const auto aliases = phazite::getAliasClips (model, joined);
@@ -327,7 +327,7 @@ TEST_CASE ("The steps of a join over part of a MIDI clip, each checked: the note
         CAPTURE (joinedState.toXmlString().toStdString());
         CHECK (joinedState.getNumChildren() == 4);
         CHECK (phazite::getClipNotes (model, joined).size() == 4);
-        CHECK (model.getIndex().isExact());
+        CHECK (phazite::test::holdsExactTrackOrder (model));
     }
 
     // And consolidatePart() itself, on the other track, without the command around it.

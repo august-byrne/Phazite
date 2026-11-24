@@ -163,8 +163,7 @@ bool holdsItsLists (const SongTracks&);
 //==============================================================================
 // The tracks in the song's order (each folder before the tracks in it, top to bottom, not the master) and each one's place
 // there: its index, and its number among those that aren't folders, from 1, as a track without a name of its own is called
-// ("Track 3"), 0 for a folder. Made from a value's lists: what the song's index keeps today (SongIndex.h: getTracks(),
-// getTrackPlace()). Message thread.
+// ("Track 3"), 0 for a folder. Made from a value's lists. Message thread.
 struct TrackOrder
 {
     struct Place
@@ -265,6 +264,14 @@ void forEachIDNamed (const SongTracks&, const std::function<void (std::uint64_t)
 // by its ID and kind. Each of an element that is no TRACK or MASTER reads as one without it.
 TrackID readTrackElementID (const juce::ValueTree& element);                    // trackID
 std::optional<TrackValue::Kind> readTrackKind (const juce::ValueTree& element); // none for no TRACK or MASTER
+
+// A song's tree's (PHAZITE) TRACK elements in the song's order, each folder before the tracks in it (only a folder's TRACKs
+// looked through, as readTracksValue() reads them); and the first of them of an ID (invalid for none): what reads the tracks
+// of a song that holds no values one element at a time (the loader's, a check's copy: model/arrangement/internal/Tracks.h,
+// findTrack(), readTrackOrderWithoutValues(), getTrackView(); SendsValue.cpp: holdsSend()). Each a walk of the tree at the
+// call, each TRACK looked at counted (Visits.h).
+std::vector<juce::ValueTree> listTrackElements (const juce::ValueTree& song);
+juce::ValueTree findTrackElementByID (const juce::ValueTree& song, TrackID);
 
 // How many tracks were read into values whole (readTrackValue(), readHeldTrack(), keepTrackAsHeld() where it rewrites one)
 // since Phazite started, on any thread: for the test that the playlist's rows read each track whole at most once and a

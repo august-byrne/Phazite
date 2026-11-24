@@ -17,7 +17,6 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstdint>
-#include <vector>
 
 namespace phazite
 {
@@ -41,55 +40,14 @@ struct SongValues::SendsTeller final : ValueArea<SongSends>::Listener
     JUCE_DECLARE_NON_COPYABLE (SendsTeller)
 };
 
-// The sends' part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes:
-//   (a) a TRACK (alone, a folder with its tracks, the track list) taken out of the song's track list: each track's sends
-//       remembered with its element, in its list's order, and erased; what an element was remembered with at an earlier
-//       removal (taken out, and brought back by an undo since, which gave its sends back itself) replaced at every removal,
-//       or forgotten where it holds none now, so that it never brings back a send deleted since (as the clips' keeper does:
-//       ClipsArea.cpp); the same element back: given back, their track the element's ID then;
-//   (b) a TRACK that comes into the song's track list with SEND elements in it (a track chosen whole in a merge, a test's):
-//       each read as the song holds it (readHeldSend()), set, taken out of the tree, and counted (countSendsAdopted()); one
-//       of an ID the song holds already (given back, or another track's) dropped, the song's kept, as modulation's and the
-//       sections' keepers drop one; one on a track without an ID, and one readHeldSend() reads as none, only taken out;
-//   (c) a SEND added by itself to a track of the song's: refused in a step (a JUCE assertion: the step can't take it out
-//       again, as its Undo, taking the tree's change back first, would find it gone; JUCE workaround W62
-//       (docs/juce-workarounds.md)), and read in and taken out outside the history.
-// And the adoption from the loaded tree, which the song's holdValues() asks.
+// The sends' adoption from the loaded tree, which the song's holdValues() asks: every send of the tree the loader made
+// consistent into the area, outside the history, as the song holds it (each track's in its order, read by readHeldSend(),
+// each of which the loader left as the song holds it: asserted), and every SEND element out of the tree, those anywhere else
+// too (SongValues.cpp: adopt()). The keeper asks the sends of nothing: no track is in a live song's tree for a SEND to come
+// into it on (the tracks' safety net reads a TRACK's: takeTrackSendsIn(), below).
 struct SongValues::SendsKeeper
 {
-    SendsKeeper (SongValues&, Song&);
-
-    // A child added to an element of the song's tree, or taken out of one (the keeper's callbacks, but while the history
-    // undoes or redoes, for every element, whoever's it is): nothing, at once, but for what is the sends' (a track or the
-    // track list in the song's, a SEND on a track of the song's).
-    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-    void childRemoved (juce::ValueTree& parent, juce::ValueTree& child);
-
-    // Every send of the tree the loader made consistent into the area, outside the history, as the song holds it (each
-    // track's in its order, read by readHeldSend(), each of which the loader left as the song holds it: asserted), and every
-    // SEND element out of the tree, those anywhere else too (SongValues.cpp: adopt()).
     static void adopt (SongValues& into, Song& loaded);
-
-    SongValues& values;
-    Song& song;
-    juce::ValueTree state;
-
-    // A track taken out of the song with its sends as it went, in its list's order: given back if the same element comes
-    // back, let go of once nothing else holds the element (the history let go of the step that could bring it back) or it is
-    // back in the song by an undo, which brought them back itself.
-    struct Remembered
-    {
-        juce::ValueTree track {};
-        std::vector<SendValue> sends {};
-    };
-
-    std::vector<Remembered> remembered {};
-    size_t sweepAt = 64;
-
-    bool isInTrackList (const juce::ValueTree& parent, const juce::ValueTree& child) const;
-    void sweep();
-
-    JUCE_DECLARE_NON_COPYABLE (SendsKeeper)
 };
 
 // The sends' part of whole state (WholeState.cpp: writeIn()): a copy's TRACK given its sends from the values kept, by its ID,

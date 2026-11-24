@@ -97,12 +97,6 @@ namespace
         return {};
     }
 
-    // Properties of an element that don't change what a frozen track sounds like: where a device's window was, view state.
-    bool isIgnoredProperty (const juce::Identifier& property)
-    {
-        return schema::isDeviceViewProperty (property);
-    }
-
     // Whether a device, a container or a chain sounds now as it did as its track was frozen: alike in all the devices' value
     // covers but its place (DevicesValue.h: DeviceValue::operator==(), each map by identity first), what the elements it was
     // compared as before held (a window's place is no part of the value, and a plug-in's state is the store's: below).
@@ -959,18 +953,6 @@ void FreezeKeeper::compare (TrackID track)
     curvesAsFrozen.erase (track);
     modulatorsAsFrozen.erase (track);
     unfreeze (song, track);
-}
-
-void FreezeKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
-{
-    // How tracks show and where windows were change nothing that plays; nor does the song's count of IDs, which every new
-    // ID moves, on its root. The areas' of the song's values (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord
-    // lane's, which no frozen file holds; the curves', curvesChanged(); the song's own, which no frozen file holds either.
-    if ((tree == state && schema::isUncountedProperty (tree, property)) || isHeardAsKept (tree, property))
-        return;
-
-    if (! schema::isTrackViewProperty (property) && ! isIgnoredProperty (property))
-        check (tree, false);
 }
 
 void FreezeKeeper::check (const juce::ValueTree& changed, bool cameIn)

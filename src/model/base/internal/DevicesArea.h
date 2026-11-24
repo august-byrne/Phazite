@@ -21,7 +21,6 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstdint>
-#include <vector>
 
 namespace phazite
 {
@@ -45,35 +44,25 @@ struct SongValues::DevicesTeller final : ValueArea<SongDevices>::Listener
     JUCE_DECLARE_NON_COPYABLE (DevicesTeller)
 };
 
-// The devices' part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes:
-//   (a) a TRACK (alone, a folder with its tracks, the track list) taken out of the song's track list: each track's channel's
-//       devices and containers, their chains and their devices remembered with its element, in their lists' order, and
-//       erased; what an element was remembered with at an earlier removal (taken out, and brought back by an undo since,
-//       which gave its devices back itself) replaced at every removal, or forgotten where it holds none now, so that it never
-//       brings back a device removed since (as the sends' keeper does: SendsArea.cpp); the same element back: given back,
-//       their places' track the element's ID then. Every function that removes a track erases its devices first
-//       (model/arrangement/internal/Tracks.h: eraseTrackHoldings()), so that this is a track JUCE moves (taken out and put in
-//       again in one step) alone, until the tracks' switch;
-//   (b) a TRACK, a folder's tracks, the track list or the MASTER that comes into the song with DEVICE or CONTAINER elements in
-//       it (a safety net: a test's; no path of Phazite's relies on it): each device, container and chain read as the song
-//       holds it (DevicesValue.h: readHeldDevice(); what the store holds of it taken in before by the store's part,
-//       DeviceStoreArea.h, and a container's macros by modulation's), set, taken out of the tree, and counted
-//       (countDevicesAdopted()); one of an ID the song holds already dropped, the song's kept;
-//   (c) a DEVICE, a CONTAINER, a CHAIN, a VALUES or a SOUNDS added by itself to an element of the song's: refused in a step (a
-//       JUCE assertion: the step can't take it out again, as its Undo, taking the tree's change back first, would find it
-//       gone; JUCE workaround W62 (docs/juce-workarounds.md)); outside the history, a DEVICE or a CONTAINER added to a channel
-//       read in after its others there and counted, and each of them taken out.
+// The devices' part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes: a
+// DEVICE, a CONTAINER, a CHAIN, a VALUES or a SOUNDS added by itself to an element of the song's: refused in a step (a JUCE
+// assertion: the step can't take it out again, as its Undo, taking the tree's change back first, would find it gone; JUCE
+// workaround W62 (docs/juce-workarounds.md)); outside the history, a DEVICE or a CONTAINER added to the master (the one
+// channel whose element the song's tree holds) read in as the song holds it (DevicesValue.h: readHeldDevice(); what the store
+// holds of it taken in before by the store's part, DeviceStoreArea.h, and a container's macros by modulation's), after its
+// others there, and counted (countDevicesAdopted()), and each of them taken out (a safety net no path of Phazite's relies
+// on). No track is in the song's tree: the tracks' safety net reads a TRACK's devices (takeChannelDevicesIn(), below), and
+// every function that removes a track erases its devices first (model/arrangement/internal/Tracks.h: eraseTrackHoldings()).
 // The store's entries stay as a device leaves (the store's own rule: DeviceStoreArea.h). And the adoption from the loaded
 // tree, which the song's holdValues() asks.
 struct SongValues::DevicesKeeper
 {
     DevicesKeeper (SongValues&, Song&);
 
-    // A child added to an element of the song's tree, or taken out of one (the keeper's callbacks, but while the history
-    // undoes or redoes, for every element, whoever's it is): nothing, at once, but for what is the devices' (a track or the
-    // track list in the song's, the master, a DEVICE, a CONTAINER, a CHAIN, a VALUES or a SOUNDS in the song's tree).
+    // A child added to an element of the song's tree (the keeper's callback, but while the history undoes or redoes, for every
+    // element, whoever's it is): nothing, at once, but for what is the devices' (a DEVICE, a CONTAINER, a CHAIN, a VALUES or a
+    // SOUNDS in the song's tree).
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-    void childRemoved (juce::ValueTree& parent, juce::ValueTree& child);
 
     // Every device, container and chain of the tree the loader made consistent into the area, outside the history, as the song
     // holds them (each read once by readHeldDevice(), each of which the loader left as the song holds it), and every DEVICE,
@@ -84,22 +73,7 @@ struct SongValues::DevicesKeeper
     Song& song;
     juce::ValueTree state;
 
-    // A track taken out of the song with its devices, containers and chains as it went, each list's in its order, an owner
-    // before what it holds: given back if the same element comes back, let go of once nothing else holds the element (the
-    // history let go of the step that could bring it back) or it is back in the song by an undo, which brought them back
-    // itself.
-    struct Remembered
-    {
-        juce::ValueTree track {};
-        std::vector<DeviceValue> devices {};
-    };
-
-    std::vector<Remembered> remembered {};
-    size_t sweepAt = 64;
-
-    bool isInTrackList (const juce::ValueTree& parent, const juce::ValueTree& child) const;
     bool isInSong (const juce::ValueTree& element) const;
-    void sweep();
 
     JUCE_DECLARE_NON_COPYABLE (DevicesKeeper)
 };

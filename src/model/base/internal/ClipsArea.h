@@ -15,8 +15,6 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstdint>
-#include <utility>
-#include <vector>
 
 namespace phazite
 {
@@ -38,56 +36,13 @@ struct SongValues::ClipsTeller final : ValueArea<SongClips>::Listener
     JUCE_DECLARE_NON_COPYABLE (ClipsTeller)
 };
 
-// The clips' part of the keeper (SongValues.h), with their notes: a track taken out of the song (alone, in a folder, the
-// track list) has its clips (their values, their order and their notes) remembered with its element and erased from both
-// areas; the same element put back gets them back; a track that comes into the song's tree with its clips' elements in it
-// has them read into both areas and taken out of the tree; a CLIP element added to a track of the song by itself is
-// refused. Each in the mode of the moment. And the clips' adoption from the loaded tree, which the song's holdValues()
-// asks.
+// The clips' adoption from the loaded tree, with their notes, which the song's holdValues() asks: every CLIP of the tree the
+// loader made consistent into both areas, outside the history, and every CLIP element out of the tree (SongValues.cpp:
+// adopt()). The keeper asks the clips of nothing: no track is in a live song's tree for a CLIP to come into it on (the
+// tracks' safety net reads a TRACK's: takeTrackClipsIn(), below).
 struct SongValues::ClipsKeeper
 {
-    ClipsKeeper (SongValues&, Song&);
-
-    // A child added to an element of the song's tree, or taken out of one (the keeper's callbacks, but while the history
-    // undoes or redoes, for every element, whoever's it is): nothing, at once, but for what is the clips' (a track, what
-    // holds tracks, or a CLIP, in the song's track list).
-    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-    void childRemoved (juce::ValueTree& parent, juce::ValueTree& child);
-
-    // Every CLIP of the tree the loader made consistent into both areas, outside the history, and every CLIP element out of
-    // the tree (SongValues.cpp: adopt()).
     static void adopt (SongValues& into, Song& loaded);
-
-    // Whether it remembers a track's element with its clips, taken out of the song, and the IDs of the tracks it remembers
-    // (SongValues::remembers(), getRemembered()).
-    bool remembers (const juce::ValueTree& track) const;
-    std::vector<TrackID> getRemembered() const;
-
-    SongValues& values;
-    Song& song;
-    juce::ValueTree state;
-
-    // The tracks taken out of the song, each element with its clips as they went (their values in its order, and their
-    // notes): given back if the same element comes back (a move), let go of once nothing else holds the element (the history
-    // let go of the step that could bring it back), or it is back in the song by an undo, which brought its clips back itself.
-    struct Remembered
-    {
-        juce::ValueTree track;
-        std::vector<ClipValue> clips;
-        std::vector<std::pair<ClipID, ClipNotes>> notes;
-    };
-
-    std::vector<Remembered> remembered;
-    size_t sweepAt = 64;
-
-    std::vector<Remembered>::iterator findRemembered (const juce::ValueTree& track);
-    void sweep();
-
-    // Whether a child of an element is in the song's track list (a track, a folder's tracks, or the track list itself): only
-    // there do tracks hold the song's clips.
-    bool isInTrackList (const juce::ValueTree& parent, const juce::ValueTree& child) const;
-
-    JUCE_DECLARE_NON_COPYABLE (ClipsKeeper)
 };
 
 // The clips' part of whole state (WholeState.cpp: writeIn()): a copy's track given its clips from the values kept, first among

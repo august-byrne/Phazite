@@ -26,23 +26,6 @@ namespace
         static std::vector<PlaybackSession*> sessions;
         return sessions;
     }
-
-    // View state (model/base/internal/Schema.h), how the song shows and no change to it, which no plan holds: the elements
-    // of view state with everything in them. (A track's or the master's view, and where a device's window was, are the song's
-    // values', outside the history; the editors' grids are the song's own, songOutsideChanged().)
-    bool isInViewElement (juce::ValueTree element)
-    {
-        for (; element.isValid(); element = element.getParent())
-            if (schema::isUncountedElement (element.getParent(), element))
-                return true;
-
-        return false;
-    }
-
-    bool isViewElement (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return (child.isValid() && schema::isUncountedElement (parent, child)) || isInViewElement (parent);
-    }
 } // namespace
 
 PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
@@ -119,23 +102,8 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
     if (child.hasType (schema::MIDILINKS))
         return;
 
-    // An element of view state added, removed or moved (a piano roll's, a track's lanes), or one in it: no new plan.
-    if (! isViewElement (parent, child))
-        triggerAsyncUpdate();
-}
-
-void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
-{
-    if (isHeardAsKept (tree, property))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), ..., devicesChanged()
-
-    // View state is how the song shows: nothing a plan holds. (The song's own, its root's properties but its count of IDs:
-    // songOutsideChanged(), which alone of it makes a plan.)
-    if (isInViewElement (tree))
-        return;
-
-    // Anything else, in a new plan. (A value set by hand plays at once, from the song's values: a device's, its latency's
-    // wait among them, devicesChanged(); a channel's volume, pan, mute and solo, tracksChanged() and trackSwitchesChanged().)
+    // What else a live song's tree tells (its CHORDLANE or SECTIONS added or taken out, its elements put in another order, an
+    // element a safety net refused in a step left where it was put until the step's Undo: SongValues.h), in a new plan.
     triggerAsyncUpdate();
 }
 
