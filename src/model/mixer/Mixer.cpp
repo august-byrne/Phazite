@@ -46,11 +46,6 @@ namespace
 
     std::atomic<std::uint64_t> deviceLooks { 0 }; // countDeviceLooks(): a count alone, which orders nothing
 
-    juce::UndoManager* getUndo (Song& song)
-    {
-        return &song.getUndoManager();
-    }
-
     // The description of one of Phazite's own devices a value is; nullptr for none, a plug-in, a container or a chain.
     const devices::DeviceInfo* findOwnInfo (const DeviceValue* value)
     {
@@ -214,14 +209,38 @@ namespace
         return values != nullptr ? &values->sends.get() : nullptr;
     }
 
-    // A value of a channel's in the song, to a ten-thousandth (a volume comes back from a fader's position a little off),
-    // none where it is the one it has without.
-    void setChannelValue (juce::ValueTree state, const juce::Identifier& property, float value, float none, juce::UndoManager* undo)
+    // A value of a channel's as the song holds it, to a ten-thousandth (a volume comes back from a fader's position a little
+    // off), the one it has without where it is that near it.
+    float roundChannelValue (float value, float none)
     {
-        if (const auto rounded = std::round ((double) value * 1.0e4) / 1.0e4; std::abs (rounded - (double) none) < 1.0e-4)
-            state.removeProperty (property, undo);
-        else
-            state.setProperty (property, rounded, undo);
+        if (const auto rounded = std::round ((double) value * 1.0e4) / 1.0e4; std::abs (rounded - (double) none) >= 1.0e-4)
+            return (float) rounded;
+
+        return none;
+    }
+
+    // One of a channel's values (its volume, its pan) set, the tracks' narrow setter that a drag's events write through: what
+    // the song holds of the channel (the tracks' keeper's: no element read) given the value, and where it is another, that one
+    // property of its element written as the song holds it (TracksValue.h: writeTrackProperty(), the rule of the tracks'
+    // setters), in the mode of the moment.
+    void setChannelField (Song& song, TrackID channel, float TrackValue::* field, const juce::Identifier& property, float value)
+    {
+        auto next = findHeldTrack (song, channel.isValid() ? channel : getMasterID (song));
+
+        if (! next.has_value() || juce::exactlyEqual ((*next).*field, value))
+            return;
+
+        (*next).*field = value;
+
+        if (auto state = findChainState (song, channel); state.isValid())
+        {
+            auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+
+            if (const auto written = writeTrackProperty (*next, property); written.isVoid())
+                state.removeProperty (property, undo);
+            else
+                state.setProperty (property, written, undo);
+        }
     }
 
     bool holdsAudioClips (const Song& song, TrackID track)
@@ -896,8 +915,6 @@ std::set<std::uint64_t> getItemIDs (const Song& song)
 
 void forgetWhatNamesTheGone (Song& song)
 {
-    auto* undo = getUndo (song);
-
     // A container's macros, with what they modulate, where the song holds the container no more (removed, ungrouped): erased
     // through modulation's code, in one set of its area, before the IDs the song holds are counted, so that what names a
     // macro (a MIDI link of its value) goes below as what names any item gone.
@@ -948,19 +965,23 @@ void forgetWhatNamesTheGone (Song& song)
     // A pad's track whose drum sampler is gone: deleted, or, holding clips, a plain track.
     std::vector<TrackID> padTracks;
 
-    for (auto state : getTrackStates (song))
+    for (const auto& pad : getPadTracks (song))
     {
-        if (! readPad (state).has_value() || ids.contains (readPadDevice (state).getRaw())) // TracksValue.h
+        if (ids.contains (pad.sampler.getRaw()))
             continue;
 
-        if (! hasClips (song, getTrackID (state)))
+        if (! hasClips (song, pad.track))
         {
-            padTracks.push_back (getTrackID (state));
+            padTracks.push_back (pad.track);
             continue;
         }
 
-        state.removeProperty (schema::trackPadDevice, undo);
-        state.removeProperty (schema::trackPad, undo);
+        setTrackFields (song, pad.track,
+                        [] (TrackValue& value)
+                        {
+                            value.padDevice = {};
+                            value.pad.reset();
+                        });
     }
 
     if (! padTracks.empty())
@@ -1122,7 +1143,7 @@ void setMixedAsBus (Song& song, TrackID folder, bool bus)
     }
     else if (getDevices (song, folder).empty())
     {
-        findTrackState (song, folder).removeProperty (schema::folderBus, getUndo (song));
+        setTrackFields (song, folder, [] (TrackValue& value) { value.bus = false; });
         makePlainFolder (song, folder);
     }
 }
@@ -1174,15 +1195,16 @@ float keepVolumeInRange (float decibels)
 
 void setChannelVolume (Song& song, TrackID channel, float decibels)
 {
-    if (auto state = findChainState (song, channel); state.isValid())
-        setChannelValue (state, schema::channelVolume, keepVolumeInRange (decibels),
-                         state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f, getUndo (song));
+    const auto none =
+        TrackValue::defaultVolume (channel.isValid() && ! isMaster (song, channel) ? TrackValue::Kind::track : TrackValue::Kind::master);
+    setChannelField (song, channel, &TrackValue::volume, schema::channelVolume, roundChannelValue (keepVolumeInRange (decibels), none));
 }
 
 void setChannelPan (Song& song, TrackID channel, float pan)
 {
-    if (auto state = findChainState (song, channel); state.isValid() && getPanParameterID (song, channel).isNotEmpty())
-        setChannelValue (state, schema::channelPan, std::isfinite (pan) ? juce::jlimit (-1.0f, 1.0f, pan) : 0.0f, 0.0f, getUndo (song));
+    if (getPanParameterID (song, channel).isNotEmpty())
+        setChannelField (song, channel, &TrackValue::pan, schema::channelPan,
+                         roundChannelValue (std::isfinite (pan) ? juce::jlimit (-1.0f, 1.0f, pan) : 0.0f, 0.0f));
 }
 
 float getChannelVolume (const Song& song, TrackID channel)

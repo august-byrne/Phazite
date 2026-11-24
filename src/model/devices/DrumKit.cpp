@@ -271,27 +271,34 @@ TrackID givePadItsOwnTrack (Song& song, DeviceID id, int pad)
         return existing;
 
     const auto drums = getDeviceChannel (song, id);
-    const auto drumState = findTrackState (song, drums);
+    const auto drumTrack = findHeldTrack (song, drums);
 
-    if (! drumState.isValid() || isMaster (song, drums))
+    if (! drumTrack.has_value() || drumTrack->isMaster())
         return {};
 
     // After the sampler's track, named after what the pad plays, in that track's colour where it has one of its own.
     const UndoStep step (song, "Give Pad " + juce::String (pad) + " Its Own Track");
     const auto track = insertTrack (song, drums, nullptr);
-    auto state = findTrackState (song, track);
 
-    if (! state.isValid())
+    if (! track.isValid())
         return {};
 
     const auto sound = getPadName (song, id, pad);
-    setTrackName (song, track, sound.isNotEmpty() ? sound : "Pad " + juce::String (pad));
+    const auto name = sound.isNotEmpty() ? sound : "Pad " + juce::String (pad);
+    const auto colour = drumTrack->colour;
 
-    if (drumState.hasProperty (schema::trackColour))
-        state.setProperty (schema::trackColour, drumState[schema::trackColour], &song.getUndoManager());
+    setTrackFields (song, track,
+                    [&name, colour, id, pad] (TrackValue& value)
+                    {
+                        value.name = name;
 
-    state.setProperty (schema::trackPadDevice, (juce::int64) id.getRaw(), &song.getUndoManager());
-    state.setProperty (schema::trackPad, pad, &song.getUndoManager());
+                        if (colour.has_value())
+                            value.colour = colour;
+
+                        value.padDevice = id;
+                        value.pad = pad;
+                    });
+
     return track;
 }
 

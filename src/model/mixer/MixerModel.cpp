@@ -38,6 +38,16 @@ namespace
         return kind.has_value() && *kind != TrackValue::Kind::master;
     }
 
+    // Whether a track is in a folder, directly or in a folder in it, by its folders up.
+    bool isInFolder (const Song& song, TrackID track, TrackID folder)
+    {
+        for (auto parent = getParentFolder (song, track); parent.isValid(); parent = getParentFolder (song, parent))
+            if (parent == folder)
+                return true;
+
+        return false;
+    }
+
     bool hasSound (const Song& song, TrackID id)
     {
         return isTrack (song, id) && ! isFolder (song, id);
@@ -652,8 +662,7 @@ std::vector<OutputChoice> getOutputChoices (const ProjectContext& context, Track
 
     // The buses, in the playlist's order: not the channel itself, nor a folder inside it.
     for (const auto other : getTrackIDs (*song))
-        if (other != id && isFolder (*song, other) && isBus (*song, other)
-            && ! findTrackState (*song, other).isAChildOf (findTrackState (*song, id)))
+        if (other != id && isFolder (*song, other) && isBus (*song, other) && ! isInFolder (*song, other, id))
             choices.push_back ({ other, getTrackName (*song, other), other == current });
 
     return choices;
@@ -672,9 +681,7 @@ void setOutput (ProjectContext& context, TrackID id, TrackID bus)
     if (song == nullptr || ! canChooseOutput (context, id))
         return;
 
-    if (bus.isValid()
-        && (bus == id || ! isFolder (*song, bus) || ! isBus (*song, bus)
-            || findTrackState (*song, bus).isAChildOf (findTrackState (*song, id))))
+    if (bus.isValid() && (bus == id || ! isFolder (*song, bus) || ! isBus (*song, bus) || isInFolder (*song, bus, id)))
         return;
 
     if (getOutputBus (*song, id) == bus)

@@ -215,6 +215,18 @@ juce::ValueTree writeTrackElement (const TrackValue&);
 // it is.
 void writeMasterInto (juce::ValueTree& master, const TrackValue&);
 
+// A track's (or the master's) own properties written into its element by what differs between what the song holds of it
+// (`held`, which the element holds as writeTrackElement() writes it) and its next value, as writeTrackElement() writes them,
+// in the undo manager given (none: outside the history): first each property the writer writes of `held` and not of `next`
+// taken away, then each it writes of `next` otherwise than of `held` set; nothing else read or written (not the element's
+// other properties, nor its children). What the tracks' setters write by (model/arrangement/TrackWriters.cpp), the one rule
+// with the writer and the loader's (keepTrackAsHeld()). Whether any was. Allocates nothing past what JUCE's writes do.
+bool writeTrackChanges (juce::ValueTree& element, const TrackValue& held, const TrackValue& next, juce::UndoManager*);
+
+// One of a track's own properties as writeTrackElement() writes it of a value, void where it writes none: what a narrow
+// setter writes one property by (a volume's drag: model/mixer/Mixer.cpp, setChannelVolume()).
+juce::var writeTrackProperty (const TrackValue&, const juce::Identifier& property);
+
 // Every track of a song's tree (PHAZITE), read as readTrackValue() reads one: each TRACK in the track list and, in a folder,
 // the TRACKs in it (a folder's before them), each list in its element's order; of two with one ID (which the loader leaves
 // none of), the first, without what is in it; and the MASTER. What reads the tracks whole while the tree is their storage

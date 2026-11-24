@@ -832,6 +832,54 @@ void writeMasterInto (juce::ValueTree& master, const TrackValue& value)
         keepPropertiesAsWritten (master, value);
 }
 
+bool writeTrackChanges (juce::ValueTree& element, const TrackValue& held, const TrackValue& next, juce::UndoManager* undo)
+{
+    if (! isTrackOrMaster (element) || held.isMaster() != next.isMaster())
+        return false;
+
+    auto changed = false;
+
+    // What it writes of `held` and not of `next` taken away first (a bus made plain: its fader before its VCA is given), then
+    // what it writes of `next` otherwise.
+    forEachWrittenProperty (held,
+                            [&] (const juce::Identifier& property, const juce::var&)
+                            {
+                                if (writeTrackProperty (next, property).isVoid() && element.hasProperty (property))
+                                {
+                                    element.removeProperty (property, undo);
+                                    changed = true;
+                                }
+                            });
+
+    forEachWrittenProperty (next,
+                            [&] (const juce::Identifier& property, const juce::var& written)
+                            {
+                                if (const auto was = writeTrackProperty (held, property);
+                                    was.isVoid() || ! isSameValue (was, written)
+                                    || ! isAsWritten (element.getPropertyPointer (property), property, written))
+                                {
+                                    element.setProperty (property, toWritten (property, written), undo);
+                                    changed = true;
+                                }
+                            });
+
+    return changed;
+}
+
+juce::var writeTrackProperty (const TrackValue& value, const juce::Identifier& property)
+{
+    juce::var found;
+
+    forEachWrittenProperty (value,
+                            [&found, &property] (const juce::Identifier& each, const juce::var& written)
+                            {
+                                if (each == property)
+                                    found = written;
+                            });
+
+    return found;
+}
+
 SongTracks readTracksValue (const juce::ValueTree& song)
 {
     SongTracks tracks;

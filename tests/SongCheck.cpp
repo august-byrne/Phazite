@@ -1634,8 +1634,8 @@ namespace
     // (writeTrackElement(), writeSwitchesInto(), writeViewInto()) give each property of it they cover as the same text, and
     // its lanes, and no other, so that the loader's rules (keepTrackAsHeld(), keepSwitchesAsHeld(), keepViewAsHeld()) leave
     // it as it is. A song that went through the loader holds each so; what a writer of the tracks' own code writes after it
-    // does too (no writer leaves a value the held readers read otherwise: a number off its range, a switch written off), but
-    // for a colour that reads as none, which is left out of the text's comparison (below), the readers agreeing on it.
+    // does too (no writer leaves a value the held readers read otherwise: a number off its range, a switch written off, a
+    // colour that reads as none: the tracks' setters write none for it).
     void checkTrackElement (const juce::ValueTree& element, std::vector<std::string>& problems)
     {
         const auto text = (element.hasType (schema::MASTER) ? std::string ("values: the master ")
@@ -1672,13 +1672,6 @@ namespace
         for (int i = 0; i < element.getNumProperties(); ++i)
         {
             const auto property = element.getPropertyName (i);
-
-            // Left out: a colour that reads as none (transparent: "0"), which a writer of the tracks' own code still writes (a
-            // track's preset saved from a track without a colour, model/presets/Presets.cpp: makeTrackPreset(), holds "0",
-            // which loading it writes through setTrackColour()), and which every reader reads as none alike; the loader takes
-            // it away, and the writers' piece of the tracks' switch is to write none for it.
-            if (property == schema::trackColour.getName() && ! held->colour.has_value())
-                continue;
 
             if (isTracksProperty (element, property)
                 && ! (written.hasProperty (property) && isSameValue (written[property], element[property])))

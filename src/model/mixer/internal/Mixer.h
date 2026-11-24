@@ -285,7 +285,9 @@ std::set<std::uint64_t> getItemIDs (const Song&);
 // is lost). Their lanes, view state, stay, ignored while what they name is gone, and go as the project opens (Schema.h:
 // LANE); the sidechains that listened to a track are forgotten as it goes (Sidechain.h). Every change
 // that takes a device, a chain, a send, a fader or a track out of the song calls it, so that the song stays as
-// makeConsistent() (model/project/internal/Project.h) would leave it.
+// makeConsistent() (model/project/internal/Project.h) would leave it. A pad's track that stays loses its pad fields through
+// the tracks' setters (model/arrangement/internal/Tracks.h: setTrackFields()), in the mode of the moment: outside the history
+// while the song is written outside it (the code before the tracks' writers always wrote them through the undo manager).
 void forgetWhatNamesTheGone (Song&);
 
 // Moves a device to another place among its channel's devices, as one undo step.

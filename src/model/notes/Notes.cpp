@@ -2287,7 +2287,9 @@ std::optional<Key> getTrackKey (const Song& song, TrackID track)
 
 void setTrackKey (Song& song, TrackID track, const std::optional<Key>& key)
 {
-    writeKey (findTrackState (song, track), key, &song.getUndoManager());
+    // A track's own field (TracksValue.h; the master holds no key), through the tracks' setters.
+    if (! isMaster (song, track))
+        setTrackFields (song, track, [&key] (TrackValue& value) { value.key = key; });
 
     // What new tracks get; not an edit to undo.
     if (key.has_value())
@@ -2306,10 +2308,9 @@ void chooseTrackKey (Song& song, TrackID track, const std::optional<Key>& key)
     setTrackKey (song, track, key);
 }
 
-void applyLastKey (Song& song, TrackID track)
+std::optional<Key> getLastKey (const Song& song)
 {
-    if (const auto last = readKey (song.getState().getChildWithName (schema::LASTKEY)))
-        writeKey (findTrackState (song, track), last, nullptr);
+    return readKey (song.getState().getChildWithName (schema::LASTKEY));
 }
 
 void setLastKey (Song& song, const Key& key)

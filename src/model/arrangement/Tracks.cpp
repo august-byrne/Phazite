@@ -4,7 +4,6 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/DeviceStoreValue.h"
-#include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
@@ -53,129 +52,122 @@ namespace
         }
     }
 
-    // A new track's element, of a kind, with an ID of the song's (Song::makeID()), and its fader's: a folder starts as a bus
-    // (design question 11).
-    juce::ValueTree makeTrackState (Song& song, const char* kind, std::optional<juce::Colour> colour)
+    // A track's index in its folder's list (the top list for none), -1 for one the song hasn't; with a track of the list left
+    // out (`without`: one that moves, as the list is once it is out of it).
+    int findListIndex (const SongTracks& tracks, TrackID id, TrackID without = {})
     {
-        juce::ValueTree state (schema::TRACK);
-        state.setProperty (schema::trackID, (juce::int64) song.makeID(), nullptr);
-        state.setProperty (schema::trackKind, kind, nullptr);
+        const auto* value = tracks.tracks.find (id.getRaw());
+        const auto* list = value != nullptr ? tracks.findList (value->parent) : nullptr;
+        auto index = 0;
 
-        if (colour.has_value())
-            state.setProperty (schema::trackColour, colour->toString(), nullptr);
+        if (list != nullptr)
+        {
+            for (const auto each : *list)
+            {
+                if (each == id)
+                    return index;
 
-        state.setProperty (schema::channelFader, (juce::int64) song.makeID(), nullptr);
-        return state;
+                index += each != without ? 1 : 0;
+            }
+        }
+
+        return -1;
     }
 
-    // Puts a track's element right after another track's, in that one's folder, or at the end of the list.
-    void insertTrackState (Song& song, const juce::ValueTree& state, TrackID after)
+    // Whether a track is the folder given or in it, through its folders up.
+    bool isInOrIs (const SongTracks& tracks, TrackID track, TrackID folder)
     {
-        if (const auto previous = findTrackState (song, after); previous.isValid() && ! previous.hasType (schema::MASTER))
+        for (auto at = track; at.isValid();)
         {
-            auto parent = previous.getParent();
-            parent.addChild (state, parent.indexOf (previous) + 1, &song.getUndoManager());
+            if (at == folder)
+                return true;
+
+            const auto* value = tracks.tracks.find (at.getRaw());
+            at = value != nullptr ? value->parent : TrackID();
         }
-        else
-        {
-            getTrackList (song).appendChild (state, &song.getUndoManager());
-        }
+
+        return false;
     }
 
-    // Moves a track's element to a place among a parent's children (a folder's element, or the list): before the child
-    // at that index as the children are before the move.
-    void moveTrackState (Song& song, const juce::ValueTree& state, juce::ValueTree parent, int index)
+    // A track moved to a place in a folder's list (setTrackPlace(): the same element), and where it came to another folder,
+    // the sidechains that would hear themselves through it forgotten (into a bus that a sidechain on it listens to, say).
+    void placeTrack (Song& song, TrackID track, TrackID folder, int index)
     {
-        auto oldParent = state.getParent();
-        auto* undo = &song.getUndoManager();
+        const auto held = findHeldTrack (song, track);
 
-        if (oldParent == parent)
-        {
-            const auto oldIndex = parent.indexOf (state);
-            const auto newIndex = index > oldIndex ? index - 1 : index;
-
-            if (newIndex != oldIndex)
-                parent.moveChild (oldIndex, juce::jlimit (0, parent.getNumChildren() - 1, newIndex), undo);
-
-            return;
-        }
-
-        oldParent.removeChild (state, undo);
-        parent.addChild (state, index, undo);
-
-        // Into a bus that a sidechain on it listens to, say.
-        forgetSidechainLoops (song);
+        if (setTrackPlace (song, track, folder, index) && held.has_value() && held->parent != folder)
+            forgetSidechainLoops (song);
     }
 
     // The tracks that move, in the playlist's order: those given, but those inside a folder that moves, which go with it.
-    std::vector<juce::ValueTree> getMovingStates (const Song& song, const std::vector<TrackID>& tracks)
+    std::vector<TrackID> getMovingTracks (const Song& song, const std::vector<TrackID>& tracks)
     {
-        std::vector<juce::ValueTree> given, moving;
+        const auto held = getHeldTracks (song);
+        const auto isGiven = [&tracks] (TrackID id) { return std::find (tracks.begin(), tracks.end(), id) != tracks.end(); };
+        std::vector<TrackID> moving;
 
-        for (const auto id : tracks)
-            if (const auto state = findTrackState (song, id); state.hasType (schema::TRACK))
-                given.push_back (state);
-
-        const auto isGiven = [&given] (const juce::ValueTree& state)
-        { return std::find (given.begin(), given.end(), state) != given.end(); };
-
-        if (given.empty())
-            return moving;
-
-        for (const auto& state : getTrackStates (song))
+        for (const auto id : getTrackIDs (song))
         {
+            if (! isGiven (id))
+                continue;
+
             auto inMovingFolder = false;
+            const auto* value = held.tracks.find (id.getRaw());
 
-            for (auto parent = state.getParent(); parent.hasType (schema::TRACK) && ! inMovingFolder; parent = parent.getParent())
-                inMovingFolder = isGiven (parent);
+            for (auto folder = value != nullptr ? value->parent : TrackID(); folder.isValid() && ! inMovingFolder;)
+            {
+                inMovingFolder = isGiven (folder);
+                const auto* parent = held.tracks.find (folder.getRaw());
+                folder = parent != nullptr ? parent->parent : TrackID();
+            }
 
-            if (isGiven (state) && ! inMovingFolder)
-                moving.push_back (state);
+            if (! inMovingFolder)
+                moving.push_back (id);
         }
 
         return moving;
     }
 
-    // Where moving tracks dropped at a track go: the element they go into, and the child of it they go before (invalid: after
-    // its last), as the song is before they move. Nothing for a folder that would go into itself or a folder inside it.
+    // Where moving tracks dropped at a track go, as the song is before they move: the folder whose list they go into (none for
+    // the top list); into it, after its last element, or else before the first track of its list from the target on that
+    // doesn't move itself (none: after the list's last). Nothing for a folder that would go into itself or a folder inside it.
     struct DropPlace
     {
-        juce::ValueTree parent, before;
+        TrackID folder {}, before {};
+        bool into = false;
     };
 
-    std::optional<DropPlace> findDropPlace (const std::vector<juce::ValueTree>& moving, const juce::ValueTree& target, TrackDrop drop)
+    std::optional<DropPlace> findDropPlace (const SongTracks& tracks, const std::vector<TrackID>& moving, TrackID target, TrackDrop drop)
     {
-        const auto isMoving = [&moving] (const juce::ValueTree& state)
-        { return std::find (moving.begin(), moving.end(), state) != moving.end(); };
+        const auto isMoving = [&moving] (TrackID id) { return std::find (moving.begin(), moving.end(), id) != moving.end(); };
+        const auto* value = tracks.tracks.find (target.getRaw());
+
+        if (value == nullptr)
+            return {};
 
         DropPlace place;
 
-        if (! target.hasType (schema::TRACK))
-            return {};
-
         if (drop == TrackDrop::into)
         {
-            if (! isFolderState (target))
+            if (! value->isFolder())
                 return {};
 
-            place.parent = target;
+            place.folder = target;
+            place.into = true;
         }
         else
         {
-            place.parent = target.getParent();
+            place.folder = value->parent;
 
-            // Before the first child from there on that doesn't move itself.
-            for (auto i = place.parent.indexOf (target) + (drop == TrackDrop::after ? 1 : 0);
-                 i < place.parent.getNumChildren() && ! place.before.isValid(); ++i)
-                if (const auto child = place.parent.getChild (i); ! isMoving (child))
-                    place.before = child;
+            if (const auto* list = tracks.findList (place.folder))
+                for (auto i = findListIndex (tracks, target) + (drop == TrackDrop::after ? 1 : 0);
+                     i < (int) list->size() && ! place.before.isValid(); ++i)
+                    if (const auto track = (*list)[(size_t) i]; ! isMoving (track))
+                        place.before = track;
         }
 
-        if (! place.parent.isValid())
-            return {};
-
-        for (auto parent = place.parent; parent.hasType (schema::TRACK); parent = parent.getParent())
-            if (isMoving (parent))
+        for (const auto each : moving)
+            if (place.folder.isValid() && isInOrIs (tracks, place.folder, each))
                 return {};
 
         return place;
@@ -196,15 +188,15 @@ namespace
     // Moves a track right after another one, in its folder, or else first in the list.
     void moveTrackAfter (Song& song, TrackID track, TrackID previous)
     {
-        const auto state = findTrackState (song, track);
+        const auto tracks = getHeldTracks (song);
 
-        if (! state.hasType (schema::TRACK))
+        if (tracks.tracks.find (track.getRaw()) == nullptr || track == previous)
             return;
 
-        if (const auto before = findTrackState (song, previous); before.hasType (schema::TRACK))
-            moveTrackState (song, state, before.getParent(), before.getParent().indexOf (before) + 1);
+        if (const auto* before = tracks.tracks.find (previous.getRaw()))
+            placeTrack (song, track, before->parent, findListIndex (tracks, previous, track) + 1);
         else
-            moveTrackState (song, state, getTrackList (song), 0);
+            placeTrack (song, track, {}, 0);
     }
 
     // The palette's next color after the track a new one goes below (the last track if that is none), so that neighbours
@@ -231,12 +223,12 @@ namespace
     // The playlist track before (direction -1) or after (1) this one in its folder, or among the top-level tracks.
     TrackID getSibling (const Song& song, TrackID track, int direction)
     {
-        const auto state = findTrackState (song, track);
-        const auto parent = state.getParent();
+        const auto tracks = getHeldTracks (song);
+        const auto* value = tracks.tracks.find (track.getRaw());
+        const auto* list = value != nullptr ? tracks.findList (value->parent) : nullptr;
 
-        for (auto i = parent.indexOf (state) + direction; juce::isPositiveAndBelow (i, parent.getNumChildren()); i += direction)
-            if (const auto sibling = parent.getChild (i); sibling.hasType (schema::TRACK))
-                return getTrackID (sibling);
+        if (const auto i = findListIndex (tracks, track) + direction; list != nullptr && juce::isPositiveAndBelow (i, (int) list->size()))
+            return (*list)[(size_t) i];
 
         return {};
     }
@@ -296,13 +288,31 @@ namespace
         phazite.appendChild (master, nullptr);
     }
 
-    // A track the song gives a key: the key set last on any of its tracks (model/notes/internal/Notes.h).
-    TrackID madeWithLastKey (Song& song, TrackID id)
+    // A new track's value, of a kind, with an ID of the song's (Song::makeID()) and its fader's (a folder starts as a bus:
+    // design question 11), in a colour where it has one; and where it goes, after another track (in that one's folder), or
+    // else at the end of the list: its folder, and its place in that folder's list.
+    TrackValue makeTrack (Song& song, TrackValue::Kind kind, std::optional<juce::Colour> colour)
     {
-        if (id.isValid())
-            applyLastKey (song, id);
+        TrackValue value;
+        value.id = TrackID::fromRaw (song.makeID());
+        value.kind = kind;
+        value.colour = colour.has_value() ? std::optional (colour->getARGB()) : std::nullopt;
+        value.fader = DeviceID::fromRaw (song.makeID());
+        return value;
+    }
 
-        return id;
+    int placeAfter (const Song& song, TrackValue& value, TrackID after)
+    {
+        const auto tracks = getHeldTracks (song);
+
+        if (const auto* previous = tracks.tracks.find (after.getRaw()))
+        {
+            value.parent = previous->parent;
+            return findListIndex (tracks, after) + 1;
+        }
+
+        value.parent = {};
+        return -1;
     }
 } // namespace
 
@@ -616,21 +626,23 @@ void setTrackSoloed (Song& song, TrackID id, bool soloed)
 
 void setTrackName (Song& song, TrackID id, const juce::String& name)
 {
-    if (auto state = findTrackState (song, id); state.hasType (schema::TRACK))
-        state.setProperty (schema::trackName, name, &song.getUndoManager());
+    if (! isMaster (song, id))
+        setTrackFields (song, id, [&name] (TrackValue& value) { value.name = name; });
 }
 
 void setTrackColour (Song& song, TrackID id, juce::Colour colour)
 {
-    if (auto state = findTrackState (song, id); state.hasType (schema::TRACK))
-        state.setProperty (schema::trackColour, colour.toString(), &song.getUndoManager());
+    // A transparent colour is none (TrackValue::colour): the track takes its row's in the palette, as every reader read it.
+    if (! isMaster (song, id))
+        setTrackFields (song, id, [colour] (TrackValue& value)
+                        { value.colour = colour.isTransparent() ? std::nullopt : std::optional (colour.getARGB()); });
 }
 
 TrackID insertPlainTrack (Song& song, TrackID after)
 {
-    const auto state = makeTrackState (song, schema::trackIsTrack, std::nullopt);
-    insertTrackState (song, state, after);
-    return getTrackID (state);
+    auto value = makeTrack (song, TrackValue::Kind::track, std::nullopt);
+    const auto index = placeAfter (song, value, after);
+    return setTrack (song, value, index) ? value.id : TrackID();
 }
 
 //==============================================================================
@@ -813,9 +825,10 @@ bool isSilencedBySolo (const Song& song, TrackID id)
 //==============================================================================
 TrackID insertTrack (Song& song, TrackID after, Selection* selection)
 {
-    const auto state = makeTrackState (song, schema::trackIsTrack, getNextColour (song, after));
-    insertTrackState (song, state, after);
-    const auto id = madeWithLastKey (song, getTrackID (state)); // the key chosen last in the song
+    auto value = makeTrack (song, TrackValue::Kind::track, getNextColour (song, after));
+    value.key = getLastKey (song); // the key chosen last in the song, in the step that adds it
+    const auto index = placeAfter (song, value, after);
+    const auto id = setTrack (song, value, index) ? value.id : TrackID();
 
     if (selection != nullptr)
         selection->selectOnly (id);
@@ -825,10 +838,10 @@ TrackID insertTrack (Song& song, TrackID after, Selection* selection)
 
 TrackID insertReturnTrack (Song& song, const juce::String& name, Selection* selection)
 {
-    auto state = makeTrackState (song, schema::trackIsReturn, getNextColour (song, {}));
-    state.setProperty (schema::trackName, name, nullptr);
-    insertTrackState (song, state, {});
-    const auto id = madeWithLastKey (song, getTrackID (state)); // as any new track gets it
+    auto value = makeTrack (song, TrackValue::Kind::returnTrack, getNextColour (song, {}));
+    value.name = name;
+    value.key = getLastKey (song); // as any new track gets it
+    const auto id = setTrack (song, value) ? value.id : TrackID();
 
     if (selection != nullptr)
         selection->selectOnly (id);
@@ -838,16 +851,7 @@ TrackID insertReturnTrack (Song& song, const juce::String& name, Selection* sele
 
 std::vector<TrackID> ensureTracks (Song& song, int count)
 {
-    const auto getTracks = [&song]
-    {
-        std::vector<TrackID> tracks;
-
-        for (const auto& state : getTrackStates (song))
-            if (! isFolderState (state) && ! isReturnState (state))
-                tracks.push_back (getTrackID (state));
-
-        return tracks;
-    };
+    const auto getTracks = [&song] { return getTrackIDsOfKind (song, TrackValue::Kind::track); };
 
     for (auto tracks = getTracks(); (int) tracks.size() < count; tracks = getTracks())
         insertPlainTrack (song, {});
@@ -857,11 +861,11 @@ std::vector<TrackID> ensureTracks (Song& song, int count)
 
 TrackID insertFolder (Song& song, TrackID after, Selection* selection)
 {
-    auto state = makeTrackState (song, schema::trackIsFolder, getNextColour (song, after));
-    state.setProperty (schema::trackName, "Folder", nullptr);
-    insertTrackState (song, state, after);
-    const auto folder = getTrackID (state);
-    mixAsBus (song, folder); // a bus from the start (design question 11)
+    auto value = makeTrack (song, TrackValue::Kind::folder, getNextColour (song, after));
+    value.name = juce::String ("Folder");
+    value.bus = true; // a bus from the start (design question 11): its fader its own (Buses.h: mixAsBus())
+    const auto index = placeAfter (song, value, after);
+    const auto folder = setTrack (song, value, index) ? value.id : TrackID();
 
     if (selection != nullptr)
         selection->selectOnly (folder);
@@ -871,20 +875,24 @@ TrackID insertFolder (Song& song, TrackID after, Selection* selection)
 
 TrackID groupIntoFolder (Song& song, const std::vector<TrackID>& tracks, Selection* selection)
 {
-    const auto firstState = tracks.empty() ? juce::ValueTree() : findTrackState (song, tracks.front());
+    const auto held = getHeldTracks (song);
+    const auto* first = tracks.empty() ? nullptr : held.tracks.find (tracks.front().getRaw());
 
-    if (! firstState.hasType (schema::TRACK))
+    if (first == nullptr)
         return {};
 
-    // Where the first track is, in its own folder if it has one; in its color.
+    // Where the first track is, in its own folder if it has one; in its color; a bus from the start (design question 11).
     const auto all = getTrackIDs (song);
     const auto row = (int) (std::find (all.begin(), all.end(), tracks.front()) - all.begin());
-    auto state = makeTrackState (song, schema::trackIsFolder, getTrackColour (song, tracks.front(), row));
-    state.setProperty (schema::trackName, "Folder", nullptr);
-    auto parent = firstState.getParent();
-    parent.addChild (state, parent.indexOf (firstState), &song.getUndoManager());
-    const auto folder = getTrackID (state);
-    mixAsBus (song, folder); // a bus from the start (design question 11)
+    auto value = makeTrack (song, TrackValue::Kind::folder, getTrackColour (song, tracks.front(), row));
+    value.name = juce::String ("Folder");
+    value.bus = true;
+    value.parent = first->parent;
+
+    if (! setTrack (song, value, findListIndex (held, tracks.front())))
+        return {};
+
+    const auto folder = value.id;
 
     for (const auto track : tracks)
         moveTrackIntoFolder (song, track, folder);
@@ -897,21 +905,22 @@ TrackID groupIntoFolder (Song& song, const std::vector<TrackID>& tracks, Selecti
 
 void moveTrackIntoFolder (Song& song, TrackID track, TrackID folder)
 {
-    const auto state = findTrackState (song, track);
-    auto folderState = findTrackState (song, folder);
+    // A folder can't go into itself, or into a folder inside it; after the folder's last element.
+    const auto held = getHeldTracks (song);
+    const auto* into = held.tracks.find (folder.getRaw());
 
-    // A folder can't go into itself, or into a folder inside it.
-    if (! state.hasType (schema::TRACK) || ! isFolderState (folderState) || state == folderState || folderState.isAChildOf (state))
+    if (held.tracks.find (track.getRaw()) == nullptr || into == nullptr || ! into->isFolder() || isInOrIs (held, folder, track))
         return;
 
-    moveTrackState (song, state, folderState, folderState.getNumChildren());
+    placeTrack (song, track, folder, -1);
 }
 
 void ungroupFolder (Song& song, TrackID folder)
 {
-    const auto folderState = findTrackState (song, folder);
+    const auto held = getHeldTracks (song);
+    const auto* value = held.tracks.find (folder.getRaw());
 
-    if (! isFolderState (folderState))
+    if (value == nullptr || ! value->isFolder())
         return;
 
     // What its bus's devices hold of their own stored first (a plug-in's own settings), so that an undo brings it back as it is.
@@ -919,20 +928,16 @@ void ungroupFolder (Song& song, TrackID folder)
 
     // Its tracks go where it was, in their order, and it goes, with the sidechains that listened to it.
     forgetSidechainsOfBus (song, folder);
-    auto parent = folderState.getParent();
-    auto place = parent.indexOf (folderState) + 1;
+    const auto parent = value->parent;
+    auto place = findListIndex (held, folder) + 1;
 
-    for (int i = 0; i < folderState.getNumChildren();)
-    {
-        if (const auto child = folderState.getChild (i); child.hasType (schema::TRACK))
-            moveTrackState (song, child, parent, place++);
-        else
-            ++i;
-    }
+    if (const auto* list = held.findList (folder))
+        for (const auto track : *list)
+            placeTrack (song, track, parent, place++);
 
     // What it holds itself (a bus's modulators and sends) erased before it goes; its tracks are out of it now.
     eraseTrackHoldings (song, { folder });
-    parent.removeChild (folderState, &song.getUndoManager());
+    eraseTrack (song, folder);
 
     // Then what named its fader or VCA and its bus's devices, which went with it: their curves, and the modulations and the
     // MIDI links of them (from modulators and links elsewhere), so that nothing is left naming what is gone.
@@ -1211,75 +1216,43 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
 
     for (const auto track : tracks)
     {
-        const auto original = findTrackState (song, track);
-
-        if (! original.hasType (schema::TRACK))
+        if (const auto held = findHeldTrack (song, track); ! held.has_value() || held->isMaster())
             continue;
 
         // The copy holds what its devices hold now (a plug-in's own settings), every item in it the song's with an ID of its
         // own (its tracks, devices, sends, modulators and clips, its clips' notes as they are, in their alias groups), with
-        // its own automation, right after the original. A frozen track's copy plays live: the frozen file is the original's.
+        // its own automation, right after the original: the tracks as values with new IDs (makeTrackCopies()), the copy of a
+        // folder with the tracks in it, put in as one (setNewTracks()). A frozen track's copy plays live: the frozen file is the
+        // original's.
         song.storeDeviceStates (track.getRaw());
-        auto copy = original.createCopy();
-        std::vector<juce::ValueTree> inside { copy };
-        collectTrackStates (copy, inside);
+        CopiedIDs copied;
+        const auto made = makeTrackCopies (song, track, copied);
 
-        // Its devices written into it as whole state writes them (DevicesArea.h: writeDevicesIn(): first among its children,
-        // as it holds no clips), so that each is given a new ID with what names it in the copy (a lane of its parameter), and
-        // taken off it again below: the song's tree holds none (DevicesValue.h), so what is written in is all the copy loses.
-        const auto kept = keepValues (song);
-        std::vector<int> written;
+        if (made.values.empty())
+            continue;
 
-        for (auto state : inside)
+        // Each copied track's switches and view given before the copies come into the song (copyTrackLeaves(): by each
+        // original with its copy; its lanes name its devices' copies, which makeTrackCopies() gave into `copied`), and put
+        // back as they were if the song refuses the copies, so that no entry stays for a track it never took.
+        auto* values = song.getValues();
+        const auto switchesBefore = values != nullptr ? values->trackSwitches.get() : TrackSwitches {};
+        const auto outsideBefore = values != nullptr ? values->tracksOutside.get() : TracksOutside {};
+        copyTrackLeaves (song, made.originalsAndCopies, copied);
+
+        if (! setNewTracks (song, made.values, findListIndex (getHeldTracks (song), track) + 1))
         {
-            jassert (std::none_of (state.begin(), state.end(), [] (const juce::ValueTree& child)
-                                   { return child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER); }));
-            const auto before = state.getNumChildren();
-            writeDevicesIn (state, kept);
-            written.push_back (state.getNumChildren() - before);
-        }
-
-        auto copied = giveNewIDs (song, copy);
-
-        // Nor does a copy of a pad's track play the pad, which plays on the original. Its clips aren't the song's tree's: the
-        // clips' code copies each track's onto its copy (copyTrackClips()), once the copy is the song's.
-        for (auto state : inside)
-            for (const auto* property : { &schema::trackPadDevice.getName(), &schema::trackPad.getName() })
-                state.removeProperty (*property, nullptr);
-
-        // Nor are its devices the copy's elements: the devices' code gives each copied track its original's
-        // (copyDevices()), by the IDs given them above, once the copy is the song's. What was written in above taken off.
-        for (size_t i = 0; i < inside.size(); ++i)
-        {
-            for (auto n = 0; n < written[i]; ++n)
+            if (values != nullptr)
             {
-                jassert (inside[i].getChild (0).hasType (schema::DEVICE) || inside[i].getChild (0).hasType (schema::CONTAINER));
-                inside[i].removeChild (0, nullptr);
+                values->setTracksOutside (outsideBefore);
+                values->setSwitchesOutsideHistory (song, switchesBefore);
             }
+
+            continue;
         }
-
-        // Each copied track with its original (by the copy's ID, from the original's), its tracks' first: their switches and
-        // view given before the copy comes into the song (copyTrackLeaves()).
-        std::map<std::uint64_t, std::uint64_t> originals;
-
-        for (const auto& [old, made] : copied)
-            originals[made] = old;
-
-        std::vector<std::pair<TrackID, TrackID>> originalsAndCopies;
-
-        for (const auto& state : inside)
-            if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
-                originalsAndCopies.emplace_back (TrackID::fromRaw (found->second), getTrackID (state));
-
-        copyTrackLeaves (song, originalsAndCopies, copied);
-
-        auto parent = original.getParent();
-        parent.addChild (copy, parent.indexOf (original) + 1, &song.getUndoManager());
 
         // Each track's clips onto its copy, in their alias groups, from the original by the copy's ID.
-        for (const auto& state : inside)
-            if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
-                copyTrackClips (song, TrackID::fromRaw (found->second), getTrackID (state), copied, true);
+        for (const auto& [original, copy] : made.originalsAndCopies)
+            copyTrackClips (song, original, copy, copied, true);
 
         // Its devices, through the devices' code; then its sends, through the sends' code, then its modulators and its
         // containers' macros, through modulation's code, each with their new IDs among the copied before what names them is
@@ -1288,7 +1261,7 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         copySends (song, copied);
         copyModulation (song, copied);
         copyCurves (song, copied);
-        copies.push_back (getTrackID (copy));
+        copies.push_back (made.values.front().id);
     }
 
     if (selection != nullptr)
@@ -1305,13 +1278,13 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
 void renameTrack (Song& song, TrackID track, const juce::String& name)
 {
     const auto trimmed = name.trim();
-    auto state = findTrackState (song, track);
+    const auto held = findHeldTrack (song, track);
 
-    if (! state.hasType (schema::TRACK) || trimmed == readTrackName (state))
+    if (! held.has_value() || held->isMaster() || trimmed == held->getOwnName())
         return;
 
     const UndoStep step (song, "Rename Track");
-    state.setProperty (schema::trackName, trimmed, &song.getUndoManager());
+    setTrackFields (song, track, [&trimmed] (TrackValue& value) { value.name = trimmed; });
 }
 
 TrackID addTrackAtEnd (Song& song, bool folder, Selection* selection)
@@ -1332,8 +1305,7 @@ void setTrackColours (Song& song, const std::vector<TrackID>& tracks, juce::Colo
     const UndoStep step (song, tracks.size() > 1 ? "Change Track Colors" : "Change Track Color");
 
     for (const auto track : tracks)
-        if (auto state = findTrackState (song, track); state.hasType (schema::TRACK))
-            state.setProperty (schema::trackColour, colour.toString(), &song.getUndoManager());
+        setTrackColour (song, track, colour);
 }
 
 void moveTracksAfter (Song& song, const std::vector<TrackID>& moving, TrackID previous)
@@ -1352,24 +1324,36 @@ void moveTracksAfter (Song& song, const std::vector<TrackID>& moving, TrackID pr
 
 bool canMoveTracksTo (const Song& song, const std::vector<TrackID>& tracks, TrackID target, TrackDrop drop)
 {
-    const auto moving = getMovingStates (song, tracks);
-    return ! moving.empty() && findDropPlace (moving, findTrackState (song, target), drop).has_value();
+    const auto moving = getMovingTracks (song, tracks);
+    return ! moving.empty() && findDropPlace (getHeldTracks (song), moving, target, drop).has_value();
 }
 
 void moveTracksTo (Song& song, const std::vector<TrackID>& tracks, TrackID target, TrackDrop drop)
 {
-    const auto moving = getMovingStates (song, tracks);
-    const auto place = moving.empty() ? std::nullopt : findDropPlace (moving, findTrackState (song, target), drop);
+    const auto moving = getMovingTracks (song, tracks);
+    const auto place = moving.empty() ? std::nullopt : findDropPlace (getHeldTracks (song), moving, target, drop);
 
     if (! place.has_value())
         return;
 
     const UndoStep step (song, moving.size() > 1 ? "Move Tracks" : "Move Track");
 
-    // Each goes before the same child, which doesn't move, so that they keep their order.
-    for (const auto& state : moving)
-        moveTrackState (song, state, place->parent,
-                        place->before.isValid() ? place->parent.indexOf (place->before) : place->parent.getNumChildren());
+    // Each goes before the same track, which doesn't move, so that they keep their order; else each after the list's last
+    // track (into a folder: after its last element).
+    for (const auto track : moving)
+    {
+        const auto held = getHeldTracks (song);
+
+        if (place->into)
+            placeTrack (song, track, place->folder, -1);
+        else if (place->before.isValid())
+            placeTrack (song, track, place->folder, findListIndex (held, place->before, track));
+        else if (const auto* list = held.findList (place->folder))
+            placeTrack (song, track, place->folder,
+                        (int) list->size() - (std::find (list->begin(), list->end(), track) != list->end() ? 1 : 0));
+        else
+            placeTrack (song, track, place->folder, 0);
+    }
 }
 
 void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* selection)
@@ -1377,9 +1361,11 @@ void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* se
     // A folder takes the tracks inside it along, so those aren't deleted on their own.
     std::vector<TrackID> outermost;
 
+    const auto held = getHeldTracks (song);
+
     for (const auto track : tracks)
     {
-        if (! findTrackState (song, track).hasType (schema::TRACK))
+        if (held.tracks.find (track.getRaw()) == nullptr)
             continue;
 
         auto inDeletedFolder = false;
@@ -1404,8 +1390,7 @@ void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* se
     eraseTrackHoldings (song, outermost); // what they hold in the song's areas, before their elements go
 
     for (const auto track : outermost)
-        if (const auto state = findTrackState (song, track); state.isValid())
-            state.getParent().removeChild (state, &song.getUndoManager());
+        eraseTrack (song, track);
 
     unlinkLoneClips (song);        // a clip linked only to clips of the tracks gone
     forgetWhatNamesTheGone (song); // a send to a return gone, a pad's track whose sampler went with its track

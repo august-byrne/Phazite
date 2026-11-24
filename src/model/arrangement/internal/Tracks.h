@@ -9,6 +9,7 @@
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
@@ -16,8 +17,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -106,29 +109,109 @@ TrackOrder::Place getTrackPlace (const Song&, TrackID);
 std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
 
 //==============================================================================
+// The tracks' setters (model/arrangement/TrackWriters.cpp; roadmap step S5.20, the tracks' writers): with the versions'
+// passes until they move, the conversion, the tracks' part of the keeper and the loader, the only code that changes a TRACK's
+// or the MASTER's own properties or the track lists of a live song. Every writer of the tracks' own code (this file's,
+// Buses.h, the channels' of Mixer.h, model/devices/internal/DrumKit.h's pads, model/transport/RecordingModel.h's input and
+// monitoring, model/notes/internal/Notes.h's key) reads a track's value by its ID, makes the next value and sets it through
+// them. While the song's tree is the tracks' storage each writes it by what differs between what the song holds (the tracks'
+// keeper's value: SongValues::getTracksAsTold(), no element read) and the value given (TracksValue.h: writeTrackChanges(),
+// the rule of the writer and the loader's): each property only where it differs, written as the song holds it; a track that
+// comes to another folder as the same element, taken out and put in again, so that the other areas' keepers carry what it
+// holds (its clips, devices, modulators, sends) and its switches, its view and its lanes go with it; a track in another place
+// in its folder by JUCE's moveChild(); a new one from its value (writeTrackElement()). In the undo manager of the moment: the
+// caller's step, or none while the song is written outside its history (Song::OutsideHistory). None begins a step. A value
+// equal to what the song holds writes nothing; each refuses what the song can't hold, the song left as it was, and returns
+// false: a track without an ID or with the master's, one whose folder is none the song holds as a folder, a folder put into
+// itself or into a folder in it, a folder made another kind while it holds tracks (TracksValue.h: withTrack()), and a new
+// track of an ID the song holds as something else (a fader, a VCA, a device). True where they wrote.
+//
+// A track's place in its folder's list (the top list for none) is its index there once it is there: from 0, before the
+// track at that index now (0: before the first; past the list's end, after its last), or -1 for after the folder's last
+// element (its lanes too: a track dropped into a folder). A folder's lanes (LANES, view state, which stays after the
+// elements it was added after) are not in the list: a track put at an index goes right after the track before it.
+//
+// What the setters write otherwise than the code before them did (roadmap step S5.20, the tracks' writers):
+//   - A track moved within its folder can come to another place among the folder's children relative to its LANES than the
+//     element functions put it (it goes right after the track before it); the tracks' order is the same. LANES goes out of
+//     the tree with the view's piece, and with it the difference.
+//   - What writes through them writes in the mode of the moment: forgetWhatNamesTheGone()'s clean-up of a pad's track whose
+//     sampler is gone (Mixer.h) takes its pad fields off outside the history while the song is written outside it, where the
+//     code before always wrote them through the song's undo manager.
+
+// What the song holds of a track (the master's by its ID), as the tracks' keeper keeps it, no element read (for a song that
+// holds no values, its element read); none for an ID the song hasn't. And the song's tracks whole so (a song without values:
+// its tree read whole). What a writer makes the next value from.
+std::optional<TrackValue> findHeldTrack (const Song&, TrackID);
+SongTracks getHeldTracks (const Song&);
+
+// A track (a folder, a return, the master) set: added at its place in its folder's list where the song hasn't it, or changed
+// (its own properties by what differs), and moved where its folder (TrackValue::parent) is another, as the same element, to
+// its place there (`index`); one whose folder stays keeps its place, `index` ignored: a reorder within a folder is
+// setTrackPlace()'s or setTrackListOrder()'s. The master's value (refused without an ID) is its own properties alone: what its
+// channel's writers set by its narrow setters (Mixer.h: setChannelVolume(), setChannelPan()) and the versions' pass, a later
+// piece, will set whole.
+bool setTrack (Song&, TrackValue, int index = -1);
+
+// Tracks made together, as one element in one action: the first at its place in its folder's list (above), each other in a
+// folder made before it in the list, after the tracks put in it before (a folder duplicated with the tracks in it).
+bool setNewTracks (Song&, const std::vector<TrackValue>&, int index = -1);
+
+// A track taken out of the song, a folder with the tracks in it. What it holds in the song's areas is erased first by its
+// caller (eraseTrackHoldings()), as what names it after (Mixer.h: forgetWhatNamesTheGone()).
+bool eraseTrack (Song&, TrackID);
+
+// A track moved to a place in a folder's list (the top list for none), as the same element: within its folder by JUCE's
+// moveChild(), to another folder taken out and put in again. One in that folder at that index already writes nothing (no step
+// that only moves an element Phazite doesn't know past it).
+bool setTrackPlace (Song&, TrackID, TrackID folder, int index);
+
+// A folder's list (the top list for none) in another order: the same IDs, each once, else nothing; each moved by moveChild().
+bool setTrackListOrder (Song&, TrackID folder, const immer::flex_vector<TrackID>& order);
+
+// A track's (or the master's) value as the song holds it, edited, and set (setTrack()): what the writers of one or a few fields
+// write through (a name, a colour, a key, an input, a bus's fader).
+bool setTrackFields (Song&, TrackID, const std::function<void (TrackValue&)>& edit);
+
+// A track's copy made as values, a folder's with the tracks in it, nothing written: each with new IDs of the song's (its own,
+// its fader's and VCA's, and its devices', in the order a copy of its element gave them: each track's own, then its devices',
+// then the tracks in it), each given into `copied` with its original's; a copy plays no frozen file and no pad (no frozen
+// switch, pad device or pad: those are the original's). The values in the order setNewTracks() takes them (the copy first,
+// each folder's tracks after it), each with its original's ID beside its copy's; none for a track the song hasn't. What they
+// hold in the other areas, and their switches and view, their caller copies by `copied` and by those pairs, and puts the
+// values in with setNewTracks() (duplicateTracks()).
+struct TrackCopies
+{
+    std::vector<TrackValue> values {};
+    std::vector<std::pair<TrackID, TrackID>> originalsAndCopies {}; // each original with its copy, in the values' order
+};
+
+TrackCopies makeTrackCopies (Song&, TrackID original, CopiedIDs& copied);
+
+//==============================================================================
 // The song's tracks as it holds them: a TRACK element for each (Schema.h), folders holding theirs, and the master's own
 // element, MASTER. What reads tracks outside the tracks' own code reads them by ID (above, and the getters below), never
-// these elements (roadmap step S5.20, the tracks' second piece). The element functions below stay for the tracks' own code
-// (this file's, model/arrangement/PlaylistModel.cpp, model/mixer/MixerModel.cpp, Buses.cpp and the channels' functions of
-// model/mixer/Mixer.cpp) and for what the later pieces move. What still reads a TRACK's or the MASTER's element of a live
-// song outside this file, PlaylistModel.cpp, MixerModel.cpp, Buses.cpp and model/base/ (through these functions, the
-// conversion's readers of one field, TracksValue.h, or the schema's names), by file and function, each with whose it is:
-//   - model/mixer/Mixer.cpp, the channels' functions (the area's own, which the writers' piece moves): canHoldInstrument()
-//     (insertDevice()'s, setInstrument()'s and placeDevice()'s check), needsInstrument(), getDeviceChannel() (a device's
-//     TRACK by its parents), the master's and each channel's element in getDeviceOutline() and getSongDeviceOutline(),
-//     insertDevice() (a plain folder's chain), copyDevices() (both tracks' kinds), removeDevice() (a bus's switch),
-//     placeDevice(), setMixedAsBus(), getFader(), getVolumeParameterID(), getPanParameterID(), findChannelOfFader(),
-//     setChannelVolume(), setChannelPan(), getChannelVolume(), getChannelPan(), getReturnTracks() and
-//     forgetWhatNamesTheGone()'s walk of the pads' tracks; the sends' there: getSendValue(), getSendValues(), addSend(),
+// these elements (roadmap step S5.20, the tracks' second piece), and what writes a track's own fields or the track lists
+// writes them through the setters above (the writers' piece: model/arrangement/TrackWriters.cpp). The element functions below
+// stay for the tracks' readers (this file's, model/arrangement/PlaylistModel.cpp, model/mixer/MixerModel.cpp, Buses.cpp and
+// the channels' functions of model/mixer/Mixer.cpp), the setters, and what the later pieces move. What still reads a
+// TRACK's or the MASTER's element of a live song outside this file, TrackWriters.cpp, PlaylistModel.cpp, MixerModel.cpp,
+// Buses.cpp and model/base/ (through these functions, the conversion's readers of one field, TracksValue.h, or the schema's
+// names), by file and function, each with whose it is:
+//   - model/mixer/Mixer.cpp, the channels' readers: canHoldInstrument() (insertDevice()'s, setInstrument()'s and
+//     placeDevice()'s check), needsInstrument(), getDeviceChannel() (a device's TRACK by its parents), the master's and each
+//     channel's element in getDeviceOutline() and getSongDeviceOutline(), insertDevice() (a plain folder's chain),
+//     copyDevices() (both tracks' kinds), removeDevice() (a bus's switch), placeDevice(), getFader(), getVolumeParameterID(),
+//     getPanParameterID(), findChannelOfFader(), getChannelVolume(), getChannelPan(), getReturnTracks(), and
+//     setChannelVolume() and setChannelPan(), the tracks' narrow setters, which write the one property a drag's event sets by
+//     the setters' rule (TracksValue.h: writeTrackProperty()); the sends' there: getSendValue(), getSendValues(), addSend(),
 //     takeSendsOf() (the keeper's) and chooseSendClash() (a merge's); the devices' there: findChainState() (a channel's chain
 //     by its TRACK or MASTER) and what reads a chain through it (getDevices(), getInstrument(), hasInstrument(),
 //     getDeviceSoundFiles(), getChannelDeviceValues(), getDeviceChannelPlace()), and getItemIDs()' walk of the IDs the tree
 //     holds.
-//   - model/notes/Notes.cpp, the tracks' key kept there (the writers' piece): getTrackKey(), setTrackKey(), applyLastKey();
-//     and chooseNoteClash() (a merge's path).
+//   - model/notes/Notes.cpp, the tracks' key read there: getTrackKey(); and chooseNoteClash() (a merge's path).
 //   - model/automation/Automation.cpp: isParameterValue() (a tree callback's test).
-//   - The writers (the writers' piece): model/devices/DrumKit.cpp: givePadItsOwnTrack(); model/transport/RecordingModel.cpp:
-//     findTrack() (its helper), setTrackInput(), setInputMonitoring(), addTrackForInput().
+//   - A merge's choice of a whole track or the master (the versions' piece): this file's chooseTrackClash().
 //   - Walks that read one field of each track from the elements the song's index gives: model/mixer/Sidechain.cpp:
 //     getSoundTracks(), getTracksFedBy(), describeTracksToListenTo().
 // The tracks' switches and view are areas of the song's values, read and written by ID (getTrackSwitches(), getTrackView()
@@ -417,7 +500,7 @@ void deleteTracks (Song&, const std::vector<TrackID>&, Selection*);
 //   - Not their devices, containers and chains, nor what the devices' store holds of them (kept by ID): the song's tree still
 //     holds them under the TRACK, and they go and come back with it until the devices' switch, which adds their line here.
 //   - Not a move: a track JUCE moves to another parent (taken out and put in again, the same element) keeps what it holds by
-//     the keeper, which remembers it as it goes and gives it back as it comes, in the same step: moveTrackState() and its
+//     the keeper, which remembers it as it goes and gives it back as it comes, in the same step: setTrackPlace() and its
 //     callers (moveTracksTo(), moveTracksAfter(), moveSelectedTracks(), moveTrackIntoFolder(), groupIntoFolder(), the tracks
 //     ungroupFolder() takes out of its folder, the clipboard's track for a paste, the mixer's setOutput()), a line's folder's
 //     tracks hoisted as it goes and the song's own line's tracks put in another folder (ApplySong.cpp: makeTrackLikeIn(),

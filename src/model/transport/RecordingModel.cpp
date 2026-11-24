@@ -27,15 +27,6 @@ namespace
         return session != nullptr ? &session->getRecorder() : nullptr;
     }
 
-    // A track's element in the open song, if it is a track (not a folder or the master), or else invalid: what the writers of
-    // its input and its monitoring write (setTrackInput(), setInputMonitoring()); the readers read by its ID.
-    juce::ValueTree findTrack (const ProjectContext& context, TrackID id)
-    {
-        auto* song = findSong (context);
-        const auto state = song != nullptr && id.isValid() ? findTrackState (*song, id) : juce::ValueTree();
-        return state.hasType (schema::TRACK) && ! isFolderState (state) ? state : juce::ValueTree();
-    }
-
     // Whether the open song holds a track that can record (not a folder or the master): a track or a return, by its kind.
     bool canHoldInput (const ProjectContext& context, TrackID id)
     {
@@ -88,18 +79,13 @@ juce::String getLastInput (const ProjectContext& context)
 void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inputID)
 {
     auto* song = findSong (context);
-    auto track = findTrack (context, id);
 
-    if (song == nullptr || ! track.isValid() || ! canRecordAudio (context, id)
+    if (song == nullptr || ! canHoldInput (context, id) || ! canRecordAudio (context, id)
         || (inputID.isNotEmpty() && getInputChannels (inputID).empty()))
         return;
 
     const UndoStep step (*song, "Change Input");
-
-    if (inputID.isEmpty())
-        track.removeProperty (schema::trackInput, &song->getUndoManager());
-    else
-        track.setProperty (schema::trackInput, inputID, &song->getUndoManager());
+    setTrackFields (*song, id, [&inputID] (TrackValue& value) { value.input = inputID; });
 
     // The input chosen last comes first in the next track's list: remembered, not an undo step.
     if (inputID.isNotEmpty())
@@ -124,19 +110,15 @@ InputMonitoring getInputMonitoring (const ProjectContext& context, TrackID id)
 void setInputMonitoring (ProjectContext& context, TrackID id, InputMonitoring monitoring)
 {
     auto* song = findSong (context);
-    auto track = findTrack (context, id);
 
-    if (song == nullptr || ! track.isValid() || ! canRecordAudio (context, id))
+    if (song == nullptr || ! canHoldInput (context, id) || ! canRecordAudio (context, id))
         return;
 
     const UndoStep step (*song, "Change Input Monitoring");
-    auto* undoManager = &song->getUndoManager();
-
-    if (monitoring == InputMonitoring::whileArmed)
-        track.removeProperty (schema::trackMonitoring, undoManager);
-    else
-        track.setProperty (schema::trackMonitoring, monitoring == InputMonitoring::always ? schema::monitorAlways : schema::monitorNever,
-                           undoManager);
+    const auto held = monitoring == InputMonitoring::always  ? TrackValue::Monitoring::always
+                      : monitoring == InputMonitoring::never ? TrackValue::Monitoring::never
+                                                             : TrackValue::Monitoring::whileArmed;
+    setTrackFields (*song, id, [held] (TrackValue& value) { value.monitoring = held; });
 }
 
 bool isArmed (const ProjectContext& context, TrackID id)
@@ -379,8 +361,12 @@ TrackID addTrackForInput (ProjectContext& context, const juce::String& inputID)
         for (int number = 2; names.contains (name); ++number)
             name = "Audio " + juce::String (number);
 
-        setTrackName (*song, track, name);
-        findTrackState (*song, track).setProperty (schema::trackInput, inputID, &song->getUndoManager());
+        setTrackFields (*song, track,
+                        [&name, &inputID] (TrackValue& value)
+                        {
+                            value.name = name;
+                            value.input = inputID;
+                        });
     }
 
     // The input chosen last comes first in the next track's list, and the track records it: neither is an undo step.

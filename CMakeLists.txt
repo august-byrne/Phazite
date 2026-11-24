@@ -308,6 +308,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/TimelineModel.h
     src/model/arrangement/TrackColours.cpp
     src/model/arrangement/TrackColours.h
+    src/model/arrangement/TrackWriters.cpp
     src/model/arrangement/Tracks.cpp
     src/model/arrangement/Transients.cpp
     src/model/arrangement/internal/Arrangement.h
@@ -1611,6 +1612,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TrackHoldingsTests.cpp
         tests/TrackReadersTests.cpp
         tests/TrackTests.cpp
+        tests/TrackWritersTests.cpp
         tests/TracksValueTests.cpp
         tests/TransportModelTests.cpp
         tests/TruePeakTests.cpp

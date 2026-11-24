@@ -82,11 +82,16 @@ void makeBus (Song& song, TrackID folder)
         return;
 
     // A fader of its own in place of its VCA, which plays at the folder's volume (the song's: Schema.h channelVolume).
-    auto* undo = &song.getUndoManager();
-    auto state = findTrackState (song, folder);
     const auto was = getVolume (song, folder);
-    state.removeProperty (schema::channelVCA, undo);
-    state.setProperty (schema::channelFader, (juce::int64) song.makeID(), undo);
+    const auto fader = DeviceID::fromRaw (song.makeID());
+
+    setTrackFields (song, folder,
+                    [fader] (TrackValue& value)
+                    {
+                        value.vca = {};
+                        value.fader = fader;
+                    });
+
     followVolume (song, folder, was);
 }
 
@@ -98,8 +103,6 @@ void makePlainFolder (Song& song, TrackID folder)
     // A VCA of its own in place of its fader, at the folder's volume; its devices go from the song too (what its plug-ins keep
     // of their own stored first, so that an undo brings them back as they were), and the sidechains that listened to it hear
     // the sound passing through them again.
-    auto* undo = &song.getUndoManager();
-    auto state = findTrackState (song, folder);
     song.storeDeviceStates (folder.getRaw());
 
     for (const auto device : getDevices (song, folder))
@@ -108,8 +111,15 @@ void makePlainFolder (Song& song, TrackID folder)
     forgetSidechainsOfBus (song, folder);
 
     const auto was = getVolume (song, folder);
-    state.removeProperty (schema::channelFader, undo);
-    state.setProperty (schema::channelVCA, (juce::int64) song.makeID(), undo);
+    const auto vca = DeviceID::fromRaw (song.makeID());
+
+    setTrackFields (song, folder,
+                    [vca] (TrackValue& value)
+                    {
+                        value.fader = {};
+                        value.vca = vca;
+                    });
+
     followVolume (song, folder, was); // and what named its devices goes with them
 }
 
@@ -117,7 +127,7 @@ void mixAsBus (Song& song, TrackID folder)
 {
     makeBus (song, folder);
 
-    if (auto state = findTrackState (song, folder); isFolderState (state))
-        state.setProperty (schema::folderBus, true, &song.getUndoManager());
+    if (isFolder (song, folder))
+        setTrackFields (song, folder, [] (TrackValue& value) { value.bus = true; });
 }
 } // namespace phazite

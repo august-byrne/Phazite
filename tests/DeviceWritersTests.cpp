@@ -36,6 +36,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
@@ -88,7 +89,10 @@ std::function<void()> inStep (phazite::Song& song, const juce::String& name, std
 }
 
 // An element with every ID it holds or names written as the order in which it first appears ("#0", "#1"...), as text: what
-// two elements hold alike but for the IDs a copy gives (Schema.h: giveNewIDs()) and in the same order, compared.
+// two elements hold alike but for the IDs a copy gives (Schema.h: giveNewIDs()) and in the same order, compared. Written as a
+// project file writes it (SongText.h: writeProjectText()), each element's properties in the order of their names, so that the
+// order they were set in is no difference (an element written from its value, a copy's, sets them in its writer's order); its
+// children in their order, which is.
 juce::String withIDsInOrder (const std::vector<juce::ValueTree>& elements)
 {
     std::map<std::uint64_t, int> order;
@@ -116,7 +120,9 @@ juce::String withIDsInOrder (const std::vector<juce::ValueTree>& elements)
     {
         auto copy = element.createCopy();
         rename (copy);
-        text << copy.toXmlString();
+        juce::MemoryOutputStream written;
+        phazite::writeProjectText (written, copy);
+        text << written.toString();
     }
 
     return text;
