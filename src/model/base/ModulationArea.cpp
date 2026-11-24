@@ -320,7 +320,8 @@ void SongValues::ModulationKeeper::remember (const juce::ValueTree& owner, SongM
     // brought back by an undo since, which gave its modulators back itself).
     Remembered gone { owner, {} };
 
-    const auto take = [&next, &gone] (const immer::flex_vector<ModulatorID>& order)
+    // The list by value: each modulator taken out makes the next value, which frees the list it was held in.
+    const auto take = [&next, &gone] (const immer::flex_vector<ModulatorID> order)
     {
         for (const auto id : order)
         {
