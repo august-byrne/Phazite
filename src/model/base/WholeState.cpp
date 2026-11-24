@@ -12,6 +12,7 @@
 #include "internal/SectionsArea.h"
 #include "internal/SendsArea.h"
 #include "internal/TempoMapArea.h"
+#include "internal/TracksArea.h"
 
 namespace phazite
 {
@@ -53,6 +54,9 @@ namespace
         if (leadsToDevices (parent, child)) // the track list, a track or a folder's tracks, the master, for the devices
             return true;
 
+        if (leadsToTrackLeaves (parent, child)) // the track list, a track or a folder's tracks, the master: switches, view
+            return true;
+
         return false;
     }
 
@@ -73,6 +77,8 @@ namespace
         writeMidiLinksIn (element, kept);
         writeCurvesIn (element, kept);
         writeSectionsIn (element, kept);    // the sections in the song's SECTIONS: SectionsArea.h
+        writeTrackLeavesIn (element, kept); // a TRACK's or the MASTER's switches and view, its LANES after its clips, devices
+                                            // and a folder's tracks, before what the next two add: TracksArea.h
         writeModulationIn (element, kept);  // a TRACK's, the MASTER's or a CONTAINER's modulators and macros: ModulationArea.h
         writeSendsIn (element, kept);       // a TRACK's sends, after its modulators and macros (the last of its
                                             // children): SendsArea.h
@@ -130,6 +136,8 @@ ValuesKept keepValues (const Song& song)
         kept.deviceStore = values->deviceStore.get();
         kept.devicesOutside = values->devicesOutside.get();
         kept.devices = values->devices.get();
+        kept.trackSwitches = values->trackSwitches.get();
+        kept.tracksOutside = values->tracksOutside.get();
     }
 
     return kept;
@@ -180,6 +188,9 @@ bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, con
         return false;
 
     if (! holdSameDeviceStoreOf (element, kept, otherElement, otherKept)) // then what a device or a chain stores
+        return false;
+
+    if (! holdSameTrackSwitchesOf (element, kept, otherElement, otherKept)) // then a track's switches, the master's mode
         return false;
 
     return true;

@@ -13,6 +13,8 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TrackSwitchesValue.h"
+#include "model/base/internal/TracksOutside.h"
 #include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
@@ -310,6 +312,8 @@ struct Changed
     juce::Identifier changedProperty;
     juce::Identifier parentType {}; // of the element changed, and its key: where a modulation is found (findModulationState())
     juce::String parentKey {};
+    phazite::TrackID channel {}; // of a track's leaf changed, or a lane's: its track's (findChannelState())
+    bool channelIsMaster = false;
 
     Changed (const schema::Element& type, const juce::Identifier& property, const juce::var& value,
              const schema::Tables& tables = schema::getTables())
@@ -338,11 +342,18 @@ struct Changed
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
             || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element)
             || isCurveElement (element) || isSection (element) || isModulation (element) || isSend (element) || isStoreEntry (element)
-            || isDeviceItem (element))
+            || isDeviceItem (element) || isTrackLeaf (element, property))
         {
+            if (isTrackLeaf (element, property))
+            {
+                const auto channelElement = element.hasType (schema::LANE) ? element.getParent().getParent() : element;
+                channelIsMaster = channelElement.hasType (schema::MASTER);
+                channel = phazite::TrackID::fromRaw (phazite::readID (channelElement[schema::trackID]));
+            }
+
             if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element) && ! isCurveElement (element)
                 && ! isSection (element) && ! isModulation (element) && ! isSend (element) && ! isStoreEntry (element)
-                && ! isDeviceItem (element))
+                && ! isDeviceItem (element) && ! isTrackLeaf (element, property))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -397,6 +408,22 @@ struct Changed
     }
 
     static bool isSend (const juce::ValueTree& element) { return element.hasType (schema::SEND); }
+
+    // A track's or the master's switch or view property, or a lane's: the tracks' switches' and view's (TrackSwitchesValue.h,
+    // TracksOutside.h), which the song holds beside its tree.
+    static bool isTrackLeaf (const juce::ValueTree& element, const juce::Identifier& property)
+    {
+        return element.hasType (schema::LANE) || phazite::isSwitchProperty (element, property)
+               || phazite::isViewProperty (element, property);
+    }
+
+    // The opened song's channel (a TRACK by its ID, or the MASTER) in its whole state, where the element changed is a track's
+    // leaf or one of its lanes.
+    juce::ValueTree findChannelState() const
+    {
+        const auto whole = phazite::copyWholeSong (*opened);
+        return channelIsMaster ? whole.getChildWithName (schema::MASTER) : phazite::test::findTrackIn (whole, channel);
+    }
 
     // A plug-in's value set by hand, the devices' store's (DeviceStoreValue.h), which the song holds beside its tree.
     static bool isStoreEntry (const juce::ValueTree& element)
@@ -463,13 +490,19 @@ struct Changed
     juce::ValueTree findOpened() const
     {
         REQUIRE (opened != nullptr);
-        const auto clipState = isTempoMapEntry (original)    ? phazite::copyWholeSong (*opened).getChildWithName (schema::TEMPOMAP)
-                               : isChordLaneEntry (original) ? phazite::copyWholeSong (*opened).getChildWithName (schema::CHORDLANE)
-                               : isMidiLink (original)       ? phazite::copyWholeSong (*opened).getChildWithName (schema::MIDILINKS)
-                               : isCurveElement (original)   ? findCurveState()
-                               : isSection (original)        ? phazite::copyWholeSong (*opened).getChildWithName (schema::SECTIONS)
-                               : isModulation (original)     ? findModulationState()
-                               : isSend (original)           ? findModulationState()
+
+        // A track's or the master's leaf: its channel itself, as whole state writes it.
+        if (isTrackLeaf (original, changedProperty) && ! original.hasType (schema::LANE))
+            return findChannelState();
+
+        const auto clipState = original.hasType (schema::LANE) ? findChannelState().getChildWithName (schema::LANES)
+                               : isTempoMapEntry (original)    ? phazite::copyWholeSong (*opened).getChildWithName (schema::TEMPOMAP)
+                               : isChordLaneEntry (original)   ? phazite::copyWholeSong (*opened).getChildWithName (schema::CHORDLANE)
+                               : isMidiLink (original)         ? phazite::copyWholeSong (*opened).getChildWithName (schema::MIDILINKS)
+                               : isCurveElement (original)     ? findCurveState()
+                               : isSection (original)          ? phazite::copyWholeSong (*opened).getChildWithName (schema::SECTIONS)
+                               : isModulation (original)       ? findModulationState()
+                               : isSend (original)             ? findModulationState()
                                : original.hasType (schema::VALUE) || isDeviceItem (element)
                                    ? findModulationState() // a plug-in's value, a device's (the copy has no parent)
                                    : phazite::copyWholeClip (*opened, clip);

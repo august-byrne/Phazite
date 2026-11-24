@@ -54,12 +54,6 @@ namespace
         return engine::Curve (std::move (points));
     }
 
-    // A device's ID as a lane keeps it (read through the tracks' view's conversion: TracksOutside.h, readLaneValue()).
-    juce::String writeDeviceID (DeviceID id)
-    {
-        return juce::String ((juce::int64) id.getRaw());
-    }
-
     // A parameter's position at a beat as its curve has it, as Phazite's engine plays it; without points, its value set by
     // hand's.
     float getCurvePositionAt (const Song& song, const ParameterRef& ref, const CurveValue& curve, BeatPosition beat)
@@ -586,16 +580,9 @@ namespace
     }
 
     //==============================================================================
-    ParameterRef readLane (const juce::ValueTree& lane)
+    ParameterRef readLane (const LaneValue& lane)
     {
-        const auto value = readLaneValue (lane); // the tracks' view's conversion (TracksOutside.h)
-        return { value.device, value.parameter };
-    }
-
-    void writeLane (juce::ValueTree& lane, const ParameterRef& parameter)
-    {
-        lane.setProperty (schema::laneDevice, writeDeviceID (parameter.device), nullptr);
-        lane.setProperty (schema::laneParameter, parameter.parameter, nullptr);
+        return { lane.device, lane.parameter };
     }
 
     // The devices whose parameters a track's lanes show, in the order the lanes of their automation come: its channel's
@@ -642,31 +629,29 @@ namespace
         return std::numeric_limits<int>::max();
     }
 
-    // The lanes a track keeps (Schema.h: LANES), none while it has kept none. The element that holds them is added after
-    // the track's other elements as its first lane is kept, and stays: the undo history finds those other elements by their
-    // places, which neither a lane nor its holder may move, being changed outside it.
-    juce::ValueTree findLanesState (const Song& song, TrackID track)
+    // The lanes a track keeps (TracksOutside.h: its row's view, outside the undo history), none while it has kept none: a look
+    // in the view by its ID, no element read.
+    immer::flex_vector<LaneValue> getKeptLanes (const Song& song, TrackID track)
     {
-        return findTrackState (song, track).getChildWithName (schema::LANES);
+        return getTrackView (song, track).lanes;
     }
 
-    void keepLane (Song& song, TrackID track, const ParameterRef& parameter)
+    // A lane's place among a track's, or -1 for none.
+    int findLane (const immer::flex_vector<LaneValue>& lanes, const ParameterRef& parameter)
     {
-        if (auto state = findTrackState (song, track); state.isValid())
-        {
-            juce::ValueTree lane (schema::LANE);
-            writeLane (lane, parameter);
-            state.getOrCreateChildWithName (schema::LANES, nullptr).appendChild (lane, nullptr);
-        }
+        for (size_t i = 0; i < lanes.size(); ++i)
+            if (readLane (lanes[i]) == parameter)
+                return (int) i;
+
+        return -1;
     }
 
-    juce::ValueTree findLaneState (const Song& song, TrackID track, const ParameterRef& parameter)
+    LaneValue makeLane (const ParameterRef& parameter)
     {
-        for (const auto& lane : findLanesState (song, track))
-            if (readLane (lane) == parameter)
-                return lane;
-
-        return {};
+        LaneValue lane;
+        lane.device = parameter.device;
+        lane.parameter = parameter.parameter;
+        return lane;
     }
 
     // Whether a lane shows a parameter of a device on this track.
@@ -676,20 +661,24 @@ namespace
         return parameter.parameter.isNotEmpty() && std::find (devices.begin(), devices.end(), parameter.device) != devices.end();
     }
 
-    // Before a change to a track's lanes: it keeps one for each lane it shows without keeping one (of a parameter with
-    // automation), in the order they show, so that they stay in that order.
-    void keepShownLanes (Song& song, TrackID track)
+    // What a change to a track's lanes starts from: its view, keeping a lane for each lane it shows without keeping one (of a
+    // parameter with automation), after the others in the order they show, so that they stay in that order. The change then
+    // sets the view once (Tracks.h: setTrackView()).
+    TrackView withShownLanesKept (const Song& song, TrackID track)
     {
+        auto view = getTrackView (song, track);
+
         for (const auto& shown : getLanes (song, track))
-            if (! findLaneState (song, track, shown.parameter).isValid())
-                keepLane (song, track, shown.parameter);
+            if (findLane (view.lanes, shown.parameter) < 0)
+                view.lanes = view.lanes.push_back (makeLane (shown.parameter));
+
+        return view;
     }
 
-    // A track's write mode as the song keeps it (Schema.h: trackAutomationMode).
-    AutomationMode readAutomationMode (const juce::ValueTree& state)
+    // A track's write mode as the song keeps it (TrackSwitchesValue.h: none is read), and the switches' word for one.
+    AutomationMode toAutomationMode (const SavedAutomationMode* mode)
     {
-        // The switches' conversion (TrackSwitchesValue.h): none is read.
-        if (const auto mode = readSavedAutomationMode (state))
+        if (mode != nullptr)
         {
             switch (*mode)
             {
@@ -705,24 +694,21 @@ namespace
         return AutomationMode::read;
     }
 
-    void writeAutomationMode (juce::ValueTree& state, AutomationMode mode)
+    std::optional<SavedAutomationMode> toSavedMode (AutomationMode mode)
     {
         switch (mode)
         {
             case AutomationMode::touch:
-                state.setProperty (schema::trackAutomationMode, schema::automationTouch, nullptr);
-                break;
+                return SavedAutomationMode::touch;
             case AutomationMode::latch:
-                state.setProperty (schema::trackAutomationMode, schema::automationLatch, nullptr);
-                break;
+                return SavedAutomationMode::latch;
             case AutomationMode::write:
-                state.setProperty (schema::trackAutomationMode, schema::automationWrite, nullptr);
-                break;
+                return SavedAutomationMode::write;
             case AutomationMode::read:
-            default:
-                state.removeProperty (schema::trackAutomationMode, nullptr);
                 break;
         }
+
+        return std::nullopt;
     }
 
 } // namespace
@@ -1529,10 +1515,9 @@ std::vector<AutomationLane> getLanes (const Song& song, TrackID track)
 {
     std::vector<AutomationLane> lanes;
 
-    for (const auto& child : findLanesState (song, track))
+    for (const auto& lane : getKeptLanes (song, track))
     {
-        const auto lane = readLaneValue (child); // the tracks' view's conversion (TracksOutside.h)
-        const ParameterRef parameter { lane.device, lane.parameter };
+        const auto parameter = readLane (lane);
         const auto height =
             juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight, lane.height.value_or (AutomationLane::defaultHeight));
 
@@ -1569,55 +1554,87 @@ void showLane (Song& song, TrackID track, const ParameterRef& parameter)
     if (! isOnTrack (song, track, parameter))
         return;
 
-    keepShownLanes (song, track);
+    // Expanded where it is kept, else kept after the others; the view set once.
+    auto view = withShownLanesKept (song, track);
 
-    if (auto lane = findLaneState (song, track, parameter); lane.isValid())
-    {
-        lane.removeProperty (schema::laneCollapsed, nullptr);
-        return;
-    }
+    if (const auto index = findLane (view.lanes, parameter); index >= 0)
+        view.lanes = view.lanes.update ((size_t) index,
+                                        [] (LaneValue lane)
+                                        {
+                                            lane.collapsed = false;
+                                            return lane;
+                                        });
+    else
+        view.lanes = view.lanes.push_back (makeLane (parameter));
 
-    keepLane (song, track, parameter);
+    setTrackView (song, track, std::move (view));
 }
 
 void removeLane (Song& song, TrackID track, const ParameterRef& parameter)
 {
-    // From the element that holds the track's lanes alone, which stays, so that the track's other elements keep their places.
-    if (auto lane = findLaneState (song, track, parameter); lane.isValid())
-        lane.getParent().removeChild (lane, nullptr);
+    // The view's lanes without it (none kept: no LANES is written for a track without one).
+    auto view = getTrackView (song, track);
+
+    if (const auto index = findLane (view.lanes, parameter); index >= 0)
+    {
+        view.lanes = view.lanes.erase ((size_t) index);
+        setTrackView (song, track, std::move (view));
+    }
 }
 
 void replaceLane (Song& song, TrackID track, const ParameterRef& parameter, const ParameterRef& replacement)
 {
-    keepShownLanes (song, track);
-    auto lane = findLaneState (song, track, parameter);
+    // The shown lanes kept first, as every change of a track's lanes keeps them, whether or not it replaces anything.
+    auto view = withShownLanesKept (song, track);
 
-    if (! lane.isValid() || parameter == replacement || ! isOnTrack (song, track, replacement))
-        return;
+    if (findLane (view.lanes, parameter) >= 0 && parameter != replacement && isOnTrack (song, track, replacement))
+    {
+        // A lane that shows the replacement already moves here, its height and its switch staying with the lane replaced.
+        if (const auto shown = findLane (view.lanes, replacement); shown >= 0)
+            view.lanes = view.lanes.erase ((size_t) shown);
 
-    removeLane (song, track, replacement); // a lane that shows it already moves here
-    writeLane (lane, replacement);
+        view.lanes = view.lanes.update ((size_t) findLane (view.lanes, parameter),
+                                        [&replacement] (LaneValue lane)
+                                        {
+                                            lane.device = replacement.device;
+                                            lane.parameter = replacement.parameter;
+                                            return lane;
+                                        });
+    }
+
+    setTrackView (song, track, std::move (view));
 }
 
 void setLaneHeight (Song& song, TrackID track, const ParameterRef& parameter, int height)
 {
-    keepShownLanes (song, track);
+    // Its default height as none, as a lane never resized has (TracksOutside.h: LaneValue).
+    auto view = withShownLanesKept (song, track);
+    const auto limited = juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight, height);
 
-    if (auto lane = findLaneState (song, track, parameter); lane.isValid())
-        lane.setProperty (schema::laneHeight, juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight, height), nullptr);
+    if (const auto index = findLane (view.lanes, parameter); index >= 0)
+        view.lanes = view.lanes.update ((size_t) index,
+                                        [limited] (LaneValue lane)
+                                        {
+                                            lane.height = limited != AutomationLane::defaultHeight ? std::optional (limited) : std::nullopt;
+                                            return lane;
+                                        });
+
+    setTrackView (song, track, std::move (view));
 }
 
 void setLaneCollapsed (Song& song, TrackID track, const ParameterRef& parameter, bool collapsed)
 {
-    keepShownLanes (song, track);
+    auto view = withShownLanesKept (song, track);
 
-    if (auto lane = findLaneState (song, track, parameter); lane.isValid())
-    {
-        if (collapsed)
-            lane.setProperty (schema::laneCollapsed, true, nullptr);
-        else
-            lane.removeProperty (schema::laneCollapsed, nullptr);
-    }
+    if (const auto index = findLane (view.lanes, parameter); index >= 0)
+        view.lanes = view.lanes.update ((size_t) index,
+                                        [collapsed] (LaneValue lane)
+                                        {
+                                            lane.collapsed = collapsed;
+                                            return lane;
+                                        });
+
+    setTrackView (song, track, std::move (view));
 }
 
 void copyCurves (Song& song, const CopiedIDs& copied)
@@ -1646,22 +1663,25 @@ void copyCurves (Song& song, const CopiedIDs& copied)
 
 AutomationMode getAutomationMode (const Song& song, TrackID track)
 {
-    return readAutomationMode (findTrackState (song, track));
+    // A look in the switches by its key (Tracks.h: the master's 0).
+    const auto key = findSwitchKey (song, track);
+    return key.has_value() ? toAutomationMode (getTrackSwitches (song).modes.find (*key)) : AutomationMode::read;
 }
 
 void setAutomationMode (Song& song, TrackID track, AutomationMode mode)
 {
-    if (auto state = findTrackState (song, track); state.isValid())
-        writeAutomationMode (state, mode);
+    // Outside the history, as mute and solo are (the menus, the inspector, the automation writer's latch): one entry set.
+    if (const auto key = findSwitchKey (song, track))
+        setTrackSwitches (song, withAutomationMode (getTrackSwitches (song), *key, toSavedMode (mode)), false);
 }
 
 bool isWritingAutomation (const Song& song)
 {
-    // Each channel's mode read from the element the song's index gives it (TrackSwitchesValue.h), the master's too.
-    auto states = getTrackStates (song);
-    states.push_back (findTrackState (song, getMasterID (song)));
-    return std::any_of (states.begin(), states.end(),
-                        [] (const juce::ValueTree& state) { return readAutomationMode (state) != AutomationMode::read; });
+    // Each mode the switches hold that isn't read, of a channel the song holds (the master's under 0; one a step took away
+    // keeps its entry, for an Undo).
+    const auto modes = getTrackSwitches (song).modes;
+    return std::any_of (modes.begin(), modes.end(), [&song] (const auto& entry)
+                        { return entry.first == 0 || findTrackState (song, TrackID::fromRaw (entry.first)).hasType (schema::TRACK); });
 }
 
 bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)

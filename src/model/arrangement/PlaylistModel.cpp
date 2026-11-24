@@ -43,15 +43,17 @@ namespace
 
     // A track's row; its color is its row's in the palette unless it has its own. The master's is gray. Without the colors
     // of the folders it is in, which getPlaylistRows() knows from the folders before it. Each field read alone from the
-    // element the song's index found (TracksValue.h, TrackSwitchesValue.h, TracksOutside.h: the readers of one field), never
-    // the track whole: a row is made at every paint of the audio clip editor and every event of a drag.
+    // element the song's index found (TracksValue.h: the readers of one field), its view and its frozen switch by a look in
+    // their values (Tracks.h: getViewOf(), getTrackSwitches()), never the track whole: a row is made at every
+    // paint of the audio clip editor and every event of a drag.
     TrackRow makeRow (const Song& song, TrackID id, int index)
     {
         const auto state = findTrackState (song, id);
         const auto kind = readTrackKind (state);
+        const auto view = getViewOf (song, state);
         TrackRow row;
         row.id = id;
-        row.collapsed = readCollapsed (state).value_or (false); // the master's: its lanes are thin rows
+        row.collapsed = view.collapsed.value_or (false); // the master's: its lanes are thin rows
 
         if (kind == TrackValue::Kind::master)
         {
@@ -70,10 +72,10 @@ namespace
         for (auto folder = state.getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
             ++row.depth;
 
-        row.pinned = readPinned (state).value_or (false);
-        row.savedHeight = readSavedHeight (state);
+        row.pinned = view.pinned.value_or (false);
+        row.savedHeight = view.height;
         row.hasInstrument = kind != TrackValue::Kind::folder && hasInstrument (song, id);
-        row.frozen = readTrackFrozen (state);
+        row.frozen = getTrackSwitches (song).frozen.find (id.getRaw()) != nullptr;
         return row;
     }
 

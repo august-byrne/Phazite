@@ -309,7 +309,12 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
     (`mute="0"`) goes;
   - its view (a track's `height`, `collapsed`, `pinned`, `drumMode`, `drumOrder` and `drumHidden`; the master's `height`
     and `collapsed`) and each `LANE` of its `LANES` (`device`, `parameter`, `height`, `collapsed`): as Phazite writes
-    them, a lane's `collapsed="0"` going; its `LANES` stays where it is, empty or not;
+    them, a lane's `collapsed="0"` going; an empty `LANES` goes (the song holds its lanes beside its tree, as a list,
+    none for none), and its `LANES` is written after its clips, its devices and a folder's tracks, before its modulators
+    and its sends, so a file that held a folder's `LANES` between its tracks has it after them from its first save.
+    Phazite's own writers write none for a `pinned` switched off, an empty `drumOrder` or `drumHidden`, and a lane's
+    `height` set back to its default (`48`), where they wrote `pinned="0"`, `drumOrder=""` and `height="48"` (a
+    `collapsed` switched off is written `"0"` still, as it always was); a file that holds one of those keeps it as it is;
   - a property of a track's alone on the `MASTER` goes (its `kind`, `name`, `colour`, `bus`, `keyRoot`, `keyScale`,
     `input`, `monitoring`, `padDevice`, `pad`, `mute`, `solo`, `frozen`, `pinned`, `drumMode`, `drumOrder` and
     `drumHidden`): what no master holds, which Phazite's code read on it all the same, and which the song doesn't hold, so

@@ -23,8 +23,9 @@ namespace phazite
 //==============================================================================
 // What keeps the areas and the tree together for every change of the tree (SongValues.h), by asking every area's part of it
 // in turn, each doing nothing for what is not its own (ClipsArea.h, TempoMapArea.h, ChordLaneArea.h, CurvesArea.h,
-// MidiLinksArea.h, SectionsArea.h, ModulationArea.h, SendsArea.h, DeviceStoreArea.h, DevicesArea.h; and TracksArea.h, which
-// tells the tracks' listener from the tree while the tree holds them, and changes nothing). It changes the areas and the tree through the song's undo manager
+// MidiLinksArea.h, SectionsArea.h, ModulationArea.h, SendsArea.h, DeviceStoreArea.h, DevicesArea.h; and TracksArea.h, whose
+// tracks' part tells the tracks' listener from the tree while the tree holds them, changing nothing, and whose switches' and
+// view's part takes in what a TRACK or the MASTER comes with). It changes the areas and the tree through the song's undo manager
 // from inside the tree's callbacks, which run inside the perform() of the tree's own action: JUCE refuses that only while it
 // undoes or redoes (when the keeper does nothing), and adds the inner actions to the step before the outer one, so that Undo
 // takes the tree's change back before the areas'. JUCE workaround W62 (docs/juce-workarounds.md).
@@ -43,7 +44,8 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
           sends (v, s),
           deviceStore (v, s),
           devices (v, s),
-          tracks (v, s)
+          tracks (v, s),
+          trackLeaves (v, s)
     {
         state.addListener (this);
     }
@@ -64,7 +66,10 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     SendsKeeper sends;
     DeviceStoreKeeper deviceStore;
     DevicesKeeper devices;
-    TracksKeeper tracks; // tells the tracks' listener from the tree, in an undo and a redo too, until the tracks' switch
+    // The tracks' keeper tells the tracks' listener from the tree, in an undo and a redo too, until the tracks' switch; the
+    // leaves' keeper takes in the tracks' switches and view a TRACK or the MASTER comes with.
+    TracksKeeper tracks;
+    TrackLeavesKeeper trackLeaves;
 
     bool isUndoingOrRedoing() const { return song.getUndoManager().isPerformingUndoRedo(); }
 
@@ -93,7 +98,9 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     // sends are neither its clips nor its modulators, so each takes its own out of a track that came in with all three), then
     // the store's (what a DEVICE or a CHAIN that came holds of the store, which no other area holds anything of), then the
     // devices' last (a track, what holds tracks, the master, a DEVICE, a CONTAINER, a CHAIN, a VALUES or a SOUNDS), which take
-    // each DEVICE and CONTAINER out of the tree whole once modulation and the store took theirs out of them.
+    // each DEVICE and CONTAINER out of the tree whole once modulation and the store took theirs out of them, then the tracks'
+    // switches and view (a TRACK's or the MASTER's own properties of them and its LANES, which no other area holds anything
+    // of).
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
         tracks.childAdded (parent, child); // tells what came of the tracks, in an undo and a redo too
@@ -111,6 +118,7 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
         sends.childAdded (parent, child);
         deviceStore.childAdded (parent, child);
         devices.childAdded (parent, child);
+        trackLeaves.childAdded (parent, child);
     }
 
     // A child taken out: every area that acts there asked in turn, each doing nothing for what is not its own. The clips' (a
@@ -145,6 +153,7 @@ SongValues::SongValues (Song& song)
       sends (song.getUndoManager(), {}),
       deviceStore (song.getUndoManager(), {}),
       devices (song.getUndoManager(), {}),
+      trackSwitches (song.getUndoManager(), {}),
       clipsTeller (std::make_unique<ClipsTeller> (clips, listeners)),
       notesTeller (std::make_unique<NotesTeller> (notes, listeners)),
       tempoMapTeller (std::make_unique<TempoMapTeller> (tempoMap, listeners)),
@@ -155,7 +164,9 @@ SongValues::SongValues (Song& song)
       modulationTeller (std::make_unique<ModulationTeller> (modulation, listeners)),
       sendsTeller (std::make_unique<SendsTeller> (sends, listeners)),
       deviceStoreTeller (std::make_unique<DeviceStoreTeller> (*this, listeners)),
-      devicesTeller (std::make_unique<DevicesTeller> (devices, listeners))
+      devicesTeller (std::make_unique<DevicesTeller> (devices, listeners)),
+      trackSwitchesTeller (std::make_unique<TrackSwitchesTeller> (*this, listeners)),
+      tracksViewTeller (std::make_unique<TracksViewTeller> (*this, listeners))
 {
     // Each area with its teller, in the order of the areas; the keeper comes once the tree is consistent (adopt()). The
     // macro's statement ended again here, so that the formatter reads a body that holds nothing else.
@@ -168,6 +179,8 @@ SongValues::~SongValues()
 
     // The keeper first, then each area's teller, in the reverse of their making.
     keeper = nullptr;
+    tracksViewTeller = nullptr;
+    trackSwitchesTeller = nullptr;
     devicesTeller = nullptr;
     deviceStoreTeller = nullptr;
     sendsTeller = nullptr;
@@ -235,23 +248,14 @@ const SongTracks* SongValues::getTracksAsTold() const noexcept
     return keeper != nullptr ? &keeper->tracks.told : nullptr;
 }
 
-const TrackSwitches* SongValues::getTrackSwitchesAsTold() const noexcept
-{
-    return keeper != nullptr ? &keeper->tracks.switches : nullptr;
-}
-
-const TracksOutside* SongValues::getTracksViewAsTold() const noexcept
-{
-    return keeper != nullptr ? &keeper->tracks.view : nullptr;
-}
-
 void SongValues::adopt (Song& song)
 {
     // What the tree the loader made consistent holds of each area, into the area, outside the history, and out of the tree:
     // each area in turn, in this order (the clips with their notes, then the tempo map, then the chord lane, then the MIDI
-    // links, then the curves, then the sections, then modulation, then the sends, then the store, then the devices, last,
-    // which take every DEVICE, CONTAINER and CHAIN element out of the tree once modulation took a container's macros and the
-    // store what a device or a chain stores out of them: none reads another's); then the keeper, from here on.
+    // links, then the curves, then the sections, then modulation, then the sends, then the store, then the devices, which
+    // take every DEVICE, CONTAINER and CHAIN element out of the tree once modulation took a container's macros and the store
+    // what a device or a chain stores out of them, then the tracks' switches and view, last: none reads another's); then the
+    // keeper, from here on.
     ClipsKeeper::adopt (*this, song);
     TempoMapKeeper::adopt (*this, song);
     ChordLaneKeeper::adopt (*this, song);
@@ -262,6 +266,7 @@ void SongValues::adopt (Song& song)
     SendsKeeper::adopt (*this, song);
     DeviceStoreKeeper::adopt (*this, song);
     DevicesKeeper::adopt (*this, song);
+    TrackLeavesKeeper::adopt (*this, song);
     keeper = std::make_unique<Keeper> (*this, song);
 }
 

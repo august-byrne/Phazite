@@ -4,9 +4,11 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -255,6 +257,38 @@ bool TracksOutside::operator== (const TracksOutside& other) const
     return isSameAs (other) || (tracks == other.tracks && master == other.master);
 }
 
+TracksOutside withTrackView (const TracksOutside& outside, std::uint64_t id, TrackView view)
+{
+    const auto* held = outside.tracks.find (id);
+
+    if (view == TrackView())
+    {
+        if (held == nullptr)
+            return outside;
+
+        auto next = outside;
+        next.tracks = outside.tracks.erase (id);
+        return next;
+    }
+
+    if (held != nullptr && *held == view)
+        return outside;
+
+    auto next = outside;
+    next.tracks = outside.tracks.set (id, std::move (view));
+    return next;
+}
+
+TracksOutside withMasterView (const TracksOutside& outside, TrackView view)
+{
+    if (outside.master == view)
+        return outside;
+
+    auto next = outside;
+    next.master = std::move (view);
+    return next;
+}
+
 TrackView readViewOf (const juce::ValueTree& element)
 {
     return readView (element, false);
@@ -263,16 +297,6 @@ TrackView readViewOf (const juce::ValueTree& element)
 TrackView readHeldViewOf (const juce::ValueTree& element)
 {
     return readView (element, true);
-}
-
-void readHeldViewProperty (const juce::ValueTree& element, const juce::Identifier& property, TrackView& view)
-{
-    if (! isTrackOrMaster (element))
-        return;
-
-    for (const auto* each : getViewProperties())
-        if (each->getName() == property)
-            readViewProperty (element, *each, true, view);
 }
 
 immer::flex_vector<LaneValue> readHeldLanesOf (const juce::ValueTree& element)
@@ -375,6 +399,41 @@ bool keepViewAsHeld (juce::ValueTree element)
     return true;
 }
 
+bool holdsViewIn (const juce::ValueTree& element)
+{
+    if (! isTrackOrMaster (element))
+        return false;
+
+    for (const auto* property : getViewProperties())
+        if (isDescribedOn (element, *property) && element.hasProperty (*property))
+            return true;
+
+    return element.getChildWithName (schema::LANES).isValid();
+}
+
+bool isViewProperty (const juce::ValueTree& element, const juce::Identifier& property)
+{
+    if (! isTrackOrMaster (element))
+        return false;
+
+    return std::any_of (getViewProperties().begin(), getViewProperties().end(),
+                        [&element, &property] (const auto* each) { return each->getName() == property && isDescribedOn (element, *each); });
+}
+
+void takeViewOutOf (juce::ValueTree element, juce::UndoManager* undo)
+{
+    if (! isTrackOrMaster (element))
+        return;
+
+    for (const auto* property : getViewProperties())
+        if (isDescribedOn (element, *property) && element.hasProperty (*property))
+            element.removeProperty (*property, undo);
+
+    for (auto i = element.getNumChildren(); --i >= 0;)
+        if (element.getChild (i).hasType (schema::LANES))
+            element.removeChild (i, undo);
+}
+
 TracksOutside readTracksOutside (const juce::ValueTree& song)
 {
     TracksOutside outside;
@@ -430,15 +489,5 @@ std::optional<bool> readPinned (const juce::ValueTree& element)
 std::optional<bool> readDrumMode (const juce::ValueTree& element)
 {
     return readSwitchOf (element, schema::drumMode);
-}
-
-juce::String readDrumOrder (const juce::ValueTree& element)
-{
-    return readTextOf (element, schema::drumOrder).value_or (juce::String());
-}
-
-juce::String readDrumHidden (const juce::ValueTree& element)
-{
-    return readTextOf (element, schema::drumHidden).value_or (juce::String());
 }
 } // namespace phazite

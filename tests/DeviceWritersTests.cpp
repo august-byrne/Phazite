@@ -718,11 +718,12 @@ TEST_CASE ("Device writers: a track duplicated holds its devices before its lane
     }
 }
 
-TEST_CASE ("Device writers: a bus folder duplicated holds its children in the original's order: its devices, then its tracks and "
-           "its lanes as they stood")
+TEST_CASE ("Device writers: a bus folder duplicated holds its children in the original's order: its devices, then its tracks, "
+           "then its lanes")
 {
-    // A bus with an effect, its lane shown while it held one track, then a second track moved into it: its devices first (as
-    // whole state writes them), then its first track, its lanes, its second track.
+    // A bus with an effect, its lane shown while it held one track, then a second track moved into it: its children in the
+    // order whole state writes them, its devices first, then its tracks, then its lanes (a folder's LANES has no place among
+    // its tracks: the song holds no LANES element, its lanes are the view's, written after the folder's tracks).
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     const auto second = s.addTrack ("Second");
@@ -738,7 +739,7 @@ TEST_CASE ("Device writers: a bus folder duplicated holds its children in the or
     const auto original = getWrittenTrack (song, bus);
     const auto types = getChildTypes (original);
     const auto track = schema::TRACK.getName().toString();
-    REQUIRE (types == juce::StringArray { schema::DEVICE.getName().toString(), track, schema::LANES.getName().toString(), track });
+    REQUIRE (types == juce::StringArray { schema::DEVICE.getName().toString(), track, track, schema::LANES.getName().toString() });
 
     phazite::test::UndoCheck undo (s.context);
     std::vector<TrackID> copies;

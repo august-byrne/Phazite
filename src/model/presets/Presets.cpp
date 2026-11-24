@@ -33,6 +33,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -1184,11 +1185,24 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
     if (const auto colour = saved[keys::colour].toString(); colour.isNotEmpty())
         setTrackColour (song, track, juce::Colour::fromString (colour));
 
-    for (const auto& [property, key] :
-         { std::pair { &schema::drumMode.getName(), &keys::drumMode }, std::pair { &schema::drumOrder.getName(), &keys::drumOrder },
-           std::pair { &schema::drumHidden.getName(), &keys::drumHidden } })
-        if (saved.hasProperty (*key))
-            findTrackState (song, track).setProperty (*property, saved[*key], nullptr); // view state
+    // Its drum view, view state outside the history (Tracks.h: setTrackView()), each as the view's reader reads it from a
+    // file (TracksOutside.h: a switch as a cast's bool, the rows as text); an empty order or hidden list as none, as the drum
+    // rows' writers write none for an empty list (Notes.h: setDrumRowOrder()).
+    if (saved.hasProperty (keys::drumMode) || saved.hasProperty (keys::drumOrder) || saved.hasProperty (keys::drumHidden))
+    {
+        auto view = getTrackView (song, track);
+
+        if (saved.hasProperty (keys::drumMode))
+            view.drumMode = (bool) saved[keys::drumMode];
+
+        if (const auto order = saved[keys::drumOrder].toString(); order.isNotEmpty())
+            view.drumOrder = order;
+
+        if (const auto hidden = saved[keys::drumHidden].toString(); hidden.isNotEmpty())
+            view.drumHidden = hidden;
+
+        setTrackView (song, track, std::move (view));
+    }
 
     // A volume or a pan that is no finite number leaves the track's as it is (as 0 it would be a guess: 0 dB, or the middle).
     constexpr auto noNumber = std::numeric_limits<float>::quiet_NaN();

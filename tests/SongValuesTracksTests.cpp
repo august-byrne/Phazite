@@ -317,14 +317,14 @@ struct Watched
         Heard heard;
         const auto projectBefore = s.getProject().getChangeCount();
         heard.before = phazite::getTracksValue (song);
-        heard.switchesBefore = phazite::readTrackSwitches (song.getState());
-        heard.viewBefore = phazite::readTracksOutside (song.getState());
+        heard.switchesBefore = phazite::readTrackSwitches (phazite::test::copyWholeSong (song));
+        heard.viewBefore = phazite::readTracksOutside (phazite::test::copyWholeSong (song));
         change();
         heard.told = told;
         heard.project = s.getProject().getChangeCount() - projectBefore;
         heard.after = phazite::getTracksValue (song);
-        heard.switchesAfter = phazite::readTrackSwitches (song.getState());
-        heard.viewAfter = phazite::readTracksOutside (song.getState());
+        heard.switchesAfter = phazite::readTrackSwitches (phazite::test::copyWholeSong (song));
+        heard.viewAfter = phazite::readTracksOutside (phazite::test::copyWholeSong (song));
         return heard;
     }
 

@@ -32,6 +32,7 @@
 #include <set>
 #include <tuple>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -2417,10 +2418,9 @@ juce::String getDrumName (int note)
 
 bool isDrumTrack (const Song& song, TrackID track)
 {
-    // Its drum mode set by hand, the tracks' view kept in this file, through the view's conversion (TracksOutside.h): the
-    // drum rows' readers' element, which the tracks' view's piece moves (Tracks.h names it).
-    if (const auto drumMode = readDrumMode (findTrackState (song, track)))
-        return *drumMode;
+    // Its drum mode set by hand, as its row's view holds it (Tracks.h: getTrackView(), a look in the view by its ID).
+    if (const auto view = getTrackView (song, track); view.drumMode.has_value())
+        return *view.drumMode;
 
     // Else as its instrument says, a track's the song has: a drum sampler (Mixer.h: getDeviceOutline(), its devices by their
     // IDs, one look through its chain and no walk of the song, where its instrument's ID alone would need a walk to its type).
@@ -2436,8 +2436,10 @@ bool isDrumTrack (const Song& song, TrackID track)
 
 void setDrumTrack (Song& song, TrackID track, bool isDrums)
 {
-    if (auto state = findTrackState (song, track); state.isValid())
-        state.setProperty (schema::drumMode, isDrums, nullptr);
+    // View state, outside the history (Tracks.h: setTrackView()): off as false, which none (as its instrument says) isn't.
+    auto view = getTrackView (song, track);
+    view.drumMode = isDrums;
+    setTrackView (song, track, std::move (view));
 }
 
 std::optional<std::vector<DrumRow>> getSamplerSounds (const Song& song, TrackID track)
@@ -2476,18 +2478,22 @@ std::vector<int> getNoteNumbersPlayed (const Song& song, const std::vector<ClipI
 
 std::vector<int> getDrumRowOrder (const Song& song, TrackID track)
 {
-    return parseNotes (readDrumOrder (findTrackState (song, track)));
+    const auto view = getTrackView (song, track);
+    return view.drumOrder.has_value() ? parseNotes (*view.drumOrder) : std::vector<int>();
 }
 
 void setDrumRowOrder (Song& song, TrackID track, const std::vector<int>& notes)
 {
-    if (auto state = findTrackState (song, track); state.isValid())
-        state.setProperty (schema::drumOrder, joinNotes (notes), nullptr);
+    // An empty order as none (TracksOutside.h).
+    auto view = getTrackView (song, track);
+    view.drumOrder = notes.empty() ? std::nullopt : std::optional (joinNotes (notes));
+    setTrackView (song, track, std::move (view));
 }
 
 std::vector<int> getHiddenDrumRows (const Song& song, TrackID track)
 {
-    return parseNotes (readDrumHidden (findTrackState (song, track)));
+    const auto view = getTrackView (song, track);
+    return view.drumHidden.has_value() ? parseNotes (*view.drumHidden) : std::vector<int>();
 }
 
 void hideDrumRow (Song& song, TrackID track, int note)
@@ -2497,14 +2503,16 @@ void hideDrumRow (Song& song, TrackID track, int note)
     if (std::find (hidden.begin(), hidden.end(), note) == hidden.end())
         hidden.push_back (note);
 
-    if (auto state = findTrackState (song, track); state.isValid())
-        state.setProperty (schema::drumHidden, joinNotes (hidden), nullptr);
+    auto view = getTrackView (song, track);
+    view.drumHidden = joinNotes (hidden);
+    setTrackView (song, track, std::move (view));
 }
 
 void showAllDrumRows (Song& song, TrackID track)
 {
-    if (auto state = findTrackState (song, track); state.isValid())
-        state.removeProperty (schema::drumHidden, nullptr);
+    auto view = getTrackView (song, track);
+    view.drumHidden.reset();
+    setTrackView (song, track, std::move (view));
 }
 
 //==============================================================================

@@ -5,10 +5,13 @@
 // trackCollapsed, trackPinned, drumMode, drumOrder, drumHidden) and its automation lanes (LANES, LANE), the master's row's
 // too. With the conversion between those properties and elements of a TRACK and the MASTER and the value.
 //
-// The song's tree is still the storage, and the song holds no such value yet (SongValues.h): the functions by ID that read
-// the view on the tree are in model/arrangement/internal/Tracks.h (getSavedTrackHeight(), isCollapsed(), isPinned()),
-// model/notes/internal/Notes.h (the drum rows) and model/automation/internal/Automation.h (getLanes()), each through the
-// readers of one field below. immer is the model's alone (tools/check-architecture.sh: immer-outside-model).
+// The song holds it outside its history (SongValues.h: tracksOutside; TracksArea.h), and its tree's TRACK and MASTER elements
+// hold none of it (no view property, no LANES): the functions by ID that read and write it are in
+// model/arrangement/internal/Tracks.h (getTrackView(), getViewOf(), setTrackView(), getSavedTrackHeight(),
+// isCollapsed(), isPinned() and their setters), model/notes/internal/Notes.h (the drum rows) and
+// model/automation/internal/Automation.h (getLanes() and the lanes' writers). The conversion below is what a file's, a whole
+// copy's or a version's element is read from and written into. immer is the model's alone (tools/check-architecture.sh:
+// immer-outside-model).
 #pragma once
 
 #include "model/base/IDs.h"
@@ -26,7 +29,8 @@ namespace phazite
 // An automation lane the playlist shows under a track (Schema.h: LANE), in its order: the device of the parameter (a
 // device's, or a fader's or a VCA's: laneDevice), the parameter as its curve names it (laneParameter), its height where one
 // was set (laneHeight: none for the lane's default, AutomationLane::defaultHeight, as a lane kept but never resized has
-// none) and whether it is a thin row (laneCollapsed).
+// none, and the lanes' writer writes none for a height set to it; a file's 48 is read as it is) and whether it is a thin row
+// (laneCollapsed).
 struct LaneValue
 {
     DeviceID device {};
@@ -38,9 +42,12 @@ struct LaneValue
 };
 
 // How a track's row shows (view, uncounted): no undo step and no change. Each property none until it is set, as the readers
-// tell none from a value (getSavedTrackHeight()) and the writers write false too (setCollapsed(), setPinned()); the drum
-// rows' texts as they were written (an empty order too); its lanes in their order, none while it has none (an empty LANES,
-// which the tree keeps once a lane was kept, is none here: writeViewInto() writes none).
+// tell none from a value (getSavedTrackHeight()); collapsed false once it was set off (setCollapsed() writes false, as
+// Phazite always wrote it: the golden command script holds collapsed="0"), pinned none while it is off (setPinned() writes
+// none for off; a file's "0" is read as it is, false, and written back so); the drum mode as it was
+// set, false too (none is as the track's instrument says); the drum rows' texts as a file holds them, none for none (the
+// writers write none for an empty list); its lanes in their order, none while it has none (no empty LANES is written:
+// writeViewInto()).
 struct TrackView
 {
     std::optional<int> height {};              // trackHeight
@@ -67,6 +74,13 @@ struct TracksOutside
     bool operator== (const TracksOutside&) const;
 };
 
+// The value with one track's view set, by its ID (an empty view, which shows as none set, takes its entry away), or the
+// master's: the very value given where it holds that view so already (a look in one map), so that a set of it is no change.
+// What every writer of a row's view sets it by (SongValues.h: setTracksOutside(); model/arrangement/internal/Tracks.h:
+// setTrackView()).
+TracksOutside withTrackView (const TracksOutside&, std::uint64_t id, TrackView);
+TracksOutside withMasterView (const TracksOutside&, TrackView);
+
 //==============================================================================
 // The conversion: the one place that reads and writes a TRACK's and the MASTER's view, and LANES and LANE, by name.
 
@@ -82,10 +96,8 @@ TrackView readViewOf (const juce::ValueTree& trackOrMaster);
 // reads as none left out.
 TrackView readHeldViewOf (const juce::ValueTree& trackOrMaster);
 
-// Of a view read so, one property read again from the element, as readHeldViewOf() reads it (none where it isn't described on
-// the element's type), and its lanes read again from its LANES: what the tracks' keeper reads for one property, or one lane,
-// that changed (TracksArea.h). Nothing for a property that isn't the view's.
-void readHeldViewProperty (const juce::ValueTree& trackOrMaster, const juce::Identifier& property, TrackView&);
+// Of a view read so, its lanes read again from its LANES: what the tracks' keeper reads for one lane that changed
+// (TracksArea.h).
 immer::flex_vector<LaneValue> readHeldLanesOf (const juce::ValueTree& trackOrMaster);
 
 // A LANE as Phazite's code always read it (model/automation/Automation.cpp: getLanes()): its device as a cast reads its
@@ -108,6 +120,14 @@ void writeViewInto (juce::ValueTree& trackOrMaster, const TrackView&);
 // keepTrackAsHeld() (TracksValue.h) and keepSwitchesAsHeld() (TrackSwitchesValue.h).
 bool keepViewAsHeld (juce::ValueTree trackOrMaster);
 
+// Whether a TRACK or the MASTER holds any of the view's properties described on its type, or a LANES; and those taken out of
+// it (its LANES, each of them, whatever they hold), with an undo manager (a step's) or none: what the adoption and the
+// keeper's safety net take out of an element that comes with them (TracksArea.h), and a merge's whole track out of its copy
+// (model/arrangement/Tracks.cpp: chooseTrackClash()). Nothing for any other element.
+bool holdsViewIn (const juce::ValueTree& trackOrMaster);
+bool isViewProperty (const juce::ValueTree& trackOrMaster, const juce::Identifier& property); // described on its type
+void takeViewOutOf (juce::ValueTree trackOrMaster, juce::UndoManager*);
+
 // Every track's view and the master's of a song's tree (PHAZITE), read as readViewOf() reads them. For the tests, and what
 // reads them whole while the tree holds them.
 TracksOutside readTracksOutside (const juce::ValueTree& song);
@@ -121,6 +141,4 @@ std::optional<int> readSavedHeight (const juce::ValueTree& trackOrMaster);
 std::optional<bool> readCollapsed (const juce::ValueTree& trackOrMaster);
 std::optional<bool> readPinned (const juce::ValueTree& trackOrMaster);
 std::optional<bool> readDrumMode (const juce::ValueTree& trackOrMaster);
-juce::String readDrumOrder (const juce::ValueTree& trackOrMaster);  // empty for none
-juce::String readDrumHidden (const juce::ValueTree& trackOrMaster); // empty for none
 } // namespace phazite

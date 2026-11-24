@@ -24,7 +24,7 @@ found by reading while the automation's curves were made values (2026-11-22), an
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
 the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
-onto another's beat does.
+onto another's beat does. 246 was found by the review of the tracks' leaf switch (the same step, 2026-11-24).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -215,6 +215,23 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `chooseClash()` is told that the parting held none; the tempo map does it through its value (`chooseTempoMapClash()`),
   and each other area can as it becomes a value (roadmap step S5.20). `tests/VersionsMergeWaitingTests.cpp` checks the
   tempo map's (the case of a conflict on a tempo's bpm, ramp and a tempo both branches added, "chosen each way").
+
+- **246. After Back to Now from a version opened live, a new track can take the mute, solo, automation mode, height and
+  lanes of a track the version held.** Open a version (of another line, say) that holds a track Now hasn't, muted or
+  with its row resized, and go back to Now; the next track made can come up muted, or with that row. Why: the tracks'
+  switches and view keep the entries of a track the song no longer holds, by its ID, for an Undo that may bring it
+  back (`src/model/base/internal/TrackSwitchesValue.h`, `TracksOutside.h`); the version's tracks leave theirs there as
+  the trial's step is undone, and `makeSongAsCopied()` (`src/model/versions/ApplySong.cpp`, Back to Now through
+  `Trial::putBackHeld()`, `src/model/versions/VersionsModel.cpp`) sets the song's count of IDs back to Now's, so a
+  track made next can be given such an ID and read its entries. The history is held, not cleared, around the call (the
+  steps before the version opened stay and its redo steps return), so an Undo can still reach a track Now deleted
+  earlier, whose entries must stay: the pass can't drop every entry of a track the copy doesn't hold. The devices'
+  store and the windows' places (`DeviceStoreValue.h`, `DevicesOutside.h`) keep entries by a device's ID the same way:
+  a device made next can open its window at a version's device's place, and keep its held plug-in values. Found by the
+  review of roadmap step S5.20's tracks' leaf switch (2026-11-24). To fix: in `makeSongAsCopied()`, outside the history
+  as it runs, drop from the switches, the view, the store and the windows' places every entry of an ID at or above the
+  copy's count of IDs: every step the history holds was made while the count was below it, so none can bring such an
+  item back.
 
 ## Devices and playback
 

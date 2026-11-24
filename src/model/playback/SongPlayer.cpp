@@ -568,13 +568,13 @@ bool SongPlayer::takeTrackSwitches (const std::vector<TrackSwitchChange>& change
 
 void SongPlayer::holdTracks()
 {
-    // As the keeper told them, so that what is held here and what tracksChanged() keeps up to date never disagree; read from
-    // the song's tree for a song without values (none that plays).
+    // As the keeper told them and the switches' area holds them, so that what is held here and what tracksChanged() and
+    // trackSwitchesChanged() keep up to date never disagree; read from the song's tree for a song without values (none that
+    // plays).
     const auto* values = song.getValues();
     const auto* tracks = values != nullptr ? values->getTracksAsTold() : nullptr;
-    const auto* switches = values != nullptr ? values->getTrackSwitchesAsTold() : nullptr;
     heldTracks->tracks = tracks != nullptr ? *tracks : readHeldTracks (song.getState());
-    heldTracks->switches = switches != nullptr ? *switches : readHeldTrackSwitches (song.getState());
+    heldTracks->switches = values != nullptr ? values->trackSwitches.get() : readTrackSwitches (song.getState());
 }
 
 void SongPlayer::holdDevices()
@@ -3106,8 +3106,9 @@ std::vector<int> SongPlayer::getHeardInput (const juce::ValueTree& trackState) c
 
 bool SongPlayer::addFrozenFile (engine::Plan::Strip& strip, const juce::ValueTree& trackState)
 {
-    // Its frozen file (model/mixer/internal/Freeze.h) from the song's start, if it is there.
-    if (! readTrackFrozen (trackState))
+    // Its frozen file (model/mixer/internal/Freeze.h) from the song's start, if it is there (its frozen switch by a look in the
+    // switches: Tracks.h).
+    if (! isTrackFrozen (song, readTrackElementID (trackState)))
         return false;
 
     auto file = getAudioFile (getFrozenFile (song, readTrackElementID (trackState)), true);

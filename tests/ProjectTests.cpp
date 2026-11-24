@@ -1056,15 +1056,9 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     REQUIRE (project->autosave().wasOk());
     CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
 
-    // Each property compared at its place in the saved copy, among the elements that count: a lane shown first in the
-    // track (view state) moves nothing there.
-    // No model function places the LANES among a track's elements: the live track's element is moved by hand, which goes with
-    // the tracks' view leaving the tree (roadmap step S5.20).
+    // A lane shown (view state, beside the song's tree since the tracks' view left it: roadmap step S5.20) moves nothing
+    // that counts.
     phazite::showLane (song, trackID, { phazite::getFader (song, trackID), phazite::getVolumeParameterID (song, trackID) });
-    auto trackState = phazite::findTrackState (song, trackID);
-    auto lanes = trackState.getChildWithName (phazite::schema::LANES);
-    REQUIRE (lanes.isValid());
-    trackState.moveChild (trackState.indexOf (lanes), 0, nullptr);
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());
 

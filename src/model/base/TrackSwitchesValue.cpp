@@ -170,6 +170,70 @@ TrackSwitches withChanges (TrackSwitches now, const TrackSwitchesChanges& change
     return now;
 }
 
+namespace
+{
+    immer::map<std::uint64_t, bool> withSwitchSet (const immer::map<std::uint64_t, bool>& switches, std::uint64_t key, bool on)
+    {
+        if ((switches.find (key) != nullptr) == on)
+            return switches;
+
+        return withSwitch (switches, key, on);
+    }
+
+    template <typename Map>
+    bool holdSameEntry (const Map& a, const Map& b, std::uint64_t key)
+    {
+        const auto* first = a.find (key);
+        const auto* second = b.find (key);
+        return first == nullptr || second == nullptr ? first == second : *first == *second;
+    }
+} // namespace
+
+TrackSwitches withMute (const TrackSwitches& switches, std::uint64_t key, bool on)
+{
+    auto next = switches;
+    next.mutes = withSwitchSet (switches.mutes, key, on);
+    return next.mutes.identity() == switches.mutes.identity() ? switches : next;
+}
+
+TrackSwitches withSolo (const TrackSwitches& switches, std::uint64_t key, bool on)
+{
+    auto next = switches;
+    next.solos = withSwitchSet (switches.solos, key, on);
+    return next.solos.identity() == switches.solos.identity() ? switches : next;
+}
+
+TrackSwitches withFrozen (const TrackSwitches& switches, std::uint64_t key, bool on)
+{
+    auto next = switches;
+    next.frozen = withSwitchSet (switches.frozen, key, on);
+    return next.frozen.identity() == switches.frozen.identity() ? switches : next;
+}
+
+TrackSwitches withAutomationMode (const TrackSwitches& switches, std::uint64_t key, std::optional<SavedAutomationMode> mode)
+{
+    const auto* held = switches.modes.find (key);
+
+    if (held == nullptr ? ! mode.has_value() : mode.has_value() && *held == *mode)
+        return switches;
+
+    auto next = switches;
+    next.modes = mode.has_value() ? switches.modes.set (key, *mode) : switches.modes.erase (key);
+    return next;
+}
+
+bool holdSameSwitchesOf (const TrackSwitches& a, const TrackSwitches& b, std::uint64_t key)
+{
+    return holdSameEntry (a.mutes, b.mutes, key) && holdSameEntry (a.solos, b.solos, key) && holdSameEntry (a.frozen, b.frozen, key)
+           && holdSameEntry (a.modes, b.modes, key);
+}
+
+bool holdsSwitchesOf (const TrackSwitches& switches, std::uint64_t key)
+{
+    return switches.mutes.find (key) != nullptr || switches.solos.find (key) != nullptr || switches.frozen.find (key) != nullptr
+           || switches.modes.find (key) != nullptr;
+}
+
 void readSwitchesOf (const juce::ValueTree& element, TrackSwitches& switches)
 {
     readInto (element, switches, false);
@@ -231,6 +295,33 @@ bool keepSwitchesAsHeld (juce::ValueTree element)
 
     writeSwitchesInto (element, held);
     return true;
+}
+
+bool holdsSwitchesIn (const juce::ValueTree& element)
+{
+    if (! element.hasType (schema::TRACK) && ! element.hasType (schema::MASTER))
+        return false;
+
+    for (int i = 0; i < element.getNumProperties(); ++i)
+        if (isSwitch (element, element.getPropertyName (i)))
+            return true;
+
+    return false;
+}
+
+bool isSwitchProperty (const juce::ValueTree& element, const juce::Identifier& property)
+{
+    return (element.hasType (schema::TRACK) || element.hasType (schema::MASTER)) && isSwitch (element, property);
+}
+
+void takeSwitchesOutOf (juce::ValueTree element, juce::UndoManager* undo)
+{
+    if (! element.hasType (schema::TRACK) && ! element.hasType (schema::MASTER))
+        return;
+
+    for (auto i = element.getNumProperties(); --i >= 0;)
+        if (const auto property = element.getPropertyName (i); isSwitch (element, property))
+            element.removeProperty (property, undo);
 }
 
 TrackSwitches readTrackSwitches (const juce::ValueTree& song)

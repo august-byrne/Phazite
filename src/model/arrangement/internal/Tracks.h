@@ -10,6 +10,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
 #include "model/base/internal/TracksValue.h"
 
@@ -123,17 +124,15 @@ std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
 //     by its TRACK or MASTER) and what reads a chain through it (getDevices(), getInstrument(), hasInstrument(),
 //     getDeviceSoundFiles(), getChannelDeviceValues(), getDeviceChannelPlace()), and getItemIDs()' walk of the IDs the tree
 //     holds.
-//   - model/notes/Notes.cpp, the tracks' view and key kept there (the writers' and the view's pieces): getTrackKey(),
-//     setTrackKey(), applyLastKey(); isDrumTrack()'s drum mode (its instrument by its ID), setDrumTrack(), getDrumRowOrder(),
-//     setDrumRowOrder(), getHiddenDrumRows(), hideDrumRow(), showAllDrumRows(); and chooseNoteClash() (a merge's path).
-//   - model/automation/Automation.cpp, the lanes and the write mode (the leaf switch): findLanesState(), keepLane() and the
-//     lanes' readers and writers on them, getAutomationMode(), setAutomationMode(), isWritingAutomation(); and
-//     isParameterValue() (a tree callback's test).
-//   - The writers (the writers' piece): model/devices/DrumKit.cpp: givePadItsOwnTrack(); model/mixer/Freeze.cpp:
-//     freezeFromFile(), unfreeze(); model/transport/RecordingModel.cpp: findTrack() (its helper), setTrackInput(),
-//     setInputMonitoring(), addTrackForInput(); model/presets/Presets.cpp: addTrackFromPreset()'s drum view.
-//   - Walks that read one field of each track from the elements the song's index gives: Freeze.cpp: getFrozenTracks();
-//     model/mixer/Sidechain.cpp: getSoundTracks(), getTracksFedBy(), describeTracksToListenTo().
+//   - model/notes/Notes.cpp, the tracks' key kept there (the writers' piece): getTrackKey(), setTrackKey(), applyLastKey();
+//     and chooseNoteClash() (a merge's path).
+//   - model/automation/Automation.cpp: isParameterValue() (a tree callback's test).
+//   - The writers (the writers' piece): model/devices/DrumKit.cpp: givePadItsOwnTrack(); model/transport/RecordingModel.cpp:
+//     findTrack() (its helper), setTrackInput(), setInputMonitoring(), addTrackForInput().
+//   - Walks that read one field of each track from the elements the song's index gives: model/mixer/Sidechain.cpp:
+//     getSoundTracks(), getTracksFedBy(), describeTracksToListenTo().
+// The tracks' switches and view are areas of the song's values, read and written by ID (getTrackSwitches(), getTrackView()
+// and the functions below them), never on an element.
 //   - The devices' code: model/mixer/ContainerModel.cpp: addContainer() (whether the channel's element is there). The
 //     devices themselves are values (model/base/internal/DevicesValue.h), read by ID; a device's channel is its value's
 //     place, and model/mixer/DeviceWriters.cpp asks the song's index whether it holds a track (holdsOwner(): hasTrack()).
@@ -238,9 +237,31 @@ juce::Colour getTrackColour (const Song&, TrackID, int row);
 juce::Colour getTrackColour (std::optional<juce::uint32> own, int row);
 
 // A track's view (base/internal/TracksOutside.h: its height, collapsed, pinned, drum mode and drum rows, lanes), the master's
-// by its ID, as readViewOf() reads it: one lookup, read whole, for what asks several of its fields once per command (a track's
-// preset); an empty view for an ID the song hasn't.
+// by its ID, as the song's view holds it (SongValues.h: tracksOutside): one lookup and a look in a map; an empty view for an
+// ID the song hasn't. And the same of the element the song's index gave a reader already (a playlist's row), with no second
+// lookup.
 TrackView getTrackView (const Song&, TrackID);
+TrackView getViewOf (const Song&, const juce::ValueTree& trackState);
+
+// The tracks' switches and view as the song holds them (base/internal/SongValues.h: trackSwitches, tracksOutside), each a
+// copy of the area's value (cheap: it shares what it holds); of a song that holds no values (a check's copy), as its tree
+// holds them (TrackSwitchesValue.h: readTrackSwitches(); TracksOutside.h: readTracksOutside() and readViewOf()). The tracks'
+// and the master's entries of each by their keys: a track's ID, the master's 0 among the switches and its own member of the
+// view (its ID is one a version gives anew). What the readers and the writers of the switches and the view read them by:
+//   - findSwitchKey(): a channel's key among the switches (a track's ID, the master's 0), none for an ID the song hasn't;
+//   - setTrackSwitches(): the switches given a whole value (a one-entry set: TrackSwitchesValue.h, withMute() and the three
+//     after it), in the history (the step in progress, or outside it while the song is written outside it) or outside it;
+//   - setTrackView(): a track's or the master's row given a view, outside the history (view state), nothing for an ID the
+//     song hasn't.
+TrackSwitches getTrackSwitches (const Song&);
+TracksOutside getTracksOutside (const Song&);
+std::optional<std::uint64_t> findSwitchKey (const Song&, TrackID);
+void setTrackSwitches (Song&, TrackSwitches, bool inHistory);
+void setTrackView (Song&, TrackID, TrackView);
+
+// A track's frozen switch (Schema.h: trackFrozen; model/mixer/internal/Freeze.h), as its mute: outside the history (a
+// freeze rendered, the freeze keeper's unfreezing), or in the caller's step with its undo manager (Bounce in Place).
+void setTrackFrozen (Song&, TrackID, bool, juce::UndoManager* = nullptr);
 
 // View settings the project keeps for each track, without undo steps; their on-screen meaning is the playlist's
 // (ui/playlist/TrackHeights.h).

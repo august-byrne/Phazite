@@ -182,21 +182,8 @@ namespace
         }
     }
 
-    // A view as the keeper keeps it: none for a view with nothing set (a track's that has none comes and goes untold).
-    immer::map<std::uint64_t, TrackView> withView (const immer::map<std::uint64_t, TrackView>& views, std::uint64_t id, TrackView view)
-    {
-        if (view == TrackView())
-            return views.find (id) != nullptr ? views.erase (id) : views;
-
-        const auto* held = views.find (id);
-        return held != nullptr && *held == view ? views : views.set (id, std::move (view));
-    }
-
-    // The song's tracks, their switches and their view, read once from its tree (readHeldTracks()), into what is kept: the
-    // switches' and the view's entries of a track the song doesn't hold left as they are. And each track's element, where
-    // asked.
-    void readHeldAll (const juce::ValueTree& song, SongTracks& tracks, TrackSwitches& switches, TracksOutside& view,
-                      std::unordered_map<std::uint64_t, juce::ValueTree>* elements)
+    // The song's tracks, read once from its tree (readHeldTracks()). And each track's element, where asked.
+    void readHeldAll (const juce::ValueTree& song, SongTracks& tracks, std::unordered_map<std::uint64_t, juce::ValueTree>* elements)
     {
         tracks = {};
 
@@ -214,8 +201,6 @@ namespace
                               return false; // refused: its folder isn't one
 
                           tracks = std::move (next);
-                          readHeldSwitchesOf (element, switches);
-                          view.tracks = withView (view.tracks, id, readHeldViewOf (element));
 
                           if (elements != nullptr)
                               (*elements)[id] = element;
@@ -224,13 +209,34 @@ namespace
                       });
 
         if (const auto master = song.getChildWithName (schema::MASTER); master.isValid())
-        {
             if (auto value = readHeldTrack (master))
                 tracks.master = std::move (*value);
+    }
 
-            readHeldSwitchesOf (master, switches);
-            view.master = readHeldViewOf (master);
-        }
+    // Each TRACK an element is or holds (a folder's tracks, the track list's), and the MASTER, in the tree's order, a folder
+    // before the tracks in it: what the switches' and the view's part of the keeper looks through.
+    void forEachChannelIn (const juce::ValueTree& element, const std::function<void (juce::ValueTree)>& each)
+    {
+        if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
+            each (element);
+
+        if (element.hasType (schema::TRACK) || element.hasType (schema::TRACKS))
+            for (const auto& child : element)
+                if (child.hasType (schema::TRACK))
+                    forEachChannelIn (child, each);
+    }
+
+    // What an element of a channel holds of the switches and the view, read as the song holds them into the values given (a
+    // TRACK's under its ID, the MASTER's under 0 and the master's row): the element is what the track holds, so its entries
+    // replace those the values hold of its key. Nothing for a TRACK whose ID the song can't count on.
+    void readLeavesOf (const juce::ValueTree& element, TrackSwitches& switches, TracksOutside& outside)
+    {
+        readHeldSwitchesOf (element, switches);
+
+        if (element.hasType (schema::MASTER))
+            outside = withMasterView (outside, readHeldViewOf (element));
+        else if (const auto id = readHeldIDOf (element[schema::trackID]); id != 0)
+            outside = withTrackView (outside, id, readHeldViewOf (element));
     }
 
     //==============================================================================
@@ -345,7 +351,7 @@ SongValues::TracksKeeper::TracksKeeper (SongValues& v, Song& s)
       song (s)
 {
     // What the song holds at the start, each track read once, which no one is told.
-    readHeldAll (song.getState(), told, switches, view, &elements);
+    readHeldAll (song.getState(), told, &elements);
 }
 
 void SongValues::TracksKeeper::propertyChanged (const juce::ValueTree& tree, const juce::Identifier& property)
@@ -353,31 +359,16 @@ void SongValues::TracksKeeper::propertyChanged (const juce::ValueTree& tree, con
     if (! isHeardAsTracks (tree, property))
         return;
 
+    // The tracks' own fields alone: a switch, a view property and a LANE's are what the switches' and the view's part of the
+    // keeper takes out of an element that came with them (TrackLeavesKeeper), which changes nothing of their areas here.
+    const auto* found = tree.hasType (schema::LANE) ? nullptr : findAreaProperty (tree, property);
+
+    if (found == nullptr || found->area != Area::value)
+        return;
+
     const auto before = told;
-    const auto switchesBefore = switches;
-    const auto viewBefore = view;
-
-    if (tree.hasType (schema::LANE))
-    {
-        takeLanes (tree.getParent().getParent());
-    }
-    else if (const auto* found = findAreaProperty (tree, property))
-    {
-        switch (found->area)
-        {
-            case Area::value:
-                takeValueProperty (tree, property);
-                break;
-            case Area::switches:
-                takeSwitches (tree);
-                break;
-            case Area::view:
-                takeViewProperty (tree, property);
-                break;
-        }
-    }
-
-    tell (before, switchesBefore, viewBefore);
+    takeValueProperty (tree, property);
+    tell (before);
 }
 
 void SongValues::TracksKeeper::childAdded (const juce::ValueTree& parent, const juce::ValueTree& child)
@@ -386,8 +377,6 @@ void SongValues::TracksKeeper::childAdded (const juce::ValueTree& parent, const 
         return;
 
     const auto before = told;
-    const auto switchesBefore = switches;
-    const auto viewBefore = view;
 
     if (child.hasType (schema::TRACK))
         add (parent, child);
@@ -395,12 +384,8 @@ void SongValues::TracksKeeper::childAdded (const juce::ValueTree& parent, const 
         settle(); // the song's track list itself
     else if (child.hasType (schema::MASTER))
         takeMaster();
-    else if (child.hasType (schema::LANES))
-        takeLanes (parent);
-    else if (child.hasType (schema::LANE))
-        takeLanes (parent.getParent());
 
-    tell (before, switchesBefore, viewBefore);
+    tell (before);
 }
 
 void SongValues::TracksKeeper::childRemoved (const juce::ValueTree& parent, const juce::ValueTree& child)
@@ -409,8 +394,6 @@ void SongValues::TracksKeeper::childRemoved (const juce::ValueTree& parent, cons
         return;
 
     const auto before = told;
-    const auto switchesBefore = switches;
-    const auto viewBefore = view;
 
     if (child.hasType (schema::TRACK))
         remove (child);
@@ -418,29 +401,21 @@ void SongValues::TracksKeeper::childRemoved (const juce::ValueTree& parent, cons
         settle();
     else if (child.hasType (schema::MASTER))
         takeMaster();
-    else if (child.hasType (schema::LANES))
-        takeLanes (parent);
-    else if (child.hasType (schema::LANE))
-        takeLanes (parent.getParent());
 
-    tell (before, switchesBefore, viewBefore);
+    tell (before);
 }
 
 void SongValues::TracksKeeper::childOrderChanged (const juce::ValueTree& parent, int oldIndex, int newIndex)
 {
-    if (! isHeardAsTracks (parent))
+    if (! isHeardAsTracks (parent) || parent.hasType (schema::LANES))
         return;
 
     const auto before = told;
-    const auto switchesBefore = switches;
-    const auto viewBefore = view;
 
-    if (parent.hasType (schema::LANES))
-        takeLanes (parent.getParent());
-    else if (parent.getChild (newIndex).hasType (schema::TRACK))
-        reorder (parent, oldIndex, newIndex); // not a channel's devices, nor its lanes, moved among its other children
+    if (parent.getChild (newIndex).hasType (schema::TRACK))
+        reorder (parent, oldIndex, newIndex);
 
-    tell (before, switchesBefore, viewBefore);
+    tell (before);
 }
 
 const TrackValue* SongValues::TracksKeeper::findKept (const juce::ValueTree& track) const
@@ -498,55 +473,6 @@ void SongValues::TracksKeeper::takeValueProperty (const juce::ValueTree& element
     told = withTrack (told, std::move (value));
 }
 
-void SongValues::TracksKeeper::takeSwitches (const juce::ValueTree& element)
-{
-    if (element.hasType (schema::TRACK) && ! isKept (element))
-        return settle();
-
-    // That element's four alone, under its key (the master's mode under 0).
-    readHeldSwitchesOf (element, switches);
-}
-
-void SongValues::TracksKeeper::takeViewProperty (const juce::ValueTree& element, const juce::Identifier& property)
-{
-    if (element.hasType (schema::MASTER))
-    {
-        readHeldViewProperty (element, property, view.master);
-        return;
-    }
-
-    const auto* kept = findKept (element);
-
-    if (kept == nullptr)
-        return settle();
-
-    const auto id = kept->id.getRaw();
-    const auto* held = view.tracks.find (id);
-    auto next = held != nullptr ? *held : TrackView();
-    readHeldViewProperty (element, property, next);
-    view.tracks = withView (view.tracks, id, std::move (next));
-}
-
-void SongValues::TracksKeeper::takeLanes (const juce::ValueTree& channel)
-{
-    if (channel.hasType (schema::MASTER))
-    {
-        view.master.lanes = readHeldLanesOf (channel);
-        return;
-    }
-
-    const auto* kept = findKept (channel);
-
-    if (kept == nullptr)
-        return settle();
-
-    const auto id = kept->id.getRaw();
-    const auto* held = view.tracks.find (id);
-    auto next = held != nullptr ? *held : TrackView();
-    next.lanes = readHeldLanesOf (channel);
-    view.tracks = withView (view.tracks, id, std::move (next));
-}
-
 std::optional<TrackID> SongValues::TracksKeeper::findListOwner (const juce::ValueTree& list) const
 {
     // The song's track list's owner is none (TrackID()); a folder's its ID; none at all for a folder the value doesn't hold
@@ -568,8 +494,7 @@ void SongValues::TracksKeeper::add (const juce::ValueTree& list, const juce::Val
     const auto owner = *found;
 
     // Its place among its list's tracks the value holds: the track list's (which holds tracks alone) by JUCE's index of the
-    // element, where the value holds every other one of them; a folder's (whose devices and lanes are among them) by its
-    // tracks before it, walked.
+    // element, where the value holds every other one of them; a folder's by its tracks before it, walked.
     const auto* held = told.findList (owner);
     const auto heldSize = held != nullptr ? (int) held->size() : 0;
     auto index = 0;
@@ -596,8 +521,6 @@ void SongValues::TracksKeeper::add (const juce::ValueTree& list, const juce::Val
     // It and the tracks in it, read as the song holds them, each at its place: one of an ID the song holds already (another
     // element), or refused (its folder isn't one), and the song's tracks are found again whole.
     auto next = told;
-    auto nextSwitches = switches;
-    auto nextView = view;
     std::vector<std::pair<std::uint64_t, juce::ValueTree>> taken;
     auto clash = false;
     auto first = true;
@@ -622,8 +545,6 @@ void SongValues::TracksKeeper::add (const juce::ValueTree& list, const juce::Val
         }
 
         next = std::move (added);
-        readHeldSwitchesOf (element, nextSwitches);
-        nextView.tracks = withView (nextView.tracks, id, readHeldViewOf (element));
         taken.emplace_back (id, element);
         return true;
     };
@@ -642,8 +563,6 @@ void SongValues::TracksKeeper::add (const juce::ValueTree& list, const juce::Val
         return settle();
 
     told = std::move (next);
-    switches = std::move (nextSwitches);
-    view = std::move (nextView);
 
     for (auto& [id, element] : taken)
         elements[id] = element;
@@ -651,8 +570,8 @@ void SongValues::TracksKeeper::add (const juce::ValueTree& list, const juce::Val
 
 void SongValues::TracksKeeper::remove (const juce::ValueTree& track)
 {
-    // One the value was read from, with the tracks in it; their switches and view kept (the top of TracksArea.h). Any other
-    // (of an ID another element holds, which the value was read from) changes nothing the song reads.
+    // One the value was read from, with the tracks in it (their switches and view are their areas', which keep them). Any
+    // other (of an ID another element holds, which the value was read from) changes nothing the song reads.
     const auto* kept = findKept (track);
 
     if (kept == nullptr)
@@ -720,39 +639,31 @@ void SongValues::TracksKeeper::reorder (const juce::ValueTree& list, int oldInde
 
 void SongValues::TracksKeeper::takeMaster()
 {
-    // The master's element put in or taken out (a merge's choice of it whole): read again, its switch and its view too (kept
-    // as they were while it has none). As a song without a MASTER has it, where it has none.
+    // The master's element put in or taken out (a merge's choice of it whole): read again. As a song without a MASTER has it,
+    // where it has none.
     masterMade = true;
     const auto master = song.getState().getChildWithName (schema::MASTER);
     auto value = master.isValid() ? readHeldTrack (master) : std::nullopt;
     told = withTrack (told, value.has_value() ? std::move (*value) : TrackValue::makeMaster());
-
-    if (master.isValid())
-    {
-        readHeldSwitchesOf (master, switches);
-        view.master = readHeldViewOf (master);
-    }
 }
 
 void SongValues::TracksKeeper::settle()
 {
     elements.clear();
-    readHeldAll (song.getState(), told, switches, view, &elements);
+    readHeldAll (song.getState(), told, &elements);
 }
 
-void SongValues::TracksKeeper::tell (const SongTracks& before, const TrackSwitches& switchesBefore, const TracksOutside& viewBefore)
+void SongValues::TracksKeeper::tell (const SongTracks& before)
 {
     // Copies of what the listeners are told, which stay while they are told whatever one of them changes meanwhile (cheap:
     // they share what they hold).
-    std::vector<std::uint64_t> came; // the tracks told added: their view is theirs, told with them
-
     if (! told.isSameAs (before) || masterMade)
     {
         const auto now = told;
         std::vector<TrackChange> changes;
         std::vector<TrackID> reordered;
 
-        const auto addChange = [&changes, &before, &now, &came] (const TrackValue* was, const TrackValue* is)
+        const auto addChange = [&changes, &before, &now] (const TrackValue* was, const TrackValue* is)
         {
             TrackChange change;
             change.id = is != nullptr ? is->id : was->id;
@@ -778,9 +689,6 @@ void SongValues::TracksKeeper::tell (const SongTracks& before, const TrackSwitch
 
                 if (placed)
                     change.indexAfter = findIndex (now, is->parent, is->id);
-
-                if (was == nullptr)
-                    came.push_back (is->id.getRaw());
             }
 
             changes.push_back (change);
@@ -823,40 +731,289 @@ void SongValues::TracksKeeper::tell (const SongTracks& before, const TrackSwitch
             values.listeners.call ([&changes, &reordered, &now] (SongValues::Listener& listener)
                                    { listener.tracksChanged (changes, reordered, now); });
     }
+}
 
-    if (! switches.isSameAs (switchesBefore))
+//==============================================================================
+SongValues::TrackSwitchesTeller::TrackSwitchesTeller (SongValues& v, juce::ListenerList<SongValues::Listener>& l)
+    : values (v),
+      area (v.trackSwitches),
+      listeners (l)
+{
+    area.addListener (this);
+}
+
+SongValues::TrackSwitchesTeller::~TrackSwitchesTeller()
+{
+    area.removeListener (this);
+}
+
+void SongValues::TrackSwitchesTeller::valueAreaChanged (const TrackSwitches& before, const TrackSwitches& after)
+{
+    if (listeners.isEmpty() || before.isSameAs (after))
+        return;
+
+    // The switches after, in a copy of the value told, which stays while the listeners are told (cheap: it shares what it
+    // holds); the master's mode named by the master's ID as the tracks' keeper told it.
+    const auto now = after;
+    const auto found = findChanges (before, now);
+    const auto* tracks = values.getTracksAsTold();
+    const auto master = tracks != nullptr ? tracks->master.id : TrackID();
+    std::vector<TrackSwitchChange> changes;
+    addSwitchChanges (changes, found.mutes, Field::mute, master);
+    addSwitchChanges (changes, found.solos, Field::solo, master);
+    addSwitchChanges (changes, found.frozen, Field::frozen, master);
+    addSwitchChanges (changes, found.modes, Field::automationMode, master);
+
+    if (! changes.empty())
+        listeners.call ([&changes, &now] (SongValues::Listener& listener) { listener.trackSwitchesChanged (changes, now); });
+}
+
+//==============================================================================
+SongValues::TracksViewTeller::TracksViewTeller (SongValues& v, juce::ListenerList<SongValues::Listener>& l)
+    : values (v),
+      area (v.tracksOutside),
+      listeners (l)
+{
+    area.addListener (this);
+}
+
+SongValues::TracksViewTeller::~TracksViewTeller()
+{
+    area.removeListener (this);
+}
+
+void SongValues::TracksViewTeller::outsideValueChanged (const TracksOutside& before, const TracksOutside& after)
+{
+    const auto* held = values.getTracksAsTold();
+
+    if (listeners.isEmpty() || held == nullptr)
+        return;
+
+    // Each track whose row changed that the song holds (one it doesn't hold is a row no view shows).
+    std::vector<TrackID> tracks;
+    const auto addTrack = [&tracks, held] (std::uint64_t id)
     {
-        const auto now = switches;
-        const auto found = findChanges (switchesBefore, now);
-        std::vector<TrackSwitchChange> changes;
-        addSwitchChanges (changes, found.mutes, Field::mute, told.master.id);
-        addSwitchChanges (changes, found.solos, Field::solo, told.master.id);
-        addSwitchChanges (changes, found.frozen, Field::frozen, told.master.id);
-        addSwitchChanges (changes, found.modes, Field::automationMode, told.master.id);
+        if (held->tracks.find (id) != nullptr)
+            tracks.push_back (TrackID::fromRaw (id));
+    };
 
-        if (! changes.empty())
-            values.listeners.call ([&changes, &now] (SongValues::Listener& listener) { listener.trackSwitchesChanged (changes, now); });
-    }
+    immer::diff (
+        before.tracks, after.tracks, [&addTrack] (const auto& entry) { addTrack (entry.first); },
+        [&addTrack] (const auto& entry) { addTrack (entry.first); }, [&addTrack] (const auto& was, const auto&) { addTrack (was.first); });
 
-    if (! view.isSameAs (viewBefore))
+    const auto master = ! (before.master == after.master);
+
+    if (! tracks.empty() || master)
+        listeners.call ([&tracks, master] (SongValues::Listener& listener) { listener.tracksViewChanged (tracks, master); });
+}
+
+//==============================================================================
+SongValues::TrackLeavesKeeper::TrackLeavesKeeper (SongValues& v, Song& s)
+    : values (v),
+      song (s)
+{
+}
+
+void SongValues::TrackLeavesKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
+{
+    auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
+
+    // A lone LANES added to a channel of the song, or a lone LANE to one (b): refused in a step; read in outside the history,
+    // its lanes after those the channel has, and taken out.
+    if ((child.hasType (schema::LANES) && isSongChannel (parent)) || (child.hasType (schema::LANE) && isSongLanes (parent)))
     {
-        // Each track whose view changed, but one told added in this call, whose row is new (its view comes with it).
-        std::vector<TrackID> tracks;
-        const auto addTrack = [&tracks, &came] (std::uint64_t id)
+        if (undo != nullptr)
         {
-            if (std::find (came.begin(), came.end(), id) == came.end())
-                tracks.push_back (TrackID::fromRaw (id));
-        };
+            jassertfalse; // a lane added to the song's tree: the lanes' functions change the lanes (Automation.h)
+            return;
+        }
 
-        immer::diff (
-            viewBefore.tracks, view.tracks, [&addTrack] (const auto& entry) { addTrack (entry.first); }, [&addTrack] (const auto& entry)
-            { addTrack (entry.first); }, [&addTrack] (const auto& was, const auto&) { addTrack (was.first); });
+        const auto channel = child.hasType (schema::LANES) ? parent : parent.getParent();
+        juce::ValueTree holder (channel.getType());
+        juce::ValueTree lanes (schema::LANES);
 
-        const auto master = ! (viewBefore.master == view.master);
+        if (child.hasType (schema::LANES))
+            lanes = child.createCopy();
+        else
+            lanes.appendChild (child.createCopy(), nullptr);
 
-        if (! tracks.empty() || master)
-            values.listeners.call ([&tracks, master] (SongValues::Listener& listener) { listener.tracksViewChanged (tracks, master); });
+        holder.appendChild (lanes, nullptr);
+        const auto read = readHeldLanesOf (holder);
+        auto outside = values.tracksOutside.get();
+
+        if (channel.hasType (schema::MASTER))
+        {
+            auto view = outside.master;
+            view.lanes = view.lanes + read;
+            outside = withMasterView (outside, std::move (view));
+        }
+        else if (const auto id = readHeldIDOf (channel[schema::trackID]); id != 0)
+        {
+            const auto* held = outside.tracks.find (id);
+            auto view = held != nullptr ? *held : TrackView();
+            view.lanes = view.lanes + read;
+            outside = withTrackView (outside, id, std::move (view));
+        }
+
+        values.setTracksOutside (std::move (outside));
+        ++values.trackLeavesAdopted;
+        parent.removeChild (child, nullptr);
+        return;
     }
+
+    // A channel (a track with the tracks in it, the track list, the master) that comes into the song with what the switches
+    // and the view hold (a): each such element's read in, made its key's, and taken out, in the mode of the moment.
+    const auto isChannelComing = (child.hasType (schema::TRACK) && (isSongTrackList (parent) || isSongTrack (parent)))
+                                 || ((child.hasType (schema::TRACKS) || child.hasType (schema::MASTER)) && isSongRoot (parent));
+
+    if (! isChannelComing)
+        return;
+
+    std::vector<juce::ValueTree> holding;
+    forEachChannelIn (child,
+                      [&holding] (juce::ValueTree element)
+                      {
+                          if (holdsSwitchesIn (element) || holdsViewIn (element))
+                              holding.push_back (element);
+                      });
+
+    if (holding.empty())
+        return;
+
+    auto switches = values.trackSwitches.get();
+    auto outside = values.tracksOutside.get();
+
+    for (const auto& element : holding)
+        readLeavesOf (element, switches, outside);
+
+    values.setSwitches (song, std::move (switches));
+    values.setTracksOutside (std::move (outside));
+
+    for (auto& element : holding)
+    {
+        takeSwitchesOutOf (element, undo);
+        takeViewOutOf (element, undo);
+        ++values.trackLeavesAdopted;
+    }
+}
+
+void SongValues::TrackLeavesKeeper::adopt (SongValues& into, Song& loaded)
+{
+    // Every TRACK of the song's track list (a folder's tracks too) and the MASTER, each read as the song holds it (the first of
+    // an ID, as the loader leaves each once); then all of it taken out of them.
+    auto tree = loaded.getState();
+    auto switches = into.trackSwitches.get();
+    auto outside = into.tracksOutside.get();
+    std::vector<juce::ValueTree> channels;
+
+    for (const auto& child : tree)
+        if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
+            forEachChannelIn (child, [&channels] (juce::ValueTree element) { channels.push_back (element); });
+
+    for (const auto& element : channels)
+    {
+        jassert (! keepSwitchesAsHeld (element.createCopy()) && ! keepViewAsHeld (element.createCopy())); // the loader's
+        readLeavesOf (element, switches, outside);
+    }
+
+    into.trackSwitches.setOutsideHistory (std::move (switches));
+    into.tracksOutside.set (std::move (outside));
+
+    for (auto& element : channels)
+    {
+        takeSwitchesOutOf (element, nullptr);
+        takeViewOutOf (element, nullptr);
+    }
+}
+
+//==============================================================================
+bool SongValues::setSwitches (Song& song, TrackSwitches next)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    if (next.isSameAs (trackSwitches.get()) || next == trackSwitches.get())
+        return false;
+
+    if (song.isWritingOutsideHistory())
+        trackSwitches.setOutsideHistory (std::move (next));
+    else
+        trackSwitches.set (std::move (next));
+
+    return true;
+}
+
+bool SongValues::setSwitchesOutsideHistory (Song& song, TrackSwitches next)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+    juce::ignoreUnused (song);
+
+    if (next.isSameAs (trackSwitches.get()) || next == trackSwitches.get())
+        return false;
+
+    trackSwitches.setOutsideHistory (std::move (next));
+    return true;
+}
+
+bool SongValues::setTracksOutside (TracksOutside next)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (next.isSameAs (tracksOutside.get()) || next == tracksOutside.get())
+        return false;
+
+    tracksOutside.set (std::move (next));
+    return true;
+}
+
+//==============================================================================
+bool leadsToTrackLeaves (const juce::ValueTree& parent, const juce::ValueTree& child)
+{
+    if (parent.hasType (schema::PHAZITE))
+        return child.hasType (schema::TRACKS) || child.hasType (schema::MASTER);
+
+    return (parent.hasType (schema::TRACKS) || parent.hasType (schema::TRACK)) && child.hasType (schema::TRACK);
+}
+
+void writeTrackLeavesIn (juce::ValueTree& element, const ValuesKept& kept)
+{
+    // Its switches (its ID's entries; the master's mode under 0), then its view: its properties, and its LANES after the
+    // children it holds now (its clips, its devices, a folder's tracks), before what the areas after it write (its modulators
+    // and macros, its sends).
+    if (element.hasType (schema::MASTER))
+    {
+        writeSwitchesInto (element, kept.trackSwitches);
+        writeViewInto (element, kept.tracksOutside.master);
+        return;
+    }
+
+    if (! element.hasType (schema::TRACK))
+        return;
+
+    // Its entries looked up by its ID as the one-field reader reads it (no text made of it): written only where it has one.
+    const auto id = readTrackElementID (element).getRaw();
+    const auto& switches = kept.trackSwitches;
+
+    if (switches.mutes.find (id) != nullptr || switches.solos.find (id) != nullptr || switches.frozen.find (id) != nullptr
+        || switches.modes.find (id) != nullptr)
+        writeSwitchesInto (element, switches);
+
+    if (const auto* view = kept.tracksOutside.tracks.find (id))
+        writeViewInto (element, *view);
+}
+
+bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
+                              const ValuesKept& otherKept)
+{
+    if (element.hasType (schema::MASTER))
+        return holdSameSwitchesOf (kept.trackSwitches, otherKept.trackSwitches, 0);
+
+    if (! element.hasType (schema::TRACK))
+        return true;
+
+    const auto id = readTrackElementID (element).getRaw();
+    return id == readTrackElementID (otherElement).getRaw() && holdSameSwitchesOf (kept.trackSwitches, otherKept.trackSwitches, id);
 }
 
 //==============================================================================
@@ -896,28 +1053,8 @@ bool isHeardAsTracks (const juce::ValueTree& parent, const juce::ValueTree& chil
 SongTracks readHeldTracks (const juce::ValueTree& song)
 {
     SongTracks tracks;
-    TrackSwitches switches;
-    TracksOutside view;
-    readHeldAll (song, tracks, switches, view, nullptr);
+    readHeldAll (song, tracks, nullptr);
     return tracks;
-}
-
-TrackSwitches readHeldTrackSwitches (const juce::ValueTree& song)
-{
-    SongTracks tracks;
-    TrackSwitches switches;
-    TracksOutside view;
-    readHeldAll (song, tracks, switches, view, nullptr);
-    return switches;
-}
-
-TracksOutside readHeldTracksOutside (const juce::ValueTree& song)
-{
-    SongTracks tracks;
-    TrackSwitches switches;
-    TracksOutside view;
-    readHeldAll (song, tracks, switches, view, nullptr);
-    return view;
 }
 
 std::uint64_t countTrackElementsWalked() noexcept

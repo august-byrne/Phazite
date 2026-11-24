@@ -1567,6 +1567,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongValuesSectionsTests.cpp
         tests/SongValuesSendsTests.cpp
         tests/SongValuesTempoTests.cpp
+        tests/SongValuesTrackLeavesTests.cpp
         tests/SongValuesTracksTests.cpp
         tests/SongValuesTests.cpp
         tests/SoundKeyTests.cpp

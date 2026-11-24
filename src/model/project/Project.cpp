@@ -3809,14 +3809,14 @@ bool Project::isDeviceStoreAsSaved() const
 
 namespace
 {
-    // The tracks' own properties that count (TracksValue.h's and TrackSwitchesValue.h's: not the view, which counts nothing).
-    const std::array<const schema::PropertyDescription*, 19>& getCountedTrackProperties()
+    // The tracks' own properties that count (TracksValue.h's: the switches are their area's, compared by its entries, and the
+    // view counts nothing).
+    const std::array<const schema::PropertyDescription*, 15>& getCountedTrackProperties()
     {
-        static const std::array<const schema::PropertyDescription*, 19> properties {
-            &schema::trackID,       &schema::trackKind,  &schema::trackName,       &schema::trackColour,        &schema::folderBus,
-            &schema::channelVolume, &schema::channelPan, &schema::channelFader,    &schema::channelVCA,         &schema::keyRoot,
-            &schema::keyScale,      &schema::trackInput, &schema::trackMonitoring, &schema::trackPadDevice,     &schema::trackPad,
-            &schema::trackMute,     &schema::trackSolo,  &schema::trackFrozen,     &schema::trackAutomationMode
+        static const std::array<const schema::PropertyDescription*, 15> properties {
+            &schema::trackID,       &schema::trackKind,  &schema::trackName,       &schema::trackColour,    &schema::folderBus,
+            &schema::channelVolume, &schema::channelPan, &schema::channelFader,    &schema::channelVCA,     &schema::keyRoot,
+            &schema::keyScale,      &schema::trackInput, &schema::trackMonitoring, &schema::trackPadDevice, &schema::trackPad
         };
 
         return properties;
@@ -4021,6 +4021,9 @@ bool Project::areTracksAsSaved() const
             return false;
     }
 
+    // Its switches by its key against the saved copy's (TrackSwitchesValue.h: a look in each map), the master's under 0.
+    const auto switches = getTrackSwitches (*song);
+
     for (const auto id : trackOwnToCompare)
     {
         const auto found = findHeld (id);
@@ -4029,7 +4032,8 @@ bool Project::areTracksAsSaved() const
         if (found.isValid() != saved.isValid())
             return false;
 
-        if (found.isValid() && ! holdSameTrackOwn (found, saved))
+        if (found.isValid()
+            && (! holdSameTrackOwn (found, saved) || ! holdSameSwitchesOf (switches, savedState.values.trackSwitches, id.getRaw())))
             return false;
     }
 
@@ -4037,7 +4041,9 @@ bool Project::areTracksAsSaved() const
     {
         const auto master = state.getChildWithName (schema::MASTER), saved = savedState.tree.getChildWithName (schema::MASTER);
 
-        if (master.isValid() != saved.isValid() || (master.isValid() && ! holdSameTrackOwn (master, saved)))
+        if (master.isValid() != saved.isValid()
+            || (master.isValid()
+                && (! holdSameTrackOwn (master, saved) || ! holdSameSwitchesOf (switches, savedState.values.trackSwitches, 0))))
             return false;
     }
 

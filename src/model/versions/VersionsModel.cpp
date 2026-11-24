@@ -2106,8 +2106,10 @@ namespace
                    + values->countSectionsAdopted()     // the sections'
                    + values->countModulationAdopted()   // modulation's
                    + values->countSendsAdopted()        // the sends'
-                   + values->countDeviceStoreAdopted(); // the store's: chooseDeviceStoreClash(), and a whole track's
+                   + values->countDeviceStoreAdopted()  // the store's: chooseDeviceStoreClash(), and a whole track's
                                                         // (chooseTrackClash()) through the store's functions
+                   + values->countTrackLeavesAdopted(); // the tracks' switches and view: a switch's clash and a whole
+                                                        // track's through their setters (chooseTrackClash())
         }
 
         const Song& song;
@@ -2122,8 +2124,8 @@ namespace
     // the sends (a path through a send), the devices (a path through a device, a container or a chain: the store's first), a
     // curve (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a
     // note's property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path
-    // through a clip, refused), a whole track or the master (chooseTrackClash()). What the first whose path it is did with
-    // it; none of them (notTheArea) for a clash in the song's tree.
+    // through a clip, refused), a whole track or the master, or a switch of one (chooseTrackClash()). What the first whose
+    // path it is did with it; none of them (notTheArea) for a clash in the song's tree.
     AreaChoice chooseInAreas (Song& song, const MergeClash& clash, int value, const MergeSides& sides)
     {
         if (const auto choice = chooseTempoMapClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
@@ -2160,7 +2162,7 @@ namespace
             return choice;
 
         if (const auto choice = chooseTrackClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
-            return choice; // a whole TRACK or the MASTER
+            return choice; // a whole TRACK or the MASTER, or a switch of one
 
         return AreaChoice::notTheArea;
     }

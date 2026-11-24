@@ -241,13 +241,19 @@ namespace
         return {};
     }
 
-    bool isSoloedOrInSoloedFolder (const juce::ValueTree& state)
+    // Whether a track's switch is on (a look in the switches' map by its ID), or a folder's it is in (up its elements).
+    bool isOnOrInFolderOn (const immer::map<std::uint64_t, bool>& switches, const juce::ValueTree& state)
     {
         for (auto element = state; element.hasType (schema::TRACK); element = element.getParent())
-            if (readTrackSolo (element))
+            if (switches.find (readTrackElementID (element).getRaw()) != nullptr)
                 return true;
 
         return false;
+    }
+
+    bool isSoloedOrInSoloedFolder (const Song& song, const juce::ValueTree& state)
+    {
+        return isOnOrInFolderOn (getTrackSwitches (song).solos, state);
     }
 
     // The track whose drum sampler a pad's track plays a pad of (model/devices/internal/DrumKit.h), whose mute and solo cover
@@ -261,13 +267,9 @@ namespace
         return sampler != state ? sampler : juce::ValueTree();
     }
 
-    bool isMutedOrInMutedFolder (const juce::ValueTree& state)
+    bool isMutedOrInMutedFolder (const Song& song, const juce::ValueTree& state)
     {
-        for (auto element = state; element.hasType (schema::TRACK); element = element.getParent())
-            if (readTrackMute (element))
-                return true;
-
-        return false;
+        return isOnOrInFolderOn (getTrackSwitches (song).mutes, state);
     }
 
     // A channel's element: the master's by its flag, else its track's; invalid for none.
@@ -553,26 +555,28 @@ bool isTrackMuted (const Song& song, TrackID id, bool orInMutedFolder)
     const auto state = findTrackState (song, id);
 
     if (! orInMutedFolder)
-        return readTrackMute (state);
+        return state.hasType (schema::TRACK) && getTrackSwitches (song).mutes.find (id.getRaw()) != nullptr;
 
     // A pad's track is muted with its sampler's track, as a track is with its folder.
-    return isMutedOrInMutedFolder (state) || isMutedOrInMutedFolder (findPadSamplerTrack (song, state));
+    return isMutedOrInMutedFolder (song, state) || isMutedOrInMutedFolder (song, findPadSamplerTrack (song, state));
 }
 
 bool isTrackSoloed (const Song& song, TrackID id)
 {
-    return readTrackSolo (findTrackState (song, id));
+    return getTrackSwitches (song).solos.find (id.getRaw()) != nullptr && findTrackState (song, id).hasType (schema::TRACK);
 }
 
 bool areAnyTracksSoloed (const Song& song)
 {
-    const auto states = getTrackStates (song);
-    return std::any_of (states.begin(), states.end(), [] (const juce::ValueTree& state) { return readTrackSolo (state); });
+    // Each solo the switches hold, of a track the song holds (one a step took away keeps its entry, for an Undo).
+    const auto solos = getTrackSwitches (song).solos;
+    return std::any_of (solos.begin(), solos.end(), [&song] (const auto& entry)
+                        { return findTrackState (song, TrackID::fromRaw (entry.first)).hasType (schema::TRACK); });
 }
 
 bool isTrackFrozen (const Song& song, TrackID id)
 {
-    return readTrackFrozen (findTrackState (song, id));
+    return getTrackSwitches (song).frozen.find (id.getRaw()) != nullptr && findTrackState (song, id).hasType (schema::TRACK);
 }
 
 std::optional<TrackPad> getTrackPad (const Song& song, TrackID id)
@@ -598,26 +602,16 @@ std::vector<TrackPad> getPadTracks (const Song& song)
 
 void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
 {
-    if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && readTrackMute (state) != muted)
-    {
-        // Off is no property at all, as it is at first: unmuted again, the track is as it was, which a version's changes then
-        // don't count (docs/design/versions.md).
-        if (muted)
-            state.setProperty (schema::trackMute, true, undo);
-        else
-            state.removeProperty (schema::trackMute, undo);
-    }
+    // Off is no entry at all, as it is at first: unmuted again, the track is as it was, which a version's changes then don't
+    // count (docs/design/versions.md). One entry set, the switches' setter asked only where it differs.
+    if (findTrackState (song, id).hasType (schema::TRACK))
+        setTrackSwitches (song, withMute (getTrackSwitches (song), id.getRaw(), muted), undo != nullptr);
 }
 
 void setTrackSoloed (Song& song, TrackID id, bool soloed)
 {
-    if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && readTrackSolo (state) != soloed)
-    {
-        if (soloed)
-            state.setProperty (schema::trackSolo, true, nullptr);
-        else
-            state.removeProperty (schema::trackSolo, nullptr);
-    }
+    if (findTrackState (song, id).hasType (schema::TRACK))
+        setTrackSwitches (song, withSolo (getTrackSwitches (song), id.getRaw(), soloed), false);
 }
 
 void setTrackName (Song& song, TrackID id, const juce::String& name)
@@ -657,46 +651,128 @@ juce::Colour getTrackColour (std::optional<juce::uint32> own, int row)
 //==============================================================================
 TrackView getTrackView (const Song& song, TrackID id)
 {
-    return readViewOf (findTrackState (song, id));
+    return getViewOf (song, findTrackState (song, id));
+}
+
+TrackView getViewOf (const Song& song, const juce::ValueTree& state)
+{
+    // A song that holds no values (a check's copy): its tree holds the view, read as Phazite's code always read it.
+    const auto* values = song.getValues();
+
+    if (values == nullptr)
+        return readViewOf (state);
+
+    if (state.hasType (schema::MASTER))
+        return values->tracksOutside.get().master;
+
+    const auto* view =
+        state.hasType (schema::TRACK) ? values->tracksOutside.get().tracks.find (readTrackElementID (state).getRaw()) : nullptr;
+    return view != nullptr ? *view : TrackView();
+}
+
+TrackSwitches getTrackSwitches (const Song& song)
+{
+    const auto* values = song.getValues();
+    return values != nullptr ? values->trackSwitches.get() : readTrackSwitches (song.getState());
+}
+
+TracksOutside getTracksOutside (const Song& song)
+{
+    const auto* values = song.getValues();
+    return values != nullptr ? values->tracksOutside.get() : readTracksOutside (song.getState());
+}
+
+std::optional<std::uint64_t> findSwitchKey (const Song& song, TrackID id)
+{
+    const auto state = findTrackState (song, id);
+
+    if (state.hasType (schema::MASTER))
+        return (std::uint64_t) 0;
+
+    return state.hasType (schema::TRACK) ? std::optional (id.getRaw()) : std::nullopt;
+}
+
+void setTrackSwitches (Song& song, TrackSwitches next, bool inHistory)
+{
+    if (auto* values = song.getValues())
+    {
+        if (inHistory)
+            values->setSwitches (song, std::move (next));
+        else
+            values->setSwitchesOutsideHistory (song, std::move (next));
+    }
+}
+
+void setTrackView (Song& song, TrackID id, TrackView view)
+{
+    auto* values = song.getValues();
+    const auto key = findSwitchKey (song, id);
+
+    if (values == nullptr || ! key.has_value())
+        return;
+
+    const auto& outside = values->tracksOutside.get();
+    values->setTracksOutside (*key == 0 ? withMasterView (outside, std::move (view)) : withTrackView (outside, *key, std::move (view)));
+}
+
+void setTrackFrozen (Song& song, TrackID id, bool frozen, juce::UndoManager* undo)
+{
+    if (findTrackState (song, id).hasType (schema::TRACK))
+        setTrackSwitches (song, withFrozen (getTrackSwitches (song), id.getRaw(), frozen), undo != nullptr);
 }
 
 std::optional<int> getSavedTrackHeight (const Song& song, TrackID id)
 {
-    return readSavedHeight (findTrackState (song, id));
+    return getTrackView (song, id).height;
 }
 
 void setSavedTrackHeight (Song& song, TrackID id, int height)
 {
-    if (auto state = findTrackState (song, id); state.isValid())
-        state.setProperty (schema::trackHeight, height, nullptr);
+    // One row's view set, a look in a map: a drag's event of a row's height reads no track and compares no other row.
+    if (auto view = getTrackView (song, id); view.height != height)
+    {
+        view.height = height;
+        setTrackView (song, id, std::move (view));
+    }
 }
 
 bool isCollapsed (const Song& song, TrackID id)
 {
-    return readCollapsed (findTrackState (song, id)).value_or (false);
+    return getTrackView (song, id).collapsed.value_or (false);
 }
 
 void setCollapsed (Song& song, TrackID id, bool collapsed)
 {
-    if (auto state = findTrackState (song, id); state.isValid())
-        state.setProperty (schema::trackCollapsed, collapsed, nullptr);
+    // Off as false, as Phazite always wrote it (the golden command script holds collapsed="0": TracksOutside.h).
+    const auto wanted = std::optional (collapsed);
+
+    if (auto view = getTrackView (song, id); view.collapsed != wanted)
+    {
+        view.collapsed = wanted;
+        setTrackView (song, id, std::move (view));
+    }
 }
 
 bool isPinned (const Song& song, TrackID id)
 {
-    return readPinned (findTrackState (song, id)).value_or (false);
+    return getTrackView (song, id).pinned.value_or (false);
 }
 
 void setPinned (Song& song, TrackID id, bool pinned)
 {
-    if (auto state = findTrackState (song, id); state.isValid())
-        state.setProperty (schema::trackPinned, pinned, nullptr);
+    const auto wanted = pinned ? std::optional (true) : std::nullopt;
+
+    if (auto view = getTrackView (song, id); view.pinned != wanted)
+    {
+        view.pinned = wanted;
+        setTrackView (song, id, std::move (view));
+    }
 }
 
 bool isHiddenInCollapsedFolder (const Song& song, TrackID id)
 {
     for (auto folder = findTrackState (song, id).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
-        if (readCollapsed (folder).value_or (false))
+        if (getViewOf (song, folder).collapsed.value_or (false))
             return true;
 
     return false;
@@ -704,32 +780,34 @@ bool isHiddenInCollapsedFolder (const Song& song, TrackID id)
 
 void toggleSoloAlone (Song& song, TrackID id)
 {
-    auto state = findTrackState (song, id);
-
-    if (! state.hasType (schema::TRACK))
+    if (! findTrackState (song, id).hasType (schema::TRACK))
         return;
 
+    // Every other track's solo off (of the tracks the song holds: a track a step took away keeps its entry), and its own on,
+    // or off where it was soloed alone: one set of the whole next value, one call to the listeners.
+    auto next = getTrackSwitches (song);
     auto alone = isTrackSoloed (song, id);
+    auto solos = next.solos;
 
-    for (auto other : getTrackStates (song))
-        if (other != state && readTrackSolo (other))
-            alone = false;
+    for (const auto& entry : next.solos)
+    {
+        if (entry.first == id.getRaw() || ! findTrackState (song, TrackID::fromRaw (entry.first)).hasType (schema::TRACK))
+            continue;
 
-    for (auto other : getTrackStates (song))
-        if (other != state)
-            other.removeProperty (schema::trackSolo, nullptr);
+        alone = false;
+        solos = solos.erase (entry.first);
+    }
 
-    if (alone)
-        state.removeProperty (schema::trackSolo, nullptr);
-    else
-        state.setProperty (schema::trackSolo, true, nullptr);
+    next.solos = alone ? solos.erase (id.getRaw()) : solos.set (id.getRaw(), true);
+    setTrackSwitches (song, std::move (next), false);
 }
 
 bool isSilencedBySolo (const Song& song, TrackID id)
 {
     const auto state = findTrackState (song, id);
-    return areAnyTracksSoloed (song) && ! isSoloedOrInSoloedFolder (state) && ! isSoloedOrInSoloedFolder (findPadSamplerTrack (song, state))
-           && ! isReturnState (state) && ! isTrackMuted (song, id, false);
+    return areAnyTracksSoloed (song) && ! isSoloedOrInSoloedFolder (song, state)
+           && ! isSoloedOrInSoloedFolder (song, findPadSamplerTrack (song, state)) && ! isReturnState (state)
+           && ! isTrackMuted (song, id, false);
 }
 
 //==============================================================================
@@ -1075,6 +1153,58 @@ void toggleAllRowsCollapsed (Song& song)
     setAllRowsCollapsed (song, isAnyRowExpanded (song));
 }
 
+namespace
+{
+    // Each copied track given its original's switches, the frozen one aside (a copy plays live: the file is the original's),
+    // and its view, its lanes naming its devices' copies (copied: a lane's device by its copy's ID, design K.12), before the
+    // copy comes into the song: by the pairs, each original with its copy. The switches written outside the history, as a
+    // maker gives a new item's entries in a keyed area (model/plugins/DeviceStore.cpp: setMadeStore()): the copies' IDs are
+    // new (the song's count of IDs is never undone), so the area keeps none of them; the step's Undo takes the copy away,
+    // leaving its entries unseen, and what is written for it since outside the history (the copy unmuted) is what its Redo
+    // brings it back with, as its element carried its mute while the tree held the switches. Written in the step, the Redo
+    // would put the copied mute back over that. The view is never in the history.
+    void copyTrackLeaves (Song& song, const std::vector<std::pair<TrackID, TrackID>>& originalsAndCopies, const CopiedIDs& copied)
+    {
+        auto* values = song.getValues();
+
+        if (values == nullptr)
+            return;
+
+        const auto held = values->trackSwitches.get();
+        auto switches = held;
+        auto outside = values->tracksOutside.get();
+
+        for (const auto& [originalID, copyID] : originalsAndCopies)
+        {
+            const auto old = originalID.getRaw();
+            const auto made = copyID.getRaw();
+            switches = withMute (switches, made, held.mutes.find (old) != nullptr);
+            switches = withSolo (switches, made, held.solos.find (old) != nullptr);
+            const auto* mode = held.modes.find (old);
+            switches = withAutomationMode (switches, made, mode != nullptr ? std::optional (*mode) : std::nullopt);
+
+            if (const auto* view = values->tracksOutside.get().tracks.find (old))
+            {
+                auto copiedView = *view;
+                copiedView.lanes = {};
+
+                for (auto lane : view->lanes)
+                {
+                    if (const auto found = copied.find (lane.device.getRaw()); found != copied.end())
+                        lane.device = DeviceID::fromRaw (found->second);
+
+                    copiedView.lanes = copiedView.lanes.push_back (std::move (lane));
+                }
+
+                outside = withTrackView (outside, made, std::move (copiedView));
+            }
+        }
+
+        values->setTracksOutside (std::move (outside));
+        values->setSwitchesOutsideHistory (song, std::move (switches));
+    }
+} // namespace
+
 std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tracks, Selection* selection)
 {
     std::vector<TrackID> copies;
@@ -1114,7 +1244,7 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         // Nor does a copy of a pad's track play the pad, which plays on the original. Its clips aren't the song's tree's: the
         // clips' code copies each track's onto its copy (copyTrackClips()), once the copy is the song's.
         for (auto state : inside)
-            for (const auto* property : { &schema::trackFrozen.getName(), &schema::trackPadDevice.getName(), &schema::trackPad.getName() })
+            for (const auto* property : { &schema::trackPadDevice.getName(), &schema::trackPad.getName() })
                 state.removeProperty (*property, nullptr);
 
         // Nor are its devices the copy's elements: the devices' code gives each copied track its original's
@@ -1128,15 +1258,25 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
             }
         }
 
-        auto parent = original.getParent();
-        parent.addChild (copy, parent.indexOf (original) + 1, &song.getUndoManager());
-
-        // Each track's clips onto its copy, in their alias groups, from the original by the copy's ID.
+        // Each copied track with its original (by the copy's ID, from the original's), its tracks' first: their switches and
+        // view given before the copy comes into the song (copyTrackLeaves()).
         std::map<std::uint64_t, std::uint64_t> originals;
 
         for (const auto& [old, made] : copied)
             originals[made] = old;
 
+        std::vector<std::pair<TrackID, TrackID>> originalsAndCopies;
+
+        for (const auto& state : inside)
+            if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
+                originalsAndCopies.emplace_back (TrackID::fromRaw (found->second), getTrackID (state));
+
+        copyTrackLeaves (song, originalsAndCopies, copied);
+
+        auto parent = original.getParent();
+        parent.addChild (copy, parent.indexOf (original) + 1, &song.getUndoManager());
+
+        // Each track's clips onto its copy, in their alias groups, from the original by the copy's ID.
         for (const auto& state : inside)
             if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
                 copyTrackClips (song, TrackID::fromRaw (found->second), getTrackID (state), copied, true);
@@ -1398,10 +1538,41 @@ namespace
 
 AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
 {
+    // A switch of a track or the master's mode ("TRACK:12" and its mute): the switches' entry of its key given the value
+    // chosen, or taken away where that side had none, in the choice's step, as the conversion reads it (TrackSwitchesValue.h:
+    // readHeldSwitchesOf(), of the element with the song's other entries of it and the value chosen). The view counts nothing,
+    // and a merge reports no clash of it.
+    if (clash.property.isValid())
+    {
+        const auto element = findByPath (song.getState(), clash.path);
+
+        if (! isSwitchProperty (element, clash.property) || song.getValues() == nullptr)
+            return AreaChoice::notTheArea;
+
+        if (! juce::isPositiveAndBelow (value, 3))
+            return AreaChoice::refused;
+
+        juce::ValueTree holder (element.getType());
+        holder.setProperty (schema::trackID, element[schema::trackID], nullptr);
+        auto switches = getTrackSwitches (song);
+        writeSwitchesInto (holder, switches);
+
+        const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+
+        if (values[value]->isVoid())
+            holder.removeProperty (clash.property, nullptr);
+        else
+            holder.setProperty (clash.property, *values[value], nullptr);
+
+        readHeldSwitchesOf (holder, switches);
+        setTrackSwitches (song, std::move (switches), true);
+        return AreaChoice::chosen;
+    }
+
     // A whole track or the master ("TRACKS:TRACKS", "TRACK:12"; "MASTER:MASTER"): a path that ends at one, with no property.
     // A merge of two songs Phazite holds never reports one (it keeps a track taken away on one side and changed on the other,
     // and merges the rest property by property: SongMerge.cpp); a commit's song may come from anyone.
-    if (clash.path.isEmpty() || clash.property.isValid())
+    if (clash.path.isEmpty())
         return AreaChoice::notTheArea;
 
     if (const auto last = clash.path[clash.path.size() - 1];
@@ -1426,6 +1597,19 @@ AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, con
     const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
     const auto& chosen = *elements[value];
     const auto place = existing.isValid() ? parent.indexOf (existing) : -1;
+
+    // The tracks the song holds in the element it replaces, by their IDs: what comes back under one of them takes its switches
+    // in the step (below).
+    std::set<std::uint64_t> heldBefore;
+
+    if (existing.isValid())
+    {
+        std::vector<juce::ValueTree> replaced;
+        collectTrackElements (existing, replaced);
+
+        for (const auto& element : replaced)
+            heldBefore.insert (readID (element[schema::trackID]));
+    }
 
     if (existing.isValid())
     {
@@ -1466,6 +1650,69 @@ AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, con
 
     if (copy.hasType (schema::MASTER))
         removeChildrenOf (copy, schema::DEVICE, schema::CONTAINER);
+
+    // Its tracks' switches and view (the master's mode and row), read from the side's elements as the song holds them and
+    // given through their areas before the copy comes in, taken out of the copy (TrackSwitchesValue.h, TracksOutside.h), as a
+    // version's track that comes back gets them (model/versions/ApplySong.cpp: makeTrackLeavesLike()): the switches in the
+    // step, the song's entries of their IDs replaced, but those of a track new to the song (neither in the element replaced
+    // nor of an ID the switches hold any entry of: holdsSwitchesOf()), which are written outside the history, as a maker gives
+    // a new item's (copyTrackLeaves()); the view of each where the song keeps none of its ID (a row it keeps, of a track it
+    // held, stays), the master's where its row holds nothing set.
+    if (auto* values = song.getValues())
+    {
+        const auto held = values->trackSwitches.get();
+        auto newSwitches = held;
+        auto outside = values->tracksOutside.get();
+        std::vector<juce::ValueTree> chosenTracks, inStep;
+        collectTrackElements (chosen, chosenTracks);
+
+        if (chosen.hasType (schema::MASTER))
+            chosenTracks.push_back (chosen);
+
+        for (const auto& element : chosenTracks)
+        {
+            if (element.hasType (schema::MASTER))
+            {
+                inStep.push_back (element);
+
+                if (outside.master == TrackView())
+                    outside = withMasterView (outside, readHeldViewOf (element));
+
+                continue;
+            }
+
+            const auto id = readID (element[schema::trackID]);
+
+            if (heldBefore.count (id) == 0 && ! holdsSwitchesOf (held, id))
+                readHeldSwitchesOf (element, newSwitches);
+            else
+                inStep.push_back (element);
+
+            if (id > 0 && id < schema::maxID && outside.tracks.find (id) == nullptr)
+                outside = withTrackView (outside, id, readHeldViewOf (element));
+        }
+
+        values->setTracksOutside (std::move (outside));
+        values->setSwitchesOutsideHistory (song, std::move (newSwitches));
+        auto switches = values->trackSwitches.get();
+
+        for (const auto& element : inStep)
+            readHeldSwitchesOf (element, switches);
+
+        values->setSwitches (song, std::move (switches));
+    }
+
+    for (const auto& track : tracks)
+    {
+        takeSwitchesOutOf (track, nullptr);
+        takeViewOutOf (track, nullptr);
+    }
+
+    if (copy.hasType (schema::MASTER))
+    {
+        takeSwitchesOutOf (copy, nullptr);
+        takeViewOutOf (copy, nullptr);
+    }
 
     parent.addChild (copy, place, undo);
     tracks.clear();

@@ -206,8 +206,9 @@ void checkRoundTrip (const juce::ValueTree& element)
 void checkReaders (const phazite::Song& song)
 {
     const auto tracks = phazite::getTracksValue (song);
-    const auto switches = phazite::readTrackSwitches (song.getState());
-    const auto outside = phazite::readTracksOutside (song.getState());
+    const auto whole = phazite::test::copyWholeSong (song); // the switches and the view are written into a whole copy alone
+    const auto switches = phazite::readTrackSwitches (whole);
+    const auto outside = phazite::readTracksOutside (whole);
     const auto order = phazite::makeTrackOrder (tracks);
 
     for (const auto id : order.order)

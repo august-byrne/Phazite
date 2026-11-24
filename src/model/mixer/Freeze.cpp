@@ -391,7 +391,7 @@ void freezeFromFile (Song& song, TrackID track, const juce::File& rendered, juce
     if (rendered != file && ! rendered.moveFileTo (file) && ! rendered.copyFileTo (file))
         return;
 
-    findTrackState (song, track).setProperty (schema::trackFrozen, true, undo);
+    setTrackFrozen (song, track, true, undo); // in the caller's step with its undo manager (Bounce in Place), else outside
 
     // What the track holds as it is frozen, taken here by what keeps the song's frozen tracks (FreezeKeeper, the song's
     // writer of what is pending), not in its tree callback, which reads no clip of the song's (SongValues.h): so what
@@ -401,8 +401,7 @@ void freezeFromFile (Song& song, TrackID track, const juce::File& rendered, juce
 
 void unfreeze (Song& song, TrackID track)
 {
-    if (auto state = findTrackState (song, track); state.hasType (schema::TRACK))
-        state.removeProperty (schema::trackFrozen, nullptr);
+    setTrackFrozen (song, track, false); // outside the history
 }
 
 bool isFrozenDevice (const Song& song, DeviceID id)
@@ -429,10 +428,16 @@ std::vector<TrackID> getFrozenTracks (const Song& song)
 {
     std::vector<TrackID> frozen;
 
-    // Each track's switch read from the element the song's index gives it (TrackSwitchesValue.h), one walk of the order.
-    for (const auto& state : getTrackStates (song))
-        if (readTrackFrozen (state))
-            frozen.push_back (readTrackElementID (state));
+    // Each frozen switch the switches hold of a track the song holds (one a step took away keeps its entry, for an Undo), in
+    // the song's order: one walk of the order where any is frozen, a look in the map for each, and none where none is.
+    const auto switches = getTrackSwitches (song).frozen;
+
+    if (switches.empty())
+        return frozen;
+
+    for (const auto id : getTrackIDs (song))
+        if (switches.find (id.getRaw()) != nullptr)
+            frozen.push_back (id);
 
     return frozen;
 }
@@ -440,8 +445,19 @@ std::vector<TrackID> getFrozenTracks (const Song& song)
 //==============================================================================
 void forgetMissingFrozenFiles (Song& song)
 {
+    // The loader's (model/project/internal/Project.h: makeSong()), on the tree before the song holds its values; on the
+    // switches, outside the history, once it does.
+    if (song.getValues() != nullptr)
+    {
+        for (const auto track : getFrozenTracks (song))
+            if (! getFrozenFile (song, track).existsAsFile())
+                unfreeze (song, track);
+
+        return;
+    }
+
     for (auto state : getTrackStates (song))
-        if ((bool) state[schema::trackFrozen] && ! getFrozenFile (song, getTrackID (state)).existsAsFile())
+        if (readTrackFrozen (state) && ! getFrozenFile (song, getTrackID (state)).existsAsFile())
             state.removeProperty (schema::trackFrozen, nullptr);
 }
 

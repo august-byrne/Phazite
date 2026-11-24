@@ -17,6 +17,7 @@
 #include "model/base/internal/Selection.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
@@ -420,6 +421,36 @@ TEST_CASE ("A track's preset keeps its name, colour, drum view, volume, pan and 
     CHECK (preset[keys::instrument][keys::type].toString() == juce::String (dev::DrumSampler::typeID));
     REQUIRE (preset[keys::effects].getArray() != nullptr);
     CHECK (preset[keys::effects].getArray()->size() == 1);
+
+    // Loaded as a new track (Presets.cpp: addTrackFromPreset()): its drum view as saved; an empty order and hidden list as
+    // none, as the drum rows' writers write none for an empty list.
+    const auto& host = phazite::getPluginHost (phazite::test::getEngineContext());
+    TrackID loaded;
+
+    {
+        const phazite::UndoStep step (song, "Add Track");
+        loaded = phazite::addTrackFromPreset (song, host, drums, phazite::makeTrackPreset (song, drums), nullptr);
+    }
+
+    REQUIRE (loaded.isValid());
+    CHECK (phazite::isDrumTrack (song, loaded));
+    CHECK (phazite::getDrumRowOrder (song, loaded) == std::vector<int> { 38, 36 });
+    CHECK (phazite::getHiddenDrumRows (song, loaded) == std::vector<int> { 42 });
+
+    auto emptyRows = phazite::makeTrackPreset (song, drums);
+    REQUIRE (emptyRows[keys::track].getDynamicObject() != nullptr);
+    emptyRows[keys::track].getDynamicObject()->setProperty (keys::drumOrder, "");
+    emptyRows[keys::track].getDynamicObject()->setProperty (keys::drumHidden, "");
+
+    {
+        const phazite::UndoStep step (song, "Add Track");
+        loaded = phazite::addTrackFromPreset (song, host, drums, emptyRows, nullptr);
+    }
+
+    REQUIRE (loaded.isValid());
+    CHECK (phazite::isDrumTrack (song, loaded));
+    CHECK_FALSE (phazite::getTrackView (song, loaded).drumOrder.has_value());
+    CHECK_FALSE (phazite::getTrackView (song, loaded).drumHidden.has_value());
 
     CHECK (phazite::makeTrackPreset (song, phazite::getMasterID (song)).isVoid());
     CHECK (phazite::makeTrackPreset (song, TrackID::fromRaw (999999)).isVoid());

@@ -11,6 +11,8 @@
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 
+#include <utility>
+
 namespace phazite
 {
 namespace
@@ -26,7 +28,6 @@ namespace
     void followVolume (Song& song, TrackID folder, const ParameterRef& was)
     {
         const auto now = getVolume (song, folder);
-        const auto device = juce::String ((juce::int64) now.device.getRaw());
 
         // Its curve, in its place among the song's (Automation.h).
         renameCurve (song, was, now);
@@ -39,24 +40,27 @@ namespace
             linkMidiController (song, *controller, now);
 
         // A lane for the new name after the old one's, as it was (its height, collapsed or not): the old one stays, ignored
-        // while its fader is gone, for an undo that brings that fader back (lanes are view state, outside the history).
-        auto lanes = findTrackState (song, folder).getChildWithName (schema::LANES);
+        // while its fader is gone, for an undo that brings that fader back (lanes are view state, outside the history: the
+        // folder's view, set once, Tracks.h: setTrackView()).
+        const auto held = getTrackView (song, folder);
+        auto view = held;
+        view.lanes = {};
 
-        for (auto i = lanes.getNumChildren(); --i >= 0;)
+        for (const auto& lane : held.lanes)
         {
-            const auto lane = lanes.getChild (i);
+            view.lanes = view.lanes.push_back (lane);
 
-            if (! lane.hasType (schema::LANE))
-                continue;
-
-            if (const auto value = readLaneValue (lane); value.device == was.device && value.parameter == was.parameter)
+            if (lane.device == was.device && lane.parameter == was.parameter)
             {
-                auto copy = lane.createCopy();
-                copy.setProperty (schema::laneDevice, device, nullptr);
-                copy.setProperty (schema::laneParameter, now.parameter, nullptr);
-                lanes.addChild (copy, i + 1, nullptr);
+                auto copy = lane;
+                copy.device = now.device;
+                copy.parameter = now.parameter;
+                view.lanes = view.lanes.push_back (std::move (copy));
             }
         }
+
+        if (view.lanes.size() != held.lanes.size())
+            setTrackView (song, folder, std::move (view));
 
         // A pass that writes the volume as the song plays goes on by its new name.
         if (auto* session = findSession (song))

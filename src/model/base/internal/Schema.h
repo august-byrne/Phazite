@@ -323,11 +323,10 @@ inline const Property<juce::String> drumHidden { "drumHidden", on (TRACK), Kind:
 // view), with an ID of the song's (trackID) like a track's. song, but for its lanes
 // (MASTER, with the elements above.)
 
-// Child of TRACK and of MASTER, once the track has kept a lane: its automation lanes (LANE), in an element of their own.
-// Lanes are view state, added and removed outside the undo history, which finds a track's other elements (its clips,
-// sends, devices and modulators) by their places among the track's elements: a lane added or removed among them would
-// make an undo or a redo take the wrong one. So LANES is added after the track's elements, once, and stays while the song
-// is open, empty or not. view
+// Child of TRACK and of MASTER, while the track keeps a lane: its automation lanes (LANE), in an element of their own. Lanes
+// are view state, held outside the undo history with the rest of a track's view (TracksOutside.h: the song's tree holds no
+// LANES), and written after the track's clips, devices and a folder's tracks, before its modulators and sends; none is
+// written for a track that keeps no lane. view
 // (LANES, with the elements above.)
 
 // Child of LANES, one for each automation lane the playlist shows under the track, in their order (docs/design.md,

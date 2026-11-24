@@ -17,7 +17,9 @@
 // writeModulatorElement() writes it; and under each TRACK, its sends in their order, after those (the last of its children),
 // each written as SendsValue.h's writeSendElement() writes it; and in each plug-in's DEVICE what the store holds of it, its
 // values set by hand as VALUEs sorted by their parameters after its other children, in each CHAIN its mute and solo, and in
-// each DEVICE its window's place (DeviceStoreValue.h: writeStoreInto(), writeWindowPlaceInto()).
+// each DEVICE its window's place (DeviceStoreValue.h: writeStoreInto(), writeWindowPlaceInto()); and on each TRACK and the
+// MASTER its switches and its view's properties, with its LANES after its clips, its devices and a folder's tracks, before its
+// modulators and its sends (TracksArea.h: writeTrackLeavesIn()).
 #pragma once
 
 #include "model/base/IDs.h"
@@ -61,6 +63,8 @@ struct ValuesKept
     DeviceStore deviceStore {};       // none kept of a song that holds no values, and of one without what devices store
     DevicesOutside devicesOutside {}; // none kept of a song that holds no values, and of one whose windows never moved
     SongDevices devices {};           // none kept of a song that holds no values, and of one without devices
+    TrackSwitches trackSwitches {};   // none kept of a song that holds no values, and of one without a switch on
+    TracksOutside tracksOutside {};   // none kept of a song that holds no values, and of one whose rows were never set
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -166,7 +170,8 @@ bool holdSameDeviceOrder (const ValuesKept&, const ValuesKept&, const DevicePlac
 // elements (holdSameCurves()), then the MIDI links of a song's element either of which holds a MIDILINKS
 // (holdSameMidiLinks()), then the sections of a song's element either of which holds a SECTIONS (holdSameSections()), then
 // a TRACK's, the MASTER's or a CONTAINER's modulators and macros (ModulationArea.h: holdSameModulationOf()), then a TRACK's
-// sends (SendsArea.h: holdSameSendsOf()), then what a DEVICE or a CHAIN stores (DeviceStoreArea.h: holdSameDeviceStoreOf()). What
+// sends (SendsArea.h: holdSameSendsOf()), then what a DEVICE or a CHAIN stores (DeviceStoreArea.h: holdSameDeviceStoreOf()),
+// then a TRACK's switches or the MASTER's mode (TracksArea.h: holdSameTrackSwitchesOf(); the view counts nothing). What
 // Project's comparison of an element whole asks once the element's own properties compare (holdTheSameProject()). And
 // whether a child of an element is the place of what an area keeps (the song's TEMPOMAP, its CHORDLANE, its MIDILINKS, its
 // AUTOMATION, its SECTIONS), which that comparison leaves out of the elements it compares one by one. Any thread.

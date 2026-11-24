@@ -1732,18 +1732,73 @@ namespace
                 checkTrackElement (child, problems);
     }
 
+    // The tracks' switches and view (SongValues.h: trackSwitches, tracksOutside): no switch, no view property and no LANES on
+    // a TRACK of the song's tree or its MASTER (their areas hold them); each switch's key an ID the song gave (a mute's, a
+    // solo's and a frozen switch's a track's, never the master's 0; a mode's a track's or the master's 0), and each row's; and
+    // each lane naming a device by an ID the song gave, and a parameter. The entries of a track the song doesn't hold are
+    // kept (an Undo brings the track back with them), and so are a lane's of a device gone (ignored while it is: Automation.h,
+    // getLanes(); the loader drops it as the song opens), which the song holds nothing of to compare them with.
+    void checkTrackLeavesValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const std::function<void (const juce::ValueTree&)> visit = [&problems, &visit] (const juce::ValueTree& parent)
+        {
+            for (const auto& child : parent)
+            {
+                if (child.hasType (schema::TRACK) || child.hasType (schema::MASTER))
+                {
+                    if (holdsSwitchesIn (child) || holdsViewIn (child))
+                        problems.push_back ("values: the song's tree holds a switch, a view property or a LANES of "
+                                            + std::string (child.hasType (schema::MASTER) ? "the master" : "a track"));
+
+                    if (child.hasType (schema::TRACK))
+                        visit (child);
+                }
+            }
+        };
+
+        visit (song.getState());
+        visit (song.getState().getChildWithName (schema::TRACKS));
+
+        const auto next = (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0);
+        const auto& switches = values.trackSwitches.get();
+
+        for (const auto* map : { &switches.mutes, &switches.solos, &switches.frozen })
+            for (const auto& entry : *map)
+                if (entry.first == 0 || entry.first >= next)
+                    problems.push_back ("values: a switch is kept under " + std::to_string (entry.first) + ", no track's ID");
+
+        for (const auto& entry : switches.modes)
+            if (entry.first >= next)
+                problems.push_back ("values: an automation mode is kept under " + std::to_string (entry.first) + ", no ID the song gave");
+
+        const auto& outside = values.tracksOutside.get();
+        const auto checkLanes = [&problems, next] (const TrackView& view, const std::string& whose)
+        {
+            for (const auto& lane : view.lanes)
+                if (! lane.device.isValid() || lane.device.getRaw() >= next || lane.parameter.isEmpty())
+                    problems.push_back ("values: " + whose + " keeps a lane of no device the song gave, or of no parameter");
+        };
+
+        for (const auto& entry : outside.tracks)
+        {
+            if (entry.first == 0 || entry.first >= next)
+                problems.push_back ("values: a row's view is kept under " + std::to_string (entry.first) + ", no track's ID");
+
+            checkLanes (entry.second, "track " + std::to_string (entry.first));
+        }
+
+        checkLanes (outside.master, "the master");
+    }
+
     // The tracks' keeper, while the song's tree holds the tracks: what its part of the keeper keeps of them, which the
-    // listeners were told (SongValues.h: getTracksAsTold(), getTrackSwitchesAsTold(), getTracksViewAsTold()), is what the
-    // song holds, read again (TracksArea.h: readHeldTracks() and the two after it): the tracks and their lists alike; and the
-    // switches and the view of each track the song holds and of the master alike (the keeper keeps those of a track taken
-    // out, for an Undo, which the song reads none of).
+    // listeners were told (SongValues.h: getTracksAsTold()), is what the song holds, read again (TracksArea.h:
+    // readHeldTracks()): the tracks and their lists alike. (The switches and the view are their areas', which the keeper keeps
+    // nothing of: checkTrackLeavesValue().)
     void checkTracksAsTold (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
         const auto* kept = values.getTracksAsTold();
-        const auto* keptSwitches = values.getTrackSwitchesAsTold();
-        const auto* keptView = values.getTracksViewAsTold();
 
-        if (kept == nullptr || keptSwitches == nullptr || keptView == nullptr)
+        if (kept == nullptr)
         {
             problems.push_back ("values: the keeper holds no tracks");
             return;
@@ -1770,33 +1825,6 @@ namespace
             if (! (kept->master == read.master))
                 problems.push_back ("values: the master is kept otherwise than the song holds it");
         }
-
-        // The entries of the tracks the song holds (the master's mode under 0).
-        const auto isHeld = [&read] (std::uint64_t key) { return key == 0 || read.tracks.find (key) != nullptr; };
-        const auto readSwitches = readHeldTrackSwitches (song.getState());
-
-        const auto compare = [&problems, &isHeld] (const auto& keptMap, const auto& readMap, const char* name)
-        {
-            for (const auto& [key, entry] : keptMap)
-                if (const auto* held = readMap.find (key); isHeld (key) && (held == nullptr || ! (*held == entry)))
-                    problems.push_back ("values: track " + std::to_string (key) + "'s " + name
-                                        + " is kept otherwise than the song holds it");
-
-            for (const auto& [key, entry] : readMap)
-                if (keptMap.find (key) == nullptr)
-                    problems.push_back ("values: track " + std::to_string (key) + "'s " + name + " is in the song but not kept");
-        };
-
-        compare (keptSwitches->mutes, readSwitches.mutes, "mute");
-        compare (keptSwitches->solos, readSwitches.solos, "solo");
-        compare (keptSwitches->frozen, readSwitches.frozen, "frozen switch");
-        compare (keptSwitches->modes, readSwitches.modes, "automation mode");
-
-        const auto readView = readHeldTracksOutside (song.getState());
-        compare (keptView->tracks, readView.tracks, "view");
-
-        if (! (keptView->master == readView.master))
-            problems.push_back ("values: the master's view is kept otherwise than the song holds it");
     }
 } // namespace
 
@@ -1822,7 +1850,8 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkDevicesValue (song, *values, problems);
     checkDeviceStoreValue (song, *values, problems); // the devices' store
     checkTracksValue (song, problems);
-    checkTracksAsTold (song, *values, problems); // what the tracks' keeper told, while the tree holds them
+    checkTrackLeavesValue (song, *values, problems); // the tracks' switches and view
+    checkTracksAsTold (song, *values, problems);     // what the tracks' keeper told, while the tree holds them
     return problems;
 }
 

@@ -4428,6 +4428,105 @@ TEST_CASE ("Performance gate: the tracks' keeper reads no track whole and walks 
     CHECK (many.at ("a folder of 10 into another").whole == 11);
 }
 
+TEST_CASE ("Performance gate: a mute's click, a row's height drag event and a lane's resize set one entry of their values, read no "
+           "track whole and compare no list entry, and allocate as much on 20 tracks as on 200")
+{
+    // The tracks' switches and view are areas of the song's values (SongValues.h: trackSwitches, tracksOutside): a mute's
+    // click sets one entry of the switches (TrackSwitchesValue.h: withMute()), a row's height and a lane's one entry of the
+    // view (TracksOutside.h: withTrackView()), each a look in a map, no track read whole (countTracksReadAsValues()), no
+    // element of the tracks walked (countTrackElementsWalked()), no entry of the tracks' lists compared
+    // (countTrackListEntriesCompared()); and the playlist's rows, rebuilt, read each row's view and frozen switch by a look,
+    // no track whole. Counted on songs of 20 and 200 tracks, the same; and their allocations, the same for both and within a
+    // bound of each (as measured: a mute's click 15, a height 4, a lane's resize 18).
+    struct Counts
+    {
+        std::uint64_t whole = 0;
+        std::uint64_t walked = 0;
+        std::uint64_t compared = 0;
+        bool operator== (const Counts&) const = default;
+    };
+
+    const auto measure = [] (const std::function<void()>& edit)
+    {
+        const auto whole = phazite::countTracksReadAsValues();
+        const auto walked = phazite::countTrackElementsWalked();
+        const auto compared = phazite::countTrackListEntriesCompared();
+        edit();
+        return Counts { .whole = phazite::countTracksReadAsValues() - whole,
+                        .walked = phazite::countTrackElementsWalked() - walked,
+                        .compared = phazite::countTrackListEntriesCompared() - compared };
+    };
+
+    struct Measured
+    {
+        std::map<std::string, Counts> counts {};
+        std::map<std::string, std::optional<int>> allocations {};
+        std::uint64_t rowsReadWhole = 0;
+    };
+
+    const auto run = [&measure] (int numTracks)
+    {
+        phazite::test::TestSong s;
+        auto& song = getSong (s);
+        const auto tracks = phazite::ensureTracks (song, numTracks);
+        const auto track = tracks[(size_t) numTracks / 2];
+        const phazite::ParameterRef volume { phazite::getFader (song, track), phazite::getVolumeParameterID (song, track) };
+        phazite::showLane (song, track, volume);
+        Measured measured;
+
+        measured.counts["a mute's click"] = measure ([&] { phazite::toggleTracksMuted (song, { track }); });
+        measured.counts["a row's height drag event"] = measure ([&] { phazite::setSavedTrackHeight (song, track, 100); });
+        measured.counts["a lane's resize"] = measure ([&] { phazite::setLaneHeight (song, track, volume, 100); });
+
+        // Each counted once more, apart, on what the count runs (PerformanceCounts.h: it runs its work in every build).
+        measured.allocations["a mute's click"] = phazite::test::countAllocations ([&] { phazite::toggleTracksMuted (song, { track }); });
+        measured.allocations["a row's height drag event"] =
+            phazite::test::countAllocations ([&] { phazite::setSavedTrackHeight (song, track, 120); });
+        measured.allocations["a lane's resize"] =
+            phazite::test::countAllocations ([&] { phazite::setLaneHeight (song, track, volume, 120); });
+
+        CHECK (phazite::isTrackMuted (song, track, false) == false);
+        CHECK (phazite::getSavedTrackHeight (song, track) == std::optional (120));
+        CHECK (phazite::getLanes (song, track).front().height == 120);
+
+        const auto whole = phazite::countTracksReadAsValues();
+        CHECK (phazite::getPlaylistRows (s.context).size() == phazite::getTrackIDs (song).size());
+        measured.rowsReadWhole = phazite::countTracksReadAsValues() - whole;
+        phazite::test::checkSong (song);
+        return measured;
+    };
+
+    const auto few = run (20);
+    const auto many = run (200);
+
+    for (const auto& [what, counted] : many.counts)
+    {
+        INFO (what);
+        MESSAGE (what << ": tracks read whole " << counted.whole << ", elements walked " << counted.walked << ", list entries compared "
+                      << counted.compared);
+        CHECK (counted == Counts {});
+        CHECK (few.counts.at (what) == Counts {});
+    }
+
+    CHECK (few.rowsReadWhole == 0);
+    CHECK (many.rowsReadWhole == 0);
+
+    const std::map<std::string, int> bounds { { "a mute's click", 15 }, { "a row's height drag event", 4 }, { "a lane's resize", 18 } };
+
+    for (const auto& [what, allocations] : many.allocations)
+    {
+        INFO (what);
+
+        if (! allocations.has_value() || ! few.allocations.at (what).has_value())
+            continue; // nothing counted on this build (PerformanceCounts.h)
+
+        MESSAGE (what << ": allocations on 20 tracks " << *few.allocations.at (what) << ", on 200 " << *allocations);
+        CHECK (*allocations == *few.allocations.at (what));
+        CHECK (*allocations <= bounds.at (what));
+        CHECK (*few.allocations.at (what) <= bounds.at (what));
+    }
+}
+
 TEST_CASE ("Performance gate: a song of 200 tracks opened reads each track and the master once as it takes its values")
 {
     auto song = phazite::createSong();
