@@ -4,6 +4,7 @@
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
+#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/internal/AreaClashes.h"
@@ -139,8 +140,47 @@ namespace
     // is written outside it (SongValues.h: setChordLane(), which writes nothing for the lane the song holds already).
     void setLane (Song& song, const Lane& lane)
     {
+        // Each chord's start and length and each key change's start within their descriptions' ranges (SongText.h:
+        // keepDescribed()), as the readers keep them; where one wasn't, its chords kept apart, as everything that enters the
+        // lane is (keepChordsApart(): a chord kept at the song's last beat can come to overlap another there).
+        const auto chordIsKept = [] (const ChordEntry& chord)
+        {
+            return chord.start == keepDescribed (chord.start, schema::chordStart)
+                   && chord.length == keepDescribed (chord.length, schema::chordLength);
+        };
+
+        const auto keyIsKept = [] (const KeyEntry& key) { return key.start == keepDescribed (key.start, schema::chordStart); };
+        auto value = lane.toValue();
+
+        if (! std::all_of (lane.chords.begin(), lane.chords.end(), chordIsKept)
+            || ! std::all_of (lane.keys.begin(), lane.keys.end(), keyIsKept))
+        {
+            auto kept = lane;
+
+            for (auto& chord : kept.chords)
+            {
+                chord.start = keepDescribed (chord.start, schema::chordStart);
+                chord.length = keepDescribed (chord.length, schema::chordLength);
+            }
+
+            // A key change kept at the last beat in place of one there (of two at one start, the later in the lane's order
+            // stays, as a key set later at a beat replaces the one there: findStartingAt(), nearAt).
+            std::vector<KeyEntry> keys;
+
+            for (auto key : kept.keys)
+            {
+                key.start = keepDescribed (key.start, schema::chordStart);
+                const auto isThere = [&key] (const KeyEntry& other) { return std::abs ((other.start - key.start).inBeats()) < nearAt; };
+                keys.erase (std::remove_if (keys.begin(), keys.end(), isThere), keys.end());
+                keys.push_back (key);
+            }
+
+            kept.keys = std::move (keys);
+            value = keepChordsApart (kept.toValue());
+        }
+
         if (auto* values = song.getValues())
-            values->setChordLane (song, lane.toValue());
+            values->setChordLane (song, std::move (value));
         else
             jassertfalse; // the chord lane's edits are a song's that holds its values (model/project/internal/Project.h: makeSong())
     }
@@ -430,15 +470,17 @@ void setLaneKey (Song& song, BeatPosition from, const Key& key)
 {
     auto lane = openLane (song);
 
-    // The key change at the beat, or a new one there.
-    if (const auto found = findStartingAt (lane.keys, from))
+    // The key change at the beat (from 0 to the song's last beat: SongText.h, keepDescribed()), or a new one there.
+    const auto at = keepDescribed (from, schema::chordStart);
+
+    if (const auto found = findStartingAt (lane.keys, at))
     {
         writeKey (lane.keys[*found], key);
     }
     else
     {
         KeyEntry change;
-        change.start = BeatPosition::fromBeats (std::max (0.0, from.inBeats()));
+        change.start = at;
         writeKey (change, key);
         lane.keys.push_back (change);
     }

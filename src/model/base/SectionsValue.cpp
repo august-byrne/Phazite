@@ -155,17 +155,26 @@ SectionsValue keepSectionsHeld (const SectionsValue& value)
 {
     std::set<SectionID> ids;
     auto kept = immer::flex_vector<SectionValue>().transient();
-    auto dropped = false;
+    auto changed = false; // a section dropped, or one kept within its ranges
 
     for (const auto& section : value.sections)
     {
         if (isHeldID (section.id) && ids.insert (section.id).second)
-            kept.push_back (section);
+        {
+            // Its start and its length within their descriptions' ranges (SongText.h: keepDescribed()), as the readers keep them.
+            auto held = section;
+            held.start = keepDescribed (section.start, schema::sectionStart);
+            held.length = keepDescribed (section.length, schema::sectionLength);
+            changed = changed || held.start != section.start || held.length != section.length;
+            kept.push_back (std::move (held));
+        }
         else
-            dropped = true;
+        {
+            changed = true;
+        }
     }
 
-    return dropped ? SectionsValue { kept.persistent() } : value;
+    return changed ? SectionsValue { kept.persistent() } : value;
 }
 
 bool holdsSectionsHeld (const SectionsValue& value)

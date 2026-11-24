@@ -192,12 +192,41 @@ double readDescribed (const juce::var& held, const schema::PropertyDescription& 
     if (! number.has_value() || ! std::isfinite (*number))
         return range.has_value() ? range->fallback.value_or (0.0) : 0.0;
 
-    return range.has_value() ? juce::jlimit (range->low, range->high, *number) : *number;
+    return keepDescribed (*number, property);
 }
 
 double readDescribed (const juce::ValueTree& element, const schema::PropertyDescription& property)
 {
     return readDescribed (element[property], property);
+}
+
+double keepDescribed (double number, const schema::PropertyDescription& property)
+{
+    const auto& range = property.getRange();
+    return range.has_value() ? juce::jlimit (range->low, range->high, number) : number;
+}
+
+BeatPosition keepDescribed (BeatPosition beat, const schema::PropertyDescription& property)
+{
+    return BeatPosition::fromBeats (keepDescribed (beat.inBeats(), property));
+}
+
+BeatDuration keepDescribed (BeatDuration beats, const schema::PropertyDescription& property)
+{
+    return BeatDuration::fromBeats (keepDescribed (beats.inBeats(), property));
+}
+
+BeatDuration keepDistanceDescribed (BeatDuration distance, BeatPosition earliest, BeatPosition latest,
+                                    const schema::PropertyDescription& property)
+{
+    // Each end only as far as the range lets it go, or not at all where it is past it already (nothing moves it farther).
+    if (const auto& range = property.getRange(); range.has_value())
+    {
+        distance = std::min (distance, BeatDuration::fromBeats (std::max (0.0, range->high - latest.inBeats())));
+        distance = std::max (distance, BeatDuration::fromBeats (std::min (0.0, range->low - earliest.inBeats())));
+    }
+
+    return distance;
 }
 
 bool isSameValue (const juce::var& a, const juce::var& b)

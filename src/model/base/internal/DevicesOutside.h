@@ -9,6 +9,7 @@
 
 #include "model/base/IDs.h"
 #include "model/base/internal/Immer.h"
+#include "model/base/internal/MapChanges.h"
 
 #include <cstdint>
 #include <optional>
@@ -43,6 +44,16 @@ struct DevicesOutside
         DevicesOutside next;
         next.windows = place.has_value() ? windows.set (id.getRaw(), *place) : windows.erase (id.getRaw());
         return next;
+    }
+
+    // The same without the places of devices whose IDs are at or above first, one walk of the map; the very map where it holds
+    // none. What the song as copied drops as its count of IDs is set back to the copy's (model/versions/ApplySong.cpp:
+    // makeSongAsCopied()): no step its history holds can bring such a device back.
+    DevicesOutside withoutIDsFrom (std::uint64_t first) const
+    {
+        DevicesOutside kept;
+        kept.windows = phazite::withoutIDsFrom (windows, first);
+        return kept;
     }
 
     // The same map without a look inside (OutsideValue.h); and the same places.

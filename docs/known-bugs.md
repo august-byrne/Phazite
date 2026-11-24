@@ -24,8 +24,7 @@ found by reading while the automation's curves were made values (2026-11-22), an
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
 the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
-onto another's beat does. 246 was found by the review of the tracks' leaf switch (the same step, 2026-11-24), and 247
-by the song's state read back from its own file's form (the same step, 2026-11-26).
+onto another's beat does. 248 was found by the review of the fix of 246 (2026-11-27).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -216,23 +215,14 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `chooseClash()` is told that the parting held none; the tempo map does it through its value (`chooseTempoMapClash()`),
   and each other area can as it becomes a value (roadmap step S5.20). `tests/VersionsMergeWaitingTests.cpp` checks the
   tempo map's (the case of a conflict on a tempo's bpm, ramp and a tempo both branches added, "chosen each way").
-
-- **246. After Back to Now from a version opened live, a new track can take the mute, solo, automation mode, height and
-  lanes of a track the version held.** Open a version (of another line, say) that holds a track Now hasn't, muted or
-  with its row resized, and go back to Now; the next track made can come up muted, or with that row. Why: the tracks'
-  switches and view keep the entries of a track the song no longer holds, by its ID, for an Undo that may bring it
-  back (`src/model/base/internal/TrackSwitchesValue.h`, `TracksOutside.h`); the version's tracks leave theirs there as
-  the trial's step is undone, and `makeSongAsCopied()` (`src/model/versions/ApplySong.cpp`, Back to Now through
-  `Trial::putBackHeld()`, `src/model/versions/VersionsModel.cpp`) sets the song's count of IDs back to Now's, so a
-  track made next can be given such an ID and read its entries. The history is held, not cleared, around the call (the
-  steps before the version opened stay and its redo steps return), so an Undo can still reach a track Now deleted
-  earlier, whose entries must stay: the pass can't drop every entry of a track the copy doesn't hold. The devices'
-  store and the windows' places (`DeviceStoreValue.h`, `DevicesOutside.h`) keep entries by a device's ID the same way:
-  a device made next can open its window at a version's device's place, and keep its held plug-in values. Found by the
-  review of roadmap step S5.20's tracks' leaf switch (2026-11-24). To fix: in `makeSongAsCopied()`, outside the history
-  as it runs, drop from the switches, the view, the store and the windows' places every entry of an ID at or above the
-  copy's count of IDs: every step the history holds was made while the count was below it, so none can bring such an
-  item back.
+- **248. After Back to Now, an Undo can bring back a track with the mute or row of a version's track of its ID.** A
+  version that holds a track Now deleted (its ID below Now's count of IDs), where Now kept no entry of its switches or
+  row (unmuted, never resized), has the version's mute, solo, mode and row written outside the history as it opens
+  (`makeTrackLeavesLike()`, `src/model/versions/ApplySong.cpp`); Back to Now keeps entries below the count, so the Undo
+  that brings Now's track back gives it the version's. Windows' places of devices the same. To fix: Back to Now puts
+  the four kept values (the tracks' switches and view, the devices' store's kept entries and the windows' places) back
+  as they were when the version opened (the copy taken then is a `SongState`, which holds them whole), which makes
+  `withoutIDsFrom()` unneeded; with a test in `tests/VersionsOpenTests.cpp`.
 
 ## Devices and playback
 
@@ -269,21 +259,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   drag across a neighbour and one that ends on it in `tests/TempoTests.cpp`; then `checkSong()`'s `key` rule holds for
   every song the model makes, and the case "A tempo moved onto another's beat..." there checks the whole song, not
   its values alone.
-
-- **247. Past beat 1,000,000 an edit is saved where it was made and opens at beat 1,000,000.** A clip, a section, a
-  tempo change or a chord put at beat 1,200,000 (far past any song: more than nine hours at 120 beats a minute, but the
-  time line scrolls there) is held and played there, and a save writes it there; opened again it stands at 1,000,000,
-  silently. Why: the readers of what a song can hold bound each beat by its description in
-  `src/model/base/internal/Schema.h` (0 to `maxBeats`), and the writers don't: `keepWithinClip()`
-  (`src/model/arrangement/Clips.cpp`) bounds a clip's start only below 0, and its length and offset not at all, and
-  the edits of `Sections.cpp`, `Tempo.cpp`, `Chords.cpp`, `Automation.cpp` and `Notes.cpp` name no `maxBeats` (a
-  curve's points and a note's start have no upper bound in their writers either: from reading). So "a writer writes
-  what the song holds" is broken past the range. Found by `readSongTree (writeSongTree (state))` compared with the
-  state (roadmap step S5.20, 2026-11-26; `tests/ValueAreaTests.cpp` placed its clips 1,024 beats apart and passed the
-  range). To fix: each area's writer bounds a beat by its description's range through one helper (or the edit refuses
-  past it, where a clamp would pile things up at the last beat: a paste, a drag), the time line's scrolling ends there,
-  and a case of `tests/ModelFuzzTests.cpp` makes its edits far out and checks that the song's state read back from
-  its file's form is the state.
 
 - **235. A DAWproject import can put MIDI clips and audio clips on one track.** Audio and notes don't share a track
   in Phazite (a model function that puts a clip on a track asks `canTrackHold()`), and the import's reader

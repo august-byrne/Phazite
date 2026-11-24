@@ -2,6 +2,7 @@
 #include "internal/SongDiff.h"
 #include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
 
@@ -558,11 +559,14 @@ SongChange findSongChange (const juce::ValueTree& songBefore, const juce::ValueT
     change.name = "Song";
     auto& what = change.what;
 
+    // What Phazite doesn't know at the root is no change: the song can't hold it (SongOwnValue.h: isKnownRootProperty(), the
+    // rule a merge leaves it out by). The root's elements it doesn't know are never compared here.
     for (const auto& property : findChangedProperties (songBefore, songAfter))
-        what.addIfNotAlreadyThere (property == schema::outline                  ? "song outline"
-                                   : property == schema::patternsKeepTheirSpeed ? "pattern speed"
-                                   : property == schema::idNumbering            ? "items numbered anew"
-                                                                                : "settings");
+        if (isKnownRootProperty (property))
+            what.addIfNotAlreadyThere (property == schema::outline                  ? "song outline"
+                                       : property == schema::patternsKeepTheirSpeed ? "pattern speed"
+                                       : property == schema::idNumbering            ? "items numbered anew"
+                                                                                    : "settings");
 
     // The tempo map's tempos and time signatures.
     const auto mapBefore = getChildren (songBefore.getChildWithName (schema::TEMPOMAP));

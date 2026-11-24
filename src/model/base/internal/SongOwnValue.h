@@ -180,7 +180,8 @@ bool isSongOwnElement (const juce::Identifier& type);
 // Whether Phazite knows a property of a song's root, by the descriptions: one they put on PHAZITE (Schema.h: the song's own,
 // and its count of IDs, nextID); and an element there, by its type (Schema.h: isKnownType()). What it doesn't know at the
 // root, the one rule of both: dropped as the song opens (SongOwnArea.h, the adoption), and left out of a merge, neither
-// merged nor compared (model/versions/SongMerge.cpp: mergeSongs()), so that no clash is made of what the song can't hold.
+// merged nor compared (model/versions/SongMerge.cpp: mergeSongs()), so that no clash is made of what the song can't hold,
+// and no change listed of it (model/versions/SongDiff.cpp: findSongChange()).
 bool isKnownRootProperty (const juce::Identifier& property);
 bool isKnownRootElement (const juce::Identifier& type);
 

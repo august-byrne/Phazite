@@ -20,6 +20,7 @@
 #pragma once
 
 #include "TestHelpers.h"
+#include "model/base/Beats.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/notes/NoteValues.h"
@@ -69,9 +70,21 @@ public:
     // alone). Joins the caller's step.
     void addOneOfEach();
 
+    // Where the beats the edits draw afresh start (a clip's, an automation point's, a section's, a chord's or a key's, a tempo
+    // change's; not a note's, which counts from its clip): the song's start, or far out, a few dozen beats before the last
+    // beat a song holds (schema::maxBeats), so that its edits go past it (ModelFuzzTests.cpp: known bug 247's case). Far out,
+    // the edits reach across the last beat too (editFarOut()): a note placed and lengthened in a clip that ends at it, a
+    // controller's value, an audio clip's warp marker, a time signature, a clip, a section and a chord lengthened across it,
+    // a clip's start and end trimmed across it, and time inserted before what is near it. At 0, none of them is drawn, so
+    // that a seed makes the song it always made.
+    double farOut = 0.0;
+
 private:
     Song& song;
     juce::File sound;
+
+    // A beat drawn afresh, from where they start (farOut).
+    BeatPosition drawnAt (double beats) const { return BeatPosition::fromBeats (farOut + beats); }
 
     // A MIDI clip of the song's (none if it has none), one holding notes that play if asked: of an alias group half of the
     // time, where there is one. And one to three of a clip's notes that play, each once, named through that clip.
@@ -79,6 +92,7 @@ private:
     std::vector<NoteData> pickNotes (ClipID);
     void editNotesOrClips (int kind);
     void setAValueByHand(); // of one of Phazite's own devices
+    void editFarOut (int kind);
 
     int draw (int below) { return below > 0 ? random.nextInt (below) : 0; }
     template <typename T>

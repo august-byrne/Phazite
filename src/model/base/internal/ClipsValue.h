@@ -172,10 +172,18 @@ juce::ValueTree writeClipElement (const ClipValue&, const ClipNotes* notes = nul
 
 // A clip's value kept within what a clip holds, as the clips' code keeps what it sets, and as the song takes in a clip read
 // from its element (Song::holdValues(), and the keeper's safety net): nothing of the other kind of clip's properties (each
-// at its default, as readClipValue() reads them), its start at 0 or later, a MIDI clip's length at least shortestClipBeats,
-// the part of its file starting at 0 or later and ending at its start or later, its fades' bends within -1 to 1, and its
-// takes either none (0 takes, the first take, no take's length) or a count with the take it plays one of them.
+// at its default, as readClipValue() reads them), each number within its description's range (keepClipNumbersDescribed(),
+// below: its start from 0 to the song's last beat among them), a MIDI clip's length at least
+// shortestClipBeats, the part of its file ending at its start or later, its fades' bends within -1 to 1, and its takes
+// either none (0 takes, the first take, no take's length) or a count with the take it plays one of them.
 ClipValue keepWithinClip (ClipValue);
+
+// A clip's value with each number within its description's range (SongText.h: keepDescribed(), as readClipValue() keeps
+// one), and nothing else changed: its start, a MIDI clip's length and offset, the part of its file, its fades, a take's
+// length and its warp markers' times (their vector made again only where one is past its range). What the clips' setter
+// keeps every value it sets with (model/arrangement/Clips.cpp: setClip()), so that an edit never leaves a number the song
+// can't hold, and what keepWithinClip() keeps first.
+ClipValue keepClipNumbersDescribed (ClipValue);
 
 // A clip's value with one of its properties (by its name in the song: schema::clipStart, clipMute...) given a value as the
 // value would read it from an element that held it, or taken away (a void value: as if the element hadn't it): a merge's

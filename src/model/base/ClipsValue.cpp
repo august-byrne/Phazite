@@ -389,13 +389,56 @@ juce::ValueTree writeClipElement (const ClipValue& value, const ClipNotes* notes
     return clip;
 }
 
-ClipValue keepWithinClip (ClipValue value)
+ClipValue keepClipNumbersDescribed (ClipValue value)
 {
-    value = ofItsKind (std::move (value));
-    value.start = BeatPosition::fromBeats (std::max (0.0, value.start.inBeats()));
+    // Each number within its description's range (SongText.h: keepDescribed(), as the readers keep one): the start, a MIDI
+    // clip's length and offset in beats, the file's part, the fades and a take's length in seconds.
+    value.start = keepDescribed (value.start, schema::clipStart);
 
     if (value.isMidi())
-        value.length = BeatDuration::fromBeats (std::max (value.length.inBeats(), shortestClipBeats));
+    {
+        value.length = keepDescribed (value.length, schema::clipLength);
+        value.offset = keepDescribed (value.offset, schema::clipOffset);
+    }
+
+    value.fileStart = keepDescribed (value.fileStart, schema::clipFileStart);
+    value.fileEnd = keepDescribed (value.fileEnd, schema::clipFileEnd);
+    value.fadeIn.seconds = keepDescribed (value.fadeIn.seconds, schema::clipFadeIn);
+    value.fadeOut.seconds = keepDescribed (value.fadeOut.seconds, schema::clipFadeOut);
+
+    if (value.takeLength > 0.0)
+        value.takeLength = keepDescribed (value.takeLength, schema::clipTakeLength);
+
+    // A warp marker's times, in seconds, the same: its markers' vector made again only where one is past its range.
+    const auto isWithin = [] (const WarpValue& warp)
+    {
+        return juce::exactlyEqual (warp.time, keepDescribed (warp.time, schema::warpTime))
+               && juce::exactlyEqual (warp.playsAt, keepDescribed (warp.playsAt, schema::warpPlaysAt));
+    };
+
+    if (! std::all_of (value.sound.warps.begin(), value.sound.warps.end(), isWithin))
+    {
+        auto warps = immer::flex_vector<WarpValue>().transient();
+
+        for (auto warp : value.sound.warps)
+        {
+            warp.time = keepDescribed (warp.time, schema::warpTime);
+            warp.playsAt = keepDescribed (warp.playsAt, schema::warpPlaysAt);
+            warps.push_back (warp);
+        }
+
+        value.sound.warps = warps.persistent();
+    }
+
+    return value;
+}
+
+ClipValue keepWithinClip (ClipValue value)
+{
+    value = keepClipNumbersDescribed (ofItsKind (std::move (value)));
+
+    if (value.isMidi())
+        value.length = keepDescribed (BeatDuration::fromBeats (std::max (value.length.inBeats(), shortestClipBeats)), schema::clipLength);
 
     value.fileStart = std::max (0.0, value.fileStart);
     value.fileEnd = std::max (value.fileStart, value.fileEnd);

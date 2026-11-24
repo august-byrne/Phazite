@@ -163,6 +163,12 @@ bool isChainSoloedIn (const DeviceStore&, DeviceID chain);
 DeviceStore takeEntriesOf (const DeviceStore&, DeviceID, bool heldToo = false);
 DeviceStore withEntriesOf (const DeviceStore&, DeviceID, const DeviceStore& entries);
 bool holdSameEntriesOf (const DeviceStore&, const DeviceStore&, DeviceID);
+
+// The store without the entries of items whose IDs are at or above first (a plug-in's values by its device's, held ones too),
+// one walk of each map; the very maps where they hold none. What the song as copied drops as its count of IDs is set back to
+// the copy's (model/versions/ApplySong.cpp: makeSongAsCopied()): no step its history holds can bring such an item back.
+DeviceStore withoutIDsFrom (const DeviceStore&, std::uint64_t first);
+
 template <typename CopiedMap>
 DeviceStore copyEntriesTo (DeviceStore into, const DeviceStore& from, const CopiedMap& copied)
 {

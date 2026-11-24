@@ -8,6 +8,7 @@
 #include "model/base/internal/ClipsValue.h"
 #include "model/base/internal/NotesArea.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/Visits.h"
 #include "model/commands/internal/Undo.h"
@@ -219,17 +220,31 @@ namespace
         return clip;
     }
 
-    // A clip set to its next value, which is returned: what the song holds of it now.
+    // A clip set to its next value, its numbers within their ranges (setClip()), which is returned: what the song holds of it.
     ClipValue setTo (Song& song, const ClipValue& clip, const ClipValue& next)
     {
-        setClip (song, clip, next);
-        return next;
+        auto kept = keepClipNumbersDescribed (next);
+        setClip (song, clip, kept);
+        return kept;
     }
 
     // The latest a clip can end, in the song's seconds: where its audio does, for an audio clip; a MIDI clip has no end.
     double getLatestEnd (const Song& song, const ClipValue& clip)
     {
         return clip.isAudio() ? getAudioFileRange (song, clip).end : std::numeric_limits<double>::max();
+    }
+
+    // How far clips moved together go: as far as the earliest and the latest start can within a clip's start's range
+    // (SongText.h: keepDistanceDescribed()), so that they keep their distances.
+    BeatDuration keepMoveOfStarts (ClipsRead& read, const std::vector<ClipID>& clips, BeatDuration distance)
+    {
+        std::optional<BeatRange> starts;
+
+        for (const auto id : clips)
+            if (const auto clip = read.find (id))
+                starts = starts.has_value() ? starts->getUnionWith ({ clip->start, clip->start }) : BeatRange (clip->start, clip->start);
+
+        return starts.has_value() ? keepDistanceDescribed (distance, starts->getStart(), starts->getEnd(), schema::clipStart) : distance;
     }
 
     // Where clips are on their tracks, for the automation under them (Automation.h: moveAutomation()).
@@ -274,9 +289,13 @@ namespace
         return next;
     }
 
-    // A clip's start moved to a beat, its end staying where it is, and what it plays too.
-    ClipValue withStartTrimmed (const Song& song, const ClipValue& clip, BeatPosition start)
+    // A clip's start moved to a beat, its end staying where it is, and what it plays too. The beat within a clip's start's range
+    // first (SongText.h: keepDescribed()), so that the length and the offset are worked out from where the start will be: the
+    // end and the place of what it plays stay where they were, though the start was asked past the song's last beat.
+    ClipValue withStartTrimmed (const Song& song, const ClipValue& clip, BeatPosition target)
     {
+        const auto start = keepDescribed (target, schema::clipStart);
+
         if (clip.isAudio())
         {
             const auto moved = getFileSecondsBetween (song, clip, getPlayedPosition (song, clip).start, start);
@@ -400,9 +419,11 @@ namespace
 
     // Splits a clip of the song into two at a beat, if it is far enough inside it: both halves play what they did, and stay
     // in its alias group if it is in one; an audio clip has no fade where it is cut. The clip's value becomes its left half's;
-    // returns the right half's.
-    std::optional<ClipValue> splitAt (Song& song, ClipValue& clip, BeatPosition beat)
+    // returns the right half's. A beat past a clip's start's range splits it at the song's last beat (SongText.h:
+    // keepDescribed()), so that the right half's offset is worked out from where it will start and plays what it did.
+    std::optional<ClipValue> splitAt (Song& song, ClipValue& clip, BeatPosition target)
     {
+        const auto beat = keepDescribed (target, schema::clipStart);
         const auto range = getLiveClipRange (song, clip);
         const auto time = toSeconds (song, beat);
 
@@ -718,9 +739,12 @@ void setClip (Song& song, const ClipValue& held, const ClipValue& next)
 {
     jassert (held.id == next.id);
 
-    // The same value: nothing. One whose sound is alike but not the same value (ClipsValue.h: ClipSound) is set, so that an
-    // alias group's clips can be given one, without a step of its own (SongValues.h: setClip()).
-    if (held == next && held.sound.isSameAs (next.sound))
+    // Each number of the value within its description's range (ClipsValue.h: keepClipNumbersDescribed()). The same value:
+    // nothing. One whose sound is alike but not the same value (ClipsValue.h: ClipSound) is set, so that an alias group's
+    // clips can be given one, without a step of its own (SongValues.h: setClip()).
+    auto value = keepClipNumbersDescribed (next);
+
+    if (held == value && held.sound.isSameAs (value.sound))
         return;
 
     auto* values = song.getValues();
@@ -729,7 +753,6 @@ void setClip (Song& song, const ClipValue& held, const ClipValue& next)
         return;
 
     // On another track only if it holds clips, at the end of its clips (one that holds none isn't one it goes on).
-    auto value = next;
 
     if (value.track != held.track && ! holdsClips (song, value.track))
         value.track = held.track;
@@ -1368,11 +1391,15 @@ std::vector<ClipID> duplicateClips (Song& song, const std::vector<ClipID>& clips
     if (selection != nullptr)
         selection->deselectAll();
 
+    // After them, or as far as the latest can start (keepMoveOfStarts()): near the song's last beat, closer. Where the latest
+    // starts at the last beat already, that is no distance at all, and the copies lie on their originals: left so, as the
+    // copies are made all the same, the only place left for them.
+    const auto distance = keepMoveOfStarts (read, clips, span->getLength());
     std::vector<ClipID> copies;
 
     for (const auto& copy : copyClipValues (song, read, clips, asAliases)) // each starts where its original is
     {
-        read.hold (moveTo (song, copy, copy.start + span->getLength(), copy.track));
+        read.hold (moveTo (song, copy, copy.start + distance, copy.track));
         copies.push_back (copy.id);
 
         if (selection != nullptr)
@@ -1380,7 +1407,7 @@ std::vector<ClipID> duplicateClips (Song& song, const std::vector<ClipID>& clips
     }
 
     // The automation under the clips is copied with them.
-    moveAutomation (song, getStretchesOf (song, read, clips), span->getLength(), true);
+    moveAutomation (song, getStretchesOf (song, read, clips), distance, true);
     return copies;
 }
 
@@ -1482,12 +1509,10 @@ void toggleClipsMuted (Song& song, const std::vector<ClipID>& clips)
 
 void nudgeClips (Song& song, const std::vector<ClipID>& clips, BeatDuration amount)
 {
-    // The earliest clip decides how far back they can go. The automation under them goes along.
+    // The earliest clip decides how far back they can go, and the latest how far on (SongText.h: keepDistanceDescribed()). The
+    // automation under them goes along.
     ClipsRead read (song);
-
-    for (const auto id : clips)
-        if (const auto clip = read.find (id))
-            amount = std::max (amount, BeatPosition() - clip->start);
+    amount = keepMoveOfStarts (read, clips, amount);
 
     const auto under = getStretchesOf (song, read, clips);
 

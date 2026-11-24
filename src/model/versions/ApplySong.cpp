@@ -2737,8 +2737,23 @@ void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
     jassert (tracks.writes + valueWrites + ownWrites == 0);
     makeTrackLeavesLike (song, copy, isEveryTrack, true, Taken::everything, {}); // written outside the history too
     placePlaceholdersLike (song, copy, nullptr, Taken::everything);
-    countIDsFrom (song, readID (copy[schema::nextID]), IDCount::mayBeBehind); // the copy's, as it was: never a change
-    jassert (holdsTracksAsRead (song, tracks));                               // as makeSongLike()'s
+
+    // Its count of IDs the copy's, as it was: never a change. What the song keeps of items it no longer holds for an Undo that
+    // may bring one back (the tracks' switches and view, the devices' store and windows' places) is kept below it alone: every
+    // step its history holds was made while the count was below it, so none brings back an item of an ID at or above it, and
+    // the next item made, given such an ID, would take what a version's kept under it (known bug 246 until 2026-11-24).
+    const auto next = readID (copy[schema::nextID]);
+
+    if (auto* values = song.getValues())
+    {
+        values->setSwitchesOutsideHistory (song, withoutIDsFrom (values->trackSwitches.get(), next));
+        values->setTracksOutside (withoutIDsFrom (values->tracksOutside.get(), next));
+        values->storeOutsideHistory (song, withoutIDsFrom (values->deviceStore.get(), next));
+        values->devicesOutside.set (values->devicesOutside.get().withoutIDsFrom (next));
+    }
+
+    countIDsFrom (song, next);
+    jassert (holdsTracksAsRead (song, tracks)); // as makeSongLike()'s
     jassert (findIDHeldTwice (song) == 0);
 }
 

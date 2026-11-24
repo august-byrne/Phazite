@@ -5,6 +5,7 @@
 #include "internal/Selection.h"
 #include "internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -214,7 +215,26 @@ namespace
         const auto target = pasteTarget.newTrack ? addTrackForPaste (*song) : pasteTarget.track;
         auto tracks = getTracksForClips (*song);
         const auto first = indexOf (tracks, target);
-        const auto distance = getPlayheadBeat (*song) - clipboard.range.getStart();
+        const auto isRange = clipboard.kind == Clipboard::Kind::range;
+        const auto cutOf = [&clipboard, isRange] (const Clipboard::CopiedClip& copied)
+        { return isRange ? copied.beats.getIntersectionWith (clipboard.range) : copied.beats; };
+
+        // At the playhead, or as far as the latest clip can start there (SongText.h: keepDistanceDescribed()): near the song's
+        // last beat, earlier, the clips as far apart as they were.
+        auto distance = getPlayheadBeat (*song) - clipboard.range.getStart();
+
+        if (! clipboard.clips.empty())
+        {
+            auto earliest = cutOf (clipboard.clips.front()).getStart(), latest = earliest;
+
+            for (const auto& copied : clipboard.clips)
+            {
+                earliest = std::min (earliest, cutOf (copied).getStart());
+                latest = std::max (latest, cutOf (copied).getStart());
+            }
+
+            distance = keepDistanceDescribed (distance, earliest, latest, schema::clipStart);
+        }
 
         // Clips from more tracks than there are from the target down: empty tracks are added after the last, as REAPER,
         // Studio One and Logic Pro add them, rather than leave clips out.
@@ -232,8 +252,6 @@ namespace
 
             tracks.push_back (added);
         }
-
-        const auto isRange = clipboard.kind == Clipboard::Kind::range;
 
         // Each clip's track: its own place from the target down, or the next below that can hold its kind (audio and notes
         // don't share a track: Clips.h, canTrackHold()), counting what this paste puts on each; or a track added for it.
@@ -266,8 +284,7 @@ namespace
         }
 
         // Where each lands (a range's clips cut to it): cleared first, so that no pasted clip cuts another.
-        const auto landingOf = [&clipboard, isRange, distance] (const Clipboard::CopiedClip& copied)
-        { return (isRange ? copied.beats.getIntersectionWith (clipboard.range) : copied.beats).movedBy (distance); };
+        const auto landingOf = [&cutOf, distance] (const Clipboard::CopiedClip& copied) { return cutOf (copied).movedBy (distance); };
 
         for (size_t i = 0; i < clipboard.clips.size(); ++i)
             if (destinations[i].isValid())

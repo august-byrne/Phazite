@@ -93,9 +93,11 @@ std::optional<SectionValue> readHeldSection (const juce::ValueTree& sectionEleme
 // other element, and for one the song can't hold. The keeper's safety net.
 SectionsValue withSectionTaken (const SectionsValue&, const juce::ValueTree& sectionElement);
 
-// The sections as the song holds them: one of each ID (of two, the first in the value's order stays), and none without an ID
-// the song can count on from. The one rule for what enters the song's sections (readHeldSections(), withSectionTaken()) and
-// for the sections' writers (model/arrangement/Sections.cpp), which give each section an ID of its own already. The same
+// The sections as the song holds them: one of each ID (of two, the first in the value's order stays), none without an ID
+// the song can count on from, and each one's start and length within their descriptions' ranges (SongText.h:
+// keepDescribed(), as readHeldSection() keeps them). The one rule for what enters the song's sections (readHeldSections(),
+// withSectionTaken()) and for the sections' writers (model/arrangement/Sections.cpp), which give each section an ID of its
+// own already. The same
 // value where it keeps them all. Sections may overlap, as the loader leaves them (the sections' code places a new one
 // between the others, but a file, an outline or an import may hold two that overlap).
 SectionsValue keepSectionsHeld (const SectionsValue&);

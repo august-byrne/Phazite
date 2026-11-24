@@ -6,6 +6,7 @@
 #include "devices/drums/FactoryDrums.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/modulation/Modulators.h"
+#include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
@@ -108,8 +109,10 @@ namespace
         return found;
     }
 
-    // The kinds of edit of notes, controllers' values and clips one by one (RandomEdits::editNotesOrClips()).
+    // The kinds of edit of notes, controllers' values and clips one by one (RandomEdits::editNotesOrClips()), and of those
+    // that reach across the song's last beat, drawn far out alone (RandomEdits::editFarOut()).
     constexpr int numNoteAndClipKinds = 19;
+    constexpr int numFarOutKinds = 9;
 
     // A song beat moved by an amount, at the song's start at the earliest.
     BeatPosition movedBy (BeatPosition beat, double beats)
@@ -375,7 +378,7 @@ void RandomEdits::editNotesOrClips (int kind)
             {
                 const auto track = pick (tracks);
                 const auto beat = draw (32) * 0.5;
-                moveClip (song, clip, at (beat), track);
+                moveClip (song, clip, drawnAt (beat), track);
             }
             break;
 
@@ -401,6 +404,113 @@ void RandomEdits::editNotesOrClips (int kind)
 
             if (! copies.empty())
                 moveClip (song, copies.front(), range.getEnd(), getClipTrack (song, clip));
+            break;
+        }
+    }
+}
+
+void RandomEdits::editFarOut (int kind)
+{
+    // Each beat around the song's last beat, from where the far-out edits draw (farOut, a few beats before it) to as far past
+    // it, through the model's functions as the editors call them.
+    const auto lastBeat = schema::maxBeats;
+    const auto plain = getPlainTracks (song);
+    const auto beat = drawnAt (draw (40) * 0.5);
+
+    switch (kind)
+    {
+        case 0: // a MIDI clip that ends at the last beat, a note placed past its end and made longer
+            if (! plain.empty())
+            {
+                const auto on = pick (plain);
+                const auto length = 1 + draw (8);
+                const auto past = draw (8) * 0.5;
+                const auto longer = (1 + draw (8)) * 0.5;
+
+                if (const auto clip = addMidiClip (song, on, { at (lastBeat - length), at (lastBeat) }); clip.isValid())
+                {
+                    const auto note = addNote (song, clip, 60, at (lastBeat + past), lasting (0.5), 100);
+                    setNoteLength (song, note, lasting (longer));
+                }
+            }
+            break;
+
+        case 1: // a controller's value, at a beat in a clip or past it
+            if (const auto clip = pickMidiClip (false); clip.isValid())
+            {
+                const auto value = draw (128);
+                addControl (song, clip, beat, ControlKind::controller, 1, value);
+            }
+            break;
+
+        case 2: // an audio clip there, warped: a marker added and moved towards a beat across the last
+            if (! plain.empty() && sound.existsAsFile())
+            {
+                const auto on = pick (plain);
+                const auto along = random.nextDouble();
+                const auto to = beat + lasting (draw (8) * 0.5);
+
+                if (const auto clip = addAudioClip (song, on, "Sound", sound, toSeconds (song, beat), 0.5); clip.isValid())
+                {
+                    const auto time = 0.1 + along * 0.3;
+
+                    if (addWarpMarker (song, clip, time))
+                        if (const auto markers = getWarpMarkers (song, clip); ! markers.empty())
+                        {
+                            const auto marker = pick (markers);
+                            moveWarpMarker (song, clip, marker.time, to);
+                        }
+                }
+            }
+            break;
+
+        case 3: // a time signature there, after the song's others (at a beat none is at: two at one beat is known bug 240)
+        {
+            const auto numerator = 2 + draw (6);
+            const auto eighths = random.nextBool();
+            auto changes = getTimeSignatureChanges (song);
+            const auto isThere = [beat] (const TimeSignatureChange& change) { return change.beat == beat; };
+
+            if (std::none_of (changes.begin(), changes.end(), isThere))
+            {
+                changes.push_back ({ beat, { numerator, eighths ? 8 : 4 } });
+                setTimeSignatureChanges (song, changes);
+            }
+            break;
+        }
+
+        case 4: // a clip's end trimmed across the last beat, either way
+        case 5: // its start
+            if (const auto clips = getAllClips (song, false); ! clips.empty())
+            {
+                const auto clip = pick (clips);
+
+                if (kind == 4)
+                    trimClipEnd (song, clip, beat);
+                else
+                    trimClipStart (song, clip, beat);
+            }
+            break;
+
+        case 6: // a section made to end across the last beat, what comes after it moved along or not
+            if (const auto sections = getSections (song); ! sections.empty())
+            {
+                const auto section = pick (sections);
+                const auto moveRest = random.nextBool();
+                const auto length = std::max (lasting (1.0), beat - section.range.getStart());
+                resizeSection (song, section.id, length, moveRest);
+            }
+            break;
+
+        case 7: // a chord made to end across the last beat
+            if (const auto chords = getLaneChords (song); ! chords.empty())
+                setLaneChordEnd (song, pick (chords).range.getStart(), beat);
+            break;
+
+        default: // time inserted before what is near the last beat
+        {
+            const auto length = (1 + draw (16)) * 0.5;
+            insertTime (song, beat, lasting (length));
             break;
         }
     }
@@ -438,9 +548,18 @@ void RandomEdits::edit()
     const auto track = pick (tracks);
     const auto other = pick (tracks);
     const auto plain = getPlainTracks (song);
-    const auto kind = draw (45 + numNoteAndClipKinds + (editsOneAreaAlone ? numOneAreaKinds : 0));
+    const auto oneAreaKinds = editsOneAreaAlone ? numOneAreaKinds : 0;
+    const auto farOutKinds = farOut > 0.0 ? numFarOutKinds : 0;
+    const auto kind = draw (45 + numNoteAndClipKinds + oneAreaKinds + farOutKinds);
 
-    if (kind >= 45 + numNoteAndClipKinds) // where asked, after all the others: a seed's songs without them stay as they were
+    // Where asked, after all the others, each kind's own after the other's: a seed's songs without them stay as they were.
+    if (kind >= 45 + numNoteAndClipKinds + oneAreaKinds)
+    {
+        editFarOut (kind - 45 - numNoteAndClipKinds - oneAreaKinds);
+        return;
+    }
+
+    if (kind >= 45 + numNoteAndClipKinds)
     {
         editOneArea (kind - 45 - numNoteAndClipKinds);
         return;
@@ -511,7 +630,7 @@ void RandomEdits::edit()
                 const auto start = draw (16);
                 const auto length = 1 + draw (8);
 
-                if (const auto clip = addMidiClip (song, on, { at (start), at (start + length) }); clip.isValid())
+                if (const auto clip = addMidiClip (song, on, { drawnAt (start), drawnAt (start + length) }); clip.isValid())
                 {
                     const auto pitch = 40 + draw (20);
                     addMidiNote (song, clip, pitch, at (0.0), lasting (0.5));
@@ -578,7 +697,7 @@ void RandomEdits::edit()
             {
                 const auto moved = pick (clips);
                 const auto beat = draw (16);
-                moveClip (song, moved, at (beat), other);
+                moveClip (song, moved, drawnAt (beat), other);
             }
             break;
 
@@ -614,7 +733,7 @@ void RandomEdits::edit()
                 const auto beat = draw (32) * 0.5;
                 const auto along = random.nextFloat();
                 AutomationPoint point;
-                point.beat = at (beat);
+                point.beat = drawnAt (beat);
                 point.position = along;
                 addPoint (song, parameter, point);
             }
@@ -667,7 +786,7 @@ void RandomEdits::edit()
             SectionInfo section;
             section.name = "Part";
             section.length = lasting (8 + draw (3) * 8);
-            insertSection (song, at (start), section);
+            insertSection (song, drawnAt (start), section);
             break;
         }
 
@@ -680,11 +799,11 @@ void RandomEdits::edit()
             {
                 Numeral numeral;
                 numeral.degree = degree;
-                putLaneChord (song, { at (start), at (start + 4) }, numeral);
+                putLaneChord (song, { drawnAt (start), drawnAt (start + 4) }, numeral);
             }
             else
             {
-                setLaneKey (song, at (start), Key { degree, Scale::minor });
+                setLaneKey (song, drawnAt (start), Key { degree, Scale::minor });
             }
             break;
         }
@@ -695,7 +814,7 @@ void RandomEdits::edit()
             const auto bpm = 60.0 + draw (120);
 
             if (random.nextInt (4) > 0)
-                addTempoChange (song, at (beat), bpm);
+                addTempoChange (song, drawnAt (beat), bpm);
             else
                 setTimeSignature (song, { 2 + draw (6), random.nextBool() ? 4 : 8 });
             break;

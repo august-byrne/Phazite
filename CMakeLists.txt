@@ -1359,6 +1359,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AutomationModelTests.cpp
         tests/AutomationOfTheGoneTests.cpp
         tests/BackgroundJobsTests.cpp
+        tests/BeatRangeTests.cpp
         tests/BeatsTests.cpp
         tests/BenchmarkGates.cpp
         tests/Benchmarks.cpp

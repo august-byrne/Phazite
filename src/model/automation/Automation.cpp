@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
@@ -326,20 +327,21 @@ namespace
                 madeAgain = wasInSong;
             }
 
-            // After those at or before its beat: where the first point after it is.
+            // Its beat within its description's range, from 0 to the song's last beat (SongText.h: keepDescribed()), as the
+            // readers keep one; after those at or before it: where the first point after it is.
+            const auto at = keepDescribed (beat, schema::pointBeat);
             size_t index = 0;
 
             for (const auto& each : value.points)
             {
-                if (! (each.beat <= beat))
+                if (! (each.beat <= at))
                     break;
 
                 ++index;
             }
 
             auto* values = song.getValues();
-            const PointValue point { BeatPosition::fromBeats (std::max (0.0, beat.inBeats())), position, readCurve (curve),
-                                     values != nullptr ? values->givePointKey() : std::uint64_t { 0 } };
+            const PointValue point { at, position, readCurve (curve), values != nullptr ? values->givePointKey() : std::uint64_t { 0 } };
             value.points = value.points.insert (index, point);
             edited = true;
             return (int) index;
@@ -366,7 +368,7 @@ namespace
                 return;
 
             auto point = value.points[(size_t) index];
-            point.beat = BeatPosition::fromBeats (std::max (0.0, beat.inBeats()));
+            point.beat = keepDescribed (beat, schema::pointBeat); // as addPoint() keeps one
             point.position = position;
             value.points = value.points.set ((size_t) index, point);
             edited = true;
@@ -968,7 +970,13 @@ BeatDuration movePoints (Song& song, const ParameterRef& parameter, const std::v
         highest = std::min (highest, 1.0f - point.position);
     }
 
-    const auto beats = juce::jlimit (std::min (earliest, 0.0), std::max (latest, 0.0), distance.inBeats());
+    // And so that the last of them goes no farther than the song's last beat, the points as far apart as they were
+    // (SongText.h: keepDistanceDescribed()).
+    const auto firstMoving = points[(size_t) indices.front()].beat, lastMoving = points[(size_t) indices.back()].beat;
+    const auto beats = keepDistanceDescribed (
+                           BeatDuration::fromBeats (juce::jlimit (std::min (earliest, 0.0), std::max (latest, 0.0), distance.inBeats())),
+                           firstMoving, lastMoving, schema::pointBeat)
+                           .inBeats();
     const auto change = juce::jlimit (std::min (lowest, 0.0f), std::max (highest, 0.0f), positionChange);
 
     // In the order that keeps the points in time order all along.

@@ -19,6 +19,7 @@
 #include "UndoCheck.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/playback/internal/SongPlayer.h"
 #include "model/project/internal/ProjectContext.h"
@@ -97,8 +98,9 @@ void checkEditedSong (const phazite::Song& song)
 // One song's run: its operations, each from the seed, checked as they go.
 struct Run
 {
-    explicit Run (juce::int64 s)
+    explicit Run (juce::int64 s, double far = 0.0)
         : seed (s),
+          farOut (far),
           random (s)
     {
         startSegment();
@@ -112,6 +114,7 @@ struct Run
     {
         auto& now = getSong();
         edits = std::make_unique<RandomEdits> (now, seed * 1000 + segment, song.getSoundsFolder());
+        edits->farOut = farOut;
         undoCheck = std::make_unique<UndoCheck> (now);
         player = std::make_unique<phazite::SongPlayer> (now);
         player->compile (44100.0, 512, std::nullopt);
@@ -241,6 +244,7 @@ struct Run
     }
 
     const juce::int64 seed;
+    const double farOut; // where the edits draw their beats from (RandomEdits.h)
     juce::Random random;
     TestSong song;
     Told told { song.context };
@@ -272,4 +276,23 @@ TEST_CASE ("The model's fuzzer: random edits, gestures, undos and redos keep a p
     }
 
     MESSAGE ("The model's fuzzer took " << juce::roundToInt ((juce::Time::getMillisecondCounterHiRes() - started) / 1000.0) << " s");
+}
+
+TEST_CASE ("The model's fuzzer far out: edits made around the last beat a song holds and past it leave values the song holds, "
+           "which its file keeps (known bug 247)")
+{
+    // Each beat an edit draws afresh from 999,990 on, a few dozen beats past schema::maxBeats at most: every value an edit
+    // leaves is one the song's state read back from its own file's form holds (checkSong()), and the project saved and opened
+    // again is the same song (checkAtInterval()).
+    constexpr juce::int64 seed = 20261124;
+    Run run (seed, phazite::schema::maxBeats - 10.0);
+
+    for (int number = 0; number < operationsPerSong; ++number)
+    {
+        INFO ("seed " << seed << " far out, operation " << number);
+        run.operate (number);
+    }
+
+    INFO ("seed " << seed << " far out, at the end");
+    run.undoCheck->walkBackAndForth();
 }

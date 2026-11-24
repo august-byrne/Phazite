@@ -5,6 +5,8 @@
 // thread.
 #pragma once
 
+#include "model/base/Beats.h"
+
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <optional>
@@ -47,6 +49,22 @@ std::optional<double> readValueNumber (const juce::var&);
 // and the clips' conversions read their numbers with (ClipNotesValue.h, ClipsValue.h).
 double readDescribed (const juce::var& held, const schema::PropertyDescription&);
 double readDescribed (const juce::ValueTree& element, const schema::PropertyDescription&);
+
+// A number an edit sets, kept within what its description gives (Schema.h), as readDescribed() keeps a finite number it reads:
+// the one rule of the readers and the writers, so that an edit never leaves a value the song can't hold, and a writer writes
+// what the song holds (a beat past schema::maxBeats was saved where it was made and opened at maxBeats: known bug 247 until
+// 2026-11-24). A beat the same, in its own type: what each area's writer keeps a beat it sets within, where its next value is
+// made (ClipsValue.h: keepClipNumbersDescribed(); SectionsValue.h: keepSectionsHeld(); model/transport/Tempo.cpp,
+// model/chords/Chords.cpp, model/automation/Automation.cpp, model/notes/Notes.cpp).
+double keepDescribed (double, const schema::PropertyDescription&);
+BeatPosition keepDescribed (BeatPosition, const schema::PropertyDescription&);
+BeatDuration keepDescribed (BeatDuration, const schema::PropertyDescription&);
+
+// How far an edit that moves a group of items together moves them: the distance given, as far as the earliest and the latest
+// of what it moves (the beats one description bounds) can go within its range, so that the distances inside the group are
+// kept rather than piled up at an end (a nudge, a paste, a duplicate past the song's last beat), as the edits keep a group
+// from going before beat 0. A group already past an end goes no farther past it.
+BeatDuration keepDistanceDescribed (BeatDuration distance, BeatPosition earliest, BeatPosition latest, const schema::PropertyDescription&);
 
 // Bytes as text, in base 64 as RFC 4648 has it (with "=" to fill the last group); and back, nothing for text that isn't
 // base 64 of some bytes.

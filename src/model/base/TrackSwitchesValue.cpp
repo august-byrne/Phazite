@@ -234,6 +234,17 @@ bool holdsSwitchesOf (const TrackSwitches& switches, std::uint64_t key)
            || switches.modes.find (key) != nullptr;
 }
 
+TrackSwitches withoutIDsFrom (const TrackSwitches& switches, std::uint64_t first)
+{
+    jassert (first > 0); // the master's mode, under 0, stays
+    auto kept = switches;
+    kept.mutes = withoutIDsFrom (switches.mutes, first);
+    kept.solos = withoutIDsFrom (switches.solos, first);
+    kept.frozen = withoutIDsFrom (switches.frozen, first);
+    kept.modes = withoutIDsFrom (switches.modes, first);
+    return kept;
+}
+
 void readSwitchesOf (const juce::ValueTree& element, TrackSwitches& switches)
 {
     readInto (element, switches, false);

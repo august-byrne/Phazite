@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "model/base/internal/TracksOutside.h"
 #include "model/base/Numbers.h"
+#include "model/base/internal/MapChanges.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 
@@ -287,6 +288,13 @@ TracksOutside withMasterView (const TracksOutside& outside, TrackView view)
     auto next = outside;
     next.master = std::move (view);
     return next;
+}
+
+TracksOutside withoutIDsFrom (const TracksOutside& outside, std::uint64_t first)
+{
+    auto kept = outside;
+    kept.tracks = withoutIDsFrom (outside.tracks, first);
+    return kept;
 }
 
 TrackView readViewOf (const juce::ValueTree& element)

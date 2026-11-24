@@ -1832,3 +1832,29 @@ TEST_CASE ("What Phazite doesn't know at the song's root is left out of a merge:
     CHECK (withNotes.song[schema::notes].toString() == "Ours");
     CHECK_FALSE (holdsUnknown (withNotes.song));
 }
+
+TEST_CASE ("What Phazite doesn't know at the song's root is no change in the list of changes: the song's own line names only "
+           "what it knows")
+{
+    // Two sides that differ only in a root property and a root element of names Phazite doesn't know: the song can't hold
+    // them, so the list (what the other side changed, and the changes since the last version) names nothing, by the rule a
+    // merge leaves them out by (SongOwnValue.h: isKnownRootProperty(), isKnownRootElement()).
+    Sides sides;
+    auto before = phazite::test::copyWholeSong (*sides.base);
+    auto after = before.createCopy();
+    after.setProperty ("laterProperty", 2, nullptr);
+    juce::ValueTree future ("FUTURE");
+    future.appendChild (juce::ValueTree ("PART", { { "x", 2 } }), nullptr);
+    after.appendChild (future, nullptr);
+
+    CHECK (phazite::findChanges (before, after).empty());
+    CHECK (phazite::findChanges (after, before).empty());
+    CHECK (phazite::findSongChange (before, after).what.isEmpty());
+
+    // The notes changed too, which Phazite knows: the song's own line, once, naming the notes' change alone.
+    after.setProperty (schema::notes, "Changed", nullptr);
+    const auto changes = phazite::findChanges (before, after);
+    REQUIRE (changes.size() == 1);
+    CHECK (changes.front().where == phazite::SongChange::Where::song);
+    CHECK (changes.front().what == juce::StringArray { "settings" });
+}

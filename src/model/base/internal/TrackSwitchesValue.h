@@ -89,6 +89,11 @@ bool holdSameSwitchesOf (const TrackSwitches&, const TrackSwitches&, std::uint64
 // track an earlier step took away kept.
 bool holdsSwitchesOf (const TrackSwitches&, std::uint64_t key);
 
+// The switches without the entries of tracks whose IDs are at or above first (the master's mode, under 0, stays), one walk of
+// each map; the very maps where they hold none. What the song as copied drops as its count of IDs is set back to the copy's
+// (model/versions/ApplySong.cpp: makeSongAsCopied()): no step its history holds can bring such a track back.
+TrackSwitches withoutIDsFrom (const TrackSwitches&, std::uint64_t first);
+
 //==============================================================================
 // The conversion: the one place that reads and writes a TRACK's and the MASTER's switches by name.
 

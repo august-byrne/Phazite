@@ -81,6 +81,11 @@ struct TracksOutside
 TracksOutside withTrackView (const TracksOutside&, std::uint64_t id, TrackView);
 TracksOutside withMasterView (const TracksOutside&, TrackView);
 
+// The value without the views of tracks whose IDs are at or above first (the master's stays), one walk of the map; the very
+// map where it holds none. What the song as copied drops as its count of IDs is set back to the copy's
+// (model/versions/ApplySong.cpp: makeSongAsCopied()): no step its history holds can bring such a track back.
+TracksOutside withoutIDsFrom (const TracksOutside&, std::uint64_t first);
+
 //==============================================================================
 // The conversion: the one place that reads and writes a TRACK's and the MASTER's view, and LANES and LANE, by name.
 

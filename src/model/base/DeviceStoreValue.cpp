@@ -283,6 +283,19 @@ bool holdSameEntriesOf (const DeviceStore& a, const DeviceStore& b, DeviceID id)
            && ! haveDifferentSongsValues (a, b, id);
 }
 
+DeviceStore withoutIDsFrom (const DeviceStore& store, std::uint64_t first)
+{
+    auto kept = store;
+    kept.pluginValues = withoutIDsFrom (store.pluginValues, first, [] (const PluginValueKey& key) { return key.device.getRaw(); });
+    kept.states = withoutIDsFrom (store.states, first);
+    kept.programs = withoutIDsFrom (store.programs, first);
+    kept.formatIDs = withoutIDsFrom (store.formatIDs, first);
+    kept.versions = withoutIDsFrom (store.versions, first);
+    kept.chainMutes = withoutIDsFrom (store.chainMutes, first);
+    kept.chainSolos = withoutIDsFrom (store.chainSolos, first);
+    return kept;
+}
+
 //==============================================================================
 namespace
 {

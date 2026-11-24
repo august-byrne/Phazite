@@ -4,7 +4,9 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
+#include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TempoMapValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -24,11 +26,54 @@ namespace phazite
 {
 namespace
 {
+    // A kind of the map's entries, each beat within its description's range (SongText.h: keepDescribed()), as the readers keep
+    // one; the very entries where every one is so already. Kept by beat still: the bound keeps their order. Where the bound
+    // puts one on a beat another of its kind is on (two past the song's last beat, both moved to it), they become one: the
+    // later, which is the one that plays (engine/core/TempoMap.cpp: of two at a beat, the later counts), as the file holds one
+    // of a kind at a beat. Two at one beat that the bound didn't move stay as they are (known bug 240).
+    template <typename Entry>
+    immer::flex_vector<Entry> keepBeatsDescribed (const immer::flex_vector<Entry>& entries)
+    {
+        const auto isKept = [] (const Entry& entry) { return entry.beat == keepDescribed (entry.beat, schema::mapBeat); };
+
+        if (std::all_of (entries.begin(), entries.end(), isKept))
+            return entries;
+
+        std::vector<Entry> kept;
+        auto atBeatMoved = false; // whether the bound moved one of those at the last kept entry's beat
+
+        for (auto entry : entries)
+        {
+            const auto beat = keepDescribed (entry.beat, schema::mapBeat);
+            const auto moved = ! (beat == entry.beat);
+            const auto atSameBeat = ! kept.empty() && kept.back().beat == beat;
+            entry.beat = beat;
+
+            if (atSameBeat && (moved || atBeatMoved))
+                while (! kept.empty() && kept.back().beat == beat)
+                    kept.pop_back();
+
+            atBeatMoved = moved || (atSameBeat && atBeatMoved);
+            kept.push_back (entry);
+        }
+
+        auto value = immer::flex_vector<Entry>().transient();
+
+        for (const auto& entry : kept)
+            value.push_back (entry);
+
+        return value.persistent();
+    }
+
     // The song's tempo map made the next value: its area's, in the step in progress, or outside the history while the song
     // is written outside it (SongValues.h: setTempoMap(), which writes nothing for the map the song holds already). Every
-    // edit below computes the next value from the one the song holds and sets it once.
+    // edit below computes the next value from the one the song holds and sets it once, its beats kept within their range
+    // (keepBeatsDescribed()).
     void setMap (Song& song, TempoMapValue next)
     {
+        next.tempos = keepBeatsDescribed (next.tempos);
+        next.signatures = keepBeatsDescribed (next.signatures);
+
         if (auto* values = song.getValues())
             values->setTempoMap (song, std::move (next));
         else
@@ -460,7 +505,7 @@ std::vector<double> getTempoValues (const Song& song, const std::vector<BeatPosi
 
 int addTempoChange (Song& song, BeatPosition beat, std::optional<double> bpm)
 {
-    const auto at = std::max (BeatPosition(), beat);
+    const auto at = keepDescribed (beat, schema::mapBeat); // from 0 to the song's last beat
     const auto changes = getTempoChanges (song);
     const auto index = findTempoAt (changes, at);
     const auto value = roundTempo (bpm.value_or (getTempoAt (song, at)));
@@ -498,7 +543,7 @@ int moveTempoChange (Song& song, int index, BeatPosition beat, double bpm)
         return -1;
 
     auto entry = map.tempos[(size_t) index];
-    const auto at = index == 0 ? BeatPosition() : std::max (BeatPosition(), beat);
+    const auto at = index == 0 ? BeatPosition() : keepDescribed (beat, schema::mapBeat);
     const auto rounded = roundTempo (bpm);
 
     if (isSameBeat (entry.beat, at) && juce::approximatelyEqual (entry.bpm, rounded))

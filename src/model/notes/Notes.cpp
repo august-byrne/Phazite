@@ -335,6 +335,43 @@ namespace
         std::vector<GroupKey> order;
     };
 
+    // A clip's notes with each note's start and length and each controller's value's beat within its description's range
+    // (SongText.h: keepDescribed()), as the readers keep them (setClipNotesValue()): the very value where each is so already,
+    // found in one walk without an allocation. A note counts from its clip's content start, so only a clip far longer than
+    // any song (its offset and length each up to the song's last beat) can hold one past the range. The walk looks at every
+    // note and value of the clip at each set, not only those the edit changed: left so on purpose, as a walk without an
+    // allocation costs little beside the set itself.
+    ClipNotes keepBeatsDescribed (const ClipNotes& clip)
+    {
+        const auto keepNote = [] (NoteValues& note)
+        {
+            note.start = keepDescribed (note.start, schema::noteStart);
+            note.length = keepDescribed (note.length, schema::noteLength);
+        };
+
+        const auto keepControl = [] (ControlValues& control) { control.beat = keepDescribed (control.beat, schema::controlBeat); };
+
+        const auto isNoteKept = [&keepNote] (NoteValues note)
+        {
+            const auto held = note;
+            keepNote (note);
+            return note == held;
+        };
+
+        const auto isControlKept = [&keepControl] (ControlValues control)
+        {
+            const auto held = control;
+            keepControl (control);
+            return control == held;
+        };
+
+        if (std::all_of (clip.notes.begin(), clip.notes.end(), isNoteKept)
+            && std::all_of (clip.controls.begin(), clip.controls.end(), isControlKept))
+            return clip;
+
+        return withEachChanged (clip, keepNote, keepControl);
+    }
+
     // A note's values as its clip holds them, but its ID, its pitch, its start and its length, which the edits work out. Its
     // channel kept within 1 to 16, as a note's value holds it (its velocity is kept within its range as it is added).
     NoteValues getValuesKept (const NoteData& data)
@@ -535,7 +572,7 @@ void setClipNotesValue (Song& song, ClipID clip, const ClipNotes& value)
     jassert (values != nullptr); // a song made to be read or checked isn't edited
 
     if (values != nullptr && isMidiClip (song, clip))
-        values->setClipNotes (song, clip, value);
+        values->setClipNotes (song, clip, keepBeatsDescribed (value));
 }
 
 namespace
