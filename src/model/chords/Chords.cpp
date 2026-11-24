@@ -116,18 +116,23 @@ namespace
     {
         explicit Lane (const ChordLaneValue& value)
             : chords (value.chords.begin(), value.chords.end()),
-              keys (value.keys.begin(), value.keys.end())
+              keys (value.keys.begin(), value.keys.end()),
+              placed (value.placed)
         {
         }
 
         ChordLaneValue toValue() const
         {
-            return { immer::flex_vector<ChordEntry> (chords.begin(), chords.end()),
-                     immer::flex_vector<KeyEntry> (keys.begin(), keys.end()) };
+            ChordLaneValue value;
+            value.chords = immer::flex_vector<ChordEntry> (chords.begin(), chords.end());
+            value.keys = immer::flex_vector<KeyEntry> (keys.begin(), keys.end());
+            value.placed = placed;
+            return value;
         }
 
         std::vector<ChordEntry> chords;
         std::vector<KeyEntry> keys;
+        bool placed = false; // whether the song has the lane (ChordLaneValue.h): set where openLane() adds its element
     };
 
     // The song's chord lane made the next value: its area's, in the step in progress, or outside the history while the song
@@ -152,6 +157,7 @@ namespace
 
         song.getState().appendChild (juce::ValueTree (schema::CHORDLANE), getTreeUndo (song));
         Lane lane (getChordLaneValue (song)); // empty: a song without a lane holds none (ChordLaneValue.h)
+        lane.placed = true;
         const auto key = getDefaultKey (song);
         lane.keys.push_back ({ BeatPosition(), key.root, getSavedScaleName (key.scale) });
         return lane;
@@ -279,6 +285,9 @@ ChordLaneValue getChordLaneValue (const Song& song)
 
 bool hasChordLane (const Song& song)
 {
+    if (const auto* values = song.getValues())
+        return values->chordLane.get().placed;
+
     return findLaneState (song).isValid();
 }
 

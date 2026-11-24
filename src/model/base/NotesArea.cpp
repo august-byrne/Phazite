@@ -168,7 +168,7 @@ void SongValues::setClipNotes (Song& song, ClipID clip, ClipNotes value)
 }
 
 //==============================================================================
-bool holdSameNotes (const ValuesKept& a, const ValuesKept& b, ClipID clip)
+bool holdSameNotes (const SongState& a, const SongState& b, ClipID clip)
 {
     const auto* first = a.notes.find (clip);
     const auto* second = b.notes.find (clip);

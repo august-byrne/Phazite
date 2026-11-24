@@ -394,9 +394,11 @@ TEST_CASE ("Song values' chord lane: a lane set equal to the one the song holds 
     Told told;
     values.addListener (&told);
 
-    // The same entries in new vectors: alike, not the same value.
-    const phazite::ChordLaneValue alike { immer::flex_vector<phazite::ChordEntry> (held.chords.begin(), held.chords.end()),
-                                          immer::flex_vector<phazite::KeyEntry> (held.keys.begin(), held.keys.end()) };
+    // The same entries in new vectors, the lane placed as it is: alike, not the same value.
+    phazite::ChordLaneValue alike;
+    alike.chords = immer::flex_vector<phazite::ChordEntry> (held.chords.begin(), held.chords.end());
+    alike.keys = immer::flex_vector<phazite::KeyEntry> (held.keys.begin(), held.keys.end());
+    alike.placed = held.placed;
     REQUIRE_FALSE (alike.isSameAs (held));
 
     {

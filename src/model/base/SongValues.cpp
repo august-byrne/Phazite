@@ -12,10 +12,12 @@
 #include "internal/SectionsArea.h"
 #include "internal/SendsArea.h"
 #include "internal/SongOwnArea.h"
+#include "internal/SongState.h"
 #include "internal/TempoMapArea.h"
 #include "internal/TracksArea.h"
 
 #include <memory>
+#include <utility>
 
 namespace phazite
 {
@@ -190,15 +192,16 @@ void SongValues::removeListener (Listener* listener) const
 
 void SongValues::adopt (Song& song)
 {
-    // What the tree the loader made consistent holds of each area, into the area, outside the history, and out of the tree:
-    // each area in turn, in this order (the clips with their notes, then the tempo map, then the chord lane, then the MIDI
-    // links, then the curves, then the sections, then modulation, then the sends, then the store, then the devices, which
-    // take every DEVICE, CONTAINER and CHAIN element out of the tree once modulation took a container's macros and the store
-    // what a device or a chain stores out of them, then the tracks' switches and view, then the tracks themselves, last,
-    // which take every TRACK out of the tree and the MASTER's own: none reads another's), the song's own first, with its
-    // count of IDs (SongOwnArea.h), so that anything an area's adoption made would count on from the count the file holds
-    // (none makes one), and what Phazite doesn't know at the root dropped before any area reads it (the placeholders, the
-    // TRACKS and the MASTER among them, are known and stay); then the keeper, from here on.
+    // What the tree the loader made consistent holds of each area, read once (SongState.h: readSongTree(): each area's reader,
+    // which changes no tree), its curves' points given the song's keys; then each area set to it, outside the history, a line
+    // each, in the order of the areas (the song's own first, with its count of IDs: none reads another); then each area's
+    // elements out of the tree, in this order (the song's own first, which drops what Phazite doesn't know at the root with
+    // everything in it; the clips with their notes, the tempo map, the chord lane, the MIDI links, the curves, the sections,
+    // modulation, the sends, the store, then the devices, which take every DEVICE, CONTAINER and CHAIN element out of the
+    // tree once modulation took a container's macros and the store what a device or a chain stores out of them, then the
+    // tracks' switches and view, then the tracks themselves, last, which take every TRACK out of the tree and the MASTER's
+    // own); then the keeper, from here on.
+    takeIn (song, readSongTree (song.getState(), nextPointKey));
     SongOwnKeeper::adopt (*this, song);
     ClipsKeeper::adopt (*this, song);
     TempoMapKeeper::adopt (*this, song);
@@ -213,6 +216,32 @@ void SongValues::adopt (Song& song)
     TrackLeavesKeeper::adopt (*this, song);
     TracksKeeper::adopt (*this, song);
     keeper = std::make_unique<Keeper> (*this, song);
+}
+
+void SongValues::takeIn (Song& song, SongState state)
+{
+    // Each area's value, a line each, outside the history: the song's own and its count of IDs first, the tracks last.
+    songOwn.setOutsideHistory (std::move (state.songOwn));
+    songStanding.setOutsideHistory (std::move (state.songStanding));
+    songOutside.set (std::move (state.songOutside));
+    song.setIDCount (state.nextID);
+    clips.setOutsideHistory (std::move (state.clips));
+    notes.setOutsideHistory (std::move (state.notes));
+    tempoMap.setOutsideHistory (std::move (state.tempoMap));
+    chordLane.setOutsideHistory (std::move (state.chordLane));
+    midiLinks.setOutsideHistory (std::move (state.midiLinks));
+    curves.setOutsideHistory (std::move (state.curves));
+    sections.setOutsideHistory (std::move (state.sections));
+    modulation.setOutsideHistory (std::move (state.modulation));
+    sends.setOutsideHistory (std::move (state.sends));
+    deviceStore.setOutsideHistory (std::move (state.deviceStore));
+    devicesOutside.set (std::move (state.devicesOutside));
+    devices.setOutsideHistory (std::move (state.devices));
+    trackSwitches.setOutsideHistory (std::move (state.trackSwitches));
+    tracksOutside.set (std::move (state.tracksOutside));
+
+    if (state.tracks.has_value())
+        tracks.setOutsideHistory (std::move (*state.tracks));
 }
 
 void Song::holdValues()

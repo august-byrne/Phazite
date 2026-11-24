@@ -560,16 +560,12 @@ bool SongValues::TracksKeeper::propertyChanged (juce::ValueTree& tree, const juc
     return true;
 }
 
-void SongValues::TracksKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::TracksKeeper::adopt (SongValues&, Song& loaded)
 {
-    // The song's tracks, each read once as the song holds it (what the loader left of each is what the song holds of it:
-    // TracksValue.h, keepTrackAsHeld()), into the area outside the history; then every TRACK out of the TRACKS, and every
-    // property and child out of the MASTER: what the other areas take of them taken before (SongValues.cpp: adopt(), this
-    // last), what Phazite doesn't know of them dropped as the song opens.
+    // Every TRACK out of the TRACKS, and every property and child out of the MASTER, their reader having read the song's tracks
+    // into the area before (readHeldTracksIn(): SongValues.cpp, adopt()): what the other areas take of them taken before
+    // (SongValues.cpp: adopt(), this last), what Phazite doesn't know of them dropped as the song opens.
     auto tree = loaded.getState();
-    auto held = readHeldAll (tree);
-    jassert (holdsItsLists (held));
-    into.tracks.setOutsideHistory (std::move (held));
 
     for (auto child : tree)
     {
@@ -829,33 +825,46 @@ void SongValues::TrackLeavesKeeper::childAdded (juce::ValueTree& parent, juce::V
     }
 }
 
-void SongValues::TrackLeavesKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::TrackLeavesKeeper::adopt (SongValues&, Song& loaded)
 {
-    // Every TRACK of the song's track list (a folder's tracks too) and the MASTER, each read as the song holds it (the first of
-    // an ID, as the loader leaves each once); then all of it taken out of them.
-    auto tree = loaded.getState();
-    auto switches = into.trackSwitches.get();
-    auto outside = into.tracksOutside.get();
+    // Every TRACK of the song's track list (a folder's tracks too) and the MASTER, each read as the song holds it before
+    // (readHeldTrackLeavesIn(): SongValues.cpp, adopt()); then all of it taken out of them.
     std::vector<juce::ValueTree> channels;
 
-    for (const auto& child : tree)
+    for (const auto& child : loaded.getState())
         if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
             forEachChannelIn (child, [&channels] (juce::ValueTree element) { channels.push_back (element); });
 
-    for (const auto& element : channels)
-    {
-        jassert (! keepSwitchesAsHeld (element.createCopy()) && ! keepViewAsHeld (element.createCopy())); // the loader's
-        readLeavesOf (element, switches, outside);
-    }
-
-    into.trackSwitches.setOutsideHistory (std::move (switches));
-    into.tracksOutside.set (std::move (outside));
-
     for (auto& element : channels)
     {
+        jassert (! keepSwitchesAsHeld (element.createCopy()) && ! keepViewAsHeld (element.createCopy())); // the loader's
         takeSwitchesOutOf (element, nullptr);
         takeViewOutOf (element, nullptr);
     }
+}
+
+void readHeldTrackLeavesIn (const juce::ValueTree& song, SongState& into)
+{
+    // Every TRACK of the song's track list (a folder's tracks too) and the MASTER, each read as the song holds it (the first
+    // of an ID, as the loader leaves each once), into the switches and the view.
+    auto switches = into.trackSwitches;
+    auto outside = into.tracksOutside;
+
+    for (const auto& child : song)
+        if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
+            forEachChannelIn (child, [&switches, &outside] (juce::ValueTree element) { readLeavesOf (element, switches, outside); });
+
+    into.trackSwitches = std::move (switches);
+    into.tracksOutside = std::move (outside);
+}
+
+void readHeldTracksIn (const juce::ValueTree& song, SongState& into)
+{
+    // The song's tracks, each read once as the song holds it (what the loader left of each is what the song holds of it:
+    // TracksValue.h, keepTrackAsHeld()).
+    auto held = readHeldAll (song);
+    jassert (holdsItsLists (held));
+    into.tracks = std::move (held);
 }
 
 //==============================================================================
@@ -905,7 +914,7 @@ bool leadsToTracks (const juce::ValueTree& parent, const juce::ValueTree& child)
     return parent.hasType (schema::PHAZITE) && (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER));
 }
 
-void writeTrackLeavesIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeTrackLeavesIn (juce::ValueTree& element, const SongState& kept)
 {
     // Its switches (its ID's entries; the master's mode under 0), then its view: its properties, and its LANES after the
     // children it holds now (its clips, its devices, a folder's tracks), before what the areas after it write (its modulators
@@ -932,8 +941,8 @@ void writeTrackLeavesIn (juce::ValueTree& element, const ValuesKept& kept)
         writeViewInto (element, *view);
 }
 
-bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                              const ValuesKept& otherKept)
+bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                              const SongState& otherKept)
 {
     if (element.hasType (schema::MASTER))
         return holdSameSwitchesOf (kept.trackSwitches, otherKept.trackSwitches, 0);
@@ -946,7 +955,7 @@ bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const ValuesKept& 
 }
 
 //==============================================================================
-bool holdSameTracks (const ValuesKept& a, const ValuesKept& b)
+bool holdSameTracks (const SongState& a, const SongState& b)
 {
     if (! a.tracks.has_value() || ! b.tracks.has_value())
         return a.tracks.has_value() == b.tracks.has_value();
@@ -954,7 +963,7 @@ bool holdSameTracks (const ValuesKept& a, const ValuesKept& b)
     return a.tracks->isSameAs (*b.tracks) || *a.tracks == *b.tracks;
 }
 
-bool holdSameTrack (const ValuesKept& a, const ValuesKept& b, TrackID id)
+bool holdSameTrack (const SongState& a, const SongState& b, TrackID id)
 {
     // Its value (its folder among it), and its switches' entries; one in neither the same.
     const auto* first = a.tracks.has_value() ? a.tracks->tracks.find (id.getRaw()) : nullptr;
@@ -966,7 +975,7 @@ bool holdSameTrack (const ValuesKept& a, const ValuesKept& b, TrackID id)
     return *first == *second && holdSameSwitchesOf (a.trackSwitches, b.trackSwitches, id.getRaw());
 }
 
-bool holdSameMaster (const ValuesKept& a, const ValuesKept& b)
+bool holdSameMaster (const SongState& a, const SongState& b)
 {
     if (! a.tracks.has_value() || ! b.tracks.has_value())
         return a.tracks.has_value() == b.tracks.has_value();
@@ -974,7 +983,7 @@ bool holdSameMaster (const ValuesKept& a, const ValuesKept& b)
     return a.tracks->master == b.tracks->master && holdSameSwitchesOf (a.trackSwitches, b.trackSwitches, 0);
 }
 
-bool holdSameTrackList (const ValuesKept& a, const ValuesKept& b, TrackID folder)
+bool holdSameTrackList (const SongState& a, const SongState& b, TrackID folder)
 {
     const auto* first = a.tracks.has_value() ? a.tracks->findList (folder) : nullptr;
     const auto* second = b.tracks.has_value() ? b.tracks->findList (folder) : nullptr;
@@ -985,8 +994,8 @@ bool holdSameTrackList (const ValuesKept& a, const ValuesKept& b, TrackID folder
     return first->identity() == second->identity() || *first == *second;
 }
 
-bool holdSameTracksOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                       const ValuesKept& otherKept)
+bool holdSameTracksOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                       const SongState& otherKept)
 {
     // The song's TRACKS and MASTER are its root's alone (a copy of one, given its tracks' own fields, has none).
     if (! kept.tracks.has_value() || ! otherKept.tracks.has_value() || element.getType() != otherElement.getType())
@@ -998,7 +1007,7 @@ bool holdSameTracksOf (const juce::ValueTree& element, const ValuesKept& kept, c
     return ! element.hasType (schema::MASTER) || holdSameMaster (kept, otherKept);
 }
 
-juce::ValueTree withTracksOwn (const juce::ValueTree& place, const ValuesKept& kept)
+juce::ValueTree withTracksOwn (const juce::ValueTree& place, const SongState& kept)
 {
     // The tracks' own fields alone, as the song's tree held them before the tracks were values: a TRACK for each, nested in its
     // folder's, in each list's order, with its own properties (writeTrackElement()); the master's on the MASTER.

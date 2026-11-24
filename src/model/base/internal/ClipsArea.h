@@ -36,9 +36,9 @@ struct SongValues::ClipsTeller final : ValueArea<SongClips>::Listener
     JUCE_DECLARE_NON_COPYABLE (ClipsTeller)
 };
 
-// The clips' adoption from the loaded tree, with their notes, which the song's holdValues() asks: every CLIP of the tree the
-// loader made consistent into both areas, outside the history, and every CLIP element out of the tree (SongValues.cpp:
-// adopt()). The keeper asks the clips of nothing: no track is in a live song's tree for a CLIP to come into it on (the
+// The clips' adoption from the loaded tree, with their notes, which the song's holdValues() asks: every CLIP element out of
+// the tree the loader made consistent, those anywhere else too, once its reader read the song's into both areas
+// (readHeldClipsIn(), SongValues.cpp: adopt()). The keeper asks the clips of nothing: no track is in a live song's tree for a CLIP to come into it on (the
 // tracks' safety net reads a TRACK's: takeTrackClipsIn(), below).
 struct SongValues::ClipsKeeper
 {
@@ -48,7 +48,12 @@ struct SongValues::ClipsKeeper
 // The clips' part of whole state (WholeState.cpp: writeIn()): a copy's track given its clips from the values kept, first among
 // its elements, in the track's order, each with its notes (ClipsValue.h: writeClipElement()). Nothing for an element that
 // isn't a track. Whole state writes each TRACK itself (TracksArea.h: writeTracksIn()), asking this of each.
-void writeClipsIn (juce::ValueTree& element, const ValuesKept&);
+void writeClipsIn (juce::ValueTree& element, const SongState&);
+
+// The clips' reader of a song's tree as the loader made it consistent (SongState.h: readSongTree(), a line of it): each track's
+// CLIP elements into the state's clips and notes, as the song holds them; no tree changed (the adoption takes them out after:
+// ClipsKeeper::adopt()). Any thread.
+void readHeldClipsIn (const juce::ValueTree& song, SongState&);
 
 // The CLIP elements on a track's element (one that comes into the song with them: the tracks' safety net, TracksArea.h) read
 // into the areas' next values as the keeper takes a clip in, on the track of this ID, after its others: each kept within what
@@ -58,7 +63,7 @@ int takeTrackClipsIn (SongClips&, NotesByClip&, const juce::ValueTree& track, Tr
 
 // The clips' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a track's
 // clips, the same in the same order (holdSameTrackClips()); true for an element that isn't a track.
-bool holdSameClipsOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameClipsOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 
 // The largest ID the clips' area holds below schema::maxID (IDsHeld.h): each clip's ID and its alias group's. 0 for none.
 std::uint64_t findLargestIDIn (const SongClips&);

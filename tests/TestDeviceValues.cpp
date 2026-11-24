@@ -111,7 +111,7 @@ juce::ValueTree copyDevice (const Song& song, DeviceID id)
 {
     // Its element with what it holds, made whole (the store's, a window's place, a container's macros), as a whole copy of the
     // song writes it.
-    return phazite::findDevice (song, id) != nullptr ? copyWhole (writeDeviceWhole (getDevicesValue (song), id), keepValues (song))
+    return phazite::findDevice (song, id) != nullptr ? copyWhole (writeDeviceWhole (getDevicesValue (song), id), getSongState (song))
                                                      : juce::ValueTree();
 }
 

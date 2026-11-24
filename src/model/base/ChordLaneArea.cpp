@@ -39,7 +39,8 @@ SongValues::ChordLaneTeller::~ChordLaneTeller()
 
 void SongValues::ChordLaneTeller::valueAreaChanged (const ChordLaneValue& before, const ChordLaneValue& after)
 {
-    if (! before.isSameAs (after))
+    // Its entries alone: the lane placed or taken away, its CHORDLANE added or taken out, is the tree's to tell.
+    if (! before.holdsSameEntriesAs (after))
         listeners.call ([] (SongValues::Listener& listener) { listener.chordLaneChanged(); });
 }
 
@@ -95,18 +96,20 @@ void SongValues::ChordLaneKeeper::childAdded (juce::ValueTree& parent, juce::Val
     parent.removeChild (child, nullptr);
 }
 
-void SongValues::ChordLaneKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::ChordLaneKeeper::adopt (SongValues&, Song& loaded)
 {
-    // The chord lane the loader made consistent into its area, outside the history, each entry as the song holds one
-    // (ChordLaneValue.h: readHeldChordLane()); then its element emptied (emptyChordLaneElement()), and kept: whether the song
-    // has one is the element's to say. None for a song without one.
-    auto lane = loaded.getState().getChildWithName (schema::CHORDLANE);
+    // The song's CHORDLANE, whose lane its reader read into the area before (readHeldChordLaneIn(): SongValues.cpp, adopt()),
+    // emptied (emptyChordLaneElement()), and kept: the sign that the song has a lane, beside its value's (placed). Nothing for a
+    // song without one.
+    if (auto lane = loaded.getState().getChildWithName (schema::CHORDLANE); lane.isValid())
+        emptyChordLaneElement (lane, nullptr);
+}
 
-    if (! lane.isValid())
-        return;
-
-    into.chordLane.setOutsideHistory (readHeldChordLane (lane));
-    emptyChordLaneElement (lane, nullptr);
+void readHeldChordLaneIn (const juce::ValueTree& song, SongState& into)
+{
+    // The chord lane the loader made consistent, each entry as the song holds one (ChordLaneValue.h: readHeldChordLane(), placed
+    // as the tree has a CHORDLANE); an empty lane, not placed, for a song without one.
+    into.chordLane = readHeldChordLane (song.getChildWithName (schema::CHORDLANE));
 }
 
 //==============================================================================
@@ -144,7 +147,7 @@ bool leadsToChordLane (const juce::ValueTree& parent, const juce::ValueTree& chi
     return parent.hasType (schema::PHAZITE) && child.hasType (schema::CHORDLANE);
 }
 
-void writeChordLaneIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeChordLaneIn (juce::ValueTree& element, const SongState& kept)
 {
     // Nothing kept of an empty lane, nor of a song that keeps everything in its tree (whose CHORDLANE holds its entries).
     if (! element.hasType (schema::CHORDLANE) || (kept.chordLane.chords.empty() && kept.chordLane.keys.empty()))
@@ -154,7 +157,7 @@ void writeChordLaneIn (juce::ValueTree& element, const ValuesKept& kept)
     writeChordLane (kept.chordLane, element);
 }
 
-bool holdSameChordLane (const juce::ValueTree& song, const ValuesKept& kept, const juce::ValueTree& otherSong, const ValuesKept& otherKept)
+bool holdSameChordLane (const juce::ValueTree& song, const SongState& kept, const juce::ValueTree& otherSong, const SongState& otherKept)
 {
     // Whether each has a lane (its tree's CHORDLANE, the sign of it), and the values kept.
     if (song.getChildWithName (schema::CHORDLANE).isValid() != otherSong.getChildWithName (schema::CHORDLANE).isValid())
@@ -163,8 +166,8 @@ bool holdSameChordLane (const juce::ValueTree& song, const ValuesKept& kept, con
     return kept.chordLane.isSameAs (otherKept.chordLane) || kept.chordLane == otherKept.chordLane;
 }
 
-bool holdSameChordLaneOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                          const ValuesKept& otherKept)
+bool holdSameChordLaneOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                          const SongState& otherKept)
 {
     const auto hasChordLane = [] (const juce::ValueTree& each)
     { return each.hasType (schema::PHAZITE) && each.getChildWithName (schema::CHORDLANE).isValid(); };

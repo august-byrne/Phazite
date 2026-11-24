@@ -282,31 +282,14 @@ void SongValues::SongOwnKeeper::childAdded (juce::ValueTree& parent, juce::Value
     parent.removeChild (child, nullptr);
 }
 
-void SongValues::SongOwnKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::SongOwnKeeper::adopt (SongValues&, Song& loaded)
 {
-    // As the loader left the root: each of its own read as held, written back, itself (SongOwnValue.h: keepSongOwnAsHeld()),
-    // asked of a root holding its properties and its own elements alone (a copy of the whole song would copy all it holds).
-    auto root = loaded.getState();
-   #if JUCE_DEBUG
-    juce::ValueTree own (schema::PHAZITE);
-    own.copyPropertiesFrom (root, nullptr);
-
-    for (const auto& child : root)
-        if (isSongOwnElement (child.getType()))
-            own.appendChild (child.createCopy(), nullptr);
-
-    jassert (! keepSongOwnAsHeld (own));
-   #endif
-
-    into.songOwn.setOutsideHistory (readHeldSongOwn (root));
-    into.songStanding.setOutsideHistory (readHeldSongStanding (root));
-    into.songOutside.set (readHeldSongOutside (root));
-    loaded.setIDCount (readID (root[schema::nextID]));
-
-    // Then out of the tree: every property of the root (its own and its count, read in; any other, Phazite doesn't know: one
+    // What its reader read into the three areas and the song's count of IDs before (readHeldSongOwnIn(): SongValues.cpp,
+    // adopt()), out of the tree: every property of the root (its own and its count, read in; any other, Phazite doesn't know: one
     // the descriptions don't put on PHAZITE), its LASTKEY, PIANOROLL and MERGING, and every element of a type Phazite doesn't
     // know there, with everything in it (dropped: no value holds it; SongOwnValue.h: isKnownRootProperty(), isKnownRootElement(),
     // the rule a merge leaves them out by).
+    auto root = loaded.getState();
     root.removeAllProperties (nullptr);
     std::vector<juce::ValueTree> gone;
 
@@ -316,6 +299,27 @@ void SongValues::SongOwnKeeper::adopt (SongValues& into, Song& loaded)
 
     for (const auto& child : gone)
         root.removeChild (child, nullptr);
+}
+
+void readHeldSongOwnIn (const juce::ValueTree& song, SongState& into)
+{
+    // As the loader left the root: each of its own read as held, written back, itself (SongOwnValue.h: keepSongOwnAsHeld()),
+    // asked of a root holding its properties and its own elements alone (a copy of the whole song would copy all it holds).
+   #if JUCE_DEBUG
+    juce::ValueTree own (schema::PHAZITE);
+    own.copyPropertiesFrom (song, nullptr);
+
+    for (const auto& child : song)
+        if (isSongOwnElement (child.getType()))
+            own.appendChild (child.createCopy(), nullptr);
+
+    jassert (! keepSongOwnAsHeld (own));
+   #endif
+
+    into.songOwn = readHeldSongOwn (song);
+    into.songStanding = readHeldSongStanding (song);
+    into.songOutside = readHeldSongOutside (song);
+    into.nextID = readID (song[schema::nextID]);
 }
 
 //==============================================================================
@@ -335,7 +339,7 @@ bool isHeardAsSongOwn (const juce::ValueTree& parent, const juce::ValueTree& chi
 }
 
 //==============================================================================
-void writeSongOwnIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeSongOwnIn (juce::ValueTree& element, const SongState& kept)
 {
     if (! element.hasType (schema::PHAZITE))
         return;
@@ -346,12 +350,12 @@ void writeSongOwnIn (juce::ValueTree& element, const ValuesKept& kept)
         element.setProperty (schema::nextID, (juce::int64) kept.nextID, nullptr);
 }
 
-bool holdSameSongOwn (const ValuesKept& kept, const ValuesKept& otherKept)
+bool holdSameSongOwn (const SongState& kept, const SongState& otherKept)
 {
     return kept.songOwn == otherKept.songOwn && kept.songStanding.lastKey == otherKept.songStanding.lastKey;
 }
 
-bool holdSameSongOwnOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree&, const ValuesKept& otherKept)
+bool holdSameSongOwnOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree&, const SongState& otherKept)
 {
     // The other element is of the same type, its counterpart in the other song (WholeState.h: holdSameKeptOf()).
     return ! element.hasType (schema::PHAZITE) || holdSameSongOwn (kept, otherKept);

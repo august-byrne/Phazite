@@ -102,15 +102,16 @@
 //      before the others' (the reverse of their making); its keeper part a member of the Keeper, made in the Keeper's
 //      list, and called in a line of each callback it acts in: every area's part is called, all of them, in the order the
 //      callback states (a part never stops the others); its adopt() a line of SongValues::adopt().
-//   5. WholeState.h and WholeState.cpp: a member of ValuesKept and a line of keepValues(); a line of writeIn() (its
-//      write<Area>In()) and of leadsToKept() (its leadsTo<Area>()); a line of holdSameKeptOf() and of isPlaceOfKept(); its
-//      holdSame<Area>() declared with the others.
+//   5. SongState.h, WholeState.h and WholeState.cpp: a member of SongState and a line of getSongState() and of readSongTree()
+//      (its readHeld<Area>In(), in its area's file: what its adopt() read before it took its elements out, which now takes them
+//      out alone) and of SongValues::takeIn(); a line of writeIn() (its write<Area>In()) and of leadsToKept() (its
+//      leadsTo<Area>()); a line of holdSameKeptOf() and of isPlaceOfKept(); its holdSame<Area>() declared with the others.
 //   6. IDsHeld.cpp: a line of findLargestIDHeld(), if it holds IDs.
 //   7. tests/SongCheck.cpp: its rule as a function of its own (check<Area>Value(): no element of it in the song's tree, its
-//      place there empty, its invariants), a line of findValueProblems(). tests/SchemaTests.cpp: its elements' type a line of
-//      Changed's list of what the loader alone takes (is<Area>Entry()), and of findOpened(), which reads the opened song's
-//      element back in its whole state; a branch of its own for a property whole state writes with its default where the
-//      element had none (as the sections' energy).
+//      place there empty, its invariants), a line of findValueProblems() and of findStateDifferences().
+//      tests/SchemaTests.cpp: its elements' type a line of Changed's list of what the loader alone takes (is<Area>Entry()),
+//      and of findOpened(), which reads the opened song's element back in its whole state; a branch of its own for a property
+//      whole state writes with its default where the element had none (as the sections' energy).
 //   8. model/versions/internal/AreaClashes.h: choose<Area>Clash(), declared there and defined with the area's model code
 //      (as chooseTempoMapClash() in model/transport/Tempo.cpp), a line of chooseInAreas() in model/versions/VersionsModel.cpp.
 //   9. model/versions/ApplySong.cpp: its pass (make<Area>Like(), through its setter) and a line of makeValuesLike(); its part
@@ -133,7 +134,7 @@
 //        automation; nor modulation's, which moves nothing a render is made of; nor the sends', which play after a clip).
 //      - FreezeKeeper (model/mixer/Freeze.cpp, internal/Freeze.h): marks the frozen tracks whose file holds what changed
 //        (all of them for the tempo map) and compares them at its later moment. What a frozen track's file holds of an area is
-//        in its Holds (parts: its frozen devices' IDs, getFrozenDevices(); values: ValuesKept, the devices' and the store's
+//        in its Holds (parts: its frozen devices' IDs, getFrozenDevices(); values: SongState, the devices' and the store's
 //        among them; tempos; curves: its frozen devices' automation, getFrozenCurves(); modulators: its modulators and its
 //        frozen containers' macros, as values, getFrozenModulators()), compared in holdsWhatWasFrozen(), each area's value by
 //        identity first. An area whose value is read to compare it (the curves, the modulators) is read only for a track it told
@@ -166,9 +167,9 @@
 //      - AudioRecorder (model/transport/internal/AudioRecorder.h): the tracks' alone, its inputs brought in line from the
 //        tracks it is handed.
 //  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
-//      copyWholeSong(), copyWhole(), keepValues(), or a part's own whole copy, as copyWholeClip()): the changes' worker
+//      copyWholeSong(), copyWhole(), getSongState(), or a part's own whole copy, as copyWholeClip()): the changes' worker
 //      (model/versions/ChangesWorker.cpp: take(), makeSkeleton(), copyTrack(), which writes a track's modulation in as
-//      whole state does); the saved copy (model/project/Project.cpp: savedState, the tree with keepValues(), written with
+//      whole state does); the saved copy (model/project/Project.cpp: savedState, the tree with getSongState(), written with
 //      copyWhole()); the clipboard (model/arrangement/Clipboard.cpp); an export
 //      (model/project/Export.cpp, DawProject.cpp). What reads the area on the message thread reads it in place, by
 //      reference (Automation.h: getCurvesValue(), findCurve()), keeping no reference across a set; a song that holds no
@@ -255,6 +256,7 @@
 namespace phazite
 {
 class Song;
+struct SongState; // SongState.h
 
 // The tracks' (model/base/internal/TracksArea.h): what the listener is told of them.
 struct TrackChange;
@@ -269,7 +271,7 @@ struct SongOwnChange;
 // the curves', the sections', modulation's and the sends', in the song's one undo history, and what keeps them and the tree
 // together.
 // Message thread only, as the song's tree is: nothing on the audio thread reads it (what plays gets what the model compiles
-// of it), and what runs on another thread gets a copy (WholeState.h: copyWholeSong(), keepValues()).
+// of it), and what runs on another thread gets a copy (WholeState.h: copyWholeSong(), getSongState()).
 //
 // Who changes the values: the clips' code (Clips.h: addClip(), setClip(), eraseClip() and the rest, through setClip(),
 // eraseClip() and setTrackClipOrder() below), the notes' code (Notes.h: setClipNotesValue(), which is setClipNotes() below),
@@ -419,8 +421,8 @@ public:
     // Gives the song this chord lane, the chord lane's code's one way to change it (model/chords/internal/Chords.h): in the
     // song's undo history (the step in progress), or outside it while the song is written outside it. A lane equal to the one
     // the song holds is no change, and writes nothing: no step, the value the song holds kept (an entry has no identity of
-    // its own to keep). Whether the song has a lane is its tree's CHORDLANE's to say, which the chord lane's code adds and
-    // takes away in the same step. In ChordLaneArea.cpp.
+    // its own to keep). Whether the song has a lane is the value's to say (ChordLaneValue.h: placed), which the chord lane's
+    // code sets in the step that adds or takes away its tree's CHORDLANE, kept beside it. In ChordLaneArea.cpp.
     void setChordLane (Song&, ChordLaneValue);
 
     // Gives the song these MIDI links, the MIDI links' code's one way to change them (model/midi/internal/MidiLinks.h): in the
@@ -1074,7 +1076,10 @@ private:
     void setWithoutStep (Song&, SongClips next);
     void setWithoutStep (Song&, NotesByClip next);
 
-    void adopt (Song&); // Song::holdValues()
+    // Song::holdValues(): its tree read (SongState.h: readSongTree()), each area set to what it holds (takeIn()), then each
+    // area's elements taken out of the tree, and the keeper made.
+    void adopt (Song&);
+    void takeIn (Song&, SongState);
 
     JUCE_DECLARE_NON_COPYABLE (SongValues)
     JUCE_DECLARE_NON_MOVEABLE (SongValues)

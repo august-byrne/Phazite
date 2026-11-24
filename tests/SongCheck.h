@@ -42,6 +42,7 @@
 #include "TestHelpers.h"
 #include "model/base/Song.h"
 #include "model/base/internal/SchemaDescription.h"
+#include "model/base/internal/SongState.h"
 
 #include <string>
 #include <vector>
@@ -64,6 +65,12 @@ void checkSong (const Song&);
 // it would open (copyAsOpened()). None for a song that holds no values.
 std::vector<std::string> findValueProblems (const Song&);
 void checkValues (const Song&); // each a failed check
+
+// What differs between two states of a song (SongState.h), an area at a time, each by its own == (identity aside), and the
+// places of the root a whole copy writes of each: a line for each that differs, naming it ("clips", "tempo map"...); none for
+// two states that hold the same song. What the rule values compares, of the state read back from the song's whole copy and the
+// state the song holds (tests/SongStateTests.cpp too).
+std::vector<std::string> findStateDifferences (const SongState&, const SongState&);
 
 // A copy of an edited song as a project opens it from its file: without what it keeps only while it is open (the lanes of
 // devices taken away: SongIDs.h, which the check takes for names of nothing) and where playback starts; its curves as they

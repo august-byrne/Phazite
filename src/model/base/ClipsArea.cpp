@@ -165,33 +165,39 @@ void SongValues::ClipsTeller::valueAreaChanged (const SongClips& before, const S
 }
 
 //==============================================================================
-void SongValues::ClipsKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::ClipsKeeper::adopt (SongValues&, Song& loaded)
 {
-    // Every CLIP of the tree the loader made consistent into both areas, outside the history: each track's in their order,
-    // the clips of an alias group sharing the first's notes and, audio clips, its sound (the loader made them hold the same:
-    // Project.cpp, makeConsistent()), each kept within what a clip holds (takeClip()); then every CLIP element out of the tree,
-    // those anywhere else too, which are no clips of the song's (dropClipElements()).
+    // Every CLIP element out of the tree, its reader having read those of the song's tracks into both areas before
+    // (readHeldClipsIn(): SongValues.cpp, adopt()): each track's, then those anywhere else too, which are no clips of the song's
+    // (dropClipElements()).
     std::vector<juce::ValueTree> tracks;
     collectTracks (loaded.getState().getChildWithName (schema::TRACKS), tracks);
-    auto nextClips = into.clips.get();
-    auto nextNotes = into.notes.get();
 
     for (auto& track : tracks)
+        for (int i = track.getNumChildren(); --i >= 0;)
+            if (track.getChild (i).hasType (schema::CLIP))
+                track.removeChild (i, nullptr);
+
+    dropClipElements (loaded.getState());
+}
+
+void readHeldClipsIn (const juce::ValueTree& song, SongState& into)
+{
+    // Every CLIP of the tree the loader made consistent, into the clips and the notes: each track's in their order, the clips
+    // of an alias group sharing the first's notes and, audio clips, its sound (the loader made them hold the same:
+    // Project.cpp, makeConsistent()), each kept within what a clip holds (takeClip()). One on a folder or a return, which holds
+    // no clips, and one anywhere else, no clip of the song's.
+    std::vector<juce::ValueTree> tracks;
+    collectTracks (song.getChildWithName (schema::TRACKS), tracks);
+
+    for (const auto& track : tracks)
     {
         const auto id = getTrackIDOf (track);
 
         for (const auto& element : track)
             if (element.hasType (schema::CLIP) && holdsClips (track))
-                takeClip (nextClips, nextNotes, element, id, -1);
-
-        for (int i = track.getNumChildren(); --i >= 0;)
-            if (track.getChild (i).hasType (schema::CLIP))
-                track.removeChild (i, nullptr);
+                takeClip (into.clips, into.notes, element, id, -1);
     }
-
-    dropClipElements (loaded.getState());
-    into.clips.setOutsideHistory (std::move (nextClips));
-    into.notes.setOutsideHistory (std::move (nextNotes));
 }
 
 //==============================================================================
@@ -320,7 +326,7 @@ int takeTrackClipsIn (SongClips& clips, NotesByClip& notes, const juce::ValueTre
     return taken;
 }
 
-void writeClipsIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeClipsIn (juce::ValueTree& element, const SongState& kept)
 {
     if (! element.hasType (schema::TRACK))
         return;
@@ -337,7 +343,7 @@ void writeClipsIn (juce::ValueTree& element, const ValuesKept& kept)
     }
 }
 
-bool holdSameClip (const ValuesKept& a, const ValuesKept& b, ClipID clip)
+bool holdSameClip (const SongState& a, const SongState& b, ClipID clip)
 {
     const auto* first = a.clips.find (clip);
     const auto* second = b.clips.find (clip);
@@ -348,7 +354,7 @@ bool holdSameClip (const ValuesKept& a, const ValuesKept& b, ClipID clip)
     return *first == *second && holdSameNotes (a, b, clip);
 }
 
-bool holdSameTrackClips (const ValuesKept& a, const ValuesKept& b, TrackID track)
+bool holdSameTrackClips (const SongState& a, const SongState& b, TrackID track)
 {
     const auto* first = a.clips.tracks.find (track.getRaw());
     const auto* second = b.clips.tracks.find (track.getRaw());
@@ -366,7 +372,7 @@ bool holdSameTrackClips (const ValuesKept& a, const ValuesKept& b, TrackID track
     return true;
 }
 
-bool holdSameClipsOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree&, const ValuesKept& otherKept)
+bool holdSameClipsOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree&, const SongState& otherKept)
 {
     return ! element.hasType (schema::TRACK)
            || holdSameTrackClips (kept, otherKept, TrackID::fromRaw ((std::uint64_t) (juce::int64) element[schema::trackID]));

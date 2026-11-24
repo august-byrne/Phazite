@@ -63,8 +63,8 @@ struct SongValues::SectionsKeeper
     // every element, whoever's it is): nothing, at once, but for the song's SECTIONS or a child added to it.
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
-    // The sections the loader made consistent into their area, outside the history, and their element emptied (SongValues.cpp:
-    // adopt()). A song without a SECTIONS keeps none, its sections none.
+    // The song's SECTIONS emptied, once its reader read the sections the loader made consistent into the area
+    // (readHeldSectionsIn(), SongValues.cpp: adopt()). A song without a SECTIONS keeps none, its sections none.
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -79,12 +79,16 @@ struct SongValues::SectionsKeeper
 // writeSections(), in their order), where some are kept (a song that keeps everything in its tree keeps none: its SECTIONS
 // holds its sections). Nothing for an element that isn't a SECTIONS.
 bool leadsToSections (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeSectionsIn (juce::ValueTree& element, const ValuesKept&);
+void writeSectionsIn (juce::ValueTree& element, const SongState&);
+
+// The sections' reader of a song's tree (SongState.h: readSongTree(), a line of it): its SECTIONS into the state, as the song
+// holds them (none where it has none); no tree changed. Any thread.
+void readHeldSectionsIn (const juce::ValueTree& song, SongState&);
 
 // The sections' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
 // either is a song's element that holds a SECTIONS, the same sections (holdSameSections()); and whether a child is the place
 // of the sections, which the comparison of the elements in them leaves out (the song's SECTIONS).
-bool holdSameSectionsOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameSectionsOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 bool isSectionsPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 
 // The largest ID the sections' area holds below schema::maxID (IDsHeld.h): each section's. 0 for none.

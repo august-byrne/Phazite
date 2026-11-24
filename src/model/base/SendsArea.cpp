@@ -179,17 +179,21 @@ void SongValues::SendsTeller::valueAreaChanged (const SongSends& before, const S
 }
 
 //==============================================================================
-void SongValues::SendsKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::SendsKeeper::adopt (SongValues&, Song& loaded)
 {
-    // Every send the loader made consistent into the area, outside the history, as the song holds each, in the elements'
-    // order (each track's, a folder's before those of the tracks in it, the first of an ID: readSendsValue()'s walk); what the
-    // loader left of each is what the song holds of it (SendsValue.h: keepSendAsHeld()), so the adoption changes nothing of
-    // what the file held. Then every SEND element out of the tree, those anywhere else too, which are no sends of the song's
-    // (dropSendElements()).
-    auto tree = loaded.getState();
-    auto sends = into.sends.get();
+    // Every SEND element out of the tree, its reader having read the song's into the area before (readHeldSendsIn():
+    // SongValues.cpp, adopt()), those anywhere else too, which are no sends of the song's (dropSendElements()).
+    dropSendElements (loaded.getState());
+}
 
-    forEachTrackHeldSends (tree,
+void readHeldSendsIn (const juce::ValueTree& song, SongState& into)
+{
+    // Every send the loader made consistent, as the song holds each, in the elements' order (each track's, a folder's before
+    // those of the tracks in it, the first of an ID: readSendsValue()'s walk); what the loader left of each is what the song
+    // holds of it (SendsValue.h: keepSendAsHeld()), so reading it changes nothing of what the file held.
+    auto sends = into.sends;
+
+    forEachTrackHeldSends (song,
                            [&sends] (const juce::ValueTree&, TrackID from, const std::vector<HeldSendElement>& held)
                            {
                                for (const auto& each : held)
@@ -202,8 +206,7 @@ void SongValues::SendsKeeper::adopt (SongValues& into, Song& loaded)
                            });
 
     jassert (holdsItsLists (sends));
-    into.sends.setOutsideHistory (std::move (sends));
-    dropSendElements (tree);
+    into.sends = std::move (sends);
 }
 
 //==============================================================================
@@ -304,7 +307,7 @@ int takeTrackSendsIn (SongSends& sends, const juce::ValueTree& track, TrackID fr
     return taken;
 }
 
-void writeSendsIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeSendsIn (juce::ValueTree& element, const SongState& kept)
 {
     if (const auto* list = findKeptList (kept.sends, element))
         for (const auto id : *list)
@@ -312,12 +315,12 @@ void writeSendsIn (juce::ValueTree& element, const ValuesKept& kept)
                 element.appendChild (writeSendElement (*value), nullptr);
 }
 
-bool holdSameSends (const ValuesKept& a, const ValuesKept& b)
+bool holdSameSends (const SongState& a, const SongState& b)
 {
     return a.sends.isSameAs (b.sends) || a.sends == b.sends;
 }
 
-bool holdSameSend (const ValuesKept& a, const ValuesKept& b, DeviceID id)
+bool holdSameSend (const SongState& a, const SongState& b, DeviceID id)
 {
     const auto* first = a.sends.find (id);
     const auto* second = b.sends.find (id);
@@ -328,7 +331,7 @@ bool holdSameSend (const ValuesKept& a, const ValuesKept& b, DeviceID id)
     return *first == *second;
 }
 
-bool holdSameTrackSendOrder (const ValuesKept& a, const ValuesKept& b, TrackID track)
+bool holdSameTrackSendOrder (const SongState& a, const SongState& b, TrackID track)
 {
     const auto* first = a.sends.tracks.find (track.getRaw());
     const auto* second = b.sends.tracks.find (track.getRaw());
@@ -339,8 +342,8 @@ bool holdSameTrackSendOrder (const ValuesKept& a, const ValuesKept& b, TrackID t
     return first->identity() == second->identity() || *first == *second;
 }
 
-bool holdSameSendsOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                      const ValuesKept& otherKept)
+bool holdSameSendsOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                      const SongState& otherKept)
 {
     const auto* list = findKeptList (kept.sends, element);
     const auto* otherList = findKeptList (otherKept.sends, otherElement);

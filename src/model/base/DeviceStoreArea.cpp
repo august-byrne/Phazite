@@ -204,16 +204,21 @@ void SongValues::DeviceStoreKeeper::childAdded (juce::ValueTree&, juce::ValueTre
     }
 }
 
-void SongValues::DeviceStoreKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::DeviceStoreKeeper::adopt (SongValues&, Song& loaded)
+{
+    // Everything of the store taken out of every DEVICE and CHAIN of the tree, those anywhere else too, its reader having read
+    // the song's channels' into the store and the windows' places before (readHeldDeviceStoreIn(): SongValues.cpp, adopt()).
+    forEachItemAnywhere (loaded.getState(), [] (const juce::ValueTree& item) { takeStoreOutOf (item, nullptr); });
+}
+
+void readHeldDeviceStoreIn (const juce::ValueTree& song, SongState& into)
 {
     // Every DEVICE and CHAIN of the song's channels, their containers' and chains', each read as the song holds it (the first
-    // of an ID, as the loader leaves each once); then everything of the store taken out of every DEVICE and CHAIN of the tree,
-    // those anywhere else too.
-    auto tree = loaded.getState();
-    auto store = into.deviceStore.get();
-    auto outside = into.devicesOutside.get();
+    // of an ID, as the loader leaves each once), into the store and the windows' places.
+    auto store = into.deviceStore;
+    auto outside = into.devicesOutside;
 
-    for (const auto& child : tree)
+    for (const auto& child : song)
     {
         if (! (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER)))
             continue;
@@ -229,9 +234,8 @@ void SongValues::DeviceStoreKeeper::adopt (SongValues& into, Song& loaded)
                        });
     }
 
-    into.deviceStore.setOutsideHistory (std::move (store));
-    into.devicesOutside.set (std::move (outside));
-    forEachItemAnywhere (tree, [] (const juce::ValueTree& item) { takeStoreOutOf (item, nullptr); });
+    into.deviceStore = std::move (store);
+    into.devicesOutside = std::move (outside);
 }
 
 //==============================================================================
@@ -318,7 +322,7 @@ bool leadsToDeviceStore (const juce::ValueTree& parent, const juce::ValueTree& c
     return parent.hasType (schema::CHAIN) && child.hasType (schema::DEVICE);
 }
 
-void writeDeviceStoreIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeDeviceStoreIn (juce::ValueTree& element, const SongState& kept)
 {
     if (! isDeviceOrChain (element))
         return;
@@ -337,13 +341,13 @@ void writeDeviceStoreIn (juce::ValueTree& element, const ValuesKept& kept)
             writeWindowPlaceInto (element, *window);
 }
 
-bool holdSameDeviceStore (const ValuesKept& a, const ValuesKept& b, DeviceID id)
+bool holdSameDeviceStore (const SongState& a, const SongState& b, DeviceID id)
 {
     return holdSameEntriesOf (a.deviceStore, b.deviceStore, id);
 }
 
-bool holdSameDeviceStoreOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                            const ValuesKept& otherKept)
+bool holdSameDeviceStoreOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                            const SongState& otherKept)
 {
     if (! isDeviceOrChain (element))
         return true;

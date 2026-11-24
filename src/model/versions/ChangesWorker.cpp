@@ -59,7 +59,7 @@ namespace
 
         // Its devices and containers after its clips, each whole as whole state writes it (DevicesArea.h: writeDeviceWhole(),
         // made whole with what the store and modulation hold of it: WholeState.h, makeWhole(), in place).
-        const auto kept = keepValues (song);
+        const auto kept = getSongState (song);
 
         if (const auto* list = kept.devices.findList (makeChannelPlace (id, onMaster)))
             for (const auto device : *list)

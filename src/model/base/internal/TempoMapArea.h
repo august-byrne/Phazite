@@ -43,8 +43,8 @@ struct SongValues::TempoMapKeeper
     // every element, whoever's it is): nothing, at once, but for what is the tempo map's (isHeardAsTempoMap()).
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
-    // The tempo map the loader made consistent into its area, outside the history, and its element emptied
-    // (SongValues.cpp: adopt()).
+    // The song's TEMPOMAP emptied (made where it has none), once its reader read the map the loader made consistent into the
+    // area (readHeldTempoMapIn(), SongValues.cpp: adopt()).
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -59,11 +59,15 @@ struct SongValues::TempoMapKeeper
 // writeTempoMap(): tempos then time signatures, each kind by beat), where one is kept (a song that keeps everything in its
 // tree keeps none: its TEMPOMAP holds its entries). Nothing for an element that isn't a TEMPOMAP.
 bool leadsToTempoMap (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeTempoMapIn (juce::ValueTree& element, const ValuesKept&);
+void writeTempoMapIn (juce::ValueTree& element, const SongState&);
+
+// The tempo map's reader of a song's tree (SongState.h: readSongTree(), a line of it): its TEMPOMAP's entries into the state,
+// as the song holds them (an empty TEMPOMAP's where it has none); no tree changed. Any thread.
+void readHeldTempoMapIn (const juce::ValueTree& song, SongState&);
 
 // The tempo map's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
 // either holds a TEMPOMAP, the same map (holdSameTempoMap()); and whether a child is the place of the map, which the
 // comparison of the elements in them leaves out (a TEMPOMAP).
-bool holdSameTempoMapOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameTempoMapOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 bool isTempoMapPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

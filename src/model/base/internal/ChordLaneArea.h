@@ -49,8 +49,8 @@ struct SongValues::ChordLaneKeeper
     // every element, whoever's it is): nothing, at once, but for the song's CHORDLANE or a child added to it.
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
-    // The chord lane the loader made consistent into its area, outside the history, and its element emptied (SongValues.cpp:
-    // adopt()). A song without a CHORDLANE keeps none, its lane empty.
+    // The song's CHORDLANE emptied, once its reader read the lane the loader made consistent into the area
+    // (readHeldChordLaneIn(), SongValues.cpp: adopt()). A song without a CHORDLANE keeps none, its lane empty and not placed.
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -65,11 +65,15 @@ struct SongValues::ChordLaneKeeper
 // writeChordLane(): chords then keys, each kind in its order), where one is kept (a song that keeps everything in its tree
 // keeps an empty lane: its CHORDLANE holds its chords and keys). Nothing for an element that isn't a CHORDLANE.
 bool leadsToChordLane (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeChordLaneIn (juce::ValueTree& element, const ValuesKept&);
+void writeChordLaneIn (juce::ValueTree& element, const SongState&);
+
+// The chord lane's reader of a song's tree (SongState.h: readSongTree(), a line of it): its CHORDLANE into the state, as the
+// song holds it, placed where the tree has one (ChordLaneValue.h); no tree changed. Any thread.
+void readHeldChordLaneIn (const juce::ValueTree& song, SongState&);
 
 // The chord lane's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
 // either is a song's element that holds a CHORDLANE, the same lane (holdSameChordLane()); and whether a child is the place of
 // the lane, which the comparison of the elements in them leaves out (the song's CHORDLANE).
-bool holdSameChordLaneOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameChordLaneOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 bool isChordLanePlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

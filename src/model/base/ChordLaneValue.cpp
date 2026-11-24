@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -74,6 +75,16 @@ namespace
                  root.has_value() && std::isfinite (*root) ? readWhole (key, schema::keyRoot) : -1, key[schema::keyScale].toString() };
     }
 
+    // A value of these entries, placed or not (its members set by name).
+    ChordLaneValue makeLane (immer::flex_vector<ChordEntry> chords, immer::flex_vector<KeyEntry> keys, bool placed)
+    {
+        ChordLaneValue lane;
+        lane.chords = std::move (chords);
+        lane.keys = std::move (keys);
+        lane.placed = placed;
+        return lane;
+    }
+
     template <typename ReadChord, typename ReadKey>
     ChordLaneValue readLane (const juce::ValueTree& lane, ReadChord&& chordOf, ReadKey&& keyOf)
     {
@@ -88,7 +99,7 @@ namespace
                 keys.push_back (keyOf (child));
         }
 
-        return { chords.persistent(), keys.persistent() };
+        return makeLane (chords.persistent(), keys.persistent(), lane.isValid());
     }
 } // namespace
 
@@ -105,12 +116,17 @@ bool KeyEntry::operator== (const KeyEntry& other) const noexcept
 
 bool ChordLaneValue::isSameAs (const ChordLaneValue& other) const noexcept
 {
+    return holdsSameEntriesAs (other) && placed == other.placed;
+}
+
+bool ChordLaneValue::holdsSameEntriesAs (const ChordLaneValue& other) const noexcept
+{
     return chords.identity() == other.chords.identity() && keys.identity() == other.keys.identity();
 }
 
 bool ChordLaneValue::operator== (const ChordLaneValue& other) const
 {
-    return chords == other.chords && keys == other.keys;
+    return placed == other.placed && chords == other.chords && keys == other.keys;
 }
 
 ChordLaneValue readChordLaneValue (const juce::ValueTree& lane)
@@ -126,10 +142,10 @@ ChordLaneValue readHeldChordLane (const juce::ValueTree& lane)
 ChordLaneValue withEntryTaken (const ChordLaneValue& value, const juce::ValueTree& entry)
 {
     if (entry.hasType (schema::CHORD))
-        return keepChordsApart ({ value.chords.push_back (readHeldChord (entry)), value.keys });
+        return keepChordsApart (makeLane (value.chords.push_back (readHeldChord (entry)), value.keys, value.placed));
 
     if (entry.hasType (schema::CHORDKEY))
-        return { value.chords, value.keys.push_back (readHeldKey (entry)) };
+        return makeLane (value.chords, value.keys.push_back (readHeldKey (entry)), value.placed);
 
     return value;
 }
@@ -185,7 +201,7 @@ ChordLaneValue keepChordsApart (const ChordLaneValue& lane)
         if (! gone[i])
             kept.push_back (chords[i]);
 
-    return { kept.persistent(), lane.keys };
+    return makeLane (kept.persistent(), lane.keys, lane.placed);
 }
 
 bool holdsChordsApart (const ChordLaneValue& lane)

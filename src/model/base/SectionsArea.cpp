@@ -119,18 +119,21 @@ void SongValues::SectionsKeeper::childAdded (juce::ValueTree& parent, juce::Valu
     parent.removeChild (child, nullptr);
 }
 
-void SongValues::SectionsKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::SectionsKeeper::adopt (SongValues&, Song& loaded)
 {
-    // The sections the loader made consistent into their area, outside the history, each as the song holds one, one of each ID
-    // (SectionsValue.h: readHeldSections()), in the element's order; then their element emptied (emptySectionsElement()), and
-    // kept: it is the place a whole copy writes the sections in, written as the song had it. None for a song without one.
-    auto element = loaded.getState().getChildWithName (schema::SECTIONS);
+    // The song's SECTIONS, whose sections its reader read into the area before (readHeldSectionsIn(): SongValues.cpp, adopt()),
+    // emptied (emptySectionsElement()), and kept: it is the place a whole copy writes the sections in, written as the song had
+    // it. Nothing for a song without one.
+    if (auto element = loaded.getState().getChildWithName (schema::SECTIONS); element.isValid())
+        emptySectionsElement (element, nullptr);
+}
 
-    if (! element.isValid())
-        return;
-
-    into.sections.setOutsideHistory (readHeldSections (element));
-    emptySectionsElement (element, nullptr);
+void readHeldSectionsIn (const juce::ValueTree& song, SongState& into)
+{
+    // The sections the loader made consistent, each as the song holds one, one of each ID (SectionsValue.h: readHeldSections()),
+    // in the element's order; none for a song without a SECTIONS.
+    if (const auto element = song.getChildWithName (schema::SECTIONS); element.isValid())
+        into.sections = readHeldSections (element);
 }
 
 //==============================================================================
@@ -168,7 +171,7 @@ bool leadsToSections (const juce::ValueTree& parent, const juce::ValueTree& chil
     return parent.hasType (schema::PHAZITE) && child.hasType (schema::SECTIONS);
 }
 
-void writeSectionsIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeSectionsIn (juce::ValueTree& element, const SongState& kept)
 {
     // Nothing kept of no sections, nor of a song that keeps everything in its tree (whose SECTIONS holds its sections).
     if (! element.hasType (schema::SECTIONS) || kept.sections.sections.empty())
@@ -178,7 +181,7 @@ void writeSectionsIn (juce::ValueTree& element, const ValuesKept& kept)
     writeSections (kept.sections, element);
 }
 
-bool holdSameSections (const juce::ValueTree& song, const ValuesKept& kept, const juce::ValueTree& otherSong, const ValuesKept& otherKept)
+bool holdSameSections (const juce::ValueTree& song, const SongState& kept, const juce::ValueTree& otherSong, const SongState& otherKept)
 {
     // Whether each has a SECTIONS (an empty one is written into the file, and is no song without one), and the values kept.
     if (song.getChildWithName (schema::SECTIONS).isValid() != otherSong.getChildWithName (schema::SECTIONS).isValid())
@@ -187,8 +190,8 @@ bool holdSameSections (const juce::ValueTree& song, const ValuesKept& kept, cons
     return kept.sections.isSameAs (otherKept.sections) || kept.sections == otherKept.sections;
 }
 
-bool holdSameSectionsOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                         const ValuesKept& otherKept)
+bool holdSameSectionsOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                         const SongState& otherKept)
 {
     const auto hasSections = [] (const juce::ValueTree& each)
     { return each.hasType (schema::PHAZITE) && each.getChildWithName (schema::SECTIONS).isValid(); };

@@ -1304,14 +1304,15 @@ TEST_CASE ("Every value of a note is kept within its limits, at both ends, by ev
         edit ("Place Note", [&] { phazite::placeNote (n.song, note, beats (5.0), 60, length (0.0)); });
         CHECK (n.get (note).length.inBeats() == doctest::Approx (shortest));
 
-        // setClipNotes() applies no shortest length today: a note given none, or less than the shortest, is put in as given.
-        // Pinned as it is (its comment in Notes.h names no limit), so that a change of it is seen.
+        // setClipNotes() too: a note given no length, or less than the shortest, is the shortest. (It put one in as given
+        // until the song's state was read back from its own file's form: a note of no length was saved so, and opened a beat
+        // long, as the loader makes one that a song can't hold.)
         edit ("Set Clip Notes",
               [&] { phazite::setClipNotes (n.song, n.clip, { noteData (60, 4.0, 0.0, 100), noteData (62, 5.0, shortest / 2.0, 100) }); });
         const auto set = phazite::getClipNotes (n.song, n.clip);
         REQUIRE (set.size() == 2);
-        CHECK (set[0].length.inBeats() == doctest::Approx (0.0));
-        CHECK (set[1].length.inBeats() == doctest::Approx (shortest / 2.0));
+        CHECK (set[0].length.inBeats() == doctest::Approx (shortest));
+        CHECK (set[1].length.inBeats() == doctest::Approx (shortest));
     }
 
     SUBCASE ("A controller's value, from 0 to its lane's highest; its number, from 0 to 127; its channel, from 1 to 16")

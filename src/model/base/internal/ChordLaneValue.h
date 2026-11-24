@@ -5,9 +5,11 @@
 // in an area of its values (SongValues.h, ChordLaneArea.h), which the chord lane's code (model/chords/internal/Chords.h)
 // computes each edit on; its tree's CHORDLANE holds none of its chords and keys, the place a whole copy writes them in.
 //
-// Whether the song has a chord lane at all is no part of the value: a song without one takes its keys from the key set last
-// (Schema.h: LASTKEY), and the element stays in the song's tree as that sign (Chords.h: hasChordLane()). A song without one
-// holds an empty value.
+// Whether the song has a chord lane at all is a part of the value (placed): a song without one takes its keys from the key set
+// last (Schema.h: LASTKEY), and a whole copy writes an empty CHORDLANE for a lane placed without chords or keys. The chord
+// lane's writers set it in the step that adds or takes away the song's CHORDLANE, which stays in its tree beside it, equal to
+// it (tests/SongCheck.cpp), until the tree goes (roadmap step S5.20's end); Chords.h's hasChordLane() reads it. A song without
+// one holds an empty value, not placed.
 //
 // Its own header, beside SongValues.h and the other areas' (one header for each area's values): the model's base includes no
 // other area, and knows no chord types nor scales, so a chord's type and a key's scale are their saved words here, which the
@@ -51,15 +53,22 @@ struct KeyEntry
 // starts, two at one start in that order). Copies are cheap and share what they hold.
 struct ChordLaneValue
 {
-    immer::flex_vector<ChordEntry> chords;
-    immer::flex_vector<KeyEntry> keys;
+    immer::flex_vector<ChordEntry> chords {};
+    immer::flex_vector<KeyEntry> keys {};
+    bool placed = false; // whether the song has a lane (above): one with chords or keys has one
 
-    // The same value without a look inside: both kinds shared (ValueArea.h). And the same entries, compared.
+    // The same value without a look inside: both kinds shared, and placed alike (ValueArea.h). And the same entries, compared,
+    // and placed alike.
     bool isSameAs (const ChordLaneValue&) const noexcept;
     bool operator== (const ChordLaneValue&) const;
+
+    // Whether two values share both kinds of entries (placed aside): what the area's teller tells a change by
+    // (ChordLaneArea.h), a lane placed or taken away without its entries changing being the tree's to tell, as it was.
+    bool holdsSameEntriesAs (const ChordLaneValue&) const noexcept;
 };
 
-// The song's chord lane read from its CHORDLANE element (an invalid tree reads as an empty lane): each kind's children in the
+// The song's chord lane read from its CHORDLANE element (an invalid tree reads as an empty lane, not placed; a valid one is
+// placed): each kind's children in the
 // element's order, each property as the chord lane's code has always read it, a number's text as the song reads one
 // (SongText.h: readValueNumber()): a start or a length that is absent or no finite number reads as 0, one below 0 as 0; a
 // degree that is absent as 1, kept within 1 to 7; an accidental absent as 0, kept within -1 to 1; an inversion absent as 0
@@ -70,7 +79,8 @@ struct ChordLaneValue
 ChordLaneValue readChordLaneValue (const juce::ValueTree& chordLaneElement);
 
 // The song's chord lane read from a CHORDLANE as the song holds one (SongValues.h: the loaded lane Song::holdValues() takes
-// in, the keeper's safety net, a version's lane and a merge's choice, ChordLaneArea.h): each kind's children in the
+// in, the keeper's safety net, a version's lane and a merge's choice, ChordLaneArea.h; placed as readChordLaneValue() places
+// it): each kind's children in the
 // element's order, each property as its description reads it (SongText.h: readDescribed()): a start that is absent or no
 // finite number as 0, a length as 4, a degree as 1, an accidental and an inversion as 0, each within its range and made
 // whole where it is a whole one; a key's root within 0 to 11 where it is a finite number, else none (as the loader leaves
@@ -94,8 +104,8 @@ constexpr double chordLaneNear = 1.0e-6;
 // one start in the lane's order), reaching no further than the next one's start, and gone where nothing of it would then be
 // left (of two at one start, the later in the lane's order stays, as a chord put later replaces one there); a chord without
 // a length of its own (none longer than chordLaneNear) stays as it is, and is no chord's next. The chords that stay in the
-// lane's order, the keys as they are; the same value where nothing overlaps. What everything that enters the song's lane is
-// read with keeps (readHeldChordLane(), withEntryTaken()).
+// lane's order, the keys and placed as they are; the same value where nothing overlaps. What everything that enters the song's
+// lane is read with keeps (readHeldChordLane(), withEntryTaken()).
 ChordLaneValue keepChordsApart (const ChordLaneValue&);
 
 // Whether a lane's chords are apart, as keepChordsApart() keeps them (it would change nothing): what the song's consistency

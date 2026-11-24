@@ -581,7 +581,7 @@ juce::ValueTree copyWholeDevice (const Song& song, DeviceID id)
         return {};
 
     auto element = writeDeviceWhole (getDevicesValue (song), id);
-    makeWhole (element, keepValues (song));
+    makeWhole (element, getSongState (song));
     return element;
 }
 

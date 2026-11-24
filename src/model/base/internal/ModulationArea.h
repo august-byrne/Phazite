@@ -62,9 +62,9 @@ struct SongValues::ModulationKeeper
     // channel of the song's).
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
-    // Every modulator and macro of the tree the loader made consistent into the area, outside the history, as the song holds
-    // them (ModulationValue.h: readHeldModulation(), each of which the loader left as the song holds it: asserted), and every
-    // MODULATOR and MACRO element out of the tree (SongValues.cpp: adopt()).
+    // Every MODULATOR and MACRO element out of the tree the loader made consistent, once its reader read the song's into the area
+    // as the song holds them (readHeldModulationIn(): ModulationValue.h, readHeldModulation(), each of which the loader left as
+    // the song holds it: asserted; SongValues.cpp: adopt()).
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -80,7 +80,11 @@ struct SongValues::ModulationKeeper
 // ID), in their list's order, after its other children (a track's sends after them: the sends' area writes them after
 // modulation, SendsArea.h). Nothing for another element.
 bool leadsToModulation (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeModulationIn (juce::ValueTree& element, const ValuesKept&);
+void writeModulationIn (juce::ValueTree& element, const SongState&);
+
+// Modulation's reader of a song's tree (SongState.h: readSongTree(), a line of it): every modulator and macro of its tracks,
+// its master and their containers into the state, as the song holds them; no tree changed. Any thread.
+void readHeldModulationIn (const juce::ValueTree& song, SongState&);
 
 // The MODULATOR and MACRO elements of a channel's element (a TRACK or the MASTER that comes into the song with them: the
 // tracks' safety net, TracksArea.h) and of each CONTAINER on it, each read as the song holds one (ModulationValue.h:
@@ -91,5 +95,5 @@ int takeChannelModulatorsIn (SongModulation&, const juce::ValueTree& channel);
 // Modulation's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's,
 // the MASTER's or a CONTAINER's modulators and macros, the same in the same order, each the same value (its place too); true
 // for another element.
-bool holdSameModulationOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameModulationOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 } // namespace phazite

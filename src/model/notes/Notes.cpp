@@ -1799,7 +1799,7 @@ void setClipNotes (Song& song, ClipID clip, const std::vector<NoteData>& notes)
         note.id = NoteID::fromRaw (song.makeID());
         note.pitch = clampPitch (data.pitch);
         note.start = BeatPosition::fromBeats ((data.start - contentStart).inBeats());
-        note.length = data.length;
+        note.length = std::max (data.length, getMinimumNoteLength()); // as every writer of a note's length: a song holds none shorter
         note.velocity = juce::jlimit (1, 127, data.velocity);
         values.push_back (note);
     }

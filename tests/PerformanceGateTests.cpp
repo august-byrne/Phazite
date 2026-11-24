@@ -15,6 +15,7 @@
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "PerformanceCounts.h"
+#include "RandomEdits.h"
 #include "SongCheck.h"
 #include "TestClips.h"
 #include "TestDeviceValues.h"
@@ -52,6 +53,7 @@
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SendsValue.h"
+#include "model/base/internal/SongState.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TracksArea.h"
@@ -4829,6 +4831,66 @@ TEST_CASE ("Performance gate: a song of 200 tracks opened reads each track and t
     const auto opened = phazite::makeSong (tree);
     REQUIRE (opened != nullptr);
     CHECK (phazite::countTracksReadAsValues() - before == phazite::getTrackIDs (*opened).size() + 1);
+}
+
+TEST_CASE ("Performance gate: the song whole taken as a value allocates nothing and reads no area, on a song of 4 tracks as of 200")
+{
+    // model/base/internal/SongState.h: getSongState() copies each area's value, a count of what shares it raised for each, and
+    // reads its root's few places: no area read or walked (each reader's count the same), nothing allocated, whatever the song.
+    phazite::test::TemporaryFolder sounds;
+
+    for (const auto numTracks : { 4, 200 })
+    {
+        CAPTURE (numTracks);
+        auto song = phazite::createSong();
+        phazite::ensureTracks (*song, numTracks);
+        phazite::test::RandomEdits (*song, 20261128, sounds.folder).edit (40);
+
+        const auto tracksRead = phazite::countTracksReadAsValues(), elementsWalked = phazite::countTrackElementsWalked();
+        const auto modulatorsRead = phazite::countModulatorsRead(), sendsRead = phazite::countSendsRead();
+        const auto sectionsRead = phazite::countSectionsRead(), pointsRead = phazite::countCurvePointsRead();
+        const auto notesRead = phazite::countNotesRead();
+        std::optional<phazite::SongState> taken;
+        const auto allocations = phazite::test::countAllocations ([&] { taken.emplace (phazite::getSongState (*song)); });
+        REQUIRE (taken.has_value());
+        CHECK (taken->tracks.has_value());
+        CHECK (phazite::countTracksReadAsValues() == tracksRead);
+        CHECK (phazite::countTrackElementsWalked() == elementsWalked);
+        CHECK (phazite::countModulatorsRead() == modulatorsRead);
+        CHECK (phazite::countSendsRead() == sendsRead);
+        CHECK (phazite::countSectionsRead() == sectionsRead);
+        CHECK (phazite::countCurvePointsRead() == pointsRead);
+        CHECK (phazite::countNotesRead() == notesRead);
+
+        if (allocations.has_value())
+            CHECK (*allocations == 0);
+    }
+}
+
+TEST_CASE ("Performance gate: the song whole written from its state allocates no more than the copy of its tree made whole did")
+{
+    // copyWholeSong() writes the song from its state alone (SongState.h: writeSongTree()), where it copied the song's tree, its
+    // empty places, and wrote the state's values in (WholeState.h: copyWhole (tree, state), the old path while both are there):
+    // no more allocations for it, on the gates' songs.
+    phazite::test::TestSong s;
+    phazite::test::buildBenchmarkSong (s, 40);
+    phazite::test::TemporaryFolder sounds;
+    auto random = phazite::createSong();
+    phazite::test::RandomEdits (*random, 20261129, sounds.folder).edit (100);
+
+    for (const auto* song : { &getSong (s), random.get() })
+    {
+        const auto state = phazite::getSongState (*song);
+        const auto before = phazite::test::countAllocations ([&] { juce::ignoreUnused (phazite::copyWhole (song->getState(), state)); });
+        const auto after = phazite::test::countAllocations ([&] { juce::ignoreUnused (phazite::copyWholeSong (*song)); });
+
+        if (! before.has_value() || ! after.has_value())
+            return; // nothing counted on this build
+
+        // Measured (2026-11-24, Windows, Debug): see the report of roadmap step S5.20's piece K1.
+        MESSAGE ("Allocations of a whole copy: " << *before << " by the tree made whole, " << *after << " by the state written");
+        CHECK (*after <= *before);
+    }
 }
 
 TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks' lists for a volume's drag event, a mute's "

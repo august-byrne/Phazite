@@ -25,8 +25,9 @@ struct Progression;
 ChordLaneValue getChordLaneValue (const Song&);
 
 // Whether the song has a chord lane: one is added with its first chord or key, starting with the key new tracks get at that
-// moment (the edits below); until then its keys are that key (getLaneKeys()). The lane's element in the song's tree is what
-// says so (Schema.h: CHORDLANE, an empty placeholder: the lane's chords and keys are the area's value), never a reader's.
+// moment (the edits below); until then its keys are that key (getLaneKeys()). The lane's value says so (ChordLaneValue.h:
+// placed), which the writers below set in the step that adds or takes away its element in the song's tree (Schema.h:
+// CHORDLANE, an empty placeholder beside it); for a song without values, that element.
 bool hasChordLane (const Song&);
 
 // The song's lane made the one an element holds (a CHORDLANE, read as the song holds one: ChordLaneValue.h,

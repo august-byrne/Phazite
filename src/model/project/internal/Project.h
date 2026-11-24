@@ -332,7 +332,7 @@ private:
     struct SongCopy
     {
         juce::ValueTree tree;
-        ValuesKept values;
+        SongState values;
     };
 
     SongCopy copySong() const; // the song as it is now
@@ -507,8 +507,8 @@ private:
     // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's
     // values against savedState.values, by their IDs (WholeState.h: holdSameClip(), holdSameTrackClips()). A clip gone, or on
     // a track compared whole anyway, compares as that track does.
-    bool holdSameClip (ClipID, const ValuesKept& now) const;
-    bool holdSameTrackClips (TrackID, const ValuesKept& now) const;
+    bool holdSameClip (ClipID, const SongState& now) const;
+    bool holdSameTrackClips (TrackID, const SongState& now) const;
     bool isComparedWhole (const juce::ValueTree&) const; // it, or what it is in, is among toCompare whole
     bool isTrackComparedWhole (TrackID) const;           // a track the song holds, with the song's TRACKS
 
@@ -574,7 +574,7 @@ private:
     // lane likewise, with whether each has one (holdSameChordLane()); the curves as values, in their order
     // (holdSameCurves()), not their elements; and the MIDI links as one value, with whether each has a MIDILINKS
     // (holdSameMidiLinks()).
-    static bool holdTheSameProject (const juce::ValueTree&, const ValuesKept&, const juce::ValueTree&, const ValuesKept&);
+    static bool holdTheSameProject (const juce::ValueTree&, const SongState&, const juce::ValueTree&, const SongState&);
 
 public:
     // How many elements the comparisons with the saved copies looked at since the program started (each element compared
@@ -591,7 +591,7 @@ public:
 
     // For tests: what the comparison of the whole song with the saved copy says, which hasUnsavedChanges() works out
     // comparing only what notified since. Message thread.
-    bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), keepValues (*song), savedState.tree, savedState.values); }
+    bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), getSongState (*song), savedState.tree, savedState.values); }
 
 private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }

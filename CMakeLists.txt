@@ -414,6 +414,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/Selection.h
     src/model/base/internal/SongOwnArea.h
     src/model/base/internal/SongOwnValue.h
+    src/model/base/internal/SongState.h
     src/model/base/internal/SongValues.h
     src/model/base/internal/SongText.h
     src/model/base/internal/TempoMapArea.h
@@ -1562,6 +1563,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongOwnAreasTests.cpp
         tests/SongOwnValueTests.cpp
         tests/SongPlaceTextTests.cpp
+        tests/SongStateTests.cpp
         tests/SongTextTests.cpp
         tests/SongValuesChordsTests.cpp
         tests/SongValuesClipsTests.cpp

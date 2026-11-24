@@ -137,7 +137,7 @@ namespace
     // (isSameSound()) with the store's entries of a device and a chain (holdSameStoreOf(), skipped where the whole store is
     // the same value), and what it holds the same IDs in the same order, each alike in turn. Nothing written, nothing read
     // into a value: looks in the two values by ID.
-    bool soundsAsFrozen (const SongDevices& now, const DeviceStore& storeNow, const ValuesKept& then, DeviceID id)
+    bool soundsAsFrozen (const SongDevices& now, const DeviceStore& storeNow, const SongState& then, DeviceID id)
     {
         const auto* is = now.find (id);
         const auto* was = then.devices.find (id);
@@ -222,7 +222,7 @@ namespace
     FreezeKeeper::Holds copyWhatTheFreezeHolds (const Song& song, TrackID track)
     {
         return { .parts = getFrozenDevices (song, track),
-                 .values = keepValues (song),
+                 .values = getSongState (song),
                  .tempos = getTempoMapValue (song).tempos,
                  .curves = getFrozenCurves (song, track),
                  .modulators = getFrozenModulators (song, track) };
@@ -265,7 +265,7 @@ namespace
         if (compareModulators && getFrozenModulators (song, track) != frozen.modulators)
             return false;
 
-        return holdSameTrackClips (keepValues (song), frozen.values, track);
+        return holdSameTrackClips (getSongState (song), frozen.values, track);
     }
 
     // The element of a type a tree is in (itself, if it is one), or an invalid one.

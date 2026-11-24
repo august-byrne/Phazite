@@ -128,7 +128,8 @@ struct SongValues::TracksTeller final : ValueArea<SongTracks>::Listener
 //       Keeper), so that none of them relies on its own case of a TRACK.
 //   (b) nothing as a track leaves: no TRACK is in the tree to leave it (the tracks' setters take a track out of the value).
 // And the adoption from the loaded tree, which the song's holdValues() asks last, after every other area's: the song's tracks
-// read once each, as the song holds them (readHeldTracks()), into the area outside the history; then every TRACK out of the
+// read once each, as the song holds them (readHeldTracksIn(), before any area's elements are taken out), into the area outside
+// the history; then every TRACK out of the
 // TRACKS and every property and child out of the MASTER (what the other areas take of them taken first; what Phazite doesn't
 // know of a TRACK or the MASTER dropped as the song opens: docs/project-format.md).
 struct SongValues::TracksKeeper
@@ -205,9 +206,9 @@ struct SongValues::TrackLeavesKeeper
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
     // What every TRACK of the track list (a folder's tracks too) and the MASTER of the tree the loader made consistent holds of
-    // the switches and the view, into the switches' area and the view's value, as the song holds them (each of which the
-    // loader left as it holds it: TrackSwitchesValue.h, keepSwitchesAsHeld(); TracksOutside.h, keepViewAsHeld()), outside the
-    // history, and all of it out of the tree (SongValues.cpp: adopt()).
+    // the switches and the view out of the tree, once its reader read them into the switches' area and the view's value as the
+    // song holds them (readHeldTrackLeavesIn(); each of which the loader left as it holds it, asserted here:
+    // TrackSwitchesValue.h, keepSwitchesAsHeld(); TracksOutside.h, keepViewAsHeld(); SongValues.cpp: adopt()).
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -223,17 +224,22 @@ struct SongValues::TrackLeavesKeeper
 // values kept. Whole state writes them after a TRACK's clips, its devices and a folder's tracks, before its modulators and its
 // sends, as every file Phazite wrote holds them. Nothing for another element.
 bool leadsToTracks (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeTrackLeavesIn (juce::ValueTree& element, const ValuesKept&);
+void writeTrackLeavesIn (juce::ValueTree& element, const SongState&);
+
+// The tracks' readers of a song's tree (SongState.h: readSongTree(), a line each): each track's and the master's switches and
+// view into the state; and the tracks themselves, each read once as the song holds it. No tree changed. Any thread.
+void readHeldTrackLeavesIn (const juce::ValueTree& song, SongState&);
+void readHeldTracksIn (const juce::ValueTree& song, SongState&);
 
 // The switches' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
 // switches (its ID's entries) or the MASTER's mode, the same in both; true for another element. The view counts as no change,
 // and is no part of it.
-bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 
 // The tracks' part of the same comparison: a song's TRACKS, the tracks whole (holdSameTracks()), its MASTER, the master's value
 // and mode (holdSameMaster()), as values, where both kept them; true for another element. What a TRACK holds is compared
 // through its element and the other parts, each TRACK given its own fields first (WholeState.h: withTracksOwn()).
-bool holdSameTracksOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameTracksOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 
 // Whether what the song's tree tells is the tracks', which a listener of the song's root hears from the values' listener
 // alone (SongValues::Listener::tracksChanged(), trackSwitchesChanged(), tracksViewChanged()) and leaves alone in its tree

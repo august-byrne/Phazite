@@ -132,12 +132,11 @@ void SongValues::CurvesKeeper::childAdded (juce::ValueTree& parent, juce::ValueT
     parent.removeChild (child, nullptr);
 }
 
-void SongValues::CurvesKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::CurvesKeeper::adopt (SongValues&, Song& loaded)
 {
-    // The curves the loader made consistent into their area, outside the history, each as the song holds one, one for each
-    // parameter, each point given a key (CurveValues.h: readHeldCurves()); then their element emptied
-    // (emptyAutomationElement()), and kept: it is the place a whole copy writes the curves in. A song whose file had none
-    // gets one, empty, as every song that holds its values has.
+    // The song's AUTOMATION, whose curves its reader read into the area before (readHeldCurvesIn(): SongValues.cpp, adopt()),
+    // emptied (emptyAutomationElement()), and kept: it is the place a whole copy writes the curves in. A song whose file had
+    // none gets one, empty, as every song that holds its values has.
     auto root = loaded.getState();
     auto automation = root.getChildWithName (schema::AUTOMATION);
 
@@ -147,8 +146,15 @@ void SongValues::CurvesKeeper::adopt (SongValues& into, Song& loaded)
         root.appendChild (automation, nullptr);
     }
 
-    into.curves.setOutsideHistory (readHeldCurves (automation, into.nextPointKey));
     emptyAutomationElement (automation);
+}
+
+void readHeldCurvesIn (const juce::ValueTree& song, SongState& into, std::uint64_t& nextPointKey)
+{
+    // The curves the loader made consistent, each as the song holds one, one for each parameter, each point given a key from
+    // the count given (CurveValues.h: readHeldCurves()); none for a song without an AUTOMATION.
+    const auto automation = song.getChildWithName (schema::AUTOMATION);
+    into.curves = readHeldCurves (automation.isValid() ? automation : juce::ValueTree (schema::AUTOMATION), nextPointKey);
 }
 
 //==============================================================================
@@ -255,7 +261,7 @@ bool leadsToCurves (const juce::ValueTree& parent, const juce::ValueTree& child)
     return parent.hasType (schema::PHAZITE) && child.hasType (schema::AUTOMATION);
 }
 
-void writeCurvesIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeCurvesIn (juce::ValueTree& element, const SongState& kept)
 {
     // A song without curves written without its AUTOMATION, which is their place alone (none kept of a song that keeps
     // everything in its tree, whose AUTOMATION, where it holds anything, holds its curves).
@@ -275,7 +281,7 @@ void writeCurvesIn (juce::ValueTree& element, const ValuesKept& kept)
     writeCurves (kept.curves, element);
 }
 
-bool holdSameCurve (const ValuesKept& kept, const ValuesKept& otherKept, const ParameterRef& parameter)
+bool holdSameCurve (const SongState& kept, const SongState& otherKept, const ParameterRef& parameter)
 {
     const auto* curve = kept.curves.find (parameter);
     const auto* other = otherKept.curves.find (parameter);
@@ -286,18 +292,18 @@ bool holdSameCurve (const ValuesKept& kept, const ValuesKept& otherKept, const P
     return curve == nullptr || *curve == *other;
 }
 
-bool holdSameCurveOrder (const ValuesKept& kept, const ValuesKept& otherKept)
+bool holdSameCurveOrder (const SongState& kept, const SongState& otherKept)
 {
     return kept.curves.order.identity() == otherKept.curves.order.identity() || kept.curves.order == otherKept.curves.order;
 }
 
-bool holdSameCurves (const ValuesKept& kept, const ValuesKept& otherKept)
+bool holdSameCurves (const SongState& kept, const SongState& otherKept)
 {
     return kept.curves.isSameAs (otherKept.curves) || kept.curves == otherKept.curves;
 }
 
-bool holdSameCurvesOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                       const ValuesKept& otherKept)
+bool holdSameCurvesOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                       const SongState& otherKept)
 {
     return ! element.hasType (schema::PHAZITE) || ! otherElement.hasType (schema::PHAZITE) || holdSameCurves (kept, otherKept);
 }

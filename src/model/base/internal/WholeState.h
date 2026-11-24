@@ -30,6 +30,7 @@
 
 #include "model/base/IDs.h"
 #include "model/base/internal/SongOwnValue.h"
+#include "model/base/internal/SongState.h"
 #include "model/base/internal/SongValues.h"
 #include "model/devices/ParameterRef.h"
 
@@ -42,11 +43,11 @@ namespace phazite
 {
 class Song;
 
-// The song's tree, or a part of it (a TRACK, the track list, the TEMPOMAP, any element of the song), as a copy that holds
-// everything the song holds of it: what is kept beside the tree written back in (each track's clips, with their notes; the
-// tempo map, in the song's or its TEMPOMAP's copy). A part that isn't
-// the song's, and any part of a song that keeps everything in its tree (one that holds no values: Song::getValues()), is
-// copied as it is. A copy no one else holds, which any thread may then read. Message thread.
+// The song's tree, or a part of it (its track list, its TEMPOMAP, any of its root's places), as a copy that holds everything
+// the song holds of it: for a song that holds its values, written from its state alone (SongState.h: writeSongTree (getSongState
+// (song)), and a place by writeSongPart()). A part that isn't the song's, and any part of a song that keeps everything in its
+// tree (one that holds no values: Song::getValues()), is copied as it is. A copy no one else holds, which any thread may then
+// read. Message thread.
 juce::ValueTree copyWholeSong (const Song&);
 juce::ValueTree copyWhole (const Song&, const juce::ValueTree& part);
 
@@ -54,47 +55,20 @@ juce::ValueTree copyWhole (const Song&, const juce::ValueTree& part);
 // isn't the song's): what reads a clip as a file would hold it (the tests). Message thread.
 juce::ValueTree copyWholeClip (const Song&, ClipID);
 
-// What the song keeps beside its tree, as it is now: kept for nothing (values share what they hold), for what must write or
-// compare the song later than it copies it (a save in the background, the copy a project compares itself with: model/
-// project/internal/Project.h; what a frozen track's file holds: model/mixer/internal/Freeze.h). Together with a copy of the
-// tree taken at the same moment it gives the whole state then. Any thread may read one once kept. A member for each area
-// (SongValues.h's recipe), which keepValues() keeps, a line each.
-struct ValuesKept
-{
-    NotesByClip notes;
-    SongClips clips;
-    TempoMapValue tempoMap;           // none (no entry of either kind) kept of a song that holds no values
-    ChordLaneValue chordLane;         // empty kept of a song that holds no values, and of one without chords or keys
-    MidiLinksValue midiLinks;         // none kept of a song that holds no values, and of one without links
-    SongCurves curves;                // none kept of a song that holds no values, and of one without automation
-    SectionsValue sections;           // none kept of a song that holds no values, and of one without sections
-    SongModulation modulation {};     // none kept of a song that holds no values, and of one without modulators or macros
-    SongSends sends {};               // none kept of a song that holds no values, and of one without sends
-    DeviceStore deviceStore {};       // none kept of a song that holds no values, and of one without what devices store
-    DevicesOutside devicesOutside {}; // none kept of a song that holds no values, and of one whose windows never moved
-    SongDevices devices {};           // none kept of a song that holds no values, and of one without devices
-    TrackSwitches trackSwitches {};   // none kept of a song that holds no values, and of one without a switch on
-    TracksOutside tracksOutside {};   // none kept of a song that holds no values, and of one whose rows were never set
-
-    // None kept of a song that holds no values (its tree holds its tracks); else every track and the master, which whole
-    // state writes into the copy's TRACKS and MASTER (writeTracksIn(), WholeState.cpp).
-    std::optional<SongTracks> tracks {};
-
-    SongOwnValue songOwn {}; // the song's own (SongOwnValue.h): the defaults kept of a song that holds no values
-    SongStanding songStanding {};
-    SongOutside songOutside {};
-    std::uint64_t nextID = 0; // the song's count of IDs (Song.h: makeID()): 0, none written, for a song that holds no values
-};
-
-ValuesKept keepValues (const Song&); // message thread
-
-// A copy of the song's tree (or of a part of it) taken with keepValues() at the same moment, made whole: a copy of it with
-// the kept values written in, which the tree given doesn't get. Any thread.
-juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const ValuesKept&);
+// The song whole as values at one moment (SongState.h: SongState, getSongState()), kept for what must write or compare the
+// song later than it takes it (a save in the background, the copy a project compares itself with: model/project/internal/
+// Project.h; what a frozen track's file holds: model/mixer/internal/Freeze.h), with writeSongTree() and readSongTree(), its
+// converters to and from the file's form. copyWholeSong() is writeSongTree (getSongState (song)) for a song that holds its
+// values.
+//
+// A copy of the song's tree (or of a part of it) taken with getSongState() at the same moment, made whole: a copy of it with
+// the state's values written in, which the tree given doesn't get. Any thread. (What still holds a tree beside a state:
+// roadmap step S5.20's next piece moves it onto the state alone.)
+juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const SongState&);
 
 // The same in place, for a tree just written from values that nothing else holds (DevicesArea.h: writeDeviceWhole()): the
 // kept values written into it, without a copy of it made first. Any thread.
-void makeWhole (juce::ValueTree& written, const ValuesKept&);
+void makeWhole (juce::ValueTree& written, const SongState&);
 
 // The halves of a comparison of the song with a copy of it that the trees don't hold (Project's holdTheSameProject(), the
 // frozen tracks' FreezeKeeper), compared as values (the same value, or two alike), or none in either. Any thread. Each
@@ -102,9 +76,9 @@ void makeWhole (juce::ValueTree& written, const ValuesKept&);
 //   - whether two kept values hold the same notes and controllers' values for a clip (by its ID);
 //   - the same clip (by its ID): its value (its track among it) and its notes;
 //   - the same clips on a track (by its ID): the same in the same order, each the same clip.
-bool holdSameNotes (const ValuesKept&, const ValuesKept&, ClipID);
-bool holdSameClip (const ValuesKept&, const ValuesKept&, ClipID);
-bool holdSameTrackClips (const ValuesKept&, const ValuesKept&, TrackID);
+bool holdSameNotes (const SongState&, const SongState&, ClipID);
+bool holdSameClip (const SongState&, const SongState&, ClipID);
+bool holdSameTrackClips (const SongState&, const SongState&, TrackID);
 
 // Whether two songs, each a tree with its kept values (the song's own and its kept values now, a copy and those kept with it),
 // hold the same tempo map, as one value (TempoMapValue.h: the same tempos and time signatures, each kind by beat): so that a
@@ -112,20 +86,20 @@ bool holdSameTrackClips (const ValuesKept&, const ValuesKept&, TrackID);
 // places of the maps alone: a tree with one and a tree without hold different maps. Both of Project's comparisons with the
 // saved copy compare the tempo map with it (the quick one, and the whole song's: holdTheSameProject()), so that the two
 // agree. Any thread.
-bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
+bool holdSameTempoMap (const juce::ValueTree& song, const SongState&, const juce::ValueTree& otherSong, const SongState&);
 
 // Whether two songs, each a tree with its kept values, hold the same chord lane: both a lane or neither (the trees' CHORDLANE
 // elements, the sign of one), and the same chords and keys as one value (ChordLaneValue.h: each kind in its order), so that
 // a chord changed and changed back compares as the same. Both of Project's comparisons with the saved copy compare the lane
 // so (the quick one, and the whole song's), so that the two agree. Any thread. In ChordLaneArea.cpp.
-bool holdSameChordLane (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
+bool holdSameChordLane (const juce::ValueTree& song, const SongState&, const juce::ValueTree& otherSong, const SongState&);
 
 // Whether two songs, each a tree with its kept values, hold the same MIDI links: both a MIDILINKS or neither (the trees'
 // elements: an empty one is written into the file, as the first link made it), and the same links as one value
 // (MidiLinksValue.h: in their order), so that a link taken away and made again as it was compares as the same. Both of
 // Project's comparisons with the saved copy compare the links so (the quick one, and the whole song's), so that the two agree.
 // Any thread. In MidiLinksArea.cpp.
-bool holdSameMidiLinks (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
+bool holdSameMidiLinks (const juce::ValueTree& song, const SongState&, const juce::ValueTree& otherSong, const SongState&);
 
 // Whether two songs' kept values hold the same automation, as values (CurveValues.h: their points' keys aside), so that a
 // point moved and moved back, or a curve's points taken out and put back, compares as the same: a parameter's curve (none in
@@ -135,16 +109,16 @@ bool holdSameMidiLinks (const juce::ValueTree& song, const ValuesKept&, const ju
 // its values has: no matter here. Both of Project's comparisons with the saved copy compare the curves so (the quick one, a
 // parameter at a time and their order, and the whole song's: holdTheSameProject()), so that the two agree. In
 // CurvesArea.cpp. Any thread.
-bool holdSameCurve (const ValuesKept&, const ValuesKept&, const ParameterRef&);
-bool holdSameCurveOrder (const ValuesKept&, const ValuesKept&);
-bool holdSameCurves (const ValuesKept&, const ValuesKept&);
+bool holdSameCurve (const SongState&, const SongState&, const ParameterRef&);
+bool holdSameCurveOrder (const SongState&, const SongState&);
+bool holdSameCurves (const SongState&, const SongState&);
 
 // Whether two songs, each a tree with its kept values, hold the same sections: both a SECTIONS or neither (the trees'
 // elements: an empty one is written into the file, as the first section made it), and the same sections as one value
 // (SectionsValue.h: in their order), so that a section changed and changed back compares as the same. Both of Project's
 // comparisons with the saved copy compare the sections so (the quick one, and the whole song's), so that the two agree. Any
 // thread. In SectionsArea.cpp.
-bool holdSameSections (const juce::ValueTree& song, const ValuesKept&, const juce::ValueTree& otherSong, const ValuesKept&);
+bool holdSameSections (const juce::ValueTree& song, const SongState&, const juce::ValueTree& otherSong, const SongState&);
 
 // Whether two songs' kept values hold the same modulation, as values (ModulationValue.h): all of it; one modulator or macro
 // by its ID (none in both, or the same value in both, its place too); and an owner's list (a channel's or a container's:
@@ -152,25 +126,25 @@ bool holdSameSections (const juce::ValueTree& song, const ValuesKept&, const juc
 // modulation so (the quick one, a modulator and an owner at a time, and the whole song's, each TRACK's, the MASTER's and each
 // CONTAINER's as holdSameKeptOf() asks them), so that the two agree. The trees hold none of it. In ModulationArea.cpp. Any
 // thread.
-bool holdSameModulation (const ValuesKept&, const ValuesKept&);
-bool holdSameModulator (const ValuesKept&, const ValuesKept&, ModulatorID);
-bool holdSameModulatorOrder (const ValuesKept&, const ValuesKept&, const ModulatorPlace& owner);
+bool holdSameModulation (const SongState&, const SongState&);
+bool holdSameModulator (const SongState&, const SongState&, ModulatorID);
+bool holdSameModulatorOrder (const SongState&, const SongState&, const ModulatorPlace& owner);
 
 // Whether two songs' kept values hold the same sends, as values (SendsValue.h): all of them; one send by its ID (none in both,
 // or the same value in both, its track too); and a track's list, the same IDs in the same order, or none in both. Both of
 // Project's comparisons with the saved copy compare the sends so (the quick one, a send and a track at a time, and the whole
 // song's, each TRACK's as holdSameKeptOf() asks it), so that the two agree. The trees hold none of them. In SendsArea.cpp.
 // Any thread.
-bool holdSameSends (const ValuesKept&, const ValuesKept&);
-bool holdSameSend (const ValuesKept&, const ValuesKept&, DeviceID);
-bool holdSameTrackSendOrder (const ValuesKept&, const ValuesKept&, TrackID);
+bool holdSameSends (const SongState&, const SongState&);
+bool holdSameSend (const SongState&, const SongState&, DeviceID);
+bool holdSameTrackSendOrder (const SongState&, const SongState&, TrackID);
 
 // Whether two songs' kept values hold the same of what one device or chain stores (DeviceStoreValue.h: a plug-in's values set
 // by hand, its state, program, format ID and version; a chain's mute and solo), the song's entries alone (a held value aside),
 // none in both or the same in both. A window's place counts as no change, and is no part of it. Both of Project's comparisons
 // with the saved copy compare the store so (the quick one, an item at a time, and the whole song's, each DEVICE's and CHAIN's
 // as holdSameKeptOf() asks it), so that the two agree. The trees hold none of it. In DeviceStoreArea.cpp. Any thread.
-bool holdSameDeviceStore (const ValuesKept&, const ValuesKept&, DeviceID);
+bool holdSameDeviceStore (const SongState&, const SongState&, DeviceID);
 
 // Whether two songs' kept values hold the same devices, as values (DevicesValue.h): all of them; one device, container or
 // chain by its ID (none in both, or the same value in both, its place too, what the store holds of it aside:
@@ -178,9 +152,9 @@ bool holdSameDeviceStore (const ValuesKept&, const ValuesKept&, DeviceID);
 // order, or none in both. Both of Project's comparisons with the saved copy compare the devices so (the quick one, an item and
 // an owner at a time, and the whole song's, each TRACK's and the MASTER's as holdSameKeptOf() asks it), so that the two agree.
 // The trees hold none of them. In DevicesArea.cpp. Any thread.
-bool holdSameDevices (const ValuesKept&, const ValuesKept&);
-bool holdSameDevice (const ValuesKept&, const ValuesKept&, DeviceID);
-bool holdSameDeviceOrder (const ValuesKept&, const ValuesKept&, const DevicePlace& owner);
+bool holdSameDevices (const SongState&, const SongState&);
+bool holdSameDevice (const SongState&, const SongState&, DeviceID);
+bool holdSameDeviceOrder (const SongState&, const SongState&, const DevicePlace& owner);
 
 // Whether two songs' kept values hold the same tracks, as values (TracksValue.h): all of them (each track's value, each list,
 // the master's value; the master's count of being put in anew is no part of the song's); one track by its ID, its value (its
@@ -188,10 +162,10 @@ bool holdSameDeviceOrder (const ValuesKept&, const ValuesKept&, const DevicePlac
 // folder's, the top list for none), the same IDs in the same order, or none in both. The view counts as no change, and is no
 // part of them. Both of Project's comparisons with the saved copy compare the tracks so (the quick one, a track and a list at
 // a time, and the whole song's, through withTracksOwn()), so that the two agree. In TracksArea.cpp. Any thread.
-bool holdSameTracks (const ValuesKept&, const ValuesKept&);
-bool holdSameTrack (const ValuesKept&, const ValuesKept&, TrackID);
-bool holdSameMaster (const ValuesKept&, const ValuesKept&);
-bool holdSameTrackList (const ValuesKept&, const ValuesKept&, TrackID folder);
+bool holdSameTracks (const SongState&, const SongState&);
+bool holdSameTrack (const SongState&, const SongState&, TrackID);
+bool holdSameMaster (const SongState&, const SongState&);
+bool holdSameTrackList (const SongState&, const SongState&, TrackID folder);
 
 // A copy of a song's TRACKS or MASTER (a place, which holds none of them) with the tracks' own fields that the kept values hold
 // written in, as the song's tree held them while it stored the tracks: each TRACK with its own properties alone
@@ -199,7 +173,7 @@ bool holdSameTrackList (const ValuesKept&, const ValuesKept&, TrackID folder);
 // comparison of an element whole (Project.h: holdTheSameProject()) compares a TRACKS or a MASTER by, each TRACK's and the
 // MASTER's switches and what the other areas hold of it then compared through holdSameKeptOf(). The element itself for any
 // other, and where the values kept hold no tracks (a song without values, whose tree holds them). In TracksArea.cpp. Any thread.
-juce::ValueTree withTracksOwn (const juce::ValueTree& place, const ValuesKept&);
+juce::ValueTree withTracksOwn (const juce::ValueTree& place, const SongState&);
 
 // Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
 // what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips
@@ -215,6 +189,6 @@ juce::ValueTree withTracksOwn (const juce::ValueTree& place, const ValuesKept&);
 // Project's comparison of an element whole asks once the element's own properties compare (holdTheSameProject()). And
 // whether a child of an element is the place of what an area keeps (the song's TEMPOMAP, its CHORDLANE, its MIDILINKS, its
 // AUTOMATION, its SECTIONS), which that comparison leaves out of the elements it compares one by one. Any thread.
-bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameKeptOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

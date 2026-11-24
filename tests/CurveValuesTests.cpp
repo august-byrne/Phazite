@@ -520,7 +520,7 @@ TEST_CASE ("Curve values: the song's curves keep the order they were made in thr
     // What a song keeps, with these curves alone (by the member's name: the next area adds a member).
     const auto keepCurves = [] (const phazite::SongCurves& held)
     {
-        phazite::ValuesKept valuesKept;
+        phazite::SongState valuesKept;
         valuesKept.curves = held;
         return valuesKept;
     };

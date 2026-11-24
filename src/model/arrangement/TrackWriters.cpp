@@ -230,7 +230,7 @@ TrackCopies makeTrackCopies (Song& song, TrackID original, CopiedIDs& copied)
     // Each track's IDs as a copy of its element was given them (Schema.h: giveNewIDs(), depth first): its own, its fader's
     // and its VCA's, then its devices' as whole state writes them into it (DevicesArea.h: writeDevicesIn(), each item in
     // its order, a container before its chains), then the tracks in it, each the same.
-    const auto kept = keepValues (song);
+    const auto kept = getSongState (song);
 
     const auto newID = [&song, &copied] (std::uint64_t old)
     {

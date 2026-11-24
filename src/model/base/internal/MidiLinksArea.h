@@ -50,8 +50,8 @@ struct SongValues::MidiLinksKeeper
     // every element, whoever's it is): nothing, at once, but for the song's MIDILINKS or a child added to it.
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
-    // The links the loader made consistent into their area, outside the history, and their element emptied (SongValues.cpp:
-    // adopt()). A song without a MIDILINKS keeps none, its links none.
+    // The song's MIDILINKS emptied, once its reader read the links the loader made consistent into the area
+    // (readHeldMidiLinksIn(), SongValues.cpp: adopt()). A song without a MIDILINKS keeps none, its links none.
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -66,11 +66,15 @@ struct SongValues::MidiLinksKeeper
 // writeMidiLinks(), in their order), where some are kept (a song that keeps everything in its tree keeps none: its MIDILINKS
 // holds its links). Nothing for an element that isn't a MIDILINKS.
 bool leadsToMidiLinks (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeMidiLinksIn (juce::ValueTree& element, const ValuesKept&);
+void writeMidiLinksIn (juce::ValueTree& element, const SongState&);
+
+// The MIDI links' reader of a song's tree (SongState.h: readSongTree(), a line of it): its MIDILINKS into the state, as the
+// song holds them (none where it has none); no tree changed. Any thread.
+void readHeldMidiLinksIn (const juce::ValueTree& song, SongState&);
 
 // The MIDI links' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
 // either is a song's element that holds a MIDILINKS, the same links (holdSameMidiLinks()); and whether a child is the place of
 // the links, which the comparison of the elements in them leaves out (the song's MIDILINKS).
-bool holdSameMidiLinksOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameMidiLinksOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 bool isMidiLinksPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

@@ -64,9 +64,9 @@ struct SongValues::DevicesKeeper
     // SOUNDS in the song's tree).
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
-    // Every device, container and chain of the tree the loader made consistent into the area, outside the history, as the song
-    // holds them (each read once by readHeldDevice(), each of which the loader left as the song holds it), and every DEVICE,
-    // CONTAINER and CHAIN element out of the tree, those anywhere else too (SongValues.cpp: adopt()).
+    // Every DEVICE, CONTAINER and CHAIN element out of the tree the loader made consistent, those anywhere else too, once its
+    // reader read the song's into the area as the song holds them (readHeldDevicesIn(): each read once by readHeldDevice(),
+    // each of which the loader left as the song holds it; SongValues.cpp: adopt()).
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -99,7 +99,11 @@ juce::ValueTree writeDeviceWhole (const SongDevices&, DeviceID);
 // its ID, the master's under 0), in their list's order, each with what it holds (writeDeviceWhole()), right after its clips
 // (which the clips' part writes first among its children) and before its other children. Nothing for another element.
 bool leadsToDevices (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeDevicesIn (juce::ValueTree& element, const ValuesKept&);
+void writeDevicesIn (juce::ValueTree& element, const SongState&);
+
+// The devices' reader of a song's tree (SongState.h: readSongTree(), a line of it): every device, container and chain of its
+// channels into the state, as the song holds them; no tree changed. Any thread.
+void readHeldDevicesIn (const juce::ValueTree& song, SongState&);
 
 // The DEVICE and CONTAINER elements of a channel's element (a TRACK or the MASTER that comes into the song with them: the
 // tracks' safety net, TracksArea.h), each with what it holds (a container's CHAINs, a chain's DEVICEs), read as the song holds
@@ -110,5 +114,5 @@ int takeChannelDevicesIn (SongDevices&, const juce::ValueTree& channel, const De
 // The devices' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
 // or the MASTER's devices and containers, the same in the same order, each the same value with what it holds (a container's
 // chains in their order, each chain's devices in theirs); true for another element.
-bool holdSameDevicesOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameDevicesOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 } // namespace phazite

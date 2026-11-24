@@ -256,9 +256,9 @@ TEST_CASE ("Song values: a clip's notes made by the model, every value a note ca
     CHECK (phazite::readClipNotes (whole).isSameAs (value) == false); // read anew: alike, not the same
 
     // Kept with a copy of the tree, then written into it: the same.
-    const auto kept = phazite::keepValues (*song);
+    const auto kept = phazite::getSongState (*song);
     CHECK (phazite::copyWhole (song->getState().createCopy(), kept).isEquivalentTo (phazite::copyWholeSong (*song)));
-    CHECK (phazite::holdSameNotes (kept, phazite::keepValues (*song), clip));
+    CHECK (phazite::holdSameNotes (kept, phazite::getSongState (*song), clip));
 }
 
 TEST_CASE ("Song values: the helpers that change a value in batches keep where each note is by its ID")

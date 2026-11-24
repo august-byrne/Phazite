@@ -61,9 +61,10 @@ struct SongValues::DeviceStoreKeeper
     // element, whoever's it is): nothing, at once, but for what is the store's.
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
-    // What every DEVICE and CHAIN of the tree the loader made consistent holds of the store, into the area, and the windows'
-    // places into the value outside the history, as the song holds them (each of which the loader left as it holds it:
-    // asserted, DeviceStoreValue.h: isStoreWrittenAsHeld()), and all of it out of the tree (SongValues.cpp: adopt()).
+    // What every DEVICE and CHAIN of the tree the loader made consistent holds of the store, and its window's place, out of
+    // the tree, once its reader read them into the area and the windows' value as the song holds them (readHeldDeviceStoreIn(),
+    // each of which the loader left as it holds it: asserted, DeviceStoreValue.h: isStoreWrittenAsHeld(); SongValues.cpp:
+    // adopt()).
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -85,10 +86,14 @@ int takeChannelStoreIn (DeviceStore&, DevicesOutside&, const juce::ValueTree& ch
 // (DeviceStoreValue.h: writeStoreInto(), its VALUEs sorted by their parameters after its other children) and its window's
 // place, a CHAIN its mute and solo, from the values kept. Nothing for another element.
 bool leadsToDeviceStore (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeDeviceStoreIn (juce::ValueTree& element, const ValuesKept&);
+void writeDeviceStoreIn (juce::ValueTree& element, const SongState&);
+
+// The store's reader of a song's tree (SongState.h: readSongTree(), a line of it): what every DEVICE and CHAIN of its channels
+// stores, and each device's window's place, into the state, as the song holds them; no tree changed. Any thread.
+void readHeldDeviceStoreIn (const juce::ValueTree& song, SongState&);
 
 // The store's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a DEVICE's
 // or a CHAIN's entries, the song's alone (a held value aside; a window's place, which counts as no change, aside), the same
 // in both; true for another element.
-bool holdSameDeviceStoreOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameDeviceStoreOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 } // namespace phazite

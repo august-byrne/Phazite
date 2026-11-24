@@ -258,7 +258,7 @@ namespace
 
     // Whether two items, each with what it holds (a container's chains, a chain's devices) and what the store holds of each
     // (DeviceStoreArea.cpp: holdSameDeviceStore()), are the same in two songs' kept values.
-    bool holdSameItem (const ValuesKept& keptA, const ValuesKept& keptB, DeviceID id)
+    bool holdSameItem (const SongState& keptA, const SongState& keptB, DeviceID id)
     {
         const auto& a = keptA.devices;
         const auto& b = keptB.devices;
@@ -439,25 +439,29 @@ void SongValues::DevicesKeeper::childAdded (juce::ValueTree& parent, juce::Value
     parent.removeChild (child, nullptr);
 }
 
-void SongValues::DevicesKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::DevicesKeeper::adopt (SongValues&, Song& loaded)
 {
-    // Every device, container and chain the loader made consistent into the area, outside the history, each read once as the
-    // song holds it, in the elements' order (each track's, a folder's before the tracks in it, then the master's; each
-    // channel's in its order, a container's chains and a chain's devices in theirs; the first of an ID); what the loader left
-    // of each is what the song holds of it (DevicesValue.h: keepDeviceAsHeld()), so the adoption changes nothing of what the
-    // file held. What the store holds of each (DeviceStoreArea.h) and a container's macros (ModulationArea.h) are taken in
-    // before. Then every DEVICE, CONTAINER and CHAIN element out of the tree, those anywhere else too, which are no devices of
-    // the song's.
-    auto tree = loaded.getState();
-    auto held = into.devices.get();
+    // Every DEVICE, CONTAINER and CHAIN element out of the tree, those anywhere else too, which are no devices of the song's,
+    // its reader having read the song's into the area before (readHeldDevicesIn(): SongValues.cpp, adopt()), and what the store
+    // holds of each (DeviceStoreArea.h) and a container's macros (ModulationArea.h) taken out of them before.
+    dropDeviceElements (loaded.getState());
+}
+
+void readHeldDevicesIn (const juce::ValueTree& song, SongState& into)
+{
+    // Every device, container and chain the loader made consistent, each read once as the song holds it, in the elements'
+    // order (each track's, a folder's before the tracks in it, then the master's; each channel's in its order, a container's
+    // chains and a chain's devices in theirs; the first of an ID); what the loader left of each is what the song holds of it
+    // (DevicesValue.h: keepDeviceAsHeld()), so reading it changes nothing of what the file held. What the store holds of each
+    // and a container's macros are no part of a device's value: their areas' (readHeldDeviceStoreIn(), readHeldModulationIn()).
+    auto held = into.devices;
     auto read = 0;
 
-    forEachChannel (tree, [&held, &read] (const juce::ValueTree& channel, const DevicePlace& place)
+    forEachChannel (song, [&held, &read] (const juce::ValueTree& channel, const DevicePlace& place)
                     { readChannelInto (channel, place, held, nullptr, read); });
 
     jassert (holdsItsLists (held));
-    into.devices.setOutsideHistory (std::move (held));
-    dropDeviceElements (tree);
+    into.devices = std::move (held);
 }
 
 //==============================================================================
@@ -554,7 +558,7 @@ bool leadsToDevices (const juce::ValueTree& parent, const juce::ValueTree& child
     return parent.hasType (schema::PHAZITE) && child.hasType (schema::MASTER);
 }
 
-void writeDevicesIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeDevicesIn (juce::ValueTree& element, const SongState& kept)
 {
     const auto* list = findChannelList (kept.devices, element);
 
@@ -572,12 +576,12 @@ void writeDevicesIn (juce::ValueTree& element, const ValuesKept& kept)
             element.addChild (child, place++, nullptr);
 }
 
-bool holdSameDevices (const ValuesKept& a, const ValuesKept& b)
+bool holdSameDevices (const SongState& a, const SongState& b)
 {
     return a.devices.isSameAs (b.devices) || a.devices == b.devices;
 }
 
-bool holdSameDevice (const ValuesKept& a, const ValuesKept& b, DeviceID id)
+bool holdSameDevice (const SongState& a, const SongState& b, DeviceID id)
 {
     const auto* first = a.devices.find (id);
     const auto* second = b.devices.find (id);
@@ -588,7 +592,7 @@ bool holdSameDevice (const ValuesKept& a, const ValuesKept& b, DeviceID id)
     return first->isSameAs (*second) || *first == *second;
 }
 
-bool holdSameDeviceOrder (const ValuesKept& a, const ValuesKept& b, const DevicePlace& owner)
+bool holdSameDeviceOrder (const SongState& a, const SongState& b, const DevicePlace& owner)
 {
     const auto* first = a.devices.findList (owner);
     const auto* second = b.devices.findList (owner);
@@ -599,8 +603,8 @@ bool holdSameDeviceOrder (const ValuesKept& a, const ValuesKept& b, const Device
     return first->identity() == second->identity() || *first == *second;
 }
 
-bool holdSameDevicesOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                        const ValuesKept& otherKept)
+bool holdSameDevicesOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                        const SongState& otherKept)
 {
     if (! (element.hasType (schema::TRACK) || element.hasType (schema::MASTER)))
         return true;

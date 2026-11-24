@@ -85,8 +85,9 @@ struct SongValues::SongOutsideTeller final : private OutsideValue<SongOutside>::
 // The song's own part of the keeper (SongValues.h):
 //   - its adoption (adopt(), which SongValues::adopt() asks first, as the song holds its values): what the loaded tree's root
 //     holds of the song's own, read as the song holds it (SongOwnValue.h: readHeldSongOwn(), readHeldSongStanding(),
-//     readHeldSongOutside(); the loader made it so: keepSongOwnAsHeld()), set into the three areas outside the history, and its
-//     count of IDs (Schema.h: nextID) onto the song (Song.h: setIDCount()); then the root's every property and its LASTKEY,
+//     readHeldSongOutside(); the loader made it so: keepSongOwnAsHeld()) by its reader (readHeldSongOwnIn()), set into the three
+//     areas outside the history, and its count of IDs (Schema.h: nextID) onto the song (Song.h: setIDCount()), as every area's
+//     (SongValues.cpp: adopt()); then (adopt()) the root's every property and its LASTKEY,
 //     PIANOROLL and MERGING taken out of the tree, and with them what Phazite doesn't know there (a property of the root's, an
 //     element of a type it doesn't know, with everything in it: dropped as the song opens, the one place that drops them, as
 //     the areas' adoptions drop what Phazite doesn't know in their elements);
@@ -124,7 +125,7 @@ bool isHeardAsSongOwn (const juce::ValueTree& element, const juce::Identifier& p
 bool isHeardAsSongOwn (const juce::ValueTree& parent, const juce::ValueTree& child);
 
 // The song's own part of whole state (WholeState.h; the recipe's step 5): into a whole copy's root (PHAZITE), the kept
-// values' song's own (WholeState.h: ValuesKept: songOwn, songStanding, songOutside), its properties and its LASTKEY, PIANOROLL
+// values' song's own (WholeState.h: SongState: songOwn, songStanding, songOutside), its properties and its LASTKEY, PIANOROLL
 // and MERGING, as SongOwnValue.h's writeSongOwnInto() writes them (the elements after the root's other children: the
 // placeholders, its track list and its master, in the tree's order), and its count of IDs (nextID) where it is kept; nothing
 // for another element. And whether two songs' roots, each with its kept values, hold the same of what counts of the song's
@@ -132,8 +133,13 @@ bool isHeardAsSongOwn (const juce::ValueTree& parent, const juce::ValueTree& chi
 // counted; the versions' names and how the song plays and shows count nothing, nor its count of IDs); true for another
 // element. Both of Project's comparisons with the saved copy compare the song's own so (the quick one, isSongOwnAsSaved(), and
 // the whole song's, through WholeState.h's holdSameKeptOf()), so that the two agree. Any thread.
-struct ValuesKept;
-void writeSongOwnIn (juce::ValueTree& element, const ValuesKept&);
-bool holdSameSongOwn (const ValuesKept&, const ValuesKept&);
-bool holdSameSongOwnOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+struct SongState;
+void writeSongOwnIn (juce::ValueTree& element, const SongState&);
+
+// The song's own reader of a song's tree (SongState.h: readSongTree(), its first line): its root's properties and its LASTKEY,
+// PIANOROLL and MERGING into the state's three values, and its count of IDs, as the song holds them; no tree changed. Any
+// thread.
+void readHeldSongOwnIn (const juce::ValueTree& song, SongState&);
+bool holdSameSongOwn (const SongState&, const SongState&);
+bool holdSameSongOwnOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 } // namespace phazite

@@ -93,11 +93,10 @@ void SongValues::TempoMapKeeper::childAdded (juce::ValueTree& parent, juce::Valu
     parent.removeChild (child, nullptr);
 }
 
-void SongValues::TempoMapKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::TempoMapKeeper::adopt (SongValues&, Song& loaded)
 {
-    // The tempo map the loader made consistent (and makeSong() made whole: Tempo.h, ensureTempoMap()) into its area, outside
-    // the history, each entry as the song reads one (TempoMapValue.h: readHeldTempoMap()); then its element emptied
-    // (emptyTempoMapElement()).
+    // The song's TEMPOMAP, whose map its reader read into the area before (readHeldTempoMapIn(): SongValues.cpp, adopt()),
+    // emptied (emptyTempoMapElement()); one made, empty, where the tree has none.
     auto root = loaded.getState();
     auto map = root.getChildWithName (schema::TEMPOMAP);
 
@@ -107,8 +106,15 @@ void SongValues::TempoMapKeeper::adopt (SongValues& into, Song& loaded)
         root.appendChild (map, nullptr);
     }
 
-    into.tempoMap.setOutsideHistory (readHeldTempoMap (map));
     emptyTempoMapElement (map, nullptr);
+}
+
+void readHeldTempoMapIn (const juce::ValueTree& song, SongState& into)
+{
+    // The tempo map the loader made consistent (and makeSong() made whole: Tempo.h, ensureTempoMap()), each entry as the song
+    // reads one (TempoMapValue.h: readHeldTempoMap()), an empty TEMPOMAP's where the tree has none.
+    const auto map = song.getChildWithName (schema::TEMPOMAP);
+    into.tempoMap = readHeldTempoMap (map.isValid() ? map : juce::ValueTree (schema::TEMPOMAP));
 }
 
 //==============================================================================
@@ -147,7 +153,7 @@ bool leadsToTempoMap (const juce::ValueTree& parent, const juce::ValueTree& chil
     return parent.hasType (schema::PHAZITE) && child.hasType (schema::TEMPOMAP);
 }
 
-void writeTempoMapIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeTempoMapIn (juce::ValueTree& element, const SongState& kept)
 {
     // Kept of a song that holds its values, which holds at least one of each kind (none kept of one that keeps everything in
     // its tree, whose TEMPOMAP holds its entries).
@@ -158,7 +164,7 @@ void writeTempoMapIn (juce::ValueTree& element, const ValuesKept& kept)
     writeTempoMap (kept.tempoMap, element);
 }
 
-bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept& kept, const juce::ValueTree& otherSong, const ValuesKept& otherKept)
+bool holdSameTempoMap (const juce::ValueTree& song, const SongState& kept, const juce::ValueTree& otherSong, const SongState& otherKept)
 {
     // The values kept, each tree's TEMPOMAP the place of its map alone.
     if (song.getChildWithName (schema::TEMPOMAP).isValid() != otherSong.getChildWithName (schema::TEMPOMAP).isValid())
@@ -167,8 +173,8 @@ bool holdSameTempoMap (const juce::ValueTree& song, const ValuesKept& kept, cons
     return kept.tempoMap.isSameAs (otherKept.tempoMap) || kept.tempoMap == otherKept.tempoMap;
 }
 
-bool holdSameTempoMapOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                         const ValuesKept& otherKept)
+bool holdSameTempoMapOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                         const SongState& otherKept)
 {
     const auto hasTempoMap = [] (const juce::ValueTree& each) { return each.getChildWithName (schema::TEMPOMAP).isValid(); };
     return ! (hasTempoMap (element) || hasTempoMap (otherElement)) || holdSameTempoMap (element, kept, otherElement, otherKept);

@@ -102,7 +102,7 @@ public:
     struct Holds
     {
         std::vector<DeviceID> parts;
-        ValuesKept values;
+        SongState values;
         immer::flex_vector<TempoEntry> tempos;
         SongCurves curves;
         std::vector<ModulatorValue> modulators;

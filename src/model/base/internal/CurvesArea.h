@@ -17,6 +17,8 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <cstdint>
+
 namespace phazite
 {
 class Song;
@@ -53,8 +55,8 @@ struct SongValues::CurvesKeeper
     // every element, whoever's it is): nothing, at once, but for an AUTOMATION added to the song or a child added to its own.
     void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
 
-    // The curves the loader made consistent into their area, outside the history, each point given a key, and their element
-    // emptied (SongValues.cpp: adopt()); a song whose file had no AUTOMATION given one, empty.
+    // The song's AUTOMATION emptied, once its reader read the curves the loader made consistent into the area, each point given
+    // a key (readHeldCurvesIn(), SongValues.cpp: adopt()); a song whose file had no AUTOMATION given one, empty.
     static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
@@ -71,11 +73,15 @@ struct SongValues::CurvesKeeper
 // a song without curves is written as one whose file never had any (the AUTOMATION a song that holds its values always
 // has is its place alone). Nothing for an element that isn't the song's or its AUTOMATION.
 bool leadsToCurves (const juce::ValueTree& parent, const juce::ValueTree& child);
-void writeCurvesIn (juce::ValueTree& element, const ValuesKept&);
+void writeCurvesIn (juce::ValueTree& element, const SongState&);
+
+// The curves' reader of a song's tree (SongState.h: readSongTree(), a line of it): its AUTOMATION's curves into the state, as
+// the song holds them, each point given a key from the count given (none where it has none); no tree changed. Any thread.
+void readHeldCurvesIn (const juce::ValueTree& song, SongState&, std::uint64_t& nextPointKey);
 
 // The curves' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where both
 // are a song's element (PHAZITE), the same curves (holdSameCurves()); and whether a child is the place of the curves, which
 // the comparison of the elements in them leaves out (the song's AUTOMATION).
-bool holdSameCurvesOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+bool holdSameCurvesOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 bool isCurvesPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

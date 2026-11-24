@@ -193,7 +193,9 @@ struct MixedSong
     // A clip made, with its notes: the tree's half and the value's in the step in progress.
     phazite::ClipID insertClip()
     {
-        const auto place = (double) (++made) * 1024.0; // where no clip was or will be, whatever is undone meanwhile
+        // Where no clip was or will be, whatever is undone meanwhile, and within the furthest beat a song holds a clip at (Schema.h:
+        // maxBeats, which a clip read back from a whole copy is kept within: tests/SongCheck.cpp, the state's round trip).
+        const auto place = (double) (++made) * 256.0;
         const auto clip = phazite::insertMidiClip (*song, tracks[(size_t) (made % tracks.size())],
                                                    { phazite::test::at (place), phazite::test::at (place + 16.0) }, nullptr);
         addNote (clip);

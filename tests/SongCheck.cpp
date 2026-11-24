@@ -18,6 +18,7 @@
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongOwnArea.h"
 #include "model/base/internal/SongOwnValue.h"
+#include "model/base/internal/SongState.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TempoMapValue.h"
@@ -892,6 +893,12 @@ namespace
             problems.push_back ("values: the song's CHORDLANE isn't an empty placeholder for its chord lane");
         }
 
+        // Whether the song has a lane: its value's (ChordLaneValue.h: placed) and its tree's CHORDLANE alike, until the tree
+        // goes.
+        if (lane.placed != song.getState().getChildWithName (schema::CHORDLANE).isValid())
+            problems.push_back (lane.placed ? "values: the song's chord lane is placed, and its tree holds no CHORDLANE"
+                                            : "values: the song's tree holds a CHORDLANE, and its chord lane isn't placed");
+
         const auto isWithin = [] (double number, const schema::PropertyDescription& property)
         {
             const auto& range = property.getRange();
@@ -1431,7 +1438,7 @@ namespace
         // Since the tracks' switch (roadmap step S5.20) the tree holds no TRACK: the copy is given each track's own element
         // (TracksValue.h: writeTrackElement()), a folder's tracks in it, for the devices to be written into.
         auto whole = song.getState().createCopy();
-        const auto valuesKept = keepValues (song);
+        const auto valuesKept = getSongState (song);
         const auto& tracksKept = values.tracks.get();
         const std::function<void (juce::ValueTree, TrackID)> writeTracks =
             [&tracksKept, &writeTracks] (juce::ValueTree into, TrackID folder)
@@ -1883,6 +1890,144 @@ namespace
     // empty (no property, no element): its TEMPOMAP, its AUTOMATION, its TRACKS and its MASTER, which every song that holds
     // its values has, and its CHORDLANE, MIDILINKS and SECTIONS where it has them. Everything else the song holds is its
     // areas', which whole state writes into a copy (WholeState.h), and what Phazite doesn't know there was dropped as it opened.
+    // The song whole as a value (SongState.h): the state read back from its whole copy (readSongTree (copyWholeSong (song))) is
+    // the state the song holds (getSongState()), area by area (identity aside), with the places of its root a whole copy writes:
+    // so that both converters agree with each other for every song checked.
+    //
+    // And while the song's tree still holds the places its areas are written into, the state written is the old whole copy:
+    // its tree copied with the state written in (WholeState.h: copyWhole (tree, state)), as the file writes each.
+    void checkSongState (const Song& song, std::vector<std::string>& problems)
+    {
+        const auto state = getSongState (song);
+        const auto written = writeSongTree (state);
+
+        for (const auto& difference : findStateDifferences (readSongTree (written), state))
+            problems.push_back ("state: the song read back from its whole copy holds other " + difference);
+
+        const auto toText = [] (const juce::ValueTree& tree)
+        {
+            juce::MemoryOutputStream text;
+            writeProjectText (text, tree);
+            return text.toString();
+        };
+
+        // Only of a live root that holds its places alone, each once and empty (else checkLiveRoot() says what it holds, which
+        // the old copy would copy: a second AUTOMATION a step refused, until its Undo).
+        std::set<juce::String> seen;
+
+        for (const auto& child : song.getState())
+            if (findRootPlace (child.getType()) == RootPlace::none || ! seen.insert (child.getType().toString()).second
+                || child.getNumChildren() > 0 || child.getNumProperties() > 0)
+                return;
+
+        if (toText (written) != toText (copyWhole (song.getState(), state)))
+            problems.push_back ("state: the song's state written isn't its tree made whole with it (the old whole copy)");
+    }
+
+    // The places of a root a state's whole copy writes, in their order (SongState.h: writeSongTree(), stated again): its places
+    // but its CHORDLANE where its lane isn't placed and its AUTOMATION where it holds no curve, then its TEMPOMAP where it names
+    // none, its AUTOMATION where it holds curves and names none, its CHORDLANE where its lane is placed and it names none.
+    std::vector<RootPlace> findWrittenPlaces (const SongState& state)
+    {
+        std::vector<RootPlace> places;
+        const auto holdsCurves = ! state.curves.order.empty();
+
+        for (const auto place : state.rootPlaces)
+            if (place != RootPlace::none && (place != RootPlace::chordLane || state.chordLane.placed)
+                && (place != RootPlace::automation || holdsCurves))
+                places.push_back (place);
+
+        if (! state.holdsPlace (RootPlace::tempoMap))
+            places.push_back (RootPlace::tempoMap);
+
+        if (holdsCurves && ! state.holdsPlace (RootPlace::automation))
+            places.push_back (RootPlace::automation);
+
+        if (state.chordLane.placed && ! state.holdsPlace (RootPlace::chordLane))
+            places.push_back (RootPlace::chordLane);
+
+        return places;
+    }
+
+    // Whether two states hold the same switches (or the same view) of the tracks they hold and the master: the entries of a
+    // track a state doesn't hold (one a step took away, kept for the Undo that brings it back: TrackSwitchesValue.h,
+    // TracksOutside.h) are never written, so none is read back.
+    bool holdSameLeavesOfHeld (const SongState& a, const SongState& b, bool view)
+    {
+        std::vector<std::uint64_t> keys { 0 };
+
+        for (const auto* state : { &a, &b })
+            if (state->tracks.has_value())
+                for (const auto& entry : state->tracks->tracks)
+                    keys.push_back (entry.first);
+
+        for (const auto key : keys)
+        {
+            if (! view)
+            {
+                if (! holdSameSwitchesOf (a.trackSwitches, b.trackSwitches, key))
+                    return false;
+
+                continue;
+            }
+
+            const auto* first = key == 0 ? &a.tracksOutside.master : a.tracksOutside.tracks.find (key);
+            const auto* second = key == 0 ? &b.tracksOutside.master : b.tracksOutside.tracks.find (key);
+
+            if ((first == nullptr) != (second == nullptr) || (first != nullptr && ! (*first == *second)))
+                return false;
+        }
+
+        return true;
+    }
+
+    // Whether two states hold the same of what the devices, containers and chains they hold store (or the same of their
+    // windows' places): the entries of an item a state doesn't hold (one a step took away, kept for the Undo that brings it
+    // back: DeviceStoreValue.h, DevicesOutside.h) are never written, so none is read back.
+    bool holdSameStoreOfHeld (const SongState& a, const SongState& b, bool windows)
+    {
+        for (const auto* state : { &a, &b })
+        {
+            for (const auto& entry : state->devices.devices)
+            {
+                const auto id = DeviceID::fromRaw (entry.first);
+
+                if (windows ? a.devicesOutside.findWindow (id) != b.devicesOutside.findWindow (id) : ! holdSameDeviceStore (a, b, id))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Whether two values of the clips hold the same alias groups, each the same clips: in any order, as the order they joined
+    // a group in (ClipsValue.h: SongClips::groups) is no part of a file, which a group read back holds in its tracks' order.
+    bool holdSameGroups (const SongClips& a, const SongClips& b)
+    {
+        if (a.groups == b.groups)
+            return true;
+
+        if (a.groups.size() != b.groups.size())
+            return false;
+
+        for (const auto& [link, members] : a.groups)
+        {
+            const auto* other = b.groups.find (link);
+
+            if (other == nullptr)
+                return false;
+
+            std::vector<ClipID> first (members.begin(), members.end()), second (other->begin(), other->end());
+            std::sort (first.begin(), first.end());
+            std::sort (second.begin(), second.end());
+
+            if (first != second)
+                return false;
+        }
+
+        return true;
+    }
+
     void checkLiveRoot (const Song& song, std::vector<std::string>& problems)
     {
         const auto live = song.getState();
@@ -1945,7 +2090,7 @@ namespace
         // values alone: what the rest of the song holds may not be whole while a test looks (a second AUTOMATION left to a
         // step's Undo), which no copy of the song should be asked of.
         juce::ValueTree root (schema::PHAZITE);
-        writeSongOwnIn (root, keepValues (song));
+        writeSongOwnIn (root, getSongState (song));
 
         if (! (readSongOwnValue (root) == readHeldSongOwn (root)))
             problems.push_back ("values: the song's own is read otherwise as Phazite's code read it and as the song holds it");
@@ -2023,7 +2168,43 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkTrackLeavesValue (song, *values, problems); // the tracks' switches and view
     checkSongOwnValue (song, *values, problems);     // the song's own
     checkLiveRoot (song, problems);                  // what the areas' switches leave of the live root: empty placeholders
+    checkSongState (song, problems);                 // the song whole as a value, written and read back
     return problems;
+}
+
+std::vector<std::string> findStateDifferences (const SongState& a, const SongState& b)
+{
+    // Each area by its own == (identity aside), a line each, in the order of the areas.
+    std::vector<std::string> found;
+    const auto compare = [&found] (bool same, const char* what)
+    {
+        if (! same)
+            found.emplace_back (what);
+    };
+
+    compare (a.songOwn == b.songOwn, "song's own");
+    compare (a.songStanding == b.songStanding, "song's standing (its key set last, its versions' names)");
+    compare (a.songOutside == b.songOutside, "song's loop, play start, grids and the rest of its outside value");
+    compare (a.nextID == b.nextID, "count of IDs");
+    compare (a.clips.clips == b.clips.clips, "clips (their values)");
+    compare (a.clips.tracks == b.clips.tracks, "clips (each track's, in its order)");
+    compare (holdSameGroups (a.clips, b.clips), "clips (each alias group's)");
+    compare (a.notes.clips == b.notes.clips, "notes");
+    compare (a.tempoMap == b.tempoMap, "tempo map");
+    compare (a.chordLane == b.chordLane, "chord lane");
+    compare (a.midiLinks == b.midiLinks, "MIDI links");
+    compare (a.curves == b.curves, "curves");
+    compare (a.sections == b.sections, "sections");
+    compare (a.modulation == b.modulation, "modulation");
+    compare (a.sends == b.sends, "sends");
+    compare (a.deviceStore == b.deviceStore || holdSameStoreOfHeld (a, b, false), "store of the devices");
+    compare (a.devicesOutside == b.devicesOutside || holdSameStoreOfHeld (a, b, true), "windows' places");
+    compare (a.devices == b.devices, "devices");
+    compare (a.trackSwitches == b.trackSwitches || holdSameLeavesOfHeld (a, b, false), "tracks' switches");
+    compare (a.tracksOutside == b.tracksOutside || holdSameLeavesOfHeld (a, b, true), "tracks' view");
+    compare (a.tracks == b.tracks, "tracks");
+    compare (findWrittenPlaces (a) == findWrittenPlaces (b), "places of its root (as a whole copy writes them)");
+    return found;
 }
 
 void checkValues (const Song& song)

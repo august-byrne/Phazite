@@ -24,7 +24,8 @@ found by reading while the automation's curves were made values (2026-11-22), an
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
 the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
-onto another's beat does. 246 was found by the review of the tracks' leaf switch (the same step, 2026-11-24).
+onto another's beat does. 246 was found by the review of the tracks' leaf switch (the same step, 2026-11-24), and 247
+by the song's state read back from its own file's form (the same step, 2026-11-26).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -268,6 +269,21 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   drag across a neighbour and one that ends on it in `tests/TempoTests.cpp`; then `checkSong()`'s `key` rule holds for
   every song the model makes, and the case "A tempo moved onto another's beat..." there checks the whole song, not
   its values alone.
+
+- **247. Past beat 1,000,000 an edit is saved where it was made and opens at beat 1,000,000.** A clip, a section, a
+  tempo change or a chord put at beat 1,200,000 (far past any song: more than nine hours at 120 beats a minute, but the
+  time line scrolls there) is held and played there, and a save writes it there; opened again it stands at 1,000,000,
+  silently. Why: the readers of what a song can hold bound each beat by its description in
+  `src/model/base/internal/Schema.h` (0 to `maxBeats`), and the writers don't: `keepWithinClip()`
+  (`src/model/arrangement/Clips.cpp`) bounds a clip's start only below 0, and its length and offset not at all, and
+  the edits of `Sections.cpp`, `Tempo.cpp`, `Chords.cpp`, `Automation.cpp` and `Notes.cpp` name no `maxBeats` (a
+  curve's points and a note's start have no upper bound in their writers either: from reading). So "a writer writes
+  what the song holds" is broken past the range. Found by `readSongTree (writeSongTree (state))` compared with the
+  state (roadmap step S5.20, 2026-11-26; `tests/ValueAreaTests.cpp` placed its clips 1,024 beats apart and passed the
+  range). To fix: each area's writer bounds a beat by its description's range through one helper (or the edit refuses
+  past it, where a clamp would pile things up at the last beat: a paste, a drag), the time line's scrolling ends there,
+  and a case of `tests/ModelFuzzTests.cpp` makes its edits far out and checks that the song's state read back from
+  its file's form is the state.
 
 - **235. A DAWproject import can put MIDI clips and audio clips on one track.** Audio and notes don't share a track
   in Phazite (a model function that puts a clip on a track asks `canTrackHold()`), and the import's reader

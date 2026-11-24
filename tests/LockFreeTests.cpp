@@ -3,11 +3,12 @@
 // (EventQueue.h), the handover of what the audio thread plays (Handover.h), the playhead's stamps (PlayheadClock.h),
 // the transport the message thread asks for (Engine.h), a device's sample tap made as a display listens (SampleTap.h) and a
 // dynamics device's trail (LevelTrail.h), and the sounds the synth and the sampler let go of once the audio thread can't be
-// reading them.
+// reading them; and a song's state (model/base/internal/SongState.h) written on another thread while the song changes.
 // Each race runs a fixed count of operations, never for a time, and waits only for what the other threads do, so that it
 // says the same on one core as on many; ThreadSanitizer (linux-tsan) sees each access the threads share. What a thread
 // finds wrong it counts, and the test thread checks the counts once the threads have ended (doctest's checks are the test
 // thread's).
+#include "RandomEdits.h"
 #include "TestHelpers.h"
 #include "devices/core/LevelTrail.h"
 #include "devices/core/SampleTap.h"
@@ -18,6 +19,9 @@
 #include "engine/core/Handover.h"
 #include "engine/core/PlayheadClock.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongState.h"
+#include "model/base/internal/SongText.h"
+#include "model/base/internal/WholeState.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/MidiTap.h"
 #include "model/project/ProjectContext.h"
@@ -1366,4 +1370,63 @@ TEST_CASE ("The MIDI tap raced by four inputs while the message thread changes w
     CHECK (torn == 0);
     CHECK (popped + (int) (tap.getDropped() - dropped) == taken.load());
     CHECK (popped > 0);
+}
+
+TEST_CASE ("A song's state raced: written on another thread while the message thread edits the song, each as it was taken")
+{
+    // model/base/internal/SongState.h: a state taken on the message thread (getSongState(), a copy of each area's value that
+    // shares what it holds) is read on another (writeSongTree()) while the message thread goes on editing the song, its new
+    // values sharing nodes with those the state holds and letting go of others: immer's counts of what shares a node are
+    // atomic. Each state's text is written on the message thread as it is taken, and on the other thread from the state alone,
+    // a fixed count of states, the other thread waiting only for the next to be handed over. The other thread takes each state
+    // for its own and lets it go there once written, while the message thread edits on: so the counts are raised and dropped
+    // on both threads at once, and the last holder of a node the song has since let go of is the other thread, which frees it
+    // (a save's writer and the versions' thread do exactly that).
+    constexpr int rounds = 40;
+    phazite::test::TemporaryFolder sounds;
+    auto song = phazite::createSong();
+    phazite::test::RandomEdits edits (*song, 20261127, sounds.folder);
+    edits.edit (20);
+
+    const auto toText = [] (const juce::ValueTree& tree)
+    {
+        juce::MemoryOutputStream text;
+        phazite::writeProjectText (text, tree);
+        return text.toString();
+    };
+
+    std::vector<phazite::SongState> states ((size_t) rounds);
+    std::vector<juce::String> expected ((size_t) rounds), written ((size_t) rounds);
+    std::atomic<int> handed { 0 };
+
+    std::thread reader (
+        [&]
+        {
+            for (int i = 0; i < rounds; ++i)
+            {
+                while (handed.load (std::memory_order_acquire) <= i)
+                    std::this_thread::yield();
+
+                // Handed over whole: the message thread wrote this one before it said so, and never touches it again.
+                const auto mine = std::move (states[(size_t) i]);
+                const auto shared = mine; // a second holder made and let go here: counts raised and dropped on this thread
+                written[(size_t) i] = toText (phazite::writeSongTree (shared));
+            }
+        });
+
+    for (int i = 0; i < rounds; ++i)
+    {
+        states[(size_t) i] = phazite::getSongState (*song);
+        expected[(size_t) i] = toText (phazite::copyWholeSong (*song));
+        handed.store (i + 1, std::memory_order_release);
+        edits.edit (3);
+    }
+
+    reader.join();
+    auto differ = 0;
+
+    for (int i = 0; i < rounds; ++i)
+        differ += written[(size_t) i] == expected[(size_t) i] ? 0 : 1;
+
+    CHECK (differ == 0);
 }

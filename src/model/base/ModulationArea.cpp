@@ -331,19 +331,23 @@ void SongValues::ModulationKeeper::childAdded (juce::ValueTree& parent, juce::Va
         child.removeChild (element, nullptr);
 }
 
-void SongValues::ModulationKeeper::adopt (SongValues& into, Song& loaded)
+void SongValues::ModulationKeeper::adopt (SongValues&, Song& loaded)
 {
-    // Every modulator and macro the loader made consistent into the area, outside the history, as the song holds each, in the
-    // elements' order (each track's, the master's, each channel's own then its containers'); what the loader left of each is
-    // what the song holds of it (ModulationValue.h: keepModulatorAsHeld()), so the adoption changes nothing of what the file
-    // held. Then every MODULATOR and MACRO element out of the tree, those anywhere else too, which are no modulators of the
-    // song's (dropModulatorElements()).
-    auto tree = loaded.getState();
-    into.modulation.setOutsideHistory (
-        readHeldModulation (tree, [] ([[maybe_unused]] const juce::ValueTree& element)
-                            { jassert (isWrittenAsHeld (element, readModulatorPlace (element))); })); // the loader keeps each as held
-    jassert (holdsTogether (into.modulation.get()));
-    dropModulatorElements (tree);
+    // Every MODULATOR and MACRO element out of the tree, its reader having read the song's into the area before
+    // (readHeldModulationIn(): SongValues.cpp, adopt()), those anywhere else too, which are no modulators of the song's
+    // (dropModulatorElements()).
+    dropModulatorElements (loaded.getState());
+}
+
+void readHeldModulationIn (const juce::ValueTree& song, SongState& into)
+{
+    // Every modulator and macro the loader made consistent, as the song holds each, in the elements' order (each track's, the
+    // master's, each channel's own then its containers'); what the loader left of each is what the song holds of it
+    // (ModulationValue.h: keepModulatorAsHeld()), so reading it changes nothing of what the file held.
+    into.modulation =
+        readHeldModulation (song, [] ([[maybe_unused]] const juce::ValueTree& element)
+                            { jassert (isWrittenAsHeld (element, readModulatorPlace (element))); }); // the loader keeps each as held
+    jassert (holdsTogether (into.modulation));
 }
 
 //==============================================================================
@@ -474,7 +478,7 @@ bool leadsToModulation (const juce::ValueTree& parent, const juce::ValueTree& ch
     return (parent.hasType (schema::TRACK) || parent.hasType (schema::MASTER)) && child.hasType (schema::CONTAINER);
 }
 
-void writeModulationIn (juce::ValueTree& element, const ValuesKept& kept)
+void writeModulationIn (juce::ValueTree& element, const SongState& kept)
 {
     const auto* list = findKeptList (kept.modulation, element);
 
@@ -487,12 +491,12 @@ void writeModulationIn (juce::ValueTree& element, const ValuesKept& kept)
             element.appendChild (writeModulatorElement (*value), nullptr);
 }
 
-bool holdSameModulation (const ValuesKept& a, const ValuesKept& b)
+bool holdSameModulation (const SongState& a, const SongState& b)
 {
     return a.modulation.isSameAs (b.modulation) || a.modulation == b.modulation;
 }
 
-bool holdSameModulator (const ValuesKept& a, const ValuesKept& b, ModulatorID id)
+bool holdSameModulator (const SongState& a, const SongState& b, ModulatorID id)
 {
     const auto* first = a.modulation.find (id);
     const auto* second = b.modulation.find (id);
@@ -503,7 +507,7 @@ bool holdSameModulator (const ValuesKept& a, const ValuesKept& b, ModulatorID id
     return first->isSameAs (*second) || *first == *second;
 }
 
-bool holdSameModulatorOrder (const ValuesKept& a, const ValuesKept& b, const ModulatorPlace& owner)
+bool holdSameModulatorOrder (const SongState& a, const SongState& b, const ModulatorPlace& owner)
 {
     const auto* first = a.modulation.findList (owner);
     const auto* second = b.modulation.findList (owner);
@@ -514,8 +518,8 @@ bool holdSameModulatorOrder (const ValuesKept& a, const ValuesKept& b, const Mod
     return first->identity() == second->identity() || *first == *second;
 }
 
-bool holdSameModulationOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
-                           const ValuesKept& otherKept)
+bool holdSameModulationOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
+                           const SongState& otherKept)
 {
     const auto* list = findKeptList (kept.modulation, element);
     const auto* otherList = findKeptList (otherKept.modulation, otherElement);
