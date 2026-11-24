@@ -2,6 +2,7 @@
 #include "internal/PlaybackSession.h"
 #include "internal/PlaybackHost.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/midi/internal/MidiLinks.h"
@@ -41,9 +42,6 @@ namespace
 
     bool isViewState (const juce::ValueTree& tree, const juce::Identifier& property)
     {
-        if ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER)) && schema::isTrackViewProperty (property))
-            return true;
-
         if (tree.hasType (schema::PHAZITE) && schema::isGridProperty (property))
             return true;
 
@@ -145,12 +143,44 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
     if ((tree == songState && property == schema::playStart) || isViewState (tree, property) || schema::isVersionsProperty (tree, property))
         return;
 
-    // A value set by hand plays at once, and an undo's or a redo's is what a pass writing it writes from then (known bug
-    // 174), once the undo or the redo is whole (followAfterMove); anything else, in a new plan. (A device's values, its
-    // latency's wait among them: devicesChanged().)
-    if (! player.takeValue (tree, property))
+    // Anything else, in a new plan. (A value set by hand plays at once, from the song's values: a device's, its latency's
+    // wait among them, devicesChanged(); a channel's volume, pan, mute and solo, tracksChanged() and trackSwitchesChanged().)
+    triggerAsyncUpdate();
+}
+
+void PlaybackSession::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>& reordered, const SongTracks& now)
+{
+    // A volume or a pan in place plays at once, and an undo's or a redo's is what a pass writing it writes from then (known bug
+    // 174), once the undo or the redo is whole (followAfterMove); anything else, in a new plan.
+    auto plan = ! reordered.empty();
+
+    for (const auto& track : tracks)
+        if (! track.wasThere || ! track.isThere || track.parts != TrackChange::mixer)
+            plan = true;
+
+    const auto taken = player.takeTracks (tracks, now);
+
+    if (plan)
         triggerAsyncUpdate();
-    else if (song->getUndoManager().isPerformingUndoRedo())
+
+    if (taken && song->getUndoManager().isPerformingUndoRedo())
+        followAfterMove = true;
+}
+
+void PlaybackSession::trackSwitchesChanged (const std::vector<TrackSwitchChange>& switches, const TrackSwitches& now)
+{
+    // A mute and a solo play at once, followed after an undo or a redo as a volume is; a frozen switch and an automation mode
+    // in a new plan, which reads them.
+    using Field = TrackSwitchChange::Field;
+    const auto plan = std::any_of (switches.begin(), switches.end(), [] (const TrackSwitchChange& change)
+                                   { return change.field == Field::frozen || change.field == Field::automationMode; });
+
+    const auto taken = player.takeTrackSwitches (switches, now);
+
+    if (plan)
+        triggerAsyncUpdate();
+
+    if (taken && song->getUndoManager().isPerformingUndoRedo())
         followAfterMove = true;
 }
 

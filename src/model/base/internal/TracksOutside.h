@@ -82,6 +82,12 @@ TrackView readViewOf (const juce::ValueTree& trackOrMaster);
 // reads as none left out.
 TrackView readHeldViewOf (const juce::ValueTree& trackOrMaster);
 
+// Of a view read so, one property read again from the element, as readHeldViewOf() reads it (none where it isn't described on
+// the element's type), and its lanes read again from its LANES: what the tracks' keeper reads for one property, or one lane,
+// that changed (TracksArea.h). Nothing for a property that isn't the view's.
+void readHeldViewProperty (const juce::ValueTree& trackOrMaster, const juce::Identifier& property, TrackView&);
+immer::flex_vector<LaneValue> readHeldLanesOf (const juce::ValueTree& trackOrMaster);
+
 // A LANE as Phazite's code always read it (model/automation/Automation.cpp: getLanes()): its device as a cast reads its
 // text, its parameter as text, its height as an int truncates it where it has one, collapsed as a cast's bool. And as the
 // song holds it: its device one the song can count on from, else none (no lane); its height within its range, made whole.

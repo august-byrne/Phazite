@@ -10,6 +10,7 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongValues.h"
 
 #include <cstdint>
 #include <optional>
@@ -21,8 +22,8 @@ namespace phazite
 class AudioIO;
 class PlaybackSession;
 
-class AudioRecorder : private juce::ChangeListener,     // Phazite's devices (AudioIO.h), as the audio device changes
-                      private juce::ValueTree::Listener // the tracks' inputs and monitoring
+class AudioRecorder : private juce::ChangeListener, // Phazite's devices (AudioIO.h), as the audio device changes
+                      private SongValues::Listener  // the tracks' inputs and monitoring
 {
 public:
     // The recorder of a session's song, on the session's audio device: the session makes it as it starts.
@@ -52,15 +53,22 @@ private:
     PlaybackSession& session;
     Song& song;
     AudioIO& audio;
-    juce::ValueTree songState;
     std::set<TrackID> armed;
     juce::BigInteger openedForTracks; // the audio device's inputs opened for the tracks, which close when they no longer need them
     bool updating = false;
     bool closing = false; // as it goes: its tracks need nothing more
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
+
+    // The inputs in line with these tracks (update()'s, from the tracks the song's values tell, or the song's).
+    void updateFrom (const SongTracks&);
+
+    // The tracks (SongValues.h): a track's input or monitoring changed (one left without an input disarmed), or a track taken
+    // out (disarmed, the tracks in it too, each told): the inputs brought in line at once from the tracks handed, never the
+    // song, as the tree's callbacks brought them in line from it. A track that comes back (an Undo of its removal) reopens no
+    // input from here, as the tree's callbacks, which heard no track added, didn't (design K.13): its input opens at the next
+    // change of an input, a monitoring, an arming or the audio device.
+    void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
 
     JUCE_DECLARE_NON_COPYABLE (AudioRecorder)
 };

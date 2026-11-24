@@ -6,6 +6,7 @@
 #include "model/base/Numbers.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/engine/AppInfo.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/mixer/internal/Mixer.h"
@@ -78,10 +79,11 @@ std::vector<int> getInputChannels (const juce::String& inputID)
 AudioRecorder::AudioRecorder (PlaybackSession& s)
     : session (s),
       song (s.getSong()),
-      audio (s.getAudioIO()),
-      songState (song.getState())
+      audio (s.getAudioIO())
 {
-    songState.addListener (this);
+    if (auto* values = song.getValues())
+        values->addListener (this);
+
     audio.addChangeListener (this);
     update();
 }
@@ -89,7 +91,10 @@ AudioRecorder::AudioRecorder (PlaybackSession& s)
 AudioRecorder::~AudioRecorder()
 {
     audio.removeChangeListener (this);
-    songState.removeListener (this);
+
+    if (auto* values = song.getValues())
+        values->removeListener (this);
+
     armed.clear();
     closing = true;
     update(); // what was opened for its tracks closes
@@ -137,6 +142,14 @@ bool AudioRecorder::canRecord() const
 //==============================================================================
 void AudioRecorder::update()
 {
+    // From the song's tracks as its values told them (their part of the keeper: SongValues.h), or as its tree holds them.
+    const auto* values = song.getValues();
+    const auto* told = values != nullptr ? values->getTracksAsTold() : nullptr;
+    updateFrom (told != nullptr ? *told : getTracksValue (song));
+}
+
+void AudioRecorder::updateFrom (const SongTracks& tracks)
+{
     // While a take records, the inputs stay as they are: changing them opens the device again. The take updates them as it
     // ends at Stop (Take.h); one that ends at a jump leaves them to the take that goes on from it, which records the same
     // tracks' inputs (PlaybackSession::locateWhileRecording()).
@@ -149,17 +162,19 @@ void AudioRecorder::update()
     const auto numInputs = device != nullptr ? device->getInputChannelNames().size() : 0;
 
     // The channels the tracks need now: those of a track that is armed or always hears its input (none as the recorder
-    // goes).
+    // goes), a track or a return (not a folder).
     juce::BigInteger wanted;
 
-    for (const auto track : closing ? std::vector<TrackID>() : getTrackIDs (song))
+    for (const auto& entry : tracks.tracks)
     {
-        const auto channels = hasInputs (song, track) ? getInputChannels (getTrackInput (song, track)) : std::vector<int>();
+        const auto& track = entry.second;
+        const auto hasInput = track.kind == TrackValue::Kind::track || track.kind == TrackValue::Kind::returnTrack;
+        const auto channels = hasInput && ! closing ? getInputChannels (track.input) : std::vector<int>();
 
         if (channels.empty() || channels.back() >= numInputs)
             continue;
 
-        if (isArmed (track) || getTrackMonitoring (song, track) == TrackValue::Monitoring::always)
+        if (isArmed (track.id) || track.monitoring == TrackValue::Monitoring::always)
             for (auto channel : channels)
                 wanted.setBit (channel);
     }
@@ -357,25 +372,32 @@ void AudioRecorder::changeListenerCallback (juce::ChangeBroadcaster*)
     update(); // the audio device changed
 }
 
-void AudioRecorder::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
+void AudioRecorder::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>&, const SongTracks& now)
 {
-    if ((property == schema::trackInput || property == schema::trackMonitoring) && tree.hasType (schema::TRACK))
-    {
-        // A track left without an input can't stay armed.
-        if (getInputChannels (tree[schema::trackInput].toString()).empty())
-            armed.erase (getTrackID (tree));
+    auto changed = false;
 
-        update();
-    }
-}
-
-void AudioRecorder::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int)
-{
-    if (child.hasType (schema::TRACK))
+    for (const auto& track : tracks)
     {
-        // The track, and those in it if it was a folder.
-        std::erase_if (armed, [this] (TrackID track) { return ! findTrackState (song, track).isValid(); });
-        update();
+        if (track.onMaster)
+            continue;
+
+        if (track.wasThere && ! track.isThere)
+        {
+            // The track, and those in it if it was a folder (each told).
+            armed.erase (track.id);
+            changed = true;
+        }
+        else if (track.has (TrackChange::recording) && track.now != nullptr)
+        {
+            // A track left without an input can't stay armed.
+            if (getInputChannels (track.now->input).empty())
+                armed.erase (track.id);
+
+            changed = true;
+        }
     }
+
+    if (changed)
+        updateFrom (now);
 }
 } // namespace phazite

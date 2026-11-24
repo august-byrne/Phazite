@@ -13,6 +13,7 @@
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/internal/Freeze.h"
@@ -102,7 +103,7 @@ namespace
 
         // Clips added, taken out, moved or changed (SongValues.h): each named, with the track it was on and the one it is on,
         // as the change says them. Not a track's clips in another order, which changes nothing a view shows (their places in
-        // time are their own: markMoved()).
+        // time are their own).
         void clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>&) override
         {
             if (clips.empty())
@@ -144,7 +145,7 @@ namespace
         // The modulators and macros (SongValues.h): their group, for one added, taken out or come to another place, and for
         // any part of one but a value set by hand, its first or its last, and a macro's value, which no view shows as a
         // change (controls read values as they show them, as valueTreePropertyChanged() leaves a parameter's value alone);
-        // nothing for their order alone, which views show nowhere as a change (markMoved()). The song's tree holds none of
+        // nothing for their order alone, which views show nowhere as a change. The song's tree holds none of
         // them. A track or a container that comes or goes with modulators or macros in it (added, removed, duplicated, moved
         // into a folder, brought back by an Undo) tells them added or taken out, so their group comes beside what the tree
         // raises for the track or the device: one group more than the tree alone raised, for a rare edit (the devices' view
@@ -164,7 +165,7 @@ namespace
         // to another track or sent to another return, which changes where sound can go, any channel (every strip's send knobs
         // follow the whole routing, as devicesChanged() says of a device's sidechain). Not a level alone, a parameter's value,
         // which no view shows as a change (controls read values as they show them). A track whose sends came in another order:
-        // its channel, as a SEND moved past another was (markMoved()). The song's tree holds no send. A track that comes or
+        // its channel, as a SEND moved past another was. The song's tree holds no send. A track that comes or
         // goes with sends on it (added, removed, duplicated, moved into a folder, brought back by an Undo) tells them added or
         // taken out, so the devices' group and any channel come beside what the tree raises for the track: more than the tree
         // alone raised while it held the sends, for a rare edit (every strip shows its send knobs again), which the area can't
@@ -202,7 +203,7 @@ namespace
 
         // The devices, containers and chains (SongValues.h): the devices' group, naming the channel each was on and is on, as a
         // change in a DEVICE's or a CONTAINER's element was (mark()), and as one added, taken out or moved past another was
-        // (markRemoved(), markMoved()); and any channel where what sound can reach changed (every strip's send knobs follow
+        // (markRemoved()); and any channel where what sound can reach changed (every strip's send knobs follow
         // the whole routing, a send that would make a loop has none): a sidechain set or cleared, or carried by one that came,
         // went or moved (as the tree's callbacks said of an element added or taken out), and a value that switches what a
         // sidechain hears (a compressor's mode: DeviceChange::sidechainSwitched). No group for a parameter's value alone (its
@@ -352,17 +353,6 @@ namespace
             items.named.erase (std::unique (items.named.begin(), items.named.end()), items.named.end());
         }
 
-        // The channel an element is, or is in (a track frozen or played live again).
-        void nameChannelOf (const juce::ValueTree& changed)
-        {
-            auto channel = changed;
-
-            while (channel.isValid() && ! isTrackElement (channel) && ! channel.hasType (schema::MASTER))
-                channel = channel.getParent();
-
-            name (pending.deviceChannels, channel.isValid() ? getTrackID (channel) : TrackID());
-        }
-
         // The group a change to this element, or to something in it, belongs to (the song's tree holds no device, container
         // or chain: devicesChanged(), deviceStoreChanged()).
         void mark (const juce::ValueTree& changed)
@@ -412,37 +402,18 @@ namespace
             listeners.call ([&changes] (ProjectContext::Listener& l) { l.songChanged (changes); });
         }
 
-        // A child that is gone has no parent to say where it was: its own type does, or else its old parent's.
+        // A child that is gone has no parent to say where it was: its own type does, or else its old parent's. (A track and a
+        // channel's LANES taken out: tracksChanged(), tracksViewChanged().)
         void markRemoved (const juce::ValueTree& parent, const juce::ValueTree& child)
         {
             if (child.hasType (schema::MIDILINKS))
                 add (pending.midiLinks);
-            else if (schema::isTrackViewElement (child))
-                add (pending.view);
             else if (child.hasType (schema::SECTIONS))
                 add (pending.sections);
             else if (child.hasType (schema::CHORDLANE))
                 add (pending.chords);
-            else if (isTrackElement (child))
-                add (pending.tracks);
             else
                 mark (parent);
-        }
-
-        // A track that moved past another, which changes their order: clips, sections and the tempo's changes have their places
-        // in time, which no order changes. A device that moved past another: devicesChanged(), told the owner reordered.
-        void markMoved (const juce::ValueTree& parent, int oldIndex, int newIndex)
-        {
-            if (! isTrackElement (parent.getChild (newIndex)))
-                return;
-
-            // The elements it passed: now between its new place and its old one.
-            const auto first = newIndex < oldIndex ? newIndex + 1 : oldIndex;
-            const auto last = newIndex < oldIndex ? oldIndex : newIndex - 1;
-
-            for (int i = first; i <= last; ++i)
-                if (isTrackElement (parent.getChild (i)))
-                    return add (pending.tracks);
         }
 
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
@@ -451,31 +422,54 @@ namespace
                 return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), ..., devicesChanged()
 
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
-            // makes one at each move (docs/archive/performance-audit.md, U1); a channel's volume and pan neither (a macro's
-            // value: modulationChanged(); a send's level: sendsChanged(); a device's values, a chain's volume, pan and
-            // crossover: devicesChanged(); a plug-in's: deviceStoreChanged()).
-            if (isParameterValue (tree, property)
-                || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
-                    && (property == schema::channelVolume || property == schema::channelPan)))
+            // makes one at each move (docs/archive/performance-audit.md, U1) (a macro's value: modulationChanged(); a send's
+            // level: sendsChanged(); a device's values, a chain's volume, pan and crossover: devicesChanged(); a plug-in's:
+            // deviceStoreChanged(); a channel's volume and pan: tracksChanged()).
+            if (isParameterValue (tree, property))
                 return;
 
             // The project's notes, the song's own.
             if (tree == state && property == schema::notes)
                 return add (pending.notes);
 
-            // A track frozen or played live again changes what its devices show too (their controls are off while frozen).
-            if (tree.hasType (schema::TRACK) && property == schema::trackFrozen)
+            mark (tree);
+        }
+
+        // The tracks (SongValues.h; the tree callbacks here leave what their values cover alone, isHeardAsKept()): their group,
+        // as a change of a TRACK's or the MASTER's own property, a TRACK added, taken out or moved past another were; nothing
+        // for a channel's volume and pan alone, which no view shows as a change (controls read values as they show them). A
+        // track given another ID in place is told as one taken out and another added, its group's alike.
+        void tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>& reordered, const SongTracks&) override
+        {
+            const auto shown = std::any_of (tracks.begin(), tracks.end(), [] (const TrackChange& track)
+                                            { return ! track.wasThere || ! track.isThere || track.parts != TrackChange::mixer; });
+
+            if (shown || ! reordered.empty())
+                add (pending.tracks);
+        }
+
+        // The switches: the tracks' group, as a TRACK's switch was; a track frozen or played live again changes what its devices
+        // show too (their controls are off while frozen): the devices' group, its channel named by its ID. The master's
+        // automation mode: the tracks' group, as the MASTER's own property was.
+        void trackSwitchesChanged (const std::vector<TrackSwitchChange>& switches, const TrackSwitches&) override
+        {
+            for (const auto& change : switches)
             {
-                nameChannelOf (tree);
-                add (pending.devices);
+                if (change.field == TrackSwitchChange::Field::frozen)
+                {
+                    name (pending.deviceChannels, change.track);
+                    add (pending.devices);
+                }
             }
 
-            // How tall a track shows, and the like, is view state (Schema.h), not the song.
-            if (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
-                add (pending.view);
-            else
-                mark (tree);
+            if (! switches.empty())
+                add (pending.tracks);
         }
+
+        // How the tracks show (view state, Schema.h; not the song): the view's group, the master's row's too (design K.7: a
+        // MASTER's view property raised the tracks' group while the tree told it). None for a write of the view that changes
+        // nothing of it (an empty LANES added), which the tree's callbacks raised the view's group for.
+        void tracksViewChanged (const std::vector<TrackID>&, bool) override { add (pending.view); }
 
         void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
         {
@@ -491,11 +485,10 @@ namespace
             if (! isHeardAsKept (parent, child))
                 markRemoved (parent, child);
         }
-        void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override
-        {
-            if (! isHeardAsKept (parent))
-                markMoved (parent, oldIndex, newIndex);
-        }
+
+        // Children in another order: nothing views show as a change but tracks' (tracksChanged(), told the lists reordered)
+        // and devices' (devicesChanged(), told the owners reordered); clips, sections and the tempo's changes have their places
+        // in time, which no order changes.
     };
 
 } // namespace

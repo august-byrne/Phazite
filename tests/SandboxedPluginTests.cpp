@@ -2568,6 +2568,38 @@ TEST_CASE ("A value typed into a plug-in's control lands while a take records an
     CHECK_FALSE (afterUndo->value().has_value());
 }
 
+TEST_CASE ("A value typed into a plug-in's control doesn't land after a drag that changed only the song's values was rolled back "
+           "while the plug-in read it")
+{
+    // The review of known bug 166 kept: what an answer that comes later watches for is a move of the song's history
+    // (model/devices/ParameterHandle.cpp: HistoryWatch), which it heard from the song's tree's callbacks while the history
+    // undid; a step that changes only the song's values (here automation points, a value beside the tree) taken back alone,
+    // as Escape takes a drag back (Gesture::rollBack()), told the tree nothing. The history tells its listeners of every move.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    const auto handle = phazite::getParameter (song.context, { slow, "60" });
+    REQUIRE (handle.readsTextLater());
+    auto& model = getSong (song);
+    const phazite::ParameterRef level { slow, "60" };
+    song.addAutomation (level, { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (4.0), 0.5f } });
+
+    SlowGate gate;
+    gate.shut();
+    auto afterRollBack = std::make_shared<std::optional<std::optional<float>>>();
+
+    {
+        phazite::Gesture drag (model, "Move Points");
+        phazite::moveAutomationPoints (song.context, level, { 0 }, phazite::BeatDuration::fromBeats (1.0), 0.0f);
+        handle.readText ("30 %", [afterRollBack] (std::optional<float> value) { *afterRollBack = value; });
+        drag.rollBack();
+    }
+
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([afterRollBack] { return afterRollBack->has_value(); }, longWait));
+    CHECK_FALSE (afterRollBack->value().has_value());
+}
+
 TEST_CASE ("What isn't a number, and texts of any length, from a plug-in never get past where they come in")
 {
     // Known bug 181: jlimit() passed NaN on, and what the helper told was taken as it came.

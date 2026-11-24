@@ -33,6 +33,7 @@ struct ClipTempo;
 struct ModulatorValue;
 struct PlayedClip;
 struct SongModulation;
+struct TrackValue;
 
 class SongPlayer : private juce::ValueTree::Listener,
                    private SongValues::Listener
@@ -74,11 +75,18 @@ public:
     // is first needed and kept.
     void readLive (engine::FileReader&, const std::atomic<std::uint64_t>& blocksPlayed);
 
-    // Takes a change of the song's tree that is a value set by hand into what plays at once; false for any other change, which
-    // needs a new plan. What the tree still holds that plays: a channel's volume, pan, mute and solo. Not a modulator's nor a
-    // macro's, nor a send's, nor a device's, a container's or a chain's that the devices' value covers, nor what the devices'
-    // store holds, which the song's values tell (takeModulator(), takeSendLevel(), takeDevice(), takeStoreEntry()).
-    bool takeValue (const juce::ValueTree& tree, const juce::Identifier& property);
+    // A track's or the master's volume or pan changed in place, as the song's values told it (TrackChange::mixer, TracksArea.h:
+    // its value after in the song's tracks handed whole), into what plays it at once: its channel's fader, with the VCAs of
+    // the plain folders it is in; a plain folder's VCA, the faders of the tracks in it (and in its folders), from the lists
+    // handed. Nothing of the song is read. Whether it took something at once (what an undo's following looks at,
+    // PlaybackSession.h). Never for a track added or taken out, which a plan takes.
+    bool takeTracks (const std::vector<TrackChange>&, const SongTracks& now);
+
+    // A track's mute or solo, as the song's values told it (TrackSwitchChange, TracksArea.h), into what plays it at once: what
+    // is heard and which sends send (updateAudibility()), from the switches handed whole and the tracks it holds as they were
+    // handed last (heldTracks), never the song. Whether it took something at once; nothing for a frozen switch or an
+    // automation mode, which a plan takes.
+    bool takeTrackSwitches (const std::vector<TrackSwitchChange>&, const TrackSwitches& now);
 
     // An entry of the devices' store that changed, as the song's values told it (SongValues::DeviceStoreChange), into what
     // plays it at once, if anything does: a plug-in's value set by hand (the value to give it: the song's, or the held one an
@@ -306,8 +314,7 @@ private:
     std::set<std::int64_t> usedNotes;
     juce::ValueTree songState;
     std::shared_ptr<const engine::NoteSequence> getNotes (const juce::ValueTree& trackState);
-    void markChange (const juce::ValueTree& changed);   // an element added, removed or moved in it
-    void markTracksIn (const juce::ValueTree& element); // it, if a track or the master, and the tracks it holds
+    void markChange (const juce::ValueTree& changed); // an element added, removed or moved in it
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
@@ -356,7 +363,30 @@ private:
     // chain's mute and solo are read from.
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
-    // What decides what is heard between plans (updateAudibility(), which a track muted or soloed asks in the tree's callback,
+    // The tracks that changed (SongValues.h; its tree callbacks leave what the tracks' values cover alone, isHeardAsKept()):
+    // a track added or taken out (made, or come to another folder), its notes and audio and its channel read again by the next
+    // compile, and the channel of the folder it was in and is in, as a TRACK added to its parent or taken out of it marked
+    // them; the master's element put in or taken out, its channel; the folders whose tracks came in another order, their
+    // channels. Any other part of one marks nothing (design J.8: a rename, a colour, a key, a bus switch, a volume read no
+    // channel's devices again; routing is worked out whole by every compile), a volume or a pan the session plays at once
+    // (takeTracks()). And the song's tracks as they are now kept (heldTracks). The tracks' switches (trackSwitchesChanged()):
+    // nothing marked, as a TRACK's switch marked nothing; kept (heldTracks), mute and solo played at once by the session
+    // (takeTrackSwitches()), a frozen switch and an automation mode in its next plan. Nor the view (tracksViewChanged()),
+    // which plays nothing.
+    void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
+    void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
+
+    // What decides what is heard between plans (updateAudibility(), which a track muted or soloed asks as the song's values
+    // tell it, reading nothing of the song: SongValues.h), of the tracks: the song's tracks and their switches as the last
+    // compile took them (the keeper's, getTracksAsTold()), and as tracksChanged() and trackSwitchesChanged() were handed them
+    // since. Copies of the values, which share what they hold; in a struct of its own (SongPlayer.cpp), so that what includes
+    // this header doesn't see the tracks' values' names.
+    struct HeldTracks;
+    std::unique_ptr<HeldTracks> heldTracks;
+    void holdTracks(); // from what the keeper told (or the song's tree, for a song without values), as a compile begins
+    void setChannelFrom (const SongTracks&, const TrackValue& channel); // its fader as takeTracks() takes it
+
+    // What decides what is heard between plans (updateAudibility(), which a track muted or soloed asks as the values tell it,
     // where nothing reads the song's devices: SongValues.h), of each device: the track its sidechain listens to (0 for none)
     // and its channel (a track's ID, 0 for the master's). Read from the song's devices as the player is made, and kept as
     // devicesChanged() tells them since.
@@ -376,7 +406,7 @@ private:
     // once; a sampler's sound, or its slices alone), each from a SOUNDS element made of the value after for what it reads.
     void loadSoundsChanged (engine::DeviceNode&, const DeviceValue& was, const DeviceValue& now);
 
-    // The sends that decide which of them sends (updateAudibility(), which a track muted or soloed asks in the tree's callback,
+    // The sends that decide which of them sends (updateAudibility(), which a track muted or soloed asks as the values tell it,
     // where nothing reads the song's sends: SongValues.h): the song's sends as the last compile read them (the sends' area's
     // value, read once for the plan), and as sendsChanged() was handed them since (a send added, removed or switched before
     // its fader and then a track soloed, before the plan the first asked for). A copy of the area's value, which shares what it

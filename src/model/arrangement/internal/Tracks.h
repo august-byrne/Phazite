@@ -143,10 +143,14 @@ std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
 //     the readers of one field: compile()'s master's channel, getChannels(), updateAudibility() (a pad's sampler's track, a
 //     soloed return), setChannel(), addFaderAutomation(), addModulation(), getNotes() and compileNotes(), makeAudio(),
 //     checkAudio(), getHeardInput(), addFrozenFile().
-//   - The listeners' tree callbacks (the listener's piece): SongPlayer.cpp: markChange(), valueTreePropertyChanged(),
-//     markTracksIn(), takeValue() (a plain folder's VCA turning its tracks); model/project/ProjectContext.cpp:
-//     isTrackElement(), nameChannelOf(), mark(), valueTreePropertyChanged(); model/transport/AudioRecorder.cpp: update();
-//     model/playback/PlaybackSession.cpp: isViewState(); Freeze.cpp's keeper: holdsWhatWasFrozen().
+//   - The tracks' part of the keeper (the listener's piece, model/base/internal/TracksArea.h), which tells the values'
+//     listeners what the tree tells of the tracks until the tracks' switch: no listener's tree callback reads a track's
+//     element any more (they hear tracksChanged(), trackSwitchesChanged(), tracksViewChanged()); what is left in them is
+//     the TRACK or the MASTER above what no area takes (the song's tree holds no device, container, chain or store entry: an
+//     element or a property Phazite doesn't know): SongPlayer.cpp: markChange() (that channel); model/project/
+//     ProjectContext.cpp: mark() (the same); Freeze.cpp's keeper: check() (the track a change is in),
+//     holdsWhatWasFrozen(); model/versions/VersionHistory.cpp: markChanged() and markTrack() (the line of the TRACK or the
+//     MASTER above a change, by its ID).
 //   - The loader, the keepers and the check for unsaved changes: model/project/Project.cpp (makeSong(), makeNewSong(),
 //     keepPlaces(), belongsIn(), keepIDs(), keepNames(), keepModulators(), keepSendsAsHeld(), keepDevicesAsHeld(),
 //     keepTracksAsHeld(), collectLinkedClips(), getCountedChild(); holdSameClip(), holdSameTrackClips()); Freeze.cpp:

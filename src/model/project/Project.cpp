@@ -18,6 +18,7 @@
 #include "model/base/internal/SendsArea.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TrackSwitchesValue.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/base/internal/TracksOutside.h"
 #include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
@@ -38,6 +39,7 @@
 #include <juce_cryptography/juce_cryptography.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <charconv>
 #include <cmath>
@@ -2879,11 +2881,18 @@ void Project::clearToCompare()
     clipsToCompare.clear();
     tracksToCompare.clear();
     clearCurvesToCompare();
+    clearTracksToCompare();
 }
+
+namespace
+{
+    std::unordered_map<std::uint64_t, juce::ValueTree> indexTrackElements (const juce::ValueTree& song); // below
+} // namespace
 
 void Project::setSavedState (SongCopy copy)
 {
     savedState = std::move (copy);
+    savedTracks = indexTrackElements (savedState.tree); // the saved copy's tracks indexed once, with it
 }
 
 Project::SongCopy Project::copySong() const
@@ -2915,6 +2924,12 @@ void Project::forgetSavedState()
 namespace
 {
     std::atomic<juce::int64> elementsComparedWithSaved { 0 };
+    std::atomic<juce::int64> trackElementsWalkedWithSaved { 0 }; // Project::countTrackElementsWalkedWithSaved()
+
+    void countTrackElementWalked()
+    {
+        trackElementsWalkedWithSaved.fetch_add (1, std::memory_order_relaxed);
+    }
 
     // An element's place among those of its parent's that count (what holdTheSameProject() compares), or -1.
     int indexAmongCounted (const juce::ValueTree& parent, const juce::ValueTree& element)
@@ -2961,6 +2976,11 @@ void Project::compareStoredStates()
 juce::int64 Project::countElementsCompared()
 {
     return elementsComparedWithSaved.load (std::memory_order_relaxed);
+}
+
+juce::int64 Project::countTrackElementsWalkedWithSaved()
+{
+    return trackElementsWalkedWithSaved.load (std::memory_order_relaxed);
 }
 
 juce::ValueTree Project::findSavedCopy (const juce::ValueTree& element) const
@@ -3027,7 +3047,7 @@ void Project::compareWithSavedState()
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
     // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the
-    // sections, modulation, the sends, the devices, the devices' store), each asked only while all before it compare.
+    // sections, modulation, the sends, the devices, the devices' store, the tracks), each asked only while all before it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
@@ -3039,6 +3059,7 @@ void Project::compareWithSavedState()
     same = same && areSendsAsSaved();
     same = same && areDevicesAsSaved();
     same = same && isDeviceStoreAsSaved();
+    same = same && areTracksAsSaved(); // the tracks', by element while the trees hold them
 
     clearToCompare();
 
@@ -3784,6 +3805,243 @@ bool Project::isDeviceStoreAsSaved() const
                             elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
                             return holdSameDeviceStore (now, savedState.values, id);
                         });
+}
+
+namespace
+{
+    // The tracks' own properties that count (TracksValue.h's and TrackSwitchesValue.h's: not the view, which counts nothing).
+    const std::array<const schema::PropertyDescription*, 19>& getCountedTrackProperties()
+    {
+        static const std::array<const schema::PropertyDescription*, 19> properties {
+            &schema::trackID,       &schema::trackKind,  &schema::trackName,       &schema::trackColour,        &schema::folderBus,
+            &schema::channelVolume, &schema::channelPan, &schema::channelFader,    &schema::channelVCA,         &schema::keyRoot,
+            &schema::keyScale,      &schema::trackInput, &schema::trackMonitoring, &schema::trackPadDevice,     &schema::trackPad,
+            &schema::trackMute,     &schema::trackSolo,  &schema::trackFrozen,     &schema::trackAutomationMode
+        };
+
+        return properties;
+    }
+
+    // Each TRACK of a song's tree by its ID (the first of one), a folder before the tracks in it: one walk.
+    std::unordered_map<std::uint64_t, juce::ValueTree> indexTrackElements (const juce::ValueTree& song)
+    {
+        std::unordered_map<std::uint64_t, juce::ValueTree> index;
+
+        const std::function<void (const juce::ValueTree&)> walk = [&index, &walk] (const juce::ValueTree& list)
+        {
+            for (const auto& child : list)
+            {
+                if (child.hasType (schema::TRACK))
+                {
+                    countTrackElementWalked();
+                    index.try_emplace (readID (child[schema::trackID]), child);
+                    walk (child);
+                }
+            }
+        };
+
+        walk (song.getChildWithName (schema::TRACKS));
+        return index;
+    }
+
+    // A list's tracks' IDs in their order (none for a list that isn't there), each walked counted.
+    std::vector<std::uint64_t> getTrackListOrder (const juce::ValueTree& list)
+    {
+        std::vector<std::uint64_t> order;
+
+        for (const auto& child : list)
+        {
+            if (child.hasType (schema::TRACK))
+            {
+                countTrackElementWalked();
+                order.push_back (readID (child[schema::trackID]));
+            }
+        }
+
+        return order;
+    }
+
+    // Whether two elements of a track, or of the master, hold the same of its own properties that count.
+    bool holdSameTrackOwn (const juce::ValueTree& a, const juce::ValueTree& b)
+    {
+        for (const auto* property : getCountedTrackProperties())
+        {
+            const auto* now = a.getPropertyPointer (property->getName());
+            const auto* saved = b.getPropertyPointer (property->getName());
+
+            if (now == nullptr || saved == nullptr ? now != saved : ! isSameValue (*now, *saved))
+                return false;
+        }
+
+        return true;
+    }
+} // namespace
+
+bool Project::markTracksChanged()
+{
+    // As markChanged() marks an element of the song: counted; and whether what changed is noted, to compare when asked.
+    if (isWriting)
+        return false;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return false;
+    }
+
+    mayHaveChanged = true;
+    return ! comparingTracksWhole;
+}
+
+void Project::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>& reordered, const SongTracks&)
+{
+    // Past mostToCompare of them, the tracks and the master whole.
+    if (! markTracksChanged())
+        return;
+
+    const auto addList = [this] (TrackID owner)
+    {
+        if (std::find (trackListsToCompare.begin(), trackListsToCompare.end(), owner) == trackListsToCompare.end())
+            trackListsToCompare.push_back (owner);
+    };
+
+    // One added, taken out or come to another folder: its folders' lists too, before and after, so that one taken out and put
+    // back at another place before the comparison compares by where it is among its list's others.
+    for (const auto& track : tracks)
+    {
+        if (track.onMaster)
+        {
+            masterOwnToCompare = true;
+            continue;
+        }
+
+        if (std::find (trackOwnToCompare.begin(), trackOwnToCompare.end(), track.id) == trackOwnToCompare.end())
+            trackOwnToCompare.push_back (track.id);
+
+        if (! track.wasThere || ! track.isThere || track.has (TrackChange::made) || track.has (TrackChange::place))
+        {
+            if (track.wasThere)
+                addList (track.parentBefore);
+
+            if (track.isThere)
+                addList (track.parentAfter);
+        }
+    }
+
+    for (const auto folder : reordered)
+        addList (folder);
+
+    if (trackOwnToCompare.size() + trackListsToCompare.size() > mostToCompare)
+    {
+        clearTracksToCompare();
+        comparingTracksWhole = true;
+    }
+}
+
+void Project::trackSwitchesChanged (const std::vector<TrackSwitchChange>& switches, const TrackSwitches&)
+{
+    // A mute toggled outside the history counts as its property did: an unsaved change, and as saved again toggled back.
+    if (! markTracksChanged())
+        return;
+
+    for (const auto& change : switches)
+    {
+        if (change.onMaster)
+            masterOwnToCompare = true;
+        else if (std::find (trackOwnToCompare.begin(), trackOwnToCompare.end(), change.track) == trackOwnToCompare.end())
+            trackOwnToCompare.push_back (change.track);
+    }
+
+    if (trackOwnToCompare.size() + trackListsToCompare.size() > mostToCompare)
+    {
+        clearTracksToCompare();
+        comparingTracksWhole = true;
+    }
+}
+
+void Project::clearTracksToCompare()
+{
+    trackOwnToCompare.clear();
+    trackListsToCompare.clear();
+    masterOwnToCompare = comparingTracksWhole = false;
+}
+
+bool Project::areTracksAsSaved() const
+{
+    if (! comparingTracksWhole && trackOwnToCompare.empty() && trackListsToCompare.empty() && ! masterOwnToCompare)
+        return true;
+
+    // While the trees hold the tracks, by element: past mostToCompare, the tracks and the master whole (holdTheSameProject());
+    // else each list's tracks in their order, then each track's own properties that count against the saved copy's track of
+    // its ID, property by property as a property that notified was (no element compared whole: countElementsCompared() counts
+    // none), one gone from both the same, and the master's; each list counted as one compared.
+    const auto state = song->getState();
+
+    if (comparingTracksWhole)
+    {
+        const auto now = keepValues (*song);
+
+        for (const auto* type : { &schema::TRACKS, &schema::MASTER })
+        {
+            const auto element = state.getChildWithName (*type), saved = savedState.tree.getChildWithName (*type);
+
+            if (element.isValid() != saved.isValid()
+                || (element.isValid() && ! holdTheSameProject (element, now, saved, savedState.values)))
+                return false;
+        }
+
+        return true;
+    }
+
+    // A track found in the song by the song's index, in the saved copy by the index made with it (savedTracks): one lookup on
+    // each side, counted, however many tracks the song has; a list's tracks walked, a folder's where the folder is.
+    const auto findHeld = [this] (TrackID id)
+    {
+        countTrackElementWalked();
+        return findTrackState (*song, id);
+    };
+
+    const auto findSaved = [this] (TrackID id)
+    {
+        countTrackElementWalked();
+        const auto found = savedTracks.find (id.getRaw());
+        return found != savedTracks.end() ? found->second : juce::ValueTree();
+    };
+
+    for (const auto owner : trackListsToCompare)
+    {
+        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+        const auto list = owner.isValid() ? findHeld (owner) : state.getChildWithName (schema::TRACKS);
+        const auto savedList = owner.isValid() ? findSaved (owner) : savedState.tree.getChildWithName (schema::TRACKS);
+
+        if (getTrackListOrder (list) != getTrackListOrder (savedList))
+            return false;
+    }
+
+    for (const auto id : trackOwnToCompare)
+    {
+        const auto found = findHeld (id);
+        const auto saved = findSaved (id);
+
+        if (found.isValid() != saved.isValid())
+            return false;
+
+        if (found.isValid() && ! holdSameTrackOwn (found, saved))
+            return false;
+    }
+
+    if (masterOwnToCompare)
+    {
+        const auto master = state.getChildWithName (schema::MASTER), saved = savedState.tree.getChildWithName (schema::MASTER);
+
+        if (master.isValid() != saved.isValid() || (master.isValid() && ! holdSameTrackOwn (master, saved)))
+            return false;
+    }
+
+    return true;
 }
 
 bool Project::areSendsAsSaved() const

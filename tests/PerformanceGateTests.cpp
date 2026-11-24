@@ -15,6 +15,7 @@
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "PerformanceCounts.h"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestDeviceValues.h"
 #include "TestDevices.h"
@@ -52,6 +53,7 @@
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
@@ -4344,4 +4346,232 @@ TEST_CASE ("Performance gate: a device removed on a song of 200 curves of other 
         return; // nothing counted on this build (PerformanceCounts.h)
 
     CHECK (*many.allocations == *none.allocations);
+}
+
+TEST_CASE ("Performance gate: the tracks' keeper reads no track whole and walks no element for a volume's drag event, a mute's "
+           "click and a row's height drag, and as much for a track added or moved on 20 tracks as on 200")
+{
+    // While the song's tree holds the tracks, the tracks' part of the keeper tells the values' listeners what the tree tells
+    // of them (model/base/internal/TracksArea.h): one property from that one property (no track read whole:
+    // countTracksReadAsValues(); no element walked: countTrackElementsWalked()), a track added read alone with what is in it,
+    // a track moved within its list by the places the tree names. Counted on songs of 20 and 200 tracks, the same.
+    struct Counts
+    {
+        std::uint64_t whole = 0, walked = 0;
+        bool operator== (const Counts&) const = default;
+    };
+
+    const auto measure = [] (const std::function<void()>& edit)
+    {
+        const auto whole = phazite::countTracksReadAsValues();
+        const auto walked = phazite::countTrackElementsWalked();
+        edit();
+        return Counts { phazite::countTracksReadAsValues() - whole, phazite::countTrackElementsWalked() - walked };
+    };
+
+    const auto run = [&measure] (int numTracks)
+    {
+        auto song = phazite::createSong();
+        const auto tracks = phazite::ensureTracks (*song, numTracks);
+        const auto track = tracks[(size_t) numTracks / 2];
+        std::map<std::string, Counts> counts;
+
+        {
+            phazite::Gesture gesture (*song, "Drag Volume");
+            phazite::setChannelVolume (*song, track, -2.0f);
+            counts["a volume's drag event"] = measure ([&] { phazite::setChannelVolume (*song, track, -3.0f); });
+            gesture.commit();
+        }
+
+        counts["a mute's click"] = measure ([&] { phazite::toggleTracksMuted (*song, { track }); });
+        counts["a row's height"] = measure ([&] { phazite::setSavedTrackHeight (*song, track, 100); });
+        counts["a track added"] = measure (
+            [&]
+            {
+                const phazite::UndoStep step (*song, "Add Track");
+                phazite::insertTrack (*song, track, nullptr);
+            });
+
+        counts["a track moved"] = measure ([&] { phazite::moveTracksAfter (*song, { tracks.front() }, tracks.back()); });
+
+        // A folder of 10 tracks moved in the list, and into another folder (JUCE takes it out and puts it in again: it and
+        // its tracks read again).
+        const auto folder =
+            phazite::groupIntoFolder (*song, std::vector<phazite::TrackID> (tracks.begin() + 1, tracks.begin() + 11), nullptr);
+        const auto other = phazite::groupIntoFolder (*song, { tracks.back() }, nullptr);
+        counts["a folder of 10 moved"] = measure ([&] { phazite::moveTracksAfter (*song, { folder }, other); });
+        counts["a folder of 10 into another"] = measure ([&] { phazite::moveTrackIntoFolder (*song, folder, other); });
+        phazite::test::checkSong (*song);
+        return counts;
+    };
+
+    const auto few = run (20);
+    const auto many = run (200);
+
+    for (const auto& [what, counted] : many)
+    {
+        INFO (what);
+        MESSAGE (what << ": tracks read whole " << counted.whole << ", elements walked " << counted.walked);
+        CHECK (counted == few.at (what));
+    }
+
+    for (const auto* what : { "a volume's drag event", "a mute's click", "a row's height" })
+    {
+        INFO (what);
+        CHECK (many.at (what).whole == 0);
+        CHECK (many.at (what).walked == 0);
+    }
+
+    CHECK (many.at ("a track added").whole == 1);
+    CHECK (many.at ("a track moved").whole == 0);
+    CHECK (many.at ("a folder of 10 moved").whole == 0);
+    CHECK (many.at ("a folder of 10 into another").whole == 11);
+}
+
+TEST_CASE ("Performance gate: a song of 200 tracks opened reads each track and the master once as it takes its values")
+{
+    auto song = phazite::createSong();
+    phazite::ensureTracks (*song, 200);
+    juce::MemoryOutputStream text;
+    phazite::writeProjectText (text, phazite::test::copyWholeSong (*song));
+    const auto parsed = juce::parseXML (text.toString());
+    REQUIRE (parsed != nullptr);
+    const auto tree = juce::ValueTree::fromXml (*parsed);
+    const auto before = phazite::countTracksReadAsValues();
+    const auto opened = phazite::makeSong (tree);
+    REQUIRE (opened != nullptr);
+    CHECK (phazite::countTracksReadAsValues() - before == phazite::getTrackIDs (*opened).size() + 1);
+}
+
+TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks' lists for a volume's drag event, a mute's "
+           "click and a rename, at most twice the list's for a track moved in it, and allocates as much for a drag event, on 20 "
+           "tracks as on 200")
+{
+    // What the keeper tells works out a track's place in its list only for one added, taken out or come to another folder
+    // (TrackChange::made, place), and a list's order before and after in one pass of each (model/base/TracksArea.cpp:
+    // keepOrder()): its count of list entries compared (countTrackListEntriesCompared()). Found 2026-11-23: a volume's drag
+    // event and a rename searched their track's list twice (202 entries on 200 tracks), and a track added or deleted compared
+    // the list with itself entry by entry (40,601 on 200 tracks, its square); now none, and 503 and 602. And one drag event's
+    // allocations (the tree's write, the change told, the tracks' value's path copied): no more on 200 tracks than on 20.
+    struct Measured
+    {
+        std::map<std::string, std::uint64_t> compared {};
+        std::optional<int> dragAllocations {};
+        size_t listLength = 0;
+    };
+
+    const auto compare = [] (const std::function<void()>& edit)
+    {
+        const auto before = phazite::countTrackListEntriesCompared();
+        edit();
+        return phazite::countTrackListEntriesCompared() - before;
+    };
+
+    const auto run = [&compare] (int numTracks)
+    {
+        auto song = phazite::createSong();
+        const auto tracks = phazite::ensureTracks (*song, numTracks);
+        const auto track = tracks[(size_t) numTracks / 2];
+        Measured measured;
+        measured.listLength = phazite::getTrackIDs (*song).size();
+
+        {
+            phazite::Gesture gesture (*song, "Drag Volume");
+            phazite::setChannelVolume (*song, track, -2.0f);
+            measured.compared["a volume's drag event"] = compare ([&] { phazite::setChannelVolume (*song, track, -3.0f); });
+            measured.dragAllocations = phazite::test::countAllocations ([&] { phazite::setChannelVolume (*song, track, -4.0f); });
+            gesture.commit();
+        }
+
+        measured.compared["a mute's click"] = compare ([&] { phazite::toggleTracksMuted (*song, { track }); });
+        measured.compared["a rename"] = compare (
+            [&]
+            {
+                const phazite::UndoStep step (*song, "Rename Track");
+                phazite::setTrackName (*song, track, "Renamed");
+            });
+
+        measured.compared["a track moved"] = compare ([&] { phazite::moveTracksAfter (*song, { tracks.front() }, tracks.back()); });
+        measured.compared["a track moved to the top"] =
+            compare ([&] { phazite::moveTracksAfter (*song, { tracks.front() }, phazite::TrackID()); });
+        measured.compared["a track added"] = compare (
+            [&]
+            {
+                const phazite::UndoStep step (*song, "Add Track");
+                phazite::insertTrack (*song, track, nullptr);
+            });
+
+        measured.compared["a track deleted"] = compare ([&] { phazite::deleteTracks (*song, { tracks.back() }, nullptr); });
+        phazite::test::checkSong (*song);
+        return measured;
+    };
+
+    const auto few = run (20);
+    const auto many = run (200);
+
+    for (const auto& [what, compared] : many.compared)
+        MESSAGE (what << ": list entries compared on 20 tracks " << few.compared.at (what) << ", on 200 " << compared);
+
+    for (const auto* what : { "a volume's drag event", "a mute's click", "a rename" })
+    {
+        INFO (what);
+        CHECK (few.compared.at (what) == 0);
+        CHECK (many.compared.at (what) == 0);
+    }
+
+    // A track moved in the top list: the list before and after, each stepped through once. A track added or deleted: its
+    // place in the list besides (TrackChange::made), the list once more at most.
+    for (const auto* measured : { &few, &many })
+    {
+        INFO (measured->listLength << " tracks");
+        CHECK (measured->compared.at ("a track moved") <= 2 * measured->listLength);
+        CHECK (measured->compared.at ("a track moved to the top") <= 2 * measured->listLength);
+        CHECK (measured->compared.at ("a track added") <= 3 * (measured->listLength + 1));
+        CHECK (measured->compared.at ("a track deleted") <= 3 * (measured->listLength + 1));
+    }
+
+    if (! few.dragAllocations.has_value() || ! many.dragAllocations.has_value())
+        return;
+
+    MESSAGE ("A volume's drag event's allocations on 20 tracks: " << *few.dragAllocations << ", on 200: " << *many.dragAllocations);
+    // 15 on 20 tracks and 16 on 200 in the windows-debug build, 2026-11-23 (the tracks' value one node deeper in its map on
+    // 200): the same bound for both.
+    constexpr auto mostAllocations = 20;
+    CHECK (*few.dragAllocations <= mostAllocations);
+    CHECK (*many.dragAllocations <= mostAllocations);
+}
+
+TEST_CASE ("Performance gate: the check for unsaved changes after a track's rename looks at as many tracks' elements on 20 "
+           "tracks as on 200")
+{
+    // A track that changed is compared with the saved copy's of its ID (Project.h: areTracksAsSaved()): found in the song by
+    // the song's index, and in the saved copy by an index made once as the copy is taken, so that one rename looks at one
+    // element on each side (Project::countTrackElementsWalkedWithSaved()). Found 2026-11-23: both trees' tracks were indexed
+    // by a walk at each comparison.
+    const auto run = [] (int numTracks)
+    {
+        phazite::test::TestSong s;
+        auto& song = getSong (s);
+        auto& project = s.getProject();
+        const auto tracks = phazite::ensureTracks (song, numTracks);
+        REQUIRE (project.save().wasOk());
+        phazite::test::dispatchPendingMessages();
+        REQUIRE_FALSE (project.hasUnsavedChanges());
+
+        const auto before = phazite::Project::countTrackElementsWalkedWithSaved();
+
+        {
+            const phazite::UndoStep step (song, "Rename Track");
+            phazite::setTrackName (song, tracks[(size_t) numTracks / 2], "Renamed");
+        }
+
+        CHECK (project.hasUnsavedChanges());
+        return phazite::Project::countTrackElementsWalkedWithSaved() - before;
+    };
+
+    const auto few = run (20);
+    const auto many = run (200);
+    MESSAGE ("Tracks' elements looked at after a rename on 20 tracks: " << few << ", on 200: " << many);
+    CHECK (many == few);
+    CHECK (many <= 2);
 }

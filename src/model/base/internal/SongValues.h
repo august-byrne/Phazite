@@ -154,9 +154,10 @@
 //        (songChanges, edited()), marks the lines it is in (markTrack(), markSongOwn()) and calls changesMayDiffer().
 //      - MidiLinker (model/midi/MidiLinks.cpp, internal/MidiLinks.h): ends a learning whose parameter the area tells taken
 //        out, in that call (modulation's: a modulator or a macro by its ID; the sends': a send's level by the send's ID; the
-//        devices': a device's, a plug-in's or a chain's parameter by its device's or chain's ID); its
-//        tree callback asks only of the sources the tree still holds (isHeardFromTree()), where an area's leaves that list
-//        for an override of its own.
+//        devices': a device's, a plug-in's or a chain's parameter by its device's or chain's ID; the tracks': a fader's by
+//        the channel it remembers); it listens to the song's tree no more (the tracks' listener's piece took its last source).
+//      - AudioRecorder (model/transport/internal/AudioRecorder.h): the tracks' alone, its inputs brought in line from the
+//        tracks it is handed.
 //  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
 //      copyWholeSong(), copyWhole(), keepValues(), or a part's own whole copy, as copyWholeClip()): the changes' worker
 //      (model/versions/ChangesWorker.cpp: take(), makeSkeleton(), copyTrack(), which writes a track's modulation in as
@@ -243,6 +244,14 @@
 namespace phazite
 {
 class Song;
+
+// The tracks' (model/base/internal/TracksArea.h, TracksValue.h, TrackSwitchesValue.h, TracksOutside.h): what the listener
+// is told of them, and what the tracks' part of the keeper keeps.
+struct TrackChange;
+struct TrackSwitchChange;
+struct SongTracks;
+struct TrackSwitches;
+struct TracksOutside;
 
 //==============================================================================
 // The song's values, which the song holds once its tree is consistent (Song::holdValues(), as model/project/internal/
@@ -787,6 +796,44 @@ public:
         {
             juce::ignoreUnused (entries, now);
         }
+
+        // The song's tracks, folders, returns and master (TracksValue.h), by their IDs: each one added, taken out or changed,
+        // each once in a call, with its folder before and after and, for one that came, went or came to another folder, its
+        // place in its list before and after (TrackChange::indexBefore, indexAfter: -1 for any other), the parts of it that
+        // changed (TrackChange::Part, TracksArea.h) and its value after (TrackChange::now); each folder whose list holds
+        // those it held before in another order (TrackID() for the top list); and the song's tracks whole after (now: a copy
+        // of what the keeper holds, valid during the call), which what plays keeps for what decides what is heard
+        // (SongPlayer.h: heldTracks). A track, or a folder with the tracks in it, added or taken out tells each of them (its
+        // clips, devices, modulators and sends are told by their own areas); a track JUCE moves, taken out and put in again,
+        // is told twice (taken out, and added); the master's ID given anew in place (a version's) is told as the master's
+        // change, never as a track gone and another come. The song's tree is still the tracks' storage, so the tracks' part
+        // of the keeper tells it from the tree (TracksArea.h), once for each of the tree's notifications that changes what
+        // the value covers, in an undo and a redo too: how many calls a step makes is the tree's until the tracks' switch, and
+        // only what they told in all is the step's. Its switches and its view are told by the two below, its devices by
+        // devicesChanged(); what the value doesn't cover of a TRACK (a property Phazite doesn't know) is the tree's, heard as
+        // before.
+        virtual void tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>& reordered, const SongTracks& now)
+        {
+            juce::ignoreUnused (tracks, reordered, now);
+        }
+
+        // The tracks' switches (TrackSwitchesValue.h): each entry that changed, a mute, a solo, a frozen switch or an automation
+        // mode (the master's too), with whether it came or went (TrackSwitchChange, TracksArea.h), in one call; and the
+        // switches whole after (now: a copy, valid during the call, which what plays keeps for what decides what is heard).
+        // Told as tracksChanged() is, from the tree, the same calls in a step, an undo, a redo and a write outside the history
+        // (a mute toggled): a track taken out tells none of its switches (the area keeps them for an Undo), and one that
+        // comes tells those that differ from what was kept.
+        virtual void trackSwitchesChanged (const std::vector<TrackSwitchChange>& switches, const TrackSwitches& now)
+        {
+            juce::ignoreUnused (switches, now);
+        }
+
+        // How the tracks' rows show (TracksOutside.h: view state, no change of the song's and no undo step): the tracks whose
+        // height, collapsed or pinned switch, drum mode or drum rows or automation lanes changed, and whether the master's
+        // did. Told as tracksChanged() is, from the tree; not for a track told added in the same notification (its row is
+        // new), nor for a write of the view that changes nothing of it (the tree's callbacks raised the views' group for it:
+        // the change named, 2026-11-23). Only the views follow it (ProjectContext.cpp).
+        virtual void tracksViewChanged (const std::vector<TrackID>& tracks, bool master) { juce::ignoreUnused (tracks, master); }
     };
 
     void addListener (Listener*) const;
@@ -852,6 +899,15 @@ public:
     // devices through the devices' setters (model/mixer/internal/Mixer.h), check they never leave to it.
     int countDevicesAdopted() const noexcept { return devicesAdopted; }
 
+    // The song's tracks, their switches and their view as the tracks' part of the keeper last told them (TracksArea.h), while
+    // the song's tree holds them: read once as the song took its values, and kept since by what the tree told (the switches'
+    // and the view's entries of a track taken out kept); nullptr before. What plays takes what decides what is heard from
+    // them as it is made (SongPlayer.h: heldTracks), so that it holds what the listeners are told; and the tests' check
+    // compares them with the song's tracks read again (tests/SongCheck.cpp). In SongValues.cpp.
+    const SongTracks* getTracksAsTold() const noexcept;
+    const TrackSwitches* getTrackSwitchesAsTold() const noexcept;
+    const TracksOutside* getTracksViewAsTold() const noexcept;
+
 private:
     friend class Song;
 
@@ -877,6 +933,7 @@ private:
     struct DeviceStoreKeeper;                       // DeviceStoreArea.h
     struct DevicesTeller;                           // DevicesArea.h
     struct DevicesKeeper;                           // DevicesArea.h
+    struct TracksKeeper;                            // TracksArea.h: tells tracksChanged() and the two after it, until the switch
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
     std::unique_ptr<ClipsTeller> clipsTeller;
@@ -991,8 +1048,9 @@ bool isHeardAsDeviceStore (const juce::ValueTree& parent, const juce::ValueTree&
 // of a property changed (the element and the property: a DEVICE's or a CHAIN's properties are the devices' but for the
 // store's), and of a child added to an element or taken out of it. Each the OR of the areas' own functions above
 // (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, the curves', the MIDI
-// links', the sections', the devices', then the devices' store's (modulation's and the sends' went at their switches: the
-// tree holds nothing of them; the store's stays for what its keeper takes out of a DEVICE or a CHAIN that comes in with it).
+// links', the sections', the devices', the tracks' (TracksArea.h: isHeardAsTracks()), then the devices' store's (modulation's
+// and the sends' went at their switches: the tree holds nothing of them; the store's stays for what its keeper takes out of a
+// DEVICE or a CHAIN that comes in with it).
 // What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12,
 // above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
 bool isHeardAsKept (const juce::ValueTree& element);

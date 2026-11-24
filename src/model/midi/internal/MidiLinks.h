@@ -96,12 +96,14 @@ std::optional<float> getValueAtControllerPosition (const Song&, const ParameterR
 //
 // Learning ends as its parameter goes, in the call that tells of it: a modulator's or a macro's as the song's values tell it
 // taken out (SongValues::Listener::modulationChanged(), by its ID), a send's level the same (sendsChanged(), by the send's ID),
-// and a device's, a plug-in's or a chain's as its device or chain is (devicesChanged(), by its ID); a fader's as the song's
-// tree tells of a child taken out, its source looked for again in the tree alone (Parameters.h: locateParameterInTree()).
-// Which of them a learned parameter is, is its source (ParameterSource), found as learning starts: so that the tree's callback
-// asks only of what the tree still holds (isHeardFromTree()), and reads no area of the song's values.
+// and a device's, a plug-in's or a chain's as its device or chain is (devicesChanged(), by its ID); a fader's as its track is
+// taken out, or given another fader or VCA (tracksChanged(), by the channel it remembers: learningChannel), the master's as
+// its element is put in anew (a merge's choice of the whole MASTER: made) or given another fader. A bus made plain while its
+// fader learns ends the learning now (the change named, 2026-11-23: the tree's callback ended it only as a child of the song
+// was taken out and the parameter wasn't found again). Which of them a
+// learned parameter is, is its source (ParameterSource), found as learning starts. Nothing of it is the song's tree's to tell
+// any more (roadmap step S5.20, the tracks' listener's piece): the linker listens to the song's values alone.
 class MidiLinker final : private juce::Timer,
-                         private juce::ValueTree::Listener,
                          private SongValues::Listener
 {
 public:
@@ -131,9 +133,9 @@ public:
 
 private:
     Song::Ptr song;
-    juce::ValueTree state;
     std::optional<ParameterRef> learning;
     ParameterSource learningSource = ParameterSource::device; // what learning's parameter is (setLearning())
+    ChannelRef learningChannel {};                            // and a fader's channel, as learning started (FoundParameter)
     std::optional<juce::String> linkMade;
 
     std::unique_ptr<Trial> burst;
@@ -147,16 +149,12 @@ private:
     void turn (const ParameterRef&, float value);
     void finishWriting(); // the burst's passes told it ended, in its step
 
-    // Whether the song's tree holds a source's parameters, so that the tree's callback looks for one of them again: a fader's
-    // alone, as a modulator's and a macro's the song's values tell (modulationChanged()), a send's (sendsChanged()), and a
-    // device's, a plug-in's and a chain's (devicesChanged(), which looks again for a chain's crossover, one only while its
-    // container splits into bands and it isn't the first, as something is taken out, in the song's devices handed whole). A
-    // source whose area gets a listener of its own (roadmap step S5.20) leaves this list for it, with an override of its own
-    // below.
-    static bool isHeardFromTree (ParameterSource);
-
+    // Where learning's parameter goes, each source by its area's listener: a modulator's and a macro's (modulationChanged()), a
+    // send's (sendsChanged()), a device's, a plug-in's and a chain's (devicesChanged(), which looks again for a chain's
+    // crossover, one only while its container splits into bands and it isn't the first, as something is taken out, in the
+    // song's devices handed whole), and a fader's (tracksChanged()).
     void timerCallback() override;
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
+    void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>&, const SongTracks& now) override;
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>&) override;
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>&, const SongSends& now) override;
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>&, const SongDevices& now) override;

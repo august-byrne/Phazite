@@ -10,10 +10,12 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 namespace phazite
@@ -352,6 +354,11 @@ private:
     SongCopy savedState;
     bool mayHaveChanged = false;
 
+    // savedState's TRACKs by their IDs (the first of one), made by one walk as savedState is set (setSavedState(), the one
+    // place that sets it; nothing writes its tracks after), so that the tracks' comparison finds a saved track by one lookup
+    // (areTracksAsSaved()).
+    std::unordered_map<std::uint64_t, juce::ValueTree> savedTracks;
+
     struct ToCompare
     {
         juce::ValueTree element;
@@ -467,6 +474,25 @@ private:
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
     bool isDeviceStoreAsSaved() const;
 
+    // The tracks, folders, returns and master that changed, by their IDs (the master by a flag of its own: its ID may be given
+    // anew), and the lists (a folder's, by its ID; the top list's, TrackID()) a track was added to, taken out of, or whose
+    // tracks came in another order (SongValues.h: Listener::tracksChanged(); the tree's callbacks below leave what the tracks'
+    // values cover alone, isHeardAsKept(), and count a property Phazite doesn't know on a TRACK as before); and the tracks whose
+    // switches changed (trackSwitchesChanged(): a mute toggled outside the history counts, as its property did). Counted as
+    // a change, and compared with savedState when asked, never as they are told: by element while the trees hold the tracks,
+    // a track found in the song by the song's index and in the saved copy by savedTracks (one lookup each, however many
+    // tracks the song has: countTrackElementsWalkedWithSaved()), each track's own properties that the values count
+    // against the saved copy's track of its ID (so that a mute toggled and toggled back is saved again), and each list's
+    // tracks in their order. Bounded as toCompare is: past mostToCompare of them, the tracks and the master whole. The view
+    // (tracksViewChanged()) counts nothing.
+    std::vector<TrackID> trackOwnToCompare, trackListsToCompare;
+    bool masterOwnToCompare = false, comparingTracksWhole = false;
+    void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
+    void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
+    bool markTracksChanged(); // counted, as markChanged() counts a change; whether to note what to compare
+    void clearTracksToCompare();
+    bool areTracksAsSaved() const;
+
     // What each area marked compared with savedState's values (compareWithSavedState()'s list, a line for each area): true
     // where nothing of it was marked.
     bool areNotesAsSaved() const;
@@ -554,6 +580,11 @@ public:
     // whole counts, with each of its elements): what the performance tests count (tests/PerformanceGateTests.cpp). Message
     // thread.
     static juce::int64 countElementsCompared();
+
+    // How many TRACK elements the comparison of the tracks with the saved copy looked at or walked since the program started
+    // (areTracksAsSaved(): a track found by its ID in either tree, a list's tracks walked, the saved copy's tracks indexed),
+    // for the same tests. Message thread.
+    static juce::int64 countTrackElementsWalkedWithSaved();
 
     // How many notifications since the last comparison are compared one by one; past them, each one's track whole.
     static constexpr size_t mostToCompare = 64;

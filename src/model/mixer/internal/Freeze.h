@@ -131,12 +131,13 @@ private:
     {
         bool takeTracks = false, all = false;
         std::set<TrackID> tracks;
+        bool noteTracks = false, cameIn = false; // the frozen tracks noted at the later moment (tracksChanged()), as if come in
     };
 
     Waiting waiting;
 
     std::vector<TrackID> takeFrozenTracks (bool fromFiles = false);
-    void noteFrozenTracks (bool cameIn);                // the same from a tree's callback, which reads nothing of the song's clips
+    void noteFrozenTracks (bool cameIn);                // the same at the later moment (markTrack()), from the tree alone
     void keepAsFrozen (const std::set<TrackID>& known); // of curvesAsFrozen and modulatorsAsFrozen, those whose holdings were kept
     void compare (TrackID);
     void check (const juce::ValueTree& changed, bool cameIn);
@@ -176,6 +177,21 @@ private:
     // CHAIN's property or of a VALUE marked it; not a plug-in's state, which every save stores again, which the comparison
     // leaves out too.
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
+
+    // The tracks that changed (SongValues.h; the tree's callbacks below leave what the tracks' values cover alone,
+    // isHeardAsKept()): each track marked and compared at the later moment, and the folder it was in and is in where it came
+    // or went, as check() took a change of a TRACK; and the tracks that are frozen noted again at the later moment
+    // (noteFrozenTracks(), which reads the song: never as it is told; during an undo or a redo taken again then, as
+    // check() takes them), one that came in noted as having come in. Their switches the same, a track frozen or played live
+    // again among them (design J.4). The master's, nothing (no track's file holds anything of it); nor the view
+    // (tracksViewChanged()), which no frozen file holds. As the frozen tracks are noted at the later moment, a frozen track
+    // moved, or deleted and brought back, within one turn of the message loop stays known as frozen and isn't compared with
+    // its file again (the change named, 2026-11-23: the tree's callback noted them as the track came back, as come in).
+    void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
+    void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
+    // What tracksChanged() and trackSwitchesChanged() mark of each: the frozen tracks noted again only where the change can
+    // make another set of tracks the frozen ones.
+    void markTrack (TrackID track, bool cameIn, bool mayChangeFrozen);
 
     // The sends (sendsChanged()): nothing, as no frozen track's file holds anything of them: a frozen file is its track before
     // its fader, which its sends come after (its Holds keep its frozen devices, the song's values, its tempos, its frozen

@@ -941,10 +941,10 @@ private:
     void markChanged (const juce::ValueTree&, const juce::Identifier& property);
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
 
-    // A track's line or the master's, from the tree's callbacks by its element (a TRACK, which may have left the song, and the
-    // tracks in it), or by its ID (markLine(), the master's by its): the master's by one key whatever its ID, which a version
+    // A track's line or the master's, from the tree's callbacks by its element (the TRACK or the MASTER nearest what changed),
+    // or by its ID (markLine(), the master's by its): the master's by one key whatever its ID, which a version
     // may give anew (ChangesWorker::masterKey; known bug 244).
-    void markTrack (const juce::ValueTree& track, bool withTracksInIt);
+    void markTrack (const juce::ValueTree& track);
     void markLine (TrackID);
 
     // The clips whose notes changed (the song holds them beside its tree: SongValues.h), heard as the values change and their
@@ -1000,6 +1000,18 @@ private:
     // it (the devices' keeper's), as a change of a DEVICE's or a CHAIN's property marked its channel's line. A held value
     // alone, and what is written for an item the song doesn't hold, mark nothing.
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
+
+    // The tracks (SongValues.h), what their values cover of which the tree's callbacks below leave alone (isHeardAsKept()): a
+    // change of the song's, and the line of each track that changed, by its ID (each track in a folder added or taken out is
+    // told, and marked, too), as a change of a TRACK's own property and a TRACK added or taken out marked it; the song's order
+    // of them, for one added or taken out, come to another folder, renamed or of another kind, and for tracks in another
+    // order (the lines' names, "Track 3"); the master's line by its key, all of them where its element came anew. Their
+    // switches: the line of each track (the master's), as a switch's property marked it. Their view: a change of the song's
+    // count alone (songChanges), as a view's property was, which marks no line (uncounted).
+    void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
+    void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
+    void tracksViewChanged (const std::vector<TrackID>&, bool master) override;
+    void markLineKey (std::uint64_t key); // a track's line by its ID, or the master's (ChangesWorker::masterKey)
     void markCurve (const juce::String& key);
     void markSongOwn();
     void markOrder();
@@ -1042,7 +1054,7 @@ private:
         markChildChanged (parent, child);
     }
 
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override;
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (VersionHistory)
     JUCE_DECLARE_NON_COPYABLE (VersionHistory)

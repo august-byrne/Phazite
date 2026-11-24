@@ -7,6 +7,7 @@
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/ContainerValues.h"
@@ -318,11 +319,8 @@ std::optional<float> getValueAtControllerPosition (const Song& song, const Param
 
 //==============================================================================
 MidiLinker::MidiLinker (Song& s)
-    : song (&s),
-      state (s.getState())
+    : song (&s)
 {
-    state.addListener (this);
-
     if (auto* values = song->getValues())
         values->addListener (this);
 
@@ -337,7 +335,6 @@ MidiLinker::~MidiLinker()
     if (auto* values = song->getValues())
         values->removeListener (this);
 
-    state.removeListener (this);
     stopTimer();
     endBurst();
 
@@ -353,6 +350,7 @@ void MidiLinker::startLearning (const ParameterRef& parameter)
         return;
 
     linkMade.reset();
+    learningChannel = found->channel; // a fader's channel, which tracksChanged() follows
     setLearning (parameter, found->source);
 }
 
@@ -536,36 +534,28 @@ void MidiLinker::timerCallback()
         endBurst();
 }
 
-bool MidiLinker::isHeardFromTree (ParameterSource source)
+void MidiLinker::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>&, const SongTracks&)
 {
-    switch (source)
+    // A learning fader's volume or pan (or a plain folder's VCA's volume) ends as its channel's track is taken out (alone, or
+    // with its folder), or as the track's fader or VCA changes to another (a bus made plain, a plain folder a bus): its
+    // channel the one it remembers (learningChannel), in this call, from what it is told alone. The master's the same, as its
+    // element is put in anew (a merge's choice of the whole MASTER, told made), or given another fader.
+    if (! learning.has_value() || (learningSource != ParameterSource::volume && learningSource != ParameterSource::pan))
+        return;
+
+    for (const auto& track : tracks)
     {
-        case ParameterSource::volume:
-        case ParameterSource::pan:
-            return true;
-        case ParameterSource::device:
-        case ParameterSource::plugin:
-        case ParameterSource::chainVolume:
-        case ParameterSource::chainPan:
-        case ParameterSource::crossover:
-            return false; // devicesChanged()
-        case ParameterSource::modulator:
-        case ParameterSource::macro:
-            return false; // modulationChanged()
-        case ParameterSource::send:
-            return false; // sendsChanged()
+        if (track.onMaster != learningChannel.onMaster || (! track.onMaster && track.id != learningChannel.track))
+            continue;
+
+        if (! track.isThere || track.has (TrackChange::made)
+            || (track.has (TrackChange::fader) && track.now != nullptr && track.now->fader != learning->device
+                && track.now->vca != learning->device))
+        {
+            setLearning (std::nullopt);
+            return;
+        }
     }
-
-    return true;
-}
-
-void MidiLinker::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
-{
-    // Learning ends as its parameter goes: a fader, still an element of the song's tree, so the linker stays a listener of the
-    // tree for it (the links themselves are a value: MidiLinks.h). It asks only of a source the tree holds (isHeardFromTree()),
-    // and only the tree (locateParameterInTree(): no area of the song's values read).
-    if (learning.has_value() && isHeardFromTree (learningSource) && ! locateParameterInTree (*song, *learning).has_value())
-        setLearning (std::nullopt);
 }
 
 void MidiLinker::devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>&,

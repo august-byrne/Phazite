@@ -298,6 +298,16 @@ private:
     // plug-in's state, program, format ID and version: nothing (its instance takes them: PluginInstances.h).
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
+    // The tracks (SongValues.h; its tree callbacks above leave what the tracks' values cover alone, isHeardAsKept()), as the
+    // tree's changes of them were taken: a volume or a pan changed in place plays at once, from the value it is told
+    // (SongPlayer::takeTracks()), and while the history undoes or redoes, what a pass writing it writes from then follows once
+    // the move is whole (historyMoved()); anything else of a track (added, taken out, renamed, coloured, a bus switch, a key,
+    // an input...), and tracks in another order: a new plan. Their switches: a mute and a solo play at once
+    // (SongPlayer::takeTrackSwitches()), followed after an undo or a redo as a volume is; a frozen switch and an automation
+    // mode, a new plan. Their view (tracksViewChanged()): nothing, as no plan holds how a track shows.
+    void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
+    void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
+
     // The song's history moved by hand, and the move is whole (Song.h: HistoryListener): what a pass writing automation writes
     // follows the values the move set by hand that play at once (AutomationWriter::followValuesSetByHand()), where the
     // tree's callbacks or the values' listener heard one meanwhile (followAfterMove), for every area alike. Read here, never

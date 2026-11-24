@@ -200,6 +200,26 @@ namespace
         }
     }
 
+    // One view property of an element read into a view, as readView() reads it (held: none where it isn't described there).
+    void readViewProperty (const juce::ValueTree& element, const schema::PropertyDescription& property, bool held, TrackView& view)
+    {
+        if (held && ! isDescribedOn (element, property))
+            return;
+
+        if (&property == &schema::trackHeight)
+            view.height = held ? readHeldWhole (element[schema::trackHeight], schema::trackHeight) : readSavedHeight (element);
+        else if (&property == &schema::trackCollapsed)
+            view.collapsed = readCollapsed (element);
+        else if (&property == &schema::trackPinned)
+            view.pinned = readPinned (element);
+        else if (&property == &schema::drumMode)
+            view.drumMode = readDrumMode (element);
+        else if (&property == &schema::drumOrder)
+            view.drumOrder = readTextOf (element, schema::drumOrder);
+        else if (&property == &schema::drumHidden)
+            view.drumHidden = readTextOf (element, schema::drumHidden);
+    }
+
     TrackView readView (const juce::ValueTree& element, bool held)
     {
         TrackView view;
@@ -207,26 +227,8 @@ namespace
         if (! isTrackOrMaster (element))
             return view;
 
-        const auto isRead = [&element, held] (const schema::PropertyDescription& property)
-        { return ! held || isDescribedOn (element, property); };
-
-        if (isRead (schema::trackHeight))
-            view.height = held ? readHeldWhole (element[schema::trackHeight], schema::trackHeight) : readSavedHeight (element);
-
-        if (isRead (schema::trackCollapsed))
-            view.collapsed = readCollapsed (element);
-
-        if (isRead (schema::trackPinned))
-            view.pinned = readPinned (element);
-
-        if (isRead (schema::drumMode))
-            view.drumMode = readDrumMode (element);
-
-        if (isRead (schema::drumOrder))
-            view.drumOrder = readTextOf (element, schema::drumOrder);
-
-        if (isRead (schema::drumHidden))
-            view.drumHidden = readTextOf (element, schema::drumHidden);
+        for (const auto* property : getViewProperties())
+            readViewProperty (element, *property, held, view);
 
         for (const auto& lane : element.getChildWithName (schema::LANES))
         {
@@ -261,6 +263,21 @@ TrackView readViewOf (const juce::ValueTree& element)
 TrackView readHeldViewOf (const juce::ValueTree& element)
 {
     return readView (element, true);
+}
+
+void readHeldViewProperty (const juce::ValueTree& element, const juce::Identifier& property, TrackView& view)
+{
+    if (! isTrackOrMaster (element))
+        return;
+
+    for (const auto* each : getViewProperties())
+        if (each->getName() == property)
+            readViewProperty (element, *each, true, view);
+}
+
+immer::flex_vector<LaneValue> readHeldLanesOf (const juce::ValueTree& element)
+{
+    return isTrackOrMaster (element) ? readView (element, true).lanes : immer::flex_vector<LaneValue>();
 }
 
 LaneValue readLaneValue (const juce::ValueTree& lane)

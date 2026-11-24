@@ -4,6 +4,7 @@
 #include "internal/AudioClips.h"
 #include "internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/engine/AudioFiles.h"
 #include "model/playback/internal/PlaybackSession.h"
 
@@ -501,6 +502,12 @@ bool ClipRenders::isSectionsPlaceholder (const juce::ValueTree& parent, const ju
     // which isHeardAsKept() leaves to the listeners of the song's root (SongValues.h: isHeardAsSections() leaves it out), and
     // which the renders alone leave alone too, as the chord lane's.
     return child.hasType (schema::SECTIONS) && parent.hasType (schema::PHAZITE);
+}
+
+void ClipRenders::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>&, const SongTracks&)
+{
+    if (std::any_of (tracks.begin(), tracks.end(), [] (const TrackChange& track) { return track.has (TrackChange::made); }))
+        rendersMayChange();
 }
 
 void ClipRenders::tempoMapChanged()

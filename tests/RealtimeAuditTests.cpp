@@ -2507,6 +2507,39 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: edited while it plays: a plain folder's VCA turned and a track's pan set, from the tracks' values "
+               "the song tells, undone and redone")
+    {
+        // The tracks' listener (model/base/internal/TracksArea.h) hands what plays the tracks whole: a plain folder's VCA turns
+        // the faders of the tracks in it at once, from the lists handed (SongPlayer::takeTracks()), without a plan.
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60, 64, 67 }, beat, 0.75);
+
+        auto& played = getSong (song);
+        const auto folder = phazite::groupIntoFolder (played, { keys }, nullptr);
+        phazite::setMixedAsBus (played, folder, false);
+
+        const auto m = playProjectAndMeasure (song.context, Playing { .edits = {
+                                                                          { 20, "the folder's VCA turned",
+                                                                            [&]
+                                                                            {
+                                                                                const phazite::UndoStep step (played, "Change Volume");
+                                                                                phazite::setChannelVolume (played, folder, -6.0f);
+                                                                            } },
+                                                                          { 40, "the track's pan set", [&] { song.setPan (keys, 0.5f); } },
+                                                                          { 60, "undone", [&] { phazite::undo (played); } },
+                                                                          { 80, "redone", [&] { phazite::redo (played); } },
+                                                                      } });
+        report ("Edited while it plays: a plain folder's VCA and a pan", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: edited while it plays: notes moved, deleted, 200 transposed at once, one edited through an alias "
                "on another track, a controller's value added, and a note edit undone and redone")
     {

@@ -10,6 +10,7 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AppInfo.h"
@@ -3034,7 +3035,7 @@ void VersionHistory::markChanged (const juce::ValueTree& tree, const juce::Ident
     {
         if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
         {
-            markTrack (element, false);
+            markTrack (element);
             return;
         }
     }
@@ -3056,36 +3057,69 @@ void VersionHistory::markChildChanged (const juce::ValueTree& parent, const juce
 
     edited();
 
-    // A track added or taken away, with the tracks in it (a folder's): its line, and the others' names ("Track 3") and the
-    // song's order of them.
-    if (child.hasType (schema::TRACK))
-    {
-        markTrack (child, true);
-        markOrder();
-        return;
-    }
-
-    if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
-    {
-        markAllChanged();
-        return;
-    }
-
+    // (A track, the track list or the master added or taken away: tracksChanged().)
     markChanged (parent, {});
 }
 
-void VersionHistory::markTrack (const juce::ValueTree& track, bool withTracksInIt)
+void VersionHistory::markTrack (const juce::ValueTree& track)
 {
-    const auto id = track.hasType (schema::MASTER) ? ChangesWorker::masterKey : readID (track[schema::trackID]);
-    sinceBase.markTrack (id);
-    againstCompared.markTrack (id);
+    markLineKey (track.hasType (schema::MASTER) ? ChangesWorker::masterKey : readID (track[schema::trackID]));
+}
 
-    if (withTracksInIt)
-        for (const auto& child : track)
-            if (child.hasType (schema::TRACK))
-                markTrack (child, true);
-
+void VersionHistory::markLineKey (std::uint64_t key)
+{
+    sinceBase.markTrack (key);
+    againstCompared.markTrack (key);
     changesMayDiffer();
+}
+
+void VersionHistory::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>& reordered, const SongTracks&)
+{
+    // A change of the song as its tree's are, in tracks: each one's line by its ID (the master's by its key), as markChanged()
+    // and markChildChanged() marked the TRACK; the song's order of them, and their names ("Track 3"), for one added or taken
+    // away, come to another folder, renamed or of another kind, and for tracks in another order; every line where the
+    // master's element came anew, as the MASTER added or taken away marked them all.
+    ++songChanges;
+    edited();
+    auto order = ! reordered.empty();
+
+    for (const auto& track : tracks)
+    {
+        if (track.onMaster)
+        {
+            if (track.has (TrackChange::made))
+                markAllChanged();
+            else
+                markLineKey (ChangesWorker::masterKey);
+
+            continue;
+        }
+
+        markLineKey (track.id.getRaw());
+
+        if (! track.wasThere || ! track.isThere || track.has (TrackChange::made) || track.has (TrackChange::place)
+            || track.has (TrackChange::name) || track.has (TrackChange::kind))
+            order = true;
+    }
+
+    if (order)
+        markOrder();
+}
+
+void VersionHistory::trackSwitchesChanged (const std::vector<TrackSwitchChange>& switches, const TrackSwitches&)
+{
+    // A change of the song as a switch's property was: each track's line (the master's by its key).
+    ++songChanges;
+    edited();
+
+    for (const auto& change : switches)
+        markLineKey (change.onMaster ? ChangesWorker::masterKey : change.track.getRaw());
+}
+
+void VersionHistory::tracksViewChanged (const std::vector<TrackID>&, bool)
+{
+    // View state, which no line holds as a change (uncounted): the song's count of changes alone, as a view's property moved it.
+    ++songChanges;
 }
 
 void VersionHistory::markLine (TrackID track)
@@ -3366,32 +3400,17 @@ void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce
                     self->followNamesOfSong();
             });
 
-    // A track's ID, name or kind changes what the lines are called; its ID, which one it is.
-    if (tree.hasType (schema::TRACK) && property == schema::trackID)
-        markAllChanged();
-    else if (tree.hasType (schema::TRACK) && (property == schema::trackName || property == schema::trackKind))
-        markOrder();
-
+    // (A track's ID, name or kind, which change what the lines are called: tracksChanged().)
     markChanged (tree, property);
 }
 
-void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex)
+void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
 {
     if (isHeardAsKept (parent))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
+        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged(), tracksChanged()
 
     ++songChanges;
-
-    // Tracks in another order: the song's line, and their numbers.
-    if (parent.getChild (newIndex).hasType (schema::TRACK))
-    {
-        edited();
-        markOrder();
-    }
-    else
-    {
-        markChanged (parent, {});
-    }
+    markChanged (parent, {}); // (tracks in another order: tracksChanged())
 }
 
 void VersionHistory::markAllChanged()

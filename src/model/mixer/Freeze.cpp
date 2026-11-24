@@ -16,6 +16,7 @@
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/TrackSwitchesValue.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -635,10 +636,86 @@ void FreezeKeeper::deviceStoreChanged (const std::vector<SongValues::DeviceStore
         triggerAsyncUpdate();
 }
 
+void FreezeKeeper::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>& reordered, const SongTracks&)
+{
+    // But what this changes itself (unfreezing) and what keepThrough() compares as it applies. A track changed in place is
+    // compared, as check() took a change of a TRACK; one added or taken out (or come to another folder) has the frozen
+    // tracks noted again, and the folder it went from or came to compared, as a TRACK added to its parent or taken out of
+    // it did.
+    if (checking)
+        return;
+
+    for (const auto& track : tracks)
+    {
+        if (track.onMaster)
+            continue;
+
+        if (track.wasThere && track.isThere && ! track.has (TrackChange::made) && ! track.has (TrackChange::place))
+        {
+            markTrack (track.id, false, false); // in place: the same tracks are frozen as before
+            continue;
+        }
+
+        const auto cameIn = track.isThere;
+
+        if (track.wasThere)
+            markTrack (track.parentBefore, false, true);
+
+        if (track.isThere)
+            markTrack (track.parentAfter, cameIn, true);
+    }
+
+    for (const auto folder : reordered)
+        markTrack (folder, false, true);
+
+    if (! tracks.empty() || ! reordered.empty())
+        triggerAsyncUpdate();
+}
+
+void FreezeKeeper::trackSwitchesChanged (const std::vector<TrackSwitchChange>& switches, const TrackSwitches&)
+{
+    // A track frozen or played live again, muted, soloed or of another automation mode: as a TRACK's property was (but what
+    // this changes itself, unfreezing).
+    if (checking)
+        return;
+
+    for (const auto& change : switches)
+        if (! change.onMaster)
+            markTrack (change.track, false, change.field == TrackSwitchChange::Field::frozen);
+
+    if (! switches.empty())
+        triggerAsyncUpdate();
+}
+
+void FreezeKeeper::markTrack (TrackID track, bool cameIn, bool mayChangeFrozen)
+{
+    // The track compared at the later moment (none for the track list), and the frozen tracks noted again then: during an
+    // undo or a redo taken again then (takeFrozenTracks()), else noted (noteFrozenTracks()), as if come in where one came.
+    // Noted only where the change can make another set of tracks the frozen ones (a track came, went or moved, or one was
+    // frozen or played live again): a fader moved or a track renamed leaves them the tracks they were, and noting them walks
+    // every track of the song.
+    if (track.isValid())
+        waiting.tracks.insert (track);
+
+    if (song.getUndoManager().isPerformingUndoRedo())
+    {
+        waiting.takeTracks = true;
+    }
+    else if (mayChangeFrozen)
+    {
+        waiting.noteTracks = true;
+        waiting.cameIn = waiting.cameIn || cameIn;
+    }
+}
+
 void FreezeKeeper::compareMarked()
 {
     if (checking)
         return;
+
+    // The frozen tracks noted again first, as a change of the tracks asked (markTrack()), from the song as it is now.
+    if (std::exchange (waiting.noteTracks, false))
+        noteFrozenTracks (std::exchange (waiting.cameIn, false));
 
     auto wait = std::exchange (waiting, {});
     auto tracks = std::exchange (wait.tracks, {});
@@ -876,24 +953,14 @@ void FreezeKeeper::check (const juce::ValueTree& changed, bool cameIn)
     // (SongValues.h: there is no order among the song's tree listeners, so the keeper of the song's values may not have
     // given a track it moved its clips back yet, and an undo puts the clips back after the tree).
     const juce::ScopedValueSetter<bool> busy (checking, true);
-    const auto undoing = song.getUndoManager().isPerformingUndoRedo();
     triggerAsyncUpdate();
     const auto track = findEnclosing (changed, schema::TRACK);
 
-    // A track frozen or unfrozen, or tracks added, removed or moved (an undo brings a frozen track back frozen). During an
-    // undo or a redo, taken at the next turn. In a step, noted now from the tree alone (noteFrozenTracks()): what a track
-    // frozen in it holds is taken by freezeFromFile() as it freezes it, or at the later moment; first what an undo or a
-    // redo left to take.
-    if (! undoing && std::exchange (waiting.takeTracks, false))
-        noteFrozenTracks (true);
-
+    // What changed of the song itself, or of a track, that its values don't tell (a property Phazite doesn't know): the
+    // frozen tracks noted again at the later moment, as a change of the tracks asks (markTrack(): taken again after an undo
+    // or a redo), never here, which reads the song (tracksChanged(), trackSwitchesChanged() tell the rest: design J.4).
     if (changed == state || changed.hasType (schema::TRACKS) || (track.isValid() && changed == track))
-    {
-        if (undoing)
-            waiting.takeTracks = true;
-        else
-            noteFrozenTracks (cameIn);
-    }
+        markTrack ({}, cameIn, true);
 
     if (track.isValid())
     {

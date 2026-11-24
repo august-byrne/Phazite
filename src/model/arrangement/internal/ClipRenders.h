@@ -192,6 +192,12 @@ private:
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override; // SongValues.h
     void tempoMapChanged() override;                                                                      // SongValues.h
 
+    // The tracks (SongValues.h; the tree callbacks above leave what their values cover alone, isHeardAsKept()): a track added
+    // or taken out, the renders found again in a while, as a TRACK added or taken out made them; nothing else of a track (no
+    // render is made of a track's fields), nor its switches, nor its view (a track's lanes, which made them look again for
+    // nothing while the tree told them).
+    void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>&, const SongTracks&) override;
+
     // The chord lane (SongValues.h: chordLaneChanged()): nothing, as no clip's render is made of chords or keys; the tree
     // callbacks above leave what is in the song's CHORDLANE alone (isHeardAsKept(), as every listener of the song's root does)
     // and, unlike the other listeners, the CHORDLANE's own coming and going too (isChordLanePlaceholder()).

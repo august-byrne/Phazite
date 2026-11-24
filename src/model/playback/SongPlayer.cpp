@@ -14,6 +14,7 @@
 #include "model/base/internal/Immer.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/TrackSwitchesValue.h"
+#include "model/base/internal/TracksArea.h"
 #include "model/base/internal/TracksValue.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
@@ -297,11 +298,19 @@ namespace
     }
 } // namespace
 
+struct SongPlayer::HeldTracks
+{
+    SongTracks tracks {};
+    TrackSwitches switches {};
+};
+
 SongPlayer::SongPlayer (Song& s, PluginInstances* p)
     : song (s),
       plugins (p),
-      songState (s.getState())
+      songState (s.getState()),
+      heldTracks (std::make_unique<HeldTracks>())
 {
+    holdTracks();
     holdDevices();
     songState.addListener (this);
 
@@ -457,6 +466,117 @@ void SongPlayer::deviceStoreChanged (const std::vector<SongValues::DeviceStoreCh
     heldStore = now; // what updateChainAudibility() reads, as the song holds it now
 }
 
+void SongPlayer::tracksChanged (const std::vector<TrackChange>& changed, const std::vector<TrackID>& reordered, const SongTracks& now)
+{
+    // A track added or taken out (a move is both, as JUCE moves a track: or come to another folder), as a TRACK added to its
+    // parent or taken out of it marked its notes and channel (and those of the tracks in it, each told) and the folder's
+    // channel it was in or came to; the master's element, its channel. Any other part of a track marks nothing (design J.8).
+    const auto markFolder = [this] (TrackID folder)
+    {
+        if (folder.isValid())
+            changes.channels.insert ((std::int64_t) folder.getRaw());
+    };
+
+    for (const auto& track : changed)
+    {
+        if (track.onMaster)
+        {
+            if (track.has (TrackChange::made))
+                changes.channels.insert (0);
+
+            continue;
+        }
+
+        if (! track.has (TrackChange::made) && ! track.has (TrackChange::place))
+            continue;
+
+        const auto id = (std::int64_t) track.id.getRaw();
+        changes.notes.insert (id);
+        changes.channels.insert (id);
+
+        if (track.wasThere)
+            markFolder (track.parentBefore);
+
+        if (track.isThere)
+            markFolder (track.parentAfter);
+    }
+
+    for (const auto folder : reordered)
+        markFolder (folder);
+
+    heldTracks->tracks = now; // what updateAudibility() reads, as the song holds it now
+}
+
+void SongPlayer::trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now)
+{
+    // Nothing marked, as a TRACK's switch marked nothing: mute and solo are played at once (takeTrackSwitches()), a frozen
+    // switch and an automation mode by the next plan, which reads them.
+    heldTracks->switches = now;
+}
+
+bool SongPlayer::takeTracks (const std::vector<TrackChange>& changed, const SongTracks& now)
+{
+    heldTracks->tracks = now;
+    auto taken = false;
+
+    // A plain folder's VCA turns the tracks in it, those in its folders too, from the lists handed.
+    const std::function<void (TrackID)> turn = [this, &now, &turn] (TrackID folder)
+    {
+        if (const auto* list = now.findList (folder))
+        {
+            for (const auto id : *list)
+            {
+                if (const auto* track = now.tracks.find (id.getRaw()))
+                {
+                    setChannelFrom (now, *track);
+                    turn (id);
+                }
+            }
+        }
+    };
+
+    for (const auto& track : changed)
+    {
+        if (! track.has (TrackChange::mixer) || track.has (TrackChange::made) || track.now == nullptr)
+            continue;
+
+        taken = true;
+
+        if (track.now->isFolder() && ! track.now->fader.isValid())
+            turn (track.id);
+        else
+            setChannelFrom (now, *track.now);
+    }
+
+    return taken;
+}
+
+bool SongPlayer::takeTrackSwitches (const std::vector<TrackSwitchChange>& changed, const TrackSwitches& now)
+{
+    heldTracks->switches = now;
+
+    // A track muted or soloed: what is heard, and which sends send, from what the player holds.
+    const auto heard =
+        std::any_of (changed.begin(), changed.end(), [] (const TrackSwitchChange& change)
+                     { return change.field == TrackSwitchChange::Field::mute || change.field == TrackSwitchChange::Field::solo; });
+
+    if (heard)
+        updateAudibility();
+
+    return heard;
+}
+
+void SongPlayer::holdTracks()
+{
+    // As the keeper told them, so that what is held here and what tracksChanged() keeps up to date never disagree; read from
+    // the song's tree for a song without values (none that plays).
+    const auto* values = song.getValues();
+    const auto* tracks = values != nullptr ? values->getTracksAsTold() : nullptr;
+    const auto* switches = values != nullptr ? values->getTrackSwitchesAsTold() : nullptr;
+    heldTracks->tracks = tracks != nullptr ? *tracks : readHeldTracks (song.getState());
+    heldTracks->switches = switches != nullptr ? *switches : readHeldTrackSwitches (song.getState());
+}
+
 void SongPlayer::holdDevices()
 {
     // Each device (its own or a plug-in, its containers' chains' too) by its ID: its sidechain's track and its channel, from
@@ -572,61 +692,35 @@ void SongPlayer::markChange (const juce::ValueTree& changed)
     }
 }
 
-void SongPlayer::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
+void SongPlayer::valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&)
 {
-    // The areas' (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's, which nothing played reads
-    // (chordLaneChanged(): SongPlayer follows none of it); the curves', curvesChanged(); the devices', devicesChanged().
-    if (isHeardAsKept (tree, property))
-        return;
-
-    // A track's ID changed in place (a merge's renumbering): what the plan before kept under it may be another track's, and
-    // its own is under an ID no longer known.
-    if (tree.hasType (schema::TRACK) && property == schema::trackID)
-        changes.allNotes = changes.allChannels = true;
-}
-
-void SongPlayer::markTracksIn (const juce::ValueTree& element)
-{
-    if (element.hasType (schema::TRACK))
-    {
-        changes.notes.insert (getID (element, schema::trackID));
-        changes.channels.insert (getID (element, schema::trackID));
-    }
-
-    if (element.hasType (schema::MASTER))
-        changes.channels.insert (0);
-
-    if (element.hasType (schema::TRACK) || element.hasType (schema::TRACKS) || element.hasType (schema::PHAZITE))
-        for (const auto& child : element)
-            if (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
-                markTracksIn (child);
+    // Nothing that plays is marked from a property of the tree. The areas tell theirs (isHeardAsKept()): the tempo map's,
+    // tempoMapChanged(); the chord lane's, which nothing played reads (chordLaneChanged(): SongPlayer follows none of it); the
+    // curves', curvesChanged(); the devices', devicesChanged() (the tree holds none of them); the tracks', tracksChanged()
+    // (a track's ID given anew in place is told as one track taken out and another added). What is left (a property Phazite
+    // doesn't know) plays nothing.
 }
 
 void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
-    // Something added to a channel; or tracks added, which may hold notes and devices already (an undo), or the master in
-    // place of another (a song applied): their devices' sounds are devicesChanged()'s, which tells each device that came with
-    // them. View state added (a track's lanes) changes nothing that plays. The areas' (isHeardAsKept()): the tempo map's,
-    // tempoMapChanged(); the chord lane's, which nothing played reads; the curves', curvesChanged(); the devices',
-    // devicesChanged().
+    // Something added to a channel: devices' sounds are devicesChanged()'s, which tells each device that came. View state
+    // added changes nothing that plays. The areas' (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's,
+    // which nothing played reads; the curves', curvesChanged(); the devices', devicesChanged(); the tracks', tracksChanged()
+    // (tracks added, the master in place of another, a track's lanes).
     if (isHeardAsKept (parent, child))
         return;
 
     if (! schema::isUncountedElement (parent, child))
         markChange (parent);
-
-    markTracksIn (child);
 }
 
 void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
 {
     if (isHeardAsKept (parent, child))
-        return; // the areas': tempoMapChanged(); the chord lane's, which nothing played reads; curvesChanged(); devicesChanged()
+        return; // the areas': tempoMapChanged(); the chord lane's, which nothing played reads; ..., tracksChanged()
 
     if (! schema::isUncountedElement (parent, child))
         markChange (parent);
-
-    markTracksIn (child);
 }
 
 void SongPlayer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
@@ -859,6 +953,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // The song's sends as this plan read them (getChannels()), which sendsChanged() brings up to date until the next plan, for
     // what decides which send sends.
     heldSends = songSends;
+    holdTracks(); // and the tracks and their switches as the keeper told them (heldTracks)
     updateAudibility();
 
     // The master adds up what goes to it: the tracks and buses in no bus, and the returns; or what a render plays of the
@@ -2281,29 +2376,61 @@ void SongPlayer::setChannel (const juce::ValueTree& channelState, bool isMaster)
     }
 }
 
+void SongPlayer::setChannelFrom (const SongTracks& tracks, const TrackValue& channel)
+{
+    if (auto* strip = findStrip (channel.isMaster() ? 0 : (std::int64_t) channel.id.getRaw()))
+    {
+        // Its fader, turned by the VCAs of the plain folders it is in (the master's -3 dB where it has none: TracksValue.h), as
+        // setChannel() turns it, from the value handed.
+        auto volume = channel.volume;
+
+        if (! channel.isMaster())
+            for (const auto* parent = tracks.tracks.find (channel.parent.getRaw()); parent != nullptr;
+                 parent = tracks.tracks.find (parent->parent.getRaw()))
+                if (parent->isFolder() && ! parent->fader.isValid())
+                    volume += parent->volume;
+
+        auto& faderChannel = strip->getChannel();
+        faderChannel.setVolume (std::max (volume, engine::Channel::silenceDb));
+        faderChannel.setPan (channel.pan);
+    }
+}
+
 void SongPlayer::updateAudibility()
 {
     // A track is heard unless it is muted, or in a muted folder, or other tracks are soloed and neither it nor a folder it is
     // in is (a return is never silenced by a solo); a pad's track, as its sampler's track is too. A render before a channel's
     // fader (a freeze, a bounce: RenderOf) hears that channel whatever its mute switch says, and what feeds it whatever
-    // other tracks' solos say: it plays the channel alone already.
-    const auto trackStates = getTrackStates (song);
+    // other tracks' solos say: it plays the channel alone already. From the tracks and their switches the player holds
+    // (heldTracks: never the song's, as this runs as the song's values tell a track muted or soloed, takeTrackSwitches()).
+    const auto& tracks = heldTracks->tracks;
+    const auto& held = heldTracks->switches;
     const auto beforeFader = rendered.has_value() && rendered->beforeFader;
-    const auto anySoloed =
-        ! beforeFader && std::any_of (trackStates.begin(), trackStates.end(), [] (const auto& state) { return readTrackSolo (state); });
+
+    const auto isOn = [] (const immer::map<std::uint64_t, bool>& map, const TrackValue& track)
+    {
+        const auto* on = map.find (track.id.getRaw());
+        return on != nullptr && *on;
+    };
+
+    const auto findHeld = [&tracks] (TrackID id) { return tracks.tracks.find (id.getRaw()); };
+    const auto anySoloed = ! beforeFader
+                           && std::any_of (tracks.tracks.begin(), tracks.tracks.end(),
+                                           [&isOn, &held] (const auto& entry) { return isOn (held.solos, entry.second); });
 
     // A bus carries a soloed track in it.
-    const auto holdsSoloed = [] (const juce::ValueTree& folder, auto& holdsNext) -> bool
+    const std::function<bool (TrackID)> holdsSoloed = [&] (TrackID folder)
     {
-        for (const auto& child : folder)
-            if (isTrackElement (child) && (readTrackSolo (child) || holdsNext (child, holdsNext)))
-                return true;
+        if (const auto* list = tracks.findList (folder))
+            for (const auto id : *list)
+                if (const auto* child = findHeld (id); child != nullptr && (isOn (held.solos, *child) || holdsSoloed (id)))
+                    return true;
 
         return false;
     };
 
     // What the song's sidechains listen to, the master's and those in containers too, from the devices the player holds
-    // (heldDevices: never the song's, as this runs in the tree's callback of a track muted or soloed, takeValue()).
+    // (heldDevices: never the song's).
     std::set<std::int64_t> keys;
 
     for (const auto& [id, device] : heldDevices)
@@ -2312,12 +2439,12 @@ void SongPlayer::updateAudibility()
 
     // A pad's track goes with its sampler's track, whose mute and solo cover its pads on tracks of their own (its sampler's
     // channel as the player holds it; none on the master).
-    const auto getSamplerTrack = [this] (const juce::ValueTree& padState)
+    const auto getSamplerTrack = [this, &findHeld] (const TrackValue& pad) -> const TrackValue*
     {
-        const auto found = heldDevices.find (readPadDevice (padState).getRaw());
+        const auto found = heldDevices.find (pad.padDevice.getRaw());
         return found != heldDevices.end() && found->second.channel != 0
-                   ? findTrackState (song, TrackID::fromRaw ((std::uint64_t) found->second.channel))
-                   : juce::ValueTree();
+                   ? findHeld (TrackID::fromRaw ((std::uint64_t) found->second.channel))
+                   : nullptr;
     };
 
     // Whether a track is muted or soloed, by its own switches or a folder's it is in.
@@ -2326,48 +2453,58 @@ void SongPlayer::updateAudibility()
         bool muted = false, soloed = false;
     };
 
-    const auto getSwitches = [&] (const juce::ValueTree& state)
+    const auto getSwitches = [&] (const TrackValue& track)
     {
         Switches switches;
-        const auto addFrom = [&switches] (const juce::ValueTree& from)
+        const auto addFrom = [&] (const TrackValue* from)
         {
-            for (auto track = from; isTrackElement (track); track = track.getParent())
+            for (const auto* each = from; each != nullptr; each = findHeld (each->parent))
             {
-                switches.muted = switches.muted || readTrackMute (track);
-                switches.soloed = switches.soloed || readTrackSolo (track);
+                switches.muted = switches.muted || isOn (held.mutes, *each);
+                switches.soloed = switches.soloed || isOn (held.solos, *each);
             }
         };
 
-        addFrom (state);
+        addFrom (&track);
 
-        if (readPad (state).has_value())
-            addFrom (getSamplerTrack (state));
+        if (track.pad.has_value())
+            addFrom (getSamplerTrack (track));
 
         return switches;
     };
 
-    const auto isRendered = [&] (const juce::ValueTree& state) { return beforeFader && readChannelID (state) == rendered->channel; };
-    const auto isSoloedOut = [&] (const juce::ValueTree& state)
+    const auto isRendered = [&] (const TrackValue& track) { return beforeFader && (std::int64_t) track.id.getRaw() == rendered->channel; };
+    const auto isSoloedOut = [&] (const TrackValue& track)
     {
-        const auto soloed = getSwitches (state).soloed || (isOfKind (state, TrackValue::Kind::folder) && holdsSoloed (state, holdsSoloed));
-        return ! isRendered (state) && anySoloed && ! soloed && ! isOfKind (state, TrackValue::Kind::returnTrack);
+        const auto soloed = getSwitches (track).soloed || (track.isFolder() && holdsSoloed (track.id));
+        return ! isRendered (track) && anySoloed && ! soloed && ! track.isReturn();
     };
-    const auto isHeard = [&] (const juce::ValueTree& state)
-    { return isRendered (state) || (! getSwitches (state).muted && ! isSoloedOut (state)); };
+    const auto isHeard = [&] (const TrackValue& track)
+    { return isRendered (track) || (! getSwitches (track).muted && ! isSoloedOut (track)); };
 
     // A return that is soloed hears what is sent to it, from tracks its solo silences too, as a soloed return does in
     // Ableton Live, Logic Pro and Cubase: else soloing a return, to hear an effect alone, would play silence.
     const auto isSoloedReturn = [&] (std::int64_t id)
     {
-        const auto target = findTrackState (song, TrackID::fromRaw ((std::uint64_t) id));
-        return isOfKind (target, TrackValue::Kind::returnTrack) && getSwitches (target).soloed && isHeard (target);
+        const auto* target = findHeld (TrackID::fromRaw ((std::uint64_t) id));
+        return target != nullptr && target->isReturn() && getSwitches (*target).soloed && isHeard (*target);
+    };
+
+    // Whether a track is a folder a bus is in, or the bus.
+    const auto isAboveOrIs = [&findHeld] (const TrackValue& track, const TrackValue& bus)
+    {
+        for (const auto* each = &bus; each != nullptr; each = findHeld (each->parent))
+            if (each->id == track.id)
+                return true;
+
+        return false;
     };
 
     // Whether a track, or a folder it is in, is muted below a bus: the bus's own mute, and its folders', don't count.
-    const auto isMutedBelow = [] (juce::ValueTree track, const juce::ValueTree& bus)
+    const auto isMutedBelow = [&] (const TrackValue* track, const TrackValue& bus)
     {
-        for (; isTrackElement (track) && track != bus && ! bus.isAChildOf (track); track = track.getParent())
-            if (readTrackMute (track))
+        for (const auto* each = track; each != nullptr && ! isAboveOrIs (*each, bus); each = findHeld (each->parent))
+            if (isOn (held.mutes, *each))
                 return true;
 
         return false;
@@ -2377,18 +2514,18 @@ void SongPlayer::updateAudibility()
     // docs/design/decisions.md): its sends before its fader go on, and those after it are silent with it. What another
     // track's solo silences sends nothing; but a track that only a solo silences (not its mute) still sends to a return
     // that is soloed.
-    const auto sendGoesOn = [&] (const juce::ValueTree& state, const SendValue& send)
+    const auto sendGoesOn = [&] (const TrackValue& track, const SendValue& send)
     {
-        const auto heard = isHeard (state);
-        return heard || (send.preFader && ! isSoloedOut (state))
-               || (! heard && ! getSwitches (state).muted && isSoloedReturn ((std::int64_t) send.to.getRaw()));
+        const auto heard = isHeard (track);
+        return heard || (send.preFader && ! isSoloedOut (track))
+               || (! heard && ! getSwitches (track).muted && isSoloedReturn ((std::int64_t) send.to.getRaw()));
     };
 
-    // A track's sends, by its element's ID, as the player holds them (heldSends: never the song's, as this runs in the tree's
-    // callback of a track muted or soloed, takeValue()), each in turn until `each` returns true; whether one did.
-    const auto anySendOf = [this] (const juce::ValueTree& state, const std::function<bool (const SendValue&)>& each)
+    // A track's sends, by its ID, as the player holds them (heldSends: never the song's), each in turn until `each` returns
+    // true; whether one did.
+    const auto anySendOf = [this] (const TrackValue& track, const std::function<bool (const SendValue&)>& each)
     {
-        if (const auto* list = heldSends.tracks.find (readTrackElementID (state).getRaw()))
+        if (const auto* list = heldSends.tracks.find (track.id.getRaw()))
             for (const auto id : *list)
                 if (const auto* send = heldSends.find (id); send != nullptr && each (*send))
                     return true;
@@ -2398,8 +2535,11 @@ void SongPlayer::updateAudibility()
 
     // Whether something still listens to a bus that isn't heard: a sidechain keyed from it, or a send of it that goes on
     // (one before its fader, while it is muted).
-    const auto isListenedTo = [&] (const juce::ValueTree& bus)
-    { return keys.contains (readChannelID (bus)) || anySendOf (bus, [&] (const SendValue& send) { return sendGoesOn (bus, send); }); };
+    const auto isListenedTo = [&] (const TrackValue& bus)
+    {
+        return keys.contains ((std::int64_t) bus.id.getRaw())
+               || anySendOf (bus, [&] (const SendValue& send) { return sendGoesOn (bus, send); });
+    };
 
     // A track that isn't heard plays on into a bus that something still listens to while that bus isn't heard either
     // (soloed out, or muted: a muted bus feeds its key, as a muted track does, and its sends before its fader), unless it is
@@ -2407,33 +2547,34 @@ void SongPlayer::updateAudibility()
     // silences it after the bus has taken it in, and what else it sends, after its fader, is silent meanwhile. A bus that
     // is heard plays its tracks as they are heard, so a track soloed in it plays alone (the owner, 2026-11-13: soloing a
     // drum in the Drums bus played the bus's other drums).
-    const auto playsForListener = [&] (const juce::ValueTree& state)
+    const auto playsForListener = [&] (const TrackValue& track)
     {
-        for (auto bus = state.getParent(); isTrackElement (bus); bus = bus.getParent())
-            if (! isHeard (bus) && isListenedTo (bus))
-                return ! isMutedBelow (state, bus) && ! (readPad (state).has_value() && isMutedBelow (getSamplerTrack (state), bus));
+        for (const auto* bus = findHeld (track.parent); bus != nullptr; bus = findHeld (bus->parent))
+            if (! isHeard (*bus) && isListenedTo (*bus))
+                return ! isMutedBelow (&track, *bus) && ! (track.pad.has_value() && isMutedBelow (getSamplerTrack (track), *bus));
 
         return false;
     };
 
-    for (const auto& state : trackStates)
+    for (const auto& entry : tracks.tracks)
     {
-        auto* strip = findStrip (readChannelID (state));
+        const auto& track = entry.second;
+        auto* strip = findStrip ((std::int64_t) entry.first);
 
         if (strip == nullptr)
             continue;
 
         // A track plays on, its devices too, whether it is heard or not; each of its sends as it goes on.
-        anySendOf (state,
+        anySendOf (track,
                    [&] (const SendValue& send)
                    {
                        if (const auto found = sendLevels.find ((std::int64_t) send.id.getRaw()); found != sendLevels.end())
-                           found->second->setCut (! sendGoesOn (state, send));
+                           found->second->setCut (! sendGoesOn (track, send));
 
                        return false;
                    });
 
-        strip->getChannel().setAudible (isHeard (state) || playsForListener (state));
+        strip->getChannel().setAudible (isHeard (track) || playsForListener (track));
     }
 }
 
@@ -2447,54 +2588,6 @@ void SongPlayer::takeSendLevel (DeviceID id, float decibels)
 {
     if (const auto found = sendLevels.find ((std::int64_t) id.getRaw()); found != sendLevels.end())
         found->second->setDecibels (decibels);
-}
-
-bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier& property)
-{
-    // (A modulator's parameter, steps or switch, and a macro's value: the song's values tell them, takeModulator(); a send's
-    // level too, takeSendLevel(); and what the devices' value covers of a device, a container or a chain, takeDevice().)
-
-    // A plain folder's VCA turns the tracks in it.
-    if (tree.hasType (schema::TRACK) && isFolderState (tree) && ! tree.hasProperty (schema::channelFader)
-        && property == schema::channelVolume)
-    {
-        const auto turn = [this] (const juce::ValueTree& folder, auto& turnNext) -> void
-        {
-            for (const auto& child : folder)
-            {
-                if (child.hasType (schema::TRACK))
-                {
-                    setChannel (child, false);
-                    turnNext (child, turnNext);
-                }
-            }
-        };
-
-        turn (tree, turn);
-        return true;
-    }
-
-    const auto isChannel = tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER);
-
-    if (isChannel && (property == schema::channelVolume || property == schema::channelPan))
-    {
-        setChannel (tree, tree.hasType (schema::MASTER));
-        return true;
-    }
-
-    // A track muted or soloed: what is heard, and which sends send, from the sends the player holds (heldSends), as this is a
-    // tree's callback.
-    if (tree.hasType (schema::TRACK) && (property == schema::trackMute || property == schema::trackSolo))
-    {
-        updateAudibility();
-        return true;
-    }
-
-    // How a track shows changes nothing that plays.
-    if (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
-        return true;
-
-    return false;
 }
 
 bool SongPlayer::takeStoreEntry (const SongValues::DeviceStoreChange& change)

@@ -123,37 +123,35 @@ namespace
     }
 
     // Whether a song's history has moved since this was made, for an answer that comes later than what it answers: an undo or
-    // a redo (any change the song hears while its history undoes or redoes, a gesture's roll-back too), or a step begun by
-    // hand (countHistoryMoves()). Not what changes the song as it plays (automation written, a take that grows, a plug-in's
-    // own change, a state written, a window's place kept): the review of known bug 166, a value typed while the song
-    // recorded was dropped.
-    struct HistoryWatch final : private juce::ValueTree::Listener
+    // a redo, a gesture's roll-back and a trial put back (each step taken back alone), told by the history once the move is
+    // whole (Song.h: HistoryListener), whatever the step changed, the song's values alone too (a step that changed only a
+    // value heard no tree callback, which the watch listened to until the tracks' listener's piece of roadmap step S5.20); or
+    // a step begun by hand (countHistoryMoves()). Not what changes the song as it plays (automation written, a take that
+    // grows, a plug-in's own change, a state written, a window's place kept), which moves no history: the review of known bug
+    // 166, a value typed while the song recorded was dropped.
+    struct HistoryWatch final : private Song::HistoryListener
     {
         explicit HistoryWatch (Song& watched)
             : song (&watched),
-              state (watched.getState()),
               moves (countHistoryMoves (watched))
         {
-            state.addListener (this);
+            watched.addHistoryListener (this);
         }
 
-        ~HistoryWatch() override { state.removeListener (this); }
+        ~HistoryWatch() override
+        {
+            if (auto* watched = song.get())
+                watched->removeHistoryListener (this);
+        }
 
         bool hasMoved() const { return undone || song == nullptr || countHistoryMoves (*song) != moves; }
 
     private:
         juce::WeakReference<Song> song;
-        juce::ValueTree state;
         const std::uint64_t moves;
         bool undone = false;
 
-        void heard() { undone = undone || song == nullptr || song->getUndoManager().isPerformingUndoRedo(); }
-
-        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { heard(); }
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { heard(); }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { heard(); }
-        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { heard(); }
-        void valueTreeRedirected (juce::ValueTree&) override { heard(); }
+        void historyMoved() override { undone = true; }
 
         JUCE_DECLARE_NON_COPYABLE (HistoryWatch)
     };
