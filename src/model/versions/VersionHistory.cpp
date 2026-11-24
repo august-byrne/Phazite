@@ -10,6 +10,7 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/TracksArea.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
@@ -293,20 +294,36 @@ juce::ValueTree readCommitSong (const VersionStore& store, const juce::String& s
     return read;
 }
 
+namespace
+{
+    // The merge waiting in a song as its element (Schema.h: MERGING) is written from what the song holds of it
+    // (SongOwnValue.h: SongOwnValue::merging): a tree of its own, which nothing shares with the song; invalid for none.
+    juce::ValueTree copyMergeWaiting (const Song& song)
+    {
+        const auto own = getSongOwn (song);
+        return own.merging.has_value() ? writeMergingElement (*own.merging) : juce::ValueTree();
+    }
+} // namespace
+
 std::optional<MergeState> readMergeState (const juce::ValueTree& element)
 {
     if (! element.hasType (schema::MERGING))
         return std::nullopt;
 
+    return readMergeState (readMergingRecord (element));
+}
+
+std::optional<MergeState> readMergeState (const MergingRecord& record)
+{
     MergeState state;
-    state.version = element[schema::mergingVersion].toString();
-    state.head = element[schema::mergingHead].toString();
-    state.before = element[schema::mergingBefore].toString();
+    state.version = record.version;
+    state.head = record.head;
+    state.before = record.before;
 
     if (! isPieceID (state.version) || ! isPieceID (state.head) || ! isPieceID (state.before))
         return std::nullopt;
 
-    for (const auto chosen : element[schema::mergingChosen].toString())
+    for (const auto chosen : record.chosen)
     {
         if (chosen < '0' || chosen > '2')
             return std::nullopt;
@@ -314,9 +331,9 @@ std::optional<MergeState> readMergeState (const juce::ValueTree& element)
         state.chosen.push_back ((int) (chosen - '0'));
     }
 
-    const auto renumbered = readMergeIDs (element[schema::mergingRenumbered].toString());
-    const auto translation = readMergeIDs (element[schema::mergingTranslated].toString());
-    const auto crossed = readMergeIDs (element[schema::mergingCrossed].toString());
+    const auto renumbered = readMergeIDs (record.renumbered);
+    const auto translation = readMergeIDs (record.translated);
+    const auto crossed = readMergeIDs (record.crossed);
 
     if (! renumbered.has_value() || ! translation.has_value() || ! crossed.has_value())
         return std::nullopt;
@@ -329,27 +346,28 @@ std::optional<MergeState> readMergeState (const juce::ValueTree& element)
 
 juce::ValueTree writeMergeState (const MergeState& state)
 {
-    juce::ValueTree element (
-        schema::MERGING,
-        { { schema::mergingVersion, state.version }, { schema::mergingHead, state.head }, { schema::mergingBefore, state.before } });
+    // Its record, each text empty for none, written as the song's own conversion writes a merge's element.
+    MergingRecord record;
+    record.version = state.version;
+    record.head = state.head;
+    record.before = state.before;
     juce::StringArray chosen;
 
     for (const auto value : state.chosen)
         chosen.add (juce::String (value));
 
-    if (! chosen.isEmpty())
-        element.setProperty (schema::mergingChosen, chosen.joinIntoString ({}), nullptr);
+    record.chosen = chosen.joinIntoString ({});
 
     if (! state.renumbered.empty())
-        element.setProperty (schema::mergingRenumbered, writeMergeIDs (state.renumbered), nullptr);
+        record.renumbered = writeMergeIDs (state.renumbered);
 
     if (! state.translation.empty())
-        element.setProperty (schema::mergingTranslated, writeMergeIDs (state.translation), nullptr);
+        record.translated = writeMergeIDs (state.translation);
 
     if (! state.crossed.empty())
-        element.setProperty (schema::mergingCrossed, writeMergeIDs (state.crossed), nullptr);
+        record.crossed = writeMergeIDs (state.crossed);
 
-    return element;
+    return writeMergingElement (record);
 }
 
 void setWaitingMerge (Song& song, const juce::ValueTree& merging)
@@ -1145,10 +1163,10 @@ void VersionHistory::open()
     // Its branches, every version their last ones follow, and the current branch's last version's song; and the merge the
     // song holds, if any, found again here rather than on the message thread.
     run (
-        [shared = store, number = generation, weak = juce::WeakReference<VersionHistory> (this),
-         mergingElement = song.getState().getChildWithName (schema::MERGING).createCopy(), closingNow = closing,
-         earlier = FinishingHistories::get().getKept (folder), sweepStop = sweepStopped, names = readNames (song.getState()),
-         songNow = readNames (song.getState()).base.isNotEmpty() ? copyWholeSong (song) : juce::ValueTree()]
+        [shared = store, number = generation, weak = juce::WeakReference<VersionHistory> (this), mergingElement = copyMergeWaiting (song),
+         closingNow = closing, earlier = FinishingHistories::get().getKept (folder), sweepStop = sweepStopped,
+         names = readNames (getSongStanding (song)),
+         songNow = readNames (getSongStanding (song)).base.isNotEmpty() ? copyWholeSong (song) : juce::ValueTree()]
         {
             // Tests' seam: the read held here, begun, and counted while it is (holdFirstReadsForTests).
             if (holdFirstReadsForTests.load())
@@ -2051,11 +2069,11 @@ void VersionHistory::adoptLater()
         for (const auto& [id, version] : *named)
             add (work.versions, id);
 
-    if (const auto waiting = song.getState().getChildWithName (schema::MERGING); waiting.isValid())
+    if (const auto waiting = getSongOwn (song).merging)
     {
-        add (work.versions, waiting[schema::mergingVersion].toString());
-        add (work.versions, waiting[schema::mergingHead].toString());
-        add (work.songs, waiting[schema::mergingBefore].toString());
+        add (work.versions, waiting->version);
+        add (work.versions, waiting->head);
+        add (work.songs, waiting->before);
     }
 
     for (const auto& branch : branches)
@@ -2228,8 +2246,9 @@ VersionHistory::AudioPathsFinder VersionHistory::makeAudioPathsFinder() const
     // The song before the merge the song holds, which Abort Merge brings back, beside what the store keeps.
     std::vector<VersionsAudio::Named> songsToo;
 
-    if (const auto waiting = readMergeState (song.getState().getChildWithName (schema::MERGING)))
-        songsToo.push_back ({ waiting->before, "the song before the merge that waits in the song" });
+    if (const auto record = getSongOwn (song).merging)
+        if (const auto waiting = readMergeState (*record))
+            songsToo.push_back ({ waiting->before, "the song before the merge that waits in the song" });
 
     return [shared = store, cache = audioPaths, songsToo] (const std::function<bool()>& shouldStop)
     { return cache->find (*shared, songsToo, shouldStop); };
@@ -2576,16 +2595,16 @@ void VersionHistory::findMerging() const
     mergeDirty = false;
     merging.reset();
     mergeProblem = mergeFailure;
-    const auto element = song.getState().getChildWithName (schema::MERGING);
+    const auto record = getSongOwn (song).merging;
 
-    if (! element.isValid() || store == nullptr || ! hasRead)
+    if (! record.has_value() || store == nullptr || ! hasRead)
         return;
 
     const auto say = [this] (const juce::String& problem) { mergeProblem = mergeFailure.isNotEmpty() ? mergeFailure : problem; };
 
     // One that isn't one, or names a commit the history hasn't (a project opened without its Versions folder, whose
     // history starts anew): no merge waits, and Abort Merge takes the element out.
-    const auto said = readMergeState (element);
+    const auto said = readMergeState (*record);
     const auto* merged = said.has_value() ? findVersion (said->version) : nullptr;
 
     if (merged == nullptr)
@@ -2642,7 +2661,7 @@ void VersionHistory::findMerging() const
     }
 
     // Found where the history has it; else read on the history's thread, waiting meanwhile, its conflicts not shown yet.
-    const auto key = getMergeKey (element);
+    const auto key = getMergeKey (writeMergingElement (*record));
     Merge merge;
 
     if (const auto found = mergesFound.find (key); found != mergesFound.end())
@@ -2740,7 +2759,7 @@ juce::ValueTree VersionHistory::keepMerge (const Merge& merge, std::vector<int> 
 
 bool VersionHistory::holdsMergeElement() const
 {
-    return song.getState().getChildWithName (schema::MERGING).isValid();
+    return getSongOwn (song).merging.has_value();
 }
 
 bool VersionHistory::holdsCommitMergeWaits (const BranchRecord& branch) const
@@ -4699,6 +4718,14 @@ VersionHistory::Names VersionHistory::readNames (const juce::ValueTree& songStat
     return names;
 }
 
+VersionHistory::Names VersionHistory::readNames (const SongStanding& standing)
+{
+    // As the song holds them (SongOwnValue.h: readHeldSongStanding()): each an id of its form, or none, already.
+    jassert (standing.versionsBranch.isEmpty() || schema::isVersionsID (standing.versionsBranch, schema::versionsBranchDigits));
+    jassert (standing.versionsBase.isEmpty() || schema::isVersionsID (standing.versionsBase, schema::versionsBaseDigits));
+    return { .branch = standing.versionsBranch, .base = standing.versionsBase };
+}
+
 void VersionHistory::baseRead (int number, const juce::String& base, const juce::String& unreadable,
                                std::map<juce::String, juce::StringArray> elsewhere, const juce::String& missing)
 {
@@ -4814,7 +4841,7 @@ void VersionHistory::followNamesOfSong()
     // song the one kept before it if it is that one, else read on the history's thread, the changes none meanwhile. As at
     // open: where it can't be read, the branch's last version, said; where the branch has newer versions and the song is
     // its last one's as it is (an Undo past a Take and a version saved after it, then Redo), it grew from that one.
-    const auto names = readNames (song.getState());
+    const auto names = readNames (getSongStanding (song));
 
     if (movingNames || ! hasRead || store == nullptr || names.branch != currentBranch || names.base.isEmpty() || names.base == baseVersion)
         return;

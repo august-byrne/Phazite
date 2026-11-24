@@ -8,6 +8,7 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -58,7 +59,7 @@ BeatRange getSongLoopBeats (const Song& song)
 
 bool doesLoopFollowSong (const Song& song)
 {
-    return song.getState().getProperty (schema::loopFollowsSong, true);
+    return getSongOutside (song).loopFollowsSong.value_or (true);
 }
 
 void loopSong (Song& song)
@@ -84,12 +85,12 @@ void loopBeats (Song& song, BeatRange range)
 
 BeatRange getLoopBeats (const Song& song)
 {
-    const auto state = song.getState();
+    const auto outside = getSongOutside (song);
 
-    if (doesLoopFollowSong (song) || ! state.hasProperty (schema::loopStart) || ! state.hasProperty (schema::loopEnd))
+    if (outside.loopFollowsSong.value_or (true) || ! outside.loopStart.has_value() || ! outside.loopEnd.has_value())
         return getSongLoopBeats (song);
 
-    return { BeatPosition::fromBeats (state[schema::loopStart]), BeatPosition::fromBeats (state[schema::loopEnd]) };
+    return { BeatPosition::fromBeats (*outside.loopStart), BeatPosition::fromBeats (*outside.loopEnd) };
 }
 
 std::optional<BeatRange> getLoop (const Song& song)
@@ -114,7 +115,7 @@ void loopBeatRange (Song& song, double startBeat, double endBeat)
 
 bool isLoopOn (const Song& song)
 {
-    return song.getState().getProperty (schema::loop, false);
+    return getSongOutside (song).loop;
 }
 
 void toggleLoop (Song& song)
@@ -143,7 +144,7 @@ void loopSections (Song& song, const std::vector<Section>& sections)
 
 BeatPosition getPlayStartBeat (const Song& song)
 {
-    return BeatPosition::fromBeats ((double) song.getState().getProperty (schema::playStart, 0.0));
+    return BeatPosition::fromBeats (getSongOutside (song).playStart);
 }
 
 void setPlayStart (Song& song, BeatPosition position)

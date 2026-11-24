@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
@@ -103,7 +104,7 @@ void toggleRecordQuantize (AudioIO& audio)
 //==============================================================================
 bool isPunchOn (const Song& song)
 {
-    return (bool) song.getState().getProperty (schema::punch, false);
+    return getSongOutside (song).punch.value_or (false);
 }
 
 bool canPunch (const Song& song)

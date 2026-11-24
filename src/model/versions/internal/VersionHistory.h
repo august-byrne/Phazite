@@ -35,6 +35,8 @@ namespace phazite
 class ProjectContext;
 class TrackRender;
 struct MergeState;
+struct MergingRecord; // model/base/internal/SongOwnValue.h
+struct SongStanding;  // model/base/internal/SongOwnValue.h
 struct VersionsAudio;
 
 // What a look for the audio the versions play found (VersionHistory::makeAudioPathsFinder()): the files' paths; what it
@@ -685,6 +687,7 @@ public:
     };
 
     static Names readNames (const juce::ValueTree& song);
+    static Names readNames (const SongStanding&);
 
     // For tests: while set, every history's writes wait before they write, as a slow disk would make them.
     static std::atomic<bool> holdWritesForTests;
@@ -1164,6 +1167,7 @@ struct MergeState
 };
 
 std::optional<MergeState> readMergeState (const juce::ValueTree& element);
+std::optional<MergeState> readMergeState (const MergingRecord&);
 juce::ValueTree writeMergeState (const MergeState&);
 
 // Sets the merge waiting in a song as its element says (a copy of it: writeMergeState()'s, or one a file holds, read as above),

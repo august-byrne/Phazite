@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Metronome.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
@@ -9,7 +10,7 @@ namespace phazite
 {
 bool isMetronomeOn (const Song& song)
 {
-    return song.getState().getProperty (schema::metronome, false);
+    return getSongOutside (song).metronome;
 }
 
 void setMetronomeOn (Song& song, bool on)

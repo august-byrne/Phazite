@@ -106,12 +106,13 @@ inline const Property<bool> loopFollowsSong { "loopFollowsSong", on (PHAZITE), b
 // On PHAZITE:
 // - loop: bool, default false: playback loops, around the song while the loop follows it, or else around the range
 //   looped on purpose, loopStart to loopEnd (double, in beats from the song's start; none while the loop follows the song);
-// - playStart: double, in beats, default 0: where playback starts, the song's start again as a project opens;
+// - playStart: double, in beats, 0 to the song's most beats (maxBeats), default 0, written only past it: where playback
+//   starts, the song's start again as a project opens;
 // - metronome: bool, default false: the metronome clicks while the song plays. state
 inline const Property<bool> loop { "loop", on (PHAZITE), byDefault (false), Kind::state, uncounted };
 inline const Property<double> loopStart { "loopStart", on (PHAZITE), within (0.0, maxBeats), Kind::state, uncounted };
 inline const Property<double> loopEnd { "loopEnd", on (PHAZITE), within (0.0, maxBeats), Kind::state, uncounted };
-inline const Property<double> playStart { "playStart", on (PHAZITE), byDefault (0.0), Kind::state, uncounted };
+inline const Property<double> playStart { "playStart", on (PHAZITE), within (0.0, maxBeats), byDefault (0.0), Kind::state, uncounted };
 inline const Property<bool> metronome { "metronome", on (PHAZITE), byDefault (false), Kind::state, uncounted };
 
 // On PHAZITE. The id of the song outline applied last (Outline::id), or none. song
@@ -176,8 +177,14 @@ inline const Property<int> gridOffset { "gridOffset", on (PHAZITE, PIANOROLL), w
                                         Kind::view,   uncountedOn (PHAZITE) };
 
 // The size of a fixed grid, used while gridAdaptive is off: "1/16 beat", "1/8 beat", "1/4 beat" (the default), "1/2 beat",
-// "1 beat", "1 bar", "2 bars", "4 bars" or "8 bars".
-inline const Property<juce::String> gridStep { "gridStep", on (PHAZITE, PIANOROLL), byDefault ("1/4 beat"), Kind::view,
+// "1 beat", "1 bar", "2 bars", "4 bars" or "8 bars" (model/arrangement/GridSettings.h: getSavedGridStep()); any other word
+// goes, and the grid reads the default.
+inline const Property<juce::String> gridStep { "gridStep",
+                                               on (PHAZITE, PIANOROLL),
+                                               byDefault ("1/4 beat"),
+                                               oneOf ("1/16 beat", "1/8 beat", "1/4 beat", "1/2 beat", "1 beat", "1 bar", "2 bars",
+                                                      "4 bars", "8 bars"),
+                                               Kind::view,
                                                uncountedOn (PHAZITE) };
 
 // bool, default false: the grid divides beats into triplets.
@@ -1328,8 +1335,11 @@ bool mustGiveIDsAnew (const juce::ValueTree& song);
 bool mustGiveIDsAnew (std::uint64_t largestID, std::uint64_t nextID);
 
 // Whether two songs' IDs are in one numbering (schema::idNumbering): neither given anew, or both by the same renumbering.
-// What the versions ask before they match a version's items with the song's by ID (model/versions/VersionsModel.cpp).
+// What the versions ask before they match a version's items with the song's by ID (model/versions/VersionsModel.cpp): of two
+// songs' trees (a version's, a merge's, a whole copy), and of the live song (its numbering as it holds it, SongOwnValue.h:
+// getSongOwn()) and a song's tree.
 bool areNumberedAlike (const juce::ValueTree& song, const juce::ValueTree& other);
+bool areNumberedAlike (const Song& song, const juce::ValueTree& other);
 
 // The ID a song gives next: past its count (nextID) and every ID it holds. Of a song's tree (a version's, a merge's, a whole
 // copy): what the tree holds. Of a live song: its tree's and what its values hold beside it (IDsHeld.h: findLargestIDHeld()),

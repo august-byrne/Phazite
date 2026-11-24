@@ -641,6 +641,30 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                     if (expected.has_value() && type == element && property->getName() == *at && juce::exactlyEqual (*expected, none))
                         expected.reset();
 
+                // The song's own as the song holds it (SongOwnValue.h: keepSongOwnAsHeld()): where playback starts, which the loader
+                // keeps within its range and leaves out at 0, goes as the song opens (makeSong(): a project opens at its start);
+                // and a loop's end kept at or before its start, or a start at or past its end (the other end as the
+                // representative project holds it), goes with the other, as no range looped.
+                if (expected.has_value() && type == &schema::PHAZITE)
+                {
+                    if (property == &schema::playStart)
+                        expected.reset();
+
+                    if (property == &schema::loopStart || property == &schema::loopEnd)
+                    {
+                        const auto isStart = property == &schema::loopStart;
+                        const auto other = phazite::readValueNumber (changed.original[isStart ? schema::loopEnd : schema::loopStart]);
+
+                        if (! other.has_value() || ! (isStart ? *other > *expected : *expected > *other))
+                            expected.reset();
+                    }
+                }
+
+                // A grid's offset that is no number, taken out, is given its default with the grid's other properties, as the
+                // song holds a grid (all five: SongOwnValue.h, keepSongOwnAsHeld()).
+                if (! expected.has_value() && property == &schema::gridOffset)
+                    expected = (double) *schema::gridOffset.getDefaultValue();
+
                 const auto loaded = changed.getLoaded (*property);
                 REQUIRE (loaded.has_value() == expected.has_value());
 
@@ -797,10 +821,17 @@ TEST_CASE ("Every word list the description gives is what the loader keeps a wor
             INFO (describeProblems (changed.problemsBefore));
             CHECK (hasProblem (changed.problemsBefore, "kind", property->toString()));
 
-            // A word not on the list goes; one every element holds (a track's kind) is given one, or its element goes.
+            // A word not on the list goes; one every element holds (a track's kind) is given one, or its element goes; a grid's
+            // step, of a grid that holds its other properties, is given its default with them, as the song holds a grid
+            // (SongOwnValue.h: keepSongOwnAsHeld()).
             const auto loaded = changed.getLoaded (*property);
 
-            if (property->isAlways() && loaded.has_value())
+            if (property == &schema::gridStep)
+            {
+                REQUIRE (loaded.has_value());
+                CHECK (loaded->toString() == *schema::gridStep.getDefaultValue());
+            }
+            else if (property->isAlways() && loaded.has_value())
             {
                 const auto& words = property->getWords();
                 CHECK (std::any_of (words.begin(), words.end(), [&] (const char* word) { return loaded->toString() == word; }));

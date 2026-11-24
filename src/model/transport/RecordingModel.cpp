@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/TracksValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
@@ -73,7 +74,7 @@ juce::String getTrackInput (const ProjectContext& context, TrackID id)
 juce::String getLastInput (const ProjectContext& context)
 {
     auto* song = findSong (context);
-    return song != nullptr ? song->getState().getProperty (schema::lastInput).toString() : juce::String();
+    return song != nullptr ? getSongOutside (*song).lastInput : juce::String();
 }
 
 void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inputID)

@@ -369,6 +369,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/Song.cpp
     src/model/base/Song.h
     src/model/base/SongIndex.cpp
+    src/model/base/SongOwnValue.cpp
     src/model/base/SongText.cpp
     src/model/base/SongValues.cpp
     src/model/base/TempoMapArea.cpp
@@ -411,6 +412,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/internal/SendsValue.h
     src/model/base/internal/Selection.h
     src/model/base/internal/SongIndex.h
+    src/model/base/internal/SongOwnValue.h
     src/model/base/internal/SongValues.h
     src/model/base/internal/SongText.h
     src/model/base/internal/TempoMapArea.h
@@ -1556,6 +1558,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongCheck.h
         tests/SongIDs.h
         tests/SongIndexTests.cpp
+        tests/SongOwnValueTests.cpp
         tests/SongPlaceTextTests.cpp
         tests/SongTextTests.cpp
         tests/SongValuesChordsTests.cpp

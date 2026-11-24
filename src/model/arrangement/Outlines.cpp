@@ -5,6 +5,7 @@
 #include "internal/Tracks.h"
 #include "model/base/Json.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/transport/internal/Tempo.h"
@@ -135,7 +136,7 @@ bool applyOutline (Song& song, const juce::String& outlineID)
 
 juce::String getAppliedOutline (const Song& song)
 {
-    return song.getState()[schema::outline].toString();
+    return getSongOwn (song).outline;
 }
 
 bool isOutlineApplied (const Song& song, const juce::String& outlineID)

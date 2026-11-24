@@ -17,6 +17,7 @@
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TempoMapValue.h"
@@ -300,6 +301,21 @@ namespace
             return {};
         }
 
+        // Every word one of its words (Schema.h: oneOf()), and one every element holds held: the song's own element's too.
+        void checkWords (const juce::ValueTree& element)
+        {
+            for (const auto* property : tables.on (element.getType()).worded)
+            {
+                const auto text = element[*property].toString();
+                const auto& words = property->getWords();
+
+                if (element.hasProperty (*property)
+                        ? std::none_of (words.begin(), words.end(), [&text] (const char* word) { return text == word; })
+                        : property->isAlways())
+                    add ("kind", element, property->toString() + " is none of its words: " + text);
+            }
+        }
+
         void checkValues (const juce::ValueTree& tree)
         {
             for (const auto& child : tree)
@@ -308,17 +324,7 @@ namespace
                     continue;
 
                 checkRanges (child);
-
-                for (const auto* property : tables.on (child.getType()).worded)
-                {
-                    const auto text = child[*property].toString();
-                    const auto& words = property->getWords();
-
-                    if (child.hasProperty (*property)
-                            ? std::none_of (words.begin(), words.end(), [&text] (const char* word) { return text == word; })
-                            : property->isAlways())
-                        add ("kind", child, property->toString() + " is none of its words: " + text);
-                }
+                checkWords (child);
 
                 if (child.hasType (schema::DEVICE))
                 {
@@ -646,6 +652,7 @@ std::vector<std::string> findSongProblems (const Song& song, const schema::Table
     checker.checkItemIDs (state);
     checker.checkKeys (state);
     checker.checkRanges (state);
+    checker.checkWords (state); // the song's own element's (a grid's step)
     checker.checkValues (state);
     checker.checkAliases();
     checker.checkAudioAliases();
@@ -1819,6 +1826,63 @@ namespace
                 problems.push_back ("values: the master is kept otherwise than the song holds it");
         }
     }
+
+    // The song's own, while the song's tree holds it (SongOwnValue.h): its root read alike as Phazite's code always read it and
+    // as the song holds it (each field by its description, by the loader's rule), so that the getters read what the file
+    // holds. A song that went through the loader holds it so; every writer of the song's own writes it so.
+    void checkSongOwnValue (const Song& song, std::vector<std::string>& problems)
+    {
+        const auto root = song.getState();
+
+        if (! (readSongOwnValue (root) == readHeldSongOwn (root)))
+            problems.push_back ("values: the song's own is read otherwise as Phazite's code read it and as the song holds it");
+
+        if (! (readSongStanding (root) == readHeldSongStanding (root)))
+            problems.push_back ("values: the song's key set last or its versions' names are read otherwise as Phazite's code read "
+                                "them and as the song holds them");
+
+        if (! (readSongOutside (root) == readHeldSongOutside (root)))
+            problems.push_back ("values: the song's loop, grids or other state are read otherwise as Phazite's code read them and as "
+                                "the song holds them");
+
+        // And the root read as held and written back is the root (for what Phazite knows: each property the descriptions put on
+        // PHAZITE but nextID, which no value holds, and those of its first LASTKEY, PIANOROLL and MERGING, each held where it is
+        // written, as it is written), so that the song's own switched to values writes the file it opened.
+        juce::ValueTree written (schema::PHAZITE);
+        writeSongOwnInto (written, readHeldSongOwn (root), readHeldSongStanding (root), readHeldSongOutside (root));
+
+        const auto compare = [&problems] (const juce::ValueTree& held, const juce::ValueTree& made, const juce::Identifier& type)
+        {
+            for (const auto* property : schema::getTables().on (type).all)
+            {
+                if (property->getName() == schema::nextID.getName())
+                    continue;
+
+                const auto* there = held.getPropertyPointer (property->getName());
+                const auto* again = made.getPropertyPointer (property->getName());
+
+                if ((there == nullptr) != (again == nullptr) || (there != nullptr && ! isSameValue (*there, *again)))
+                    problems.push_back ("values: the song's own " + type.toString().toStdString() + " " + property->toString().toStdString()
+                                        + " is written back otherwise than the song holds it: "
+                                        + (there != nullptr ? there->toString().toStdString() : std::string ("none")) + " -> "
+                                        + (again != nullptr ? again->toString().toStdString() : std::string ("none")));
+            }
+        };
+
+        compare (root, written, schema::PHAZITE);
+
+        for (const auto* type : { &schema::LASTKEY, &schema::PIANOROLL, &schema::MERGING })
+        {
+            const auto held = root.getChildWithName (*type);
+            const auto made = written.getChildWithName (*type);
+
+            if (held.isValid() != made.isValid())
+                problems.push_back ("values: the song's own " + type->toString().toStdString()
+                                    + (held.isValid() ? " is held, holding nothing it is for" : " is written back, not held"));
+            else if (held.isValid())
+                compare (held, made, *type);
+        }
+    }
 } // namespace
 
 std::vector<std::string> findValueProblems (const Song& song)
@@ -1830,7 +1894,7 @@ std::vector<std::string> findValueProblems (const Song& song)
         return problems;
 
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
-    // lane, the MIDI links, the curves, the sections, modulation, the sends, the devices, the tracks.
+    // lane, the MIDI links, the curves, the sections, modulation, the sends, the devices, the tracks, the song's own.
     checkClipsValue (song, *values, problems);
     checkNotesValue (song, *values, problems);
     checkTempoMapValue (song, *values, problems);
@@ -1845,6 +1909,7 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkTracksValue (song, problems);
     checkTrackLeavesValue (song, *values, problems); // the tracks' switches and view
     checkTracksAsTold (song, *values, problems);     // what the tracks' keeper told, while the tree holds them
+    checkSongOwnValue (song, problems);              // the song's own, while the tree holds it
     return problems;
 }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Schema.h"
 #include "internal/IDsHeld.h"
+#include "internal/SongOwnValue.h"
 
 #include <algorithm>
 #include <functional>
@@ -50,6 +51,11 @@ bool mustGiveIDsAnew (const juce::ValueTree& song)
 bool areNumberedAlike (const juce::ValueTree& song, const juce::ValueTree& other)
 {
     return song[schema::idNumbering].toString() == other[schema::idNumbering].toString();
+}
+
+bool areNumberedAlike (const Song& song, const juce::ValueTree& other)
+{
+    return getSongOwn (song).idNumbering == other[schema::idNumbering].toString();
 }
 
 namespace

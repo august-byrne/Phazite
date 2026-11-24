@@ -3,6 +3,7 @@
 #include "Progressions.h"
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongValues.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/internal/AreaClashes.h"
@@ -36,19 +37,16 @@ namespace
         return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
     }
 
-    std::optional<Key> readKey (const juce::ValueTree& state)
-    {
-        if (! state.hasProperty (schema::keyRoot))
-            return std::nullopt;
-
-        return Key { juce::jlimit (0, 11, (int) state[schema::keyRoot]),
-                     findScale (state[schema::keyScale].toString()).value_or (Scale::major) };
-    }
-
-    // The key before any is written: the one new tracks get, which a new project sets, or else C major.
+    // The key before any is written: the one new tracks get, which a new project sets (SongOwnValue.h: SongStanding's key
+    // set last, as model/notes/Notes.cpp's getLastKey() reads it: its scale by its word, major for none), or else C major.
     Key getDefaultKey (const Song& song)
     {
-        return readKey (song.getState().getChildWithName (schema::LASTKEY)).value_or (Key {});
+        const auto saved = getSongStanding (song).lastKey;
+
+        if (! saved.has_value())
+            return Key {};
+
+        return Key { .root = saved->root, .scale = findScale (saved->scale).value_or (Scale::major) };
     }
 
     BeatDuration getBarLength (const Song& song, BeatPosition where)

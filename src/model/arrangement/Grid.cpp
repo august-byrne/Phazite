@@ -2,6 +2,7 @@
 #include "internal/Grid.h"
 #include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 
 #include <algorithm>
 #include <cmath>
@@ -79,12 +80,17 @@ void GridSettings::makeCoarser()
 
 GridSettings GridSettings::load (const juce::ValueTree& state)
 {
+    return loadGridSettings (readSavedGrid (state));
+}
+
+GridSettings loadGridSettings (const SavedGrid& saved)
+{
     GridSettings grid;
-    grid.snap = state.getProperty (schema::gridSnap, grid.snap);
-    grid.adaptive = state.getProperty (schema::gridAdaptive, grid.adaptive);
-    grid.adaptiveOffset = juce::jlimit (-maxAdaptiveOffset, maxAdaptiveOffset, (int) state.getProperty (schema::gridOffset, 0));
-    grid.fixedLevel = findFixedGridLevel (state[schema::gridStep].toString()).value_or (grid.fixedLevel);
-    grid.triplets = state.getProperty (schema::gridTriplets, grid.triplets);
+    grid.snap = saved.snap;
+    grid.adaptive = saved.adaptive;
+    grid.adaptiveOffset = juce::jlimit (-GridSettings::maxAdaptiveOffset, GridSettings::maxAdaptiveOffset, saved.offset);
+    grid.fixedLevel = findFixedGridLevel (saved.step).value_or (grid.fixedLevel);
+    grid.triplets = saved.triplets;
     return grid;
 }
 
@@ -115,8 +121,9 @@ std::optional<int> findFixedGridLevel (const juce::String& savedStep)
 GridSettings loadGridSettings (const Song& song, GridOwner owner)
 {
     // Reading leaves the song as it is: a song that doesn't have the state yet reads the defaults.
-    const auto state = song.getState();
-    return GridSettings::load (owner == GridOwner::pianoRoll ? state.getChildWithName (schema::PIANOROLL) : state);
+    const auto outside = getSongOutside (song);
+    const auto& saved = owner == GridOwner::pianoRoll ? outside.pianoRollGrid : outside.playlistGrid;
+    return saved.has_value() ? loadGridSettings (*saved) : GridSettings();
 }
 
 void saveGridSettings (Song& song, GridOwner owner, const GridSettings& grid)

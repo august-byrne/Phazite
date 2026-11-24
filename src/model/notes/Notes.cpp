@@ -9,6 +9,7 @@
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TracksOutside.h"
@@ -100,15 +101,15 @@ namespace
                                   { ChordType::minorNinth,            { 0, 3, 7, 10, 14 },  "m9" } };
     // clang-format on
 
-    // A key on LASTKEY in the song's Phazite state (model/base/internal/Schema.h); a track's is read by the tracks' conversion
+    // The key set last (LASTKEY in the song's Phazite state, model/base/internal/Schema.h), as the song's standing holds it
+    // (SongOwnValue.h: SavedKey): its scale by its word, major for none; a track's is read by the tracks' conversion
     // (TracksValue.h: readTrackKey()), alike. A key exists exactly when its root does.
-    std::optional<Key> readKey (const juce::ValueTree& state)
+    std::optional<Key> readKey (const std::optional<SavedKey>& saved)
     {
-        if (! state.hasProperty (schema::keyRoot))
+        if (! saved.has_value())
             return std::nullopt;
 
-        return Key { juce::jlimit (0, 11, (int) state[schema::keyRoot]),
-                     findScale (state[schema::keyScale].toString()).value_or (Scale::major) };
+        return Key { .root = saved->root, .scale = findScale (saved->scale).value_or (Scale::major) };
     }
 
     void writeKey (juce::ValueTree state, const std::optional<Key>& key, juce::UndoManager* undo)
@@ -2310,7 +2311,7 @@ void chooseTrackKey (Song& song, TrackID track, const std::optional<Key>& key)
 
 std::optional<Key> getLastKey (const Song& song)
 {
-    return readKey (song.getState().getChildWithName (schema::LASTKEY));
+    return readKey (getSongStanding (song).lastKey);
 }
 
 void setLastKey (Song& song, const Key& key)

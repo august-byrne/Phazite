@@ -3,6 +3,7 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -624,7 +625,7 @@ void toggleSamplesFollowTempo (Song& song)
 
 bool doPatternsFollowTempo (const Song& song)
 {
-    return ! (bool) song.getState().getProperty (schema::patternsKeepTheirSpeed, false);
+    return ! getSongOwn (song).patternsKeepTheirSpeed;
 }
 
 void togglePatternsFollowTempo (Song& song)

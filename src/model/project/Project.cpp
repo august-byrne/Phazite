@@ -16,6 +16,7 @@
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksArea.h"
@@ -1894,6 +1895,15 @@ namespace
                 keepNames (state, items);
                 forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
                 keepKeys (state);
+
+                // The song's own (its root's properties, LASTKEY, PIANOROLL, MERGING) as it holds it, once its numbers are
+                // within their ranges, its words its descriptions' (keepNumbers(): a grid's step of no word gone, playStart
+                // within 0 to the song's most beats) and each of its elements held once (keepKeys(), the first staying): read
+                // as held and written back, by the conversion's one rule (SongOwnValue.h: keepSongOwnAsHeld()), what the
+                // descriptions can't say: a switch written off and an empty text out, playStart at 0 out, a loop's range
+                // without both ends or not past its start out, a grid completed with its defaults, and a LASTKEY without a
+                // root and a PIANOROLL without a grid's property out.
+                keepSongOwnAsHeld (state);
                 keepModulators (state);
                 keepSendsAsHeld (state);
                 keepDevicesAsHeld (state);
@@ -2210,6 +2220,23 @@ namespace
     const char* const notWhileShowing = "A version is open in the song's place and can't go back to Now yet (a render has it, "
                                         "automation is being written, or the branch a change makes is being written): let that "
                                         "finish, then save.";
+
+    // The song's names of where it stands in its versions (Schema.h: versionsBranch, versionsBase), as it holds them now
+    // (SongOwnValue.h: getSongStanding()), written into a copy of it as it was saved: each where the song has one, none where
+    // it hasn't.
+    void writeNamesNow (const Song& song, juce::ValueTree& saved)
+    {
+        const auto standing = getSongStanding (song);
+
+        for (const auto& [name, text] :
+             { std::pair (&schema::versionsBranch, &standing.versionsBranch), std::pair (&schema::versionsBase, &standing.versionsBase) })
+        {
+            if (text->isNotEmpty())
+                saved.setProperty (*name, *text, nullptr);
+            else
+                saved.removeProperty (*name, nullptr);
+        }
+    }
 } // namespace
 
 Project::Project (Song::Ptr s, const juce::File& f)
@@ -2269,13 +2296,7 @@ Project::~Project()
 
     if (namesPending && ! changedSinceSave && savedState.tree.isValid())
     {
-        const auto state = song->getState();
-
-        for (const auto* name : { &schema::versionsBranch, &schema::versionsBase })
-            if (const auto* now = state.getPropertyPointer (*name))
-                savedState.tree.setProperty (*name, *now, nullptr);
-            else
-                savedState.tree.removeProperty (*name, nullptr);
+        writeNamesNow (*song, savedState.tree);
 
         if (writeProjectFile (copyWhole (savedState.tree, savedState.values), file).wasOk())
             namesPending = false;
@@ -3173,15 +3194,7 @@ void Project::writeVersionsNames()
     }
 
     // The file as it was saved, the song's names in it as they are now: no backup, as the song in it is the one backed up.
-    const auto state = song->getState();
-
-    for (const auto* name : { &schema::versionsBranch, &schema::versionsBase })
-    {
-        if (const auto* now = state.getPropertyPointer (*name))
-            savedState.tree.setProperty (*name, *now, nullptr);
-        else
-            savedState.tree.removeProperty (*name, nullptr);
-    }
+    writeNamesNow (*song, savedState.tree);
 
     namesWriter->write (copyWhole (savedState.tree, savedState.values), file);
     namesPending = false;

@@ -7,6 +7,7 @@
 #include "model/base/BackgroundJobs.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/mixer/internal/Mixer.h"
@@ -68,7 +69,7 @@ namespace
 juce::String getProjectNotes (const ProjectContext& context)
 {
     const auto* song = findSong (context);
-    return song != nullptr ? song->getState()[schema::notes].toString() : juce::String();
+    return song != nullptr ? getSongOwn (*song).notes : juce::String();
 }
 
 void setProjectNotes (ProjectContext& context, const juce::String& text)

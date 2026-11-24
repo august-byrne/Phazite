@@ -11,6 +11,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -862,7 +863,7 @@ bool takeBack (ProjectContext& context, const VersionChange& line)
 
     // Not from a version numbered otherwise (numberedOtherwise()), as the last version itself is until one is saved after the
     // song's IDs were given anew as it opened.
-    if (! areNumberedAlike (song->getState(), then))
+    if (! areNumberedAlike (*song, then))
     {
         history->restoreRefused = compared != nullptr
                                       ? otherNumberingRefusal ("\"" + getDisplayName (*compared) + "\"")
@@ -938,7 +939,7 @@ namespace
         if (idsGivenAnew)
             return VersionHistory::Taken::refused (idsTwiceRefusal());
 
-        if (then.isValid() && ! areNumberedAlike (song->getState(), then))
+        if (then.isValid() && ! areNumberedAlike (*song, then))
             return VersionHistory::Taken::refused (otherNumberingRefusal ("\"" + getDisplayName (*version) + "\""));
 
         // As much of it as can be read, as the whole song's restore takes it: what a damaged piece held stays as it is now, and
@@ -1677,7 +1678,7 @@ namespace
                                                          "lines share can't be told apart.");
 
             // Numbered otherwise than the song as it was read against, or than the song now, made another whole meanwhile.
-            if (worked->numberedOtherwise || ! areNumberedAlike (song->getState(), start.ours))
+            if (worked->numberedOtherwise || ! areNumberedAlike (*song, start.ours))
                 return VersionHistory::Taken::refused (mergeNumberingRefusal (*history, start.version));
 
             if (last == nullptr || last->id != start.head || version == nullptr || history->getMerging().has_value()
@@ -1934,7 +1935,7 @@ namespace
     // numbering, never one without the other.
     bool refuseOtherNumbering (VersionHistory& history, const Song& song, const VersionHistory::Merge& merge)
     {
-        if (song.getState()[schema::idNumbering].toString() == merge.numbering)
+        if (getSongOwn (song).idNumbering == merge.numbering)
             return false;
 
         history.mergeFailure = mergeNumberingRefusal (history, merge.version);

@@ -925,6 +925,18 @@
         "PIANOROLL"
       ],
       "type": "text",
+      "form": "words",
+      "words": [
+        "1/16 beat",
+        "1/8 beat",
+        "1/4 beat",
+        "1/2 beat",
+        "1 beat",
+        "1 bar",
+        "2 bars",
+        "4 bars",
+        "8 bars"
+      ],
       "default": "1/4 beat",
       "kind": "view",
       "uncountedOn": [
@@ -1872,6 +1884,11 @@
         "PHAZITE"
       ],
       "type": "double",
+      "range": {
+        "low": 0.0,
+        "high": 1.0e6,
+        "whole": false
+      },
       "default": 0.0,
       "kind": "state",
       "uncountedOn": [

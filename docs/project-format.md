@@ -326,6 +326,19 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   on a track, on `LASTKEY` and on a `CHORDKEY`, is one of the scales' saved names (`major`, `minor`, `dorian`, `phrygian`,
   `lydian`, `mixolydian`, `locrian`, `harmonicMinor`, `melodicMinor`): another word goes as the song opens, and reads as
   major, as it did.
+- **The song's own** (`PHAZITE`'s properties but `nextID`, and its `LASTKEY`, `PIANOROLL` and `MERGING`): written as
+  Phazite writes what the song holds of them, once the ranges and words above have brought them within theirs and the
+  first of two of one of those elements has stayed (one rule, the one the song reads them by: `keepSongOwnAsHeld()` in
+  `src/model/base/SongOwnValue.cpp`): `loop`, `metronome` and `patternsKeepTheirSpeed` written off (`"0"`) go; an empty
+  `notes`, `outline` or `lastInput` goes; `playStart` is held to 0 to a million beats and goes at 0 (a project opens
+  at the song's start anyway); a `loopStart` or a `loopEnd` without the other, or a `loopEnd` not past its `loopStart`,
+  goes with the other (the loop plays the song, as it did); the playlist's grid on `PHAZITE` and a `PIANOROLL` with some
+  of the five grid properties (`gridSnap`, `gridAdaptive`, `gridOffset`, `gridStep`, `gridTriplets`) get the others at
+  their defaults, and a `PIANOROLL` with none of them goes (a `gridStep` that is none of its words goes first, so a
+  grid that held only that holds none); a `LASTKEY` without a `keyRoot` goes (it holds no key; one with a root and no
+  `keyScale` stays so, read as major); an empty text on `MERGING` goes (one without its `version`, `head` or `before`
+  stays as it is: no merge waits, the versions say so, and Cancel Merge takes it out). A property or an element Phazite
+  doesn't know there stays.
 - **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values, and its audio clips play
   one file alike: they share their `file` (the path as written, compared as text, whether the file is there or not),
   `tempo`, `pitch`, `reversed` and `WARP` markers. Each keeps its own place, the part of the file it plays (`fileStart`,
