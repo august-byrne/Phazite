@@ -175,7 +175,10 @@ bool setDevice (Song& song, DeviceValue value, int index)
 
     // One held as another form of a device: made anew at its place.
     if (was != nullptr && was->form != value.form)
-        return values->setAllDevices (song, withDevice (withoutDevice (held, value.id), std::move (value), index));
+    {
+        const auto without = withoutDevice (held, value.id);
+        return values->setAllDevices (song, withDevice (without, std::move (value), index));
+    }
 
     // A container put on another channel takes its macros along (a version's line sends it there).
     const auto before = was != nullptr ? std::optional (*was) : std::nullopt;
