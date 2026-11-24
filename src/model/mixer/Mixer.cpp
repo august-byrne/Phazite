@@ -220,10 +220,9 @@ namespace
     }
 
     // One of a channel's values (its volume, its pan) set, the tracks' narrow setter that a drag's events write through: what
-    // the song holds of the channel (the tracks' keeper's: no element read) given the value, and where it is another, that one
-    // property of its element written as the song holds it (TracksValue.h: writeTrackProperty(), the rule of the tracks'
-    // setters), in the mode of the moment.
-    void setChannelField (Song& song, TrackID channel, float TrackValue::* field, const juce::Identifier& property, float value)
+    // the song holds of the channel (the tracks' area's: a look in its map) given the value, and set through the tracks'
+    // setter where it is another (one entry of the area's map set), in the mode of the moment.
+    void setChannelField (Song& song, TrackID channel, float TrackValue::* field, float value)
     {
         auto next = findHeldTrack (song, channel.isValid() ? channel : getMasterID (song));
 
@@ -231,16 +230,7 @@ namespace
             return;
 
         (*next).*field = value;
-
-        if (auto state = findChainState (song, channel); state.isValid())
-        {
-            auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-
-            if (const auto written = writeTrackProperty (*next, property); written.isVoid())
-                state.removeProperty (property, undo);
-            else
-                state.setProperty (property, written, undo);
-        }
+        setTrack (song, std::move (*next));
     }
 
     bool holdsAudioClips (const Song& song, TrackID track)
@@ -249,9 +239,15 @@ namespace
     }
 
     // Whether a track can hold an instrument: a track of the playlist's that is neither a folder nor a return.
-    bool canHoldInstrument (const juce::ValueTree& trackState)
+    bool canHoldInstrument (const Song& song, TrackID track)
     {
-        return trackState.hasType (schema::TRACK) && ! isFolderState (trackState) && ! isReturnState (trackState);
+        return getTrackKind (song, track) == TrackValue::Kind::track;
+    }
+
+    // Whether the song holds a channel: a track's by its ID, the master's for none or its ID.
+    bool holdsChannel (const Song& song, TrackID channel)
+    {
+        return ! channel.isValid() || hasTrack (song, channel);
     }
 
     // One of Phazite's own device types, described as a plug-in is: in Phazite's own format, by its type ID.
@@ -283,11 +279,6 @@ namespace
 } // namespace
 
 //==============================================================================
-juce::ValueTree findChainState (const Song& song, TrackID channel)
-{
-    return channel.isValid() ? findTrackState (song, channel) : song.getState().getChildWithName (schema::MASTER);
-}
-
 const SongDevices& getDevicesValue (const Song& song)
 {
     if (const auto* values = song.getValues())
@@ -404,9 +395,7 @@ TrackID getDeviceChannel (const Song& song, DeviceID device)
 
 bool needsInstrument (const Song& song, TrackID track)
 {
-    const auto state = findTrackState (song, track);
-
-    if (! canHoldInstrument (state) || getInstrument (song, track).isValid())
+    if (! canHoldInstrument (song, track) || getInstrument (song, track).isValid())
         return false;
 
     return hasClips (song, track, ClipValue::Kind::midi);
@@ -533,8 +522,8 @@ std::vector<DeviceOutline> getSongDeviceOutline (const Song& song)
     // Read once (a copy); for a song that holds no values (the loader's) its tree's fields alone, never a device's values.
     const auto devices = song.getValues() != nullptr ? getDevicesValue (song) : readDevicesFields (song.getState());
 
-    for (const auto& track : getTrackStates (song))
-        addOutlineOf (song, devices, getTrackID (track), outline);
+    for (const auto track : getTrackIDs (song))
+        addOutlineOf (song, devices, track, outline);
 
     addOutlineOf (song, devices, {}, outline);
     return outline;
@@ -578,8 +567,8 @@ std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song& song)
     const auto addOf = [&files, &devices] (const DevicePlace& channel)
     { forEachOnChannel (devices, channel, [&files] (const DeviceValue& value) { addSoundFilesOf (value, files); }); };
 
-    for (const auto& track : getTrackStates (song))
-        addOf (makeChannelPlace (getTrackID (track), false));
+    for (const auto track : getTrackIDs (song))
+        addOf (makeChannelPlace (track, false));
 
     addOf (makeChannelPlace ({}, true));
     return files;
@@ -641,7 +630,7 @@ juce::String getDeviceName (const DeviceValue& value)
 
 DevicePlace getDeviceChannelPlace (const Song& song, TrackID channel)
 {
-    if (findChainState (song, channel).hasType (schema::MASTER))
+    if (! channel.isValid() || isMaster (song, channel))
         return { .onMaster = true };
 
     return { .track = channel };
@@ -701,19 +690,17 @@ PluginIdentity fromDescription (const juce::PluginDescription& description)
 
 DeviceID insertDevice (Song& song, TrackID channel, MadeDevices made, int index)
 {
-    auto chain = findChainState (song, channel);
-
-    if (made.devices.empty() || ! chain.isValid() || made.devices.front().form == DeviceValue::Form::chain)
+    if (made.devices.empty() || ! holdsChannel (song, channel) || made.devices.front().form == DeviceValue::Form::chain)
         return {};
 
     const auto id = made.devices.front().id;
     const auto instrument = made.devices.front().isInstrument();
 
-    if (instrument && ! canHoldInstrument (chain))
+    if (instrument && ! canHoldInstrument (song, channel))
         return {};
 
     // A plain folder mixes its tracks through its devices as a bus.
-    if (isFolderState (chain) && ! isBus (song, channel))
+    if (isFolder (song, channel) && ! isBus (song, channel))
         makeBus (song, channel);
 
     placeMade (made, getDeviceChannelPlace (song, channel));
@@ -727,7 +714,7 @@ DeviceID insertDevice (Song& song, TrackID channel, MadeDevices made, int index)
 
 DeviceID setInstrument (Song& song, TrackID track, MadeDevices instrument)
 {
-    if (instrument.devices.empty() || ! instrument.devices.front().isInstrument() || ! canHoldInstrument (findTrackState (song, track)))
+    if (instrument.devices.empty() || ! instrument.devices.front().isInstrument() || ! canHoldInstrument (song, track))
         return {};
 
     if (const auto old = getInstrument (song, track); old.isValid())
@@ -746,8 +733,9 @@ void copyDevices (Song& song, CopiedIDs& copied)
     {
         const auto from = TrackID::fromRaw (original), to = TrackID::fromRaw (copy);
 
-        if (findTrackState (song, from).hasType (schema::TRACK) && findTrackState (song, to).hasType (schema::TRACK)
-            && ! getDevices (song, from).empty() && getDevices (song, to).empty())
+        if (const auto& tracks = getTracksValue (song); tracks.tracks.find (from.getRaw()) != nullptr
+                                                        && tracks.tracks.find (to.getRaw()) != nullptr && ! getDevices (song, from).empty()
+                                                        && getDevices (song, to).empty())
             channels.emplace_back (from, to);
     }
 
@@ -835,7 +823,7 @@ void takeDevicesOf (Song& song, const juce::ValueTree& channel)
     if (values == nullptr || ! (onMaster || channel.hasType (schema::TRACK)))
         return;
 
-    const auto place = makeChannelPlace (getTrackID (channel), onMaster);
+    const auto place = makeChannelPlace (readTrackElementID (channel), onMaster);
 
     if (! onMaster && ! hasTrack (song, place.track))
         return;
@@ -883,8 +871,8 @@ void removeDevice (Song& song, DeviceID id)
     // A container goes with what it holds, and the devices after a device in a container take its place.
     removeDeviceState (song, id);
 
-    if (const auto folder = findTrackState (song, channel);
-        isFolderState (folder) && isBus (song, channel) && getDevices (song, channel).empty() && ! (bool) folder[schema::folderBus])
+    if (const auto folder = findTrack (song, channel);
+        folder && folder->isFolder() && folder->isBus() && getDevices (song, channel).empty() && ! folder->bus)
         makePlainFolder (song, channel);
 }
 
@@ -1094,9 +1082,9 @@ DeviceID placeDevice (Song& song, TrackID track, MadeDevices device, Selection* 
     // folder, a return or none.
     auto target = track;
 
-    if (! canHoldInstrument (findTrackState (song, track)) || holdsAudioClips (song, track))
+    if (! canHoldInstrument (song, track) || holdsAudioClips (song, track))
     {
-        target = insertTrack (song, findTrackState (song, track).hasType (schema::TRACK) ? track : TrackID(), selection);
+        target = insertTrack (song, getTracksValue (song).tracks.find (track.getRaw()) != nullptr ? track : TrackID(), selection);
 
         if (! target.isValid())
             return {};
@@ -1150,27 +1138,34 @@ void setMixedAsBus (Song& song, TrackID folder, bool bus)
 
 DeviceID getFader (const Song& song, TrackID channel)
 {
-    return readVolumeDevice (findChainState (song, channel));
+    const auto value = findTrack (song, channel.isValid() ? channel : getMasterID (song));
+    return value ? value->getVolumeDevice() : DeviceID();
 }
 
 juce::String getVolumeParameterID (const Song& song, TrackID channel)
 {
-    const auto state = findChainState (song, channel);
+    const auto value = findTrack (song, channel.isValid() ? channel : getMasterID (song));
 
-    if (state.hasType (schema::MASTER))
+    if (! value)
+        return schema::faderVolume;
+
+    if (value->isMaster())
         return schema::masterVolume;
 
-    return readChannelVCA (state).isValid() ? schema::vcaVolume : schema::faderVolume;
+    return value->vca.isValid() ? schema::vcaVolume : schema::faderVolume;
 }
 
 juce::String getPanParameterID (const Song& song, TrackID channel)
 {
-    const auto state = findChainState (song, channel);
+    const auto value = findTrack (song, channel.isValid() ? channel : getMasterID (song));
 
-    if (state.hasType (schema::MASTER))
+    if (! value)
+        return schema::faderPan;
+
+    if (value->isMaster())
         return schema::masterPan;
 
-    return readChannelVCA (state).isValid() ? juce::String() : juce::String (schema::faderPan);
+    return value->vca.isValid() ? juce::String() : juce::String (schema::faderPan);
 }
 
 ChannelRef findChannelOfFader (const Song& song, DeviceID fader)
@@ -1178,11 +1173,25 @@ ChannelRef findChannelOfFader (const Song& song, DeviceID fader)
     if (! fader.isValid())
         return {};
 
-    for (const auto& channel : getTrackStates (song))
-        if (readChannelFader (channel) == fader || readChannelVCA (channel) == fader)
-            return { .track = readTrackElementID (channel) };
+    // The area's values; a song without values (the check's copy, which describes its parameters) read from its tree, by
+    // value (the loader reads it once for all its curves: findChannelOfFaderIn()).
+    if (song.getValues() == nullptr)
+        return findChannelOfFaderIn (readTracksWithoutValues (song), readTrackOrderWithoutValues (song).order, fader);
 
-    if (const auto master = findChainState (song, {}); readChannelFader (master) == fader || readChannelVCA (master) == fader)
+    return findChannelOfFaderIn (getTracksValue (song), getTrackOrder (song).order, fader);
+}
+
+ChannelRef findChannelOfFaderIn (const SongTracks& tracks, const std::vector<TrackID>& order, DeviceID fader)
+{
+    if (! fader.isValid())
+        return {};
+
+    // The tracks in the order given, then the master (a walk of the values, as the elements were walked).
+    for (const auto id : order)
+        if (const auto* value = tracks.tracks.find (id.getRaw()); value != nullptr && (value->fader == fader || value->vca == fader))
+            return { .track = id };
+
+    if (tracks.master.fader == fader || tracks.master.vca == fader)
         return { .onMaster = true };
 
     return {};
@@ -1197,24 +1206,26 @@ void setChannelVolume (Song& song, TrackID channel, float decibels)
 {
     const auto none =
         TrackValue::defaultVolume (channel.isValid() && ! isMaster (song, channel) ? TrackValue::Kind::track : TrackValue::Kind::master);
-    setChannelField (song, channel, &TrackValue::volume, schema::channelVolume, roundChannelValue (keepVolumeInRange (decibels), none));
+    setChannelField (song, channel, &TrackValue::volume, roundChannelValue (keepVolumeInRange (decibels), none));
 }
 
 void setChannelPan (Song& song, TrackID channel, float pan)
 {
     if (getPanParameterID (song, channel).isNotEmpty())
-        setChannelField (song, channel, &TrackValue::pan, schema::channelPan,
+        setChannelField (song, channel, &TrackValue::pan,
                          roundChannelValue (std::isfinite (pan) ? juce::jlimit (-1.0f, 1.0f, pan) : 0.0f, 0.0f));
 }
 
 float getChannelVolume (const Song& song, TrackID channel)
 {
-    return readChannelVolume (findChainState (song, channel));
+    const auto value = findTrack (song, channel.isValid() ? channel : getMasterID (song));
+    return value ? value->volume : 0.0f;
 }
 
 float getChannelPan (const Song& song, TrackID channel)
 {
-    return readChannelPan (findChainState (song, channel));
+    const auto value = findTrack (song, channel.isValid() ? channel : getMasterID (song));
+    return value ? value->pan : 0.0f;
 }
 
 TrackID getOutputBus (const Song& song, TrackID track)
@@ -1240,13 +1251,7 @@ std::vector<TrackID> getChannelTracks (const Song& song)
 //==============================================================================
 std::vector<TrackID> getReturnTracks (const Song& song)
 {
-    std::vector<TrackID> returns;
-
-    for (const auto& state : getTrackStates (song))
-        if (isReturnState (state))
-            returns.push_back (getTrackID (state));
-
-    return returns;
+    return getTrackIDsOfKind (song, TrackValue::Kind::returnTrack);
 }
 
 TrackID addReturnTrack (Song& song, const juce::String& name, Selection* selection)
@@ -1318,11 +1323,10 @@ std::optional<SendValue> getSendValue (const Song& song, DeviceID send)
         return found != nullptr ? std::optional<SendValue> (*found) : std::nullopt;
     }
 
-    for (const auto& track : getTrackStates (song))
-        if (auto found = findTrackSend (track, send))
-            return found;
-
-    return std::nullopt;
+    // A song that holds no values (the loader's, a check's copy): its tree's sends read.
+    const auto sends = readSendsValue (song.getState());
+    const auto* found = sends.find (send);
+    return found != nullptr ? std::optional<SendValue> (*found) : std::nullopt;
 }
 
 TrackID getSendTrack (const Song& song, DeviceID send)
@@ -1345,7 +1349,16 @@ std::vector<SendValue> getSendValues (const Song& song, TrackID track)
         return sends;
     }
 
-    return readTrackSends (findTrackState (song, track));
+    // A song that holds no values: its tree's sends read, the track's in their order.
+    std::vector<SendValue> sends;
+    const auto read = readSendsValue (song.getState());
+
+    if (const auto* list = read.tracks.find (track.getRaw()))
+        for (const auto id : *list)
+            if (const auto* send = read.find (id))
+                sends.push_back (*send);
+
+    return sends;
 }
 
 DeviceID findSendFromTo (const Song& song, TrackID from, TrackID returnTrack)
@@ -1376,9 +1389,9 @@ TrackID getSendTarget (const Song& song, DeviceID send)
 DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
 {
     // The song's, after the track's other sends, to the return.
-    auto state = findTrackState (song, from);
-
-    if (! state.hasType (schema::TRACK) || isFolderState (state) || ! isReturnTrack (song, returnTrack) || from == returnTrack)
+    if (const auto kind = getTrackKind (song, from); ! kind.has_value() || *kind == TrackValue::Kind::master
+                                                     || *kind == TrackValue::Kind::folder || ! isReturnTrack (song, returnTrack)
+                                                     || from == returnTrack)
         return {};
 
     // Nor to a return whose sound comes back to the track through sends and buses: a loop, which Phazite's engine can't play,
@@ -1497,7 +1510,7 @@ bool eraseTrackSends (Song& song, const std::vector<TrackID>& tracks)
 void takeSendsOf (Song& song, const juce::ValueTree& track)
 {
     auto* values = song.getValues();
-    const auto from = getTrackID (track);
+    const auto from = readTrackElementID (track);
 
     if (values == nullptr || ! track.hasType (schema::TRACK) || ! from.isValid())
         return;
@@ -1582,12 +1595,12 @@ AreaChoice chooseSendClash (Song& song, const MergeClash& clash, int value, cons
 
     auto ownerPath = clash.path;
     ownerPath.removeRange (step, clash.path.size() - step);
-    const auto owner = findByPath (song.getState(), ownerPath);
-    const auto from = getTrackID (owner);
+    const auto owner = findChannelOnPath (song, ownerPath); // a track's, read from the tracks' area (no TRACK in the tree)
+    const auto from = owner.has_value() && ! owner->onMaster ? owner->track : TrackID();
     const auto id = DeviceID::fromRaw (readID (clash.path[step].fromFirstOccurrenceOf (":", false, false)));
     const auto held = getSendValue (song, id);
 
-    if (! owner.hasType (schema::TRACK) || ! from.isValid() || ! id.isValid() || (held.has_value() && held->from != from))
+    if (! from.isValid() || ! id.isValid() || (held.has_value() && held->from != from))
         return AreaChoice::refused;
 
     const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };

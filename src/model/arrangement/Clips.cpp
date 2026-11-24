@@ -774,7 +774,7 @@ void eraseTrackClips (Song& song, const std::vector<TrackID>& tracks)
 void takeClipsOf (Song& song, const juce::ValueTree& track)
 {
     auto* values = song.getValues();
-    const auto id = getTrackID (track);
+    const auto id = readTrackElementID (track);
 
     if (values == nullptr || ! track.hasType (schema::TRACK) || ! holdsClips (song, id))
         return;
@@ -1607,8 +1607,9 @@ namespace
         const auto clip = ClipID::fromRaw ((std::uint64_t) path[path.size() - 1].substring (clipStep.length()).getLargeIntValue());
         auto trackPath = path;
         trackPath.remove (trackPath.size() - 1);
-        // The track the path names, by its ID as the tracks' conversion reads it (TracksValue.h), none for no track there.
-        const auto track = readTrackElementID (findByPath (song.getState(), trackPath));
+        // The track the path names, where the song holds it there (Tracks.h: findChannelOnPath()), none for no track there.
+        const auto channel = findChannelOnPath (song, trackPath);
+        const auto track = channel.has_value() && ! channel->onMaster ? channel->track : TrackID();
 
         if (! clip.isValid() || ! track.isValid() || getClipTrack (song, clip) != track)
             return std::nullopt;

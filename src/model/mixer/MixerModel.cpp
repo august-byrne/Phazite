@@ -34,7 +34,7 @@ namespace
     // A track of the playlist's (a track, a folder or a return); and one with sound of its own (not a folder).
     bool isTrack (const Song& song, TrackID id)
     {
-        const auto kind = readTrackKind (findTrackState (song, id));
+        const auto kind = getTrackKind (song, id);
         return kind.has_value() && *kind != TrackValue::Kind::master;
     }
 

@@ -609,7 +609,8 @@ const immer::flex_vector<TrackID>* SongTracks::findList (TrackID folder) const n
 
 bool SongTracks::isSameAs (const SongTracks& other) const noexcept
 {
-    return tracks.identity() == other.tracks.identity() && lists.identity() == other.lists.identity() && master == other.master;
+    return tracks.identity() == other.tracks.identity() && lists.identity() == other.lists.identity() && master == other.master
+           && masterPutIn == other.masterPutIn;
 }
 
 bool SongTracks::operator== (const SongTracks& other) const
@@ -699,9 +700,22 @@ SongTracks withListOrder (const SongTracks& tracks, TrackID folder, immer::flex_
     if (list == nullptr || list->size() != order.size())
         return tracks;
 
-    const std::set<TrackID> held (list->begin(), list->end()), given (order.begin(), order.end());
+    // The same IDs, each once: both sorted, in a vector each (two allocations, however long the list: a track moved in 200
+    // allocates as in 20).
+    std::vector<std::uint64_t> held, given;
+    held.reserve (list->size());
+    given.reserve (order.size());
 
-    if (held != given || given.size() != order.size())
+    for (const auto id : *list)
+        held.push_back (id.getRaw());
+
+    for (const auto id : order)
+        given.push_back (id.getRaw());
+
+    std::sort (held.begin(), held.end());
+    std::sort (given.begin(), given.end());
+
+    if (held != given || std::adjacent_find (given.begin(), given.end()) != given.end())
         return tracks;
 
     auto next = tracks;
@@ -759,13 +773,16 @@ bool holdsItsLists (const SongTracks& tracks)
 //==============================================================================
 TrackOrder::Place TrackOrder::getPlace (TrackID id) const
 {
-    const auto found = places.find (id.getRaw());
-    return found != places.end() ? found->second : Place();
+    const auto found = std::lower_bound (places.begin(), places.end(), id.getRaw(),
+                                         [] (const auto& place, std::uint64_t raw) { return place.first < raw; });
+    return found != places.end() && found->first == id.getRaw() ? found->second : Place();
 }
 
 TrackOrder makeTrackOrder (const SongTracks& tracks)
 {
     TrackOrder order;
+    order.order.reserve (tracks.tracks.size());
+    order.places.reserve (tracks.tracks.size());
     int number = 0;
 
     const std::function<void (TrackID)> add = [&tracks, &order, &number, &add] (TrackID owner)
@@ -783,7 +800,7 @@ TrackOrder makeTrackOrder (const SongTracks& tracks)
             TrackOrder::Place place;
             place.index = (int) order.order.size();
             place.number = folder ? 0 : number;
-            order.places.try_emplace (id.getRaw(), place);
+            order.places.emplace_back (id.getRaw(), place);
             order.order.push_back (id);
 
             if (folder)
@@ -792,6 +809,7 @@ TrackOrder makeTrackOrder (const SongTracks& tracks)
     };
 
     add ({});
+    std::stable_sort (order.places.begin(), order.places.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
     return order;
 }
 
@@ -830,54 +848,6 @@ void writeMasterInto (juce::ValueTree& master, const TrackValue& value)
 {
     if (master.hasType (schema::MASTER) && value.isMaster() && ! holdsPropertiesAsWritten (master, value))
         keepPropertiesAsWritten (master, value);
-}
-
-bool writeTrackChanges (juce::ValueTree& element, const TrackValue& held, const TrackValue& next, juce::UndoManager* undo)
-{
-    if (! isTrackOrMaster (element) || held.isMaster() != next.isMaster())
-        return false;
-
-    auto changed = false;
-
-    // What it writes of `held` and not of `next` taken away first (a bus made plain: its fader before its VCA is given), then
-    // what it writes of `next` otherwise.
-    forEachWrittenProperty (held,
-                            [&] (const juce::Identifier& property, const juce::var&)
-                            {
-                                if (writeTrackProperty (next, property).isVoid() && element.hasProperty (property))
-                                {
-                                    element.removeProperty (property, undo);
-                                    changed = true;
-                                }
-                            });
-
-    forEachWrittenProperty (next,
-                            [&] (const juce::Identifier& property, const juce::var& written)
-                            {
-                                if (const auto was = writeTrackProperty (held, property);
-                                    was.isVoid() || ! isSameValue (was, written)
-                                    || ! isAsWritten (element.getPropertyPointer (property), property, written))
-                                {
-                                    element.setProperty (property, toWritten (property, written), undo);
-                                    changed = true;
-                                }
-                            });
-
-    return changed;
-}
-
-juce::var writeTrackProperty (const TrackValue& value, const juce::Identifier& property)
-{
-    juce::var found;
-
-    forEachWrittenProperty (value,
-                            [&found, &property] (const juce::Identifier& each, const juce::var& written)
-                            {
-                                if (each == property)
-                                    found = written;
-                            });
-
-    return found;
 }
 
 SongTracks readTracksValue (const juce::ValueTree& song)
@@ -1021,83 +991,6 @@ std::optional<TrackValue::Kind> readTrackKind (const juce::ValueTree& element)
         return Kind::master;
 
     return element.hasType (schema::TRACK) ? std::optional (readKindWord (element[schema::trackKind])) : std::nullopt;
-}
-
-juce::String readTrackName (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? element[schema::trackName].toString() : juce::String();
-}
-
-std::optional<juce::uint32> readTrackColour (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? readColourOf (element[schema::trackColour]) : std::nullopt;
-}
-
-bool readFolderBus (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) && (bool) element[schema::folderBus];
-}
-
-float readChannelVolume (const juce::ValueTree& element)
-{
-    if (! isTrackOrMaster (element))
-        return 0.0f;
-
-    return readCastFloat (element[schema::channelVolume],
-                          TrackValue::defaultVolume (element.hasType (schema::MASTER) ? Kind::master : Kind::track));
-}
-
-float readChannelPan (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? readCastFloat (element[schema::channelPan], 0.0f) : 0.0f;
-}
-
-DeviceID readChannelFader (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? DeviceID::fromRaw (castID (element[schema::channelFader])) : DeviceID();
-}
-
-DeviceID readChannelVCA (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? DeviceID::fromRaw (castID (element[schema::channelVCA])) : DeviceID();
-}
-
-std::optional<Key> readTrackKey (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? readKeyOf (element) : std::nullopt;
-}
-
-juce::String readTrackInput (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? element[schema::trackInput].toString() : juce::String();
-}
-
-TrackValue::Monitoring readTrackMonitoring (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? readMonitoringWord (element[schema::trackMonitoring]) : Monitoring::whileArmed;
-}
-
-DeviceID readPadDevice (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? DeviceID::fromRaw (castID (element[schema::trackPadDevice])) : DeviceID();
-}
-
-std::optional<int> readPad (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) && element.hasProperty (schema::trackPad) ? std::optional (toWhole<int> (element[schema::trackPad]))
-                                                                               : std::nullopt;
-}
-
-DeviceID readVolumeDevice (const juce::ValueTree& element)
-{
-    const auto vca = readChannelVCA (element);
-    return vca.isValid() ? vca : readChannelFader (element);
-}
-
-bool readIsBus (const juce::ValueTree& element)
-{
-    return element.hasType (schema::TRACK) && readKindWord (element[schema::trackKind]) == Kind::folder
-           && readChannelFader (element).isValid();
 }
 
 std::uint64_t countTracksReadAsValues() noexcept

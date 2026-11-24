@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's tracks as values (roadmap step S5.20, the tracks' area; its first piece): each track, folder and return
+// The song's tracks as values (roadmap step S5.20, the tracks' area): each track, folder and return
 // (Schema.h: TRACK) and the master (MASTER) as a TrackValue, its fields that are written in the undo history alone; every
 // one of a song (SongTracks) by its ID, with each folder's list and the top list that order them, the master a member, and
 // the helpers that alone write it; the song's order made of those lists (TrackOrder); and the conversion between those
-// elements and the values, the one place that reads and writes a TRACK's and the MASTER's own properties by name. The
-// song's tree is still the storage: the area's readers read the tree through this conversion (model/arrangement/internal/
-// Tracks.h: getTracksValue(), findTrack(), and for one field of one track, the readers of one field below, on the element
-// the song's index found), and the song holds no area of it yet (SongValues.h).
+// elements and the values, the one place that reads and writes a TRACK's and the MASTER's own properties by name. Since the
+// tracks' switch the song's values hold them (SongValues.h: tracks; TracksArea.h), its tree's TRACKS and MASTER empty: the
+// conversion reads a tree that holds tracks (a file as the song opens, a version's, a whole copy) and writes a whole copy's
+// (WholeState.h); the area's readers read the area (model/arrangement/internal/Tracks.h: getTracksValue(), findTrack()), and
+// read a song that holds no values (the loader's, a check's copy) from its tree through this conversion.
 //
 // What the value covers, and what it doesn't. A TRACK's trackID, trackKind, trackName, trackColour, folderBus,
 // channelVolume, channelPan, channelFader, channelVCA, keyRoot, keyScale, trackInput, trackMonitoring, trackPadDevice and
@@ -33,7 +34,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -119,6 +120,12 @@ struct SongTracks
     immer::map<std::uint64_t, immer::flex_vector<TrackID>> lists {};
     TrackValue master = TrackValue::makeMaster();
 
+    // How many times the master was put in anew whole (a merge's choice of the whole MASTER: model/arrangement/internal/
+    // Tracks.h, setMasterAnew()), so that the tracks' teller tells the master made (TracksArea.h: TrackChange::made) as that
+    // step, its Undo and its Redo move it, as the MASTER element put in anew was told while the tree held the tracks. No part
+    // of the song's: never read from an element nor written into one, nor compared (operator== leaves it out).
+    std::uint64_t masterPutIn = 0;
+
     // One by its ID (the master's for its ID), or nullptr: a pointer into this value, valid while it lives: keep the value in
     // a local of its own, never a temporary's.
     const TrackValue* find (TrackID) const noexcept;
@@ -126,7 +133,8 @@ struct SongTracks
     // A folder's list, the top list for none (TrackID()), or nullptr where it holds none.
     const immer::flex_vector<TrackID>* findList (TrackID folder) const noexcept;
 
-    // The maps without a look inside (ValueArea.h), and the master alike; and alike, compared.
+    // The maps without a look inside (ValueArea.h), and the master alike, put in as often; and alike, compared (the master's
+    // count of being put in aside).
     bool isSameAs (const SongTracks&) const noexcept;
     bool operator== (const SongTracks&) const;
 };
@@ -166,7 +174,7 @@ struct TrackOrder
     };
 
     std::vector<TrackID> order {};
-    std::unordered_map<std::uint64_t, Place> places {};
+    std::vector<std::pair<std::uint64_t, Place>> places {}; // by ID, sorted: one allocation however many tracks
 
     // A track's place, none (-1 and 0) for one that isn't in the order.
     Place getPlace (TrackID) const;
@@ -215,22 +223,10 @@ juce::ValueTree writeTrackElement (const TrackValue&);
 // it is.
 void writeMasterInto (juce::ValueTree& master, const TrackValue&);
 
-// A track's (or the master's) own properties written into its element by what differs between what the song holds of it
-// (`held`, which the element holds as writeTrackElement() writes it) and its next value, as writeTrackElement() writes them,
-// in the undo manager given (none: outside the history): first each property the writer writes of `held` and not of `next`
-// taken away, then each it writes of `next` otherwise than of `held` set; nothing else read or written (not the element's
-// other properties, nor its children). What the tracks' setters write by (model/arrangement/TrackWriters.cpp), the one rule
-// with the writer and the loader's (keepTrackAsHeld()). Whether any was. Allocates nothing past what JUCE's writes do.
-bool writeTrackChanges (juce::ValueTree& element, const TrackValue& held, const TrackValue& next, juce::UndoManager*);
-
-// One of a track's own properties as writeTrackElement() writes it of a value, void where it writes none: what a narrow
-// setter writes one property by (a volume's drag: model/mixer/Mixer.cpp, setChannelVolume()).
-juce::var writeTrackProperty (const TrackValue&, const juce::Identifier& property);
-
 // Every track of a song's tree (PHAZITE), read as readTrackValue() reads one: each TRACK in the track list and, in a folder,
 // the TRACKs in it (a folder's before them), each list in its element's order; of two with one ID (which the loader leaves
-// none of), the first, without what is in it; and the MASTER. What reads the tracks whole while the tree is their storage
-// (model/arrangement/internal/Tracks.h: getTracksValue()), and the tests.
+// none of), the first, without what is in it; and the MASTER. What reads the tracks of a song that holds no values (the
+// loader's, a check's copy: model/arrangement/internal/Tracks.h, readTracksWithoutValues()), and the tests.
 SongTracks readTracksValue (const juce::ValueTree& song);
 
 // A track with one of its own properties given a value as readHeldTrack() reads one, or taken away (a void value: as if the
@@ -265,28 +261,10 @@ void forEachIDNamed (const SongTracks&, const std::function<void (std::uint64_t)
 
 //==============================================================================
 // One field of one element read as readTrackValue() reads it, without reading the rest (none counted:
-// countTracksReadAsValues()): what the area's readers read one field of one track by, at every row of the playlist, every
-// strip of the mixer and every paint of a clip, while the song's tree is the storage. Each of an element that is no TRACK or
-// MASTER reads as one without it.
+// countTracksReadAsValues()): what finds a track's element in a tree that holds tracks (a file's, a whole copy's, the loader's)
+// by its ID and kind. Each of an element that is no TRACK or MASTER reads as one without it.
 TrackID readTrackElementID (const juce::ValueTree& element);                    // trackID
 std::optional<TrackValue::Kind> readTrackKind (const juce::ValueTree& element); // none for no TRACK or MASTER
-juce::String readTrackName (const juce::ValueTree& element);                    // its own, empty for none
-std::optional<juce::uint32> readTrackColour (const juce::ValueTree& element);   // TrackValue::colour
-bool readFolderBus (const juce::ValueTree& element);                            // folderBus
-float readChannelVolume (const juce::ValueTree& element);                       // TrackValue::volume
-float readChannelPan (const juce::ValueTree& element);                          // TrackValue::pan
-DeviceID readChannelFader (const juce::ValueTree& element);                     // channelFader
-DeviceID readChannelVCA (const juce::ValueTree& element);                       // channelVCA
-std::optional<Key> readTrackKey (const juce::ValueTree& element);               // TrackValue::key
-juce::String readTrackInput (const juce::ValueTree& element);                   // trackInput
-TrackValue::Monitoring readTrackMonitoring (const juce::ValueTree& element);    // trackMonitoring
-DeviceID readPadDevice (const juce::ValueTree& element);                        // trackPadDevice
-std::optional<int> readPad (const juce::ValueTree& element);                    // trackPad
-
-// The device that sets the channel's volume (TrackValue::getVolumeDevice()), and whether it is a bus (TrackValue::isBus()),
-// from the element alone.
-DeviceID readVolumeDevice (const juce::ValueTree& element);
-bool readIsBus (const juce::ValueTree& element);
 
 // How many tracks were read into values whole (readTrackValue(), readHeldTrack(), keepTrackAsHeld() where it rewrites one)
 // since Phazite started, on any thread: for the test that the playlist's rows read each track whole at most once and a

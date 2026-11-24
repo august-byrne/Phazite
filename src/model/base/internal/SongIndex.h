@@ -53,7 +53,8 @@ public:
     // master's), by an ID; invalid for none.
     juce::ValueTree findTrack (std::uint64_t id) const;
 
-    // The tracks' elements in the song's order, each folder's before those in it (Tracks.h: getTrackStates()).
+    // The tracks' elements in the song's order, each folder's before those in it (Tracks.h: getTrackOrder() of a song
+    // without values).
     std::vector<juce::ValueTree> getTracks() const;
 
     // Where a track is among those: its index there, and its number among the tracks that aren't folders, from 1, as a

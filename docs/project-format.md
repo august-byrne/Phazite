@@ -49,7 +49,10 @@ an element or property it doesn't know through a load and a save (an element wit
 its tags), but on a `CLIP`, a `WARP`, a `NOTE` or a `CONTROL`: a song's clips, their warp markers and a clip's notes and
 controllers' values are values in Phazite (each with the properties this page names), so a property or an element it
 doesn't know on one of them isn't kept, nor a property of the other kind of clip's (a `length` on an audio clip, a
-`file` on a MIDI clip). Phazite writes a clip's properties only while they are set, so one another program wrote at its
+`file` on a MIDI clip). A track's and the master's own fields, switches and view are values too (each with the properties this
+page names), so a property or an element Phazite doesn't know on a `TRACK` or the `MASTER` goes as the song opens: a
+track's element holds its clips, its devices and containers, a folder's tracks, its `LANES`, its modulators and macros
+and its sends alone. Phazite writes a clip's properties only while they are set, so one another program wrote at its
 default (`offset="0"`, `name=""`) is gone at the next save. A `CURVE` holds its `POINT`s alone: an element of another
 type in one goes as the song opens. An element it does know, where `Schema.h` doesn't put it, it leaves
 out as it opens the file (section 7).

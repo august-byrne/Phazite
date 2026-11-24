@@ -95,13 +95,19 @@ struct SongValues::ModulationKeeper
 };
 
 // Modulation's part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to
-// an owner of modulators or macros (the track list, a track, a folder's tracks, the master, a channel's container, from the
-// song's element down); and a copy's TRACK, MASTER or CONTAINER given its modulators and macros from the values kept (a
-// channel's own by its track's ID, the master's under 0, a container's by its ID), in their list's order, after its other
-// children (a track's sends after them: the sends' area writes them after modulation, SendsArea.h). Nothing for another
-// element.
+// an owner of modulators or macros (the master, a channel's container, from the song's element down: whole state writes each
+// TRACK itself, WholeState.cpp: writeTracksIn(), asking each area of each); and a copy's TRACK, MASTER or CONTAINER given its
+// modulators and macros from the values kept (a channel's own by its track's ID, the master's under 0, a container's by its
+// ID), in their list's order, after its other children (a track's sends after them: the sends' area writes them after
+// modulation, SendsArea.h). Nothing for another element.
 bool leadsToModulation (const juce::ValueTree& parent, const juce::ValueTree& child);
 void writeModulationIn (juce::ValueTree& element, const ValuesKept&);
+
+// The MODULATOR and MACRO elements of a channel's element (a TRACK or the MASTER that comes into the song with them: the
+// tracks' safety net, TracksArea.h) and of each CONTAINER on it, each read as the song holds one (ModulationValue.h:
+// readHeldModulator(), at its owner's place) after the others of its owner; one of an ID the area holds already left out. How
+// many it read.
+int takeChannelModulatorsIn (SongModulation&, const juce::ValueTree& channel);
 
 // Modulation's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's,
 // the MASTER's or a CONTAINER's modulators and macros, the same in the same order, each the same value (its place too); true

@@ -12,8 +12,8 @@
 // macros, in a pass of their own, by their IDs through modulation's setters (model/modulation/internal/Modulation.h:
 // setModulator(), eraseModulator(), setModulatorOrder()), each owner's in the other's order; and the song's tracks, folders,
 // returns and master, first, by their IDs through the tracks' setters (model/arrangement/internal/Tracks.h: setTrack(),
-// setNewTracks(), setTrackPlace(), eraseTrack()), a track the other has in another folder moved there as the same element,
-// with what it holds. No ID is in the song twice after: what the other has in another place than the song (a clip on
+// setNewTracks(), setTrackPlace(), eraseTrack()), a track the other has in another folder moved there,
+// keeping what it holds. No ID is in the song twice after: what the other has in another place than the song (a clip on
 // another track) is taken from where the song has it. And the song's count of IDs ends past every ID it holds and past the
 // other's count, so that
 // what it took, from a song that counted further than it did, keeps its IDs to itself.

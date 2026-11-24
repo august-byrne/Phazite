@@ -2,6 +2,7 @@
 #include "ContainerModel.h"
 #include "internal/Containers.h"
 #include "internal/Mixer.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -117,7 +118,7 @@ DeviceID addContainer (ProjectContext& context, TrackID channel)
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! findChainState (*song, channel).isValid())
+    if (song == nullptr || (channel.isValid() && ! hasTrack (*song, channel)))
         return {};
 
     const UndoStep step (*song, "Add Container");

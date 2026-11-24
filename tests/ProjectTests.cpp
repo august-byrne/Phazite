@@ -2005,11 +2005,20 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (isUnsavedChange ([&reopened, track] { phazite::setTrackKey (reopened, track, phazite::Key { 2, phazite::Scale::dorian }); }));
     CHECK (isUnsavedChange ([&reopened, folder] { phazite::setMixedAsBus (reopened, folder, false); })); // a new folder is a bus
 
-    // Those two are undo steps; written without one, they count too.
-    CHECK (isUnsavedChange ([&reopened, track]
-                            { phazite::findTrackState (reopened, track).setProperty (schema::keyScale, "lydian", nullptr); }));
-    CHECK (isUnsavedChange ([&reopened, folder]
-                            { phazite::findTrackState (reopened, folder).setProperty (schema::folderBus, true, nullptr); }));
+    // Those two are undo steps; written without one (outside the history: the tracks are values, which the song's tree holds
+    // none of), they count too.
+    CHECK (isUnsavedChange (
+        [&reopened, track]
+        {
+            const phazite::Song::OutsideHistory outside (reopened);
+            phazite::setTrackKey (reopened, track, phazite::Key { 2, phazite::Scale::lydian });
+        }));
+    CHECK (isUnsavedChange (
+        [&reopened, folder]
+        {
+            const phazite::Song::OutsideHistory outside (reopened);
+            phazite::setTrackFields (reopened, folder, [] (phazite::TrackValue& value) { value.bus = true; });
+        }));
 
     // A section's own properties, as the model changes them (Sections.h).
     const auto section = phazite::insertSection (reopened, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });

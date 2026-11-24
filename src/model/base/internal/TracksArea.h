@@ -1,24 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tracks' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows), as far as it is built:
-// the song's tracks, folders, returns and master are still the song's tree's (Schema.h: TRACKS, TRACK, MASTER), with their
-// fields written in the undo history alone (TracksValue.h: SongTracks); their switches and their view are areas of the
-// song's values, beside the tree (SongValues.h: trackSwitches, TrackSwitchesValue.h: mute, solo, frozen, the automation
-// mode, keyed; tracksOutside, TracksOutside.h: the view, LANES and LANE, outside the history), and the tree's TRACK and
-// MASTER elements hold none of them. Here: what the values' listeners are told of them (TrackChange, TrackSwitchChange:
-// SongValues::Listener::tracksChanged(), trackSwitchesChanged(), tracksViewChanged()); the tracks' part of the keeper, which
-// tells them what the tree tells of the tracks until the tracks' switch; the switches' and the view's tellers, setters and
-// part of the keeper (its safety net, and the adoption); their whole state's part and comparison; and what of the tree's
-// notifications is the tracks' (isHeardAsTracks()), which every listener of the song's root leaves to them.
+// The tracks' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): the song's tracks,
+// folders, returns and master are values beside the song's tree, in three areas: their fields written in the undo history
+// alone (SongValues.h: tracks, TracksValue.h: SongTracks, plain), their switches (trackSwitches, TrackSwitchesValue.h: mute,
+// solo, frozen, the automation mode, keyed) and their view (tracksOutside, TracksOutside.h: the view, LANES and LANE, outside
+// the history). The song's tree keeps its TRACKS and MASTER as places, empty (a TRACKS holds no TRACK, the MASTER no property),
+// which whole state writes the tracks into (WholeState.cpp: writeTracksIn()). Here: what the values' listeners are told of them
+// (TrackChange, TrackSwitchChange: SongValues::Listener::tracksChanged(), trackSwitchesChanged(), tracksViewChanged()) and the
+// three tellers; the tracks' setters (members of SongValues) and their order (SongValues::getTrackOrder()); the tracks' part of
+// the keeper (its safety net, and the adoption) and the switches' and the view's; their part of whole state and of the
+// comparison; and what of the tree's notifications is the tracks' (isHeardAsTracks()), which every listener of the song's root
+// leaves to them.
 //
-// What is the tracks' and what isn't, written once (isHeardAsTracks()): the song's track list (TRACKS), a track (TRACK, of the
-// song's track list or of a folder in it) and the song's MASTER coming, going or moving; their own properties that the three
-// values cover (the descriptions of TracksValue.h's, TrackSwitchesValue.h's and TracksOutside.h's names, each where it is
-// described: a MASTER's ID, fader, VCA, volume, pan, automation mode, height, collapsed: the switches' and the view's only
-// what the keeper takes out of an element that came with them, its safety net); and their LANES and LANE elements (the
-// same). Not what else is in a TRACK or the MASTER (its devices, containers and chains: the devices' area's, DevicesArea.h),
-// nor a property Phazite doesn't know there, nor a property described on a TRACK alone that a MASTER holds (the loader takes
-// those away), which the tree tells as before. Message thread, but for whole state's parts and the comparison, which read only
-// the values they are given.
+// What is the tracks' and what isn't, written once (isHeardAsTracks()): the song's TRACKS and MASTER themselves, a TRACK added
+// to the TRACKS, a property of the MASTER, and a LANES or a LANE added to the MASTER (what the keeper takes in, its safety
+// net). Not what else is in the MASTER (a lone device: the devices' area's safety net, DevicesArea.h), which the tree tells as
+// before. Message thread, but for whole state's parts and the comparison, which read only the values they are given.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -32,7 +28,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <unordered_map>
 #include <vector>
 
 namespace phazite
@@ -51,8 +46,8 @@ struct TrackChange
     {
         made = 1 << 0,      // added or taken out: alone, or with the folder or the track list it is in; the master's element
                             // itself put in the song or taken out (a merge's choice of it whole)
-        place = 1 << 1,     // come to another folder: only where the song's tracks are found again whole (the tree tells a
-                            // move as a track taken out and put in again: two changes, each made)
+        place = 1 << 1,     // come to another folder: a move is one change of the track, never made (the tracks in a folder
+                            // moved are told nothing: their folder is the same)
         kind = 1 << 2,      // a track, a folder or a return
         bus = 1 << 3,       // a folder's bus switch
         fader = 1 << 4,     // its fader or its VCA (a bus made plain, or a plain folder a bus)
@@ -95,60 +90,64 @@ struct TrackSwitchChange
     bool appeared = false, went = false;
 };
 
-// The tracks' part of the keeper (SongValues.h), while the song's tree holds the tracks: for each of the tree's notifications
-// that is the tracks' (isHeardAsTracks()), whatever the history does (an undo's and a redo's, a write's outside the history),
-// the values' listeners told at once, in one call each, what it changed of the tracks' value (Listener::tracksChanged()), so
-// that a volume set by hand plays in the same call, as the tree's callbacks played it. Exactly what differs between the value
-// as the listeners were last told it (told: at the start, every track and the master read once, as the song holds them:
-// readHeldTrack(), which no one is told) and as the song holds it now. The switches and the view are their areas' (their
-// tellers tell them: TrackSwitchesTeller, TracksViewTeller); what the tree tells of them is what the switches' and the view's
-// part of the keeper takes out of an element that came with them (TrackLeavesKeeper), which tells nothing here. How a
-// notification is worked out, by its cost:
-//   - A property of a track or the master: that one field read from that one property (TracksValue.h: setTrackProperty();
-//     a key's root and scale together), set in the value told before (immer: a path copied), no track read whole and no
-//     element walked (countTrackElementsWalked()).
-//   - A track (a folder with the tracks in it) added: it and the tracks in it read whole (readHeldTrack()), each element
-//     walked counted, put at its place in its list (the track list's place found by JUCE's index of the element; a folder's
-//     by its other tracks walked); taken out: it and the tracks in it taken out of the value, nothing read.
-//   - Tracks in another order: the track list's by the two places JUCE names; a folder's by its tracks walked (a folder's
-//     element holds its tracks alone: its devices and its lanes are their areas').
-//   - The master's element put in the song or taken out: the master read again (made).
-//   - Where the value can't be counted on to follow one element (a track given another ID or another kind in place, the
-//     track list itself put in or taken out, an element of an ID another the song holds already has, or one the value
-//     wasn't read from): the song's tracks read again whole, as at the start, and what differs told.
-// The calls are the tree's (one for each of its notifications that changes a value, none for one that changes nothing of
-// them), so that what a step told in all, not how many calls, is what holds from the tracks' switch on. Nothing of the song's
-// values is read.
+// What the values' listeners are told of the tracks (Listener::tracksChanged()): once for each change of the area's value (a
+// step's, an undo's or a redo's whole step, a write outside the history), what differs between the two: each track added,
+// taken out, come to another folder or changed (immer's diff of the map, which skips what the two share: O(changed)), with its
+// folder and, for one that came, went or came to another folder alone, its place in its list before and after, as a search of
+// the list finds it (countTrackListEntriesCompared()); the master where it differs, or where it was put in anew whole
+// (SongTracks::masterPutIn: made); each list whose tracks came in another order (immer's diff of the lists); and the area's
+// whole value after (cheap: it shares what it holds). It listens to the area from its making to its end.
+struct SongValues::TracksTeller final : ValueArea<SongTracks>::Listener
+{
+    TracksTeller (ValueArea<SongTracks>&, juce::ListenerList<SongValues::Listener>&);
+    ~TracksTeller() override;
+
+    ValueArea<SongTracks>& area;
+    juce::ListenerList<SongValues::Listener>& listeners;
+
+    void valueAreaChanged (const SongTracks& before, const SongTracks& after) override;
+
+    JUCE_DECLARE_NON_COPYABLE (TracksTeller)
+};
+
+// The tracks' part of the keeper (SongValues.h): the song's tree holds the tracks no more (its TRACKS holds no TRACK, its MASTER
+// no property: places, as the TEMPOMAP is), and this keeps them so, the safety net of the recipe's step 13 for a placeholder:
+//   (a) a TRACK added to the song's TRACKS, a TRACKS or a MASTER added to the song, or a property written to its MASTER: in a
+//       step, refused, the element or the property left where it was put (a JUCE assertion: the tracks' setters change the
+//       tracks, model/arrangement/internal/Tracks.h; the step that adds it can't take it out again, as its Undo would find
+//       it gone: JUCE workaround W62 (docs/juce-workarounds.md)), and no other area's part asked of it; outside the history,
+//       read in as the song holds it, each TRACK (a folder's too) and the MASTER read once (TracksValue.h: readHeldTrack()),
+//       a track of an ID the song holds or can't hold left out with the tracks in it; their switches and view read in
+//       (TrackSwitchesValue.h: readHeldSwitchesOf(); TracksOutside.h: readHeldViewOf()); what each holds read in through
+//       each area's reader of a whole element and set through its setter (its CLIPs with their notes, ClipsArea.h:
+//       takeTrackClipsIn(); its DEVICEs and CONTAINERs with what the store holds of them, DevicesArea.h:
+//       takeChannelDevicesIn(), DeviceStoreArea.h: takeChannelStoreIn(); its MODULATORs and MACROs, a container's too,
+//       ModulationArea.h: takeChannelModulatorsIn(); its SENDs, SendsArea.h: takeTrackSendsIn()); the tracks set after the
+//       last of the top list (the TRACKS holds no other to place it by); the element taken out (a property taken away), and
+//       each counted (countTracksAdopted()). The other areas' parts are not asked of what this takes (SongValues.cpp: the
+//       Keeper), so that none of them relies on its own case of a TRACK.
+//   (b) nothing as a track leaves: no TRACK is in the tree to leave it (the tracks' setters take a track out of the value).
+// And the adoption from the loaded tree, which the song's holdValues() asks last, after every other area's: the song's tracks
+// read once each, as the song holds them (readHeldTracks()), into the area outside the history; then every TRACK out of the
+// TRACKS and every property and child out of the MASTER (what the other areas take of them taken first; what Phazite doesn't
+// know of a TRACK or the MASTER dropped as the song opens: docs/project-format.md).
 struct SongValues::TracksKeeper
 {
     TracksKeeper (SongValues&, Song&);
 
-    // The keeper's callbacks, each for every element, whoever's it is, in an undo or a redo too: nothing, at once, but for
-    // what is the tracks'.
-    void propertyChanged (const juce::ValueTree& tree, const juce::Identifier& property);
-    void childAdded (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void childRemoved (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void childOrderChanged (const juce::ValueTree& parent, int oldIndex, int newIndex);
+    // A child added to an element of the song's tree, a property changed, and a child taken out (the keeper's callbacks, but
+    // while the history undoes or redoes, for every element, whoever's it is): whether it was the tracks' (a), which the
+    // keeper then asks no other area's part of. A child taken out is the tracks' only as the keeper's own taking out of what
+    // it read in.
+    bool childAdded (juce::ValueTree& parent, juce::ValueTree& child);
+    bool propertyChanged (juce::ValueTree& tree, const juce::Identifier& property);
+    bool childRemoved (const juce::ValueTree& parent, const juce::ValueTree& child) const;
+
+    static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
     Song& song;
-    SongTracks told {}; // the song's tracks as the listeners were last told them
-
-    // Each of told's tracks' element, by its ID.
-    std::unordered_map<std::uint64_t, juce::ValueTree> elements {};
-    bool masterMade = false; // the master's element put in or taken out since it was last told
-
-    const TrackValue* findKept (const juce::ValueTree& track) const; // told's value of the element, or nullptr
-    bool isKept (const juce::ValueTree& track) const;
-    void takeValueProperty (const juce::ValueTree& element, const juce::Identifier& property);
-    void add (const juce::ValueTree& list, const juce::ValueTree& track);
-    void remove (const juce::ValueTree& track);
-    void reorder (const juce::ValueTree& list, int oldIndex, int newIndex);
-    void takeMaster();
-    void settle();                                                            // the song's tracks read again whole
-    std::optional<TrackID> findListOwner (const juce::ValueTree& list) const; // TrackID() for the track list's
-
-    void tell (const SongTracks& before);
+    juce::ValueTree takingOut {}; // the element the keeper takes out as it is told, which no other part is asked of
 
     JUCE_DECLARE_NON_COPYABLE (TracksKeeper)
 };
@@ -156,14 +155,14 @@ struct SongValues::TracksKeeper
 // What the values' listeners are told of the switches (Listener::trackSwitchesChanged()): once for each change of the area's
 // value (a step's, an undo's or a redo's whole step, a write outside the history), each entry that differs between the two
 // (MapChanges.h, through immer's diff, which skips what the two share), the master's mode named by the master's ID as the
-// tracks' keeper told it, and the area's whole value after (cheap: it shares what it holds). It listens to the area from its
+// tracks' area holds it, and the area's whole value after (cheap: it shares what it holds). It listens to the area from its
 // making to its end.
 struct SongValues::TrackSwitchesTeller final : ValueArea<TrackSwitches>::Listener
 {
     TrackSwitchesTeller (SongValues&, juce::ListenerList<SongValues::Listener>&);
     ~TrackSwitchesTeller() override;
 
-    SongValues& values; // the master's ID, as the tracks' keeper told it
+    SongValues& values; // the master's ID, as the tracks' area holds it
     ValueArea<TrackSwitches>& area;
     juce::ListenerList<SongValues::Listener>& listeners;
 
@@ -173,7 +172,7 @@ struct SongValues::TrackSwitchesTeller final : ValueArea<TrackSwitches>::Listene
 };
 
 // What the values' listeners are told of the view (Listener::tracksViewChanged()): once for each write that changes it, each
-// track whose row differs between the two (immer's diff of the map) that the song holds as the tracks' keeper told them, and
+// track whose row differs between the two (immer's diff of the map) that the song holds as the tracks' area holds them, and
 // whether the master's did. Nothing of a track the song doesn't hold: one a maker gives its view before it puts the track in
 // the song (its row is new, told by tracksChanged()), or one a step took away (its entry kept for an Undo).
 struct SongValues::TracksViewTeller final : OutsideValue<TracksOutside>::Listener
@@ -181,7 +180,7 @@ struct SongValues::TracksViewTeller final : OutsideValue<TracksOutside>::Listene
     TracksViewTeller (SongValues&, juce::ListenerList<SongValues::Listener>&);
     ~TracksViewTeller() override;
 
-    SongValues& values; // which tracks the song holds, as the tracks' keeper told them
+    SongValues& values; // which tracks the song holds, as the tracks' area holds them
     OutsideValue<TracksOutside>& area;
     juce::ListenerList<SongValues::Listener>& listeners;
 
@@ -193,15 +192,15 @@ struct SongValues::TracksViewTeller final : OutsideValue<TracksOutside>::Listene
 // The switches' and the view's part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes
 // or redoes:
 //   (a) a TRACK, the track list or the MASTER that comes into the song with a switch, a view property or a LANES in it, or in
-//       a track in it (a track a merge's choice would bring in whole, a test's: TrackSwitchesValue.h, holdsSwitchesIn();
-//       TracksOutside.h, holdsViewIn()): each such element's switches read as the song holds them (readHeldSwitchesOf()),
-//       made its key's in the switches (the song's entries of its ID replaced: the element is what the track holds), its
-//       view made its row's (readHeldViewOf()), all of it taken out of the element, each element counted
-//       (countTrackLeavesAdopted());
-//   (b) a lone LANES added to a TRACK of the song or its MASTER, or a lone LANE to a LANES of one: refused in a step, whose
-//       Undo, taking the tree's change back first, would find it gone (a JUCE assertion: the lanes' functions change the
-//       lanes, model/automation/internal/Automation.h; JUCE workaround W62 (docs/juce-workarounds.md)); read in outside the
-//       history (the lanes it holds made the channel's, after those it has), counted, and taken out;
+//       a track in it: each such element's switches read as the song holds them (readHeldSwitchesOf()), made its key's in the
+//       switches (the song's entries of its ID replaced: the element is what the track holds), its view made its row's
+//       (readHeldViewOf()), all of it taken out of the element, each element counted (countTrackLeavesAdopted()). The tracks'
+//       part of the keeper takes every TRACK, TRACKS and MASTER that comes in itself, its switches and view with it, and asks
+//       this of none (TracksKeeper): this case is left for the next piece of roadmap step S5.20 to take away;
+//   (b) a lone LANES added to the MASTER, or a lone LANE to its LANES: refused in a step, whose Undo, taking the tree's change
+//       back first, would find it gone (a JUCE assertion: the lanes' functions change the lanes,
+//       model/automation/internal/Automation.h; JUCE workaround W62 (docs/juce-workarounds.md)); read in outside the history
+//       (the lanes it holds made the master's, after those it has), counted, and taken out;
 //   (c) nothing as a track leaves: the switches and the view keep its entries (an Undo brings the track back with them).
 // And the adoption from the loaded tree, which the song's holdValues() asks.
 struct SongValues::TrackLeavesKeeper
@@ -224,14 +223,13 @@ struct SongValues::TrackLeavesKeeper
     JUCE_DECLARE_NON_COPYABLE (TrackLeavesKeeper)
 };
 
-// The switches' and the view's part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the
-// song leads to a TRACK or the MASTER (the track list, a track, a folder's tracks, the master, from the song's element down);
-// and a copy's TRACK given its switches (TrackSwitchesValue.h: writeSwitchesInto(), its ID's entries) and its view
-// (TracksOutside.h: writeViewInto(): its view's properties, and a LANES after the element's other children where it has a
-// lane), the MASTER its mode and its view, from the values kept. Whole state writes them after a TRACK's clips, its devices
-// and a folder's tracks, before its modulators and its sends, as every file Phazite wrote holds them. Nothing for another
-// element.
-bool leadsToTrackLeaves (const juce::ValueTree& parent, const juce::ValueTree& child);
+// The tracks' part of whole state (WholeState.cpp: writeIn(), which writes each TRACK whole: writeTracksIn()): whether a child
+// of an element in a copy of the song is the tracks' place (the song's TRACKS or MASTER); and a copy's TRACK given its switches
+// (TrackSwitchesValue.h: writeSwitchesInto(), its ID's entries) and its view (TracksOutside.h: writeViewInto(): its view's
+// properties, and a LANES after the element's other children where it has a lane), the MASTER its mode and its view, from the
+// values kept. Whole state writes them after a TRACK's clips, its devices and a folder's tracks, before its modulators and its
+// sends, as every file Phazite wrote holds them. Nothing for another element.
+bool leadsToTracks (const juce::ValueTree& parent, const juce::ValueTree& child);
 void writeTrackLeavesIn (juce::ValueTree& element, const ValuesKept&);
 
 // The switches' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
@@ -239,31 +237,34 @@ void writeTrackLeavesIn (juce::ValueTree& element, const ValuesKept&);
 // and is no part of it.
 bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
 
+// The tracks' part of the same comparison: a song's TRACKS, the tracks whole (holdSameTracks()), its MASTER, the master's value
+// and mode (holdSameMaster()), as values, where both kept them; true for another element. What a TRACK holds is compared
+// through its element and the other parts, each TRACK given its own fields first (WholeState.h: withTracksOwn()).
+bool holdSameTracksOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
+
 // Whether what the song's tree tells is the tracks', which a listener of the song's root hears from the values' listener
 // alone (SongValues::Listener::tracksChanged(), trackSwitchesChanged(), tracksViewChanged()) and leaves alone in its tree
-// callbacks, while the tree is still their storage (the top of this header). Of an element (children in another order): the
-// song's track list, a track of the song's, its master, a track's or the master's LANES. Of a property changed: one of the
-// three values' (TracksValue.h, TrackSwitchesValue.h, TracksOutside.h) described on a track of the song's, or on its master,
-// or a LANE's of one (a switch's, a view's and a LANE's what the keeper takes out of an element that came with them: its
-// safety net). Of a child added or taken out: a track to the song's track list or a folder of it, the track list or the
-// master to the song, a LANES to a track or the master, or what is in one. In TracksArea.cpp.
+// callbacks: the places and what the keeper takes in there (the top of this header). Of an element (children in another
+// order): the song's TRACKS, its MASTER, the MASTER's LANES. Of a property changed: any of the song's MASTER (it holds none but
+// what its keeper takes out), or a LANE's of the MASTER's LANES. Of a child added or taken out: a TRACK to the song's TRACKS,
+// the TRACKS or the MASTER to the song, a LANES to the MASTER, a LANE to its LANES. In TracksArea.cpp.
 bool isHeardAsTracks (const juce::ValueTree& element);
 bool isHeardAsTracks (const juce::ValueTree& element, const juce::Identifier& property);
 bool isHeardAsTracks (const juce::ValueTree& parent, const juce::ValueTree& child);
 
-// The song's tracks as its tree holds them, read as the song holds them (readHeldTrack()): each TRACK of the track list and,
-// in a folder, the TRACKs in it (a folder's before them), each list in its element's order; of two of one ID, the first,
-// without what is in it; one whose ID the song can't count on left out with what is in it; and the master (as a song without
-// a MASTER has it, where it has none). What the tracks' keeper starts from, and what the tests' check compares what it told
-// with (tests/SongCheck.cpp).
+// A song's tracks as its tree holds them (a file's, a whole copy's: the live song's tree holds none), read as the song holds
+// them (readHeldTrack()): each TRACK of the track list and, in a folder, the TRACKs in it (a folder's before them), each list
+// in its element's order; of two of one ID, the first, without what is in it; one whose ID the song can't count on left out
+// with what is in it; and the master (as a song without a MASTER has it, where it has none). What the adoption reads once,
+// and the tests.
 SongTracks readHeldTracks (const juce::ValueTree& song);
 
-// How many TRACK elements the tracks' keeper looked at in its walks (a track added with the tracks in it, a folder's tracks
-// in another order, the song's tracks read again), by every song since the program started: for the speed gates
-// (tests/PerformanceGateTests.cpp), which count what an edit makes it walk. Any thread.
+// How many TRACK elements the tracks' reading of a tree looked at in its walks (the adoption, readHeldTracks()), by every song
+// since the program started: for the speed gates (tests/PerformanceGateTests.cpp), which count what an edit makes it walk
+// (none: the live song's tree holds no track). Any thread.
 std::uint64_t countTrackElementsWalked() noexcept;
 
-// How many entries of the tracks' lists (a folder's, the top list's) the tracks' keeper compared as it worked out what to tell
+// How many entries of the tracks' lists (a folder's, the top list's) the tracks' teller compared as it worked out what to tell
 // (a track's place in its list, a list's order before and after), by every song since the program started: for the speed
 // gates (tests/PerformanceGateTests.cpp). Any thread.
 std::uint64_t countTrackListEntriesCompared() noexcept;

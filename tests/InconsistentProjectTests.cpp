@@ -427,8 +427,9 @@ TEST_CASE ("A clip anywhere but on a track, in an element Phazite doesn't know t
     CHECK (phazite::getAllClips (song).size() == 2); // the MIDI clip and the audio clip, each once
     CHECK (phazite::getClips (song, edited.lead).size() == 1);
 
-    // What Phazite doesn't know stays, without the clip.
-    CHECK (phazite::test::copyTrack (song, edited.lead).getChildWithName ("FUTURE").isValid());
+    // What Phazite doesn't know at the root stays, without the clip; what it doesn't know on a track goes as the song opens
+    // (named, roadmap step S5.20, the tracks' switch: a track is a value, which holds its own fields alone).
+    CHECK_FALSE (phazite::test::copyTrack (song, edited.lead).getChildWithName ("FUTURE").isValid());
     CHECK (song.getState().getChildWithName ("ELSEWHERE").isValid());
 }
 
@@ -2631,7 +2632,8 @@ TEST_CASE ("A chain's crossover's automation stays while its container isn't spl
     CHECK (phazite::getPoints (*phazite::findSong (s.context), crossover).size() == 2);
 }
 
-TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as they are, and are saved again, but in a clip's notes")
+TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as they are, and are saved again, but on a track and in a "
+           "clip's notes")
 {
     Edited edited;
     const auto project = edited.open (
@@ -2656,11 +2658,14 @@ TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as
     CHECK (future->getStringAttribute ("kept") == "yes");
     CHECK (future->getNumChildElements() == 2);
     CHECK (future->getChildByName ("NOTE")->getStringAttribute ("pitch") == "500");
+    // But a track's: what Phazite doesn't know on a TRACK (or the MASTER) isn't kept, as a track is a value beside the song's
+    // tree, which holds its own fields alone (named, roadmap step S5.20, the tracks' switch: docs/project-format.md); nor a
+    // note's and a controller's value: what Phazite doesn't know on a NOTE or a CONTROL isn't kept, as a clip's notes are
+    // values beside the song's tree.
     const auto* lead = Edited::findTrack (*saved, "Lead");
-    CHECK (lead->getStringAttribute ("laterProperty") == "1");
-    CHECK (lead->getChildByName ("TOOLDATA") != nullptr);
-    // But a note's and a controller's value: what Phazite doesn't know on a NOTE or a CONTROL isn't kept, as a clip's notes
-    // are values beside the song's tree (docs/project-format.md).
+    REQUIRE (lead != nullptr);
+    CHECK_FALSE (lead->hasAttribute ("laterProperty"));
+    CHECK (lead->getChildByName ("TOOLDATA") == nullptr);
     CHECK (lead->getChildByName ("CLIP")->getChildByName ("NOTE")->getChildByName ("EXPRESSION") == nullptr);
 }
 

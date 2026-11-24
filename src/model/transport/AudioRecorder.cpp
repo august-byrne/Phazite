@@ -142,10 +142,8 @@ bool AudioRecorder::canRecord() const
 //==============================================================================
 void AudioRecorder::update()
 {
-    // From the song's tracks as its values told them (their part of the keeper: SongValues.h), or as its tree holds them.
-    const auto* values = song.getValues();
-    const auto* told = values != nullptr ? values->getTracksAsTold() : nullptr;
-    updateFrom (told != nullptr ? *told : getTracksValue (song));
+    // From the song's tracks as its values hold them (the tracks' area: SongValues.h), or as its tree holds them.
+    updateFrom (getTracksValue (song));
 }
 
 void AudioRecorder::updateFrom (const SongTracks& tracks)

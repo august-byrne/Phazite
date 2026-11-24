@@ -279,16 +279,37 @@ void SongValues::setWindowPlace (DeviceID id, std::optional<WindowPlace> place)
 }
 
 //==============================================================================
+int takeChannelStoreIn (DeviceStore& store, DevicesOutside& outside, const juce::ValueTree& channel)
+{
+    // Its devices and containers, with their chains and their devices (not a folder's tracks: each is a channel of its own).
+    auto taken = 0;
+
+    for (const auto& child : channel)
+    {
+        if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)))
+            continue;
+
+        forEachItemIn (child,
+                       [&store, &outside, &taken] (const juce::ValueTree& item)
+                       {
+                           taken += holdsStoreIn (item) ? 1 : 0;
+                           readHeldStoreOf (item, store);
+
+                           if (const auto window = item.hasType (schema::DEVICE) ? readWindowPlaceOf (item) : std::nullopt)
+                               outside = outside.withWindow (readDeviceElementID (item), *window);
+                       });
+    }
+
+    return taken;
+}
+
 bool leadsToDeviceStore (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
     if (parent.hasType (schema::PHAZITE))
-        return child.hasType (schema::TRACKS) || child.hasType (schema::MASTER);
-
-    if (parent.hasType (schema::TRACKS))
-        return child.hasType (schema::TRACK);
+        return child.hasType (schema::MASTER);
 
     if (parent.hasType (schema::TRACK) || parent.hasType (schema::MASTER))
-        return child.hasType (schema::TRACK) || child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER);
+        return child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER);
 
     if (parent.hasType (schema::CONTAINER))
         return child.hasType (schema::CHAIN);

@@ -520,7 +520,7 @@ TEST_CASE ("Track holdings: a merge's choice of a whole track gives it the side'
     clash.oursElement = phazite::test::findTrackIn (now, h.track);
     clash.theirsElement = then;
     const phazite::MergeSides sides { version, now, version };
-    REQUIRE (phazite::findByPath (h.song.getState(), clash.path).isValid());
+    REQUIRE (phazite::findByPath (now, clash.path).isValid()); // the song's whole copy's: its tree holds no TRACK
 
     h.checkRemoval ("Take the Other Branch's", [&h, &clash, &sides]
                     { REQUIRE (phazite::chooseTrackClash (h.song, clash, 2, sides) == phazite::AreaChoice::chosen); }, {});
@@ -620,26 +620,4 @@ TEST_CASE ("Track holdings: a merge's choice of the whole master gives it the si
     CHECK (phazite::getModulations (h.song, masterMacro).size() == 1);
     CHECK_FALSE (phazite::test::treeHolds (h.song, schema::MODULATOR));
     CHECK_FALSE (phazite::test::treeHolds (h.song, schema::MACRO));
-}
-
-TEST_CASE ("Track holdings: a track taken out of the song's tree without eraseTrackHoldings() is what the keepers' count finds")
-{
-    // The guard's own case: what a new remover that forgot the call would leave (the keeper erasing and remembering what the
-    // track held), which checkSong() and every UndoCheck fail on.
-    Holdings h;
-    CHECK (h.values().countHoldingsLeftWithKeepers() == 0);
-
-    {
-        const phazite::UndoStep step (h.song, "Taken Out");
-        auto state = phazite::findTrackState (h.song, h.track);
-        state.getParent().removeChild (state, &h.song.getUndoManager());
-    }
-
-    CHECK_FALSE (phazite::getClipValue (h.song, h.clip).has_value()); // erased by the keeper, its safety net
-    CHECK (h.values().countHoldingsLeftWithKeepers() == 4);           // its clips, its LFO, its container's macros, its send
-
-    // Back by Undo, the same element: nothing of a track out of the song.
-    phazite::undo (h.song);
-    CHECK (h.values().countHoldingsLeftWithKeepers() == 0);
-    CHECK (phazite::getClipValue (h.song, h.clip).has_value());
 }

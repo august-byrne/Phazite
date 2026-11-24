@@ -34,6 +34,8 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksArea.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/midi/MidiLinkModel.h"
@@ -89,6 +91,13 @@ struct Told final : phazite::SongValues::Listener
     void clipNotesChanged (const std::vector<phazite::ClipID>&) override { ++notes; }
     void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<TrackID>&) override { ++clips; }
     void tempoMapChanged() override { ++tempo; }
+
+    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch (no TRACK element
+    // in the tree).
+    void tracksChanged (const std::vector<phazite::TrackChange>&, const std::vector<phazite::TrackID>&, const phazite::SongTracks&) override
+    {
+        ++tracksTold;
+    }
     void curvesChanged (const std::vector<phazite::ParameterRef>&) override { ++curves; }
 
     void modulationChanged (const std::vector<phazite::SongValues::ModulationChange>&, const std::vector<phazite::ModulatorPlace>&) override
@@ -147,7 +156,7 @@ struct Told final : phazite::SongValues::Listener
         reordered.insert (reordered.end(), tracks.begin(), tracks.end());
     }
 
-    int notes = 0, clips = 0, tempo = 0, curves = 0, modulation = 0, calls = 0;
+    int notes = 0, clips = 0, tempo = 0, curves = 0, tracksTold = 0, modulation = 0, calls = 0;
     std::map<std::uint64_t, Entry> told {};
     std::vector<TrackID> reordered {};
     std::optional<SongSends> applied {}; // where given the song's sends before: each change told applied to it, in turn
@@ -441,7 +450,7 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
         }
 
         // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more.
-        if (each.other == 0)
+        if (each.other == 0 && each.told.tracksTold == 0)
         {
             CHECK (each.project == each.told.calls);
             CHECK (each.versions == each.told.calls);
@@ -586,7 +595,9 @@ TEST_CASE ("Song values' sends: what takes sends along tells them: a track with 
         CHECK_FALSE (entry.wasThere);
     }
 
-    // Into a folder: the same sends, on the same track (JUCE takes it out and puts it in again).
+    // Into a folder: the same sends, on the same track, told nothing since the tracks' switch (roadmap step S5.20): a track
+    // moved changes its place in the tracks' lists alone (named: JUCE took its element out and put it in again before, and
+    // the sends' keeper told its sends taken out and back).
     TrackID folder;
 
     {
@@ -597,7 +608,7 @@ TEST_CASE ("Song values' sends: what takes sends along tells them: a track with 
     const auto intoFolder = w.hearEach ("Into the Folder", [&] { phazite::moveTrackIntoFolder (song, track, folder); });
     checkHeard ("Into the Folder", intoFolder, true);
     CHECK (phazite::getParentFolder (song, track) == folder);
-    CHECK (intoFolder[0].told.told.count (toReverb.getRaw()) == 1);
+    CHECK (intoFolder[0].told.told.count (toReverb.getRaw()) == 0);
 
     // A return removed: the sends to it go with it, in that step, and come back with it.
     const auto returnRemoved = w.hearEach ("Delete Return", [&] { phazite::deleteTracks (song, { reverb }, nullptr); });
@@ -1445,60 +1456,32 @@ TEST_CASE ("Song values' sends: a track deleted and brought back by Undo, whose 
     phazite::test::checkSong (song);
 }
 
-TEST_CASE ("Song values' sends: a lone send added to a track in a step is refused and one outside the history read in; a track "
-           "that comes in with sends has them taken in, one of an ID the song holds dropped")
+TEST_CASE ("Song values' sends: a track that comes in with sends outside the history has them taken in by the tracks' safety net, "
+           "one of an ID the song holds dropped")
 {
-    // The keeper's own: goes with the keepers (S5.20, the tracks' switch).
+    // The keeper's own: goes with the keepers (S5.20). Since the tracks' switch the song's tree holds no TRACK, so no lone SEND
+    // can be added to one; a TRACK that comes in is the tracks' part of the keeper's (TracksArea.h), which reads its sends
+    // through the sends' reader of a track (SendsArea.h: takeTrackSendsIn()), outside the history alone.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
-    auto& context = s.context;
     const auto& values = *song.getValues();
     const auto track = s.firstTrack;
     TrackID reverb;
-    DeviceID held;
+    DeviceID held, other;
 
     {
-        const phazite::UndoStep step (song, "Add Send");
+        const phazite::UndoStep step (song, "Add Sends");
         reverb = phazite::addReturnTrack (song, "Reverb", nullptr);
         held = phazite::addSend (song, track, reverb, false);
+        other = phazite::addSend (song, track, phazite::addReturnTrack (song, "Delay", nullptr), true);
     }
 
-    // (c) A lone one in a step: refused (the element can't be taken out in the step that adds it: JUCE workaround W62,
-    // docs/juce-workarounds.md), the song's sends as they were; its step's Undo takes the element out again.
-    auto trackState = phazite::findTrackState (song, track);
-    const auto loneID = DeviceID::fromRaw (song.makeID());
-    const auto lone = phazite::writeSendElement ({ .id = loneID, .from = track, .to = reverb, .level = -3.0f });
-    const auto before = phazite::getSendsValue (song);
+    REQUIRE (other.isValid());
 
-    {
-        const phazite::test::ExpectedAssertion refused ("SendsArea.cpp");
-        const phazite::UndoStep step (song, "A Lone Send");
-        trackState.appendChild (lone.createCopy(), &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (phazite::getSendsValue (song) == before);
-    phazite::undo (song);
-    CHECK_FALSE (holdsSendElement (song.getState()));
-
-    // Outside the history: read in, as the song holds one, and taken out.
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        trackState.appendChild (lone.createCopy(), nullptr);
-    }
-
-    REQUIRE (phazite::getSendValue (song, loneID).has_value());
-    CHECK (phazite::getSendValue (song, loneID)->from == track);
-    CHECK (juce::exactlyEqual (phazite::getSendValue (song, loneID)->level, -3.0f));
-    CHECK (phazite::getSends (song, track) == std::vector { held, loneID });
-    CHECK_FALSE (holdsSendElement (song.getState()));
-
-    // (b) A track that comes in whole with its SEND elements (as a merge's choice of a whole track brings one), in a step: its
-    // own taken in, counted, the one under an ID the song holds dropped (the song's kept, on its track), none left in the
-    // tree; its Undo and its Redo.
-    auto incoming = phazite::copyWhole (song, trackState);
+    // A track that comes in whole with its SEND elements (as a merge's choice of a whole track brings one), outside the
+    // history: its own taken in, counted (by the sends' count, and as a track taken in), the one under an ID the song holds
+    // dropped (the song's kept, on its track), none left in the tree.
+    auto incoming = phazite::test::copyTrack (song, track);
     phazite::giveNewIDs (song, incoming);
     auto sendsIn = 0;
 
@@ -1507,23 +1490,20 @@ TEST_CASE ("Song values' sends: a lone send added to a track in a step is refuse
             child.setProperty (phazite::schema::sendID, (juce::int64) held.getRaw(), nullptr); // the song's send's ID
 
     REQUIRE (sendsIn == 2);
-    const auto came = phazite::getTrackID (incoming);
+    const auto came = phazite::readTrackElementID (incoming);
     const auto adoptedBefore = values.countSendsAdopted();
-    phazite::test::UndoCheck undo (context);
-    undo.check ("Add Track",
-                [&]
-                {
-                    const phazite::UndoStep step (song, "Add Track");
-                    song.getState().getChildWithName (phazite::schema::TRACKS).appendChild (incoming, &song.getUndoManager());
-                });
+    const auto tracksBefore = values.countTracksAdopted();
+
+    {
+        const phazite::Song::OutsideHistory outside (song);
+        song.getState().getChildWithName (phazite::schema::TRACKS).appendChild (incoming, nullptr);
+    }
 
     CHECK (values.countSendsAdopted() == adoptedBefore + 1);
+    CHECK (values.countTracksAdopted() == tracksBefore + 1);
     REQUIRE (phazite::getSends (song, came).size() == 1);
     CHECK (phazite::getSendTrack (song, held) == track);
     CHECK_FALSE (holdsSendElement (song.getState()));
-    phazite::test::checkSong (song);
-    undo.walkBackAndForth();
-    CHECK (phazite::getSends (song, came).size() == 1);
     phazite::test::checkSong (song);
 }
 

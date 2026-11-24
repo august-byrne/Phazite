@@ -18,10 +18,12 @@
 
 #include <functional>
 #include <optional>
+#include <vector>
 
 namespace phazite
 {
 struct SongDevices; // model/base/internal/DevicesValue.h
+struct SongTracks;  // model/base/internal/TracksValue.h
 
 class AutomationWriter;
 
@@ -122,11 +124,14 @@ struct FoundParameter
 
 std::optional<FoundParameter> locateParameter (const Song&, const ParameterRef&);
 
-// The same with the song's devices, containers and chains given, never looked up in the song: a value of their own
-// properties alone will do (model/base/internal/DevicesValue.h: readDevicesFields()), as no parameter's look reads a device's
-// values set by hand or its sounds. What the loader's checks of the curves and the MIDI links ask of a song that holds no
-// values yet, whose devices they read once (model/project/Project.cpp: makeConsistent()).
-std::optional<FoundParameter> locateParameter (const Song&, const ParameterRef&, const SongDevices& devices);
+// The same with the song's devices, containers and chains, and its tracks and the master in the song's order, given, never
+// looked up in the song: a value of the devices' own properties alone will do (model/base/internal/DevicesValue.h:
+// readDevicesFields()), as no parameter's look reads a device's values set by hand or its sounds. What the loader's checks of
+// the curves and the MIDI links ask of a song that holds no values yet, whose devices and tracks they read once
+// (model/project/Project.cpp: makeConsistent(); model/arrangement/internal/Tracks.h: readTracksWithoutValues(),
+// readTrackOrderWithoutValues()).
+std::optional<FoundParameter> locateParameter (const Song&, const ParameterRef&, const SongDevices& devices, const SongTracks& tracks,
+                                               const std::vector<TrackID>& order);
 
 // The half of locateParameter() that looks in the song's tree alone, which it asks after its looks in modulation's area and,
 // for a send's level, the sends', and before the devices' area: the sources the tree holds (a fader's parameters); none for

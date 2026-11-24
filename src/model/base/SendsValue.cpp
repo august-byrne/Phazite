@@ -126,7 +126,7 @@ namespace
     }
 
     // Each TRACK under an element (the track list, a folder), a folder before the tracks in it, as the song orders its tracks
-    // (model/arrangement/internal/Tracks.h: getTrackStates()).
+    // (model/arrangement/internal/Tracks.h: getTrackOrder()).
     void forEachTrack (const juce::ValueTree& parent, const std::function<void (const juce::ValueTree&)>& visit)
     {
         for (const auto& child : parent)

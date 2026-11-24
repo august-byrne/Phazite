@@ -19,12 +19,12 @@ namespace phazite
 namespace
 {
     // Whether a child of an element in a copy of the song leads to what an area keeps beside the tree: each area asked in
-    // turn, a line each (the track list, a track or a folder's tracks, for the clips; the song's TEMPOMAP, for the tempo map;
-    // the song's CHORDLANE, for the chord lane; the song's MIDILINKS, for the MIDI links; the song's AUTOMATION, for the
-    // curves).
+    // turn, a line each (the song's TEMPOMAP, for the tempo map; the song's CHORDLANE, for the chord lane; the song's
+    // MIDILINKS, for the MIDI links; the song's AUTOMATION, for the curves). Never a TRACK: each is written whole where it is
+    // put in its TRACKS or its folder (writeTracksIn()).
     bool leadsToKept (const juce::ValueTree& parent, const juce::ValueTree& child)
     {
-        if (leadsToClips (parent, child))
+        if (leadsToTracks (parent, child)) // the song's TRACKS and MASTER, for the tracks
             return true;
 
         if (leadsToTempoMap (parent, child))
@@ -42,33 +42,73 @@ namespace
         if (leadsToSections (parent, child)) // the song's SECTIONS, for the sections
             return true;
 
-        if (leadsToModulation (parent, child)) // a track, the master or a channel's container, for modulation
+        if (leadsToModulation (parent, child)) // the master or a channel's container, for modulation
             return true;
 
-        if (leadsToSends (parent, child)) // the track list, a track or a folder's tracks, for the sends
+        if (leadsToDeviceStore (parent, child)) // the master, a channel's devices, a container's chains, a chain's devices: the store
             return true;
 
-        if (leadsToDeviceStore (parent, child)) // a channel, its devices, a container's chains, a chain's devices: the store
-            return true;
-
-        if (leadsToDevices (parent, child)) // the track list, a track or a folder's tracks, the master, for the devices
-            return true;
-
-        if (leadsToTrackLeaves (parent, child)) // the track list, a track or a folder's tracks, the master: switches, view
+        if (leadsToDevices (parent, child)) // the master, for the devices
             return true;
 
         return false;
     }
 
-    // What the areas keep of a copy's element written in, each area in turn, a line each (a track's clips, first among its
+    void writeIn (juce::ValueTree element, const ValuesKept& kept);
+
+    // A track of the kept values as a TRACK that holds everything the song holds of it: its own properties first
+    // (TracksValue.h: writeTrackElement()), a folder's tracks in it each written whole the same, in its list's order; then
+    // what the areas keep of it written in around them (writeIn(): its clips first among its children, its devices and
+    // containers after them, before a folder's tracks; its switches and view, its LANES after those; its modulators and
+    // macros; its sends, the last).
+    juce::ValueTree writeTrackWhole (const SongTracks& tracks, const TrackValue& track, const ValuesKept& kept)
+    {
+        auto element = writeTrackElement (track);
+
+        if (const auto* list = tracks.findList (track.id))
+            for (const auto id : *list)
+                if (const auto* inside = tracks.tracks.find (id.getRaw()))
+                    element.appendChild (writeTrackWhole (tracks, *inside, kept), nullptr);
+
+        writeIn (element, kept);
+        return element;
+    }
+
+    // The tracks' part of whole state: a copy's TRACKS given every track of the top list, each written whole, in the list's
+    // order; its MASTER the master's own properties (TracksValue.h: writeMasterInto()), which the other areas' parts then
+    // write after (its mode and view, its devices, its LANES, its modulators). Nothing for another element, nor where the
+    // values kept hold no tracks (a song without values: its tree holds them).
+    void writeTracksIn (juce::ValueTree& element, const ValuesKept& kept)
+    {
+        if (! kept.tracks.has_value())
+            return;
+
+        if (element.hasType (schema::MASTER))
+        {
+            writeMasterInto (element, kept.tracks->master);
+            return;
+        }
+
+        if (! element.hasType (schema::TRACKS))
+            return;
+
+        if (const auto* list = kept.tracks->findList ({}))
+            for (const auto id : *list)
+                if (const auto* track = kept.tracks->tracks.find (id.getRaw()))
+                    element.appendChild (writeTrackWhole (*kept.tracks, *track, kept), nullptr);
+    }
+
+    // What the areas keep of a copy's element written in, each area in turn, a line each (the tracks' own fields, first: the
+    // TRACKs of a TRACKS, each whole, and the MASTER's own properties: writeTracksIn(); a track's clips, first among its
     // elements, in the track's order, each with its notes: ClipsArea.h; the tempo map in the song's TEMPOMAP, the place the
     // song keeps for it: TempoMapArea.h; the chord lane in the song's CHORDLANE: ChordLaneArea.h; the MIDI links in the song's
     // MIDILINKS: MidiLinksArea.h; the curves in the song's AUTOMATION, which a song without curves is written without:
     // CurvesArea.h), each of an element of its own, so that their order is no matter; then the same of each element in it
-    // that leads to what an area keeps, found where the areas' elements are (the song's element, its track list and its
-    // folders, its TEMPOMAP, its CHORDLANE, its MIDILINKS, its AUTOMATION).
+    // that leads to what an area keeps, found where the areas' elements are (the song's element, its MASTER, its devices,
+    // its TEMPOMAP, its CHORDLANE, its MIDILINKS, its AUTOMATION).
     void writeIn (juce::ValueTree element, const ValuesKept& kept)
     {
+        writeTracksIn (element, kept);
         writeClipsIn (element, kept);
         writeDevicesIn (element, kept); // a TRACK's or the MASTER's devices and containers, right after its clips, each with
                                         // its chains and their devices, so that the parts below write into them: DevicesArea.h
@@ -138,6 +178,7 @@ ValuesKept keepValues (const Song& song)
         kept.devices = values->devices.get();
         kept.trackSwitches = values->trackSwitches.get();
         kept.tracksOutside = values->tracksOutside.get();
+        kept.tracks = values->tracks.get();
     }
 
     return kept;
@@ -191,6 +232,9 @@ bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, con
         return false;
 
     if (! holdSameTrackSwitchesOf (element, kept, otherElement, otherKept)) // then a track's switches, the master's mode
+        return false;
+
+    if (! holdSameTracksOf (element, kept, otherElement, otherKept)) // then the tracks whole, the master's value and mode
         return false;
 
     return true;

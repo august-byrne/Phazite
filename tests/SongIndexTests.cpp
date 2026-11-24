@@ -4,7 +4,11 @@
 // after every kind of change, their undos and redos, the whole song made like another (a merge, Bring Back, a branch
 // switch), a track list put in the place of the song's, a track that becomes a folder, and a paste of thousands of notes;
 // and what listens to the song finds a change in it as it is told of it. Every lookup the tests make is compared with a walk
-// too (TestMain.cpp turns that on), and UndoCheck.h compares the whole index at each step.
+// too (TestMain.cpp turns that on), and UndoCheck.h compares the whole index at each step. Since the tracks' switch (roadmap
+// step S5.20) a song that holds its values holds no track in its tree, which its index then holds none of (the tracks are
+// found in the tracks' area: Tracks.h, findTrack()): what a song does is checked through the model, and the index itself on
+// songs made of a tree, without values (a check's copy, a song the versions read), which keep their tracks in it. The index
+// goes with the next piece of that step.
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UndoCheck.h"
@@ -14,6 +18,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
@@ -60,13 +65,13 @@ phazite::ClipID addClipOfNotes (phazite::Song& song, phazite::TrackID track, dou
 // Every track, clip and note of the song found by its ID.
 void findEverything (const phazite::Song& song)
 {
-    for (const auto& track : phazite::getTrackStates (song))
+    for (const auto track : phazite::getTrackIDs (song))
     {
-        CHECK (phazite::findTrackState (song, phazite::getTrackID (track)) == track);
+        CHECK (phazite::hasTrack (song, track));
 
-        for (const auto clip : phazite::getClips (song, phazite::getTrackID (track)))
+        for (const auto clip : phazite::getClips (song, track))
         {
-            CHECK (phazite::getClipTrack (song, clip) == phazite::getTrackID (track));
+            CHECK (phazite::getClipTrack (song, clip) == track);
 
             for (const auto& note : phazite::getClipNotes (song, clip))
                 CHECK (findsNote (song, note.getRef()));
@@ -158,13 +163,13 @@ TEST_CASE ("The song's index follows the whole song made like another, as a merg
     CHECK (isExact (*song));
     CHECK (phazite::getClipTrack (*song, first) == tracks[0]);
     CHECK (phazite::getClipNotes (*song, first).size() == 64);
-    CHECK (phazite::findTrackState (*song, tracks[2]).isValid());
-    CHECK_FALSE (phazite::findTrackState (*song, added).isValid());
+    CHECK (phazite::hasTrack (*song, tracks[2]));
+    CHECK_FALSE (phazite::hasTrack (*song, added));
     findEverything (*song);
 
     phazite::undo (*song);
     CHECK (isExact (*song));
-    CHECK (phazite::findTrackState (*song, added).isValid());
+    CHECK (phazite::hasTrack (*song, added));
     findEverything (*song);
 
     phazite::redo (*song);
@@ -175,46 +180,10 @@ TEST_CASE ("The song's index follows the whole song made like another, as a merg
     auto other = phazite::createSong();
     const auto otherTracks = phazite::ensureTracks (*other, 2);
     addClipOfNotes (*other, otherTracks[1], 8.0, 8);
-    phazite::makeSongTheSame (*song, other->getState());
+    phazite::makeSongTheSame (*song, phazite::test::copyWholeSong (*other));
     CHECK (isExact (*song));
-    CHECK (phazite::getTrackStates (*song).size() == 2);
+    CHECK (phazite::getTrackIDs (*song).size() == 2);
     findEverything (*song);
-}
-
-TEST_CASE ("The song's index follows a track list put in the place of the song's, and a track that becomes a folder")
-{
-    auto song = phazite::createSong();
-    const auto tracks = phazite::ensureTracks (*song, 2);
-    const auto clip = addClipOfNotes (*song, tracks[0], 0.0, 8);
-    auto state = song->getState();
-
-    // Another track list, a whole copy (its tracks' clips in it), in the place of the song's: its elements are the ones found,
-    // and the clips its tracks came with the song's.
-    {
-        const phazite::UndoStep step (*song, "Replace");
-        auto list = state.getChildWithName (phazite::schema::TRACKS);
-        const auto copy = phazite::copyWhole (*song, list);
-        state.removeChild (list, &song->getUndoManager());
-        state.appendChild (copy, &song->getUndoManager());
-        CHECK (phazite::findTrackState (*song, tracks[0]).isAChildOf (copy));
-        CHECK (phazite::getClipTrack (*song, clip) == tracks[0]);
-    }
-
-    CHECK (isExact (*song));
-    phazite::undo (*song);
-    CHECK (isExact (*song));
-    CHECK (phazite::findTrackState (*song, tracks[0]).isAChildOf (state.getChildWithName (phazite::schema::TRACKS)));
-    CHECK (phazite::getClipTrack (*song, clip) == tracks[0]);
-
-    // A track that becomes a folder holds the tracks in it.
-    auto folder = phazite::findTrackState (*song, tracks[0]);
-    auto inside = phazite::findTrackState (*song, tracks[1]);
-    inside.getParent().removeChild (inside, nullptr);
-    folder.appendChild (inside, nullptr);
-    CHECK_FALSE (phazite::findTrackState (*song, tracks[1]).isValid()); // only a folder holds tracks
-    folder.setProperty (phazite::schema::trackKind, phazite::schema::trackIsFolder, nullptr);
-    CHECK (phazite::findTrackState (*song, tracks[1]) == inside);
-    CHECK (isExact (*song));
 }
 
 namespace
@@ -232,9 +201,12 @@ struct Asker final : juce::ValueTree::Listener
     {
     }
 
-    juce::ValueTree find (const juce::ValueTree& element) const { return phazite::findTrackState (*song, phazite::getTrackID (element)); }
+    juce::ValueTree find (const juce::ValueTree& element) const
+    {
+        return song->getIndex().findTrack (phazite::readTrackElementID (element).getRaw());
+    }
 
-    juce::ValueTree find (juce::int64 id) const { return phazite::findTrackState (*song, phazite::TrackID::fromRaw ((std::uint64_t) id)); }
+    juce::ValueTree find (juce::int64 id) const { return song->getIndex().findTrack ((std::uint64_t) id); }
 
     static bool isAsked (const juce::ValueTree& element) { return element.hasType (phazite::schema::TRACK); }
 
@@ -267,7 +239,7 @@ struct Asker final : juce::ValueTree::Listener
         }
         else if (property == phazite::schema::trackKind)
         {
-            const auto folder = phazite::isFolderState (element);
+            const auto folder = phazite::readTrackKind (element) == phazite::TrackValue::Kind::folder;
 
             for (const auto& child : element)
                 if (isAsked (child))
@@ -317,7 +289,7 @@ TEST_CASE ("What listens to the song, on any of its elements, finds a change in 
 
     rootHandle.addListener (&onRoot);
     folderHandle.addListener (&onFolder);
-    CHECK (phazite::findTrackState (*song, phazite::getTrackID (inside)) == inside); // the index made
+    CHECK (song->getIndex().findTrack (phazite::readTrackElementID (inside).getRaw()) == inside); // the index made
 
     auto* undo = &song->getUndoManager();
     track.setProperty (phazite::schema::trackID, renamed, undo); // a track's ID changed, as no edit changes one
@@ -332,9 +304,9 @@ TEST_CASE ("What listens to the song, on any of its elements, finds a change in 
     list.appendChild (otherTrack, undo); // a track added to the list and taken out
     list.removeChild (otherTrack, undo);
     phazite::undo (*song); // and all of it back, then again, as Undo and Redo make it
-    CHECK (phazite::findTrackState (*song, phazite::TrackID::fromRaw ((std::uint64_t) trackID)) == track);
+    CHECK (song->getIndex().findTrack ((std::uint64_t) trackID) == track);
     phazite::redo (*song);
-    CHECK (phazite::findTrackState (*song, phazite::TrackID::fromRaw ((std::uint64_t) renamed)) == track);
+    CHECK (song->getIndex().findTrack ((std::uint64_t) renamed) == track);
 
     for (auto* asker : { &onList, &onRoot, &onFolder })
     {
@@ -366,15 +338,7 @@ TEST_CASE ("The song's index holds what the song does after each of a few hundre
 
     const auto pick = [&random] (const auto& items) { return items[(size_t) random.nextInt ((int) items.size())]; };
     const auto tracksOf = [&song] (bool folders)
-    {
-        std::vector<phazite::TrackID> found;
-
-        for (const auto& state : phazite::getTrackStates (*song))
-            if (phazite::isFolderState (state) == folders && ! phazite::isReturnState (state))
-                found.push_back (phazite::getTrackID (state));
-
-        return found;
-    };
+    { return phazite::getTrackIDsOfKind (*song, folders ? phazite::TrackValue::Kind::folder : phazite::TrackValue::Kind::track); };
     const auto clipsOf = [&song] { return phazite::getAllClips (*song); };
     const auto at4 = [&random] { return at (random.nextInt (32) * 1.0); };
 
@@ -407,12 +371,9 @@ TEST_CASE ("The song's index holds what the song does after each of a few hundre
                         phazite::deleteTracks (*song, { pick (tracks) }, nullptr);
                     break;
                 case 4: // moved within the list, as a drag of its header moves it
-                {
-                    auto list = song->getState().getChildWithName (phazite::schema::TRACKS);
-                    if (list.getNumChildren() > 1)
-                        list.moveChild (random.nextInt (list.getNumChildren()), random.nextInt (list.getNumChildren()), history);
+                    if (tracks.size() > 1)
+                        phazite::moveTracksAfter (*song, { pick (tracks) }, pick (tracks));
                     break;
-                }
                 case 5: // into a folder, or out of one
                     if (! folders.empty() && ! tracks.empty())
                         phazite::moveTracksTo (*song, { pick (tracks) }, pick (folders),
@@ -573,22 +534,23 @@ phazite::Song::Ptr makeSongOfOwn (int numTracks, juce::int64 firstID)
 // and not found. Whether every answer was right.
 bool lookAndChange (phazite::Song& song, int rounds)
 {
-    const auto tracks = phazite::getTrackStates (song);
+    const auto& index = song.getIndex();
+    const auto tracks = index.getTracks();
     auto list = song.getState().getChildWithName (phazite::schema::TRACKS);
     auto right = true;
 
     for (int round = 0; round < rounds; ++round)
     {
         for (const auto& track : tracks)
-            right = right && phazite::findTrackState (song, phazite::getTrackID (track)) == track;
+            right = right && index.findTrack (phazite::readTrackElementID (track).getRaw()) == track;
 
         juce::ValueTree added (phazite::schema::TRACK);
         const auto addedID = phazite::TrackID::fromRaw ((std::uint64_t) 1000000 + (std::uint64_t) round);
         added.setProperty (phazite::schema::trackID, (juce::int64) addedID.getRaw(), nullptr);
         list.appendChild (added, &song.getUndoManager());
-        right = right && phazite::findTrackState (song, addedID) == added;
+        right = right && index.findTrack (addedID.getRaw()) == added;
         list.removeChild (added, &song.getUndoManager());
-        right = right && ! phazite::findTrackState (song, addedID).isValid();
+        right = right && ! index.findTrack (addedID.getRaw()).isValid();
     }
 
     return right && song.getIndex().isExact();
@@ -621,7 +583,7 @@ TEST_CASE ("A lookup into a song from a thread other than the one that made it i
     const auto track = phazite::ensureTracks (*song, 1).front();
 
     const phazite::test::ExpectedAssertion fromAnotherThread ("SongIndex.cpp");
-    std::thread other ([&song, track] { juce::ignoreUnused (phazite::findTrackState (*song, track)); }); // while this thread waits
+    std::thread other ([&song, track] { juce::ignoreUnused (song->getIndex().findTrack (track.getRaw())); }); // while this waits
     other.join();
 
 #if JUCE_DEBUG

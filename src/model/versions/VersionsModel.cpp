@@ -2131,18 +2131,19 @@ namespace
 
             // Not the devices': their choices set them through their setters (chooseDeviceClash()), and their part of the
             // keeper only tells what the tree holds, taking nothing in, until the devices' switch.
-            return values->countAdopted()               // the clips', with their notes
-                   + values->countTempoMapAdopted()     // the tempo map's
-                   + values->countChordLaneAdopted()    // the chord lane's
-                   + values->countMidiLinksAdopted()    // the MIDI links'
-                   + values->countCurvesAdopted()       // the curves'
-                   + values->countSectionsAdopted()     // the sections'
-                   + values->countModulationAdopted()   // modulation's
-                   + values->countSendsAdopted()        // the sends'
-                   + values->countDeviceStoreAdopted()  // the store's: chooseDeviceStoreClash(), and a whole track's
-                                                        // (chooseTrackClash()) through the store's functions
-                   + values->countTrackLeavesAdopted(); // the tracks' switches and view: a switch's clash and a whole
-                                                        // track's through their setters (chooseTrackClash())
+            return values->countAdopted()              // the clips', with their notes
+                   + values->countTempoMapAdopted()    // the tempo map's
+                   + values->countChordLaneAdopted()   // the chord lane's
+                   + values->countMidiLinksAdopted()   // the MIDI links'
+                   + values->countCurvesAdopted()      // the curves'
+                   + values->countSectionsAdopted()    // the sections'
+                   + values->countModulationAdopted()  // modulation's
+                   + values->countSendsAdopted()       // the sends'
+                   + values->countDeviceStoreAdopted() // the store's: chooseDeviceStoreClash(), and a whole track's
+                                                       // (chooseTrackClash()) through the store's functions
+                   + values->countTrackLeavesAdopted() // the tracks' switches and view: a switch's clash and a whole
+                                                       // track's through their setters (chooseTrackClash())
+                   + values->countTracksAdopted();     // the tracks': a track's or the master's through their setters
         }
 
         const Song& song;

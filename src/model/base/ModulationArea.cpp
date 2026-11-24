@@ -616,12 +616,39 @@ bool SongValues::setAllModulation (Song& song, SongModulation next)
 }
 
 //==============================================================================
+int takeChannelModulatorsIn (SongModulation& modulation, const juce::ValueTree& channel)
+{
+    // The channel's own, then each of its containers' macros, each owner's in its order (as the keeper's safety net takes them).
+    auto taken = 0;
+
+    const auto takeOwner = [&modulation, &taken] (const juce::ValueTree& owner)
+    {
+        const auto place = readOwnerPlace (owner);
+
+        for (const auto& element : owner)
+        {
+            if (! isModulatorElement (element))
+                continue;
+
+            if (auto value = readHeldModulator (element, place); value.has_value() && modulation.find (value->id) == nullptr)
+            {
+                modulation = withHeldModulator (modulation, std::move (*value));
+                ++taken;
+            }
+        }
+    };
+
+    takeOwner (channel);
+
+    for (const auto& element : channel)
+        if (element.hasType (schema::CONTAINER))
+            takeOwner (element);
+
+    return taken;
+}
+
 bool leadsToModulation (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    if ((parent.hasType (schema::PHAZITE) || parent.hasType (schema::TRACKS) || parent.hasType (schema::TRACK))
-        && (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK)))
-        return true;
-
     if (parent.hasType (schema::PHAZITE) && child.hasType (schema::MASTER))
         return true;
 

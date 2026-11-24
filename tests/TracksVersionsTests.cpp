@@ -138,51 +138,34 @@ TrackValue held (const phazite::Song& song, TrackID id)
     return *value;
 }
 
-// Whether a change put a track's element in the song anew rather than the element it took out (a move): what a plug-in on it
-// would be taken out and put in again with. Its element's identity, which only the song's tree, the tracks' storage until the
-// tracks' switch (roadmap step S5.20), has: read there alone, by its ID, as the tree tells what it took out and put in.
-class ElementKept final : private juce::ValueTree::Listener
+// Whether a change put a track in the song anew rather than moving the one it holds (what a plug-in on it would be taken out
+// and put in again with): whether the tracks' teller told it taken out or added (TracksArea.h: TrackChange::made) rather than
+// come to another folder (TrackChange::place). Since the tracks' switch (roadmap step S5.20) no track has an element whose
+// identity could tell it (named: this read the element's identity in the song's tree before).
+class ElementKept final : private phazite::SongValues::Listener
 {
 public:
-    ElementKept (const phazite::Song& song, TrackID id)
-        : state (song.getState()),
+    ElementKept (const phazite::Song& s, TrackID id)
+        : song (s),
           track (id)
     {
-        state.addListener (this);
+        song.getValues()->addListener (this);
     }
 
-    ~ElementKept() override { state.removeListener (this); }
+    ~ElementKept() override { song.getValues()->removeListener (this); }
 
     bool isPutInAnew() const noexcept { return anew; }
 
 private:
-    juce::ValueTree findIn (const juce::ValueTree& element) const
+    void tracksChanged (const std::vector<phazite::TrackChange>& changes, const std::vector<TrackID>&, const phazite::SongTracks&) override
     {
-        if (element.hasType (schema::TRACK) && phazite::readID (element[schema::trackID]) == track.getRaw())
-            return element;
-
-        for (const auto& child : element)
-            if (const auto found = findIn (child); found.isValid())
-                return found;
-
-        return {};
+        for (const auto& change : changes)
+            if (! change.onMaster && change.id == track && change.has (phazite::TrackChange::made))
+                anew = true;
     }
 
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int) override
-    {
-        if (const auto found = findIn (child); found.isValid())
-            removed.push_back (found);
-    }
-
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
-    {
-        if (const auto found = findIn (child); found.isValid())
-            anew = anew || std::find (removed.begin(), removed.end(), found) == removed.end();
-    }
-
-    juce::ValueTree state {};
+    const phazite::Song& song;
     TrackID track {};
-    std::vector<juce::ValueTree> removed {};
     bool anew = false;
 };
 

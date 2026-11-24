@@ -54,24 +54,10 @@ namespace
         return (juce::int64) state[property];
     }
 
-    // A channel's element as the compile reads it, a field at a time through the tracks' conversion (TracksValue.h,
-    // TrackSwitchesValue.h), never a track whole: its ID as the plans key it (the master's is 0, which no track's is); whether
-    // it is a track's (a TRACK: a track, a folder or a return), which a walk up from a track to the folders it is in asks; and
-    // whether it is of a kind.
-    std::int64_t readChannelID (const juce::ValueTree& channel)
+    // A channel's ID as the plans key it: a track's raw ID (the master's is 0, which no track's is).
+    std::int64_t getChannelKey (const TrackValue& channel)
     {
-        return (std::int64_t) readTrackElementID (channel).getRaw();
-    }
-
-    bool isTrackElement (const juce::ValueTree& element)
-    {
-        const auto kind = readTrackKind (element);
-        return kind.has_value() && *kind != TrackValue::Kind::master;
-    }
-
-    bool isOfKind (const juce::ValueTree& channel, TrackValue::Kind kind)
-    {
-        return readTrackKind (channel) == kind;
+        return channel.isMaster() ? 0 : (std::int64_t) channel.id.getRaw();
     }
 
     // A device's, a container's or a chain's ID as the plans key it.
@@ -86,16 +72,15 @@ namespace
         return value.form == DeviceValue::Form::own || value.form == DeviceValue::Form::plugin;
     }
 
-    // The place of what a channel's element holds (a TRACK's by its ID, the MASTER's by its flag), as the devices' area
-    // lists it.
-    DevicePlace getChannelPlaceOf (const juce::ValueTree& channel)
+    // The place of what a channel holds (a track's by its ID, the master's by its flag), as the devices' area lists it.
+    DevicePlace getChannelPlaceOf (const TrackValue& channel)
     {
-        return makeChannelPlace (readTrackElementID (channel), channel.hasType (schema::MASTER)); // read without a text made
+        return makeChannelPlace (channel.id, channel.isMaster());
     }
 
     // Each item of a channel's list in the devices' values, in its order (a device, or a container, which holds the rest).
     template <typename Each>
-    void forEachOnChannel (const SongDevices& all, const juce::ValueTree& channel, Each&& each)
+    void forEachOnChannel (const SongDevices& all, const TrackValue& channel, Each&& each)
     {
         if (const auto* list = all.findList (getChannelPlaceOf (channel)))
             for (const auto id : *list)
@@ -148,12 +133,12 @@ namespace
     // started before the clip's start plays from it, one that goes past its end stops there), each on its channel; none of a
     // muted clip or note. The clips in the order the track holds them (Clips.h: getClipValues()), which ties between their
     // events keep.
-    std::shared_ptr<const engine::NoteSequence> compileNotes (const Song& song, const juce::ValueTree& trackState)
+    std::shared_ptr<const engine::NoteSequence> compileNotes (const Song& song, const TrackValue& track)
     {
         std::vector<engine::NoteSequence::Note> notes;
         std::vector<engine::NoteSequence::Control> controls;
 
-        for (const auto& clip : getClipValues (song, readTrackElementID (trackState)))
+        for (const auto& clip : getClipValues (song, track.id))
         {
             if (! clip.isMidi() || clip.muted)
                 continue;
@@ -468,9 +453,9 @@ void SongPlayer::deviceStoreChanged (const std::vector<SongValues::DeviceStoreCh
 
 void SongPlayer::tracksChanged (const std::vector<TrackChange>& changed, const std::vector<TrackID>& reordered, const SongTracks& now)
 {
-    // A track added or taken out (a move is both, as JUCE moves a track: or come to another folder), as a TRACK added to its
-    // parent or taken out of it marked its notes and channel (and those of the tracks in it, each told) and the folder's
-    // channel it was in or came to; the master's element, its channel. Any other part of a track marks nothing (design J.8).
+    // A track added or taken out (each track in a folder added or taken out told too), or come to another folder (a move: one
+    // change, place): its notes and channel, and the channels of the folders it was in and came to; the master put in whole,
+    // its channel. Any other part of a track marks nothing (design J.8).
     const auto markFolder = [this] (TrackID folder)
     {
         if (folder.isValid())
@@ -568,12 +553,11 @@ bool SongPlayer::takeTrackSwitches (const std::vector<TrackSwitchChange>& change
 
 void SongPlayer::holdTracks()
 {
-    // As the keeper told them and the switches' area holds them, so that what is held here and what tracksChanged() and
+    // As the tracks' and the switches' areas hold them, so that what is held here and what tracksChanged() and
     // trackSwitchesChanged() keep up to date never disagree; read from the song's tree for a song without values (none that
     // plays).
     const auto* values = song.getValues();
-    const auto* tracks = values != nullptr ? values->getTracksAsTold() : nullptr;
-    heldTracks->tracks = tracks != nullptr ? *tracks : readHeldTracks (song.getState());
+    heldTracks->tracks = getTracksValue (song);
     heldTracks->switches = values != nullptr ? values->trackSwitches.get() : readTrackSwitches (song.getState());
 }
 
@@ -645,9 +629,9 @@ bool SongPlayer::shouldCheck()
 }
 
 //==============================================================================
-std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const juce::ValueTree& trackState)
+std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const TrackValue& trackState)
 {
-    const auto id = readChannelID (trackState);
+    const auto id = getChannelKey (trackState);
     usedNotes.insert (id);
 
     if (const auto found = notes.find (id); found != notes.end() && ! compiling.hasNotes (id))
@@ -848,7 +832,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         heldStore = values->deviceStore.get();
 
     containerChains.clear();
-    const auto channels = getChannels (songSends);
+    const auto songTracks = getTracksValue (song); // the song's tracks, read once (a copy, which shares what it holds)
+    const auto channels = getChannels (songTracks, songSends);
     std::map<std::int64_t, int> places; // each channel's strip, by its ID
 
     // The pads on mixer channels of their own, by their samplers, which play each into an output of its own.
@@ -871,7 +856,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
         // A bus adds up its tracks; a return what is sent to it.
         std::vector<engine::Plan::Input> inputs;
-        const auto isReturn = isOfKind (channel.state, TrackValue::Kind::returnTrack);
+        const auto isReturn = channel.value.isReturn();
 
         for (const auto& other : channels)
         {
@@ -917,27 +902,27 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         // A frozen track plays its frozen file, through the devices after its freeze point; any other its clips.
         auto frozen = false;
 
-        if (isOfKind (channel.state, TrackValue::Kind::track))
+        if (channel.value.holdsClips())
         {
-            frozen = addFrozenFile (strip, channel.state);
+            frozen = addFrozenFile (strip, channel.value);
 
             if (! frozen)
             {
-                strip.notes = getNotes (channel.state);
-                addAudio (strip, channel.state, clipTempo);
+                strip.notes = getNotes (channel.value);
+                addAudio (strip, channel.value, clipTempo);
             }
         }
 
         const auto* only = of.has_value() && channel.id == of->channel && of->devices.has_value() ? &*of->devices : nullptr;
-        const auto deviceIDs = addDevices (*plan, places, channel, strip, channel.state, frozen, only);
+        const auto deviceIDs = addDevices (*plan, places, channel, strip, channel.value, frozen, only);
 
-        if (live.has_value() && ! strip.hasInstrument && isOfKind (channel.state, TrackValue::Kind::track))
-            strip.inputChannels = getHeardInput (channel.state);
+        if (live.has_value() && ! strip.hasInstrument && channel.value.holdsClips())
+            strip.inputChannels = getHeardInput (channel.value);
 
-        addFaderAutomation (strip, channel.state, false);
-        addModulation (strip, songModulation, channel.state, deviceIDs);
+        addFaderAutomation (strip, channel.value, false);
+        addModulation (strip, songModulation, channel.value, deviceIDs);
         tellWhatMoves (strip);
-        setChannel (channel.state, false);
+        setChannelFrom (songTracks, channel.value);
         places[channel.id] = (int) plan->strips.size();
         plan->strips.push_back (std::move (strip));
     }
@@ -946,9 +931,9 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // the file (a later track's clips changed, and asked about it again): that track's audio made again, so that every
     // track plays the file as it is now. One whose audio isn't kept whole (a render not made yet) made again in any case.
     if (filesChangedForPlan)
-        for (const auto& [id, trackState] : std::exchange (trustedForPlan, {}))
+        for (const auto& [id, track] : std::exchange (trustedForPlan, {}))
             if (const auto kept = audio.find (id); kept == audio.end() || ! isOnDiskAsKept (kept->second))
-                addAudio (plan->strips[(size_t) places[id]], trackState, clipTempo);
+                addAudio (plan->strips[(size_t) places[id]], track, clipTempo);
 
     // The song's sends as this plan read them (getChannels()), which sendsChanged() brings up to date until the next plan, for
     // what decides which send sends.
@@ -978,12 +963,12 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     if (! of.has_value())
     {
-        const auto masterState = findTrackState (song, getMasterID (song)); // the master's element, by its ID
-        const auto masterDeviceIDs = addDevices (*plan, places, {}, master, masterState);
-        addFaderAutomation (master, masterState, true);
-        addModulation (master, songModulation, masterState, masterDeviceIDs);
+        const auto& masterValue = songTracks.master;
+        const auto masterDeviceIDs = addDevices (*plan, places, {}, master, masterValue);
+        addFaderAutomation (master, masterValue, true);
+        addModulation (master, songModulation, masterValue, masterDeviceIDs);
         tellWhatMoves (master);
-        setChannel (masterState, true);
+        setChannelFrom (songTracks, masterValue);
     }
 
     plan->strips.push_back (std::move (master));
@@ -1235,7 +1220,7 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const DeviceVal
 }
 
 std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std::map<std::int64_t, int>& places, const ChannelInfo& channel,
-                                                  engine::Plan::Strip& strip, const juce::ValueTree& channelState, bool skipFrozen,
+                                                  engine::Plan::Strip& strip, const TrackValue& channelState, bool skipFrozen,
                                                   const std::set<std::int64_t>* only)
 {
     std::vector<std::int64_t> ids;
@@ -1520,36 +1505,39 @@ engine::ChainState* SongPlayer::findChain (std::int64_t id) const
     return found != chains.end() ? found->second.get() : nullptr;
 }
 
-std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels (const SongSends& songSends) const
+std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels (const SongTracks& songTracks, const SongSends& songSends) const
 {
     // Each track's, bus's and return's: where it goes (the bus it is in, or the master), and what it takes in.
     std::vector<ChannelInfo> infos;
     const auto& all = getDevicesValue (song);
 
-    for (const auto& state : getTrackStates (song))
+    for (const auto id : getTrackOrder (song).order)
     {
-        const auto kind = readTrackKind (state);
+        const auto* value = songTracks.tracks.find (id.getRaw());
 
-        if (kind == TrackValue::Kind::folder && ! readChannelFader (state).isValid())
-            continue; // a plain folder's VCA turns its tracks (setChannel())
+        if (value == nullptr || (value->isFolder() && ! value->fader.isValid()))
+            continue; // a plain folder's VCA turns its tracks (setChannelFrom())
 
-        ChannelInfo info { state, readChannelID (state) };
+        ChannelInfo info;
+        info.value = *value;
+        info.id = getChannelKey (*value);
 
-        if (kind != TrackValue::Kind::returnTrack)
-            for (auto parent = state.getParent(); isTrackElement (parent) && info.output == 0; parent = parent.getParent())
-                if (readChannelFader (parent).isValid())
-                    info.output = readChannelID (parent);
+        if (! value->isReturn())
+            for (const auto* parent = songTracks.tracks.find (value->parent.getRaw()); parent != nullptr && info.output == 0;
+                 parent = songTracks.tracks.find (parent->parent.getRaw()))
+                if (parent->fader.isValid())
+                    info.output = getChannelKey (*parent);
 
         if (const auto* list = songSends.tracks.find ((std::uint64_t) info.id))
-            for (const auto id : *list)
-                if (const auto* send = songSends.find (id))
+            for (const auto sendID : *list)
+                if (const auto* send = songSends.find (sendID))
                     info.sends.push_back (*send);
 
         // A pad track plays its drum sampler's pad, after the sampler's track.
-        if (const auto pad = readPad (state))
+        if (value->pad.has_value())
         {
-            info.padDevice = (std::int64_t) readPadDevice (state).getRaw();
-            info.pad = *pad;
+            info.padDevice = (std::int64_t) value->padDevice.getRaw();
+            info.pad = *value->pad;
             info.padSource = (std::int64_t) getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) info.padDevice)).getRaw();
         }
 
@@ -1558,7 +1546,7 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels (const SongSends& s
 
     for (auto& info : infos)
     {
-        const auto isReturn = isOfKind (info.state, TrackValue::Kind::returnTrack);
+        const auto isReturn = info.value.isReturn();
 
         for (const auto& other : infos)
         {
@@ -1584,7 +1572,7 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels (const SongSends& s
             }
         };
 
-        forEachOnChannel (all, info.state, addSidechains);
+        forEachOnChannel (all, info.value, addSidechains);
 
         if (info.padSource != 0)
             info.needs.push_back (info.padSource);
@@ -2019,7 +2007,7 @@ void SongPlayer::setModulatorValues (engine::ModulatorNode& node, const Modulato
     node.setOn (! value.off);
 }
 
-void SongPlayer::addModulation (engine::Plan::Strip& strip, const SongModulation& modulation, const juce::ValueTree& channelState,
+void SongPlayer::addModulation (engine::Plan::Strip& strip, const SongModulation& modulation, const TrackValue& channelState,
                                 const std::vector<std::int64_t>& deviceIDs)
 {
     // Its modulators and macros, in their order, then its containers' macros, and what each moves: its devices' parameters
@@ -2043,8 +2031,8 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const SongModulation
         }
     };
 
-    const auto isMaster = isOfKind (channelState, TrackValue::Kind::master);
-    const auto channel = isMaster ? TrackID() : readTrackElementID (channelState);
+    const auto isMaster = channelState.isMaster();
+    const auto channel = isMaster ? TrackID() : channelState.id;
     addSources (modulation.channels.find (isMaster ? 0 : channel.getRaw()));
 
     forEachOnChannel (getDevicesValue (song), channelState,
@@ -2054,7 +2042,7 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const SongModulation
                               addSources (modulation.containers.find (child.id.getRaw()));
                       });
 
-    const auto fader = (std::int64_t) readChannelFader (channelState).getRaw();
+    const auto fader = (std::int64_t) channelState.fader.getRaw();
     std::optional<std::vector<DeviceID>> sends;
 
     for (size_t source = 0; source < sources.size(); ++source)
@@ -2325,10 +2313,10 @@ std::shared_ptr<const engine::Curve> SongPlayer::findCurve (std::uint64_t device
     return found != curves.end() ? found->second : nullptr;
 }
 
-void SongPlayer::addFaderAutomation (engine::Plan::Strip& strip, const juce::ValueTree& channelState, bool isMaster)
+void SongPlayer::addFaderAutomation (engine::Plan::Strip& strip, const TrackValue& channelState, bool isMaster)
 {
     // The fader's volume and pan, by its parameters' IDs (the master's are its own).
-    const auto fader = readChannelFader (channelState).getRaw();
+    const auto fader = channelState.fader.getRaw();
     faders[fader] = strip.id;
     strip.volume = findCurve (fader, isMaster ? "master volume" : "volume");
     strip.pan = findCurve (fader, isMaster ? "master pan" : "pan");
@@ -2359,29 +2347,12 @@ void SongPlayer::loadSounds (engine::DeviceNode& node, const DeviceValue& device
     }
 }
 
-void SongPlayer::setChannel (const juce::ValueTree& channelState, bool isMaster)
-{
-    if (auto* strip = findStrip (isMaster ? 0 : readChannelID (channelState)))
-    {
-        // Its fader, turned by the VCAs of the plain folders it is in (the master's -3 dB where it has none: TracksValue.h).
-        auto volume = readChannelVolume (channelState);
-
-        for (auto parent = channelState.getParent(); ! isMaster && isTrackElement (parent); parent = parent.getParent())
-            if (isOfKind (parent, TrackValue::Kind::folder) && ! readChannelFader (parent).isValid())
-                volume += readChannelVolume (parent);
-
-        auto& channel = strip->getChannel();
-        channel.setVolume (std::max (volume, engine::Channel::silenceDb));
-        channel.setPan (readChannelPan (channelState));
-    }
-}
-
 void SongPlayer::setChannelFrom (const SongTracks& tracks, const TrackValue& channel)
 {
     if (auto* strip = findStrip (channel.isMaster() ? 0 : (std::int64_t) channel.id.getRaw()))
     {
-        // Its fader, turned by the VCAs of the plain folders it is in (the master's -3 dB where it has none: TracksValue.h), as
-        // setChannel() turns it, from the value handed.
+        // Its fader, turned by the VCAs of the plain folders it is in (the master's -3 dB where it has none: TracksValue.h),
+        // from the values handed: the compile's, and what tracksChanged() tells.
         auto volume = channel.volume;
 
         if (! channel.isMaster())
@@ -2963,12 +2934,12 @@ void SongPlayer::placeRegion (engine::AudioRegion& region, const ClipValue& clip
     region.fadeOutCurve = toEngineFade (getFadeCurve (clip.fadeOut));
 }
 
-SongPlayer::TrackAudio SongPlayer::makeAudio (const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo, bool askAgain)
+SongPlayer::TrackAudio SongPlayer::makeAudio (const TrackValue& trackState, std::optional<ClipTempo>& tempo, bool askAgain)
 {
     TrackAudio made;
 
     // The track's clips in the order it holds them (Clips.h: getClipValues()), which checkAudio() compares the regions in.
-    for (const auto& clip : getClipValues (song, readTrackElementID (trackState)))
+    for (const auto& clip : getClipValues (song, trackState.id))
     {
         if (! clip.isAudio() || clip.muted)
             continue;
@@ -3010,7 +2981,7 @@ SongPlayer::TrackAudio SongPlayer::makeAudio (const juce::ValueTree& trackState,
     return made;
 }
 
-void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo)
+void SongPlayer::addAudio (engine::Plan::Strip& strip, const TrackValue& trackState, std::optional<ClipTempo>& tempo)
 {
     // As the plan before played it, while nothing of its clips, the tempo, the rate, the song's folders or its files on the
     // disk changed, nor the sources its renders are named for (each asked about only once what was known of it is too old:
@@ -3048,7 +3019,7 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
         audio.erase (strip.id);
 }
 
-void SongPlayer::checkAudio (const TrackAudio& kept, const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo)
+void SongPlayer::checkAudio (const TrackAudio& kept, const TrackValue& trackState, std::optional<ClipTempo>& tempo)
 {
     // What makeAudio() would make of the track now, without making anything: the same clips, each the same file (as this
     // player knows it now: a file that changed under the same name, once it asked, makes the track's audio again), the same
@@ -3057,7 +3028,7 @@ void SongPlayer::checkAudio (const TrackAudio& kept, const juce::ValueTree& trac
     auto same = true;
     size_t index = 0;
 
-    for (const auto& clip : getClipValues (song, readTrackElementID (trackState)))
+    for (const auto& clip : getClipValues (song, trackState.id))
     {
         if (! clip.isAudio() || clip.muted)
             continue;
@@ -3093,25 +3064,25 @@ void SongPlayer::checkAudio (const TrackAudio& kept, const juce::ValueTree& trac
     juce::ignoreUnused (same);
 }
 
-std::vector<int> SongPlayer::getHeardInput (const juce::ValueTree& trackState) const
+std::vector<int> SongPlayer::getHeardInput (const TrackValue& trackState) const
 {
-    const auto monitoring = readTrackMonitoring (trackState);
-    const auto isArmed = armed.contains (readTrackElementID (trackState));
+    const auto monitoring = trackState.monitoring;
+    const auto isArmed = armed.contains (trackState.id);
 
     if (monitoring == TrackValue::Monitoring::always || (isArmed && monitoring == TrackValue::Monitoring::whileArmed))
-        return getInputChannels (readTrackInput (trackState));
+        return getInputChannels (trackState.input);
 
     return {};
 }
 
-bool SongPlayer::addFrozenFile (engine::Plan::Strip& strip, const juce::ValueTree& trackState)
+bool SongPlayer::addFrozenFile (engine::Plan::Strip& strip, const TrackValue& trackState)
 {
     // Its frozen file (model/mixer/internal/Freeze.h) from the song's start, if it is there (its frozen switch by a look in the
     // switches: Tracks.h).
-    if (! isTrackFrozen (song, readTrackElementID (trackState)))
+    if (! isTrackFrozen (song, trackState.id))
         return false;
 
-    auto file = getAudioFile (getFrozenFile (song, readTrackElementID (trackState)), true);
+    auto file = getAudioFile (getFrozenFile (song, trackState.id), true);
 
     if (file == nullptr)
         return false;

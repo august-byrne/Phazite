@@ -550,12 +550,12 @@ void SongValues::DevicesKeeper::childRemoved (juce::ValueTree& parent, juce::Val
     // A track (or what holds tracks) taken out of the song's track list (a): each track's devices, containers and chains
     // remembered with its element, in the place of what it was remembered with before, or that forgotten where it holds none
     // now; and erased.
-    std::vector<juce::ValueTree> tracks;
-    collectTracks (child, tracks);
+    std::vector<juce::ValueTree> trackElements;
+    collectTracks (child, trackElements);
     const auto before = values.devices.get();
     auto next = before;
 
-    for (const auto& track : tracks)
+    for (const auto& track : trackElements)
     {
         const auto found =
             std::find_if (remembered.begin(), remembered.end(), [&track] (const Remembered& each) { return each.track == track; });
@@ -711,12 +711,16 @@ juce::ValueTree writeDeviceWhole (const SongDevices& devices, DeviceID id)
     return element;
 }
 
+int takeChannelDevicesIn (SongDevices& devices, const juce::ValueTree& channel, const DevicePlace& place)
+{
+    auto taken = 0;
+    readChannelInto (channel, place, devices, nullptr, taken);
+    return taken;
+}
+
 bool leadsToDevices (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    if (parent.hasType (schema::PHAZITE))
-        return child.hasType (schema::TRACKS) || child.hasType (schema::MASTER);
-
-    return (parent.hasType (schema::TRACKS) || parent.hasType (schema::TRACK)) && child.hasType (schema::TRACK);
+    return parent.hasType (schema::PHAZITE) && child.hasType (schema::MASTER);
 }
 
 void writeDevicesIn (juce::ValueTree& element, const ValuesKept& kept)

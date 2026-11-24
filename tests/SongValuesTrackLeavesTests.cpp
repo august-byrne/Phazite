@@ -68,63 +68,46 @@ phazite::ParameterRef getVolume (const phazite::Song& song, TrackID track)
     return { phazite::getFader (song, track), phazite::getVolumeParameterID (song, track) };
 }
 
-// Whether the song's tree holds a switch, a view property or a LANES on a track's element.
-bool treeHoldsLeaves (const phazite::Song& song, TrackID track)
+// Whether the song's tree holds a switch, a view property or a LANES of a track or of the master: it holds no TRACK (the
+// tracks' area does, since the tracks' switch) and its MASTER none of them.
+bool treeHoldsLeaves (const phazite::Song& song, TrackID)
 {
-    const auto element = phazite::findTrackState (song, track);
-    return phazite::holdsSwitchesIn (element) || phazite::holdsViewIn (element);
+    const auto master = song.getState().getChildWithName (schema::MASTER);
+    return phazite::test::treeHolds (song, schema::TRACK) || phazite::holdsSwitchesIn (master) || phazite::holdsViewIn (master);
 }
 } // namespace
 
-TEST_CASE ("Song values' track leaves: a track that comes into the song with its switches and view has them read in and taken "
-           "out, in a step and outside it, counted, and its Undo and Redo hold")
+TEST_CASE ("Song values' track leaves: a track that comes into the song with its switches and view is refused in a step, and "
+           "outside the history has them read in and taken out, counted")
 {
+    // Since the tracks' switch a TRACK that comes into the song is the tracks' part of the keeper's (TracksArea.h:
+    // TracksKeeper), which refuses one in a step (named: a step took it in, its switches and view in that step, before the
+    // switch) and outside the history reads it in with its switches and view, counted as the switches' and the view's part
+    // of the keeper counted them.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& values = *song.getValues();
     const auto adoptedBefore = values.countTrackLeavesAdopted();
-    phazite::test::UndoCheck undo (song);
     auto element = makeTrackWithLeaves (song);
     const auto id = TrackID::fromRaw ((std::uint64_t) (juce::int64) element[schema::trackID]);
 
-    undo.check ("A Track With Its Leaves",
-                [&]
-                {
-                    const phazite::UndoStep step (song, "A Track With Its Leaves");
-                    phazite::getTrackList (song).appendChild (element, &song.getUndoManager());
-                });
+    {
+        const phazite::test::ExpectedAssertion refused ("TracksArea.cpp");
+        const phazite::UndoStep step (song, "A Track With Its Leaves");
+        phazite::getTrackList (song).appendChild (element, &song.getUndoManager());
+#if JUCE_DEBUG
+        CHECK (refused.getCount() == 1);
+#endif
+    }
 
-    REQUIRE (phazite::hasTrack (song, id));
-    CHECK_FALSE (treeHoldsLeaves (song, id));
-    CHECK (values.countTrackLeavesAdopted() == adoptedBefore + 1);
-    CHECK (phazite::isTrackMuted (song, id, false));
-    CHECK (phazite::isTrackSoloed (song, id));
-    CHECK (phazite::getAutomationMode (song, id) == phazite::AutomationMode::latch);
-    CHECK (phazite::getSavedTrackHeight (song, id) == std::optional (96));
-    CHECK (phazite::isPinned (song, id));
-    const auto lanes = phazite::getLanes (song, id);
-    REQUIRE (lanes.size() == 1);
-    CHECK (lanes.front().parameter == getVolume (song, id));
-    CHECK (lanes.front().height == 80);
-
-    // As a whole copy writes it: on its element, its lane after its other children.
-    const auto copy = phazite::test::copyTrack (song, id);
-    CHECK ((bool) copy[schema::trackMute]);
-    CHECK (copy[schema::trackAutomationMode].toString() == schema::automationLatch);
-    CHECK (copy.getChildWithName (schema::LANES).getNumChildren() == 1);
-    phazite::test::checkSong (song);
-
-    // Undone: the track gone, its switches as they were before; redone: back with them, nothing taken in again.
-    phazite::undo (song);
     CHECK_FALSE (phazite::hasTrack (song, id));
+    CHECK (values.countTrackLeavesAdopted() == adoptedBefore);
     CHECK (values.trackSwitches.get().mutes.find (id.getRaw()) == nullptr);
-    phazite::redo (song);
-    CHECK (phazite::isTrackMuted (song, id, false));
-    CHECK (phazite::getLanes (song, id).size() == 1);
-    CHECK (values.countTrackLeavesAdopted() == adoptedBefore + 1);
+    phazite::undo (song);
+    CHECK_FALSE (treeHoldsLeaves (song, id));
     phazite::test::checkSong (song);
 
-    // Outside the history: read in and taken out the same.
+    // Outside the history: read in and taken out.
     auto another = makeTrackWithLeaves (song);
     const auto anotherID = TrackID::fromRaw ((std::uint64_t) (juce::int64) another[schema::trackID]);
 
@@ -133,31 +116,48 @@ TEST_CASE ("Song values' track leaves: a track that comes into the song with its
         phazite::getTrackList (song).appendChild (another, nullptr);
     }
 
+    REQUIRE (phazite::hasTrack (song, anotherID));
     CHECK_FALSE (treeHoldsLeaves (song, anotherID));
+    CHECK (values.countTrackLeavesAdopted() == adoptedBefore + 1);
     CHECK (phazite::isTrackMuted (song, anotherID, false));
+    CHECK (phazite::isTrackSoloed (song, anotherID));
+    CHECK (phazite::getAutomationMode (song, anotherID) == phazite::AutomationMode::latch);
     CHECK (phazite::getSavedTrackHeight (song, anotherID) == std::optional (96));
-    CHECK (values.countTrackLeavesAdopted() == adoptedBefore + 2);
+    CHECK (phazite::isPinned (song, anotherID));
+    const auto lanes = phazite::getLanes (song, anotherID);
+    REQUIRE (lanes.size() == 1);
+    CHECK (lanes.front().parameter == getVolume (song, anotherID));
+    CHECK (lanes.front().height == 80);
+
+    // As a whole copy writes it: on its element, its lane after its other children.
+    const auto copy = phazite::test::copyTrack (song, anotherID);
+    CHECK ((bool) copy[schema::trackMute]);
+    CHECK (copy[schema::trackAutomationMode].toString() == schema::automationLatch);
+    CHECK (copy.getChildWithName (schema::LANES).getNumChildren() == 1);
     phazite::test::checkSong (song);
 }
 
-TEST_CASE ("Song values' track leaves: a lone LANES added to a track of the song is refused in a step, and outside the history "
-           "read in after its lanes and taken out")
+TEST_CASE ("Song values' track leaves: a lone LANES added to the master is refused in a step, and outside the history read in "
+           "after its lanes and taken out")
 {
+    // On the master, the one channel whose element the song's tree holds (a place, since the tracks' switch): a lone LANES on
+    // a track has nowhere to go, as no TRACK is in the tree.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& values = *song.getValues();
-    const auto track = s.firstTrack;
-    const auto volume = getVolume (song, track);
-    phazite::showLane (song, track, volume);
+    const auto master = phazite::getMasterID (song);
+    const auto volume = getVolume (song, master);
+    phazite::showLane (song, master, volume);
     const auto adoptedBefore = values.countTrackLeavesAdopted();
     const auto viewBefore = values.tracksOutside.get();
+    auto masterState = song.getState().getChildWithName (schema::MASTER);
 
     const auto makeLanes = [&volume]
     {
         juce::ValueTree lanes (schema::LANES);
         juce::ValueTree lane (schema::LANE);
         lane.setProperty (schema::laneDevice, juce::String ((juce::int64) volume.device.getRaw()), nullptr);
-        lane.setProperty (schema::laneParameter, "pan", nullptr);
+        lane.setProperty (schema::laneParameter, "master pan", nullptr);
         lanes.appendChild (lane, nullptr);
         return lanes;
     };
@@ -165,7 +165,7 @@ TEST_CASE ("Song values' track leaves: a lone LANES added to a track of the song
     {
         const phazite::test::ExpectedAssertion refused ("TracksArea.cpp");
         const phazite::UndoStep step (song, "A Lone LANES");
-        phazite::findTrackState (song, track).appendChild (makeLanes(), &song.getUndoManager());
+        masterState.appendChild (makeLanes(), &song.getUndoManager());
 #if JUCE_DEBUG
         CHECK (refused.getCount() == 1);
 #endif
@@ -174,20 +174,20 @@ TEST_CASE ("Song values' track leaves: a lone LANES added to a track of the song
     CHECK (values.tracksOutside.get().isSameAs (viewBefore));
     CHECK (values.countTrackLeavesAdopted() == adoptedBefore);
     phazite::undo (song);
-    CHECK_FALSE (treeHoldsLeaves (song, track));
+    CHECK_FALSE (treeHoldsLeaves (song, master));
     phazite::test::checkSong (song);
 
     {
         const phazite::Song::OutsideHistory outside (song);
-        phazite::findTrackState (song, track).appendChild (makeLanes(), nullptr);
+        masterState.appendChild (makeLanes(), nullptr);
     }
 
-    CHECK_FALSE (treeHoldsLeaves (song, track));
+    CHECK_FALSE (treeHoldsLeaves (song, master));
     CHECK (values.countTrackLeavesAdopted() == adoptedBefore + 1);
-    const auto lanes = phazite::getTrackView (song, track).lanes;
+    const auto lanes = phazite::getTrackView (song, master).lanes;
     REQUIRE (lanes.size() == 2);
     CHECK (lanes[0].parameter == volume.parameter);
-    CHECK (lanes[1].parameter == "pan");
+    CHECK (lanes[1].parameter == "master pan");
     phazite::test::checkSong (song);
 }
 
@@ -482,9 +482,7 @@ TEST_CASE ("Song values' track leaves: a version applied that changes a mute cha
 
     // A merge's clash on the mute: the other line's value (none: unmuted) chosen, in its step.
     phazite::MergeClash clash;
-    const auto element = phazite::findTrackState (song, track);
-    clash.path = { juce::String ("TRACKS:") + schema::getElementKey (element.getParent()),
-                   element.getType().toString() + ":" + schema::getElementKey (element) };
+    clash.path = { juce::String ("TRACKS:TRACKS"), "TRACK:" + juce::String ((juce::int64) track.getRaw()) };
     clash.property = schema::trackMute;
     clash.ours = true;
 

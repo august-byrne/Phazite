@@ -36,6 +36,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
+#include <functional>
 #include <set>
 #include <utility>
 
@@ -456,9 +457,22 @@ void forgetMissingFrozenFiles (Song& song)
         return;
     }
 
-    for (auto state : getTrackStates (song))
-        if (readTrackFrozen (state) && ! getFrozenFile (song, getTrackID (state)).existsAsFile())
-            state.removeProperty (schema::trackFrozen, nullptr);
+    // Each TRACK of the tree, a folder's too, as the loader left it.
+    const std::function<void (juce::ValueTree)> forget = [&song, &forget] (juce::ValueTree list)
+    {
+        for (auto state : list)
+        {
+            if (! state.hasType (schema::TRACK))
+                continue;
+
+            if (readTrackFrozen (state) && ! getFrozenFile (song, readTrackElementID (state)).existsAsFile())
+                state.removeProperty (schema::trackFrozen, nullptr);
+
+            forget (state);
+        }
+    };
+
+    forget (song.getState().getChildWithName (schema::TRACKS));
 }
 
 void purgeCache (Song& song)
@@ -980,7 +994,7 @@ void FreezeKeeper::check (const juce::ValueTree& changed, bool cameIn)
 
     if (track.isValid())
     {
-        waiting.tracks.insert (getTrackID (track));
+        waiting.tracks.insert (readTrackElementID (track));
         return;
     }
 

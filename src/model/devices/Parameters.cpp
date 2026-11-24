@@ -22,6 +22,7 @@
 #include <optional>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -85,6 +86,27 @@ namespace
         FoundParameter parameter { ref, kind, nullptr };
         parameter.channel = channel;
         return parameter;
+    }
+
+    // A fader's parameter, of the channel whose fader or VCA the reference's device is (none for another device), that
+    // channel's VCA given.
+    std::optional<FoundParameter> locateOnFader (const ParameterRef& ref, ChannelRef channel, DeviceID vca)
+    {
+        if (! channel.isValid())
+            return {};
+
+        const auto isMaster = channel.onMaster;
+
+        if (vca == ref.device)
+            return ref.parameter == schema::vcaVolume ? foundOnChannel (ref, ParameterSource::volume, channel) : std::nullopt;
+
+        if (ref.parameter == (isMaster ? schema::masterVolume : schema::faderVolume))
+            return foundOnChannel (ref, ParameterSource::volume, channel);
+
+        if (ref.parameter == (isMaster ? schema::masterPan : schema::faderPan))
+            return foundOnChannel (ref, ParameterSource::pan, channel);
+
+        return {};
     }
 
     // A chain's place among its container's, and how many chains it has; and whether it has a crossover: a band's, but the
@@ -151,9 +173,11 @@ namespace
     }
 
     // locateParameter()'s look, with how a device, a container or a chain is found by its ID (a pointer valid while the look
-    // lasts, nullptr for none) and whether a chain has a crossover.
-    template <typename FindDevice, typename HasCrossover>
-    std::optional<FoundParameter> locate (const Song& song, const ParameterRef& ref, FindDevice&& findDeviceOf, HasCrossover&& crossover)
+    // lasts, nullptr for none), whether a chain has a crossover, and how a fader's parameter is found (the song's tracks
+    // looked at: locateParameterInTree(), or tracks given).
+    template <typename FindDevice, typename HasCrossover, typename OnFader>
+    std::optional<FoundParameter> locate (const Song& song, const ParameterRef& ref, FindDevice&& findDeviceOf, HasCrossover&& crossover,
+                                          OnFader&& onFaderOf)
     {
         if (! ref.isValid())
             return {};
@@ -183,7 +207,7 @@ namespace
                 return found (ref, ParameterSource::send);
 
         // A fader's, which controls read most, in the song's tree.
-        if (auto onFader = locateParameterInTree (song, ref))
+        if (auto onFader = onFaderOf (ref))
             return onFader;
 
         // A device's, a plug-in's or a chain's: a look in the devices' area by its ID (its FoundParameter holds no element:
@@ -241,15 +265,24 @@ namespace
 std::optional<FoundParameter> locateParameter (const Song& song, const ParameterRef& ref)
 {
     return locate (
-        song, ref, [&song] (DeviceID id) { return findDevice (song, id); },
-        [&song] (DeviceID chain) { return hasCrossover (song, chain); });
+        song, ref, [&song] (DeviceID id) { return findDevice (song, id); }, [&song] (DeviceID chain) { return hasCrossover (song, chain); },
+        [&song] (const ParameterRef& onFader) { return locateParameterInTree (song, onFader); });
 }
 
-std::optional<FoundParameter> locateParameter (const Song& song, const ParameterRef& ref, const SongDevices& devices)
+std::optional<FoundParameter> locateParameter (const Song& song, const ParameterRef& ref, const SongDevices& devices,
+                                               const SongTracks& tracks, const std::vector<TrackID>& order)
 {
+    // A fader's among the tracks given, in their order, then the master's; its channel's VCA from the same.
+    const auto onFaderOf = [&tracks, &order] (const ParameterRef& onFader)
+    {
+        const auto channel = findChannelOfFaderIn (tracks, order, onFader.device);
+        const auto* value = channel.onMaster ? &tracks.master : tracks.find (channel.track);
+        return locateOnFader (onFader, channel, value != nullptr ? value->vca : DeviceID());
+    };
+
     return locate (
         song, ref, [&devices] (DeviceID id) { return devices.find (id); },
-        [&devices] (DeviceID chain) { return hasCrossoverIn (devices, chain); });
+        [&devices] (DeviceID chain) { return hasCrossoverIn (devices, chain); }, onFaderOf);
 }
 
 std::optional<FoundParameter> locateParameterInTree (const Song& song, const ParameterRef& ref)
@@ -258,21 +291,8 @@ std::optional<FoundParameter> locateParameterInTree (const Song& song, const Par
         return {};
 
     // A fader's, by its channel.
-    if (const auto channel = findChannelOfFader (song, ref.device); channel.isValid())
-    {
-        const auto isMaster = channel.onMaster;
-
-        if (getChannelVCA (song, channel) == ref.device)
-            return ref.parameter == schema::vcaVolume ? foundOnChannel (ref, ParameterSource::volume, channel) : std::nullopt;
-
-        if (ref.parameter == (isMaster ? schema::masterVolume : schema::faderVolume))
-            return foundOnChannel (ref, ParameterSource::volume, channel);
-
-        if (ref.parameter == (isMaster ? schema::masterPan : schema::faderPan))
-            return foundOnChannel (ref, ParameterSource::pan, channel);
-    }
-
-    return {};
+    const auto channel = findChannelOfFader (song, ref.device);
+    return locateOnFader (ref, channel, channel.isValid() ? getChannelVCA (song, channel) : DeviceID());
 }
 
 bool isStillThere (const Song& song, const FoundParameter& parameter)

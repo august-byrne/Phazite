@@ -329,7 +329,8 @@ TEST_CASE ("A container is the song's, with its name, mix, devices and macros")
     CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
 
     // A container the song gains shows on its channel, with its chain's devices and its macros: written outside the song's
-    // history, as what isn't an undo step is (Song::OutsideHistory), whose keeper takes its macros in (SongValues.h).
+    // history, as what isn't an undo step is (Song::OutsideHistory), whose keeper takes its macros in (SongValues.h). On the
+    // master, the one channel whose element the song's tree still holds (a place: the tracks are values, SongValues.h).
     const phazite::Song::OutsideHistory outside (song);
     juce::ValueTree made (schema::CONTAINER), chain (schema::CHAIN), delay (schema::DEVICE), macro (schema::MACRO);
     const auto madeID = DeviceID::fromRaw (song.makeID());
@@ -343,8 +344,11 @@ TEST_CASE ("A container is the song's, with its name, mix, devices and macros")
     macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
     macro.setProperty (schema::macroName, "Space", nullptr);
     made.appendChild (macro, nullptr);
-    phazite::findTrackState (song, tracks.b).appendChild (made, nullptr);
-    CHECK (tracks.effectNamesOf (tracks.b) == std::vector<juce::String> { "EQ", "Echoes" });
+    const auto masterBefore = tracks.effectNamesOf ({});
+    song.getState().getChildWithName (schema::MASTER).appendChild (made, nullptr);
+    auto masterAfter = masterBefore;
+    masterAfter.push_back ("Echoes");
+    CHECK (tracks.effectNamesOf ({}) == masterAfter);
     CHECK (tracks.namesOf (phazite::getContainerDevices (context, madeID)) == std::vector<juce::String> { "Delay" });
     const auto macros = phazite::getContainerMacros (context, madeID);
     REQUIRE (macros.size() == 1);

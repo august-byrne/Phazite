@@ -19,7 +19,11 @@
 // values set by hand as VALUEs sorted by their parameters after its other children, in each CHAIN its mute and solo, and in
 // each DEVICE its window's place (DeviceStoreValue.h: writeStoreInto(), writeWindowPlaceInto()); and on each TRACK and the
 // MASTER its switches and its view's properties, with its LANES after its clips, its devices and a folder's tracks, before its
-// modulators and its sends (TracksArea.h: writeTrackLeavesIn()).
+// modulators and its sends (TracksArea.h: writeTrackLeavesIn()). The tracks themselves are written by one function
+// (WholeState.cpp: writeTracksIn()), into the copy's TRACKS and MASTER, which the song's tree keeps empty: each TRACK in its
+// list's order with, in this order, its own properties (TracksValue.h: writeTrackElement()), its switches and its view's
+// properties; its clips; its devices and containers; a folder's TRACKs, each written the same; its LANES; its modulators and
+// macros; its sends; the MASTER its own properties, its mode and view, its devices, its LANES, its modulators.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -27,6 +31,8 @@
 #include "model/devices/ParameterRef.h"
 
 #include <juce_data_structures/juce_data_structures.h>
+
+#include <optional>
 
 namespace phazite
 {
@@ -65,6 +71,10 @@ struct ValuesKept
     SongDevices devices {};           // none kept of a song that holds no values, and of one without devices
     TrackSwitches trackSwitches {};   // none kept of a song that holds no values, and of one without a switch on
     TracksOutside tracksOutside {};   // none kept of a song that holds no values, and of one whose rows were never set
+
+    // None kept of a song that holds no values (its tree holds its tracks); else every track and the master, which whole
+    // state writes into the copy's TRACKS and MASTER (writeTracksIn(), WholeState.cpp).
+    std::optional<SongTracks> tracks {};
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -162,6 +172,25 @@ bool holdSameDeviceStore (const ValuesKept&, const ValuesKept&, DeviceID);
 bool holdSameDevices (const ValuesKept&, const ValuesKept&);
 bool holdSameDevice (const ValuesKept&, const ValuesKept&, DeviceID);
 bool holdSameDeviceOrder (const ValuesKept&, const ValuesKept&, const DevicePlace& owner);
+
+// Whether two songs' kept values hold the same tracks, as values (TracksValue.h): all of them (each track's value, each list,
+// the master's value; the master's count of being put in anew is no part of the song's); one track by its ID, its value (its
+// folder among it) and its switches' entries (none in both the same); the master's value and its mode; and one list (a
+// folder's, the top list for none), the same IDs in the same order, or none in both. The view counts as no change, and is no
+// part of them. Both of Project's comparisons with the saved copy compare the tracks so (the quick one, a track and a list at
+// a time, and the whole song's, through withTracksOwn()), so that the two agree. In TracksArea.cpp. Any thread.
+bool holdSameTracks (const ValuesKept&, const ValuesKept&);
+bool holdSameTrack (const ValuesKept&, const ValuesKept&, TrackID);
+bool holdSameMaster (const ValuesKept&, const ValuesKept&);
+bool holdSameTrackList (const ValuesKept&, const ValuesKept&, TrackID folder);
+
+// A copy of a song's TRACKS or MASTER (a place, which holds none of them) with the tracks' own fields that the kept values hold
+// written in, as the song's tree held them while it stored the tracks: each TRACK with its own properties alone
+// (TracksValue.h: writeTrackElement()), nested in its folder's, in each list's order; the MASTER's own properties. What the
+// comparison of an element whole (Project.h: holdTheSameProject()) compares a TRACKS or a MASTER by, each TRACK's and the
+// MASTER's switches and what the other areas hold of it then compared through holdSameKeptOf(). The element itself for any
+// other, and where the values kept hold no tracks (a song without values, whose tree holds them). In TracksArea.cpp. Any thread.
+juce::ValueTree withTracksOwn (const juce::ValueTree& place, const ValuesKept&);
 
 // Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
 // what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips

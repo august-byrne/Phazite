@@ -73,7 +73,8 @@ namespace
 bool isBus (const Song& song, TrackID track)
 {
     // A folder whose volume a fader of its own sets, not a VCA (Schema.h: channelFader).
-    return readIsBus (findTrackState (song, track));
+    const auto value = findTrack (song, track);
+    return value && value->isBus();
 }
 
 void makeBus (Song& song, TrackID folder)

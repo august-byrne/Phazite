@@ -378,10 +378,11 @@ TEST_CASE ("Song values' clips: what listens to the song's tree hears nothing of
     toldOnce ([&w, clip] { phazite::toggleClipsMuted (w.song, { clip }); });
     toldOnce ([&w, clip] { phazite::renameClips (w.song, { clip }, "Renamed"); });
 
-    // A track's name: through the tree; nothing told the clips' listener.
+    // A track's name: through the tracks' value since the tracks' switch (roadmap step S5.20; through the tree before), so
+    // that the tree hears nothing of it either; nothing told the clips' listener.
     tree.heard = 0;
     w.told.calls.clear();
     phazite::setTrackName (w.song, w.s.firstTrack, "Renamed");
-    CHECK (tree.heard > 0);
+    CHECK (tree.heard == 0);
     CHECK (w.told.calls.empty());
 }

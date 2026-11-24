@@ -2,6 +2,7 @@
 // MIDI learn (model/midi/MidiLinkModel.h): a hardware controller linked to a parameter, saved in the song, turning it as its
 // control does; what the MIDI inputs send reaching it through AudioIO::takeMidi(), as an input's thread calls it.
 #include "EnginePlayback.h"
+#include "SongCheck.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -470,7 +471,7 @@ TEST_CASE ("Another project opened ends learning, and its own links are diverted
     phazite::startMidiLearn (s.parameter ("resonance"));
     CHECK (tap.isLearning());
 
-    s.song.openSong (phazite::createSong()->getState());
+    s.song.openSong (phazite::makeNewSong()); // a new song written whole: a live song's tree holds no track
     CHECK_FALSE (phazite::isLearningMidi (s.song.context));
     CHECK_FALSE (tap.isLearning());
     CHECK_FALSE (tap.isDiverted (1, 21));
@@ -675,6 +676,43 @@ TEST_CASE ("Learning a chain's volume ends as the chain goes, in that call, read
 
     CHECK (phazite::getSends (context, s.song.firstTrack).empty());
     CHECK_FALSE (phazite::isLearningMidi (context));
+}
+
+TEST_CASE ("Learning a track's fader goes on as the track moves into a folder, and the link made is the fader's")
+{
+    // A move is one change of the track, come to another folder (TracksArea.h: TrackChange::place), never told as the track
+    // taken out and made again: the learning of its fader goes on (MidiLinks.h: MidiLinker::tracksChanged()). Named in the
+    // tracks' switch (roadmap step S5.20): while the tree held the tracks, a move was told as a track taken out and made, and
+    // ended the learning.
+    SynthSong s;
+    auto& context = s.song.context;
+    auto& song = getSong (s.song);
+    const auto track = s.song.firstTrack;
+    const auto other = s.song.addTrack ("Other");
+    const auto folder = s.song.addBus ("Folder", { other });
+    auto volume = phazite::getVolume (context, track);
+    REQUIRE (phazite::canLearnMidi (volume));
+    phazite::startMidiLearn (volume);
+    REQUIRE (phazite::isLearningMidi (volume));
+    phazite::test::UndoCheck undoCheck (context);
+
+    undoCheck.check ("Into Folder",
+                     [&]
+                     {
+                         const phazite::UndoStep step (song, "Into Folder");
+                         phazite::moveTrackIntoFolder (song, track, folder);
+                     });
+    REQUIRE (phazite::getParentFolder (song, track) == folder);
+    CHECK (phazite::isLearningMidi (volume));
+
+    undoCheck.check ("Link MIDI Controller", [] { sendController (2, 24, 64); });
+    CHECK_FALSE (phazite::isLearningMidi (context));
+    CHECK (phazite::getMidiLink (volume) == MidiController { 2, 24 });
+    const auto links = phazite::getMidiLinks (context);
+    REQUIRE (links.size() == 1);
+    CHECK (links[0].track == track);
+    undoCheck.walkBackAndForth();
+    phazite::test::checkSong (song);
 }
 
 TEST_CASE ("A link made is a change of the song's own in its versions: \"Update MIDI links\"")
@@ -910,7 +948,7 @@ TEST_CASE ("The project closed during a burst: the burst is kept with its song, 
     sendController (1, 21, 120);
     REQUIRE (s.getLinker().isInBurst());
 
-    s.song.openSong (phazite::createSong()->getState());
+    s.song.openSong (phazite::makeNewSong()); // a new song written whole: a live song's tree holds no track
     auto* linker = phazite::findMidiLinker (getSong (s.song));
     REQUIRE (linker != nullptr);
     CHECK_FALSE (linker->isBurstOpen());

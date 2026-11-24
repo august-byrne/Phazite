@@ -24,6 +24,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/SamplerSound.h"
@@ -415,12 +416,15 @@ TEST_CASE ("Song values: a song opened holds its clips' notes beside its tree, t
     CHECK_FALSE (project->checkUnsavedChanges()); // compared whole: as saved again
 }
 
-TEST_CASE ("Song values: a track that comes into the song with its clips' elements has them read into the values and taken out "
-           "of the tree, in the step, and Undo and Redo take both back and forth")
+TEST_CASE ("Song values: a track that comes into the song with its clips' elements outside the history has them read into the "
+           "values and taken out of the tree by the tracks' safety net")
 {
-    // The keeper's own: goes with the keepers (S5.20, the tracks' switch).
+    // The keeper's own (S5.20). Since the tracks' switch a TRACK that comes into the song's TRACKS is the tracks' part of the
+    // keeper's (TracksArea.h), which reads its clips through the clips' reader of a track (ClipsArea.h: takeTrackClipsIn()),
+    // outside the history alone (in a step it is refused: SongValuesTracksKeeperTests.cpp), counting them as the clips' keeper does.
     Kept k;
     const auto adoptedBefore = k.song->getValues()->countAdopted();
+    const auto tracksBefore = k.song->getValues()->countTracksAdopted();
 
     // A clip's element with notes and values, and a property and a child Phazite doesn't know, which the song keeps none of.
     const auto makeElement = [&k] (double start)
@@ -440,9 +444,9 @@ TEST_CASE ("Song values: a track that comes into the song with its clips' elemen
     };
 
     // A track with three clips' elements in it, as a paste or a version puts a track in, the second an alias of the first.
-    auto trackElement = phazite::copyWhole (*k.song, phazite::findTrackState (*k.song, k.tracks[2]));
+    auto trackElement = phazite::test::copyTrack (*k.song, k.tracks[2]);
     phazite::giveNewIDs (*k.song, trackElement);
-    const auto added = phazite::getTrackID (trackElement);
+    const auto added = phazite::readTrackElementID (trackElement);
     auto first = makeElement (0.0), second = makeElement (8.0), third = makeElement (16.0);
     const auto link = (juce::int64) k.song->makeID();
     first.setProperty (schema::clipLink, link, nullptr);
@@ -454,11 +458,16 @@ TEST_CASE ("Song values: a track that comes into the song with its clips' elemen
     const auto secondID = ClipID::fromRaw (phazite::readID (second[schema::clipID]));
     const auto id = ClipID::fromRaw (phazite::readID (third[schema::clipID]));
     const auto expected = phazite::readClipNotes (third);
-    k.step ("Add Track",
-            [&] { k.song->getState().getChildWithName (schema::TRACKS).appendChild (trackElement, &k.song->getUndoManager()); });
+    {
+        const phazite::Song::OutsideHistory outside (*k.song);
+        k.song->getState().getChildWithName (schema::TRACKS).appendChild (trackElement, nullptr);
+    }
+
     CHECK (phazite::getClips (*k.song, added) == std::vector<ClipID> { firstID, secondID, id });
-    CHECK_FALSE (phazite::findTrackState (*k.song, added).getChildWithName (schema::CLIP).isValid());
+    CHECK_FALSE (phazite::test::treeHolds (*k.song, schema::CLIP));
+    CHECK_FALSE (phazite::test::treeHolds (*k.song, schema::TRACK));
     CHECK (k.song->getValues()->countAdopted() == adoptedBefore + 3);
+    CHECK (k.song->getValues()->countTracksAdopted() == tracksBefore + 1);
     REQUIRE (k.find (id) != nullptr);
     CHECK (*k.find (id) == expected);
     CHECK (phazite::getNoteData (*k.song, { id, NoteID::fromRaw (2) })->pitch == 62);
@@ -471,12 +480,8 @@ TEST_CASE ("Song values: a track that comes into the song with its clips' elemen
     CHECK_FALSE (whole.hasProperty ("unknown"));
     CHECK_FALSE (whole.getChildWithName ("SOMETHING").isValid());
 
-    phazite::undo (*k.song);
-    CHECK (k.find (id) == nullptr);
-    CHECK_FALSE (phazite::getClipTrack (*k.song, id).isValid());
-    phazite::redo (*k.song);
-    CHECK (*k.find (id) == expected);
     CHECK (phazite::getClipTrack (*k.song, id) == added);
+    phazite::test::checkValues (*k.song);
 
     // Through the model: a track duplicated holds its clips' values, each shared with its original until it is edited.
     std::vector<phazite::TrackID> copies;
@@ -580,99 +585,6 @@ TEST_CASE ("Song values: a clip's copies share its value, an alias joins its gro
     CHECK (k.find (k.clip)->notes.size() == 3);
 
     k.check.walkBackAndForth();
-}
-
-TEST_CASE ("Song values: what is written outside the history is no undo step, and a track taken out is remembered with its clips "
-           "only while something can bring it back")
-{
-    // The keeper's own: goes with the keepers (S5.20, the tracks' switch).
-    Kept k;
-    const auto value = k.get (k.clip);
-    const auto clipValue = phazite::getClipValue (*k.song, k.clip);
-    auto element = phazite::findTrackState (*k.song, k.tracks[0]);
-    auto list = k.song->getState().getChildWithName (schema::TRACKS);
-
-    {
-        const phazite::Song::OutsideHistory outside (*k.song);
-        list.removeChild (element, nullptr);
-    }
-
-    CHECK_FALSE (k.song->getUndoManager().canUndo());
-    CHECK (k.find (k.clip) == nullptr);
-    CHECK_FALSE (phazite::getClipValue (*k.song, k.clip).has_value());
-    CHECK (k.song->getValues()->remembers (element)); // held here
-    phazite::test::checkValues (*k.song);
-
-    // The same element put back, after the others: its clips back, with their values.
-    {
-        const phazite::Song::OutsideHistory outside (*k.song);
-        list.appendChild (element, nullptr);
-    }
-
-    CHECK_FALSE (k.song->getUndoManager().canUndo());
-    CHECK (k.find (k.clip)->isSameAs (value));
-    CHECK (phazite::getClipValue (*k.song, k.clip) == clipValue);
-    CHECK_FALSE (k.song->getValues()->remembers (element));
-    phazite::test::checkValues (*k.song);
-
-    // Taken out of the tree in a step, then the history cleared: what could bring it back is gone, and so is what was
-    // remembered, as the next changes look. While its step is still open, its clips are out of the areas already, the keeper
-    // remembering them: the check of the song's values, which allows no clip of a track outside the song, holds there too.
-    // Taken out of the tree itself, as only a remover that forgot eraseTrackHoldings() would (model/arrangement/internal/
-    // Tracks.h: every remover erases what a track holds first, so that the keeper finds nothing): its safety net, which this
-    // case follows. The check's own failure for what the keeper is then left holding is the one this case expects: it must
-    // come (the guard fires), and every other failure is passed on.
-    int keeperFailures = 0;
-    k.check.onFailure = [&keeperFailures] (const juce::String& failure)
-    {
-        if (failure.contains ("eraseTrackHoldings"))
-            ++keeperFailures;
-        else
-            FAIL_CHECK (failure.toStdString());
-    };
-
-    k.step ("Delete Track",
-            [&]
-            {
-                list.removeChild (element, &k.song->getUndoManager());
-                CHECK (k.find (k.clip) == nullptr);
-                CHECK (k.song->getValues()->remembers (element));
-                phazite::test::checkValues (*k.song);
-            });
-    CHECK (keeperFailures > 0);
-    k.check.onFailure = nullptr;
-    element = {};
-    k.song->getUndoManager().clearUndoHistory();
-    const auto remembers = [&k] (phazite::TrackID track)
-    {
-        const auto remembered = k.song->getValues()->getRemembered();
-        return std::find (remembered.begin(), remembered.end(), track) != remembered.end();
-    };
-
-    CHECK (remembers (k.tracks[0])); // until the keeper looks again
-
-    // Tracks with clips made and deleted, the history cleared after each: past the 64 remembered at which the keeper looks
-    // through what it remembers, it lets go of each that nothing can bring back, the first deleted track's among them.
-    for (int i = 0; i < 70; ++i)
-    {
-        const auto made = phazite::addTrackAtEnd (*k.song, false, nullptr);
-        REQUIRE (phazite::insertMidiClip (*k.song, made, { phazite::test::at (0.0), phazite::test::at (2.0) }, nullptr).isValid());
-
-        {
-            const phazite::UndoStep step (*k.song, "Delete Track");
-            list.removeChild (phazite::findTrackState (*k.song, made), &k.song->getUndoManager());
-        }
-
-        k.song->getUndoManager().clearUndoHistory();
-    }
-
-    INFO ("Remembered: " << k.song->getValues()->getRemembered().size());
-    CHECK_FALSE (remembers (k.tracks[0]));
-    CHECK (k.song->getValues()->getRemembered().size() < 64);
-
-    const auto last = phazite::insertMidiClip (*k.song, k.tracks[2], { phazite::test::at (400.0), phazite::test::at (402.0) }, nullptr);
-    CHECK (k.find (last) != nullptr);
-    phazite::test::checkValues (*k.song);
 }
 
 TEST_CASE ("A track deleted and brought back by Undo has its clips, sends, modulators, macros and devices; moved into a folder and "
@@ -922,7 +834,7 @@ TEST_CASE ("Song values: every clip of the golden projects, read into a value an
     {
         const auto value = phazite::readClipValue (clip);
         CHECK (value.id == ClipID::fromRaw (phazite::readID (clip[schema::clipID])));
-        CHECK (value.track == phazite::getTrackID (clip.getParent()));
+        CHECK (value.track == phazite::readTrackElementID (clip.getParent()));
         CHECK (value.isAudio() == (clip[schema::clipKind].toString() == schema::clipIsAudio));
         audio += value.isAudio() ? 1 : 0;
         warped += value.sound.warps.empty() ? 0 : 1;

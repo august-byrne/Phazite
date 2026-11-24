@@ -59,8 +59,8 @@ anyone can download. What the comparison left for later is under [After 1.0](#af
 Added on 2026-11-20 and 2026-11-21 (the owner's decisions, so that the model under Phazite is robust before the
 beta): the song's schema as data (S5.19) and the song as an immutable value (S5.20), which was weighed and left at
 first and taken once it was measured ([decisions.md](design/decisions.md), "Engineering"). S5.19 comes before S5.20,
-and both before the stage's other steps that add to the model, which then write through them. Of S5.20, the first thirteen
-areas are built (2026-11-21 to 23): a clip's notes and its controllers' values, the clips themselves (with each
+and both before the stage's other steps that add to the model, which then write through them. Of S5.20, the first fourteen
+areas are built (2026-11-21 to 24): a clip's notes and its controllers' values, the clips themselves (with each
 track's order of clips and the alias groups), the tempo map, the chord lane (its element kept as the sign that the
 song has one), the MIDI links (their element kept as the place the first link made), automation's curves (their
 AUTOMATION kept as their place, each point with a key the selection of points holds), the sections (theirs kept as
@@ -70,10 +70,12 @@ the devices store in the history and outside it alike (a plug-in's values set by
 version, a chain's mute and solo: the first keyed area, undone by entry, with the windows' places outside the history)
 and the devices, containers and chains themselves (each by its ID, each owner's list in its order, kept as their tracks
 come and go), and the tracks' switches (mute, solo, frozen and the automation mode: keyed, undone by entry) with their
-view (each row's height, collapsed and pinned switches, drum rows and automation lanes, outside the history) are values
-beside the song's tree, in the song's one undo history, with immer in `external/`. The rest goes leaf first, as an
-element can leave the tree only once nothing left in it is its child: tracks, folders and the master themselves; the
-song's own properties; then the history as a list of roots, and the tree goes.
+view (each row's height, collapsed and pinned switches, drum rows and automation lanes, outside the history), and the
+tracks, folders, returns and master themselves (each by its ID, each folder's list and the top list in their order, the
+master a member: the tree's TRACKS and MASTER kept as empty places a whole copy writes them into) are values beside the
+song's tree, in the song's one undo history, with immer in `external/`. The rest goes leaf first, as an element can
+leave the tree only once nothing left in it is its child: the song's own properties; then the history as a list of
+roots, and the tree goes.
 
 ### Stage 1. Safe: the bugs that lose work or sound
 

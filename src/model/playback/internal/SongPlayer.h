@@ -13,6 +13,7 @@
 #include "model/base/Song.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/devices/ParameterRef.h"
 
 #include <atomic>
@@ -282,7 +283,7 @@ private:
     std::map<std::uint64_t, std::int64_t> faders; // each fader's track, by the fader's ID (the master's under 0)
     void readCurves();
     std::shared_ptr<const engine::Curve> findCurve (std::uint64_t device, const juce::String& parameter) const;
-    void addFaderAutomation (engine::Plan::Strip&, const juce::ValueTree& channelState, bool isMaster);
+    void addFaderAutomation (engine::Plan::Strip&, const TrackValue& channelState, bool isMaster);
 
     // What changed in the song since the plan compiled last, as the player hears it (it listens to the song itself, so that
     // every player's plans follow it): the tracks whose clips changed (their notes and audio), the channels (by their
@@ -313,7 +314,7 @@ private:
     std::map<std::int64_t, std::shared_ptr<const engine::NoteSequence>> notes;
     std::set<std::int64_t> usedNotes;
     juce::ValueTree songState;
-    std::shared_ptr<const engine::NoteSequence> getNotes (const juce::ValueTree& trackState);
+    std::shared_ptr<const engine::NoteSequence> getNotes (const TrackValue& trackState);
     void markChange (const juce::ValueTree& changed); // an element added, removed or moved in it
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
@@ -378,8 +379,8 @@ private:
 
     // What decides what is heard between plans (updateAudibility(), which a track muted or soloed asks as the song's values
     // tell it, reading nothing of the song: SongValues.h), of the tracks: the song's tracks and their switches as the last
-    // compile took them (the keeper's, getTracksAsTold()), and as tracksChanged() and trackSwitchesChanged() were handed them
-    // since. Copies of the values, which share what they hold; in a struct of its own (SongPlayer.cpp), so that what includes
+    // compile took them (the tracks' area's, getTracksValue()), and as tracksChanged() and trackSwitchesChanged() were handed
+    // them since. Copies of the values, which share what they hold; in a struct of its own (SongPlayer.cpp), so that what includes
     // this header doesn't see the tracks' values' names.
     struct HeldTracks;
     std::unique_ptr<HeldTracks> heldTracks;
@@ -451,16 +452,16 @@ private:
     std::set<juce::String> askedForPlan;
     bool filesChangedForPlan = false; // a file's key that this plan found changed (compile() makes trustedForPlan's again)
     // The tracks whose audio this plan kept, or made without asking the disk again about their files, with their elements.
-    std::vector<std::pair<std::int64_t, juce::ValueTree>> trustedForPlan;
+    std::vector<std::pair<std::int64_t, TrackValue>> trustedForPlan;
     juce::String getFileKey (const juce::File&, bool askAgain);
     bool isOnDiskAsKept (const TrackAudio&); // each of its files and sources as the plan before knew it (getFileKey())
     std::shared_ptr<engine::AudioFile> getAudioFile (const juce::File&, bool askAgain, juce::String* key = nullptr);
     engine::AudioRegion makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile>);
     void placeRegion (engine::AudioRegion&, const ClipValue&, const PlayedClip&) const;
-    TrackAudio makeAudio (const juce::ValueTree& trackState, std::optional<ClipTempo>&, bool askAgain); // the tempo read once
-    void addAudio (engine::Plan::Strip&, const juce::ValueTree& trackState, std::optional<ClipTempo>&);
-    void checkAudio (const TrackAudio& kept, const juce::ValueTree& trackState, std::optional<ClipTempo>&);
-    bool addFrozenFile (engine::Plan::Strip&, const juce::ValueTree& trackState);
+    TrackAudio makeAudio (const TrackValue& trackState, std::optional<ClipTempo>&, bool askAgain); // the tempo read once
+    void addAudio (engine::Plan::Strip&, const TrackValue& trackState, std::optional<ClipTempo>&);
+    void checkAudio (const TrackAudio& kept, const TrackValue& trackState, std::optional<ClipTempo>&);
+    bool addFrozenFile (engine::Plan::Strip&, const TrackValue& trackState);
 
     // The comparison, and what plays it from plan to plan: made anew for another rate or block size, still hearing what it
     // heard.
@@ -471,7 +472,7 @@ private:
     void addComparison (engine::Plan&, double sampleRate);
 
     // The audio device's inputs a track hears: its input, while it is armed or always hears it (RecordingModel.h).
-    std::vector<int> getHeardInput (const juce::ValueTree& trackState) const;
+    std::vector<int> getHeardInput (const TrackValue& trackState) const;
 
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
     // What plays a device, its values set by hand read again from the song if its channel changed (Changes::channels).
@@ -493,7 +494,7 @@ private:
     // sends to it, what its sidechains listen to), and what of that it refuses, which would feed itself round a loop.
     struct ChannelInfo
     {
-        juce::ValueTree state {};
+        TrackValue value {};
         std::int64_t id = 0, output = 0;
         std::vector<SendValue> sends {}; // its sends, from the song's sends read once for the plan
         std::vector<std::int64_t> needs {};
@@ -507,7 +508,7 @@ private:
 
     // In an order in which each comes after what it takes in, each track's sends from the song's sends given (the compile's
     // one reading of the sends' area: SendsValue.h, getSendsValue()).
-    std::vector<ChannelInfo> getChannels (const SongSends&) const;
+    std::vector<ChannelInfo> getChannels (const SongTracks&, const SongSends&) const;
     void addInputs (engine::Plan&, engine::Plan::Strip&, std::vector<engine::Plan::Input>);
     // One for every path (none for a render's that needs none): reading a strip's tap, or with a ring of its own. One that
     // doesn't come and go with what the song routes (a device's own sound held back) never fades in as a new path does.
@@ -520,7 +521,7 @@ private:
     void replace (std::shared_ptr<engine::Delay>& kept, std::shared_ptr<engine::Delay> by) const; // a path's delay
     std::shared_ptr<engine::SendLevel> getSendLevel (const SendValue&);
     std::vector<std::int64_t> addDevices (engine::Plan&, const std::map<std::int64_t, int>& places, const ChannelInfo&,
-                                          engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false,
+                                          engine::Plan::Strip&, const TrackValue& channelState, bool skipFrozen = false,
                                           const std::set<std::int64_t>* only = nullptr); // their IDs
 
     // A container on a strip, its chains' devices each added as add() adds a device; each chain's state, kept by its ID,
@@ -535,10 +536,9 @@ private:
     // channel's own and its containers' from the song's modulation, which the compile reads once.
     std::shared_ptr<engine::ModulatorNode> getModulator (const ModulatorValue&);
     void setModulatorValues (engine::ModulatorNode&, const ModulatorValue&);
-    void addModulation (engine::Plan::Strip&, const SongModulation&, const juce::ValueTree& channelState,
+    void addModulation (engine::Plan::Strip&, const SongModulation&, const TrackValue& channelState,
                         const std::vector<std::int64_t>& deviceIDs);
     void loadSounds (engine::DeviceNode&, const DeviceValue& device);
-    void setChannel (const juce::ValueTree& channelState, bool isMaster);
     void updateAudibility();
 };
 

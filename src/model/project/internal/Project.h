@@ -354,11 +354,6 @@ private:
     SongCopy savedState;
     bool mayHaveChanged = false;
 
-    // savedState's TRACKs by their IDs (the first of one), made by one walk as savedState is set (setSavedState(), the one
-    // place that sets it; nothing writes its tracks after), so that the tracks' comparison finds a saved track by one lookup
-    // (areTracksAsSaved()).
-    std::unordered_map<std::uint64_t, juce::ValueTree> savedTracks;
-
     struct ToCompare
     {
         juce::ValueTree element;
@@ -479,11 +474,11 @@ private:
     // tracks came in another order (SongValues.h: Listener::tracksChanged(); the tree's callbacks below leave what the tracks'
     // values cover alone, isHeardAsKept(), and count a property Phazite doesn't know on a TRACK as before); and the tracks whose
     // switches changed (trackSwitchesChanged(): a mute toggled outside the history counts, as its property did). Counted as
-    // a change, and compared with savedState when asked, never as they are told: by element while the trees hold the tracks,
-    // a track found in the song by the song's index and in the saved copy by savedTracks (one lookup each, however many
-    // tracks the song has: countTrackElementsWalkedWithSaved()), each track's own properties that the values count
-    // against the saved copy's track of its ID (so that a mute toggled and toggled back is saved again), and each list's
-    // tracks in their order. Bounded as toCompare is: past mostToCompare of them, the tracks and the master whole. The view
+    // a change, and compared with savedState when asked, never as they are told: as values (WholeState.h: holdSameTrack(),
+    // holdSameMaster(), holdSameTrackList()), a track found in the song's kept values and the saved copy's by its ID (one
+    // look each, however many tracks the song has: countTrackElementsWalkedWithSaved()), its value and its switches against
+    // the saved copy's of its ID (so that a mute toggled and toggled back is saved again), and each list's tracks in their
+    // order. Bounded as toCompare is: past mostToCompare of them, the tracks and the master whole. The view
     // (tracksViewChanged()) counts nothing.
     std::vector<TrackID> trackOwnToCompare, trackListsToCompare;
     bool masterOwnToCompare = false, comparingTracksWhole = false;
@@ -510,6 +505,7 @@ private:
     bool holdSameClip (ClipID, const ValuesKept& now) const;
     bool holdSameTrackClips (TrackID, const ValuesKept& now) const;
     bool isComparedWhole (const juce::ValueTree&) const; // it, or what it is in, is among toCompare whole
+    bool isTrackComparedWhole (TrackID) const;           // a track the song holds, with the song's TRACKS
 
     void setSavedState (SongCopy);
 
@@ -581,9 +577,8 @@ public:
     // thread.
     static juce::int64 countElementsCompared();
 
-    // How many TRACK elements the comparison of the tracks with the saved copy looked at or walked since the program started
-    // (areTracksAsSaved(): a track found by its ID in either tree, a list's tracks walked, the saved copy's tracks indexed),
-    // for the same tests. Message thread.
+    // How many tracks the comparison of the tracks with the saved copy looked at since the program started (areTracksAsSaved():
+    // a track or a list found by its ID in the song's kept values or the saved copy's, one each), for the same tests. Message thread.
     static juce::int64 countTrackElementsWalkedWithSaved();
 
     // How many notifications since the last comparison are compared one by one; past them, each one's track whole.

@@ -72,9 +72,16 @@ struct SongValues::DeviceStoreKeeper
     JUCE_DECLARE_NON_COPYABLE (DeviceStoreKeeper)
 };
 
+// The DEVICE and CHAIN elements of a channel's element (a TRACK or the MASTER that comes into the song with them: the tracks'
+// safety net, TracksArea.h), in its devices and containers, what each holds of the store read in as the song holds it
+// (DeviceStoreValue.h: readHeldStoreOf(): its entries made the element's) and a device's window's place. How many of them held
+// any of it (DeviceStoreValue.h: holdsStoreIn()).
+int takeChannelStoreIn (DeviceStore&, DevicesOutside&, const juce::ValueTree& channel);
+
 // The store's part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to a
-// DEVICE or a CHAIN (the track list, a track, a folder's tracks, the master, a channel's devices and containers, a container's
-// chains, a chain's devices, from the song's element down); and a copy's DEVICE given what the store holds of its plug-in
+// DEVICE or a CHAIN (the master, a channel's devices and containers, a container's chains, a chain's devices, from the song's
+// element down: whole state writes each TRACK itself, WholeState.cpp: writeTracksIn(), whose devices this leads to from it);
+// and a copy's DEVICE given what the store holds of its plug-in
 // (DeviceStoreValue.h: writeStoreInto(), its VALUEs sorted by their parameters after its other children) and its window's
 // place, a CHAIN its mute and solo, from the values kept. Nothing for another element.
 bool leadsToDeviceStore (const juce::ValueTree& parent, const juce::ValueTree& child);

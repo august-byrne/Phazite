@@ -1028,20 +1028,22 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            return values->countAdopted()               // the clips', with their notes
-                   + values->countTempoMapAdopted()     // the tempo map's
-                   + values->countChordLaneAdopted()    // the chord lane's
-                   + values->countMidiLinksAdopted()    // the MIDI links'
-                   + values->countCurvesAdopted()       // the curves'
-                   + values->countSectionsAdopted()     // the sections'
-                   + values->countModulationAdopted()   // modulation's: no track or copy the passes add holds one
-                   + values->countSendsAdopted()        // the sends': nor a send
-                   + values->countDeviceStoreAdopted()  // the store's: the devices pass sets an item's entries in the store
-                   + values->countDevicesAdopted()      // the devices': no track or copy the passes add holds a device, a
-                                                        // container or a chain, which the devices pass alone sets
-                                                        // (makeDevicesLike())
-                   + values->countTrackLeavesAdopted(); // the tracks' switches and view: nor a switch, a view property or a
-                                                        // LANES, which their pass sets (makeTrackLeavesLike())
+            return values->countAdopted()              // the clips', with their notes
+                   + values->countTempoMapAdopted()    // the tempo map's
+                   + values->countChordLaneAdopted()   // the chord lane's
+                   + values->countMidiLinksAdopted()   // the MIDI links'
+                   + values->countCurvesAdopted()      // the curves'
+                   + values->countSectionsAdopted()    // the sections'
+                   + values->countModulationAdopted()  // modulation's: no track or copy the passes add holds one
+                   + values->countSendsAdopted()       // the sends': nor a send
+                   + values->countDeviceStoreAdopted() // the store's: the devices pass sets an item's entries in the store
+                   + values->countDevicesAdopted()     // the devices': no track or copy the passes add holds a device, a
+                                                       // container or a chain, which the devices pass alone sets
+                                                       // (makeDevicesLike())
+                   + values->countTrackLeavesAdopted() // the tracks' switches and view: nor a switch, a view property or a
+                                                       // LANES, which their pass sets (makeTrackLeavesLike())
+                   + values->countTracksAdopted();     // the tracks': nor a TRACK or the MASTER's own, which their pass
+                                                       // sets (makeTracksLike())
         }
 
         const Song& song;
@@ -2429,9 +2431,8 @@ namespace
     // The whole song's tracks, folders, returns and master made like the other's (their own fields, which folder each is in
     // and its place there: TracksValue.h, TrackValue), through the tracks' setters (model/arrangement/internal/Tracks.h:
     // setTrack(), setNewTracks(), setTrackPlace(), eraseTrack()), in the mode of the moment, each writing nothing where the
-    // song holds what it would set, each given the other's element to write as it is written (writtenLike: the song's text
-    // the other's to the letter): the first of the passes of what the song holds beside its tree, as a track must be in the
-    // song before the clip pass gives it its clips (ClipPass: addTrack()). The song's tracks as its keeper holds them
+    // song holds what it would set: the first of the passes of what the song holds beside its tree, as a track must be in the
+    // song before the clip pass gives it its clips (ClipPass: addTrack()). The song's tracks as its area holds them
     // (findHeldTrack(), getHeldTracks(): none read), the other's read once each, as the song holds one (readHeldTrack()). In
     // this order, so that what goes frees its IDs before what comes takes them (a merge gives IDs anew):
     //   1. a track of both made a folder, where the other has it as one;
@@ -2540,7 +2541,7 @@ namespace
                 auto value = *each.value;
                 value.parent = now->parent;
 
-                if (setTrack (song, std::move (value), -1, each.element))
+                if (setTrack (song, std::move (value)))
                     ++writes;
             }
 
@@ -2572,7 +2573,7 @@ namespace
                 keepUncounted (*value, getHeldTracks (song).master, taken);
                 made.master = *value;
 
-                if (setTrack (song, std::move (*value), -1, then))
+                if (setTrack (song, std::move (*value)))
                     ++made.writes;
             }
         }
@@ -2608,7 +2609,6 @@ namespace
                 continue; // in a folder the song couldn't hold: not there
 
             std::vector<TrackValue> group { *each.value };
-            std::vector<juce::ValueTree> elements { each.element };
             std::set<std::uint64_t> inGroup { each.id.getRaw() };
 
             for (auto j = i + 1; j < theirs.size(); ++j)
@@ -2617,15 +2617,13 @@ namespace
                     inside.value.has_value() && inGroup.count (inside.value->parent.getRaw()) > 0 && ! hasTrack (song, inside.id))
                 {
                     group.push_back (*inside.value);
-                    elements.push_back (inside.element);
                     inGroup.insert (inside.id.getRaw());
                 }
             }
 
             const auto tracks = getHeldTracks (song);
 
-            if (! setNewTracks (song, group, findTrackPlaceLike (tracks, folder, each.id, each.element), elements,
-                                whereHeldElsewhere (group)))
+            if (! setNewTracks (song, group, findTrackPlaceLike (tracks, folder, each.id, each.element), whereHeldElsewhere (group)))
                 continue;
 
             ++made.writes;
@@ -2772,6 +2770,7 @@ namespace
 
 void makeSongLike (Song& song, const juce::ValueTree& other)
 {
+    jassert (other != song.getState()); // a whole copy (WholeState.h), never the song's live tree, which holds no track
     const NothingTakenIn byThePassesAlone (song);
     auto* undo = &song.getUndoManager();
     const auto standIns = findStandIns (other);
@@ -2790,6 +2789,7 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
 
 void makeSongTheSame (Song& song, const juce::ValueTree& other)
 {
+    jassert (other != song.getState()); // as makeSongLike()'s
     const NothingTakenIn byThePassesAlone (song);
 
     // Outside the history, as what the song keeps beside its tree is written too (Song::OutsideHistory).
@@ -2810,6 +2810,7 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
 
 void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
 {
+    jassert (copy != song.getState()); // as makeSongLike()'s
     const NothingTakenIn byThePassesAlone (song);
     const Song::OutsideHistory outside (song);
 
@@ -2967,7 +2968,7 @@ namespace
                 auto value = std::move (line.given.front());
                 value.parent = live->parent;
                 keepUncounted (value, *live, Taken::counted);
-                setTrack (song, std::move (value), -1, then);
+                setTrack (song, std::move (value));
             }
 
             clips.addTrack (id);
@@ -3019,7 +3020,7 @@ namespace
 
                 made.front().parent = folder;
                 const auto tracks = getHeldTracks (song);
-                setNewTracks (song, made, findTrackPlaceLike (tracks, folder, id, then), elements);
+                setNewTracks (song, made, findTrackPlaceLike (tracks, folder, id, then));
             }
 
             // Its clips, and those of the tracks in it that came back with it; and their devices, modulators and macros, which

@@ -212,10 +212,10 @@ void SongValues::ClipsKeeper::childAdded (juce::ValueTree& parent, juce::ValueTr
         return;
     }
 
-    std::vector<juce::ValueTree> tracks;
-    collectTracks (child, tracks);
+    std::vector<juce::ValueTree> trackElements;
+    collectTracks (child, trackElements);
 
-    if (tracks.empty() || ! isInTrackList (parent, child))
+    if (trackElements.empty() || ! isInTrackList (parent, child))
         return;
 
     auto nextClips = values.clips.get();
@@ -223,7 +223,7 @@ void SongValues::ClipsKeeper::childAdded (juce::ValueTree& parent, juce::ValueTr
     std::vector<juce::ValueTree> taken;
     auto changed = false;
 
-    for (const auto& track : tracks)
+    for (const auto& track : trackElements)
     {
         if (const auto found = findRemembered (track); found != remembered.end())
         {
@@ -278,13 +278,13 @@ void SongValues::ClipsKeeper::childRemoved (juce::ValueTree& parent, juce::Value
     // What it may have been remembered with before (taken out, and brought back by an undo since, which gave its clips back
     // itself) is replaced, or forgotten where it holds none now: else the next time it comes back, it would bring back
     // clips deleted since.
-    std::vector<juce::ValueTree> tracks;
-    collectTracks (child, tracks);
+    std::vector<juce::ValueTree> trackElements;
+    collectTracks (child, trackElements);
     auto nextClips = values.clips.get();
     auto nextNotes = values.notes.get();
     auto any = false;
 
-    for (const auto& track : tracks)
+    for (const auto& track : trackElements)
     {
         const auto* list = nextClips.tracks.find (getTrackIDOf (track).getRaw());
 
@@ -363,12 +363,12 @@ bool SongValues::ClipsKeeper::remembers (const juce::ValueTree& track) const
 
 std::vector<TrackID> SongValues::ClipsKeeper::getRemembered() const
 {
-    std::vector<TrackID> tracks;
+    std::vector<TrackID> trackIDs;
 
     for (const auto& each : remembered)
-        tracks.push_back (getTrackIDOf (each.track));
+        trackIDs.push_back (getTrackIDOf (each.track));
 
-    return tracks;
+    return trackIDs;
 }
 
 //==============================================================================
@@ -478,10 +478,23 @@ void SongValues::eraseClips (Song& song, const std::vector<ClipID>& gone)
 }
 
 //==============================================================================
-bool leadsToClips (const juce::ValueTree& parent, const juce::ValueTree& child)
+int takeTrackClipsIn (SongClips& clips, NotesByClip& notes, const juce::ValueTree& track, TrackID id)
 {
-    return (parent.hasType (schema::PHAZITE) || parent.hasType (schema::TRACKS) || parent.hasType (schema::TRACK))
-           && (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK));
+    if (! holdsClips (track) || ! id.isValid())
+        return 0;
+
+    auto taken = 0;
+
+    for (const auto& element : track)
+    {
+        if (element.hasType (schema::CLIP))
+        {
+            takeClip (clips, notes, element, id, -1);
+            ++taken;
+        }
+    }
+
+    return taken;
 }
 
 void writeClipsIn (juce::ValueTree& element, const ValuesKept& kept)

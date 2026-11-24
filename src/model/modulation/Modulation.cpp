@@ -94,13 +94,12 @@ namespace
         return element.getType().toString() + ":" + schema::getElementKey (element);
     }
 
-    // The place a channel's element in the song gives what it holds: a track's or the master's own, as the tracks' conversion
-    // reads them (TracksValue.h); none for another element.
-    std::optional<ModulatorPlace> readOwnerPlace (const juce::ValueTree& owner)
+    // The place a channel the song holds where a clash's path names it gives what it holds (Tracks.h: findChannelOnPath()): a
+    // track's or the master's own; none for another path.
+    std::optional<ModulatorPlace> readOwnerPlace (const Song& song, const juce::StringArray& path)
     {
-        if (const auto kind = readTrackKind (owner))
-            return *kind == TrackValue::Kind::master ? ModulatorPlace { .onMaster = true }
-                                                     : ModulatorPlace { .track = readTrackElementID (owner) };
+        if (const auto channel = findChannelOnPath (song, path))
+            return channel->onMaster ? ModulatorPlace { .onMaster = true } : ModulatorPlace { .track = channel->track };
 
         return std::nullopt;
     }
@@ -114,11 +113,11 @@ namespace
         const auto containerStep = schema::CONTAINER.toString() + ":";
 
         if (path.isEmpty() || ! path[path.size() - 1].startsWith (containerStep))
-            return readOwnerPlace (findByPath (song.getState(), path));
+            return readOwnerPlace (song, path);
 
         const auto container = DeviceID::fromRaw (readID (path[path.size() - 1].fromFirstOccurrenceOf (":", false, false)));
         path.remove (path.size() - 1);
-        auto place = readOwnerPlace (findByPath (song.getState(), path));
+        auto place = readOwnerPlace (song, path);
         const auto held = findContainerPlace (song, container);
 
         if (! place.has_value() || ! held.has_value() || held->onMaster != place->onMaster

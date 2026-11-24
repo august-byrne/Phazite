@@ -38,24 +38,27 @@ namespace
     // A track of the song's that holds clips (Schema.h: trackKind): a track, not a folder, a return or the master.
     bool holdsClips (const Song& song, TrackID id)
     {
-        return readTrackKind (findTrackState (song, id)) == TrackValue::Kind::track;
+        return getTrackKind (song, id) == TrackValue::Kind::track;
     }
 
     // A track's row; its color is its row's in the palette unless it has its own. The master's is gray. Without the colors
-    // of the folders it is in, which getPlaylistRows() knows from the folders before it. Each field read alone from the
-    // element the song's index found (TracksValue.h: the readers of one field), its view and its frozen switch by a look in
-    // their values (Tracks.h: getViewOf(), getTrackSwitches()), never the track whole: a row is made at every
-    // paint of the audio clip editor and every event of a drag.
+    // of the folders it is in, which getPlaylistRows() knows from the folders before it. The track found once (one look in
+    // the tracks' area: Tracks.h, findTrack()), its fields read from its value, its folders by their IDs up the area's map,
+    // its view and its frozen switch by a look in their values (Tracks.h: getTrackView(), getTrackSwitches()): a row is made
+    // at every paint of the audio clip editor and every event of a drag.
     TrackRow makeRow (const Song& song, TrackID id, int index)
     {
-        const auto state = findTrackState (song, id);
-        const auto kind = readTrackKind (state);
-        const auto view = getViewOf (song, state);
         TrackRow row;
         row.id = id;
+        const auto track = findTrack (song, id);
+
+        if (! track)
+            return row;
+
+        const auto view = getTrackView (song, id);
         row.collapsed = view.collapsed.value_or (false); // the master's: its lanes are thin rows
 
-        if (kind == TrackValue::Kind::master)
+        if (track->isMaster())
         {
             row.name = "Master";
             row.colour = getTrackColours().back().colour;
@@ -63,14 +66,16 @@ namespace
             return row;
         }
 
-        row.name = getTrackName (song, id);
-        row.colour = getTrackColour (readTrackColour (state), index);
-        row.kind = kind == TrackValue::Kind::folder        ? TrackType::folder
-                   : kind == TrackValue::Kind::returnTrack ? TrackType::returnTrack
-                                                           : TrackType::track;
+        row.name = getTrackName (song, *track);
+        row.colour = getTrackColour (track->colour, index);
+        row.kind = track->isFolder() ? TrackType::folder : track->isReturn() ? TrackType::returnTrack : TrackType::track;
+        const auto& tracks = getTracksValue (song);
 
-        for (auto folder = state.getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
+        for (const auto* folder = tracks.tracks.find (track->parent.getRaw()); folder != nullptr;
+             folder = tracks.tracks.find (folder->parent.getRaw()))
             ++row.depth;
+
+        const auto kind = track->kind;
 
         row.pinned = view.pinned.value_or (false);
         row.savedHeight = view.height;
@@ -178,11 +183,11 @@ std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
     if (song == nullptr || ! hasTrack (*song, id))
         return {};
 
-    const auto indexOf = [song] (TrackID track) { return song->getIndex().getTrackPlace (findTrackState (*song, track)).index; };
+    const auto indexOf = [song] (TrackID track) { return getTrackPlace (*song, track).index; };
     auto row = makeRow (*song, id, indexOf (id));
 
-    for (auto folder = findTrackState (*song, id).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
-        row.folderColours.insert (row.folderColours.begin(), getTrackColour (*song, getTrackID (folder), indexOf (getTrackID (folder))));
+    for (auto folder = getParentFolder (*song, id); folder.isValid(); folder = getParentFolder (*song, folder))
+        row.folderColours.insert (row.folderColours.begin(), getTrackColour (*song, folder, indexOf (folder)));
 
     return row;
 }
@@ -211,8 +216,8 @@ bool isInside (const ProjectContext& context, TrackID track, TrackID folder)
     if (song == nullptr || track == folder || ! hasTrack (*song, folder))
         return false;
 
-    for (auto parent = findTrackState (*song, track).getParent(); parent.hasType (schema::TRACK); parent = parent.getParent())
-        if (getTrackID (parent) == folder)
+    for (auto parent = getParentFolder (*song, track); parent.isValid(); parent = getParentFolder (*song, parent))
+        if (parent == folder)
             return true;
 
     return false;
@@ -331,7 +336,7 @@ juce::String whyClipsCantGo (const ProjectContext& context, TrackID id, const st
 
     if (! holdsClips (*song, id))
     {
-        const auto kind = readTrackKind (findTrackState (*song, id));
+        const auto kind = getTrackKind (*song, id);
         return kind == TrackValue::Kind::master        ? "The master holds no clips"
                : kind == TrackValue::Kind::returnTrack ? "A return holds no clips"
                : kind == TrackValue::Kind::folder      ? "A folder holds no clips"

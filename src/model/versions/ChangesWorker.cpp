@@ -34,33 +34,31 @@ namespace
     }
 
     // A track's own parts, or the master's, found by its ID (the master's by its ID now), none for one the song hasn't:
-    // without the tracks in it (a folder's), which are parts of their own. Its own properties and the elements its element
-    // holds, whole state of one track (Tracks.h: findTrackState(), the one element function the versions' copies still find a
-    // track by). Its clips first, by their IDs (Clips.h), each whole with its notes (WholeState.h: copyWholeClip()), as the
-    // song holds them beside its tree; then its devices and containers, each whole (a container with its chains and macros);
-    // then its other parts, each whole; then its switches and its view (its LANES), then its modulators and macros, then its
-    // sends, as whole state writes them (TracksArea.h: writeTrackLeavesIn(); ModulationArea.h: writeModulationIn();
-    // SendsArea.h: writeSendsIn()).
+    // without the tracks in it (a folder's), which are parts of their own. Whole state of one track, from the song's values
+    // (the song's tree holds no track): its own properties as whole state writes them (TracksValue.h: writeTrackElement());
+    // its clips first, by their IDs (Clips.h), each whole with its notes (WholeState.h: copyWholeClip()); then its devices and
+    // containers, each whole (a container with its chains and macros); then its switches and its view (its LANES), then its
+    // modulators and macros, then its sends, as whole state writes them (TracksArea.h: writeTrackLeavesIn(); ModulationArea.h:
+    // writeModulationIn(); SendsArea.h: writeSendsIn()).
     // A comparison finds a clip by its key, in no order among the rest (Schema.h: CLIP is in no order group), and a modulator
     // and a send by its ID, in the order of its kind.
     juce::ValueTree copyTrack (const Song& song, TrackID id)
     {
-        const auto track = findTrackState (song, id);
+        const auto track = findTrack (song, id);
 
-        if (! track.isValid())
+        if (! track)
             return {};
 
-        juce::ValueTree copy (track.getType());
-        copy.copyPropertiesFrom (track, nullptr);
+        auto copy = writeTrackElement (*track);
+        const auto onMaster = track->isMaster();
 
-        if (! isMaster (song, id))
+        if (! onMaster)
             for (const auto clip : getClips (song, id))
                 copy.appendChild (copyWholeClip (song, clip), nullptr);
 
         // Its devices and containers after its clips, each whole as whole state writes it (DevicesArea.h: writeDeviceWhole(),
         // made whole with what the store and modulation hold of it: WholeState.h, makeWhole(), in place).
         const auto kept = keepValues (song);
-        const auto onMaster = isMaster (song, id);
 
         if (const auto* list = kept.devices.findList (makeChannelPlace (id, onMaster)))
             for (const auto device : *list)
@@ -69,10 +67,6 @@ namespace
                 makeWhole (element, kept);
                 copy.appendChild (element, nullptr);
             }
-
-        for (const auto& child : track)
-            if (! readTrackKind (child).has_value()) // not a track in it (TracksValue.h)
-                copy.appendChild (copyWhole (song, child), nullptr);
 
         writeTrackLeavesIn (copy, kept); // its switches and its view, its LANES after its devices (TracksArea.h)
         writeModulationIn (copy, kept);
@@ -85,9 +79,8 @@ namespace
     // folder, and the master's ID. What the song's own line and the lines' names and order are worked out from, without
     // copying any track's parts. Each of the song's own parts whole (WholeState.h), as the song holds it, beside its tree too
     // (roadmap step S5.20: the tempo map is a value beside it, its TEMPOMAP an empty place that copyWhole() fills).
-    // The tracks' three fields read one at a time from the elements the song's index gives (Tracks.h: getTrackStates()), through
-    // the tracks' readers of one field (TracksValue.h: readTrackElementID(), readTrackKind(), readTrackName()), never a track
-    // whole: it runs on the message thread at each round after a rename, a move or a change of the song's own
+    // The tracks' three fields read from the tracks' area in the song's order (Tracks.h: getTrackOrder(), getTracksValue()),
+    // never a track copied: it runs on the message thread at each round after a rename, a move or a change of the song's own
     // (tests/PerformanceGateTests.cpp). Each stub holds them as the writer writes them (TracksValue.h: writeTrackElement()):
     // the ID a number, the kind its word, the name where it has one.
     juce::ValueTree makeSkeleton (const Song& whole)
@@ -103,30 +96,31 @@ namespace
         // The kinds' words as values, made once: a text made for each track would allocate.
         static const juce::var trackWord (schema::trackIsTrack), folderWord (schema::trackIsFolder), returnWord (schema::trackIsReturn);
         juce::ValueTree list (schema::TRACKS);
+        const auto& tracks = getTracksValue (whole);
 
-        // The open folders' elements and their stubs, outermost first.
-        std::vector<std::pair<juce::ValueTree, juce::ValueTree>> folders;
+        // The open folders' IDs and their stubs, outermost first.
+        std::vector<std::pair<TrackID, juce::ValueTree>> folders;
 
-        for (const auto& element : getTrackStates (whole))
+        for (const auto id : getTrackOrder (whole).order)
         {
-            // Each element comes after its folder's (getTrackStates()): its stub goes in that folder's stub.
-            while (! folders.empty() && folders.back().first != element.getParent())
+            const auto* value = tracks.tracks.find (id.getRaw());
+
+            if (value == nullptr)
+                continue;
+
+            // Each comes after its folder (the song's order): its stub goes in that folder's stub.
+            while (! folders.empty() && folders.back().first != value->parent)
                 folders.pop_back();
 
             juce::ValueTree stub (schema::TRACK);
-            stub.setProperty (schema::trackID, (juce::int64) readTrackElementID (element).getRaw(), nullptr);
-            const auto kind = readTrackKind (element);
-            stub.setProperty (schema::trackKind,
-                              kind == TrackValue::Kind::folder        ? folderWord
-                              : kind == TrackValue::Kind::returnTrack ? returnWord
-                                                                      : trackWord,
-                              nullptr);
+            stub.setProperty (schema::trackID, (juce::int64) id.getRaw(), nullptr);
+            stub.setProperty (schema::trackKind, value->isFolder() ? folderWord : value->isReturn() ? returnWord : trackWord, nullptr);
 
-            if (const auto name = readTrackName (element); name.isNotEmpty())
-                stub.setProperty (schema::trackName, name, nullptr);
+            if (value->name.has_value() && value->name->isNotEmpty())
+                stub.setProperty (schema::trackName, *value->name, nullptr);
 
             (folders.empty() ? list : folders.back().second).appendChild (stub, nullptr);
-            folders.emplace_back (element, stub);
+            folders.emplace_back (id, stub);
         }
 
         own.appendChild (list, nullptr);

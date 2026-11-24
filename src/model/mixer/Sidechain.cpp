@@ -17,8 +17,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <set>
 #include <string_view>
+#include <vector>
 
 namespace phazite
 {
@@ -32,10 +34,10 @@ namespace
     // Whether a track has sound of its own for a sidechain to listen to: a track, a return, or a bus, which mixes the tracks
     // in it (as Ableton Live's, Logic's and Cubase's sidechains take group and bus channels); not a plain folder, which only
     // scales its tracks' volumes (Buses.h).
-    // Read from a track's element the song's index gives it (the tracks' conversion, TracksValue.h), or by its ID.
-    bool hasSoundOfItsOwn (const juce::ValueTree& state)
+    // Read from a track's value (TracksValue.h), or by its ID.
+    bool hasSoundOfItsOwn (const TrackValue& value)
     {
-        return readTrackKind (state) != TrackValue::Kind::folder || readIsBus (state);
+        return ! value.isFolder() || value.isBus();
     }
 
     // Whether the song holds a track (a track, a folder or a return, not the master) by its ID.
@@ -54,29 +56,41 @@ namespace
     std::vector<TrackID> getSoundTracks (const Song& song)
     {
         std::vector<TrackID> tracks;
+        const auto& values = getTracksValue (song);
 
-        for (const auto& state : getTrackStates (song))
-            if (hasSoundOfItsOwn (state))
-                tracks.push_back (readTrackElementID (state));
+        for (const auto id : getTrackOrder (song).order)
+            if (const auto* value = values.tracks.find (id.getRaw()); value != nullptr && hasSoundOfItsOwn (*value))
+                tracks.push_back (id);
 
         return tracks;
     }
 
     // Whether a track's sound comes from any of these tracks: a folder mixes the tracks inside it, a return takes in what
     // is sent to it, a drum pad's track plays what its sampler's track's sampler plays for it (DrumKit.h), and a device can
-    // listen to a sidechain.
-    bool isFedBy (const Song& song, const SongDevices& devices, const juce::ValueTree& state, const std::vector<TrackID>& feeding)
+    // listen to a sidechain. The track's value and those inside a folder from the tracks given (taken once by the caller: a
+    // song without values reads its tree for them, Tracks.h: readTracksWithoutValues()).
+    bool isFedBy (const Song& song, const SongTracks& tracks, const SongDevices& devices, const TrackValue& value,
+                  const std::vector<TrackID>& feeding)
     {
-        const auto track = readTrackElementID (state);
-        const auto kind = readTrackKind (state);
+        const auto track = value.id;
+        const auto kind = value.kind;
 
-        if (const auto pad = getPlayedPad (song, track); pad.has_value() && contains (feeding, getDeviceChannel (song, pad->first)))
+        if (value.pad.has_value() && contains (feeding, getDeviceChannel (song, value.padDevice)))
             return true;
 
-        if (kind == TrackValue::Kind::folder)
-            for (const auto inside : getTracksInFolder (song, track))
-                if (contains (feeding, inside))
-                    return true;
+        // Every track inside a folder, in folders inside it too.
+        const std::function<bool (TrackID)> holdsFeeding = [&tracks, &feeding, &holdsFeeding] (TrackID folder)
+        {
+            if (const auto* list = tracks.findList (folder))
+                for (const auto inside : *list)
+                    if (contains (feeding, inside) || holdsFeeding (inside))
+                        return true;
+
+            return false;
+        };
+
+        if (kind == TrackValue::Kind::folder && holdsFeeding (track))
+            return true;
 
         if (kind == TrackValue::Kind::returnTrack)
             for (const auto sender : feeding)
@@ -243,18 +257,21 @@ namespace
 std::vector<TrackID> getTracksFedBy (const Song& song, TrackID track)
 {
     std::vector<TrackID> fed { track };
-    const auto all = getTrackStates (song);
+    const auto all = getTrackIDs (song);
     // Read once (a copy, whatever reads the song meanwhile): nothing here changes it; for a song that holds no values (the
-    // loader's) its tree's fields alone (DevicesValue.h: readDevicesFields()), never a device's values.
+    // loader's) its tree read once (Tracks.h: readTracksWithoutValues()), and its tree's devices' fields alone
+    // (DevicesValue.h: readDevicesFields()), never a device's values.
+    const auto tracks = song.getValues() != nullptr ? getTracksValue (song) : readTracksWithoutValues (song);
     const auto devices = song.getValues() != nullptr ? getDevicesValue (song) : readDevicesFields (song.getState());
 
     for (auto grew = true; grew;)
     {
         grew = false;
 
-        for (const auto& other : all)
+        for (const auto id : all)
         {
-            if (const auto id = readTrackElementID (other); ! contains (fed, id) && isFedBy (song, devices, other, fed))
+            if (const auto* other = tracks.tracks.find (id.getRaw());
+                other != nullptr && ! contains (fed, id) && isFedBy (song, tracks, devices, *other, fed))
             {
                 fed.push_back (id);
                 grew = true;
@@ -336,16 +353,18 @@ std::vector<SidechainChoice> describeTracksToListenTo (const Song& song, TrackID
     std::vector<SidechainChoice> choices;
     const auto fed = isSongTrack (song, listener) ? getTracksFedBy (song, listener) : std::vector<TrackID>();
 
-    for (const auto& state : getTrackStates (song))
-    {
-        const auto track = readTrackElementID (state);
+    const auto tracks = getTracksValue (song); // a copy, which shares what it holds
 
-        if (track == listener)
+    for (const auto track : getTrackIDs (song))
+    {
+        const auto* value = tracks.tracks.find (track.getRaw());
+
+        if (track == listener || value == nullptr)
             continue;
 
         auto choice = describe (song, track);
 
-        if (! hasSoundOfItsOwn (state))
+        if (! hasSoundOfItsOwn (*value))
             choice.whyNot = "a plain folder: mix it as a bus to listen to it";
         else if (contains (fed, track))
             choice.whyNot = "its sound comes from " + getTrackName (song, listener);

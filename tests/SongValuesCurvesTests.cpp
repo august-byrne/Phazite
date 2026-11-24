@@ -28,6 +28,8 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/TracksArea.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Buses.h"
@@ -78,6 +80,13 @@ struct Told final : phazite::SongValues::Listener
     void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<phazite::TrackID>&) override { ++clips; }
     void tempoMapChanged() override { ++tempo; }
 
+    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch (no TRACK element
+    // in the tree).
+    void tracksChanged (const std::vector<phazite::TrackChange>&, const std::vector<phazite::TrackID>&, const phazite::SongTracks&) override
+    {
+        ++tracksTold;
+    }
+
     // The devices', which a device removed comes and goes with since the devices' switch (no DEVICE element in the tree).
     void devicesChanged (const std::vector<phazite::SongValues::DeviceChange>&, const std::vector<phazite::DevicePlace>&,
                          const phazite::SongDevices&) override
@@ -98,7 +107,7 @@ struct Told final : phazite::SongValues::Listener
         }
     }
 
-    int notes = 0, clips = 0, tempo = 0, curves = 0, devices = 0;
+    int notes = 0, clips = 0, tempo = 0, curves = 0, tracksTold = 0, devices = 0;
     std::vector<phazite::ParameterRef> parameters;
 };
 
@@ -310,7 +319,7 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
 
         // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more (where
         // nothing else changed: the tree, or the devices, which a device removed comes and goes with).
-        if (each.other == 0 && each.told.devices == 0)
+        if (each.other == 0 && each.told.devices == 0 && each.told.tracksTold == 0)
         {
             CHECK (each.project == each.told.curves);
             CHECK (each.versions == each.told.curves);

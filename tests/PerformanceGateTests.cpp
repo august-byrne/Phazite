@@ -53,6 +53,7 @@
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 #include "model/base/internal/TracksArea.h"
 #include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
@@ -1519,13 +1520,15 @@ TEST_CASE ("Performance gate: one track's line of a version a knob apart, restor
 #endif
 }
 
-TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 tracks, applied, writes one property, reads each "
-           "of the version's tracks once and none of the song's, nor what a track holds; a line's restore reads its own track")
+TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 tracks, applied, sets one track and writes nothing "
+           "into the tree, reads each of the version's tracks once and none of the song's, nor what a track holds; a line's "
+           "restore reads its own track")
 {
     // The versions' tracks pass (model/versions/ApplySong.cpp: makeTracksLike()) takes the song's tracks from the tracks'
     // keeper (Tracks.h: getHeldTracks(), findHeldTrack(): none read), reads the version's once each, as the song holds one
     // (TracksValue.h: readHeldTrack()), and writes through the tracks' setters only what differs: here one track's name, one
-    // property of its element, while the song's tree is the tracks' storage. It reads nothing a track holds (no device read
+    // track set in the tracks' value, nothing written into the song's tree since the tracks' switch (roadmap step S5.20; one
+    // property of its element before, while the tree was the tracks' storage). It reads nothing a track holds (no device read
     // whole for it: the devices pass reads the version's once each, as its own gate above counts) and erases nothing. One
     // track's line reads the version's track alone, the song's from the keeper.
     auto song = phazite::createSong();
@@ -1557,10 +1560,23 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
         void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++children; }
     };
 
+    // The tracks the values' listener is told changed.
+    struct TracksTold final : phazite::SongValues::Listener
+    {
+        void tracksChanged (const std::vector<phazite::TrackChange>& changes, const std::vector<phazite::TrackID>&,
+                            const phazite::SongTracks&) override
+        {
+            count += changes.size();
+        }
+
+        size_t count = 0;
+    };
+
     struct Taken
     {
         Writes writes {};
         std::uint64_t tracksRead = 0, devicesRead = 0;
+        size_t tracksTold = 0;
     };
 
     const auto measure = [&song, line] (const std::function<void()>& apply)
@@ -1568,6 +1584,8 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
         Taken taken;
         auto state = song->getState(); // a listener belongs to the tree object it was added to
         state.addListener (&taken.writes);
+        TracksTold told;
+        song->getValues()->addListener (&told);
         const auto tracksBefore = phazite::countTracksReadAsValues();
         const auto devicesBefore = phazite::countDevicesReadAsValues();
 
@@ -1579,6 +1597,8 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
         taken.tracksRead = phazite::countTracksReadAsValues() - tracksBefore;
         taken.devicesRead = phazite::countDevicesReadAsValues() - devicesBefore;
         state.removeListener (&taken.writes);
+        song->getValues()->removeListener (&told);
+        taken.tracksTold = told.count;
         CHECK (phazite::getTrackName (*song, line) == "Then");
         phazite::undo (*song);
         REQUIRE (phazite::getTrackName (*song, line) == "Now");
@@ -1594,14 +1614,17 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
              << songTaken.devicesRead << " (of " << devices << " on each side); the line's: properties written "
              << lineTaken.writes.properties << ", tracks read whole " << lineTaken.tracksRead << ", devices read whole "
              << lineTaken.devicesRead);
-    // Measured 2026-11-24 with the tracks' versions pass: one property written, nothing added, taken out or moved, the
+    // Measured 2026-11-24 with the tracks' switch: no property written (one before the switch), nothing added, taken out or
+    // moved, one track told changed, the
     // version's 40 tracks and its master read once each and none of the song's, the version's 80 devices once each by the
-    // devices pass (none for the tracks); the line's one property, its one track read, its two devices.
-    CHECK (songTaken.writes.properties == 1);
+    // devices pass (none for the tracks); the line's the same, its one track read, its two devices.
+    CHECK (songTaken.writes.properties == 0);
+    CHECK (songTaken.tracksTold == 1);
     CHECK (songTaken.writes.children == 0);
     CHECK (songTaken.tracksRead == 41);
     CHECK (songTaken.devicesRead == devices);
-    CHECK (lineTaken.writes.properties == 1);
+    CHECK (lineTaken.writes.properties == 0);
+    CHECK (lineTaken.tracksTold == 1);
     CHECK (lineTaken.writes.children == 0);
     CHECK (lineTaken.tracksRead == 1);
     CHECK (lineTaken.devicesRead <= 3); // the version's of the line's channel
@@ -4437,13 +4460,14 @@ TEST_CASE ("Performance gate: a device removed on a song of 200 curves of other 
     CHECK (*many.allocations == *none.allocations);
 }
 
-TEST_CASE ("Performance gate: the tracks' keeper reads no track whole and walks no element for a volume's drag event, a mute's "
-           "click and a row's height drag, and as much for a track added or moved on 20 tracks as on 200")
+TEST_CASE ("Performance gate: the tracks' setters read no track whole and walk no element for a volume's drag event, a mute's "
+           "click, a row's height drag, a track added or moved, a folder moved into another, on 20 tracks as on 200")
 {
-    // While the song's tree holds the tracks, the tracks' part of the keeper tells the values' listeners what the tree tells
-    // of them (model/base/internal/TracksArea.h): one property from that one property (no track read whole:
-    // countTracksReadAsValues(); no element walked: countTrackElementsWalked()), a track added read alone with what is in it,
-    // a track moved within its list by the places the tree names. Counted on songs of 20 and 200 tracks, the same.
+    // The tracks are values (model/base/internal/TracksArea.h, roadmap step S5.20, the tracks' switch): each setter works the
+    // next value out of the area's and sets it, reading no track whole (countTracksReadAsValues()) and walking no element
+    // (countTrackElementsWalked()), and a volume's drag event tells one track changed. Counted on songs of 20 and 200 tracks,
+    // the same. (Before the switch a track added was read whole once, and a folder of 10 that came into another folder 11
+    // times: the tree's keeper read what came in.)
     struct Counts
     {
         std::uint64_t whole = 0, walked = 0;
@@ -4511,10 +4535,12 @@ TEST_CASE ("Performance gate: the tracks' keeper reads no track whole and walks 
         CHECK (many.at (what).walked == 0);
     }
 
-    CHECK (many.at ("a track added").whole == 1);
-    CHECK (many.at ("a track moved").whole == 0);
-    CHECK (many.at ("a folder of 10 moved").whole == 0);
-    CHECK (many.at ("a folder of 10 into another").whole == 11);
+    for (const auto& [what, counted] : many)
+    {
+        INFO (what);
+        CHECK (counted.whole == 0);
+        CHECK (counted.walked == 0);
+    }
 }
 
 TEST_CASE ("Performance gate: a mute's click, a row's height drag event and a lane's resize set one entry of their values, read no "
@@ -4550,7 +4576,8 @@ TEST_CASE ("Performance gate: a mute's click, a row's height drag event and a la
     {
         std::map<std::string, Counts> counts {};
         std::map<std::string, std::optional<int>> allocations {};
-        std::uint64_t rowsReadWhole = 0;
+        std::uint64_t rowsReadWhole = 0, rowLooks = 0;
+        size_t rows = 0;
     };
 
     const auto run = [&measure] (int numTracks)
@@ -4579,8 +4606,12 @@ TEST_CASE ("Performance gate: a mute's click, a row's height drag event and a la
         CHECK (phazite::getLanes (song, track).front().height == 120);
 
         const auto whole = phazite::countTracksReadAsValues();
-        CHECK (phazite::getPlaylistRows (s.context).size() == phazite::getTrackIDs (song).size());
+        const auto looks = phazite::countTrackLooks();
+        const auto rows = phazite::getPlaylistRows (s.context).size();
+        measured.rowLooks = phazite::countTrackLooks() - looks;
+        CHECK (rows == phazite::getTrackIDs (song).size());
         measured.rowsReadWhole = phazite::countTracksReadAsValues() - whole;
+        measured.rows = rows;
         phazite::test::checkSong (song);
         return measured;
     };
@@ -4599,6 +4630,13 @@ TEST_CASE ("Performance gate: a mute's click, a row's height drag event and a la
 
     CHECK (few.rowsReadWhole == 0);
     CHECK (many.rowsReadWhole == 0);
+
+    // The playlist's rows rebuilt: each row's track looked up once in the tracks' area (Tracks.h: countTrackLooks()), its
+    // folders by their IDs up the area's map, as many looks for each row on 20 tracks as on 200.
+    MESSAGE ("The playlist's rows: " << few.rows << " rows looked up " << few.rowLooks << " times, " << many.rows << " rows "
+                                     << many.rowLooks << " times");
+    CHECK (few.rowLooks == few.rows);
+    CHECK (many.rowLooks == many.rows);
 
     const std::map<std::string, int> bounds { { "a mute's click", 15 }, { "a row's height drag event", 4 }, { "a lane's resize", 18 } };
 
@@ -4640,12 +4678,27 @@ TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks
     // keepOrder()): its count of list entries compared (countTrackListEntriesCompared()). Found 2026-11-23: a volume's drag
     // event and a rename searched their track's list twice (202 entries on 200 tracks), and a track added or deleted compared
     // the list with itself entry by entry (40,601 on 200 tracks, its square); now none, and 503 and 602. And one drag event's
-    // allocations (the tree's write, the change told, the tracks' value's path copied): no more on 200 tracks than on 20.
+    // allocations (the tracks' value's path copied, the change told): no more on 200 tracks than on 20, each count taken while
+    // the teller is listened to.
     struct Measured
     {
         std::map<std::string, std::uint64_t> compared {};
-        std::optional<int> dragAllocations {};
+        std::optional<int> dragAllocations {}, moveAllocations {};
         size_t listLength = 0;
+        std::uint64_t madeReadWhole = 0;
+        size_t dragChanges = 0;
+    };
+
+    // What the tracks' teller tells of a change: how many tracks, in all.
+    struct Told final : phazite::SongValues::Listener
+    {
+        void tracksChanged (const std::vector<phazite::TrackChange>& changes, const std::vector<phazite::TrackID>&,
+                            const phazite::SongTracks&) override
+        {
+            tracks += changes.size();
+        }
+
+        size_t tracks = 0;
     };
 
     const auto compare = [] (const std::function<void()>& edit)
@@ -4658,18 +4711,32 @@ TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks
     const auto run = [&compare] (int numTracks)
     {
         auto song = phazite::createSong();
+        const auto readBefore = phazite::countTracksReadAsValues();
         const auto tracks = phazite::ensureTracks (*song, numTracks);
         const auto track = tracks[(size_t) numTracks / 2];
         Measured measured;
+        measured.madeReadWhole = phazite::countTracksReadAsValues() - readBefore;
         measured.listLength = phazite::getTrackIDs (*song).size();
+        // On through every count: with no listener the teller tells nothing and compares nothing (TracksArea.cpp).
+        Told told;
+        song->getValues()->addListener (&told);
 
         {
             phazite::Gesture gesture (*song, "Drag Volume");
             phazite::setChannelVolume (*song, track, -2.0f);
+            told.tracks = 0;
             measured.compared["a volume's drag event"] = compare ([&] { phazite::setChannelVolume (*song, track, -3.0f); });
+            measured.dragChanges = told.tracks;
             measured.dragAllocations = phazite::test::countAllocations ([&] { phazite::setChannelVolume (*song, track, -4.0f); });
             gesture.commit();
         }
+
+        // A track moved within the list and back: the move back's allocations, counted apart, on what the count runs (the
+        // first move makes what a song's first move makes once, which a gate alone in its run would count otherwise); what a
+        // move compares is counted below ("a track moved": the list before and after, the teller's work, which grows with
+        // the list).
+        phazite::moveTracksAfter (*song, { tracks[1] }, tracks[3]);
+        measured.moveAllocations = phazite::test::countAllocations ([&] { phazite::moveTracksAfter (*song, { tracks[1] }, tracks[0]); });
 
         measured.compared["a mute's click"] = compare ([&] { phazite::toggleTracksMuted (*song, { track }); });
         measured.compared["a rename"] = compare (
@@ -4690,6 +4757,7 @@ TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks
             });
 
         measured.compared["a track deleted"] = compare ([&] { phazite::deleteTracks (*song, { tracks.back() }, nullptr); });
+        song->getValues()->removeListener (&told);
         phazite::test::checkSong (*song);
         return measured;
     };
@@ -4708,7 +4776,14 @@ TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks
     }
 
     // A track moved in the top list: the list before and after, each stepped through once. A track added or deleted: its
-    // place in the list besides (TrackChange::made), the list once more at most.
+    // place in the list besides (TrackChange::made), the list once more at most. The same rule on 20 tracks and on 200; and
+    // what was measured (2026-11-24, the teller listened to): a track moved 40 and 400, moved to the top the same, added 53 and
+    // 503, deleted 62 and 602.
+    const std::map<std::string, std::pair<std::uint64_t, std::uint64_t>> mostCompared { { "a track moved", { 40, 400 } },
+                                                                                        { "a track moved to the top", { 40, 400 } },
+                                                                                        { "a track added", { 53, 503 } },
+                                                                                        { "a track deleted", { 62, 602 } } };
+
     for (const auto* measured : { &few, &many })
     {
         INFO (measured->listLength << " tracks");
@@ -4718,13 +4793,40 @@ TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks
         CHECK (measured->compared.at ("a track deleted") <= 3 * (measured->listLength + 1));
     }
 
+    for (const auto& [what, most] : mostCompared)
+    {
+        INFO (what);
+        CHECK (few.compared.at (what) <= most.first);
+        CHECK (many.compared.at (what) <= most.second);
+    }
+
+    // Made through the tracks' setters, no track read whole; a drag event tells one track.
+    MESSAGE ("Tracks read whole making the song: " << few.madeReadWhole << ", " << many.madeReadWhole << "; a drag event told "
+                                                   << few.dragChanges << ", " << many.dragChanges << " tracks");
+    CHECK (few.madeReadWhole == 0);
+    CHECK (many.madeReadWhole == 0);
+    CHECK (few.dragChanges == 1);
+    CHECK (many.dragChanges == 1);
+
+    // A track moved: 18 allocations on 20 tracks and on 200 in the windows-debug build in its file's run, 19 and 20 in a run of
+    // this case alone, 2026-11-24, the teller listened to (14 and 15 without a listener): at most a node of the maps' depth
+    // more on 200, and no more than the most measured.
+    if (few.moveAllocations.has_value() && many.moveAllocations.has_value())
+    {
+        MESSAGE ("A track moved: allocations on 20 tracks " << *few.moveAllocations << ", on 200 " << *many.moveAllocations);
+        constexpr auto mostMoveAllocations = 20;
+        CHECK (*many.moveAllocations <= *few.moveAllocations + 4);
+        CHECK (*few.moveAllocations <= mostMoveAllocations);
+        CHECK (*many.moveAllocations <= mostMoveAllocations);
+    }
+
     if (! few.dragAllocations.has_value() || ! many.dragAllocations.has_value())
         return;
 
     MESSAGE ("A volume's drag event's allocations on 20 tracks: " << *few.dragAllocations << ", on 200: " << *many.dragAllocations);
-    // 15 on 20 tracks and 16 on 200 in the windows-debug build, 2026-11-23 (the tracks' value one node deeper in its map on
-    // 200): the same bound for both.
-    constexpr auto mostAllocations = 20;
+    // 8 on 20 tracks and 10 on 200 in the windows-debug build, 2026-11-24 (the tracks' value one node deeper in its map on
+    // 200; no tree written since the tracks' switch): the same bound for both.
+    constexpr auto mostAllocations = 10;
     CHECK (*few.dragAllocations <= mostAllocations);
     CHECK (*many.dragAllocations <= mostAllocations);
 }

@@ -90,12 +90,16 @@ struct SongValues::ClipsKeeper
     JUCE_DECLARE_NON_COPYABLE (ClipsKeeper)
 };
 
-// The clips' part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to a
-// track (the track list, a track, a folder's tracks, from the song's element down); and a copy's track given its clips from
-// the values kept, first among its elements, in the track's order, each with its notes (ClipsValue.h: writeClipElement()).
-// Nothing for an element that isn't a track.
-bool leadsToClips (const juce::ValueTree& parent, const juce::ValueTree& child);
+// The clips' part of whole state (WholeState.cpp: writeIn()): a copy's track given its clips from the values kept, first among
+// its elements, in the track's order, each with its notes (ClipsValue.h: writeClipElement()). Nothing for an element that
+// isn't a track. Whole state writes each TRACK itself (TracksArea.h: writeTracksIn()), asking this of each.
 void writeClipsIn (juce::ValueTree& element, const ValuesKept&);
+
+// The CLIP elements on a track's element (one that comes into the song with them: the tracks' safety net, TracksArea.h) read
+// into the areas' next values as the keeper takes a clip in, on the track of this ID, after its others: each kept within what
+// a clip holds, a MIDI clip's notes those of the alias group it joins where another clip of it holds some, else its own, an
+// audio clip of a group sharing the group's sound alike. Nothing for an element whose kind holds no clips. How many it read.
+int takeTrackClipsIn (SongClips&, NotesByClip&, const juce::ValueTree& track, TrackID);
 
 // The clips' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a track's
 // clips, the same in the same order (holdSameTrackClips()); true for an element that isn't a track.

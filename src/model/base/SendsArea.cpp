@@ -258,13 +258,13 @@ void SongValues::SendsKeeper::childAdded (juce::ValueTree& parent, juce::ValueTr
 
     // A track (or what holds tracks) put in the song's track list: what each was remembered with given back (a), and the SEND
     // elements each holds read in (b), each track's in their order.
-    std::vector<juce::ValueTree> tracks;
-    collectTracks (child, tracks);
+    std::vector<juce::ValueTree> trackElements;
+    collectTracks (child, trackElements);
     auto next = values.sends.get();
     std::vector<juce::ValueTree> taken;
     auto changed = false;
 
-    for (const auto& track : tracks)
+    for (const auto& track : trackElements)
     {
         const auto from = readTrackID (track);
 
@@ -318,12 +318,12 @@ void SongValues::SendsKeeper::childRemoved (juce::ValueTree& parent, juce::Value
 
     // A track (or what holds tracks) taken out of the song's track list (a): each track's sends remembered with its element,
     // in the place of what it was remembered with before, or that forgotten where it holds none now; and erased.
-    std::vector<juce::ValueTree> tracks;
-    collectTracks (child, tracks);
+    std::vector<juce::ValueTree> trackElements;
+    collectTracks (child, trackElements);
     const auto before = values.sends.get();
     auto next = before;
 
-    for (const auto& track : tracks)
+    for (const auto& track : trackElements)
     {
         const auto found =
             std::find_if (remembered.begin(), remembered.end(), [&track] (const Remembered& each) { return each.track == track; });
@@ -466,10 +466,23 @@ bool SongValues::setAllSends (Song& song, SongSends next)
 }
 
 //==============================================================================
-bool leadsToSends (const juce::ValueTree& parent, const juce::ValueTree& child)
+int takeTrackSendsIn (SongSends& sends, const juce::ValueTree& track, TrackID from)
 {
-    return (parent.hasType (schema::PHAZITE) || parent.hasType (schema::TRACKS) || parent.hasType (schema::TRACK))
-           && (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK));
+    auto taken = 0;
+
+    for (const auto& element : track)
+    {
+        if (! element.hasType (schema::SEND))
+            continue;
+
+        if (auto value = readHeldSend (element, from); value.has_value() && sends.find (value->id) == nullptr)
+        {
+            sends = withSend (sends, std::move (*value));
+            ++taken;
+        }
+    }
+
+    return taken;
 }
 
 void writeSendsIn (juce::ValueTree& element, const ValuesKept& kept)

@@ -467,7 +467,7 @@ TEST_CASE ("Automation of the gone: a merge's choice of a whole track without a 
     clash.oursElement = clash.baseElement;
     clash.theirsElement = then;
     const phazite::MergeSides sides { now, now, version };
-    REQUIRE (phazite::findByPath (a.getSong().getState(), clash.path).isValid());
+    REQUIRE (phazite::findByPath (now, clash.path).isValid()); // the song's whole copy's: its tree holds no TRACK
 
     a.checkRemoval ("Take the Other Branch's",
                     a.inStep ("Take the Other Branch's",

@@ -463,12 +463,13 @@ struct Changed
 
     static bool isSend (const juce::ValueTree& element) { return element.hasType (schema::SEND); }
 
-    // A track's or the master's switch or view property, or a lane's: the tracks' switches' and view's (TrackSwitchesValue.h,
-    // TracksOutside.h), which the song holds beside its tree.
+    // A track's or the master's own property, switch or view property, or a lane's: the tracks' areas' (TracksValue.h,
+    // TrackSwitchesValue.h, TracksOutside.h), which the song holds beside its tree, the tree keeping its TRACKS and MASTER as
+    // places alone.
     static bool isTrackLeaf (const juce::ValueTree& element, const juce::Identifier& property)
     {
-        return element.hasType (schema::LANE) || phazite::isSwitchProperty (element, property)
-               || phazite::isViewProperty (element, property);
+        return element.hasType (schema::LANE) || element.hasType (schema::TRACK) || element.hasType (schema::MASTER)
+               || phazite::isSwitchProperty (element, property) || phazite::isViewProperty (element, property);
     }
 
     // The opened song's channel (a TRACK by its ID, or the MASTER) in its whole state, where the element changed is a track's
@@ -545,7 +546,7 @@ struct Changed
     {
         REQUIRE (opened != nullptr);
 
-        // A track's or the master's leaf: its channel itself, as whole state writes it.
+        // A track's or the master's own property or leaf: its channel itself, as whole state writes it.
         if (isTrackLeaf (original, changedProperty) && ! original.hasType (schema::LANE))
             return findChannelState();
 

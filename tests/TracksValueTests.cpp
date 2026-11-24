@@ -614,7 +614,20 @@ TEST_CASE ("Tracks' values: the lenient reader reads what the getters it replace
                              R"(<MASTER id="40" fader="41"/></TRACK>)"
                              R"(<TRACK id="50" kind="whatever" fader="51" colour="#FF336699" automationMode="skip"/>)"
                              R"(</TRACKS><MASTER id="1" fader="2" volume="0" automationMode="latch" pinned="1" drumMode="1"/></PHAZITE>)");
-    const phazite::Song::Ptr song (new phazite::Song (tree));
+
+    // The getters read a song's values (roadmap step S5.20, the tracks' switch; a song that holds none is read by
+    // readTracksWithoutValues() alone): a song given, outside the history, what the lenient readers read of the tree as it is.
+    const phazite::Song::Ptr asItIs (new phazite::Song (tree));
+    const auto song = phazite::createSong();
+
+    {
+        const phazite::Song::OutsideHistory outside (*song);
+        auto& values = *song->getValues();
+        values.setAllTracks (*song, phazite::readTracksWithoutValues (*asItIs));
+        values.setSwitchesOutsideHistory (*song, phazite::readTrackSwitches (tree));
+        values.setTracksOutside (phazite::readTracksOutside (tree));
+    }
+
     const auto id = [] (std::uint64_t raw) { return TrackID::fromRaw (raw); };
     const auto& palette = phazite::getTrackColours();
 
@@ -662,7 +675,7 @@ TEST_CASE ("Tracks' values: the lenient reader reads what the getters it replace
     CHECK_FALSE (phazite::hasTrack (*song, id (40)));
 
     // The lenient reader reads the same.
-    const auto tracks = phazite::getTracksValue (*song);
+    const auto tracks = phazite::readTracksWithoutValues (*asItIs);
     REQUIRE (tracks.find (id (10)) != nullptr);
     const auto& ten = *tracks.find (id (10));
     CHECK (juce::exactlyEqual (ten.volume, 0.0f));
@@ -996,7 +1009,8 @@ TEST_CASE ("Tracks' values: damaged tracks open as the song holds them, written 
     // a file Phazite didn't write loses at its first save: a volume at its default (0 dB, the master's -3) and a pan of 0;
     // a number in more digits than its float; a colour written otherwise, as Phazite writes it, and one that is no colour; a
     // switch written off; an empty input; a scale of no word (major where it has a root), a scale without a root; a lane's
-    // switch written off. What Phazite doesn't know stays.
+    // switch written off. What Phazite doesn't know on a TRACK or the MASTER goes, since the tracks' switch (roadmap step
+    // S5.20: the song's values hold the tracks; it stayed before).
     const auto damaged = makeDamagedFile();
     const auto& file = damaged.file;
     const auto& tracks = damaged.tracks;
@@ -1019,13 +1033,13 @@ TEST_CASE ("Tracks' values: damaged tracks open as the song holds them, written 
     CHECK (first[schema::trackName].toString().isEmpty()); // an empty name, as renaming writes it, stays
     CHECK (first.hasProperty (schema::trackName));
     CHECK (first.hasProperty (schema::drumOrder));
-    CHECK (first.getChildWithName ("FUTURE").isValid()); // what Phazite doesn't know stays, in this piece
+    CHECK_FALSE (first.getChildWithName ("FUTURE").isValid()); // what Phazite doesn't know goes
 
     const auto group = phazite::test::findTrackIn (whole, folder);
     CHECK (phazite::writeValue (group[schema::channelVolume]) == "-100");
     CHECK (phazite::writeValue (group[schema::channelPan]) == "1");
     CHECK_FALSE (group.hasProperty (schema::trackColour));
-    CHECK (group["shade"].toString() == "deep");
+    CHECK_FALSE (group.hasProperty ("shade"));
 
     const auto in = phazite::test::findTrackIn (whole, inside);
     CHECK_FALSE (in.hasProperty (schema::channelVolume));
@@ -1083,7 +1097,7 @@ TEST_CASE ("Tracks' values: what only a track has goes from a MASTER as the song
         CHECK_FALSE (master.hasProperty (property->getName()));
     }
 
-    CHECK (master["shade"].toString() == "deep"); // what Phazite doesn't know stays
+    CHECK_FALSE (master.hasProperty ("shade")); // what Phazite doesn't know goes, since the tracks' switch
     CHECK (master.hasProperty (schema::channelFader));
 
     // Both readers read it alike, and the readers by ID too.

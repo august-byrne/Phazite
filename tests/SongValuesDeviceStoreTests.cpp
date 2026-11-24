@@ -853,7 +853,7 @@ TEST_CASE ("Song values' device store: a DEVICE that comes into the song with th
 
     {
         const phazite::Song::OutsideHistory outside (song);
-        phazite::findTrackState (song, s.firstTrack).appendChild (device, nullptr);
+        song.getState().getChildWithName (phazite::schema::MASTER).appendChild (device, nullptr); // the one channel the tree holds
     }
 
     CHECK (values->countDeviceStoreAdopted() == adopted + 1);

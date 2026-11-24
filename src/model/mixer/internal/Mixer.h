@@ -16,6 +16,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SendsValue.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/mixer/DeviceType.h"
 #include "model/mixer/internal/Buses.h"
 
@@ -59,10 +60,6 @@ bool isInstrument (const Song&, DeviceID);
 // thread: for the tests that a control's tick, a strip's slot and a setter find a device by as many looks however many tracks
 // the song has (tests/PerformanceGateTests.cpp).
 std::uint64_t countDeviceLooks() noexcept;
-
-// The element that holds a channel's chain: its TRACK, or the MASTER for the master or none (the tracks' element, which the
-// containers', the modulators' and automation's code find a channel by; it holds no device: the devices' area does).
-juce::ValueTree findChainState (const Song&, TrackID channel);
 
 // A channel's devices, in their order: a track's instrument, if it has one (its first device), then its effects, which
 // change the sound; folders, returns and the master have effects only. And the channel a device is on, the devices in its
@@ -351,6 +348,10 @@ DeviceID getFader (const Song&, TrackID channel);
 juce::String getVolumeParameterID (const Song&, TrackID channel);
 juce::String getPanParameterID (const Song&, TrackID channel); // none for a plain folder's VCA
 ChannelRef findChannelOfFader (const Song&, DeviceID fader);
+
+// The same among tracks given, in the order given, then their master: what a loader that read a song without values once
+// asks (model/devices/internal/Parameters.h: locateParameter() with the song's devices and tracks given).
+ChannelRef findChannelOfFaderIn (const SongTracks&, const std::vector<TrackID>& order, DeviceID fader);
 
 // A channel's volume, in decibels, and its pan, from -1 to 1 (Schema.h: channelVolume, channelPan): the song's, which its
 // fader plays (a plain folder's VCA has no pan); the master's are the master's, whose volume is -3 dB until it is set, as a

@@ -1681,7 +1681,7 @@ bool isWritingAutomation (const Song& song)
     // keeps its entry, for an Undo).
     const auto modes = getTrackSwitches (song).modes;
     return std::any_of (modes.begin(), modes.end(), [&song] (const auto& entry)
-                        { return entry.first == 0 || findTrackState (song, TrackID::fromRaw (entry.first)).hasType (schema::TRACK); });
+                        { return entry.first == 0 || getTracksValue (song).tracks.find (entry.first) != nullptr; });
 }
 
 bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)

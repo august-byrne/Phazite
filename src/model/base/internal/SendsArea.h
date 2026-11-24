@@ -92,12 +92,16 @@ struct SongValues::SendsKeeper
     JUCE_DECLARE_NON_COPYABLE (SendsKeeper)
 };
 
-// The sends' part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to a
-// track (the track list, a track, a folder's tracks, from the song's element down); and a copy's TRACK given its sends from
-// the values kept, by its ID, in their list's order, after its other children (its modulators and macros among them, which
-// modulation's part writes before: decision L.5 of roadmap step S5.20's design). Nothing for another element.
-bool leadsToSends (const juce::ValueTree& parent, const juce::ValueTree& child);
+// The sends' part of whole state (WholeState.cpp: writeIn()): a copy's TRACK given its sends from the values kept, by its ID,
+// in their list's order, after its other children (its modulators and macros among them, which modulation's part writes
+// before: decision L.5 of roadmap step S5.20's design). Nothing for another element. Whole state writes each TRACK itself
+// (WholeState.cpp: writeTracksIn()), asking this of each.
 void writeSendsIn (juce::ValueTree& element, const ValuesKept&);
+
+// The SEND elements on a track's element (one that comes into the song with them: the tracks' safety net, TracksArea.h), each
+// read as the song holds one (SendsValue.h: readHeldSend()) from the track of this ID, after its others; one of an ID the
+// sends hold already left out. How many it read.
+int takeTrackSendsIn (SongSends&, const juce::ValueTree& track, TrackID);
 
 // The sends' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
 // sends, the same in the same order, each the same value; true for another element.

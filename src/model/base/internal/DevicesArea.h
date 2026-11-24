@@ -120,12 +120,18 @@ DevicePlace makeContainerPlace (const DevicePlace& channel, DeviceID container, 
 juce::ValueTree writeDeviceWhole (const SongDevices&, DeviceID);
 
 // The devices' part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to a
-// channel (the track list, a track, a folder's tracks, the master, from the song's element down); and a copy's TRACK or
-// MASTER given its devices and containers from the values kept (a track's by its ID, the master's under 0), in their list's
-// order, each with what it holds (writeDeviceWhole()), right after its clips (which the clips' part writes first among its
-// children) and before its other children. Nothing for another element.
+// channel (the master, from the song's element down: whole state writes each TRACK itself, WholeState.cpp: writeTracksIn(),
+// asking each area of each); and a copy's TRACK or MASTER given its devices and containers from the values kept (a track's by
+// its ID, the master's under 0), in their list's order, each with what it holds (writeDeviceWhole()), right after its clips
+// (which the clips' part writes first among its children) and before its other children. Nothing for another element.
 bool leadsToDevices (const juce::ValueTree& parent, const juce::ValueTree& child);
 void writeDevicesIn (juce::ValueTree& element, const ValuesKept&);
+
+// The DEVICE and CONTAINER elements of a channel's element (a TRACK or the MASTER that comes into the song with them: the
+// tracks' safety net, TracksArea.h), each with what it holds (a container's CHAINs, a chain's DEVICEs), read as the song holds
+// one (DevicesValue.h: readHeldDevice()) at the channel's place given, an owner before what it holds; one of an ID the area
+// holds already left out with what it holds. How many it read.
+int takeChannelDevicesIn (SongDevices&, const juce::ValueTree& channel, const DevicePlace&);
 
 // The devices' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
 // or the MASTER's devices and containers, the same in the same order, each the same value with what it holds (a container's

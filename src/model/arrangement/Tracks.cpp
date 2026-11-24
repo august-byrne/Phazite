@@ -24,6 +24,7 @@
 #include "model/versions/internal/SongMerge.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -36,23 +37,6 @@ namespace phazite
 {
 namespace
 {
-    // Only a folder holds tracks: the others' children (their clips and devices, many in a big song) aren't looked through.
-    void collectTrackStates (const juce::ValueTree& parent, std::vector<juce::ValueTree>& states)
-    {
-        SongIndex::countVisited ((std::uint64_t) parent.getNumChildren()); // a walk, for the speed gates
-
-        for (const auto& child : parent)
-        {
-            if (child.hasType (schema::TRACK))
-            {
-                states.push_back (child);
-
-                if (isFolderState (child))
-                    collectTrackStates (child, states);
-            }
-        }
-    }
-
     // A track's index in its folder's list (the top list for none), -1 for one the song hasn't; with a track of the list left
     // out (`without`: one that moves, as the list is once it is out of it).
     int findListIndex (const SongTracks& tracks, TrackID id, TrackID without = {})
@@ -90,7 +74,7 @@ namespace
         return false;
     }
 
-    // A track moved to a place in a folder's list (setTrackPlace(): the same element), and where it came to another folder,
+    // A track moved to a place in a folder's list (setTrackPlace(): its place alone), and where it came to another folder,
     // the sidechains that would hear themselves through it forgotten (into a bus that a sidechain on it listens to, say).
     void placeTrack (Song& song, TrackID track, TrackID folder, int index)
     {
@@ -103,7 +87,7 @@ namespace
     // The tracks that move, in the playlist's order: those given, but those inside a folder that moves, which go with it.
     std::vector<TrackID> getMovingTracks (const Song& song, const std::vector<TrackID>& tracks)
     {
-        const auto held = getHeldTracks (song);
+        const auto& held = getTracksValue (song);
         const auto isGiven = [&tracks] (TrackID id) { return std::find (tracks.begin(), tracks.end(), id) != tracks.end(); };
         std::vector<TrackID> moving;
 
@@ -130,7 +114,7 @@ namespace
     }
 
     // Where moving tracks dropped at a track go, as the song is before they move: the folder whose list they go into (none for
-    // the top list); into it, after its last element, or else before the first track of its list from the target on that
+    // the top list); into it, after its last track, or else before the first track of its list from the target on that
     // doesn't move itself (none: after the list's last). Nothing for a folder that would go into itself or a folder inside it.
     struct DropPlace
     {
@@ -204,13 +188,13 @@ namespace
     // differ.
     juce::Colour getNextColour (const Song& song, TrackID after)
     {
-        const auto tracks = getTrackIDs (song);
+        const auto& order = getTrackOrder (song).order;
         const auto& colours = getTrackColours();
         size_t next = 0;
 
-        if (const auto above = after.isValid() ? after : (tracks.empty() ? TrackID() : tracks.back()); above.isValid())
+        if (const auto above = after.isValid() ? after : (order.empty() ? TrackID() : order.back()); above.isValid())
         {
-            const auto row = (int) (std::find (tracks.begin(), tracks.end(), above) - tracks.begin());
+            const auto row = (int) (std::find (order.begin(), order.end(), above) - order.begin());
             const auto aboveColour = getTrackColour (song, above, row);
 
             for (size_t i = 0; i < colours.size(); ++i)
@@ -224,7 +208,7 @@ namespace
     // The playlist track before (direction -1) or after (1) this one in its folder, or among the top-level tracks.
     TrackID getSibling (const Song& song, TrackID track, int direction)
     {
-        const auto tracks = getHeldTracks (song);
+        const auto& tracks = getTracksValue (song);
         const auto* value = tracks.tracks.find (track.getRaw());
         const auto* list = value != nullptr ? tracks.findList (value->parent) : nullptr;
 
@@ -234,48 +218,58 @@ namespace
         return {};
     }
 
-    // Whether a track's switch is on (a look in the switches' map by its ID), or a folder's it is in (up its elements).
-    bool isOnOrInFolderOn (const immer::map<std::uint64_t, bool>& switches, const juce::ValueTree& state)
+    // Whether a track's switch is on (a look in the switches' map by its ID), or a folder's it is in (up its folders).
+    bool isOnOrInFolderOn (const SongTracks& tracks, const immer::map<std::uint64_t, bool>& switches, TrackID track)
     {
-        for (auto element = state; element.hasType (schema::TRACK); element = element.getParent())
-            if (switches.find (readTrackElementID (element).getRaw()) != nullptr)
+        for (const auto* value = tracks.tracks.find (track.getRaw()); value != nullptr; value = tracks.tracks.find (value->parent.getRaw()))
+            if (switches.find (value->id.getRaw()) != nullptr)
                 return true;
 
         return false;
     }
 
-    bool isSoloedOrInSoloedFolder (const Song& song, const juce::ValueTree& state)
-    {
-        return isOnOrInFolderOn (getTrackSwitches (song).solos, state);
-    }
-
     // The track whose drum sampler a pad's track plays a pad of (model/devices/internal/DrumKit.h), whose mute and solo cover
     // it as a folder's cover its tracks; none for any other track.
-    juce::ValueTree findPadSamplerTrack (const Song& song, const juce::ValueTree& state)
+    TrackID findPadSamplerTrack (const Song& song, const SongTracks& tracks, TrackID track)
     {
-        if (! readPad (state).has_value())
+        const auto* value = tracks.tracks.find (track.getRaw());
+
+        if (value == nullptr || ! value->pad.has_value())
             return {};
 
-        const auto sampler = findTrackState (song, getDeviceChannel (song, readPadDevice (state)));
-        return sampler != state ? sampler : juce::ValueTree();
+        const auto sampler = getDeviceChannel (song, value->padDevice);
+        return sampler != track && tracks.tracks.find (sampler.getRaw()) != nullptr ? sampler : TrackID();
     }
 
-    bool isMutedOrInMutedFolder (const Song& song, const juce::ValueTree& state)
-    {
-        return isOnOrInFolderOn (getTrackSwitches (song).mutes, state);
-    }
-
-    // A channel's element: the master's by its flag, else its track's; invalid for none.
-    juce::ValueTree findChannelState (const Song& song, ChannelRef channel)
+    // A channel's value: the master's by its flag, else its track's; nullptr for none. A pointer into the value given.
+    const TrackValue* findChannel (const SongTracks& tracks, ChannelRef channel)
     {
         if (channel.onMaster)
-            return song.getState().getChildWithName (schema::MASTER);
+            return &tracks.master;
 
-        return channel.track.isValid() ? findTrackState (song, channel.track) : juce::ValueTree();
+        return tracks.find (channel.track); // the master by its ID too
+    }
+
+    // A channel's fader and VCA: the area's by a look; a song without values' read from its one element (findTrack()).
+    struct ChannelDevices
+    {
+        DeviceID fader {}, vca {};
+    };
+
+    ChannelDevices findChannelDevices (const Song& song, ChannelRef channel)
+    {
+        if (song.getValues() == nullptr)
+        {
+            const auto track = findTrack (song, channel.onMaster ? getMasterID (song) : channel.track);
+            return track ? ChannelDevices { .fader = track->fader, .vca = track->vca } : ChannelDevices {};
+        }
+
+        const auto* value = findChannel (getTracksValue (song), channel);
+        return value != nullptr ? ChannelDevices { .fader = value->fader, .vca = value->vca } : ChannelDevices {};
     }
 
     // The master's element, added with IDs of the song's for the master and its fader if the song has none yet, without an
-    // undo step: what every song has (getTrackList()).
+    // undo step: what every song has (getTrackList()), before it takes its values.
     void addMaster (Song& song)
     {
         auto phazite = song.getState();
@@ -304,7 +298,7 @@ namespace
 
     int placeAfter (const Song& song, TrackValue& value, TrackID after)
     {
-        const auto tracks = getHeldTracks (song);
+        const auto& tracks = getTracksValue (song);
 
         if (const auto* previous = tracks.tracks.find (after.getRaw()))
         {
@@ -318,98 +312,147 @@ namespace
 } // namespace
 
 //==============================================================================
-TrackLookup::TrackLookup (std::optional<TrackValue> found) noexcept
-    : value (std::move (found))
+TrackLookup::TrackLookup (const TrackValue* inArea) noexcept
+    : found (inArea)
 {
+}
+
+TrackLookup::TrackLookup (std::optional<TrackValue> read) noexcept
+    : value (std::move (read))
+{
+    found = value.has_value() ? &*value : nullptr;
 }
 
 const TrackValue* TrackLookup::operator->() const& noexcept
 {
-    jassert (value.has_value()); // a lookup that found none holds no track
-    return &*value;
+    jassert (found != nullptr); // a lookup that found none holds no track
+    return found;
 }
 
 const TrackValue& TrackLookup::operator*() const& noexcept
 {
-    jassert (value.has_value()); // a lookup that found none holds no track
-    return *value;
+    jassert (found != nullptr); // a lookup that found none holds no track
+    return *found;
+}
+
+namespace
+{
+    std::atomic<std::uint64_t> trackLooks { 0 }; // countTrackLooks()
+} // namespace
+
+std::uint64_t countTrackLooks() noexcept
+{
+    return trackLooks.load (std::memory_order_relaxed);
 }
 
 TrackLookup findTrack (const Song& song, TrackID id)
 {
-    return TrackLookup (readTrackValue (findTrackState (song, id)));
+    trackLooks.fetch_add (1, std::memory_order_relaxed);
+
+    if (const auto* values = song.getValues())
+        return TrackLookup (values->tracks.get().find (id));
+
+    // A song without values: the one track's element read, through the song's index (none read whole but that one).
+    if (! id.isValid())
+        return TrackLookup (std::optional<TrackValue>());
+
+    if (const auto master = song.getState().getChildWithName (schema::MASTER); readTrackElementID (master) == id)
+        return TrackLookup (readTrackValue (master));
+
+    return TrackLookup (readTrackValue (song.getIndex().findTrack (id.getRaw())));
 }
 
 bool hasTrack (const Song& song, TrackID id)
 {
-    return findTrackState (song, id).isValid();
+    return (bool) findTrack (song, id);
 }
 
-SongTracks getTracksValue (const Song& song)
+const SongTracks& getTracksValue (const Song& song)
 {
+    if (const auto* values = song.getValues())
+        return values->tracks.get();
+
+    // A song without values is read by readTracksWithoutValues(), by value: nothing here to point into.
+    jassertfalse;
+    static const SongTracks none;
+    return none;
+}
+
+const TrackOrder& getTrackOrder (const Song& song)
+{
+    if (const auto* values = song.getValues())
+        return values->getTrackOrder();
+
+    jassertfalse; // as getTracksValue()'s: readTrackOrderWithoutValues()
+    static const TrackOrder none;
+    return none;
+}
+
+SongTracks readTracksWithoutValues (const Song& song)
+{
+    jassert (song.getValues() == nullptr);
     return readTracksValue (song.getState());
 }
 
-TrackOrder getTrackOrder (const Song& song)
+TrackOrder readTrackOrderWithoutValues (const Song& song)
 {
+    jassert (song.getValues() == nullptr);
     TrackOrder order;
-    const auto& index = song.getIndex();
+    int number = 0;
 
-    for (const auto& state : index.getTracks())
+    for (const auto& element : song.getIndex().getTracks())
     {
-        const auto id = readTrackElementID (state);
-        const auto place = index.getTrackPlace (state);
-        TrackOrder::Place kept;
-        kept.index = place.index;
-        kept.number = place.number;
-        order.places.try_emplace (id.getRaw(), kept);
+        const auto id = readTrackElementID (element);
+        const auto folder = readTrackKind (element) == TrackValue::Kind::folder;
+        number += folder ? 0 : 1;
+        TrackOrder::Place place;
+        place.index = (int) order.order.size();
+        place.number = folder ? 0 : number;
+        order.places.emplace_back (id.getRaw(), place);
         order.order.push_back (id);
     }
 
+    std::stable_sort (order.places.begin(), order.places.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
     return order;
 }
 
 DeviceID getChannelFader (const Song& song, ChannelRef channel)
 {
-    return readChannelFader (findChannelState (song, channel));
+    return findChannelDevices (song, channel).fader;
 }
 
 DeviceID getChannelVCA (const Song& song, ChannelRef channel)
 {
-    return readChannelVCA (findChannelState (song, channel));
+    return findChannelDevices (song, channel).vca;
 }
 
 bool isFaderOf (const Song& song, ChannelRef channel, DeviceID device)
 {
-    const auto state = findChannelState (song, channel);
-    return device.isValid() && (readChannelFader (state) == device || readChannelVCA (state) == device);
+    const auto devices = findChannelDevices (song, channel);
+    return device.isValid() && (devices.fader == device || devices.vca == device);
 }
 
 TrackOrder::Place getTrackPlace (const Song& song, TrackID id)
 {
-    const auto state = findTrackState (song, id);
-
-    if (! state.hasType (schema::TRACK))
+    if (! hasTrack (song, id) || isMaster (song, id))
         return {};
 
-    const auto place = song.getIndex().getTrackPlace (state);
-    TrackOrder::Place found;
-    found.index = place.index;
-    found.number = place.number;
-    return found;
+    return getTrackOrder (song).getPlace (id);
 }
 
 std::set<std::uint64_t> getAutomatableIDs (const Song& song, TrackID id)
 {
     std::set<std::uint64_t> ids;
-    const auto state = findTrackState (song, id);
+    const auto track = findTrack (song, id);
 
-    if (! state.isValid())
+    if (! track)
         return ids;
 
-    for (const auto device : { readChannelFader (state), readChannelVCA (state) })
+    for (const auto device : { track->fader, track->vca })
         if (device.isValid())
             ids.insert (device.getRaw());
+
+    const auto onMaster = track->isMaster();
 
     for (const auto& device : getDeviceOutline (song, id))
         ids.insert (device.id.getRaw());
@@ -417,7 +460,6 @@ std::set<std::uint64_t> getAutomatableIDs (const Song& song, TrackID id)
     for (const auto send : getSends (song, id))
         ids.insert (send.getRaw());
 
-    const auto onMaster = state.hasType (schema::MASTER);
     const auto modulation = getModulationValue (song);
 
     for (const auto& entry : modulation.modulators)
@@ -425,6 +467,35 @@ std::set<std::uint64_t> getAutomatableIDs (const Song& song, TrackID id)
             ids.insert (entry.first);
 
     return ids;
+}
+
+std::optional<ChannelRef> findChannelOnPath (const Song& song, const juce::StringArray& path)
+{
+    const auto isStepOf = [] (const juce::String& step, const juce::Identifier& type) { return step.startsWith (type.toString() + ":"); };
+
+    if (path.size() == 1 && isStepOf (path[0], schema::MASTER))
+        return ChannelRef { .onMaster = true };
+
+    if (path.size() < 2 || ! isStepOf (path[0], schema::TRACKS))
+        return std::nullopt;
+
+    const auto& tracks = getTracksValue (song);
+    TrackID folder;
+
+    for (int i = 1; i < path.size(); ++i)
+    {
+        if (! isStepOf (path[i], schema::TRACK))
+            return std::nullopt;
+
+        const auto id = TrackID::fromRaw (readID (path[i].fromFirstOccurrenceOf (":", false, false)));
+
+        if (const auto* value = tracks.tracks.find (id.getRaw()); value == nullptr || value->parent != folder)
+            return std::nullopt;
+
+        folder = id;
+    }
+
+    return ChannelRef { .track = folder };
 }
 
 //==============================================================================
@@ -436,85 +507,60 @@ juce::ValueTree getTrackList (Song& song)
 
 TrackID getMasterID (const Song& song)
 {
+    if (const auto* values = song.getValues())
+        return values->tracks.get().master.id;
+
+    // A song without values (the loader's): its MASTER's one field, no track read.
     return readTrackElementID (song.getState().getChildWithName (schema::MASTER));
-}
-
-juce::ValueTree findTrackState (const Song& song, TrackID id)
-{
-    if (! id.isValid())
-        return {};
-
-    // The master's is its own element, with its view (its lanes).
-    if (const auto master = song.getState().getChildWithName (schema::MASTER); readTrackElementID (master) == id)
-        return master;
-
-    return song.getIndex().findTrack (id.getRaw());
-}
-
-std::vector<juce::ValueTree> getTrackStates (const Song& song)
-{
-    return song.getIndex().getTracks();
 }
 
 std::vector<TrackID> getTrackIDs (const Song& song)
 {
-    std::vector<TrackID> ids;
-
-    for (const auto& state : getTrackStates (song))
-        ids.push_back (getTrackID (state));
-
-    return ids;
-}
-
-TrackID getTrackID (const juce::ValueTree& state)
-{
-    return readTrackElementID (state);
-}
-
-bool isFolderState (const juce::ValueTree& state)
-{
-    return readTrackKind (state) == TrackValue::Kind::folder;
-}
-
-bool isReturnState (const juce::ValueTree& state)
-{
-    return readTrackKind (state) == TrackValue::Kind::returnTrack;
+    return song.getValues() != nullptr ? getTrackOrder (song).order : readTrackOrderWithoutValues (song).order;
 }
 
 std::optional<TrackValue::Kind> getTrackKind (const Song& song, TrackID id)
 {
-    return readTrackKind (findTrackState (song, id));
+    if (const auto track = findTrack (song, id))
+        return track->kind;
+
+    return std::nullopt;
 }
 
 std::vector<TrackID> getTrackIDsOfKind (const Song& song, TrackValue::Kind kind)
 {
+    const auto& tracks = getTracksValue (song);
     std::vector<TrackID> ids;
 
-    for (const auto& state : getTrackStates (song))
-        if (readTrackKind (state) == kind)
-            ids.push_back (readTrackElementID (state));
+    for (const auto id : getTrackOrder (song).order)
+        if (const auto* value = tracks.tracks.find (id.getRaw()); value != nullptr && value->kind == kind)
+            ids.push_back (id);
 
     return ids;
 }
 
 juce::String getTrackInput (const Song& song, TrackID id)
 {
-    return readTrackInput (findTrackState (song, id));
+    const auto track = findTrack (song, id);
+    return track ? track->input : juce::String();
 }
 
 TrackValue::Monitoring getTrackMonitoring (const Song& song, TrackID id)
 {
-    return readTrackMonitoring (findTrackState (song, id));
+    const auto track = findTrack (song, id);
+    return track ? track->monitoring : TrackValue::Monitoring::whileArmed;
 }
 
 bool isFolder (const Song& song, TrackID id)
 {
-    return isFolderState (findTrackState (song, id));
+    const auto track = findTrack (song, id);
+    return track && track->isFolder();
 }
 
 bool isReturnTrack (const Song& song, TrackID id)
 {
-    return isReturnState (findTrackState (song, id));
+    const auto track = findTrack (song, id);
+    return track && track->isReturn();
 }
 
 bool isMaster (const Song& song, TrackID id)
@@ -524,89 +570,106 @@ bool isMaster (const Song& song, TrackID id)
 
 juce::String getTrackName (const Song& song, TrackID id)
 {
-    const auto state = findTrackState (song, id);
-    const auto kind = readTrackKind (state);
+    const auto track = findTrack (song, id);
+    return track ? getTrackName (song, *track) : juce::String();
+}
 
-    if (! kind.has_value() || *kind == TrackValue::Kind::master)
-        return kind.has_value() ? juce::String ("Master") : juce::String();
+juce::String getTrackName (const Song& song, const TrackValue& track)
+{
+    if (track.isMaster())
+        return "Master";
 
-    if (const auto name = readTrackName (state); name.isNotEmpty() || *kind == TrackValue::Kind::folder)
+    if (const auto name = track.getOwnName(); name.isNotEmpty() || track.isFolder())
         return name;
 
-    // Its number among the tracks that aren't folders, as the song's index keeps it: every track findTrackState() finds has
-    // one.
-    const auto number = song.getIndex().getTrackPlace (state).number;
+    // Its number among the tracks that aren't folders, as the song's order keeps it: every track the song holds has one.
+    const auto number = getTrackOrder (song).getPlace (track.id).number;
     jassert (number > 0);
     return number > 0 ? "Track " + juce::String (number) : juce::String ("Track");
 }
 
 TrackID getParentFolder (const Song& song, TrackID id)
 {
-    if (const auto parent = findTrackState (song, id).getParent(); parent.hasType (schema::TRACK))
-        return getTrackID (parent);
+    if (const auto* value = getTracksValue (song).tracks.find (id.getRaw()))
+        return value->parent;
 
     return {};
 }
 
 std::vector<TrackID> getTracksInFolder (const Song& song, TrackID folder)
 {
-    std::vector<juce::ValueTree> states;
-    collectTrackStates (findTrackState (song, folder), states);
-
+    const auto& tracks = getTracksValue (song);
     std::vector<TrackID> ids;
 
-    for (const auto& state : states)
-        ids.push_back (getTrackID (state));
+    const std::function<void (TrackID)> add = [&tracks, &ids, &add] (TrackID owner)
+    {
+        if (const auto* list = tracks.findList (owner))
+        {
+            for (const auto id : *list)
+            {
+                ids.push_back (id);
+                add (id);
+            }
+        }
+    };
+
+    if (tracks.tracks.find (folder.getRaw()) != nullptr)
+        add (folder);
 
     return ids;
 }
 
 bool isTrackMuted (const Song& song, TrackID id, bool orInMutedFolder)
 {
-    const auto state = findTrackState (song, id);
+    const auto& tracks = getTracksValue (song);
+
+    if (tracks.tracks.find (id.getRaw()) == nullptr)
+        return false;
+
+    const auto switches = getTrackSwitches (song);
 
     if (! orInMutedFolder)
-        return state.hasType (schema::TRACK) && getTrackSwitches (song).mutes.find (id.getRaw()) != nullptr;
+        return switches.mutes.find (id.getRaw()) != nullptr;
 
     // A pad's track is muted with its sampler's track, as a track is with its folder.
-    return isMutedOrInMutedFolder (song, state) || isMutedOrInMutedFolder (song, findPadSamplerTrack (song, state));
+    return isOnOrInFolderOn (tracks, switches.mutes, id)
+           || isOnOrInFolderOn (tracks, switches.mutes, findPadSamplerTrack (song, tracks, id));
 }
 
 bool isTrackSoloed (const Song& song, TrackID id)
 {
-    return getTrackSwitches (song).solos.find (id.getRaw()) != nullptr && findTrackState (song, id).hasType (schema::TRACK);
+    return getTrackSwitches (song).solos.find (id.getRaw()) != nullptr && getTracksValue (song).tracks.find (id.getRaw()) != nullptr;
 }
 
 bool areAnyTracksSoloed (const Song& song)
 {
     // Each solo the switches hold, of a track the song holds (one a step took away keeps its entry, for an Undo).
     const auto solos = getTrackSwitches (song).solos;
-    return std::any_of (solos.begin(), solos.end(), [&song] (const auto& entry)
-                        { return findTrackState (song, TrackID::fromRaw (entry.first)).hasType (schema::TRACK); });
+    const auto& tracks = getTracksValue (song);
+    return std::any_of (solos.begin(), solos.end(), [&tracks] (const auto& entry) { return tracks.tracks.find (entry.first) != nullptr; });
 }
 
 bool isTrackFrozen (const Song& song, TrackID id)
 {
-    return getTrackSwitches (song).frozen.find (id.getRaw()) != nullptr && findTrackState (song, id).hasType (schema::TRACK);
+    return getTrackSwitches (song).frozen.find (id.getRaw()) != nullptr && getTracksValue (song).tracks.find (id.getRaw()) != nullptr;
 }
 
 std::optional<TrackPad> getTrackPad (const Song& song, TrackID id)
 {
-    const auto state = findTrackState (song, id);
-
-    if (const auto pad = readPad (state))
-        return TrackPad { .track = id, .sampler = readPadDevice (state), .pad = *pad };
+    if (const auto* value = getTracksValue (song).tracks.find (id.getRaw()); value != nullptr && value->pad.has_value())
+        return TrackPad { .track = id, .sampler = value->padDevice, .pad = *value->pad };
 
     return std::nullopt;
 }
 
 std::vector<TrackPad> getPadTracks (const Song& song)
 {
+    const auto& tracks = getTracksValue (song);
     std::vector<TrackPad> pads;
 
-    for (const auto& state : getTrackStates (song))
-        if (const auto pad = readPad (state))
-            pads.push_back ({ .track = readTrackElementID (state), .sampler = readPadDevice (state), .pad = *pad });
+    for (const auto id : getTrackOrder (song).order)
+        if (const auto* value = tracks.tracks.find (id.getRaw()); value != nullptr && value->pad.has_value())
+            pads.push_back ({ .track = id, .sampler = value->padDevice, .pad = *value->pad });
 
     return pads;
 }
@@ -615,13 +678,13 @@ void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
 {
     // Off is no entry at all, as it is at first: unmuted again, the track is as it was, which a version's changes then don't
     // count (docs/design/versions.md). One entry set, the switches' setter asked only where it differs.
-    if (findTrackState (song, id).hasType (schema::TRACK))
+    if (getTracksValue (song).tracks.find (id.getRaw()) != nullptr)
         setTrackSwitches (song, withMute (getTrackSwitches (song), id.getRaw(), muted), undo != nullptr);
 }
 
 void setTrackSoloed (Song& song, TrackID id, bool soloed)
 {
-    if (findTrackState (song, id).hasType (schema::TRACK))
+    if (getTracksValue (song).tracks.find (id.getRaw()) != nullptr)
         setTrackSwitches (song, withSolo (getTrackSwitches (song), id.getRaw(), soloed), false);
 }
 
@@ -649,7 +712,8 @@ TrackID insertPlainTrack (Song& song, TrackID after)
 //==============================================================================
 juce::Colour getTrackColour (const Song& song, TrackID id, int row)
 {
-    return getTrackColour (readTrackColour (findTrackState (song, id)), row);
+    const auto track = findTrack (song, id);
+    return getTrackColour (track ? track->colour : std::nullopt, row);
 }
 
 juce::Colour getTrackColour (std::optional<juce::uint32> own, int row)
@@ -664,22 +728,22 @@ juce::Colour getTrackColour (std::optional<juce::uint32> own, int row)
 //==============================================================================
 TrackView getTrackView (const Song& song, TrackID id)
 {
-    return getViewOf (song, findTrackState (song, id));
-}
-
-TrackView getViewOf (const Song& song, const juce::ValueTree& state)
-{
     // A song that holds no values (a check's copy): its tree holds the view, read as Phazite's code always read it.
     const auto* values = song.getValues();
 
     if (values == nullptr)
-        return readViewOf (state);
+    {
+        if (const auto master = song.getState().getChildWithName (schema::MASTER); readTrackElementID (master) == id)
+            return readViewOf (master);
 
-    if (state.hasType (schema::MASTER))
+        return readViewOf (song.getIndex().findTrack (id.getRaw()));
+    }
+
+    if (isMaster (song, id))
         return values->tracksOutside.get().master;
 
     const auto* view =
-        state.hasType (schema::TRACK) ? values->tracksOutside.get().tracks.find (readTrackElementID (state).getRaw()) : nullptr;
+        values->tracks.get().tracks.find (id.getRaw()) != nullptr ? values->tracksOutside.get().tracks.find (id.getRaw()) : nullptr;
     return view != nullptr ? *view : TrackView();
 }
 
@@ -697,12 +761,12 @@ TracksOutside getTracksOutside (const Song& song)
 
 std::optional<std::uint64_t> findSwitchKey (const Song& song, TrackID id)
 {
-    const auto state = findTrackState (song, id);
+    const auto track = findTrack (song, id);
 
-    if (state.hasType (schema::MASTER))
-        return (std::uint64_t) 0;
+    if (! track)
+        return std::nullopt;
 
-    return state.hasType (schema::TRACK) ? std::optional (id.getRaw()) : std::nullopt;
+    return track->isMaster() ? (std::uint64_t) 0 : id.getRaw();
 }
 
 void setTrackSwitches (Song& song, TrackSwitches next, bool inHistory)
@@ -730,7 +794,7 @@ void setTrackView (Song& song, TrackID id, TrackView view)
 
 void setTrackFrozen (Song& song, TrackID id, bool frozen, juce::UndoManager* undo)
 {
-    if (findTrackState (song, id).hasType (schema::TRACK))
+    if (getTracksValue (song).tracks.find (id.getRaw()) != nullptr)
         setTrackSwitches (song, withFrozen (getTrackSwitches (song), id.getRaw(), frozen), undo != nullptr);
 }
 
@@ -784,16 +848,26 @@ void setPinned (Song& song, TrackID id, bool pinned)
 
 bool isHiddenInCollapsedFolder (const Song& song, TrackID id)
 {
-    for (auto folder = findTrackState (song, id).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
-        if (getViewOf (song, folder).collapsed.value_or (false))
+    const auto& tracks = getTracksValue (song);
+    const auto* value = tracks.tracks.find (id.getRaw());
+
+    for (auto folder = value != nullptr ? value->parent : TrackID(); folder.isValid();)
+    {
+        if (getTrackView (song, folder).collapsed.value_or (false))
             return true;
+
+        const auto* parent = tracks.tracks.find (folder.getRaw());
+        folder = parent != nullptr ? parent->parent : TrackID();
+    }
 
     return false;
 }
 
 void toggleSoloAlone (Song& song, TrackID id)
 {
-    if (! findTrackState (song, id).hasType (schema::TRACK))
+    const auto& tracks = getTracksValue (song);
+
+    if (tracks.tracks.find (id.getRaw()) == nullptr)
         return;
 
     // Every other track's solo off (of the tracks the song holds: a track a step took away keeps its entry), and its own on,
@@ -804,7 +878,7 @@ void toggleSoloAlone (Song& song, TrackID id)
 
     for (const auto& entry : next.solos)
     {
-        if (entry.first == id.getRaw() || ! findTrackState (song, TrackID::fromRaw (entry.first)).hasType (schema::TRACK))
+        if (entry.first == id.getRaw() || tracks.tracks.find (entry.first) == nullptr)
             continue;
 
         alone = false;
@@ -817,9 +891,15 @@ void toggleSoloAlone (Song& song, TrackID id)
 
 bool isSilencedBySolo (const Song& song, TrackID id)
 {
-    const auto state = findTrackState (song, id);
-    return areAnyTracksSoloed (song) && ! isSoloedOrInSoloedFolder (song, state)
-           && ! isSoloedOrInSoloedFolder (song, findPadSamplerTrack (song, state)) && ! isReturnState (state)
+    const auto& tracks = getTracksValue (song);
+    const auto* value = tracks.tracks.find (id.getRaw());
+
+    if (value == nullptr)
+        return false;
+
+    const auto solos = getTrackSwitches (song).solos;
+    return areAnyTracksSoloed (song) && ! isOnOrInFolderOn (tracks, solos, id)
+           && ! isOnOrInFolderOn (tracks, solos, findPadSamplerTrack (song, tracks, id)) && ! value->isReturn()
            && ! isTrackMuted (song, id, false);
 }
 
@@ -1450,7 +1530,7 @@ void eraseTrackHoldings (Song& song, const std::vector<TrackID>& tracks)
             continue;
         }
 
-        if (! findTrackState (song, id).hasType (schema::TRACK))
+        if (getTracksValue (song).tracks.find (id.getRaw()) == nullptr)
             continue;
 
         addTrack (id);
@@ -1496,7 +1576,8 @@ namespace
 
         for (const auto& child : owner)
             if (child.hasType (schema::CONTAINER)
-                || (child.hasType (schema::TRACK) && owner.hasType (schema::TRACK) && isFolderState (owner)))
+                || (child.hasType (schema::TRACK) && owner.hasType (schema::TRACK)
+                    && owner[schema::trackKind].toString() == schema::trackIsFolder))
                 collectModulationOwners (child, owners);
     }
 
@@ -1831,7 +1912,7 @@ namespace
         if (chosen.isValid())
         {
             giveLeavesOf (song, chosen, heldBefore);
-            [[maybe_unused]] const auto added = setNewTracks (song, made, place, elements);
+            [[maybe_unused]] const auto added = setNewTracks (song, made, place);
             jassert (added); // what the trial above took
             giveHoldingsOf (song, chosen);
         }
@@ -1853,7 +1934,7 @@ namespace
 
         eraseTrackHoldings (song, { track.id });
         giveLeavesOf (song, chosen, {});
-        setMasterAnew (song, *value, chosen);
+        setMasterAnew (song, *value);
         giveHoldingsOf (song, chosen);
         unlinkLoneClips (song);
         return AreaChoice::chosen;

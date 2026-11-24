@@ -103,7 +103,7 @@ namespace
 
     // The key set last (LASTKEY in the song's Phazite state, model/base/internal/Schema.h), as the song's standing holds it
     // (SongOwnValue.h: SavedKey): its scale by its word, major for none; a track's is read by the tracks' conversion
-    // (TracksValue.h: readTrackKey()), alike. A key exists exactly when its root does.
+    // (TracksValue.h: readTrackValue()), alike. A key exists exactly when its root does.
     std::optional<Key> readKey (const std::optional<SavedKey>& saved)
     {
         if (! saved.has_value())
@@ -2283,7 +2283,8 @@ std::optional<Scale> findScale (const juce::String& savedName)
 
 std::optional<Key> getTrackKey (const Song& song, TrackID track)
 {
-    return readTrackKey (findTrackState (song, track)); // the tracks' conversion (TracksValue.h)
+    const auto value = findTrack (song, track);
+    return value ? value->key : std::nullopt;
 }
 
 void setTrackKey (Song& song, TrackID track, const std::optional<Key>& key)
@@ -2667,8 +2668,10 @@ AreaChoice chooseNoteClash (Song& song, const MergeClash& clash, int value, cons
     auto trackPath = clipPath;
     trackPath.remove (trackPath.size() - 1);
 
-    // The track the path names, by its ID as the tracks' conversion reads it (TracksValue.h), none for no track there.
-    if (const auto track = readTrackElementID (findByPath (song.getState(), trackPath));
+    // The track the path names, where the song holds it there (Tracks.h: findChannelOnPath()), none for no track there.
+    const auto channel = findChannelOnPath (song, trackPath);
+
+    if (const auto track = channel.has_value() && ! channel->onMaster ? channel->track : TrackID();
         ! clip.isValid() || ! track.isValid() || getClipTrack (song, clip) != track)
         return AreaChoice::refused; // no clip there, so no note
 

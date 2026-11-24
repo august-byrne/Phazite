@@ -1428,14 +1428,35 @@ namespace
         // A copy of the tree given its devices alone, as a whole copy writes them (DevicesArea.h: writeDevicesIn()): what the
         // other areas write is their checks', and a song whose tree holds what its keeper refused (a second AUTOMATION, which
         // a whole copy can't write) still has its devices checked.
+        // Since the tracks' switch (roadmap step S5.20) the tree holds no TRACK: the copy is given each track's own element
+        // (TracksValue.h: writeTrackElement()), a folder's tracks in it, for the devices to be written into.
         auto whole = song.getState().createCopy();
         const auto valuesKept = keepValues (song);
+        const auto& tracksKept = values.tracks.get();
+        const std::function<void (juce::ValueTree, TrackID)> writeTracks =
+            [&tracksKept, &writeTracks] (juce::ValueTree into, TrackID folder)
+        {
+            if (const auto* list = tracksKept.findList (folder))
+            {
+                for (const auto id : *list)
+                {
+                    if (const auto* track = tracksKept.tracks.find (id.getRaw()))
+                    {
+                        auto element = writeTrackElement (*track);
+                        writeTracks (element, id);
+                        into.appendChild (element, nullptr);
+                    }
+                }
+            }
+        };
+
+        writeTracks (whole.getChildWithName (schema::TRACKS), {});
         const std::function<void (juce::ValueTree)> writeDevices = [&valuesKept, &writeDevices] (juce::ValueTree element)
         {
             writeDevicesIn (element, valuesKept);
 
             for (auto child : element)
-                if (leadsToDevices (element, child))
+                if (leadsToDevices (element, child) || child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
                     writeDevices (child);
         };
 
@@ -1709,27 +1730,95 @@ namespace
             problems.push_back (text + "holds its lanes otherwise than Phazite writes them");
     }
 
-    // The tracks' area, while the song's tree holds the tracks: each TRACK (in the track list and in each TRACK, a folder's
-    // tracks after it) and the MASTER read alike both ways and holding what Phazite writes of them (checkTrackElement()).
-    void checkTracksValue (const Song& song, std::vector<std::string>& problems)
+    // The tracks' area (SongValues.h: tracks): no TRACK in the song's tree's TRACKS, and its MASTER without a property or a child
+    // (their area holds them: places alone); the tracks' value holding its lists (TracksValue.h: holdsItsLists()); every ID it
+    // holds (a track's, a fader's, a VCA's, the master's) one the song gave; each track and the master, written as whole state
+    // writes it (writeTrackElement(), with its switches and its view), read alike both ways and holding what Phazite writes of
+    // it (checkTrackElement(): each field within its description's range, as the song holds it), and read back as the value it
+    // was written from (its folder aside, which the element doesn't hold); no list of another area's kept under a TrackID the
+    // value doesn't hold (the clips' tracks, the sends' tracks, the devices' and modulation's channels; but the switches' and
+    // the view's entries, kept for an Undo); each clip on a track that holds clips; and the order the song keeps (getTrackOrder())
+    // the order made afresh of the value. (A send's track, a device's and a modulator's place: their areas' rules.)
+    void checkTracksValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> visit = [&problems, &visit] (const juce::ValueTree& parent)
+        const auto state = song.getState();
+
+        for (const auto& child : state)
         {
-            for (const auto& child : parent)
+            if (child.hasType (schema::TRACKS) && child.getNumChildren() > 0)
+                problems.push_back ("values: the song's tree holds a track (its TRACKS holds an element)");
+
+            if (child.hasType (schema::MASTER) && (child.getNumProperties() > 0 || child.getNumChildren() > 0))
+                problems.push_back ("values: the song's tree's MASTER holds a property or an element");
+        }
+
+        const auto& tracks = values.tracks.get();
+
+        if (! holdsItsLists (tracks))
+            problems.push_back ("values: the tracks don't hold their lists");
+
+        const auto next = (std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0);
+
+        forEachIDHeld (tracks,
+                       [&problems, next] (std::uint64_t id)
+                       {
+                           if (id >= next)
+                               problems.push_back ("values: the tracks hold " + std::to_string (id) + ", no ID the song gave");
+                       });
+
+        const auto checkWritten = [&problems, &values] (const TrackValue& value)
+        {
+            auto written = writeTrackElement (value);
+            writeSwitchesInto (written, values.trackSwitches.get());
+            writeViewInto (written, value.isMaster() ? values.tracksOutside.get().master
+                                    : values.tracksOutside.get().tracks.find (value.id.getRaw()) != nullptr
+                                        ? *values.tracksOutside.get().tracks.find (value.id.getRaw())
+                                        : TrackView());
+            checkTrackElement (written, problems);
+
+            if (auto read = readHeldTrack (written); ! read.has_value())
             {
-                if (child.hasType (schema::TRACK))
-                {
-                    checkTrackElement (child, problems);
-                    visit (child);
-                }
+                problems.push_back ("values: track " + std::to_string (value.id.getRaw()) + " is written as none");
+            }
+            else
+            {
+                read->parent = value.parent;
+
+                if (const auto fields = findDifferingFields (*read, value); ! fields.empty())
+                    problems.push_back ("values: track " + std::to_string (value.id.getRaw()) + " is read back otherwise, in its "
+                                        + fields);
             }
         };
 
-        visit (song.getState().getChildWithName (schema::TRACKS));
+        for (const auto& [id, value] : tracks.tracks)
+            checkWritten (value);
 
-        for (const auto& child : song.getState())
-            if (child.hasType (schema::MASTER))
-                checkTrackElement (child, problems);
+        checkWritten (tracks.master);
+
+        // Another area's lists by a track's ID, each of a track the song holds (the devices' and modulation's channels: the
+        // master's under 0).
+        const auto checkKeys = [&problems, &tracks] (const auto& map, const char* what, bool masterUnderNone)
+        {
+            for (const auto& entry : map)
+                if (! (masterUnderNone && entry.first == 0) && tracks.tracks.find (entry.first) == nullptr)
+                    problems.push_back ("values: " + std::string (what) + " kept under " + std::to_string (entry.first)
+                                        + ", no track the song holds");
+        };
+
+        checkKeys (values.clips.get().tracks, "a list of clips", false);
+        checkKeys (values.sends.get().tracks, "a list of sends", false);
+        checkKeys (values.devices.get().channels, "a channel's devices", true);
+        checkKeys (values.modulation.get().channels, "a channel's modulators", true);
+
+        for (const auto& [id, clip] : values.clips.get().clips)
+            if (const auto* track = tracks.tracks.find (clip.track.getRaw()); track == nullptr || ! track->holdsClips())
+                problems.push_back ("values: clip " + std::to_string (id) + " is on no track that holds clips");
+
+        const auto fresh = makeTrackOrder (tracks);
+        const auto& kept = values.getTrackOrder();
+
+        if (kept.order != fresh.order || kept.places != fresh.places)
+            problems.push_back ("values: the song's order of its tracks is kept otherwise than its tracks make it");
     }
 
     // The tracks' switches and view (SongValues.h: trackSwitches, tracksOutside): no switch, no view property and no LANES on
@@ -1788,43 +1877,6 @@ namespace
         }
 
         checkLanes (outside.master, "the master");
-    }
-
-    // The tracks' keeper, while the song's tree holds the tracks: what its part of the keeper keeps of them, which the
-    // listeners were told (SongValues.h: getTracksAsTold()), is what the song holds, read again (TracksArea.h:
-    // readHeldTracks()): the tracks and their lists alike. (The switches and the view are their areas', which the keeper keeps
-    // nothing of: checkTrackLeavesValue().)
-    void checkTracksAsTold (const Song& song, const SongValues& values, std::vector<std::string>& problems)
-    {
-        const auto* kept = values.getTracksAsTold();
-
-        if (kept == nullptr)
-        {
-            problems.push_back ("values: the keeper holds no tracks");
-            return;
-        }
-
-        const auto read = readHeldTracks (song.getState());
-
-        if (! holdsItsLists (*kept))
-            problems.push_back ("values: the tracks kept don't hold their lists");
-
-        if (! (*kept == read))
-        {
-            for (const auto& [id, value] : kept->tracks)
-                if (const auto* held = read.tracks.find (id); held == nullptr || ! (*held == value))
-                    problems.push_back ("values: track " + std::to_string (id) + " is kept otherwise than the song holds it");
-
-            for (const auto& [id, value] : read.tracks)
-                if (kept->tracks.find (id) == nullptr)
-                    problems.push_back ("values: track " + std::to_string (id) + " is in the song but not kept");
-
-            if (! (kept->lists == read.lists))
-                problems.push_back ("values: the tracks' lists are kept otherwise than the song holds them");
-
-            if (! (kept->master == read.master))
-                problems.push_back ("values: the master is kept otherwise than the song holds it");
-        }
     }
 
     // The song's own, while the song's tree holds it (SongOwnValue.h): its root read alike as Phazite's code always read it and
@@ -1906,9 +1958,8 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkSendsValue (song, *values, problems);
     checkDevicesValue (song, *values, problems);
     checkDeviceStoreValue (song, *values, problems); // the devices' store
-    checkTracksValue (song, problems);
+    checkTracksValue (song, *values, problems);
     checkTrackLeavesValue (song, *values, problems); // the tracks' switches and view
-    checkTracksAsTold (song, *values, problems);     // what the tracks' keeper told, while the tree holds them
     checkSongOwnValue (song, problems);              // the song's own, while the tree holds it
     return problems;
 }
