@@ -11,6 +11,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
@@ -26,6 +27,8 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "model/plugins/internal/PluginInstances.h"
+#include "model/plugins/internal/SandboxedInstance.h"
 #include "model/presets/internal/Presets.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -71,6 +74,15 @@ TEST_CASE ("Devices' keeper: a track's devices go with its deletion and come bac
         const phazite::UndoStep step (song, "Add Device");
         plugin = phazite::test::TestPlugin::add (song, track);
     }
+
+    // The plug-in loaded and its first state in the song before the steps are compared: its helper's answer comes when it
+    // comes, and one that arrived in the middle of the walk below was a state the walk did not expect on its device.
+    s.waitForPlugins();
+    auto* instance = phazite::findPluginInstance (song, plugin);
+    REQUIRE (instance != nullptr);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [instance] { return ! instance->isStateUnasked() && ! instance->isAskingState() && instance->getLastState().getSize() > 0; }));
+    song.storeDeviceStates();
 
     const auto macros = phazite::getContainerMacros (song, container);
     REQUIRE (macros.size() == 8);
