@@ -618,12 +618,6 @@ inline const IdentifierList& getTrackViewProperties()
     return list;
 }
 
-inline const IdentifierList& getGridProperties()
-{
-    static const IdentifierList list = findProperties (PIANOROLL, Kind::view);
-    return list;
-}
-
 // Written without the undo manager (model/plugins/internal/DeviceStore.h: setWindowPlace()).
 inline const IdentifierList& getDeviceViewProperties()
 {
@@ -634,10 +628,6 @@ inline const IdentifierList& getDeviceViewProperties()
 inline bool isTrackViewProperty (const juce::Identifier& p)
 {
     return isAmong (p, getTrackViewProperties());
-}
-inline bool isGridProperty (const juce::Identifier& p)
-{
-    return isAmong (p, getGridProperties());
 }
 inline bool isDeviceViewProperty (const juce::Identifier& p)
 {
@@ -909,12 +899,6 @@ inline const Property<juce::String> versionsBase { "versionsBase", on (PHAZITE),
 inline bool isVersionsID (const juce::String& text, int digits)
 {
     return text.length() == digits && text.containsOnly ("0123456789abcdef");
-}
-
-// Whether a property of the song's own element is one of those two.
-inline bool isVersionsProperty (const juce::ValueTree& tree, const juce::Identifier& p)
-{
-    return tree.hasType (PHAZITE) && (p == versionsBranch || p == versionsBase);
 }
 
 //==============================================================================

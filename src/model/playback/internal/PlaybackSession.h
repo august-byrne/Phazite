@@ -260,6 +260,19 @@ private:
     // lowers the counts of plans on purpose, roadmap step S5.20).
     void sectionsChanged (const std::vector<SectionID>&) override { triggerAsyncUpdate(); }
 
+    // What the song holds of its own (SongValues.h; its tree callbacks above leave the root's own properties and its LASTKEY,
+    // PIANOROLL and MERGING alone, isHeardAsKept()): a new plan only where what plays changed, the loop's four or the
+    // metronome, which a plan holds (SongPlayer.cpp: compile(), getLoop(), isMetronomeOn()). Nothing else of it makes one:
+    // the notes, an outline applied, patterns' speed (which a tempo edit reads as it is made, no plan), the numbering, a merge
+    // waiting, the key set last, the versions' names, the play start (movePlayhead() locates the engine itself), punch, the
+    // input chosen last and the grids, each of which made one while the tree's callbacks heard them (but the play start, the
+    // grids and the names).
+    void songOutsideChanged (bool plays) override
+    {
+        if (plays)
+            triggerAsyncUpdate();
+    }
+
     void curvesChanged (const std::vector<ParameterRef>&) override { triggerAsyncUpdate(); } // the curves: a new plan, as above
 
     // The modulators and macros (SongValues.h; its tree callbacks above leave the song's MODULATOR and MACRO elements and what

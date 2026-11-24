@@ -200,6 +200,12 @@ private:
     // send added, taken out or changed on a frozen track compared the track's holdings again for nothing (roadmap step
     // S5.20, the sends' second piece). A track added or taken out with sends on it is the tree's, looked at as before.
 
+    // The song's own (songOwnChanged(), songStandingChanged(), songOutsideChanged()): nothing, as no frozen track's file holds
+    // anything of it. The tree's callbacks below leave the root's own properties and its LASTKEY, PIANOROLL and MERGING alone
+    // (isHeardAsKept()), where a counted one (the notes, an outline, a key set last, a merge waiting) compared every frozen
+    // track's holdings again for nothing (roadmap step S5.20, the song's own). Its count of IDs, the root's nextID, which
+    // every new ID moves, is still left alone below, as uncounted.
+
     void handleAsyncUpdate() override { compareMarked(); }
     void writePending() override; // what is marked compared now, but during an undo or a redo (Song.h)
 

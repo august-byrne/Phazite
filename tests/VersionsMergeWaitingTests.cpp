@@ -23,6 +23,8 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnArea.h"
+#include "model/base/internal/SongValues.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
@@ -42,9 +44,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -476,6 +480,137 @@ TEST_CASE ("No merge starts while one waits for its commit, as git refuses one: 
     CHECK_FALSE (phazite::isMerging (m.s.context));
     phazite::selectVersion (m.s.context, m.theirs);
     CHECK (phazite::canMerge (m.s.context));
+}
+
+namespace
+{
+// What the song's values' listener is told of the song's own while it listens: the parts of each call of the song's own value,
+// and how many of the standing, with whether the key set last was among them.
+struct SongOwnTold final : phazite::SongValues::Listener
+{
+    explicit SongOwnTold (phazite::Song& s)
+        : song (s)
+    {
+        song.getValues()->addListener (this);
+    }
+    ~SongOwnTold() override { song.getValues()->removeListener (this); }
+
+    phazite::Song& song;
+    std::vector<std::uint8_t> own {};
+    int standing = 0;
+    bool lastKey = false;
+
+    void songOwnChanged (const phazite::SongOwnChange& change) override { own.push_back (change.parts); }
+
+    void songStandingChanged (bool key, bool) override
+    {
+        ++standing;
+        lastKey = lastKey || key;
+    }
+
+    void forget()
+    {
+        own.clear();
+        standing = 0;
+        lastKey = false;
+    }
+
+    JUCE_DECLARE_NON_COPYABLE (SongOwnTold)
+};
+
+// The place of the clash of the merge waiting that a test names, -1 for none.
+int findClash (const phazite::ProjectContext& context, const std::function<bool (const phazite::MergeClash&)>& isIt)
+{
+    const auto& merging = phazite::getVersionHistory (context)->getMerging();
+    REQUIRE (merging.has_value());
+
+    for (size_t i = 0; i < merging->clashes.size(); ++i)
+        if (isIt (merging->clashes[i]))
+            return (int) i;
+
+    return -1;
+}
+} // namespace
+
+TEST_CASE ("A clash of the song's own chosen in a merge waiting sets it once: the key set last told once, the notes once with their "
+           "part alone, each one undo step, its Undo exact")
+{
+    // Both lines set the notes and the key set last since First, differently: two clashes of the song's own (Schema.h: notes
+    // on the song's element; its LASTKEY, which merges whole), chosen through the song's own chooser (AreaClashes.h:
+    // chooseSongOwnClash()), never in the song's tree (whose way takes a LASTKEY out and appends the side's: told twice).
+    TestSong s;
+    const auto setOwn = [&s] (const juce::String& notes, int root)
+    {
+        phazite::setProjectNotes (s.context, notes);
+        phazite::setLastKey (*phazite::findSong (s.context), { .root = root });
+    };
+
+    setOwn ("Before", 1);
+    keepVersion (s.context, "First");
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+    setOwn ("Theirs", 4);
+    const auto theirs = keepVersion (s.context, "Theirs");
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    setOwn ("Ours", 6);
+    keepVersion (s.context, "Ours");
+    REQUIRE (s.getProject().save().wasOk());
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+    phazite::finishMerge (s.context);
+    REQUIRE (phazite::isMerging (s.context));
+
+    auto& song = *phazite::findSong (s.context);
+    const auto key = findClash (s.context, [] (const phazite::MergeClash& clash)
+                                { return clash.path.size() == 1 && clash.path[0].startsWith (schema::LASTKEY.toString() + ":"); });
+    const auto notes =
+        findClash (s.context, [] (const phazite::MergeClash& clash) { return clash.path.isEmpty() && clash.property == schema::notes; });
+    REQUIRE (key >= 0);
+    REQUIRE (notes >= 0);
+
+    SongOwnTold told (song);
+    UndoCheck undo (s.context);
+    const auto countSteps = [&song] { return song.getUndoManager().getUndoDescriptions().size(); };
+
+    // The other's key: the standing told once, with the key; the merge waiting's record (its choices) the song's own, once.
+    std::vector<std::uint8_t> own;
+    int standing = 0, steps = 0;
+    auto heardKey = false;
+    undo.check ("Take the Other Branch's key",
+                [&]
+                {
+                    told.forget();
+                    const auto before = countSteps();
+                    REQUIRE (phazite::chooseClash (s.context, key, 2));
+                    own = told.own;
+                    standing = told.standing;
+                    heardKey = told.lastKey;
+                    steps = countSteps() - before;
+                });
+
+    CHECK (standing == 1);
+    CHECK (heardKey);
+    CHECK (own == std::vector<std::uint8_t> { phazite::SongOwnChange::merging });
+    CHECK (steps == 1);
+    CHECK (phazite::getLastKey (song) == phazite::Key { .root = 4 });
+    checkSong (song);
+
+    // The other's notes: the song's own told once with the notes alone, then once with the record.
+    undo.check ("Take the Other Branch's notes",
+                [&]
+                {
+                    told.forget();
+                    const auto before = countSteps();
+                    REQUIRE (phazite::chooseClash (s.context, notes, 2));
+                    own = told.own;
+                    standing = told.standing;
+                    steps = countSteps() - before;
+                });
+
+    CHECK (own == std::vector<std::uint8_t> { phazite::SongOwnChange::notes, phazite::SongOwnChange::merging });
+    CHECK (standing == 0);
+    CHECK (steps == 1);
+    CHECK (phazite::getProjectNotes (s.context) == "Theirs");
+    checkSong (song);
 }
 
 TEST_CASE ("A merge's element that isn't one (a song from anyone) waits for nothing, and Cancel Merge never takes a track for the song")

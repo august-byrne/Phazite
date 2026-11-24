@@ -6,13 +6,14 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Toggles.h"
-#include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/playback/internal/PlaybackSession.h"
+
+#include <utility>
 
 namespace phazite
 {
@@ -114,7 +115,10 @@ bool canPunch (const Song& song)
 
 void setPunchOn (Song& song, bool on)
 {
-    song.getState().setProperty (schema::punch, on, nullptr); // like the loop's switch, not an undo step
+    // Like the loop's switch, not an undo step: outside the history, held once set (false too).
+    auto outside = getSongOutside (song);
+    outside.punch = on;
+    setSongOutside (song, std::move (outside));
 }
 
 bool isPunching (const Song& song)

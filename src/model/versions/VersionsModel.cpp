@@ -407,7 +407,9 @@ namespace
         song->storeDeviceStates();
         makeSongLike (*song, read.song);
         removeBrokenReferences (*song);
-        song->getState().setProperty (schema::versionsBase, versionID, &song->getUndoManager());
+        auto standing = getSongStanding (*song);
+        standing.versionsBase = versionID;
+        setSongStanding (*song, std::move (standing)); // in the step: its Undo puts the base before it back
         history->tellNow();
         return true;
     }
@@ -1489,14 +1491,14 @@ namespace
     // song is: none for none.
     void setMergingElement (Song& song, const juce::ValueTree& element)
     {
-        auto state = song.getState();
-        auto* undo = &song.getUndoManager();
-
-        if (const auto old = state.getChildWithName (schema::MERGING); old.isValid())
-            state.removeChild (old, undo);
-
-        if (element.isValid())
-            state.appendChild (element, undo);
+        // The song's own value, its record read as the element holds it (SongOwnValue.h: setSongOwn()), in the step. Its setter
+        // writes the root by what differs (writeSongOwnPart()): a MERGING replaced keeps its place among the root's children,
+        // its properties written in place, and one where the song has none is appended after them. The order whole state
+        // writes the root's children in is the storage switch's (roadmap step S5.20, the song's own).
+        jassert (! song.isWritingOutsideHistory());
+        auto own = getSongOwn (song);
+        own.merging = element.isValid() ? std::optional (readMergingRecord (element)) : std::nullopt;
+        setSongOwn (song, std::move (own));
     }
 } // namespace
 
@@ -2153,15 +2155,19 @@ namespace
     };
 
     // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
-    // this order: the tempo map (a path into the song's TEMPOMAP), the chord lane (a path into the song's CHORDLANE), the MIDI
-    // links, the sections, modulation (a path through a modulator or a macro: a container's macro's before the container's),
-    // the sends (a path through a send), the devices (a path through a device, a container or a chain: the store's first), a
-    // curve (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a
-    // note's property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path
-    // through a clip, refused), a whole track or the master, or a switch of one (chooseTrackClash()). What the first whose
-    // path it is did with it; none of them (notTheArea) for a clash in the song's tree.
+    // this order: the song's own (a property of the song's own, or its LASTKEY), the tempo map (a path into the song's
+    // TEMPOMAP), the chord lane (a path into the song's CHORDLANE), the MIDI links, the sections, modulation (a path through a
+    // modulator or a macro: a container's macro's before the container's), the sends (a path through a send), the devices (a
+    // path through a device, a container or a chain: the store's first), a curve (a path to a CURVE of the song's AUTOMATION,
+    // or through one, refused), a note (a note's property: its path goes through its clip, so before the clip's), a clip (a
+    // clip's property, or any other path through a clip, refused), a whole track or the master, or a switch of one
+    // (chooseTrackClash()). What the first whose path it is did with it; none of them (notTheArea) for a clash in the song's
+    // tree.
     AreaChoice chooseInAreas (Song& song, const MergeClash& clash, int value, const MergeSides& sides)
     {
+        if (const auto choice = chooseSongOwnClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
+            return choice; // a property of the song's own (PHAZITE's), or its LASTKEY whole
+
         if (const auto choice = chooseTempoMapClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
             return choice;
 
@@ -2204,11 +2210,13 @@ namespace
     // A clash in the song's tree (no area's: chooseInAreas()), chosen in it, in the history of the choice's step: a property
     // given the value chosen, or taken away where that side had none; an element replaced whole by the side chosen's, in its
     // place, or taken out where that side had none. Whether it was chosen (false for a path that names nothing in the song).
-    // What comes here is the song's own alone: a property of its own (PHAZITE's), its LASTKEY (which merges whole), its
-    // PIANOROLL, and an element Phazite doesn't know at its top. No path through a DEVICE, a CONTAINER or a CHAIN comes here:
-    // the devices' choosers take or refuse every one; nor any path through the song's TRACKS or its MASTER, which the tracks'
-    // chooser takes or refuses (chooseTrackClash(): a track's or the master's own property through the tracks' setters, a whole
-    // track or master), so that nothing here writes a track or what an area's keeper would take in.
+    // What comes here is what Phazite doesn't know at the song's top alone: a property of PHAZITE's that the song's own values
+    // don't hold (SongOwnValue.h: isSongOwnProperty(); nextID, a count, is never a clash) and an element Phazite doesn't know
+    // there. The song's own properties and its LASTKEY are the song's own chooser's (chooseSongOwnClash()), and a merge reports
+    // no PIANOROLL (view state) and no MERGING (no version holds one). No path through a DEVICE, a CONTAINER or a CHAIN comes
+    // here: the devices' choosers take or refuse every one; nor any path through the song's TRACKS or its MASTER, which the
+    // tracks' chooser takes or refuses (chooseTrackClash(): a track's or the master's own property through the tracks'
+    // setters, a whole track or master), so that nothing here writes a track or what an area's keeper would take in.
     bool chooseInTree (Song& song, const MergeClash& clash, int value)
     {
         jassert (clash.path.isEmpty()
@@ -2267,7 +2275,6 @@ bool chooseClash (ProjectContext& context, int index, int value)
 
     const auto merging = *history->getMerging();
     const auto& clash = merging.clashes[(size_t) index];
-    auto* undo = &song->getUndoManager();
 
     // A change of its own, one undo step, named for the choice: "Take the Other Branch's: Bass volume".
     const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
@@ -2292,7 +2299,13 @@ bool chooseClash (ProjectContext& context, int index, int value)
     for (const auto each : chosen)
         digits << each;
 
-    song->getState().getChildWithName (schema::MERGING).setProperty (schema::mergingChosen, digits, undo);
+    // The merge waiting's record, in the choice's step.
+    auto own = getSongOwn (*song);
+
+    if (own.merging.has_value())
+        own.merging->chosen = digits;
+
+    setSongOwn (*song, std::move (own));
     history->tellNow();
     return true;
 }

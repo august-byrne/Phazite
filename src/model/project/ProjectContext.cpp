@@ -12,6 +12,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnArea.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TracksArea.h"
 #include "model/engine/internal/EngineContext.h"
@@ -428,11 +429,18 @@ namespace
             if (isParameterValue (tree, property))
                 return;
 
-            // The project's notes, the song's own.
-            if (tree == state && property == schema::notes)
-                return add (pending.notes);
-
+            // (The project's notes, the song's own: songOwnChanged().)
             mark (tree);
+        }
+
+        // What the song holds of its own (SongValues.h; the tree callbacks here leave the root's own properties and its
+        // LASTKEY, PIANOROLL and MERGING alone, isHeardAsKept()): the notes' group, for the project's notes. Nothing else of
+        // it names a group, as none did while the tree told it (mark() of the song's element): the views poll the loop,
+        // punch and the grids, and ask the outline, the key set last and a merge waiting as they show them.
+        void songOwnChanged (const SongOwnChange& change) override
+        {
+            if (change.has (SongOwnChange::notes))
+                add (pending.notes);
         }
 
         // The tracks (SongValues.h; the tree callbacks here leave what their values cover alone, isHeardAsKept()): their group,

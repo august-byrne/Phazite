@@ -82,10 +82,12 @@
 #include "model/playback/internal/SongPlayer.h"
 #include "model/plugins/internal/DeviceStore.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/project/ProjectContents.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/ApplySong.h"
 #include "model/versions/internal/ChangesWorker.h"
@@ -2252,6 +2254,74 @@ TEST_CASE ("Performance gate: the unsaved check after devices' knobs turned and 
         CHECK (counts.one == 1); // the knob's device compared: none would be a check skipped
         CHECK (counts.many == counts.turned);
     }
+}
+
+TEST_CASE ("Performance gate: a notes edit and a loop toggle allocate, and the unsaved check after them compares, no more than "
+           "before the song's own told its listeners")
+{
+    // The song's own (model/base/internal/SongOwnValue.h): each writer sets its next value once through its setter, which
+    // writes the song's root by what differs while the tree holds it, and its part of the keeper tells the values' listeners
+    // once for the set (SongOwnArea.h): what the project, the version history, the playback session and the views' watcher
+    // follow of it. On a project with everything that listens to it (its version history read): the project's notes set (a
+    // step of its own) and the loop switched on, each counted alone; then the unsaved check after the notes and after the
+    // loop. Counted: what each allocates, and what the check compared with the saved copy (Project::countElementsCompared()).
+    phazite::test::TestSong s;
+    auto& song = getSong (s);
+    auto& project = s.getProject();
+    REQUIRE (project.save().wasOk());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (project.hasUnsavedChanges());
+
+    // Warmed once each, so that what is made once (a listener's first mark, a name's first text) is no part of the count.
+    phazite::setProjectNotes (s.context, "Warm");
+    phazite::toggleLoop (song);
+    phazite::toggleLoop (song);
+    REQUIRE (project.save().wasOk());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (project.hasUnsavedChanges());
+
+    const auto notes = phazite::test::countAllocations ([&s] { phazite::setProjectNotes (s.context, "Bridge in D"); });
+    auto before = phazite::Project::countElementsCompared();
+    CHECK (project.hasUnsavedChanges());
+    const auto notesCompared = phazite::Project::countElementsCompared() - before;
+    REQUIRE (project.save().wasOk());
+
+    const auto loop = phazite::test::countAllocations ([&song] { phazite::toggleLoop (song); });
+    before = phazite::Project::countElementsCompared();
+    CHECK_FALSE (project.hasUnsavedChanges());
+    const auto loopCompared = phazite::Project::countElementsCompared() - before;
+
+    MESSAGE ("A notes edit: allocations " << notes.value_or (-1) << ", the unsaved check compared " << notesCompared
+                                          << "; a loop toggled: allocations " << loop.value_or (-1) << ", compared " << loopCompared);
+
+    // Measured 2026-11-24 on MSVC's Debug build, the same test on the sources before this piece (cc9c2e08: the writers on the
+    // tree, the tree's callbacks heard by each listener): the notes 8 allocations (the undo step, its action, the property's
+    // text), the check compared no element (the root's property alone); the loop 1, none compared. After it, the same: 8 and
+    // none, 1 and none (the setters write the root by what differs making no tree, and the song's own is compared as values,
+    // no element). With the setters' first form, which wrote the value into a tree of its own to compare, 10 and 3.
+    CHECK (notesCompared == 0);
+    CHECK (loopCompared == 0);
+
+    if (! notes.has_value() || ! loop.has_value())
+        return; // nothing counted on this build
+
+    CHECK (*notes <= 8);
+    CHECK (*loop <= 1);
+
+    // And what the views poll a tick, which read through the getters: nothing.
+    auto read = 0;
+    const auto polled = phazite::test::countAllocations (
+        [&s, &song, &read]
+        {
+            read += phazite::isLoopOn (song) ? 1 : 0;  // the top bar's
+            read += phazite::isPunchOn (song) ? 1 : 0; // the time line's
+            read += phazite::canPunch (song) ? 1 : 0;
+            read += phazite::loadGridSettings (song, phazite::GridOwner::playlist).snap ? 1 : 0;
+            read += phazite::getProjectNotes (s.context).isNotEmpty() ? 1 : 0; // the project view's
+        });
+
+    CHECK (read == 3); // the loop on, the grid snapping, the notes
+    CHECK (polled.value_or (0) == 0);
 }
 
 TEST_CASE ("Performance gate: the loader's rule allocates nothing for a send Phazite wrote")

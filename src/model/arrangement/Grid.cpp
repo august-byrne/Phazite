@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Grid.h"
 #include "model/base/Numbers.h"
-#include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
 
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <utility>
 
 namespace phazite
 {
@@ -78,11 +78,6 @@ void GridSettings::makeCoarser()
         fixedLevel = std::min (maxFixedLevel, fixedLevel + 1);
 }
 
-GridSettings GridSettings::load (const juce::ValueTree& state)
-{
-    return loadGridSettings (readSavedGrid (state));
-}
-
 GridSettings loadGridSettings (const SavedGrid& saved)
 {
     GridSettings grid;
@@ -92,15 +87,6 @@ GridSettings loadGridSettings (const SavedGrid& saved)
     grid.fixedLevel = findFixedGridLevel (saved.step).value_or (grid.fixedLevel);
     grid.triplets = saved.triplets;
     return grid;
-}
-
-void GridSettings::save (juce::ValueTree& state) const
-{
-    state.setProperty (schema::gridSnap, snap, nullptr);
-    state.setProperty (schema::gridAdaptive, adaptive, nullptr);
-    state.setProperty (schema::gridOffset, adaptiveOffset, nullptr);
-    state.setProperty (schema::gridStep, getSavedGridStep (fixedLevel), nullptr);
-    state.setProperty (schema::gridTriplets, triplets, nullptr);
 }
 
 juce::String getSavedGridStep (int fixedLevel)
@@ -126,14 +112,24 @@ GridSettings loadGridSettings (const Song& song, GridOwner owner)
     return saved.has_value() ? loadGridSettings (*saved) : GridSettings();
 }
 
+SavedGrid makeSavedGrid (const GridSettings& grid)
+{
+    // Each of its settings, the fixed size by its saved word (getSavedGridStep()).
+    SavedGrid saved;
+    saved.snap = grid.snap;
+    saved.adaptive = grid.adaptive;
+    saved.offset = grid.adaptiveOffset;
+    saved.step = getSavedGridStep (grid.fixedLevel);
+    saved.triplets = grid.triplets;
+    return saved;
+}
+
 void saveGridSettings (Song& song, GridOwner owner, const GridSettings& grid)
 {
-    auto state = song.getState();
-
-    if (owner == GridOwner::pianoRoll)
-        state = state.getOrCreateChildWithName (schema::PIANOROLL, nullptr);
-
-    grid.save (state);
+    // View state, outside the history: the playlist's on the song's own, the piano roll's in its PIANOROLL.
+    auto outside = getSongOutside (song);
+    (owner == GridOwner::pianoRoll ? outside.pianoRollGrid : outside.playlistGrid) = makeSavedGrid (grid);
+    setSongOutside (song, std::move (outside));
 }
 
 //==============================================================================

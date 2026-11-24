@@ -7,10 +7,13 @@
 // tree's Undo of a property does), and what no step writes (SongOutside: state and view, never in the history). nextID is no
 // value of these: a count, which stays on the tree until the song's own switch moves it onto the song.
 //
-// The song's tree still holds them (the next pieces move the listeners and the writers, then the storage): the getters below
-// build each value from the song's root on each call, as the song holds it, and every reader of the song's own reads through
-// them. Their writers write the tree as they always did. The conversion below is the one place that reads and writes these
-// names: what the getters read, and what a whole copy will be written from.
+// The song's tree still holds them (the next piece switches the storage): the getters below build each value from the song's
+// root on each call, as the song holds it, and every reader of the song's own reads through them; the setters below are
+// their writers' one way to change them, each writing the root by what differs from the value it holds; and what listens to
+// the song hears them change from the values' listener (SongValues.h: songOwnChanged(), songStandingChanged(),
+// songOutsideChanged(); SongOwnArea.h, which tells them from the tree until the switch). The conversion below is the one
+// place that reads and writes these names: what the getters read, what the setters write, and what a whole copy will be
+// written from.
 #pragma once
 
 #include "model/base/internal/ValueArea.h"
@@ -89,7 +92,7 @@ SongStanding withChanges (SongStanding now, const SongStandingChanges&, ChangeDi
 const juce::String& getDefaultGridStep();
 
 // A grid's settings as the song saves them (Schema.h: gridSnap, gridAdaptive, gridOffset, gridStep, gridTriplets), the step as
-// its saved word. model/arrangement/GridSettings.h makes the grid of it (GridSettings::load()).
+// its saved word. model/arrangement/internal/Grid.h makes the grid of it (loadGridSettings()).
 struct SavedGrid
 {
     bool snap = true, adaptive = true, triplets = false;
@@ -158,9 +161,35 @@ bool keepSongOwnAsHeld (juce::ValueTree phazite);
 MergingRecord readMergingRecord (const juce::ValueTree& merging);
 juce::ValueTree writeMergingElement (const MergingRecord&);
 
-// One grid's saved settings as Phazite's code always read them (GridSettings::load()): each where held, else its default;
+// One grid's saved settings as Phazite's code always read them (Grid.h: loadGridSettings()): each where held, else its default;
 // what a tree of a file's grid is read by. The defaults for an invalid tree.
 SavedGrid readSavedGrid (const juce::ValueTree& gridHolder);
+
+// What the three values hold of a song's root, by name: a property of its own (Schema.h: PHAZITE's outline, notes,
+// idNumbering, patternsKeepTheirSpeed, the versions' two names, the loop's four, playStart, metronome, punch, lastInput and
+// the playlist's grid; not nextID, a count, nor a property Phazite doesn't know); and an element of its own (LASTKEY,
+// PIANOROLL, MERGING), by its type. What the passes over a song's elements leave to the values (model/versions/
+// ApplySong.cpp) and what the root's listeners leave to the values' listener (SongOwnArea.h: isHeardAsSongOwn()).
+bool isSongOwnProperty (const juce::Identifier& property);
+bool isSongOwnElement (const juce::Identifier& type);
+
+// Which of the three values a write is of.
+enum class SongOwnPart
+{
+    own,
+    standing,
+    outside
+};
+
+// A song's root written as the three values say, for one of them alone (part): each of that value's properties and its
+// element (MERGING, LASTKEY, PIANOROLL) as writeSongOwnInto() writes them, by what differs from what the root holds: a
+// property set where its text differs (SongText.h: isSameValue()) or removed where the value writes none; the element added
+// where the root has none (after its other children), taken out where the value writes none, else its properties by what
+// differs, in place. Through this undo manager (nullptr: outside the history). What is the same writes nothing, and the
+// other values' properties and elements, nextID and what Phazite doesn't know are left as they are. Whether it wrote. The
+// setters' writes while the tree holds the song's own (SongOwnArea.cpp).
+bool writeSongOwnPart (juce::ValueTree phazite, SongOwnPart, const SongOwnValue&, const SongStanding&, const SongOutside&,
+                       juce::UndoManager*);
 
 //==============================================================================
 // The getters: each value as the song holds it, built from its root on each call (readHeld...()) while the tree holds them. A
@@ -170,4 +199,21 @@ SavedGrid readSavedGrid (const juce::ValueTree& gridHolder);
 SongOwnValue getSongOwn (const Song&);
 SongStanding getSongStanding (const Song&);
 SongOutside getSongOutside (const Song&);
+
+//==============================================================================
+// The setters: each value's writers' one way to change it, the next value worked out and set once. None begins an undo step.
+// A value equal to what the song holds is no change: nothing written, no action in the history, nothing told.
+//   - setSongOwn(): in the song's undo history (the step in progress: an outline applied, the notes, patterns' speed, a merge
+//     taken or a clash chosen, a version applied), or outside it while the song is written outside it (Song::OutsideHistory).
+//   - setSongStanding(): the same (Take the Newer Versions' base, a version applied's key set last).
+//   - storeStandingOutsideHistory(): outside the history whatever is open (a key set on a track, the key set last, where the
+//     song stands in its versions as the versions move it).
+//   - setSongOutside(): outside the history, always (the loop, the play start, the metronome, punch, the input chosen last,
+//     the grids).
+// While the song's tree holds them: written into its root by what differs (writeSongOwnPart()), the values' listener told
+// once for the set as its writes end (SongOwnArea.h). In SongOwnArea.cpp.
+void setSongOwn (Song&, SongOwnValue);
+void setSongStanding (Song&, SongStanding);
+void storeStandingOutsideHistory (Song&, SongStanding);
+void setSongOutside (Song&, SongOutside);
 } // namespace phazite

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/ApplySong.h"
+#include "internal/AreaClashes.h"
 #include "internal/SongDiff.h"
 #include "internal/SongPieces.h"
 #include "model/arrangement/internal/Clips.h"
@@ -14,6 +15,7 @@
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsValue.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TrackSwitchesValue.h"
@@ -177,6 +179,20 @@ namespace
         return isModulation (element) || element.hasType (schema::SEND) || isDeviceItem (element) || element.hasType (schema::LANES);
     }
 
+    // Whether a property or an element of the song's is the song's own (SongOwnValue.h: a property of the root's own, its
+    // LASTKEY, PIANOROLL or MERGING), which the song's own pass makes like the other's (makeSongOwnValuesLike(), below),
+    // through its setters, never the passes over elements: they leave the root's own properties alone, and the elements where
+    // they are, which placePlaceholdersLike() puts in the other's places.
+    bool isSongOwnPropertyOf (const juce::ValueTree& element, const juce::Identifier& property)
+    {
+        return element.hasType (schema::PHAZITE) && isSongOwnProperty (property);
+    }
+
+    bool isSongOwnChild (const juce::ValueTree& parent, const juce::ValueTree& child)
+    {
+        return parent.hasType (schema::PHAZITE) && isSongOwnElement (child.getType());
+    }
+
     // Whether an element is the song's track list (TRACKS) or its MASTER, whose tracks and own fields the tracks' pass makes
     // like the other's (makeTracksLike(), below), through the tracks' setters (model/arrangement/internal/Tracks.h), never the
     // passes over elements: they keep their places among the song's elements, which every song has, and are never added, taken
@@ -189,8 +205,8 @@ namespace
     // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read
     // (the stand-ins, and the elements that stand in for themselves), and without what of an area's it would hold (a clip,
     // the tempo map's entries, the chord lane's, the MIDI links, the curves, the sections, a modulator, a send, a device), which
-    // the areas' passes give the song: one of the song's own elements that no area holds (Schema.h: LASTKEY, or one Phazite
-    // doesn't know), never a track (the tracks' pass's: makeTracksLike()).
+    // the areas' passes give the song: an element Phazite doesn't know at the song's top, never a track (the tracks' pass's:
+    // makeTracksLike()), nor the song's own LASTKEY, PIANOROLL or MERGING (the song's own pass's: makeSongOwnValuesLike()).
     // The song hasn't the stand-ins, so what they held stays as it is now: not there. A stand-in is never part of a song
     // (Schema.h: schema::versions::missing).
     juce::ValueTree copyForSong (const juce::ValueTree& element)
@@ -222,13 +238,14 @@ namespace
     // makeModulationLike()) nor a send (the sends pass's: makeSendsLike()), which the song's tree holds none of (their areas'
     // whole state writes them in a copy), nor a device, a container or a chain (the devices pass's: makeDevicesLike()). The
     // song's TRACKS and MASTER are placed (they keep their places among the song's elements), and nothing in them is
-    // (isTrackPlace()). The whole song's placeholders and places are put in the other's places after the areas' passes
-    // (placePlaceholdersLike()).
+    // (isTrackPlace()). Nor the song's own LASTKEY, PIANOROLL or MERGING (the song's own pass's: makeSongOwnValuesLike()). The
+    // whole song's placeholders and places, and the song's own elements, are put in the other's places after the areas'
+    // passes (placePlaceholdersLike()).
     bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, Taken taken)
     {
         return isTaken (taken, element, child) && ! child.hasType (schema::CLIP) && ! isKeptBeside (child) && ! isTempoMaps (element, child)
                && ! isChordLanes (element, child) && ! isMidiLinks (element, child) && ! isSections (element, child)
-               && ! isCurves (element, child);
+               && ! isCurves (element, child) && ! isSongOwnChild (element, child);
     }
 
     std::vector<Child> getCountedChildren (const juce::ValueTree& element, Taken taken)
@@ -256,9 +273,11 @@ namespace
         return children;
     }
 
-    // The element made like the other, its children too (the song's own: its properties, and the elements no area holds,
-    // LASTKEY, PIANOROLL where everything is taken, MERGING, and those Phazite doesn't know), in the same history (the
-    // song's, or none while the song is written outside it). Its TRACKS and its MASTER keep their places among its elements
+    // The element made like the other, its children too, in the same history (the song's, or none while the song is written
+    // outside it). Of the song's own element (PHAZITE), what no value holds alone: its properties that Phazite doesn't know,
+    // its count of IDs where everything is taken (which the callers count on again after), and the elements Phazite doesn't
+    // know at its top; its own properties and its LASTKEY, PIANOROLL and MERGING are the song's own pass's
+    // (makeSongOwnValuesLike(), below), left as they are here. Its TRACKS and its MASTER keep their places among its elements
     // and are left as they are, never added, taken away or looked into (isTrackPlace()): the tracks' pass makes them like the
     // other's (makeTracksLike(), below).
     void makeLike (Song& song, juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo, Taken taken,
@@ -267,14 +286,15 @@ namespace
         jassert ((undo == nullptr) == song.isWritingOutsideHistory());
 
         for (int i = live.getNumProperties(); --i >= 0;)
-            if (const auto name = live.getPropertyName (i); isTaken (taken, live, name) && ! other.hasProperty (name))
+            if (const auto name = live.getPropertyName (i);
+                isTaken (taken, live, name) && ! isSongOwnPropertyOf (live, name) && ! other.hasProperty (name))
                 live.removeProperty (name, undo);
 
         for (int i = 0; i < other.getNumProperties(); ++i)
         {
             const auto name = other.getPropertyName (i);
 
-            if (! isTaken (taken, other, name))
+            if (! isTaken (taken, other, name) || isSongOwnPropertyOf (live, name))
                 continue;
 
             if (const auto* value = live.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
@@ -2253,8 +2273,9 @@ namespace
                    || child.hasType (schema::AUTOMATION) || child.hasType (schema::SECTIONS));
     }
 
-    // The song's placeholders and places (isPlaceholder()) put where the other song has them among its elements, once the
-    // pass over the song's elements (makeLike(), which leaves them where they are) and the areas' passes (makeValuesLike(),
+    // The song's placeholders and places (isPlaceholder()), and its own elements where they are taken (its LASTKEY and MERGING,
+    // its PIANOROLL where everything is), put where the other song has them among its elements, once the pass over the song's
+    // elements (makeLike(), which leaves them where they are) and the areas' passes (makeValuesLike(), makeSongOwnValuesLike(),
     // which add one after the others) are done, in the same history (the song's step, or none while the song is written
     // outside it), so that the song's file writes its elements in the other's order: by makeLike()'s rule, with the
     // placeholders and places among what it places. In the other's order, each of its elements that makeLike() places, and
@@ -2269,7 +2290,10 @@ namespace
         jassert ((undo == nullptr) == song.isWritingOutsideHistory());
         auto live = song.getState();
         const auto isOrdered = [taken] (const juce::ValueTree& parent, const juce::ValueTree& child)
-        { return isPlaced (parent, child, taken) || isPlaceholder (parent, child); };
+        {
+            return isPlaced (parent, child, taken) || isPlaceholder (parent, child)
+                   || (isSongOwnChild (parent, child) && isTaken (taken, parent, child));
+        };
 
         const auto getOrdered = [&isOrdered] (const juce::ValueTree& element)
         {
@@ -2766,6 +2790,57 @@ namespace
     {
         return true;
     }
+
+    // Whether the song's own pass takes the merge waiting too: the whole song's (a merge's, a version restored, Cancel Merge's
+    // song before it, and switching in place: a version's song holds none, so the song's goes), not the song's own line's,
+    // which always left it as it is.
+    enum class MergingTaken
+    {
+        taken,
+        left
+    };
+
+    // What the song holds of its own (SongOwnValue.h) made like the other's, read as the song holds it (readHeldSongOwn(),
+    // readHeldSongStanding(), readHeldSongOutside()), through its setters, in the mode of the moment (the step in progress, or
+    // outside the history while the song is written outside it): what is counted (Taken::counted) its own value (the outline,
+    // the notes, the numbering of IDs, patterns' speed; a merge waiting where it is taken) and the key set last, the other's
+    // or none, a LASTKEY the other's version couldn't read (a stand-in) leaving the song's as it is; where everything is
+    // taken, the versions' names and what it keeps of how it plays and shows besides. As makeLike() on the song's element
+    // and makeSongOwnLikeIn() wrote them, each set once. Its count of IDs is no part of it (the callers count it). How many
+    // times its own value was written, which only a step writes otherwise (SongOwnValue.h): 1, or 0 where it was the other's.
+    int makeSongOwnValuesLike (Song& song, const juce::ValueTree& other, Taken taken, MergingTaken merging)
+    {
+        const auto theirs = readHeldSongOwn (other);
+        const auto theirStanding = readHeldSongStanding (other);
+        auto own = getSongOwn (song);
+        own.outline = theirs.outline;
+        own.notes = theirs.notes;
+        own.idNumbering = theirs.idNumbering;
+        own.patternsKeepTheirSpeed = theirs.patternsKeepTheirSpeed;
+
+        if (merging == MergingTaken::taken)
+            own.merging = theirs.merging;
+
+        auto standing = getSongStanding (song);
+
+        if (const auto key = other.getChildWithName (schema::LASTKEY); ! (key.isValid() && isStandIn (key)))
+            standing.lastKey = theirStanding.lastKey;
+
+        if (taken == Taken::everything)
+        {
+            standing.versionsBranch = theirStanding.versionsBranch;
+            standing.versionsBase = theirStanding.versionsBase;
+        }
+
+        const auto ownWrites = own == getSongOwn (song) ? 0 : 1;
+        setSongOwn (song, std::move (own));
+        setSongStanding (song, std::move (standing));
+
+        if (taken == Taken::everything)
+            setSongOutside (song, readHeldSongOutside (other));
+
+        return ownWrites;
+    }
 } // namespace
 
 void makeSongLike (Song& song, const juce::ValueTree& other)
@@ -2776,6 +2851,7 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
     const auto standIns = findStandIns (other);
     const auto tracks = makeTracksLike (song, other, Taken::counted, standIns);
     makeLike (song, song.getState(), other, undo, Taken::counted, standIns);
+    makeSongOwnValuesLike (song, other, Taken::counted, MergingTaken::taken);
     makeValuesLike (song, other, true, Taken::counted, standIns);
     makeTrackLeavesLike (song, other, isEveryTrack, true, Taken::counted, tracks.cameIn);
     placePlaceholdersLike (song, other, undo, Taken::counted);
@@ -2799,6 +2875,7 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     const auto next = std::max (findNextID (song), findNextID (other));
     [[maybe_unused]] const auto tracks = makeTracksLike (song, other, Taken::everything, noStandIns());
     makeLike (song, song.getState(), other, nullptr, Taken::everything, noStandIns());
+    makeSongOwnValuesLike (song, other, Taken::everything, MergingTaken::taken);
     makeValuesLike (song, other, false, Taken::everything, noStandIns());
     makeTrackLeavesLike (song, other, isEveryTrack, true, Taken::everything, {});
     placePlaceholdersLike (song, other, nullptr, Taken::everything);
@@ -2823,8 +2900,10 @@ void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
     // differ.
     [[maybe_unused]] const auto tracks = makeTracksLike (song, copy, Taken::everything, noStandIns());
     makeLike (song, song.getState(), copy, nullptr, Taken::everything, noStandIns());
+    // Of the song's own, what changed outside the history: its names, the key set last, the loop; never its own value.
+    [[maybe_unused]] const auto ownWrites = makeSongOwnValuesLike (song, copy, Taken::everything, MergingTaken::taken);
     [[maybe_unused]] const auto valueWrites = makeValuesLike (song, copy, false, Taken::everything, noStandIns());
-    jassert (tracks.writes + valueWrites == 0);
+    jassert (tracks.writes + valueWrites + ownWrites == 0);
     makeTrackLeavesLike (song, copy, isEveryTrack, true, Taken::everything, {}); // written outside the history too
     placePlaceholdersLike (song, copy, nullptr, Taken::everything);
     song.getState().setProperty (schema::nextID, copy[schema::nextID], nullptr);
@@ -3071,39 +3150,27 @@ namespace
 
     void makeSongOwnLikeIn (Song& song, juce::ValueTree state, const juce::ValueTree& other, juce::UndoManager* undo)
     {
-        // Its own properties.
+        // Its own properties that Phazite doesn't know (the song's own value's are its pass's, below).
         for (int i = state.getNumProperties(); --i >= 0;)
-            if (const auto name = state.getPropertyName (i); ! schema::isUncountedProperty (state, name) && ! other.hasProperty (name))
+            if (const auto name = state.getPropertyName (i);
+                ! schema::isUncountedProperty (state, name) && ! isSongOwnPropertyOf (state, name) && ! other.hasProperty (name))
                 state.removeProperty (name, undo);
 
         for (int i = 0; i < other.getNumProperties(); ++i)
-            if (const auto name = other.getPropertyName (i); ! schema::isUncountedProperty (other, name))
+            if (const auto name = other.getPropertyName (i);
+                ! schema::isUncountedProperty (other, name) && ! isSongOwnPropertyOf (state, name))
                 if (const auto* value = state.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
                     state.setProperty (name, other[name], undo);
 
-        // Its tempo map, through the tempo pass; its chord lane, through the lane pass; its sections, through the sections pass;
-        // the key set last: each as the other has it, or none.
+        // Its tempo map, through the tempo pass; its chord lane, through the lane pass; its sections, through the sections
+        // pass; its own value and the key set last, through the song's own pass (a merge waiting left as it is, as the line
+        // always left it; a LASTKEY the other's version couldn't read, a stand-in, which only a piece that isn't Phazite's can
+        // make, leaves the song's as it is): each as the other has it, or none, in this order, so that a LASTKEY added comes
+        // after a SECTIONS added, as it always did.
         makeTempoMapLike (song, other);
         makeChordLaneLike (song, other);
         makeSectionsLike (song, other);
-
-        for (const auto* type : { &schema::LASTKEY })
-        {
-            auto live = state.getChildWithName (*type);
-            const auto then = other.getChildWithName (*type);
-
-            // One the other's version couldn't read (a stand-in, which only a piece that isn't Phazite's can make of these)
-            // stays as it is.
-            if (then.isValid() && isStandIn (then))
-                continue;
-
-            if (live.isValid() && then.isValid())
-                makeLike (song, live, then, undo, Taken::counted, findStandIns (then));
-            else if (live.isValid())
-                state.removeChild (live, undo);
-            else if (then.isValid())
-                state.appendChild (copyForSong (then), undo);
-        }
+        makeSongOwnValuesLike (song, other, Taken::counted, MergingTaken::left);
 
         // The tracks both have, in the other's order: in its folders, and in its order there, each as the same element.
         makeTrackOrderLike (song, other);
@@ -3134,6 +3201,85 @@ void makeSongOwnLike (Song& song, const juce::ValueTree& other)
     const NothingTakenIn byThePassesAlone (song);
     makeSongOwnLikeIn (song, song.getState(), other, &song.getUndoManager());
     countIDsPast (song, other);
+}
+
+AreaChoice chooseSongOwnClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
+{
+    // A property of the song's own (PHAZITE's: a path of no element), or the song's LASTKEY, which merges whole
+    // (SongMerge.cpp: mergesWhole()), or anything in one of its LASTKEY, PIANOROLL and MERGING.
+    const auto isOwnProperty = clash.path.isEmpty() && clash.property.isValid() && isSongOwnProperty (clash.property);
+    const auto isInOwnElement =
+        ! clash.path.isEmpty()
+        && (clash.path[0].startsWith (schema::LASTKEY.toString() + ":") || clash.path[0].startsWith (schema::PIANOROLL.toString() + ":")
+            || clash.path[0].startsWith (schema::MERGING.toString() + ":"));
+
+    if (! isOwnProperty && ! isInOwnElement)
+        return AreaChoice::notTheArea;
+
+    if (! juce::isPositiveAndBelow (value, 3))
+        return AreaChoice::refused;
+
+    const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+    const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+
+    // The song's own as it holds it, with what the side chosen holds there in place of its own, read as the song holds it:
+    // the property's value, or none where that side had none; the key set last whole, or none.
+    juce::ValueTree chosen (schema::PHAZITE);
+    writeSongOwnInto (chosen, getSongOwn (song), getSongStanding (song), getSongOutside (song));
+
+    if (isOwnProperty)
+    {
+        // Only what is counted is merged (a merge reports nothing of the versions' names nor of how the song plays and shows):
+        // the song's own value's properties.
+        if (schema::isUncountedProperty (chosen, clash.property))
+            return AreaChoice::refused;
+
+        if (values[value]->isVoid())
+            chosen.removeProperty (clash.property, nullptr);
+        else
+            chosen.setProperty (clash.property, *values[value], nullptr);
+
+        // Refused where the song can't hold the value as that side has it (a commit's song may come from anyone: a numbering
+        // not of its digits), which the value read back would write otherwise.
+        const auto own = readHeldSongOwn (chosen);
+        juce::ValueTree written (schema::PHAZITE);
+        writeSongOwnInto (written, own, {}, {});
+        const auto* held = written.getPropertyPointer (clash.property);
+
+        if (values[value]->isVoid() ? held != nullptr : (held == nullptr || ! isSameValue (*held, *values[value])))
+            return AreaChoice::refused;
+
+        setSongOwn (song, own);
+        return AreaChoice::chosen;
+    }
+
+    // The key set last, whole, the side chosen's or none: never a property of it, nor what is deeper, nor a merge waiting's
+    // or the piano roll's grid (which no merge reports), nor one that stands in for what its version couldn't read.
+    const auto& element = *elements[value];
+
+    if (clash.property.isValid() || clash.path.size() != 1 || ! clash.path[0].startsWith (schema::LASTKEY.toString() + ":")
+        || (element.isValid() && (! element.hasType (schema::LASTKEY) || isStandIn (element))))
+        return AreaChoice::refused;
+
+    // Set through the song's standing, whose setter writes the root by what differs (SongOwnValue.h: writeSongOwnPart()): a
+    // LASTKEY chosen over one the song holds keeps its place among the root's children, its properties written in place, and
+    // one where the song has none is appended after them (where the tree's way took the element out and appended the side's).
+    // The order whole state writes the root's children in is the storage switch's (roadmap step S5.20, the song's own).
+    if (auto held = chosen.getChildWithName (schema::LASTKEY); held.isValid())
+        chosen.removeChild (held, nullptr);
+
+    if (element.isValid())
+        chosen.appendChild (element.createCopy(), nullptr);
+
+    auto standing = getSongStanding (song);
+    standing.lastKey = readHeldSongStanding (chosen).lastKey;
+
+    // Refused where the side's element holds no key the song can hold (no root: SongOwnValue.h, readHeldSongStanding()).
+    if (element.isValid() && ! standing.lastKey.has_value())
+        return AreaChoice::refused;
+
+    setSongStanding (song, std::move (standing)); // in the choice's step, as a version applied sets it
+    return AreaChoice::chosen;
 }
 
 int removeBrokenReferences (Song& song)

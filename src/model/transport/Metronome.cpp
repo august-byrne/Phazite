@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Metronome.h"
-#include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
+
+#include <utility>
 
 namespace phazite
 {
@@ -15,11 +16,10 @@ bool isMetronomeOn (const Song& song)
 
 void setMetronomeOn (Song& song, bool on)
 {
-    // Written only while it is on, without an undo manager.
-    if (on)
-        song.getState().setProperty (schema::metronome, true, nullptr);
-    else
-        song.getState().removeProperty (schema::metronome, nullptr);
+    // How the song plays, outside the history (written only while it is on: SongOwnValue.h, writeSongOwnInto()).
+    auto outside = getSongOutside (song);
+    outside.metronome = on;
+    setSongOutside (song, std::move (outside));
 }
 
 void toggleMetronome (Song& song)

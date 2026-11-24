@@ -397,6 +397,18 @@ private:
     bool chordLaneToCompare = false;
     void chordLaneChanged() override;
 
+    // What the song holds of its own changed (SongValues.h: Listener::songOwnChanged(), songStandingChanged(); the tree's
+    // callbacks below leave the root's own properties and its LASTKEY, PIANOROLL and MERGING alone, isHeardAsKept()): its
+    // own value (the outline, the notes, the numbering, patterns' speed, a merge waiting) and the key set last, each counted
+    // as a change, and compared with savedState's when asked, as values read as the song holds them (isSongOwnAsSaved()), so
+    // that notes changed and changed back are saved again. Where the song stands in its versions is no change: its names go
+    // into the project file in the background (versionsMoved()). What it keeps of how it plays and shows (the loop, the
+    // grids: songOutsideChanged()) counts nothing.
+    bool songOwnToCompare = false;
+    void songOwnChanged (const SongOwnChange&) override;
+    void songStandingChanged (bool lastKey, bool versionsNames) override;
+    void markSongOwnChanged(); // counted, and compared when asked
+
     // The curves that changed, by their parameters (SongValues.h: Listener::curvesChanged(); the tree's callbacks below leave
     // the curves' elements alone, isHeardAsKept()): compared with savedState's when asked, each as a value, and the curves'
     // order with it (WholeState.h: holdSameCurve(), holdSameCurveOrder()), so that a point moved and moved back is saved
@@ -494,6 +506,7 @@ private:
     bool areClipsAsSaved() const;
     bool isTempoMapAsSaved() const;
     bool isChordLaneAsSaved() const;
+    bool isSongOwnAsSaved() const;
     bool areCurvesAsSaved() const;
     bool areMidiLinksAsSaved() const;
     bool areSectionsAsSaved() const;

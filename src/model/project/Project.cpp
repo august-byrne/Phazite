@@ -2058,11 +2058,16 @@ Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file, const 
     countIDs (*song);
     forgetMissingFrozenFiles (*song);
     forgetCurvesOfGoneDevices (*song);
-    song->getState().removeProperty (schema::playStart, nullptr);
 
     // Its clips, and their notes and controllers' values, as values beside its tree from here on, its tree holding no CLIP
     // element (model/base/internal/SongValues.h).
     song->holdValues();
+
+    // Playing from its start: where it plays from is the song's own, outside the history (SongOwnValue.h: setSongOutside()).
+    auto outside = getSongOutside (*song);
+    outside.playStart = 0.0;
+    setSongOutside (*song, std::move (outside));
+
     song->getUndoManager().clearUndoHistory();
     return song;
 }
@@ -2907,6 +2912,7 @@ void Project::clearToCompare()
 {
     mayHaveChanged = comparingWhole = comparingClipsWhole = tempoToCompare = false;
     chordLaneToCompare = false;
+    songOwnToCompare = false;
     midiLinksToCompare = false;
     sectionsToCompare = false;
     comparingModulationWhole = false;
@@ -3082,6 +3088,7 @@ void Project::compareWithSavedState()
         return;
 
     auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
+    same = same && isSongOwnAsSaved(); // the song's own, by its values while the tree holds them
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
     // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the
@@ -3113,13 +3120,9 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
     if (isWriting)
         return;
 
+    // (Where the song stands in its versions, the root's other own properties and its LASTKEY: songStandingChanged(),
+    // songOwnChanged().)
     const auto state = song->getState();
-
-    if (tree == state && schema::isVersionsProperty (tree, property))
-    {
-        versionsMoved();
-        return;
-    }
 
     if (! (tree == state || tree.isAChildOf (state)) || ! schema::isCounted (tree, property))
         return;
@@ -3329,6 +3332,44 @@ void Project::chordLaneChanged()
     chordLaneToCompare = true;
 }
 
+void Project::songOwnChanged (const SongOwnChange&)
+{
+    markSongOwnChanged(); // every part counts (Schema.h: the outline, the notes, the numbering, patterns' speed, MERGING)
+}
+
+void Project::songStandingChanged (bool lastKey, bool versionsNames)
+{
+    if (isWriting)
+        return;
+
+    // Where the song stands: no change, its names into the file (versionsMoved()). The key set last: a change, as LASTKEY is
+    // counted.
+    if (versionsNames)
+        versionsMoved();
+
+    if (lastKey)
+        markSongOwnChanged();
+}
+
+void Project::markSongOwnChanged()
+{
+    // As markChanged() marks the song's element: counted, and compared when asked.
+    if (isWriting)
+        return;
+
+    if (! song->isShowingOther())
+        ++changeCount;
+
+    if (changedSinceSave)
+    {
+        changedSinceAutosave = true;
+        return;
+    }
+
+    mayHaveChanged = true;
+    songOwnToCompare = true;
+}
+
 void Project::midiLinksChanged()
 {
     // As markChanged() marks an element of the song: counted, and compared when asked.
@@ -3514,6 +3555,21 @@ bool Project::isTempoMapAsSaved() const
     // The tempo map, against the saved copy's, as one value.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
     return holdSameTempoMap (song->getState(), keepValues (*song), savedState.tree, savedState.values);
+}
+
+bool Project::isSongOwnAsSaved() const
+{
+    if (! songOwnToCompare)
+        return true;
+
+    // The song's own value and the key set last (what of its standing counts: Schema.h), against the saved copy's root read
+    // as the song holds it (SongOwnValue.h): what the whole comparison compares of the root's own, as values. No element
+    // compared (countElementsCompared()), as a property of the root compared alone counted none.
+    if (! savedState.tree.isValid())
+        return false;
+
+    return getSongOwn (*song) == readHeldSongOwn (savedState.tree)
+           && getSongStanding (*song).lastKey == readHeldSongStanding (savedState.tree).lastKey;
 }
 
 bool Project::isChordLaneAsSaved() const

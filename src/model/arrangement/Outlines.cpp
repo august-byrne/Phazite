@@ -4,7 +4,6 @@
 #include "internal/Sections.h"
 #include "internal/Tracks.h"
 #include "model/base/Json.h"
-#include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -13,6 +12,7 @@
 #include <PhaziteData.h>
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite
 {
@@ -120,7 +120,10 @@ void applyOutline (Song& song, const Outline& outline)
         bar += section.bars;
     }
 
-    song.getState().setProperty (schema::outline, outline.id, &song.getUndoManager());
+    // In the caller's step.
+    auto own = getSongOwn (song);
+    own.outline = outline.id;
+    setSongOwn (song, std::move (own));
 }
 
 bool applyOutline (Song& song, const juce::String& outlineID)

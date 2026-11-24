@@ -100,7 +100,7 @@ namespace
 
     using Described = const schema::PropertyDescription*;
 
-    // A grid's five properties (GridSettings::save()'s), in its order.
+    // A grid's five properties (Grid.h: makeSavedGrid()'s), in its order.
     const std::array<Described, 5>& getGridProperties()
     {
         static const std::array<Described, 5> properties { &schema::gridSnap, &schema::gridAdaptive, &schema::gridOffset, &schema::gridStep,
@@ -150,14 +150,138 @@ namespace
         return grid;
     }
 
-    void writeGrid (juce::ValueTree& element, const SavedGrid& grid)
+    //==============================================================================
+    // The writers: each property of one of the three values as Phazite writes it, handed to a function that writes it (the
+    // name, and the value, nullptr for none: a property left out), in a fixed order; nothing made but the values, so that a
+    // setter writes what differs allocating no tree (writeSongOwnPart()). A text each where not empty; a switch where its
+    // writer always wrote it.
+    template <typename Write>
+    void writeText (const schema::PropertyDescription& property, const juce::String& text, Write&& write)
     {
-        // As GridSettings::save() writes them: all five, in its order.
-        element.setProperty (schema::gridSnap, grid.snap, nullptr);
-        element.setProperty (schema::gridAdaptive, grid.adaptive, nullptr);
-        element.setProperty (schema::gridOffset, grid.offset, nullptr);
-        element.setProperty (schema::gridStep, grid.step, nullptr);
-        element.setProperty (schema::gridTriplets, grid.triplets, nullptr);
+        if (text.isEmpty())
+        {
+            write (property.getName(), nullptr);
+            return;
+        }
+
+        const juce::var value (text);
+        write (property.getName(), &value);
+    }
+
+    template <typename Write>
+    void writeIf (const schema::PropertyDescription& property, bool held, const juce::var& value, Write&& write)
+    {
+        write (property.getName(), held ? &value : nullptr);
+    }
+
+    // A grid's five (Grid.h: makeSavedGrid()'s), all of them, in its order; or none of them.
+    template <typename Write>
+    void writeGrid (const std::optional<SavedGrid>& grid, Write&& write)
+    {
+        const auto held = grid.has_value();
+        const auto saved = grid.value_or (SavedGrid {});
+        writeIf (schema::gridSnap, held, saved.snap, write);
+        writeIf (schema::gridAdaptive, held, saved.adaptive, write);
+        writeIf (schema::gridOffset, held, saved.offset, write);
+        writeIf (schema::gridStep, held, saved.step, write);
+        writeIf (schema::gridTriplets, held, saved.triplets, write);
+    }
+
+    // A value's properties on the root.
+    template <typename Write>
+    void writeRootProperties (SongOwnPart part, const SongOwnValue& own, const SongStanding& standing, const SongOutside& outside,
+                              Write&& write)
+    {
+        switch (part)
+        {
+            case SongOwnPart::own:
+                writeText (schema::outline, own.outline, write);
+                writeText (schema::notes, own.notes, write);
+                writeText (schema::idNumbering, own.idNumbering, write);
+                writeIf (schema::patternsKeepTheirSpeed, own.patternsKeepTheirSpeed, true, write); // only while on
+                return;
+
+            case SongOwnPart::standing:
+                writeText (schema::versionsBranch, standing.versionsBranch, write);
+                writeText (schema::versionsBase, standing.versionsBase, write);
+                return;
+
+            case SongOwnPart::outside:
+                writeIf (schema::loop, outside.loop, true, write); // only while on
+                writeIf (schema::loopFollowsSong, outside.loopFollowsSong.has_value(), outside.loopFollowsSong.value_or (true), write);
+                writeIf (schema::loopStart, outside.loopStart.has_value(), outside.loopStart.value_or (0.0), write);
+                writeIf (schema::loopEnd, outside.loopEnd.has_value(), outside.loopEnd.value_or (0.0), write);
+                writeIf (schema::playStart, outside.playStart > 0.0, outside.playStart, write); // only past the start
+                writeIf (schema::metronome, outside.metronome, true, write);                    // only while on
+                writeIf (schema::punch, outside.punch.has_value(), outside.punch.value_or (false), write);
+                writeText (schema::lastInput, outside.lastInput, write);
+                writeGrid (outside.playlistGrid, write);
+                return;
+        }
+    }
+
+    // Whether a value holds its element (MERGING, LASTKEY, PIANOROLL), and that element's properties.
+    bool holdsPartElement (SongOwnPart part, const SongOwnValue& own, const SongStanding& standing, const SongOutside& outside)
+    {
+        switch (part)
+        {
+            case SongOwnPart::own:
+                return own.merging.has_value();
+            case SongOwnPart::standing:
+                return standing.lastKey.has_value();
+            case SongOwnPart::outside:
+                return outside.pianoRollGrid.has_value();
+        }
+
+        return false;
+    }
+
+    template <typename Write>
+    void writeElementProperties (SongOwnPart part, const SongOwnValue& own, const SongStanding& standing, const SongOutside& outside,
+                                 Write&& write)
+    {
+        switch (part)
+        {
+            case SongOwnPart::own:
+            {
+                const auto record = own.merging.value_or (MergingRecord {});
+                writeText (schema::mergingVersion, record.version, write);
+                writeText (schema::mergingHead, record.head, write);
+                writeText (schema::mergingBefore, record.before, write);
+                writeText (schema::mergingChosen, record.chosen, write);
+                writeText (schema::mergingRenumbered, record.renumbered, write);
+                writeText (schema::mergingTranslated, record.translated, write);
+                writeText (schema::mergingCrossed, record.crossed, write);
+                return;
+            }
+
+            case SongOwnPart::standing:
+            {
+                const auto key = standing.lastKey.value_or (SavedKey {});
+                writeIf (schema::keyRoot, standing.lastKey.has_value(), key.root, write);
+                writeText (schema::keyScale, key.scale, write);
+                return;
+            }
+
+            case SongOwnPart::outside:
+                writeGrid (outside.pianoRollGrid, write);
+                return;
+        }
+    }
+
+    const juce::Identifier& getPartElement (SongOwnPart part)
+    {
+        switch (part)
+        {
+            case SongOwnPart::own:
+                return schema::MERGING.getName();
+            case SongOwnPart::standing:
+                return schema::LASTKEY.getName();
+            case SongOwnPart::outside:
+                return schema::PIANOROLL.getName();
+        }
+
+        return schema::MERGING.getName();
     }
 
     //==============================================================================
@@ -326,68 +450,28 @@ SongOutside readHeldSongOutside (const juce::ValueTree& phazite)
 
 void writeSongOwnInto (juce::ValueTree& phazite, const SongOwnValue& own, const SongStanding& standing, const SongOutside& outside)
 {
-    const auto setText = [&phazite] (const schema::PropertyDescription& property, const juce::String& text)
+    // Each value's properties in their order, then the elements, LASTKEY, PIANOROLL and MERGING, each appended where held.
+    const auto setOn = [] (juce::ValueTree& element)
     {
-        if (text.isNotEmpty())
-            phazite.setProperty (property.getName(), text, nullptr);
+        return [&element] (const juce::Identifier& name, const juce::var* value)
+        {
+            if (value != nullptr)
+                element.setProperty (name, *value, nullptr);
+        };
     };
 
-    setText (schema::outline, own.outline);
-    setText (schema::notes, own.notes);
-    setText (schema::idNumbering, own.idNumbering);
+    for (const auto part : { SongOwnPart::own, SongOwnPart::standing, SongOwnPart::outside })
+        writeRootProperties (part, own, standing, outside, setOn (phazite));
 
-    if (own.patternsKeepTheirSpeed)
-        phazite.setProperty (schema::patternsKeepTheirSpeed, true, nullptr);
-
-    setText (schema::versionsBranch, standing.versionsBranch);
-    setText (schema::versionsBase, standing.versionsBase);
-
-    if (outside.loop)
-        phazite.setProperty (schema::loop, true, nullptr);
-
-    if (outside.loopFollowsSong.has_value())
-        phazite.setProperty (schema::loopFollowsSong, *outside.loopFollowsSong, nullptr);
-
-    if (outside.loopStart.has_value())
-        phazite.setProperty (schema::loopStart, *outside.loopStart, nullptr);
-
-    if (outside.loopEnd.has_value())
-        phazite.setProperty (schema::loopEnd, *outside.loopEnd, nullptr);
-
-    if (outside.playStart > 0.0)
-        phazite.setProperty (schema::playStart, outside.playStart, nullptr);
-
-    if (outside.metronome)
-        phazite.setProperty (schema::metronome, true, nullptr);
-
-    if (outside.punch.has_value())
-        phazite.setProperty (schema::punch, *outside.punch, nullptr);
-
-    setText (schema::lastInput, outside.lastInput);
-
-    if (outside.playlistGrid.has_value())
-        writeGrid (phazite, *outside.playlistGrid);
-
-    if (standing.lastKey.has_value())
+    for (const auto part : { SongOwnPart::standing, SongOwnPart::outside, SongOwnPart::own })
     {
-        juce::ValueTree key (schema::LASTKEY);
-        key.setProperty (schema::keyRoot, standing.lastKey->root, nullptr);
+        if (! holdsPartElement (part, own, standing, outside))
+            continue;
 
-        if (standing.lastKey->scale.isNotEmpty())
-            key.setProperty (schema::keyScale, standing.lastKey->scale, nullptr);
-
-        phazite.appendChild (key, nullptr);
+        juce::ValueTree element (getPartElement (part));
+        writeElementProperties (part, own, standing, outside, setOn (element));
+        phazite.appendChild (element, nullptr);
     }
-
-    if (outside.pianoRollGrid.has_value())
-    {
-        juce::ValueTree pianoRoll (schema::PIANOROLL);
-        writeGrid (pianoRoll, *outside.pianoRollGrid);
-        phazite.appendChild (pianoRoll, nullptr);
-    }
-
-    if (own.merging.has_value())
-        phazite.appendChild (writeMergingElement (*own.merging), nullptr);
 }
 
 MergingRecord readMergingRecord (const juce::ValueTree& merging)
@@ -445,8 +529,9 @@ namespace
     }
 
     // Each of those properties of an element as another holds it (as its text: SongText.h, isSameValue()), or none where the
-    // other has none. Whether any changed.
-    bool keepAsWritten (juce::ValueTree& element, const juce::ValueTree& written, const std::vector<Described>& properties)
+    // other has none, through this undo manager. Whether any changed.
+    bool keepAsWritten (juce::ValueTree& element, const juce::ValueTree& written, const std::vector<Described>& properties,
+                        juce::UndoManager* undo)
     {
         auto changed = false;
 
@@ -458,13 +543,13 @@ namespace
             {
                 if (there == nullptr || ! isSameValue (*there, *made))
                 {
-                    element.setProperty (property->getName(), *made, nullptr);
+                    element.setProperty (property->getName(), *made, undo);
                     changed = true;
                 }
             }
             else if (there != nullptr)
             {
-                element.removeProperty (property->getName(), nullptr);
+                element.removeProperty (property->getName(), undo);
                 changed = true;
             }
         }
@@ -473,6 +558,77 @@ namespace
     }
 } // namespace
 
+bool isSongOwnProperty (const juce::Identifier& property)
+{
+    const auto& properties = getRootProperties();
+    return std::any_of (properties.begin(), properties.end(), [&property] (Described each) { return each->getName() == property; });
+}
+
+bool isSongOwnElement (const juce::Identifier& type)
+{
+    return type == schema::LASTKEY.getName() || type == schema::PIANOROLL.getName() || type == schema::MERGING.getName();
+}
+
+bool writeSongOwnPart (juce::ValueTree phazite, SongOwnPart part, const SongOwnValue& own, const SongStanding& standing,
+                       const SongOutside& outside, juce::UndoManager* undo)
+{
+    // Each property as writeSongOwnInto() writes it, compared with what the element holds (as its text: SongText.h,
+    // isSameValue()): nothing made but the values, no tree.
+    jassert (phazite.hasType (schema::PHAZITE));
+    auto changed = false;
+
+    const auto writeOn = [&changed, undo] (juce::ValueTree& element)
+    {
+        return [&changed, undo, &element] (const juce::Identifier& name, const juce::var* value)
+        {
+            const auto* there = element.getPropertyPointer (name);
+
+            if (value != nullptr && (there == nullptr || ! isSameValue (*there, *value)))
+            {
+                element.setProperty (name, *value, undo);
+                changed = true;
+            }
+            else if (value == nullptr && there != nullptr)
+            {
+                element.removeProperty (name, undo);
+                changed = true;
+            }
+        };
+    };
+
+    writeRootProperties (part, own, standing, outside, writeOn (phazite));
+
+    const auto& type = getPartElement (part);
+    auto held = phazite.getChildWithName (type);
+
+    if (holdsPartElement (part, own, standing, outside))
+    {
+        if (held.isValid())
+        {
+            writeElementProperties (part, own, standing, outside, writeOn (held));
+        }
+        else
+        {
+            juce::ValueTree made (type);
+            writeElementProperties (part, own, standing, outside,
+                                    [&made] (const juce::Identifier& name, const juce::var* value)
+                                    {
+                                        if (value != nullptr)
+                                            made.setProperty (name, *value, nullptr);
+                                    });
+            phazite.appendChild (made, undo);
+            changed = true;
+        }
+    }
+    else if (held.isValid())
+    {
+        phazite.removeChild (held, undo);
+        changed = true;
+    }
+
+    return changed;
+}
+
 bool keepSongOwnAsHeld (juce::ValueTree phazite)
 {
     if (! phazite.hasType (schema::PHAZITE))
@@ -480,7 +636,7 @@ bool keepSongOwnAsHeld (juce::ValueTree phazite)
 
     juce::ValueTree written (schema::PHAZITE);
     writeSongOwnInto (written, readHeldSongOwn (phazite), readHeldSongStanding (phazite), readHeldSongOutside (phazite));
-    auto changed = keepAsWritten (phazite, written, getRootProperties());
+    auto changed = keepAsWritten (phazite, written, getRootProperties(), nullptr);
 
     for (const auto* type : { &schema::LASTKEY, &schema::PIANOROLL, &schema::MERGING })
     {
@@ -491,7 +647,7 @@ bool keepSongOwnAsHeld (juce::ValueTree phazite)
 
         if (const auto made = written.getChildWithName (*type); made.isValid())
         {
-            changed = keepAsWritten (held, made, getElementProperties (*type)) || changed;
+            changed = keepAsWritten (held, made, getElementProperties (*type), nullptr) || changed;
         }
         else
         {

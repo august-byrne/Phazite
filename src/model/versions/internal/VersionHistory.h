@@ -1014,6 +1014,17 @@ private:
     void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
     void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
     void tracksViewChanged (const std::vector<TrackID>&, bool master) override;
+
+    // What the song holds of its own (SongValues.h; the tree's callbacks below leave the root's own properties and its
+    // LASTKEY, PIANOROLL and MERGING alone, isHeardAsKept()), each a change of the song's count (songChanges), as each
+    // property was: its own value (songOwnChanged()) and the key set last (songStandingChanged()), the song's own line, as
+    // markChanged() marked them; a merge waiting taken, chosen in, finished or cancelled found again as it is asked for
+    // (mergeDirty). Where the song stands in its versions, moved by an Undo or a Redo (not by the history itself:
+    // movingNames), followed once the step is whole, at the next turn of the message loop (followNamesOfSong()). How it plays
+    // and shows (songOutsideChanged()) the count alone, as a property of view state was.
+    void songOwnChanged (const SongOwnChange&) override;
+    void songStandingChanged (bool lastKey, bool versionsNames) override;
+    void songOutsideChanged (bool plays) override;
     void markLineKey (std::uint64_t key); // a track's line by its ID, or the master's (ChangesWorker::masterKey)
     void markCurve (const juce::String& key);
     void markSongOwn();

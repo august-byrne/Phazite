@@ -5,7 +5,6 @@
 #include "internal/Take.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Tracks.h"
-#include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/TracksValue.h"
 #include "model/commands/internal/Undo.h"
@@ -16,6 +15,7 @@
 #include "model/project/internal/ProjectContext.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite
 {
@@ -34,6 +34,15 @@ namespace
         const auto* song = findSong (context);
         const auto kind = song != nullptr && id.isValid() ? getTrackKind (*song, id) : std::nullopt;
         return kind == TrackValue::Kind::track || kind == TrackValue::Kind::returnTrack;
+    }
+
+    // The input chosen last, which comes first in the next track's list: remembered, not an undo step (outside the history,
+    // whatever step is open).
+    void rememberLastInput (Song& song, const juce::String& inputID)
+    {
+        auto outside = getSongOutside (song);
+        outside.lastInput = inputID;
+        setSongOutside (song, std::move (outside));
     }
 } // namespace
 
@@ -90,7 +99,7 @@ void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inp
 
     // The input chosen last comes first in the next track's list: remembered, not an undo step.
     if (inputID.isNotEmpty())
-        song->getState().setProperty (schema::lastInput, inputID, nullptr);
+        rememberLastInput (*song, inputID);
 }
 
 InputMonitoring getInputMonitoring (const ProjectContext& context, TrackID id)
@@ -371,7 +380,7 @@ TrackID addTrackForInput (ProjectContext& context, const juce::String& inputID)
     }
 
     // The input chosen last comes first in the next track's list, and the track records it: neither is an undo step.
-    song->getState().setProperty (schema::lastInput, inputID, nullptr);
+    rememberLastInput (*song, inputID);
     recorder->setArmed (track, true);
     return track;
 }

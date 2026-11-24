@@ -10,6 +10,7 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnArea.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/TracksArea.h"
 #include "model/base/internal/WholeState.h"
@@ -372,14 +373,12 @@ juce::ValueTree writeMergeState (const MergeState& state)
 
 void setWaitingMerge (Song& song, const juce::ValueTree& merging)
 {
+    // The song's own value, its record read as the element holds it, outside the history whatever step is open.
     jassert (! merging.isValid() || merging.hasType (schema::MERGING));
-    auto state = song.getState();
-
-    if (const auto old = state.getChildWithName (schema::MERGING); old.isValid())
-        state.removeChild (old, nullptr);
-
-    if (merging.isValid())
-        state.appendChild (merging.createCopy(), nullptr);
+    const Song::OutsideHistory outside (song);
+    auto own = getSongOwn (song);
+    own.merging = merging.isValid() ? std::optional (readMergingRecord (merging)) : std::nullopt;
+    setSongOwn (song, std::move (own));
 }
 
 VersionHistory::Merge findMergeAgain (const VersionStore& store, const std::map<juce::String, VersionRecord>& versions,
@@ -3076,13 +3075,8 @@ void VersionHistory::markChanged (const juce::ValueTree& tree, const juce::Ident
 
 void VersionHistory::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    // A merge taken or undone, redone, aborted (Schema.h: MERGING): found again as it is asked for.
-    if (child.hasType (schema::MERGING))
-    {
-        mergeDirty = true;
-        changed();
-    }
-
+    // (A merge taken or undone, redone, aborted, Schema.h: MERGING, and the key set last: songOwnChanged(),
+    // songStandingChanged().)
     if (schema::isUncountedElement (parent, child) || ! schema::isCounted (parent, {}))
         return;
 
@@ -3150,6 +3144,50 @@ void VersionHistory::trackSwitchesChanged (const std::vector<TrackSwitchChange>&
 void VersionHistory::tracksViewChanged (const std::vector<TrackID>&, bool)
 {
     // View state, which no line holds as a change (uncounted): the song's count of changes alone, as a view's property moved it.
+    ++songChanges;
+}
+
+void VersionHistory::songOwnChanged (const SongOwnChange& change)
+{
+    // A change of the song as its tree's are, of its own: a merge waiting (Schema.h: MERGING) found again as it is asked for;
+    // and every part, MERGING too, counted, the song's own line (as markChanged() and markChildChanged() marked them).
+    ++songChanges;
+
+    if (change.has (SongOwnChange::merging))
+    {
+        mergeDirty = true;
+        changed();
+    }
+
+    edited();
+    markSongOwn();
+}
+
+void VersionHistory::songStandingChanged (bool lastKey, bool versionsNames)
+{
+    ++songChanges;
+
+    // The key set last (LASTKEY, counted): the song's own line.
+    if (lastKey)
+    {
+        edited();
+        markSongOwn();
+    }
+
+    // Where the song stands, moved by an Undo or a Redo: followed once the step is whole (its other changes, undone after this
+    // one or redone before it, in the song too), at the next turn of the message loop.
+    if (versionsNames && ! movingNames)
+        juce::MessageManager::callAsync (
+            [weak = juce::WeakReference<VersionHistory> (this)]
+            {
+                if (auto* self = weak.get())
+                    self->followNamesOfSong();
+            });
+}
+
+void VersionHistory::songOutsideChanged (bool)
+{
+    // How the song plays and shows, which no line holds as a change (uncounted): the count alone, as its properties moved it.
     ++songChanges;
 }
 
@@ -3415,23 +3453,8 @@ void VersionHistory::valueTreePropertyChanged (juce::ValueTree& tree, const juce
 
     ++songChanges;
 
-    if (tree.hasType (schema::MERGING)) // a conflict switched
-    {
-        mergeDirty = true;
-        changed();
-    }
-
-    // Where the song stands, moved by an Undo or a Redo: followed once the step is whole (its other changes, undone after this
-    // one or redone before it, in the song too), at the next turn of the message loop.
-    if (schema::isVersionsProperty (tree, property) && ! movingNames)
-        juce::MessageManager::callAsync (
-            [weak = juce::WeakReference<VersionHistory> (this)]
-            {
-                if (auto* self = weak.get())
-                    self->followNamesOfSong();
-            });
-
-    // (A track's ID, name or kind, which change what the lines are called: tracksChanged().)
+    // (A track's ID, name or kind, which change what the lines are called: tracksChanged(). A conflict switched in a merge
+    // waiting, and where the song stands in its versions: songOwnChanged(), songStandingChanged().)
     markChanged (tree, property);
 }
 
@@ -3468,7 +3491,12 @@ void VersionHistory::edited()
     editedSinceSnapshot = true; // Local History takes the song again in a while
     saveProblem.clear();
 
-    if (song.getUndoManager().isPerformingUndoRedo() && isBehind())
+    // An Undo's or a Redo's: inside JUCE's, or what the song's own part of the values' keeper tells once the move is whole
+    // (SongValues.h: isTellingHistoryMove()).
+    const auto* values = song.getValues();
+    const auto byHistory = song.getUndoManager().isPerformingUndoRedo() || (values != nullptr && values->isTellingHistoryMove());
+
+    if (byHistory && isBehind())
         healPending = true;
 
     // What is heard is what is shown: an edit is heard as it is made, in the song.
@@ -4746,21 +4774,18 @@ void VersionHistory::writeNames()
     if (store == nullptr || ! hasRead || branches.empty() || currentBranch.isEmpty() || missingBranch.isNotEmpty())
         return; // (where the song's branch is missing here, they stay what they are: it may sync yet)
 
-    auto songState = song.getState();
     const juce::ScopedValueSetter<bool> moving (movingNames, true); // the history's own move, not one to follow
 
     // Each as an id of its form (a branch or a version another tool wrote under another id leaves the song's out: the
-    // folder's current file names the branch then, and its last version the base).
-    const auto set = [&songState] (const juce::Identifier& name, const juce::String& value, int digits)
-    {
-        if (! schema::isVersionsID (value, digits))
-            songState.removeProperty (name, nullptr);
-        else if (songState[name].toString() != value)
-            songState.setProperty (name, value, nullptr);
-    };
+    // folder's current file names the branch then, and its last version the base). The song's standing, outside the history
+    // whatever step is open (SongOwnValue.h: storeStandingOutsideHistory()), told as it is written, while it moves its names.
+    const auto asWritten = [] (const juce::String& value, int digits)
+    { return schema::isVersionsID (value, digits) ? value : juce::String(); };
 
-    set (schema::versionsBranch, currentBranch, schema::versionsBranchDigits);
-    set (schema::versionsBase, baseVersion, schema::versionsBaseDigits);
+    auto standing = getSongStanding (song);
+    standing.versionsBranch = asWritten (currentBranch, schema::versionsBranchDigits);
+    standing.versionsBase = asWritten (baseVersion, schema::versionsBaseDigits);
+    storeStandingOutsideHistory (song, std::move (standing));
 }
 
 const VersionRecord* VersionHistory::findBaseVersion() const

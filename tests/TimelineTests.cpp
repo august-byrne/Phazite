@@ -2,6 +2,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Grid.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/project/internal/Project.h"
 
 namespace
@@ -237,11 +238,12 @@ TEST_CASE ("Grid settings are kept in the project")
     grid.fixedLevel = 10;
     grid.triplets = true;
 
-    juce::ValueTree state (phazite::schema::PHAZITE);
-    grid.save (state);
-    CHECK (phazite::GridSettings::load (state) == grid);
+    auto song = phazite::createSong();
+    phazite::saveGridSettings (*song, phazite::GridOwner::playlist, grid);
+    CHECK (phazite::loadGridSettings (*song, phazite::GridOwner::playlist) == grid);
 
     // The fixed size is saved by name, not as a level.
+    auto state = phazite::test::copyWholeSong (*song);
     CHECK (state[phazite::schema::gridStep].toString() == juce::String ("1 bar"));
 
     for (int level = phazite::GridSettings::minFixedLevel; level <= phazite::GridSettings::maxFixedLevel; ++level)
@@ -249,10 +251,10 @@ TEST_CASE ("Grid settings are kept in the project")
 
     CHECK (phazite::getSavedGridStep (3) == juce::String ("1/16 beat")); // the nearest fixed size
 
-    // A name that isn't a size reads the default, and so does a project that has none.
+    // A name that isn't a size reads the default, and so does a project that has none: a file's tree, as it is read.
     state.setProperty (phazite::schema::gridStep, "1/5 beat", nullptr);
-    CHECK (phazite::GridSettings::load (state).fixedLevel == 7);
-    CHECK (phazite::GridSettings::load (juce::ValueTree()) == phazite::GridSettings());
+    CHECK (phazite::loadGridSettings (phazite::readSavedGrid (state)).fixedLevel == 7);
+    CHECK (phazite::loadGridSettings (phazite::readSavedGrid (juce::ValueTree())) == phazite::GridSettings());
 }
 
 TEST_CASE ("Each editor keeps its own grid in the project")
@@ -271,7 +273,8 @@ TEST_CASE ("Each editor keeps its own grid in the project")
     phazite::saveGridSettings (*song, phazite::GridOwner::pianoRoll, pianoRollGrid);
     CHECK (phazite::loadGridSettings (*song, phazite::GridOwner::pianoRoll) == pianoRollGrid);
     CHECK (phazite::loadGridSettings (*song, phazite::GridOwner::playlist) == phazite::GridSettings());
-    CHECK (phazite::GridSettings::load (phazite::test::copyWholeSong (*song).getChildWithName (phazite::schema::PIANOROLL))
+    CHECK (phazite::loadGridSettings (
+               phazite::readSavedGrid (phazite::test::copyWholeSong (*song).getChildWithName (phazite::schema::PIANOROLL)))
            == pianoRollGrid);
 
     const phazite::GridSettings playlistGrid { .snap = false, .adaptiveOffset = 1 };

@@ -112,17 +112,10 @@ namespace
         return Key { .root = saved->root, .scale = findScale (saved->scale).value_or (Scale::major) };
     }
 
-    void writeKey (juce::ValueTree state, const std::optional<Key>& key, juce::UndoManager* undo)
+    // And a key as the song's standing holds it, its scale by its word.
+    SavedKey writeKey (const Key& key)
     {
-        if (! key.has_value())
-        {
-            state.removeProperty (schema::keyRoot, undo);
-            state.removeProperty (schema::keyScale, undo);
-            return;
-        }
-
-        state.setProperty (schema::keyRoot, key->root, undo);
-        state.setProperty (schema::keyScale, getSavedScaleName (key->scale), undo);
+        return { .root = key.root, .scale = getSavedScaleName (key.scale) };
     }
 
     const auto tinyBeats = BeatDuration::fromBeats (1.0e-6);
@@ -2295,7 +2288,7 @@ void setTrackKey (Song& song, TrackID track, const std::optional<Key>& key)
 
     // What new tracks get; not an edit to undo.
     if (key.has_value())
-        writeKey (song.getState().getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
+        setLastKey (song, *key);
 }
 
 void setTrackKeys (Song& song, const std::vector<TrackID>& tracks, const std::optional<Key>& key)
@@ -2317,7 +2310,10 @@ std::optional<Key> getLastKey (const Song& song)
 
 void setLastKey (Song& song, const Key& key)
 {
-    writeKey (song.getState().getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
+    // The song's standing, outside the history whatever step is open (as a key set on a track is no edit to undo).
+    auto standing = getSongStanding (song);
+    standing.lastKey = writeKey (key);
+    storeStandingOutsideHistory (song, std::move (standing));
 }
 
 int snapToKey (int pitch, const Key& key)

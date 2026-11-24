@@ -47,6 +47,16 @@ struct MergeSides
 AreaChoice chooseTempoMapClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseChordLaneClash (Song&, const MergeClash&, int value, const MergeSides&);
 
+// The song's own (model/versions/ApplySong.cpp; model/base/internal/SongOwnValue.h): a property of the song's own (a path of
+// no element: the outline, the notes, the numbering of IDs, patterns' speed), the side chosen's value read as the song holds
+// it, through setSongOwn(); or the song's LASTKEY whole (which merges whole), the side's or none, through setSongStanding();
+// each in the choice's step. Refused (nothing written) for a value the song can't hold as that side has it (a commit's song
+// may come from anyone), an uncounted property of its own (which a merge never reports), a property of its LASTKEY or what is
+// deeper in it, a key's element that stands in for what its version couldn't read, and any path into its PIANOROLL or its
+// MERGING. Asked first: what is left of the song's top for the song's tree (VersionsModel.cpp: chooseInTree()) is a property
+// Phazite doesn't know there, and an element of a type it doesn't know.
+AreaChoice chooseSongOwnClash (Song&, const MergeClash&, int value, const MergeSides&);
+
 // The MIDI links' (model/midi/MidiLinks.cpp): a path into the song's MIDILINKS, whose links merge whole, each by its
 // controller, through the MIDI links' value.
 AreaChoice chooseMidiLinkClash (Song&, const MergeClash&, int value, const MergeSides&);

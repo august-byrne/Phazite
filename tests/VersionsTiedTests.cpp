@@ -15,6 +15,9 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/NoteValues.h"
+#include "model/notes/internal/Notes.h"
+#include "model/project/ProjectContents.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
@@ -24,6 +27,7 @@
 #include "ui/versions/VersionsView.h"
 
 #include <atomic>
+#include <functional>
 
 namespace
 {
@@ -90,17 +94,14 @@ float volume (phazite::ProjectContext& context, phazite::TrackID track)
     return phazite::getChannelVolume (*phazite::findSong (context), track);
 }
 
-// A version another computer saved on a branch, on top of one, with one track's volume set in it, and that computer's record
-// of the branch at it: as a synced Versions folder brings them. Its id.
+// A version another computer saved on a branch, on top of one, with its song changed as given (a file's tree), and that
+// computer's record of the branch at it: as a synced Versions folder brings them. Its id.
 juce::String saveElsewhere (phazite::ProjectContext& context, const juce::String& branchID, const juce::String& parent,
-                            phazite::TrackID track, float decibels)
+                            const std::function<void (juce::ValueTree&)>& change)
 {
     auto song = history (context).readSong (parent);
     REQUIRE (song.isValid());
-
-    for (const auto& element : phazite::getTrackElements (song))
-        if (phazite::readID (element[schema::trackID]) == track.getRaw())
-            juce::ValueTree (element).setProperty (schema::channelVolume, decibels, nullptr);
+    change (song);
 
     phazite::VersionStore store (phazite::getVersionsFolder (*phazite::findSong (context)), "elsewhere");
     phazite::VersionRecord record;
@@ -123,6 +124,19 @@ juce::String saveElsewhere (phazite::ProjectContext& context, const juce::String
     REQUIRE (store.writeBranch (branch));
     store.getPieces().closeFiles();
     return id;
+}
+
+// The same, with one track's volume set in it.
+juce::String saveElsewhere (phazite::ProjectContext& context, const juce::String& branchID, const juce::String& parent,
+                            phazite::TrackID track, float decibels)
+{
+    return saveElsewhere (context, branchID, parent,
+                          [track, decibels] (juce::ValueTree& song)
+                          {
+                              for (const auto& element : phazite::getTrackElements (song))
+                                  if (phazite::readID (element[schema::trackID]) == track.getRaw())
+                                      juce::ValueTree (element).setProperty (schema::channelVolume, decibels, nullptr);
+                          });
 }
 
 // The changes once the history has worked them out.
@@ -411,6 +425,42 @@ TEST_CASE ("A version another computer saved on the branch under a closed projec
     s.setVolume (bass, -3.0f);
     keepVersion (s.context, "Mine");
     CHECK (phazite::getLastVersion (s.context)->parents == juce::StringArray (theirs));
+}
+
+TEST_CASE ("The Undo of Take the Newer Versions puts the base back, which the history follows, and leaves a key set since")
+{
+    // The song's standing (SongOwnValue.h: SongStanding, keyed): the base in Take the Newer Versions' step, the key set last
+    // outside the history after it; the step's Undo moves the base alone, which the version history follows at the next turn.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto first = keepVersion (s.context, "First");
+    s.saveWithPluginStates();
+    const auto main = phazite::getCurrentBranch (s.context)->id;
+    const auto theirs = saveElsewhere (s.context, main, first, bass, -6.0f);
+    REQUIRE (s.reopenAs (TestSong::Reopening::withoutSaving));
+    REQUIRE (waitForVersionHistory (s.context));
+    auto& song = *phazite::findSong (s.context);
+    REQUIRE (changesOf (s.context).empty());
+    REQUIRE (phazite::countNewerVersions (s.context) == 1);
+    REQUIRE (phazite::canTakeNewerVersions (s.context));
+
+    REQUIRE (finished (s.context, [&] { return phazite::takeNewerVersions (s.context); }));
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE (namesOf (s.context).base == theirs);
+    phazite::setLastKey (song, { .root = 5, .scale = phazite::Scale::minor });
+
+    phazite::undo (song);
+    CHECK (namesOf (s.context).base == first);
+    CHECK (phazite::getLastKey (song) == phazite::Key { .root = 5, .scale = phazite::Scale::minor });
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK (history (s.context).getBaseVersionID() == first);
+    CHECK (namesOf (s.context) == expected (s.context));
+
+    phazite::redo (song);
+    CHECK (namesOf (s.context).base == theirs);
+    CHECK (phazite::getLastKey (song) == phazite::Key { .root = 5, .scale = phazite::Scale::minor });
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK (history (s.context).getBaseVersionID() == theirs);
 }
 
 TEST_CASE ("The newer versions merged with the song's own changes: its version follows both lines, and nothing is lost")
@@ -910,6 +960,38 @@ TEST_CASE ("Undo past a Take of the newer versions and a version saved after it,
     CHECK (changesOf (s.context).empty());
     CHECK (phazite::countNewerVersions (s.context) == 0);
     CHECK (namesOf (s.context).base == mine);
+}
+
+TEST_CASE ("A Redo of the song's own that makes the song the branch's newer version grows from it; the edit itself doesn't")
+{
+    // VersionHistory::edited(): a change of the song's own told once a move of the history is whole (SongOwnArea.h:
+    // isTellingHistoryMove()) is the move's, after which the history looks for the song being the branch's last version
+    // (healPending); the same change made as an edit is no move.
+    TestSong s;
+    s.addTrack ("Bass");
+    const auto first = keepVersion (s.context, "First");
+    s.saveWithPluginStates();
+    const auto main = phazite::getCurrentBranch (s.context)->id;
+    const auto theirs =
+        saveElsewhere (s.context, main, first, [] (juce::ValueTree& song) { song.setProperty (schema::notes, "Theirs", nullptr); });
+    REQUIRE (s.reopenAs (TestSong::Reopening::withoutSaving));
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE (phazite::countNewerVersions (s.context) == 1);
+
+    // The same notes typed here: an edit, which grows from First still, the newer version offered.
+    phazite::setProjectNotes (s.context, "Theirs");
+    CHECK (changesOf (s.context).size() == 1);
+    CHECK (history (s.context).getBaseVersionID() == first);
+
+    // Undone: not that version's song. Redone: it is, and the song grows from it.
+    auto& song = *phazite::findSong (s.context);
+    phazite::undo (song);
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK (history (s.context).getBaseVersionID() == first);
+    phazite::redo (song);
+    REQUIRE (dispatchMessagesUntil ([&s, &theirs] { return history (s.context).getBaseVersionID() == theirs; }, versionHistoryTimeout));
+    CHECK (changesOf (s.context).empty());
+    CHECK (phazite::countNewerVersions (s.context) == 0);
 }
 
 TEST_CASE (

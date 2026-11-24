@@ -332,6 +332,12 @@ private:
     // The sections (SongValues.h: sectionsChanged()): nothing, as nothing a plan holds reads them; its tree callbacks leave what
     // is in the song's SECTIONS alone (isHeardAsKept()), and its SECTIONS's own coming and going marks nothing that plays.
 
+    // The song's own (SongValues.h: songOwnChanged(), songStandingChanged(), songOutsideChanged()): nothing. What a plan holds
+    // of it, the loop and the metronome, the next compile reads (compile(): getLoop(), isMetronomeOn()), which the playback
+    // session makes for a change of either (PlaybackSession.h); nothing that plays reads the rest. Its tree callbacks leave
+    // the root's own properties and its LASTKEY, PIANOROLL and MERGING alone (isHeardAsKept()), which marked the song's
+    // element, read by no compile, as a child of the root that counts.
+
     // The curves that changed (SongValues.h), each read again by the next compile.
     void curvesChanged (const std::vector<ParameterRef>&) override;
 

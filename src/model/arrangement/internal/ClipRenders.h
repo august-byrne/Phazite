@@ -198,6 +198,10 @@ private:
     // nothing while the tree told them).
     void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>&, const SongTracks&) override;
 
+    // The song's own (SongValues.h: songOwnChanged(), songStandingChanged(), songOutsideChanged()): nothing, as no render is
+    // made of it. The tree callbacks above leave its LASTKEY, PIANOROLL and MERGING alone (isHeardAsKept()), whose coming and
+    // going, as a child of the song's element, looked for renders again for nothing while the tree told it.
+
     // The chord lane (SongValues.h: chordLaneChanged()): nothing, as no clip's render is made of chords or keys; the tree
     // callbacks above leave what is in the song's CHORDLANE alone (isHeardAsKept(), as every listener of the song's root does)
     // and, unlike the other listeners, the CHORDLANE's own coming and going too (isChordLanePlaceholder()).

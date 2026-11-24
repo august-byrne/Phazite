@@ -432,7 +432,7 @@ TEST_CASE ("Song's own: a damaged root read as the song holds it is what the loa
     CHECK (phazite::readSongOutside (consistent) == phazite::readHeldSongOutside (damaged));
 
     // Written back as the song holds it: what the loader left, a grid's step of no word, which it took out, completed with its
-    // default, as GridSettings::save() writes all five.
+    // default, as a grid saved writes all five (Grid.h: makeSavedGrid()).
     CHECK (consistent[schema::gridStep].toString() == "1/4 beat");
     CHECK (consistent.getChildWithName (schema::PIANOROLL)[schema::gridStep].toString() == "1/4 beat");
     CHECK_FALSE (phazite::keepSongOwnAsHeld (consistent.createCopy()));
@@ -464,7 +464,7 @@ TEST_CASE ("Song's own: a damaged root read as the song holds it is what the loa
     CHECK_FALSE (outside.pianoRollGrid->adaptive);
 
     // A step of no word and the default read the same grid, as they did before the description had the words.
-    CHECK (phazite::GridSettings::load (pianoRoll) == phazite::loadGridSettings (*outside.pianoRollGrid));
+    CHECK (phazite::loadGridSettings (phazite::readSavedGrid (pianoRoll)) == phazite::loadGridSettings (*outside.pianoRollGrid));
 }
 
 TEST_CASE ("Song's own: where playback starts is held within its range, past 0 or not at all; a project opens at the start")

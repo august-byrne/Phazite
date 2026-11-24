@@ -6,7 +6,6 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/BackgroundJobs.h"
 #include "model/base/internal/DevicesValue.h"
-#include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
@@ -19,6 +18,7 @@
 #include <atomic>
 #include <functional>
 #include <map>
+#include <utility>
 
 namespace phazite
 {
@@ -80,11 +80,9 @@ void setProjectNotes (ProjectContext& context, const juce::String& text)
         return;
 
     const UndoStep step (*song, "Change Notes");
-
-    if (text.isEmpty())
-        song->getState().removeProperty (schema::notes, &song->getUndoManager());
-    else
-        song->getState().setProperty (schema::notes, text, &song->getUndoManager());
+    auto own = getSongOwn (*song);
+    own.notes = text; // written only while not empty (SongOwnValue.h: writeSongOwnInto())
+    setSongOwn (*song, std::move (own));
 }
 
 std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext& context, const std::set<juce::File>& missing)

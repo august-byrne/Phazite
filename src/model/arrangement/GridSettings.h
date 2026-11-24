@@ -36,11 +36,6 @@ struct GridSettings
     void makeFiner();   // Ableton Live's "Narrow Grid"
     void makeCoarser(); // "Widen Grid"
 
-    // Read from and written to a tree of the project's Phazite state (each editor's: loadGridSettings()), without undo
-    // steps.
-    static GridSettings load (const juce::ValueTree& state);
-    void save (juce::ValueTree& state) const;
-
     bool operator== (const GridSettings&) const = default;
 };
 

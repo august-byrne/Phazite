@@ -14,24 +14,19 @@
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 
+#include <algorithm>
+#include <utility>
+
 namespace phazite
 {
 namespace
 {
-    // Written only when it changes, so a project that never looped anything else has nothing new to save.
-    void setLoopFollowsSong (Song& song, bool follows)
+    // Whether the loop follows the song, held only once it changed, so a project that never looped anything else has nothing
+    // new to save (SongOwnValue.h: SongOutside::loopFollowsSong).
+    void setLoopFollowsSong (SongOutside& outside, bool follows)
     {
-        if (doesLoopFollowSong (song) != follows)
-            song.getState().setProperty (schema::loopFollowsSong, follows, nullptr);
-    }
-
-    // The song's switches, each written only while it is on.
-    void setSwitch (Song& song, const juce::Identifier& property, bool on)
-    {
-        if (on)
-            song.getState().setProperty (property, true, nullptr);
-        else
-            song.getState().removeProperty (property, nullptr);
+        if (outside.loopFollowsSong.value_or (true) != follows)
+            outside.loopFollowsSong = follows;
     }
 } // namespace
 
@@ -64,23 +59,31 @@ bool doesLoopFollowSong (const Song& song)
 
 void loopSong (Song& song)
 {
-    setLoopFollowsSong (song, true);
-    auto state = song.getState();
-    state.removeProperty (schema::loopStart, nullptr);
-    state.removeProperty (schema::loopEnd, nullptr);
-    setSwitch (song, schema::loop, true);
+    // How the song plays, not an undo step: outside the history.
+    auto outside = getSongOutside (song);
+    setLoopFollowsSong (outside, true);
+    outside.loopStart.reset();
+    outside.loopEnd.reset();
+    outside.loop = true;
+    setSongOutside (song, std::move (outside));
 }
 
 void loopBeats (Song& song, BeatRange range)
 {
-    if (range.isEmpty())
+    // Its ends within the song's most beats, as their descriptions bound them (Schema.h: loopStart, loopEnd); nothing where
+    // that leaves no range.
+    const auto start = juce::jlimit (0.0, schema::maxBeats, range.getStart().inBeats());
+    const auto end = juce::jlimit (0.0, schema::maxBeats, range.getEnd().inBeats());
+
+    if (range.isEmpty() || ! (end > start))
         return;
 
-    setLoopFollowsSong (song, false);
-    auto state = song.getState();
-    state.setProperty (schema::loopStart, std::max (0.0, range.getStart().inBeats()), nullptr);
-    state.setProperty (schema::loopEnd, range.getEnd().inBeats(), nullptr);
-    setSwitch (song, schema::loop, true);
+    auto outside = getSongOutside (song);
+    setLoopFollowsSong (outside, false);
+    outside.loopStart = start;
+    outside.loopEnd = end;
+    outside.loop = true;
+    setSongOutside (song, std::move (outside));
 }
 
 BeatRange getLoopBeats (const Song& song)
@@ -120,7 +123,9 @@ bool isLoopOn (const Song& song)
 
 void toggleLoop (Song& song)
 {
-    setSwitch (song, schema::loop, ! isLoopOn (song));
+    auto outside = getSongOutside (song);
+    outside.loop = ! outside.loop;
+    setSongOutside (song, std::move (outside));
 }
 
 bool isLoopingSong (const Song& song)
@@ -149,11 +154,11 @@ BeatPosition getPlayStartBeat (const Song& song)
 
 void setPlayStart (Song& song, BeatPosition position)
 {
-    // The song's start isn't written: a project that never played from elsewhere has nothing new to save.
-    if (position.inBeats() > 0.0)
-        song.getState().setProperty (schema::playStart, position.inBeats(), nullptr);
-    else
-        song.getState().removeProperty (schema::playStart, nullptr);
+    // The song's start isn't written (SongOwnValue.h: writeSongOwnInto()): a project that never played from elsewhere has
+    // nothing new to save. Outside the history.
+    auto outside = getSongOutside (song);
+    outside.playStart = std::max (0.0, position.inBeats());
+    setSongOutside (song, std::move (outside));
 }
 
 void movePlayhead (Song& song, BeatPosition position)

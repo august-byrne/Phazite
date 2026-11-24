@@ -11,9 +11,14 @@ namespace phazite
 struct SavedGrid; // model/base/internal/SongOwnValue.h
 
 GridSettings loadGridSettings (const Song&, GridOwner); // the defaults if there are none; reading adds nothing
+
+// An editor's grid saved in the song, as view state: outside the history, no change of the song's (SongOwnValue.h:
+// setSongOutside(), the song's SongOutside::playlistGrid or pianoRollGrid).
 void saveGridSettings (Song&, GridOwner, const GridSettings&);
 
-// A grid as the song holds it (SongOwnValue.h: SavedGrid, what a tree of the project's state is read as too: readSavedGrid(),
-// GridSettings::load()): its offset within the grid's, its step's level where it is one of the saved words, else the default.
+// A grid as the song holds it (SongOwnValue.h: SavedGrid, what a tree of a file's grid is read as too: readSavedGrid()): its
+// offset within the grid's, its step's level where it is one of the saved words, else the default. And a grid as the song
+// saves it: each of its settings, the fixed size by its saved word (getSavedGridStep()).
 GridSettings loadGridSettings (const SavedGrid&);
+SavedGrid makeSavedGrid (const GridSettings&);
 } // namespace phazite

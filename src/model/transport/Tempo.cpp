@@ -630,12 +630,10 @@ bool doPatternsFollowTempo (const Song& song)
 
 void togglePatternsFollowTempo (Song& song)
 {
-    auto state = song.getState();
-
-    if (doPatternsFollowTempo (song))
-        state.setProperty (schema::patternsKeepTheirSpeed, true, &song.getUndoManager());
-    else
-        state.removeProperty (schema::patternsKeepTheirSpeed, &song.getUndoManager());
+    // In the command's step (written only while on: SongOwnValue.h, writeSongOwnInto()).
+    auto own = getSongOwn (song);
+    own.patternsKeepTheirSpeed = ! own.patternsKeepTheirSpeed;
+    setSongOwn (song, std::move (own));
 }
 
 TimeSignature getTimeSignature (const Song& song)

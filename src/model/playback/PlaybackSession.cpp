@@ -27,10 +27,9 @@ namespace
         return sessions;
     }
 
-    // View state (model/base/internal/Schema.h), how the song shows and no change to it, which no plan holds: a track's or
-    // the master's view properties (their heights, their lanes shown), the editors' grids, and the elements of view state (a
-    // piano roll's, a track's lanes) with everything in them. (Where a device's window was is the song's values', outside
-    // the history: the song's tree holds no device.)
+    // View state (model/base/internal/Schema.h), how the song shows and no change to it, which no plan holds: the elements
+    // of view state with everything in them. (A track's or the master's view, and where a device's window was, are the song's
+    // values', outside the history; the editors' grids are the song's own, songOutsideChanged().)
     bool isInViewElement (juce::ValueTree element)
     {
         for (; element.isValid(); element = element.getParent())
@@ -38,14 +37,6 @@ namespace
                 return true;
 
         return false;
-    }
-
-    bool isViewState (const juce::ValueTree& tree, const juce::Identifier& property)
-    {
-        if (tree.hasType (schema::PHAZITE) && schema::isGridProperty (property))
-            return true;
-
-        return isInViewElement (tree);
     }
 
     bool isViewElement (const juce::ValueTree& parent, const juce::ValueTree& child)
@@ -138,9 +129,9 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
     if (isHeardAsKept (tree, property))
         return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), ..., devicesChanged()
 
-    // Where playback starts is the transport's (movePlayhead() locates the engine itself), view state is how the song shows,
-    // and where the song stands in its versions is the versions': nothing a plan holds.
-    if ((tree == songState && property == schema::playStart) || isViewState (tree, property) || schema::isVersionsProperty (tree, property))
+    // View state is how the song shows: nothing a plan holds. (The song's own, its root's properties but its count of IDs:
+    // songOutsideChanged(), which alone of it makes a plan.)
+    if (isInViewElement (tree))
         return;
 
     // Anything else, in a new plan. (A value set by hand plays at once, from the song's values: a device's, its latency's
