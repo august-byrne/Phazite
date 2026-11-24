@@ -1784,3 +1784,51 @@ TEST_CASE ("A warp marker of an audio group moved on one side and the group's pi
         checkSong (*sides.ours);
     }
 }
+
+TEST_CASE ("What Phazite doesn't know at the song's root is left out of a merge: no clash of it, the merged song holds none of it, "
+           "and a clash of the song's own it knows is still made")
+{
+    // The base and the other side differ in a root property and a root element of names Phazite doesn't know (a later
+    // build's, or another program's); this side holds neither, as a song that opened never does.
+    Sides sides;
+    auto base = phazite::test::copyWholeSong (*sides.base);
+    auto ours = phazite::test::copyWholeSong (*sides.ours);
+    auto theirs = phazite::test::copyWholeSong (*sides.theirs);
+    const auto addUnknown = [] (juce::ValueTree& song, int value)
+    {
+        song.setProperty ("laterProperty", value, nullptr);
+        juce::ValueTree future ("FUTURE");
+        future.appendChild (juce::ValueTree ("PART", { { "x", value } }), nullptr);
+        song.appendChild (future, nullptr);
+    };
+
+    addUnknown (base, 1);
+    addUnknown (theirs, 2);
+    const auto holdsUnknown = [] (const juce::ValueTree& song)
+    { return song.hasProperty ("laterProperty") || song.getChildWithName ("FUTURE").isValid(); };
+
+    const auto makeID = [&sides] { return sides.ours->makeID(); };
+    const auto merged = phazite::mergeSongs (base, ours, theirs, makeID);
+    CHECK (merged.clashes.empty());
+    CHECK_FALSE (holdsUnknown (merged.song));
+    sides.checkMerged (merged);
+
+    // This side holding them too (a song merged by hand, never one that opened): the merged song holds none of them still.
+    auto oursWithUnknown = ours.createCopy();
+    addUnknown (oursWithUnknown, 3);
+    const auto mergedWithOurs = phazite::mergeSongs (base, oursWithUnknown, theirs, makeID);
+    CHECK (mergedWithOurs.clashes.empty());
+    CHECK_FALSE (holdsUnknown (mergedWithOurs.song));
+
+    // The project's notes changed on both sides, which Phazite knows: that clash is made, alone.
+    base.setProperty (schema::notes, "Base", nullptr);
+    ours.setProperty (schema::notes, "Ours", nullptr);
+    theirs.setProperty (schema::notes, "Theirs", nullptr);
+    const auto withNotes = phazite::mergeSongs (base, ours, theirs, makeID);
+    REQUIRE (withNotes.clashes.size() == 1);
+    CHECK (withNotes.clashes.front().line == "Song");
+    CHECK (withNotes.clashes.front().property == schema::notes);
+    CHECK (withNotes.clashes.front().theirs.toString() == "Theirs");
+    CHECK (withNotes.song[schema::notes].toString() == "Ours");
+    CHECK_FALSE (holdsUnknown (withNotes.song));
+}

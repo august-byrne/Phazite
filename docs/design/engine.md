@@ -26,7 +26,7 @@ between them, which compiles the song into what plays. The layers and where the 
 | Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
 | Browser previews on an engine of their own | Built | |
 | Every element of the song described once in code: its type, range, default and kind | Built | `src/model/base/internal/Schema.h`, `SchemaDescription.h`; `tests/SchemaTests.cpp` |
-| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: the clips, a clip's notes and controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves, the sections, modulation, the sends, the devices' store (keyed, with the windows' places outside the history), the devices, containers and chains, the tracks' switches (keyed, with their rows' view outside the history), and the tracks, folders, returns and master themselves are values beside the tree (built); the song's own next |
+| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: every area is a value beside the tree (built): the clips, a clip's notes and controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves, the sections, modulation, the sends, the devices' store (keyed, with the windows' places outside the history), the devices, containers and chains, the tracks' switches (keyed, with their rows' view outside the history), the tracks, folders, returns and master themselves, and the song's own (plain, keyed and outside the history, its count of IDs on the song); the song's tree holds only empty placeholders, which the end step takes away next |
 | Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
 | Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
 
@@ -349,9 +349,10 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
   which the values, the loader and the merge are made from; then the song moves one area at a time behind the
   model's functions (S5.20), the notes first, then the clips, then the tempo map, then the chord lane, then the MIDI
   links, then automation, then the sections, then modulation, then the sends, then the devices' store, then the devices,
-  then the tracks' switches and view, then the tracks themselves (done: all fourteen are values beside the tree, the
-  song's tree holding no device, container or chain, nor a track, nor a track's switch, view property or lanes, its
-  TRACKS and MASTER left as empty places a whole copy writes the tracks into, the chord lane's element left
+  then the tracks' switches and view, then the tracks themselves, then the song's own (done: every area is a value
+  beside the tree, the song's tree holding only empty placeholders: no device, container or chain, nor a track, nor a
+  track's switch, view property or lanes, nor a property of its root, its TRACKS and MASTER left as empty places a whole
+  copy writes the tracks into, the chord lane's element left
   as the sign that the song has one, the MIDI links' and the sections' as the places their first link and section made,
   automation's AUTOMATION as the place of its curves, each point with a key the selection of points holds, never saved,
   modulation under the tracks that stay and the containers its keeper follows by their places, the sends under the
@@ -363,8 +364,13 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
   written on their tracks' elements in a whole copy, the lanes after a track's devices and a folder's tracks; and the
   tracks, folders, returns and master themselves, each by its ID with each folder's list and the top list in their order
   and the master a member, which a move changes the place of alone, every other area naming its track by ID, written by
-  one function into a whole copy's TRACKS and MASTER),
-  with one undo history for the tree's changes and the values' while both are there, and the project file as it is.
+  one function into a whole copy's TRACKS and MASTER; and the
+  song's own, its root's properties and its LASTKEY, PIANOROLL and MERGING, in three values by how the song writes them, a
+  plain one for what a step alone writes, the third keyed one for the key set last and the versions' names, and one
+  outside the history for how it plays and shows, its count of IDs a member of the song's that tells no one, written on
+  the root of a whole copy, what Phazite doesn't know at the root dropped as the song opens; the end step, the history
+  as a list of roots without the tree, still to come), with one undo history for the tree's changes and the values'
+  while both are there, and the project file as it is.
 - **Beats are quarter notes everywhere,** and a time signature only sets the bar's length and the counted beat.
   Everything that keeps time then agrees, in every meter.
 - **Control points every 32 samples from the song's start,** so that what a song sounds like does not depend on
@@ -385,8 +391,10 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
 
 - The song as an immutable value: being built, before the beta (roadmap step S5.20). The clips, a clip's notes and
   controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves, the sections, modulation and the
-  sends are values beside the tree (built: the engine's tempo map is made once for each change of the song's); the rest of the song is still a `ValueTree`, every name of it
-  described in `Schema.h` (S5.19), and moves one area at a time next.
+  sends, the devices' store, the devices, the tracks' switches and view, the tracks themselves and the song's own (every
+  area) are values beside the tree (built: the engine's tempo map is made once for each change of the song's); the song's
+  `ValueTree` holds only empty placeholders, every name of the song described in `Schema.h` (S5.19), and the end step
+  takes it away next.
 - Other stretch modes, such as slicing drums at their hits or re-pitching: Planned.
 - Tracks that aren't being edited pre-rendered in the background: Planned, after v1.
 - Audio Units and CLAP in the helper: Planned, after v1 ([plugin-hosting.md](plugin-hosting.md)).

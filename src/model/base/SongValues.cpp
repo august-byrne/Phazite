@@ -25,8 +25,8 @@ namespace phazite
 // What keeps the areas and the tree together for every change of the tree (SongValues.h), by asking every area's part of it
 // in turn, each doing nothing for what is not its own (TracksArea.h, ClipsArea.h, TempoMapArea.h, ChordLaneArea.h,
 // CurvesArea.h, MidiLinksArea.h, SectionsArea.h, ModulationArea.h, SendsArea.h, DeviceStoreArea.h, DevicesArea.h; and
-// SongOwnArea.h, whose part tells the song's own listener from the tree while the tree holds it, changing nothing). The tracks'
-// part first: what it takes (a TRACK added to the song's TRACKS, a TRACKS or a MASTER added to the song, a property of its
+// SongOwnArea.h, whose part takes in what is written to the song's root of its own: its safety net). The tracks' part
+// first: what it takes (a TRACK added to the song's TRACKS, a TRACKS or a MASTER added to the song, a property of its
 // MASTER: its safety net) is asked of no other part, so that none relies on its own case of a track. It changes the areas and
 // the tree through the song's undo manager from inside the tree's callbacks, which run inside the perform() of the tree's own
 // action: JUCE refuses that only while it undoes or redoes (when the keeper does nothing), and adds the inner actions to the
@@ -37,7 +37,6 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     Keeper (SongValues& v, Song& s)
         : song (s),
           state (s.getState()),
-          songOwn (v, s),
           tracks (v, s),
           clips (v, s),
           tempoMap (v, s),
@@ -49,7 +48,8 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
           sends (v, s),
           deviceStore (v, s),
           devices (v, s),
-          trackLeaves (v, s)
+          trackLeaves (v, s),
+          songOwn (v, s)
     {
         state.addListener (this);
     }
@@ -58,10 +58,6 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
 
     Song& song;
     juce::ValueTree state;
-
-    // The song's own part tells the song's own listener from the tree, in an undo and a redo too (once the move is whole),
-    // until its switch (SongOwnArea.h).
-    SongOwnKeeper songOwn;
 
     // Each area's part, a member each (the notes' is the clips', which take each clip's notes in and out with the clip).
     TracksKeeper tracks;
@@ -76,14 +72,17 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     DeviceStoreKeeper deviceStore;
     DevicesKeeper devices;
     TrackLeavesKeeper trackLeaves; // the switches' and the view's: a lone LANES of the master's
+    SongOwnKeeper songOwn;         // the song's own's safety net (SongOwnArea.h)
 
     bool isUndoingOrRedoing() const { return song.getUndoManager().isPerformingUndoRedo(); }
 
-    // A property changed: the song's own, and the tracks' (a property of the song's MASTER, which holds none: its safety net).
+    // A property changed: the tracks' (a property of the song's MASTER, which holds none: its safety net), then the song's
+    // own, a property written to the song's root (its safety net: SongOwnArea.h, which does nothing while the history undoes
+    // or redoes).
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
     {
-        songOwn.propertyChanged (tree, property); // the song's own, while the tree holds it (SongOwnArea.h)
         tracks.propertyChanged (tree, property);
+        songOwn.propertyChanged (tree, property);
     }
 
     // A child added: every area asked in turn, each doing nothing (and returning at once) for what is not its own, so that an
@@ -95,13 +94,12 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     // modulation's (a lone MODULATOR or MACRO), then the sends' (a lone SEND), then the store's (what a lone DEVICE or CHAIN
     // holds of the store), then the devices' (a lone DEVICE, CONTAINER, CHAIN, VALUES or SOUNDS), which take a DEVICE or a
     // CONTAINER out of the tree whole once modulation and the store took theirs out of it, then the switches' and the view's
-    // (a lone LANES of the master's). (The clips', modulation's, the sends', the devices' and the switches' parts each still
+    // (a lone LANES of the master's), then the song's own (a LASTKEY, a PIANOROLL or a MERGING added to the song's root,
+    // which no other area holds). (The clips', modulation's, the sends', the devices' and the switches' parts each still
     // have a case of a track that comes into the song, which the tracks' part leaves them nothing of: the next piece of
     // roadmap step S5.20 takes those away.)
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
-        songOwn.childChanged (parent, child); // a LASTKEY, PIANOROLL or MERGING, in an undo and a redo too
-
         if (isUndoingOrRedoing())
             return;
 
@@ -119,16 +117,15 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
         deviceStore.childAdded (parent, child);
         devices.childAdded (parent, child);
         trackLeaves.childAdded (parent, child);
+        songOwn.childAdded (parent, child);
     }
 
     // A child taken out: every area that acts there asked in turn, each doing nothing for what is not its own (no track is in
     // the tree to leave it: their cases are left for the next piece, as above); what the tracks' part takes out itself is
     // asked of none. The clips', then modulation's, then the sends', then the devices': the tempo map, the chord lane, the MIDI
-    // links, the curves, the sections and the store do nothing as their elements leave.
+    // links, the curves, the sections, the store and the song's own do nothing as their elements leave.
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        songOwn.childChanged (parent, child); // a LASTKEY, PIANOROLL or MERGING, in an undo and a redo too
-
         if (isUndoingOrRedoing() || tracks.childRemoved (parent, child))
             return;
 
@@ -154,6 +151,8 @@ SongValues::SongValues (Song& song)
       devices (song.getUndoManager(), {}),
       trackSwitches (song.getUndoManager(), {}),
       tracks (song.getUndoManager(), {}),
+      songOwn (song.getUndoManager(), {}),
+      songStanding (song.getUndoManager(), {}),
       clipsTeller (std::make_unique<ClipsTeller> (clips, listeners)),
       notesTeller (std::make_unique<NotesTeller> (notes, listeners)),
       tempoMapTeller (std::make_unique<TempoMapTeller> (tempoMap, listeners)),
@@ -167,7 +166,10 @@ SongValues::SongValues (Song& song)
       devicesTeller (std::make_unique<DevicesTeller> (devices, listeners)),
       trackSwitchesTeller (std::make_unique<TrackSwitchesTeller> (*this, listeners)),
       tracksViewTeller (std::make_unique<TracksViewTeller> (*this, listeners)),
-      tracksTeller (std::make_unique<TracksTeller> (tracks, listeners))
+      tracksTeller (std::make_unique<TracksTeller> (tracks, listeners)),
+      songOwnTeller (std::make_unique<SongOwnTeller> (songOwn, listeners)),
+      songStandingTeller (std::make_unique<SongStandingTeller> (songStanding, listeners)),
+      songOutsideTeller (std::make_unique<SongOutsideTeller> (songOutside, listeners))
 {
     // Each area with its teller, in the order of the areas; the keeper comes once the tree is consistent (adopt()). The
     // macro's statement ended again here, so that the formatter reads a body that holds nothing else.
@@ -180,6 +182,9 @@ SongValues::~SongValues()
 
     // The keeper first, then each area's teller, in the reverse of their making.
     keeper = nullptr;
+    songOutsideTeller = nullptr;
+    songStandingTeller = nullptr;
+    songOwnTeller = nullptr;
     tracksTeller = nullptr;
     tracksViewTeller = nullptr;
     trackSwitchesTeller = nullptr;
@@ -245,16 +250,6 @@ int SongValues::countHoldingsLeftWithKeepers() const
     return count;
 }
 
-SongValues::SongOwnKeeper* SongValues::findSongOwnKeeper() const noexcept
-{
-    return keeper != nullptr ? &keeper->songOwn : nullptr;
-}
-
-bool SongValues::isTellingHistoryMove() const noexcept
-{
-    return keeper != nullptr && keeper->songOwn.tellingMove;
-}
-
 void SongValues::adopt (Song& song)
 {
     // What the tree the loader made consistent holds of each area, into the area, outside the history, and out of the tree:
@@ -262,7 +257,11 @@ void SongValues::adopt (Song& song)
     // links, then the curves, then the sections, then modulation, then the sends, then the store, then the devices, which
     // take every DEVICE, CONTAINER and CHAIN element out of the tree once modulation took a container's macros and the store
     // what a device or a chain stores out of them, then the tracks' switches and view, then the tracks themselves, last,
-    // which take every TRACK out of the tree and the MASTER's own: none reads another's); then the keeper, from here on.
+    // which take every TRACK out of the tree and the MASTER's own: none reads another's), the song's own first, with its
+    // count of IDs (SongOwnArea.h), so that anything an area's adoption made would count on from the count the file holds
+    // (none makes one), and what Phazite doesn't know at the root dropped before any area reads it (the placeholders, the
+    // TRACKS and the MASTER among them, are known and stay); then the keeper, from here on.
+    SongOwnKeeper::adopt (*this, song);
     ClipsKeeper::adopt (*this, song);
     TempoMapKeeper::adopt (*this, song);
     ChordLaneKeeper::adopt (*this, song);
@@ -315,7 +314,7 @@ bool isHeardAsKept (const juce::ValueTree& element, const juce::Identifier& prop
            || isHeardAsDevices (element, property)     // a DEVICE, a CONTAINER or a CHAIN, or an element in one
            || isHeardAsTracks (element, property)      // what the tracks' three values cover of a track, the master, a LANE
            || isHeardAsDeviceStore (element, property) // a store's property of a device or a chain, or one in a VALUE
-           || isHeardAsSongOwn (element, property);    // the root's own (not nextID), or one of LASTKEY, PIANOROLL, MERGING
+           || isHeardAsSongOwn (element, property);    // the root's own or its count, or one of LASTKEY, PIANOROLL, MERGING
 }
 
 bool isHeardAsKept (const juce::ValueTree& parent, const juce::ValueTree& child)

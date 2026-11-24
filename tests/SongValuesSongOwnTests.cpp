@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's own change hears it from one place (model/base/internal/SongValues.h: Listener::songOwnChanged(),
-// songStandingChanged(), songOutsideChanged()), each value once for each change of it (roadmap step S5.20, the song's own;
-// while the song's tree is still its storage, its part of the keeper tells it from the tree: model/base/internal/
+// songStandingChanged(), songOutsideChanged()), each value once for each change of it (roadmap step S5.20, the song's own:
+// its three areas hold it beside the song's tree, and each tells the changes of its own value: model/base/internal/
 // SongOwnArea.h). Each writer of the song's own, through its setter (SongOwnValue.h), tells its value once with what differs,
 // makes the undo step it always made or none, and its Undo and its Redo tell once each; what is written outside the history
 // survives the Undo of a step that changed another entry of the song's standing; what plays makes a plan for the loop and the
@@ -276,6 +276,21 @@ TEST_CASE ("Song values' own: the key set last and the versions' names are writt
 {
     Watched w;
 
+    // A merge waiting set by hand, as a file from anyone may hold it: the song's own value, outside the history,
+    // first, in a song with nothing to undo yet (VersionHistory.h: setWaitingMerge()).
+    phazite::MergingRecord merge;
+    merge.version = repeat ('a', 64);
+    merge.head = repeat ('b', 64);
+    merge.before = repeat ('c', 64);
+    const auto waiting = w.hear ([&] { phazite::setWaitingMerge (w.song, phazite::writeMergingElement (merge)); });
+    checkOwnOnce (waiting, SongOwnChange::merging);
+    CHECK (waiting.steps == 0);
+    CHECK (phazite::test::hasWaitingMerge (w.song));
+
+    const auto gone = w.hear ([&] { phazite::setWaitingMerge (w.song, {}); });
+    checkOwnOnce (gone, SongOwnChange::merging);
+    CHECK_FALSE (phazite::test::hasWaitingMerge (w.song));
+
     // A key set by itself (a new project's content, the key menu's last): told, no step.
     const auto set = w.hear ([&] { phazite::setLastKey (w.song, { .root = 2, .scale = phazite::Scale::minor }); });
     CHECK (set.told.standing == 1);
@@ -293,20 +308,6 @@ TEST_CASE ("Song values' own: the key set last and the versions' names are writt
     const auto undone = w.undo();
     CHECK (undone.told.standing == 0);
     CHECK (phazite::getLastKey (w.song) == phazite::Key { .root = 7 });
-
-    // A merge waiting set by hand, as a file from anyone may hold it: the song's own value, outside the history.
-    phazite::MergingRecord merge;
-    merge.version = repeat ('a', 64);
-    merge.head = repeat ('b', 64);
-    merge.before = repeat ('c', 64);
-    const auto waiting = w.hear ([&] { phazite::setWaitingMerge (w.song, phazite::writeMergingElement (merge)); });
-    checkOwnOnce (waiting, SongOwnChange::merging);
-    CHECK (waiting.steps == 0);
-    CHECK (phazite::test::hasWaitingMerge (w.song));
-
-    const auto gone = w.hear ([&] { phazite::setWaitingMerge (w.song, {}); });
-    checkOwnOnce (gone, SongOwnChange::merging);
-    CHECK_FALSE (phazite::test::hasWaitingMerge (w.song));
 }
 
 //==============================================================================
@@ -490,6 +491,8 @@ TEST_CASE ("Song values' own: what is counted makes the project unsaved and its 
     merge.version = repeat ('a', 64);
     merge.head = repeat ('b', 64);
     merge.before = repeat ('c', 64);
+    // Set by hand in a song with nothing to undo, as one just opened (setWaitingMerge()).
+    w.song.getUndoManager().clearUndoHistory();
     phazite::setWaitingMerge (w.song, phazite::writeMergingElement (merge));
     phazite::setWaitingMerge (w.song, {});
     check (false);

@@ -13,6 +13,7 @@
 #include "devices/reverb/Reverb.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
@@ -506,32 +507,39 @@ TEST_CASE ("The undo check fails a change that Undo doesn't take back whole, and
         CHECK (kept.failures[0].contains ("@mute"));
     }
 
-    SUBCASE ("An element taken away round the history between two steps: the walk's Undo takes the wrong one")
+    SUBCASE ("A change round the history between two steps, to an area the step before changed: the walk's Undo gives another song")
     {
-        // As automation lanes were, among a track's elements, until 2026-11-13: the history finds an element by its place.
-        // On the song's tree by hand, with elements Phazite doesn't know: it goes when the root holds nothing (roadmap step
-        // S5.20, the song's own switch), with the fault it shows, which only a tree's history has.
+        // A plain area's Undo and Redo put back the whole value their step held (ValueArea.h): a section added round the
+        // history after a step that added one is lost by that step's Undo and Redo (here the check's own, catching up as the
+        // next change begins), so that the walk's Undo to the step between gives a song without the section it had there.
         KeptFailures kept (*song);
-        auto state = song->getState();
-        const auto add = [&song, &state] (const char* type)
+        const auto addSection = [&song] (const char* name)
         {
-            const phazite::UndoStep step (*song, juce::String ("Add ") + type);
-            state.appendChild (juce::ValueTree (type), &song->getUndoManager());
+            REQUIRE (phazite::insertSection (*song, phazite::getSectionsEnd (*song),
+                                             { .name = name, .length = phazite::BeatDuration::fromBeats (4.0) })
+                         .isValid());
         };
 
-        state.appendChild (juce::ValueTree (phazite::schema::PIANOROLL), nullptr); // view settings, which the texts leave out
-        kept.check.check ("Add FIRST", [&add] { add ("FIRST"); });
-        kept.check.check ("Add SECOND", [&add] { add ("SECOND"); });
+        kept.check.check ("First",
+                          [&song, &addSection]
+                          {
+                              const phazite::UndoStep step (*song, "First");
+                              addSection ("First");
+                          });
+        phazite::test::changeRoundTheHistory (*song);
+        kept.check.check ("Second",
+                          [&song]
+                          {
+                              const phazite::UndoStep step (*song, "Second");
+                              change (*song, "a", 1);
+                          });
         CHECK (kept.failures.isEmpty());
 
-        // JUCE asserts as its undo finds another element than it added at the place it kept: the fault this makes.
-        const phazite::test::ExpectedAssertion wrongElement ("juce_ValueTree.cpp:569");
-        state.removeChild (state.getChildWithName (phazite::schema::PIANOROLL), nullptr);
         kept.check.walkBackAndForth();
-
         REQUIRE (! kept.failures.isEmpty());
         CHECK (kept.failures[0].startsWith ("The walk: Undo to step 1 of 2"));
         CHECK (kept.failures[0].contains ("doesn't give the song as it was there"));
+        CHECK (kept.failures[0].contains ("SECTION"));
     }
 
     SUBCASE ("An undo that the check wasn't told of")

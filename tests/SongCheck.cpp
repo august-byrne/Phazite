@@ -17,6 +17,7 @@
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongIndex.h"
+#include "model/base/internal/SongOwnArea.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
@@ -1152,7 +1153,7 @@ namespace
                                 "container's macros are on two channels");
 
         const auto songTracks = getTrackIDSet (song);
-        const auto next = (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0);
+        const auto next = getNextID (song);
 
         for (const auto& [key, value] : modulation.modulators)
         {
@@ -1236,7 +1237,7 @@ namespace
             problems.push_back ("values: the sends' lists don't hold its sends, or hold one twice");
 
         const auto songTracks = getTrackIDSet (song);
-        const auto next = (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0);
+        const auto next = getNextID (song);
         const auto& range = schema::sendLevel.getRange();
 
         for (const auto& [key, send] : sends.sends)
@@ -1757,7 +1758,7 @@ namespace
         if (! holdsItsLists (tracks))
             problems.push_back ("values: the tracks don't hold their lists");
 
-        const auto next = (std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0);
+        const auto next = getNextID (song);
 
         forEachIDHeld (tracks,
                        [&problems, next] (std::uint64_t id)
@@ -1848,7 +1849,7 @@ namespace
         visit (song.getState());
         visit (song.getState().getChildWithName (schema::TRACKS));
 
-        const auto next = (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0);
+        const auto next = getNextID (song);
         const auto& switches = values.trackSwitches.get();
 
         for (const auto* map : { &switches.mutes, &switches.solos, &switches.frozen })
@@ -1879,12 +1880,73 @@ namespace
         checkLanes (outside.master, "the master");
     }
 
-    // The song's own, while the song's tree holds it (SongOwnValue.h): its root read alike as Phazite's code always read it and
-    // as the song holds it (each field by its description, by the loader's rule), so that the getters read what the file
-    // holds. A song that went through the loader holds it so; every writer of the song's own writes it so.
-    void checkSongOwnValue (const Song& song, std::vector<std::string>& problems)
+    // The song's live root as every area's switch leaves it: no property, and nothing but its placeholders, each once and each
+    // empty (no property, no element): its TEMPOMAP, its AUTOMATION, its TRACKS and its MASTER, which every song that holds
+    // its values has, and its CHORDLANE, MIDILINKS and SECTIONS where it has them. Everything else the song holds is its
+    // areas', which whole state writes into a copy (WholeState.h), and what Phazite doesn't know there was dropped as it opened.
+    void checkLiveRoot (const Song& song, std::vector<std::string>& problems)
     {
-        const auto root = song.getState();
+        const auto live = song.getState();
+
+        if (live.getNumProperties() > 0)
+            problems.push_back ("values: the song's live root holds a property");
+
+        for (const auto* type : { &schema::TEMPOMAP, &schema::AUTOMATION, &schema::TRACKS, &schema::MASTER })
+            if (! live.getChildWithName (*type).isValid())
+                problems.push_back ("values: the song's live root holds no " + type->toString().toStdString());
+
+        std::set<juce::String> seen;
+
+        for (const auto& child : live)
+        {
+            const auto type = child.getType();
+            const auto isPlaceholder = type == schema::TEMPOMAP.getName() || type == schema::AUTOMATION.getName()
+                                       || type == schema::TRACKS.getName() || type == schema::MASTER.getName()
+                                       || type == schema::CHORDLANE.getName() || type == schema::MIDILINKS.getName()
+                                       || type == schema::SECTIONS.getName();
+
+            if (! isPlaceholder)
+                problems.push_back ("values: the song's live root holds a " + type.toString().toStdString() + ", no placeholder");
+            else if (! seen.insert (type.toString()).second)
+                problems.push_back ("values: the song's live root holds two of " + type.toString().toStdString());
+            else if (child.getNumProperties() > 0 || child.getNumChildren() > 0)
+                problems.push_back ("values: the song's live root's " + type.toString().toStdString() + " isn't empty");
+        }
+    }
+
+    // The song's own, its areas' (SongOwnValue.h; SongValues.h: songOwn, songStanding, songOutside): the song's tree holds
+    // none of it (no property on its root, nor a LASTKEY, PIANOROLL or MERGING), its count of IDs past every ID the song holds,
+    // each field within its description (the values written into a root and read back as the song holds them are themselves),
+    // and its whole copy's root read alike as Phazite's code always read it and as the song holds it (each field by its
+    // description, by the loader's rule), and read as held and written back, itself: the file it writes is the one it opens.
+    void checkSongOwnValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    {
+        const auto live = song.getState();
+
+        for (int i = 0; i < live.getNumProperties(); ++i)
+            problems.push_back ("values: the song's tree holds the property " + live.getPropertyName (i).toString().toStdString()
+                                + " on its root, which the song holds beside it or drops as it opens");
+
+        for (const auto* type : { &schema::LASTKEY, &schema::PIANOROLL, &schema::MERGING })
+            if (live.getChildWithName (*type).isValid())
+                problems.push_back ("values: the song's tree holds a " + type->toString().toStdString() + ", the song's own's");
+
+        if (findNextID (song) != getNextID (song))
+            problems.push_back ("values: the song's count of IDs is at an ID it holds, or before one");
+
+        juce::ValueTree asHeld (schema::PHAZITE);
+        writeSongOwnInto (asHeld, values.songOwn.get(), values.songStanding.get(), values.songOutside.get());
+
+        if (! (readHeldSongOwn (asHeld) == values.songOwn.get()) || ! (readHeldSongStanding (asHeld) == values.songStanding.get())
+            || ! (readHeldSongOutside (asHeld) == values.songOutside.get()))
+            problems.push_back ("values: the song's own holds a field outside its description (written and read back as held, "
+                                "it is another)");
+
+        // The root as a whole copy writes it (SongOwnArea.h: writeSongOwnIn(), its properties and its own elements), made of the
+        // values alone: what the rest of the song holds may not be whole while a test looks (a second AUTOMATION left to a
+        // step's Undo), which no copy of the song should be asked of.
+        juce::ValueTree root (schema::PHAZITE);
+        writeSongOwnIn (root, keepValues (song));
 
         if (! (readSongOwnValue (root) == readHeldSongOwn (root)))
             problems.push_back ("values: the song's own is read otherwise as Phazite's code read it and as the song holds it");
@@ -1960,7 +2022,8 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkDeviceStoreValue (song, *values, problems); // the devices' store
     checkTracksValue (song, *values, problems);
     checkTrackLeavesValue (song, *values, problems); // the tracks' switches and view
-    checkSongOwnValue (song, problems);              // the song's own, while the tree holds it
+    checkSongOwnValue (song, *values, problems);     // the song's own
+    checkLiveRoot (song, problems);                  // what the areas' switches leave of the live root: empty placeholders
     return problems;
 }
 

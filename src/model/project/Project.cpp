@@ -16,6 +16,7 @@
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
+#include "model/base/internal/SongOwnArea.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TrackSwitchesValue.h"
@@ -2250,20 +2251,13 @@ namespace
                                         "finish, then save.";
 
     // The song's names of where it stands in its versions (Schema.h: versionsBranch, versionsBase), as it holds them now
-    // (SongOwnValue.h: getSongStanding()), written into a copy of it as it was saved: each where the song has one, none where
-    // it hasn't.
-    void writeNamesNow (const Song& song, juce::ValueTree& saved)
+    // (SongOwnValue.h: getSongStanding()), given to the values kept with a copy of it as it was saved (WholeState.h:
+    // ValuesKept, its songStanding, which its whole copy writes them from): each the song's, none where it has none.
+    void writeNamesNow (const Song& song, ValuesKept& saved)
     {
-        const auto standing = getSongStanding (song);
-
-        for (const auto& [name, text] :
-             { std::pair (&schema::versionsBranch, &standing.versionsBranch), std::pair (&schema::versionsBase, &standing.versionsBase) })
-        {
-            if (text->isNotEmpty())
-                saved.setProperty (*name, *text, nullptr);
-            else
-                saved.removeProperty (*name, nullptr);
-        }
+        const auto& standing = getSongStanding (song);
+        saved.songStanding.versionsBranch = standing.versionsBranch;
+        saved.songStanding.versionsBase = standing.versionsBase;
     }
 } // namespace
 
@@ -2324,7 +2318,7 @@ Project::~Project()
 
     if (namesPending && ! changedSinceSave && savedState.tree.isValid())
     {
-        writeNamesNow (*song, savedState.tree);
+        writeNamesNow (*song, savedState.values);
 
         if (writeProjectFile (copyWhole (savedState.tree, savedState.values), file).wasOk())
             namesPending = false;
@@ -2530,7 +2524,8 @@ bool Project::finishBackgroundSave()
 
     if (autosaveWriter->takeFailure())
     {
-        namesPending = namesPending || written.tree.hasProperty (schema::versionsBase) || written.tree.hasProperty (schema::versionsBranch);
+        namesPending = namesPending || written.values.songStanding.versionsBase.isNotEmpty()
+                       || written.values.songStanding.versionsBranch.isNotEmpty();
         return false; // its changes are still to save
     }
 
@@ -3214,7 +3209,7 @@ void Project::writeVersionsNames()
     }
 
     // The file as it was saved, the song's names in it as they are now: no backup, as the song in it is the one backed up.
-    writeNamesNow (*song, savedState.tree);
+    writeNamesNow (*song, savedState.values);
 
     namesWriter->write (copyWhole (savedState.tree, savedState.values), file);
     namesPending = false;
@@ -3562,14 +3557,16 @@ bool Project::isSongOwnAsSaved() const
     if (! songOwnToCompare)
         return true;
 
-    // The song's own value and the key set last (what of its standing counts: Schema.h), against the saved copy's root read
-    // as the song holds it (SongOwnValue.h): what the whole comparison compares of the root's own, as values. No element
-    // compared (countElementsCompared()), as a property of the root compared alone counted none.
+    // The song's own value and the key set last (what of its standing counts: Schema.h), against the saved copy's kept values
+    // (SongOwnArea.h: holdSameSongOwn()), as the whole comparison compares them (holdTheSameProject(), through
+    // holdSameKeptOf()). No element compared (countElementsCompared()), as a property of the root compared alone counted none.
     if (! savedState.tree.isValid())
         return false;
 
-    return getSongOwn (*song) == readHeldSongOwn (savedState.tree)
-           && getSongStanding (*song).lastKey == readHeldSongStanding (savedState.tree).lastKey;
+    ValuesKept now;
+    now.songOwn = getSongOwn (*song);
+    now.songStanding = getSongStanding (*song);
+    return holdSameSongOwn (now, savedState.values);
 }
 
 bool Project::isChordLaneAsSaved() const

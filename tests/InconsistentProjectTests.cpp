@@ -427,10 +427,11 @@ TEST_CASE ("A clip anywhere but on a track, in an element Phazite doesn't know t
     CHECK (phazite::getAllClips (song).size() == 2); // the MIDI clip and the audio clip, each once
     CHECK (phazite::getClips (song, edited.lead).size() == 1);
 
-    // What Phazite doesn't know at the root stays, without the clip; what it doesn't know on a track goes as the song opens
-    // (named, roadmap step S5.20, the tracks' switch: a track is a value, which holds its own fields alone).
+    // What Phazite doesn't know goes as the song opens, with the clip in it: on a track (named, roadmap step S5.20, the tracks'
+    // switch: a track is a value, which holds its own fields alone) and at the song's root (the song's own: SongOwnArea.h).
     CHECK_FALSE (phazite::test::copyTrack (song, edited.lead).getChildWithName ("FUTURE").isValid());
-    CHECK (song.getState().getChildWithName ("ELSEWHERE").isValid());
+    CHECK_FALSE (song.getState().getChildWithName ("ELSEWHERE").isValid());
+    CHECK_FALSE (phazite::test::copyWholeSong (song).getChildWithName ("ELSEWHERE").isValid());
 }
 
 TEST_CASE ("A clip whose properties don't hold together opens as the clips' own edits keep one, and is the same opened again")
@@ -1031,7 +1032,7 @@ TEST_CASE ("An ID past 2^61 inside an element Phazite doesn't know neither raise
             checkSong (reopened->getSong());
             CHECK (findNamedTrack (reopened->getSong(), "Added").isValid());
             const auto future = reopened->getSong().getState().getChildWithName ("FUTURE");
-            CHECK (phazite::readID (future.getChild (0)[schema::trackID]) == id); // kept as it is
+            CHECK_FALSE (future.isValid()); // dropped as the song opened (SongOwnArea.h), uncounted
             REQUIRE (reopened->save().wasOk());
             const auto text = file.loadFileAsString();
             CHECK (text == previous);
@@ -2632,8 +2633,8 @@ TEST_CASE ("A chain's crossover's automation stays while its container isn't spl
     CHECK (phazite::getPoints (*phazite::findSong (s.context), crossover).size() == 2);
 }
 
-TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as they are, and are saved again, but on a track and in a "
-           "clip's notes")
+TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as they are, and are saved again, but at the song's root, "
+           "on a track and in a clip's notes")
 {
     Edited edited;
     const auto project = edited.open (
@@ -2653,12 +2654,11 @@ TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as
     const auto saved = juce::parseXML (project->getFile());
     REQUIRE (saved != nullptr);
 
-    const auto* future = saved->getChildByName ("FUTURE");
-    REQUIRE (future != nullptr);
-    CHECK (future->getStringAttribute ("kept") == "yes");
-    CHECK (future->getNumChildElements() == 2);
-    CHECK (future->getChildByName ("NOTE")->getStringAttribute ("pitch") == "500");
-    // But a track's: what Phazite doesn't know on a TRACK (or the MASTER) isn't kept, as a track is a value beside the song's
+    // At the song's root, what Phazite doesn't know goes as the song opens, with everything in it (roadmap step S5.20, the
+    // song's own: the song holds its root's own as values, and nothing else of it: SongOwnArea.h).
+    CHECK (saved->getChildByName ("FUTURE") == nullptr);
+    CHECK_FALSE (project->getSong().getState().getChildWithName ("FUTURE").isValid());
+    // And a track's: what Phazite doesn't know on a TRACK (or the MASTER) isn't kept, as a track is a value beside the song's
     // tree, which holds its own fields alone (named, roadmap step S5.20, the tracks' switch: docs/project-format.md); nor a
     // note's and a controller's value: what Phazite doesn't know on a NOTE or a CONTROL isn't kept, as a clip's notes are
     // values beside the song's tree.

@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <set>
 #include <vector>
@@ -107,11 +108,7 @@ struct TreeHeard final : juce::ValueTree::Listener
             hear (parent);
     }
 
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
-    {
-        if (! (tree == root && property == schema::nextID)) // a new section's ID counted (Song::makeID()): no undo step
-            hear (tree);
-    }
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { hear (tree); }
 
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { hearChild (parent, child); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { hearChild (parent, child); }
@@ -138,6 +135,7 @@ struct Watched
         Told told;
         int inSections = 0, place = 0, other = 0;
         juce::int64 project = 0, versions = 0;
+        std::uint64_t ids = 0; // how far the song's count of IDs moved on (Song.h: makeID())
     };
 
     Heard hear (const std::function<void()>& change)
@@ -148,13 +146,15 @@ struct Watched
         tree.inSections = tree.place = tree.other = 0;
         const auto projectBefore = s.getProject().getChangeCount();
         const auto versionsBefore = versions->countSongChanges();
+        const auto idsBefore = phazite::getNextID (song);
         change();
         return { told,
                  tree.inSections,
                  tree.place,
                  tree.other,
                  s.getProject().getChangeCount() - projectBefore,
-                 versions->countSongChanges() - versionsBefore };
+                 versions->countSongChanges() - versionsBefore,
+                 phazite::getNextID (song) - idsBefore };
     }
 
     // A change as one undo step, then its Undo, then its Redo: what each told.
@@ -251,8 +251,11 @@ TEST_CASE ("Song values' sections: each edit through the model tells the section
             CHECK (heard[i].inSections == 0);
             CHECK (heard[i].place == (makesThePlace ? 1 : 0));
             CHECK (heard[i].project == heard[i].told.sections + heard[i].place);
-            // The versions count the song's count of IDs moving on too (Song::makeID(), in the step alone: no Undo takes it back).
-            CHECK (heard[i].versions == heard[i].told.sections + heard[i].place + (i == 0 ? idsMade : 0));
+            CHECK (heard[i].versions == heard[i].told.sections + heard[i].place);
+
+            // The song's count of IDs moves on in the step alone (no Undo takes it back), told to no one: neither the project
+            // nor the versions count it (Song.h: makeID()).
+            CHECK (heard[i].ids == (i == 0 ? (std::uint64_t) idsMade : 0));
 
             for (const auto& call : heard[i].told.calls) // each section named once in a call
                 CHECK (std::set<SectionID> (call.begin(), call.end()).size() == call.size());

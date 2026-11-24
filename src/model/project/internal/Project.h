@@ -398,12 +398,12 @@ private:
     void chordLaneChanged() override;
 
     // What the song holds of its own changed (SongValues.h: Listener::songOwnChanged(), songStandingChanged(); the tree's
-    // callbacks below leave the root's own properties and its LASTKEY, PIANOROLL and MERGING alone, isHeardAsKept()): its
-    // own value (the outline, the notes, the numbering, patterns' speed, a merge waiting) and the key set last, each counted
-    // as a change, and compared with savedState's when asked, as values read as the song holds them (isSongOwnAsSaved()), so
-    // that notes changed and changed back are saved again. Where the song stands in its versions is no change: its names go
-    // into the project file in the background (versionsMoved()). What it keeps of how it plays and shows (the loop, the
-    // grids: songOutsideChanged()) counts nothing.
+    // callbacks below leave what the song's own keeper takes in alone, isHeardAsKept()): its own value (the outline, the
+    // notes, the numbering, patterns' speed, a merge waiting) and the key set last, each counted as a change, and compared
+    // with savedState's kept values when asked (isSongOwnAsSaved(); SongOwnArea.h: holdSameSongOwn()), so that notes
+    // changed and changed back are saved again. Where the song stands in its versions is no change: its names go into the
+    // project file in the background (versionsMoved()). What it keeps of how it plays and shows (the loop, the grids:
+    // songOutsideChanged()) counts nothing.
     bool songOwnToCompare = false;
     void songOwnChanged (const SongOwnChange&) override;
     void songStandingChanged (bool lastKey, bool versionsNames) override;

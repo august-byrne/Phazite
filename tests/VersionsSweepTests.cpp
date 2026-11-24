@@ -216,9 +216,17 @@ TEST_CASE ("The sweep keeps the song before a merge that waits, in the open song
     merging.setProperty (schema::mergingVersion, head, nullptr);
     merging.setProperty (schema::mergingHead, head, nullptr);
     merging.setProperty (schema::mergingBefore, beforeLeft, nullptr);
-    phazite::setWaitingMerge (*s.song, merging);
+
+    // Set by hand, as a song just opened holds one: in a song with nothing to undo (VersionHistory.h: setWaitingMerge()).
+    const auto setMerge = [&s] (const juce::ValueTree& element)
+    {
+        s.song->getUndoManager().clearUndoHistory();
+        phazite::setWaitingMerge (*s.song, element);
+    };
+
+    setMerge (merging);
     const auto leftWithMerge = s.keepSong (-4.0f);
-    phazite::setWaitingMerge (*s.song, {});
+    setMerge ({});
     s.putBranch ("main", head, leftWithMerge);
 
     merging.setProperty (schema::mergingBefore, beforeOpen, nullptr);

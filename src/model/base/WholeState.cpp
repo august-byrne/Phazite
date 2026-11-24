@@ -11,6 +11,7 @@
 #include "internal/Schema.h"
 #include "internal/SectionsArea.h"
 #include "internal/SendsArea.h"
+#include "internal/SongOwnArea.h"
 #include "internal/TempoMapArea.h"
 #include "internal/TracksArea.h"
 
@@ -124,6 +125,8 @@ namespace
                                             // children): SendsArea.h
         writeDeviceStoreIn (element, kept); // a plug-in's DEVICE's store (its VALUEs after its other children), a CHAIN's
                                             // mute and solo, a DEVICE's window's place: DeviceStoreArea.h
+        writeSongOwnIn (element, kept);     // the song's root's own, its LASTKEY, PIANOROLL and MERGING after its other
+                                            // children: SongOwnArea.h
 
         for (auto child : element)
             if (leadsToKept (element, child))
@@ -179,6 +182,10 @@ ValuesKept keepValues (const Song& song)
         kept.trackSwitches = values->trackSwitches.get();
         kept.tracksOutside = values->tracksOutside.get();
         kept.tracks = values->tracks.get();
+        kept.songOwn = values->songOwn.get();
+        kept.songStanding = values->songStanding.get();
+        kept.songOutside = values->songOutside.get();
+        kept.nextID = song.getIDCount();
     }
 
     return kept;
@@ -235,6 +242,9 @@ bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, con
         return false;
 
     if (! holdSameTracksOf (element, kept, otherElement, otherKept)) // then the tracks whole, the master's value and mode
+        return false;
+
+    if (! holdSameSongOwnOf (element, kept, otherElement, otherKept)) // then the song's own, of a song's root
         return false;
 
     return true;

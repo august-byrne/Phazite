@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Schema.h"
+#include "Song.h"
 #include "internal/IDsHeld.h"
 #include "internal/SongOwnValue.h"
 
 #include <algorithm>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <unordered_set>
 
@@ -67,13 +69,29 @@ namespace
 
 } // namespace
 
-// Here, with the other counting of IDs and the name of the count (schema::nextID), rather than in Song.cpp.
-std::uint64_t Song::makeID()
+// Here, with the other counting of IDs and the name of the count (schema::nextID), rather than in Song.cpp. The count is the
+// song's member once it holds its values (the song's own part of its keeper takes it from the tree then: SongOwnArea.h), and
+// its tree's before (a song being made or read, which keeps everything in its tree): never told to anyone either way, as no
+// value holds it and the tree of a song that holds its values hears nothing of it.
+std::uint64_t Song::getIDCount() const
 {
     // From 1: no item's ID is 0.
-    const auto id = std::max ((std::uint64_t) 1, readNextID (state));
+    return std::max ((std::uint64_t) 1, values != nullptr ? nextID : readNextID (state));
+}
+
+void Song::setIDCount (std::uint64_t next)
+{
+    if (values != nullptr)
+        nextID = next;
+    else if (next != readNextID (state))
+        state.setProperty (schema::nextID, (juce::int64) next, nullptr);
+}
+
+std::uint64_t Song::makeID()
+{
+    const auto id = getIDCount();
     jassert (id < schema::maxID); // a loaded song counts from at most schema::maxCountedID, 2^61 below it
-    state.setProperty (schema::nextID, (juce::int64) (id + 1), nullptr);
+    setIDCount (id + 1);
     return id;
 }
 
@@ -84,30 +102,25 @@ std::uint64_t findNextID (const juce::ValueTree& song)
 
 std::uint64_t findNextID (const Song& song)
 {
-    return std::max (findNextID (song.getState()), findLargestIDHeld (song) + 1);
+    // Its count, and past every ID it holds: in its tree, and in its values beside it.
+    return std::max ({ song.getIDCount(), findLargestID (song.getState()) + 1, findLargestIDHeld (song) + 1 });
 }
 
 void countIDs (Song& song)
 {
-    auto state = song.getState();
-
-    if (const auto next = findNextID (song); next != readNextID (state))
-        state.setProperty (schema::nextID, (juce::int64) next, nullptr);
+    song.setIDCount (findNextID (song));
 }
 
 std::uint64_t getNextID (const Song& song)
 {
-    return std::max ((std::uint64_t) 1, readNextID (song.getState()));
+    return song.getIDCount();
 }
 
 void countIDsFrom (Song& song, std::uint64_t next, [[maybe_unused]] IDCount count)
 {
-    auto state = song.getState();
     jassert (next < schema::maxID);
-    jassert (count == IDCount::mayBeBehind || next > std::max (findLargestID (state), findLargestIDHeld (song)));
-
-    if (next != readNextID (state))
-        state.setProperty (schema::nextID, (juce::int64) next, nullptr);
+    jassert (count == IDCount::mayBeBehind || next > std::max (findLargestID (song.getState()), findLargestIDHeld (song)));
+    song.setIDCount (next);
 }
 
 CopiedIDs giveNewIDs (Song& song, juce::ValueTree& copy)

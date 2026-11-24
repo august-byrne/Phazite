@@ -24,14 +24,18 @@
 // mute, solo and frozen switch and each track's and the master's automation mode, keyed: undone by entry), with each track's
 // and the master's view outside the history alone (TracksOutside.h, an OutsideValue: its row's height, collapsed and pinned
 // switches, drum mode and rows, and its automation lanes), which the tracks' functions by ID (model/arrangement/internal/
-// Tracks.h, model/automation/internal/Automation.h, model/notes/internal/Notes.h) read and write. All as plain values in
-// Phazite's own types.
+// Tracks.h, model/automation/internal/Automation.h, model/notes/internal/Notes.h) read and write; and what the song holds of
+// its own (SongOwnValue.h: its root's properties and its LASTKEY, PIANOROLL and MERGING, in three values: SongOwnValue, plain;
+// SongStanding, keyed; SongOutside, outside the history alone), which its getters and setters read and write. All as plain
+// values in Phazite's own types.
 //
 // The values are the storage: the song holds an area of each (SongValues) in its one undo history, and the song's tree holds
 // no CLIP element (nor a clip's NOTE, CONTROL or WARP elements), no TEMPO or TIMESIGNATURE element, no CHORD or CHORDKEY
 // element, no MIDILINK element, no CURVE or POINT element, no SECTION element, no MODULATOR or MACRO element (nor a
 // MODULATES, nor a modulator's VALUES), no SEND element, no DEVICE, CONTAINER or CHAIN element (nor a device's VALUES,
-// SOUNDS or VALUE), and no switch, view property or LANES of a TRACK or the MASTER: its TEMPOMAP element stays, empty, the
+// SOUNDS or VALUE), no switch, view property or LANES of a TRACK or the MASTER, and no property of its root (PHAZITE) nor a
+// LASTKEY, PIANOROLL or MERGING (the song's own; its count of IDs is the song's: Song.h, makeID()): its TEMPOMAP element
+// stays, empty, the
 // place a whole copy writes the map in, its AUTOMATION too (which a whole copy writes only while the song has a curve), its
 // CHORDLANE, where it has one, empty too, the sign that it has a lane, and its MIDILINKS and its SECTIONS, where it has them
 // (added with the first link and the first section), empty too. Each area's value header holds the conversion between its
@@ -232,6 +236,7 @@
 #include "model/base/internal/OutsideValue.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/SendsValue.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/TempoMapValue.h"
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
@@ -321,7 +326,11 @@ struct SongOwnChange;
 // relies on); and a lone DEVICE, CONTAINER, CHAIN, VALUES or SOUNDS is refused in a step, read in (a device or a container
 // on a channel) and taken out outside the history. The tracks' switches' and view's part (TracksArea.h: TrackLeavesKeeper):
 // a lone LANES on the master is refused in a step and read in outside the history; a track taken out leaves its switches'
-// and view's entries where they are, for an Undo.
+// and view's entries where they are, for an Undo. The song's own part (SongOwnArea.h: SongOwnKeeper): a property of the
+// root's own or its count of IDs written to the song's root, or a LASTKEY, PIANOROLL or MERGING added to it, is refused in a
+// step and read in and taken out outside the history (a safety net no path of Phazite's relies on: countSongOwnAdopted());
+// and as the song holds its values, the root's every property and those elements are read in and taken out, and what
+// Phazite doesn't know there dropped.
 //
 // The rule for what listens to the song's tree, with no exception: a tree callback never reads the clips' area (nor the
 // notes'), directly or through anything that reads them (the clips' functions, Clips.h, AudioClips.h; the notes', Notes.h;
@@ -353,6 +362,9 @@ public:
     ValueArea<TrackSwitches> trackSwitches;      // keyed: undone by entry; the master's mode under 0 (TrackSwitchesValue.h)
     OutsideValue<TracksOutside> tracksOutside;   // never in the history: each track's row, the master's (TracksOutside.h)
     ValueArea<SongTracks> tracks;                // by ID, each folder's list and the top list, the master a member (TracksValue.h)
+    ValueArea<SongOwnValue> songOwn;             // the song's own that a step alone writes, a merge waiting too (SongOwnValue.h)
+    ValueArea<SongStanding> songStanding;        // keyed: undone by entry; the key set last, the versions' names (SongOwnValue.h)
+    OutsideValue<SongOutside> songOutside;       // never in the history: the loop, the play start, the grids... (SongOwnValue.h)
 
     // A parameter's curve: none for a parameter without one. A pointer into the area's value as it is now, valid until the
     // area's next change (as findClip()).
@@ -564,6 +576,19 @@ public:
     // where the lists differ or a track came to be a folder or stopped being one (immer's diff of the tracks' map since,
     // O(changed)), as playedTempoMaps is kept. Valid until the area's next change: what holds it longer copies it.
     const TrackOrder& getTrackOrder() const;
+
+    // Give the song's own its next values (SongOwnValue.h), their setters' one way to change them (SongOwnValue.h:
+    // setSongOwn(), setSongStanding(), storeStandingOutsideHistory(), setSongOutside(), which call these):
+    //   - setOwn(): the song's own value, in the song's undo history (the step in progress), or outside it while the song is
+    //     written outside it.
+    //   - setStanding(): its standing (keyed: an Undo puts back only the entries its step changed), the same.
+    //   - setStandingOutsideHistory(): its standing outside the history whatever is open.
+    //   - setOutside(): what it keeps of how it plays and shows, never in the history.
+    // A value equal to what the area holds is no change: no undo action, nothing told. Whether it changed. In SongOwnArea.cpp.
+    bool setOwn (Song&, SongOwnValue);
+    bool setStanding (Song&, SongStanding);
+    bool setStandingOutsideHistory (SongStanding);
+    bool setOutside (SongOutside);
 
     // The tempo map as Phazite's engine plays it (engine/core/TempoMap.h), made of the tempo map's value at a sample rate,
     // kept for the tempo map's code (model/transport/Tempo.cpp: getTempoMap()), so that it is made once for each change of
@@ -895,16 +920,16 @@ public:
         virtual void tracksViewChanged (const std::vector<TrackID>& tracks, bool master) { juce::ignoreUnused (tracks, master); }
 
         // What the song holds of its own (SongOwnValue.h), told once for each change of each of its three values (a setter's
-        // set, an Undo's or a Redo's whole move, a write outside the history), each only where it differs: the song's own
-        // value (SongOwnValue: written in the history alone), with the parts of it that differ (SongOwnChange, SongOwnArea.h:
-        // the outline, the notes, the numbering of IDs, patterns' speed, a merge waiting); its standing (SongStanding:
-        // written in the history and outside it), with whether the key set last differs and whether where the song stands in
-        // its versions does (versionsBranch, versionsBase); and what it keeps of how it plays and shows (SongOutside: never
-        // in the history), with whether what plays differs (the loop's four, the metronome: what a plan holds of it), the
-        // play start, punch, the input chosen last and the grids being none of it. The song's tree is still their storage,
-        // so the song's own part of the keeper tells them from the tree (SongOwnArea.h: what a set or a move of the history
-        // wrote, once as it ends); the root's nextID, a count, and what Phazite doesn't know there stay the tree's, heard as
-        // before.
+        // set, an Undo's or a Redo's move, a write outside the history), each only where it differs: the song's own value
+        // (SongOwnValue: written in the history alone), with the parts of it that differ (SongOwnChange, SongOwnArea.h: the
+        // outline, the notes, the numbering of IDs, patterns' speed, a merge waiting); its standing (SongStanding: written in
+        // the history and outside it), with whether the key set last differs and whether where the song stands in its
+        // versions does (versionsBranch, versionsBase); and what it keeps of how it plays and shows (SongOutside: never in
+        // the history), with whether what plays differs (the loop's four, the metronome: what a plan holds of it), the play
+        // start, punch, the input chosen last and the grids being none of it. Each area's teller tells it (SongOwnArea.h:
+        // SongOwnTeller, SongStandingTeller, SongOutsideTeller), from the value before and after. The song's tree holds none
+        // of them, nor its count of IDs (Song.h: makeID(), which tells no one), nor what Phazite doesn't know at its root
+        // (dropped as the song opens).
         virtual void songOwnChanged (const SongOwnChange& change) { juce::ignoreUnused (change); }
         virtual void songStandingChanged (bool lastKey, bool versionsNames) { juce::ignoreUnused (lastKey, versionsNames); }
         virtual void songOutsideChanged (bool plays) { juce::ignoreUnused (plays); }
@@ -987,11 +1012,12 @@ public:
     // to it (model/versions/ApplySong.cpp, VersionsModel.cpp: NothingTakenIn).
     int countTracksAdopted() const noexcept { return tracksAdopted; }
 
-    // Whether what the listener is told of the song's own now (songOwnChanged(), songStandingChanged(),
-    // songOutsideChanged()) is what a move of the song's history put back, an Undo's or a Redo's, which its part of the keeper
-    // tells once the move is whole (SongOwnArea.h), after JUCE's undo() returned: what follows an Undo apart from an edit asks
-    // it beside juce::UndoManager::isPerformingUndoRedo() (VersionHistory.h: edited()). In SongValues.cpp.
-    bool isTellingHistoryMove() const noexcept;
+    // How many of the song's own properties (its root's own, and its count of IDs) and LASTKEY, PIANOROLL and MERGING elements
+    // written to the song's tree outside the history its part of the keeper took in since the song held its values (the
+    // safety net, SongOwnArea.h: SongOwnKeeper): what the versions' passes, a merge's choice, a merge waiting set and the
+    // loader, which give the song its own through its setters (SongOwnValue.h) and its count through Schema.h's
+    // countIDsFrom(), check they never leave to it.
+    int countSongOwnAdopted() const noexcept { return songOwnAdopted; }
 
 private:
     friend class Song;
@@ -1023,7 +1049,10 @@ private:
     struct TrackSwitchesTeller;                     // TracksArea.h
     struct TracksViewTeller;                        // TracksArea.h
     struct TrackLeavesKeeper;                       // TracksArea.h: the switches' and the view's
-    struct SongOwnKeeper;                           // SongOwnArea.h: tells the song's own, until its switch
+    struct SongOwnTeller;                           // SongOwnArea.h
+    struct SongStandingTeller;                      // SongOwnArea.h
+    struct SongOutsideTeller;                       // SongOwnArea.h
+    struct SongOwnKeeper;                           // SongOwnArea.h: the song's own's safety net, and its adoption
     struct Keeper;                                  // SongValues.cpp
     mutable juce::ListenerList<Listener> listeners; // told by the areas' tellers (addListener())
     std::unique_ptr<ClipsTeller> clipsTeller;
@@ -1040,6 +1069,9 @@ private:
     std::unique_ptr<TrackSwitchesTeller> trackSwitchesTeller;
     std::unique_ptr<TracksViewTeller> tracksViewTeller;
     std::unique_ptr<TracksTeller> tracksTeller;
+    std::unique_ptr<SongOwnTeller> songOwnTeller;
+    std::unique_ptr<SongStandingTeller> songStandingTeller;
+    std::unique_ptr<SongOutsideTeller> songOutsideTeller;
     std::unique_ptr<Keeper> keeper;
     int adopted = 0, tempoMapAdopted = 0;
     int chordLaneAdopted = 0;
@@ -1052,6 +1084,7 @@ private:
     int devicesAdopted = 0;
     int trackLeavesAdopted = 0;
     int tracksAdopted = 0;
+    int songOwnAdopted = 0;
     std::uint64_t nextPointKey = 1; // givePointKey(): outside the history, never undone, never saved
 
     // In the history, or outside it, as the song is written now; and a value alike to the area's, without a step of its own
@@ -1063,24 +1096,6 @@ private:
 
     void adopt (Song&); // Song::holdValues()
 
-    SongOwnKeeper* findSongOwnKeeper() const noexcept; // the keeper's song's own part; none before it is made
-
-public:
-    // A setter's writes of the song's own (SongOwnValue.h: setSongOwn() and the three after it), from its start to its end,
-    // for the song's own part of the keeper, which tells the listener once as the outermost ends (SongOwnArea.h); nothing for
-    // a song that holds no values. In SongOwnArea.cpp.
-    struct SongOwnWrite
-    {
-        explicit SongOwnWrite (Song&);
-        ~SongOwnWrite();
-
-        SongOwnKeeper* keeper = nullptr;
-
-        JUCE_DECLARE_NON_COPYABLE (SongOwnWrite)
-        JUCE_DECLARE_NON_MOVEABLE (SongOwnWrite)
-    };
-
-private:
     JUCE_DECLARE_NON_COPYABLE (SongValues)
     JUCE_DECLARE_NON_MOVEABLE (SongValues)
 };
@@ -1163,8 +1178,8 @@ bool isHeardAsDeviceStore (const juce::ValueTree& parent, const juce::ValueTree&
 // (isHeardAs<Area>()), a line each, in the order of the areas: the tempo map's, the chord lane's, the curves', the MIDI
 // links', the sections', the devices', the tracks' (TracksArea.h: isHeardAsTracks()), then the devices' store's (modulation's
 // and the sends' went at their switches: the tree holds nothing of them; the store's stays for what its keeper takes out of a
-// DEVICE or a CHAIN that comes in with it), then the song's own (SongOwnArea.h: isHeardAsSongOwn(): the root's own
-// properties but nextID, and its LASTKEY, PIANOROLL and MERGING).
+// DEVICE or a CHAIN that comes in with it), then the song's own (SongOwnArea.h: isHeardAsSongOwn(): its safety net's alone, a
+// property of the root's own or its count of IDs, and a LASTKEY, PIANOROLL or MERGING, written to the song's tree).
 // What every listener's tree callback asks, once, where it returns early for what the areas tell (the recipe's step 12,
 // above): a new area adds its line here, not a line in each listener. In SongValues.cpp.
 bool isHeardAsKept (const juce::ValueTree& element);

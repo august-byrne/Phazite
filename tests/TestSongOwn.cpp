@@ -102,6 +102,10 @@ void changeWaitingMerge (Song& song, const juce::Identifier& property, const juc
     auto merging = copyWaitingMerge (song);
     REQUIRE (merging.isValid());
     merging.setProperty (property, value, nullptr);
+
+    // Set by hand in a song with nothing to undo (setWaitingMerge()), its history let go first, as one opened from such a file
+    // has none.
+    song.getUndoManager().clearUndoHistory();
     setWaitingMerge (song, merging);
 }
 } // namespace phazite::test

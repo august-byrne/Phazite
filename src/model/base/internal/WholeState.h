@@ -23,15 +23,19 @@
 // (WholeState.cpp: writeTracksIn()), into the copy's TRACKS and MASTER, which the song's tree keeps empty: each TRACK in its
 // list's order with, in this order, its own properties (TracksValue.h: writeTrackElement()), its switches and its view's
 // properties; its clips; its devices and containers; a folder's TRACKs, each written the same; its LANES; its modulators and
-// macros; its sends; the MASTER its own properties, its mode and view, its devices, its LANES, its modulators.
+// macros; its sends; the MASTER its own properties, its mode and view, its devices, its LANES, its modulators. And on the
+// song's root (PHAZITE) the song's own, its properties and its count of IDs (nextID), with its LASTKEY, PIANOROLL and
+// MERGING after the root's other children, in that order (SongOwnArea.h: writeSongOwnIn()).
 #pragma once
 
 #include "model/base/IDs.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongValues.h"
 #include "model/devices/ParameterRef.h"
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <cstdint>
 #include <optional>
 
 namespace phazite
@@ -75,6 +79,11 @@ struct ValuesKept
     // None kept of a song that holds no values (its tree holds its tracks); else every track and the master, which whole
     // state writes into the copy's TRACKS and MASTER (writeTracksIn(), WholeState.cpp).
     std::optional<SongTracks> tracks {};
+
+    SongOwnValue songOwn {}; // the song's own (SongOwnValue.h): the defaults kept of a song that holds no values
+    SongStanding songStanding {};
+    SongOutside songOutside {};
+    std::uint64_t nextID = 0; // the song's count of IDs (Song.h: makeID()): 0, none written, for a song that holds no values
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -200,7 +209,9 @@ juce::ValueTree withTracksOwn (const juce::ValueTree& place, const ValuesKept&);
 // (holdSameMidiLinks()), then the sections of a song's element either of which holds a SECTIONS (holdSameSections()), then
 // a TRACK's, the MASTER's or a CONTAINER's modulators and macros (ModulationArea.h: holdSameModulationOf()), then a TRACK's
 // sends (SendsArea.h: holdSameSendsOf()), then what a DEVICE or a CHAIN stores (DeviceStoreArea.h: holdSameDeviceStoreOf()),
-// then a TRACK's switches or the MASTER's mode (TracksArea.h: holdSameTrackSwitchesOf(); the view counts nothing). What
+// then a TRACK's switches or the MASTER's mode (TracksArea.h: holdSameTrackSwitchesOf(); the view counts nothing), then the
+// tracks whole (TracksArea.h: holdSameTracksOf()), then the song's own of a song's root (SongOwnArea.h: holdSameSongOwnOf():
+// its own value and its key set last). What
 // Project's comparison of an element whole asks once the element's own properties compare (holdTheSameProject()). And
 // whether a child of an element is the place of what an area keeps (the song's TEMPOMAP, its CHORDLANE, its MIDILINKS, its
 // AUTOMATION, its SECTIONS), which that comparison leaves out of the elements it compares one by one. Any thread.

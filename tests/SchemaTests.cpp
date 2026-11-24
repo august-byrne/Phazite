@@ -12,6 +12,7 @@
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TrackSwitchesValue.h"
@@ -154,7 +155,7 @@ TEST_CASE ("An ID two items of a song hold is found, whatever their kinds; none 
     REQUIRE (alias.isValid());
     CHECK (phazite::findIDHeldTwice (song) == 0);
 
-    const auto countFrom = [&song] (std::uint64_t id) { song.getState().setProperty (phazite::schema::nextID, (juce::int64) id, nullptr); };
+    const auto countFrom = [&song] (std::uint64_t id) { phazite::countIDsFrom (song, id, phazite::IDCount::mayBeBehind); };
 
     SUBCASE ("a clip of a track's ID")
     {
@@ -432,6 +433,21 @@ struct Changed
         }
 
         loadedElement = isInSong (element) ? element : juce::ValueTree();
+
+        // The song's own (its root's properties, its LASTKEY, PIANOROLL and MERGING), which the song opened holds beside its
+        // tree (SongOwnArea.h), its tree holding none of it: read back from the song's whole copy, as its file holds it.
+        if (isSongOwn (original) && opened == nullptr)
+        {
+            const auto whole = phazite::copyWholeSong (*loaded);
+            loadedElement = original.hasType (schema::PHAZITE) ? whole : whole.getChildWithName (original.getType());
+        }
+    }
+
+    // The song's root, or its LASTKEY, PIANOROLL or MERGING: the song's own (SongOwnValue.h), which the song holds beside its
+    // tree.
+    static bool isSongOwn (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::PHAZITE) || phazite::isSongOwnElement (element.getType());
     }
 
     // What the loaded song holds there: none if it took the value, or the element, out.

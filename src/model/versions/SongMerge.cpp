@@ -2,6 +2,7 @@
 #include "internal/SongMerge.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/mixer/internal/Mixer.h"
@@ -436,6 +437,22 @@ namespace
         return property.isValid() ? property.toString() : element.getType().toString().toLowerCase();
     }
 
+    // What Phazite doesn't know at a song's root (SongOwnValue.h: isKnownRootProperty(), isKnownRootElement(), the rule the
+    // song drops it by as it opens) taken out of the merged song, which so holds none of it, from either side: the root's
+    // merge (Merger::mergeProperties(), and the song's own elements by their types in mergeSongs()) compares and takes none
+    // of it from the base or the other side either. The song can't hold it, so a clash of it would have no choice that did
+    // anything.
+    void leaveOutUnknownAtRoot (juce::ValueTree song)
+    {
+        for (auto i = song.getNumProperties(); --i >= 0;)
+            if (const auto name = song.getPropertyName (i); ! isKnownRootProperty (name))
+                song.removeProperty (name, nullptr);
+
+        for (auto i = song.getNumChildren(); --i >= 0;)
+            if (! isKnownRootElement (song.getChild (i).getType()))
+                song.removeChild (i, nullptr);
+    }
+
     //==============================================================================
     struct Merger
     {
@@ -558,10 +575,14 @@ namespace
             juce::StringArray names;
             const juce::ValueTree& ours = r;
 
+            // At the song's root, what Phazite doesn't know there is neither merged nor compared (leaveOutUnknownAtRoot()).
+            const auto isRoot = r.hasType (schema::PHAZITE);
+
             for (const auto* tree : { &b, &ours, &t })
                 if (tree->isValid())
                     for (int i = 0; i < tree->getNumProperties(); ++i)
-                        if (const auto name = tree->getPropertyName (i); ! schema::isUncountedProperty (r, name))
+                        if (const auto name = tree->getPropertyName (i);
+                            ! schema::isUncountedProperty (r, name) && (! isRoot || isKnownRootProperty (name)))
                             names.addIfNotAlreadyThere (name.toString());
 
             for (const auto& text : names)
@@ -1228,6 +1249,8 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
 
     MergeResult result;
     result.song = ours.createCopy();
+    leaveOutUnknownAtRoot (result.song);
+
     // New IDs past every ID either side holds: the other side may have counted further than this one.
     const auto floor = juce::jmax (findNextID (theirs), findNextID (ours));
     const std::function<std::uint64_t()> makeNewID = [&makeID, floor]

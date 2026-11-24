@@ -1015,8 +1015,8 @@ private:
     void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
     void tracksViewChanged (const std::vector<TrackID>&, bool master) override;
 
-    // What the song holds of its own (SongValues.h; the tree's callbacks below leave the root's own properties and its
-    // LASTKEY, PIANOROLL and MERGING alone, isHeardAsKept()), each a change of the song's count (songChanges), as each
+    // What the song holds of its own (SongValues.h, told by its areas' tellers; the tree's callbacks below leave what its
+    // keeper's safety net takes in alone, isHeardAsKept()), each a change of the song's count (songChanges), as each
     // property was: its own value (songOwnChanged()) and the key set last (songStandingChanged()), the song's own line, as
     // markChanged() marked them; a merge waiting taken, chosen in, finished or cancelled found again as it is asked for
     // (mergeDirty). Where the song stands in its versions, moved by an Undo or a Redo (not by the history itself:
@@ -1183,9 +1183,10 @@ juce::ValueTree writeMergeState (const MergeState&);
 
 // Sets the merge waiting in a song as its element says (a copy of it: writeMergeState()'s, or one a file holds, read as above),
 // in place of the one the song holds, none for an invalid element, outside the song's history: as a song opened from a file
-// that holds one has it. The merge's own steps set theirs in the step (model/versions/VersionsModel.cpp). For a song whose
-// history holds no step that an Undo could still take back across this call (one just opened, or never undone): the merge
-// waiting is undone with the step that set it, so an Undo of an earlier step would put back what that step knew.
+// that holds one has it. The merge's own steps set theirs in the step (model/versions/VersionsModel.cpp). Only for a song
+// whose history holds no step to undo and none to redo (one just opened or made: asserted): the merge waiting is a field of a
+// plain area's value, whose Undo and Redo put back the whole value their step held, so that an Undo of an earlier step would
+// put back a song without it.
 void setWaitingMerge (Song&, const juce::ValueTree& merging);
 
 // A merge waiting found again from what its element says, in a store with these commits: the song before it, read on its

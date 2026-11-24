@@ -373,8 +373,12 @@ juce::ValueTree writeMergeState (const MergeState& state)
 
 void setWaitingMerge (Song& song, const juce::ValueTree& merging)
 {
-    // The song's own value, its record read as the element holds it, outside the history whatever step is open.
+    // The song's own value, its record read as the element holds it, outside the history whatever step is open. Only for a
+    // song whose history holds no step to undo or redo: the merge waiting is a field of a plain area's value (SongOwnArea.h:
+    // songOwn), whose Undo and Redo put back the whole value their step held, so that an Undo of a step before this call (or a
+    // Redo of one undone) would put back a song without the merge set here (ValueArea.h: setOutsideHistory()).
     jassert (! merging.isValid() || merging.hasType (schema::MERGING));
+    jassert (! song.getUndoManager().canUndo() && ! song.getUndoManager().canRedo());
     const Song::OutsideHistory outside (song);
     auto own = getSongOwn (song);
     own.merging = merging.isValid() ? std::optional (readMergingRecord (merging)) : std::nullopt;
@@ -3491,12 +3495,8 @@ void VersionHistory::edited()
     editedSinceSnapshot = true; // Local History takes the song again in a while
     saveProblem.clear();
 
-    // An Undo's or a Redo's: inside JUCE's, or what the song's own part of the values' keeper tells once the move is whole
-    // (SongValues.h: isTellingHistoryMove()).
-    const auto* values = song.getValues();
-    const auto byHistory = song.getUndoManager().isPerformingUndoRedo() || (values != nullptr && values->isTellingHistoryMove());
-
-    if (byHistory && isBehind())
+    // An Undo's or a Redo's: inside JUCE's (every area's teller, the song's own's too, tells inside it).
+    if (song.getUndoManager().isPerformingUndoRedo() && isBehind())
         healPending = true;
 
     // What is heard is what is shown: an edit is heard as it is made, in the song.

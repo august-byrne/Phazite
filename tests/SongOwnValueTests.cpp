@@ -215,6 +215,14 @@ TEST_CASE ("Song's own: a song with every field set through the model is written
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
 
+    // A merge waiting set by hand first, in a song with nothing to undo yet (VersionHistory.h: setWaitingMerge()).
+    MergingRecord merge;
+    merge.version = repeat ('a', 64);
+    merge.head = repeat ('b', 64);
+    merge.before = repeat ('c', 64);
+    merge.chosen = "12";
+    phazite::setWaitingMerge (song, phazite::writeMergingElement (merge));
+
     phazite::loopBeats (song, { phazite::BeatPosition::fromBeats (4.0), phazite::BeatPosition::fromBeats (12.5) });
     phazite::setPunchOn (song, true);
     phazite::setPunchOn (song, false);
@@ -234,13 +242,6 @@ TEST_CASE ("Song's own: a song with every field set through the model is written
     phazite::test::changeSongInStep (song, "an outline's id");
     phazite::setProjectNotes (s.context, "First line\nsecond line\n\nfourth");
     phazite::togglePatternsFollowTempo (song);
-
-    MergingRecord merge;
-    merge.version = repeat ('a', 64);
-    merge.head = repeat ('b', 64);
-    merge.before = repeat ('c', 64);
-    merge.chosen = "12";
-    phazite::setWaitingMerge (song, phazite::writeMergingElement (merge));
 
     phazite::test::checkSong (song);
     checkRoundTrip (phazite::test::copyWholeSong (song));
@@ -277,6 +278,8 @@ TEST_CASE ("Song's own: a song with every field set through the model is written
     unchosen.version = merge.version;
     unchosen.head = merge.head;
     unchosen.before = merge.before;
+    // Set by hand in a song with nothing to undo, as one just opened (setWaitingMerge()).
+    song.getUndoManager().clearUndoHistory();
     phazite::setWaitingMerge (song, phazite::writeMergingElement (unchosen));
     CHECK (phazite::doesLoopFollowSong (song));
     CHECK (phazite::getLoopBeats (song) == phazite::getSongLoopBeats (song));

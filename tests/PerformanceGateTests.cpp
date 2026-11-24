@@ -86,6 +86,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
+#include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/versions/VersionsModel.h"
@@ -129,6 +130,26 @@ phazite::Song& getSong (phazite::test::TestSong& s)
     REQUIRE (song != nullptr);
     return *song;
 }
+
+// How many notifications a song's tree gave, of any kind, while this listened to its root.
+struct TreeHeardCount final : juce::ValueTree::Listener
+{
+    explicit TreeHeardCount (juce::ValueTree root)
+        : tree (std::move (root))
+    {
+        tree.addListener (this);
+    }
+
+    ~TreeHeardCount() override { tree.removeListener (this); }
+
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++count; }
+    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++count; }
+    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++count; }
+    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++count; }
+
+    juce::ValueTree tree;
+    int count = 0;
+};
 
 const phazite::engine::Plan& getPlan()
 {
@@ -2259,12 +2280,12 @@ TEST_CASE ("Performance gate: the unsaved check after devices' knobs turned and 
 TEST_CASE ("Performance gate: a notes edit and a loop toggle allocate, and the unsaved check after them compares, no more than "
            "before the song's own told its listeners")
 {
-    // The song's own (model/base/internal/SongOwnValue.h): each writer sets its next value once through its setter, which
-    // writes the song's root by what differs while the tree holds it, and its part of the keeper tells the values' listeners
-    // once for the set (SongOwnArea.h): what the project, the version history, the playback session and the views' watcher
-    // follow of it. On a project with everything that listens to it (its version history read): the project's notes set (a
-    // step of its own) and the loop switched on, each counted alone; then the unsaved check after the notes and after the
-    // loop. Counted: what each allocates, and what the check compared with the saved copy (Project::countElementsCompared()).
+    // The song's own (model/base/internal/SongOwnValue.h): each writer sets its next value once through its setter, into its
+    // area, whose teller tells the values' listeners once for the set (SongOwnArea.h): what the project, the version
+    // history, the playback session and the views' watcher follow of it. On a project with everything that listens to it
+    // (its version history read): the project's notes set (a step of its own) and the loop switched on, each counted alone;
+    // then the unsaved check after the notes and after the loop. Counted: what each allocates, and what the check compared
+    // with the saved copy (Project::countElementsCompared()).
     phazite::test::TestSong s;
     auto& song = getSong (s);
     auto& project = s.getProject();
@@ -2298,17 +2319,20 @@ TEST_CASE ("Performance gate: a notes edit and a loop toggle allocate, and the u
     // tree, the tree's callbacks heard by each listener): the notes 8 allocations (the undo step, its action, the property's
     // text), the check compared no element (the root's property alone); the loop 1, none compared. After it, the same: 8 and
     // none, 1 and none (the setters write the root by what differs making no tree, and the song's own is compared as values,
-    // no element). With the setters' first form, which wrote the value into a tree of its own to compare, 10 and 3.
+    // no element). With the setters' first form, which wrote the value into a tree of its own to compare, 10 and 3. From the
+    // song's own switch on (its areas: SongOwnArea.h), 7 (the undo step and the area's action: no property's text) and 0 (an
+    // outside value set: no tree written), none compared.
     CHECK (notesCompared == 0);
     CHECK (loopCompared == 0);
 
     if (! notes.has_value() || ! loop.has_value())
         return; // nothing counted on this build
 
-    CHECK (*notes <= 8);
-    CHECK (*loop <= 1);
+    CHECK (*notes <= 7);
+    CHECK (*loop == 0);
 
-    // And what the views poll a tick, which read through the getters: nothing.
+    // And what the views and what plays poll, which read through the getters (each its area's value, by reference: one value
+    // read, none built): nothing.
     auto read = 0;
     const auto polled = phazite::test::countAllocations (
         [&s, &song, &read]
@@ -2318,10 +2342,77 @@ TEST_CASE ("Performance gate: a notes edit and a loop toggle allocate, and the u
             read += phazite::canPunch (song) ? 1 : 0;
             read += phazite::loadGridSettings (song, phazite::GridOwner::playlist).snap ? 1 : 0;
             read += phazite::getProjectNotes (s.context).isNotEmpty() ? 1 : 0; // the project view's
+            read += phazite::isMetronomeOn (song) ? 1 : 0;
+            read += phazite::getPlayStartBeat (song) > phazite::BeatPosition() ? 1 : 0;
         });
 
     CHECK (read == 3); // the loop on, the grid snapping, the notes
     CHECK (polled.value_or (0) == 0);
+}
+
+TEST_CASE ("Performance gate: an ID made allocates nothing and tells no one, so that a paste of 1,000 notes makes one plan and one "
+           "change of the versions' count")
+{
+    // The song's count of IDs (Song.h: makeID()), a member of the song's from the song's own switch (roadmap step S5.20), as it
+    // was a property of the song's root before: each ID made then was a notification of the song's tree, which the version
+    // history counted as a change of the song (VersionHistory.h: countSongChanges()) and the playback session as a reason for a
+    // plan. On a project with everything that listens to it: 1,000 IDs made alone; then 1,000 notes pasted into a clip, one
+    // undo step, each note given an ID.
+    phazite::test::TestSong s;
+    auto& song = getSong (s);
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    auto* versions = phazite::getVersionHistory (s.context);
+    REQUIRE (versions != nullptr);
+    const auto track = s.addTrack ("Keys");
+    const auto clip = s.addMidiClip (track, 0.0, 256.0); // long enough for every note pasted
+    phazite::test::PlanCounter plans (s.context);
+    phazite::test::dispatchPendingMessages();
+    plans.take();
+
+    constexpr int numIDs = 1000;
+    TreeHeardCount heard (song.getState());
+    auto changes = versions->countSongChanges();
+    const auto made = phazite::test::countAllocations (
+        [&song]
+        {
+            for (int i = 0; i < numIDs; ++i)
+                song.makeID();
+        });
+
+    phazite::test::dispatchPendingMessages();
+    CHECK (heard.count == 0);
+    CHECK (versions->countSongChanges() == changes);
+    CHECK (plans.take() == 0);
+
+    if (made.has_value())
+        CHECK (*made == 0);
+
+    // The paste: the notes' area set once in the step, one plan for it, one change counted, whatever the IDs made.
+    std::vector<phazite::NoteData> pasted;
+
+    for (int i = 0; i < numIDs; ++i)
+        pasted.push_back ({ .clip = clip, .pitch = 60, .start = at (i * 0.25), .length = lasting (0.25) });
+
+    changes = versions->countSongChanges();
+    const auto idsBefore = phazite::getNextID (song);
+
+    {
+        const phazite::UndoStep step (song, "Paste");
+        REQUIRE (phazite::replaceNotes (song, {}, pasted).size() == (size_t) numIDs);
+    }
+
+    phazite::test::dispatchPendingMessages();
+    const auto counted = versions->countSongChanges() - changes;
+    const auto ids = phazite::getNextID (song) - idsBefore;
+    const auto plansMade = plans.take();
+    MESSAGE ("A paste of " << numIDs << " notes: " << ids << " IDs made, " << counted << " changes counted by the versions, " << plansMade
+                           << " plans");
+
+    // Before the switch (cc9c2e08 and the piece before it): the same paste counted 1 + the IDs made (each a notification of
+    // the root's nextID), and one plan (the session's plans are one for a turn of the message loop). After it: 1, and 1.
+    CHECK (ids >= (std::uint64_t) numIDs);
+    CHECK (counted == 1);
+    CHECK (plansMade == 1);
 }
 
 TEST_CASE ("Performance gate: the loader's rule allocates nothing for a send Phazite wrote")

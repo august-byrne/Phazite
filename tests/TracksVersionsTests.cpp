@@ -708,7 +708,7 @@ struct HeldElsewhere
         REQUIRE_FALSE (phazite::test::hasTrack (song, versionTrack));
 
         const auto taken = kind == "a clip's (the fader's ID)" ? fader.getRaw() : versionTrack.getRaw();
-        song.getState().setProperty (schema::nextID, (juce::int64) taken, nullptr);
+        phazite::countIDsFrom (song, taken, phazite::IDCount::mayBeBehind);
         const phazite::UndoStep step (song, "Since");
         std::uint64_t made = 0;
 

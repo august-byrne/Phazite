@@ -148,8 +148,14 @@ public:
 
     // A new ID for an item of the song (a track, a channel's fader or VCA, a clip, a note, an alias group, a device, a
     // container, a send, a modulator, a macro, a section): the song's next (Schema.h: nextID), never given twice, nor
-    // taken back by an undo.
-    std::uint64_t makeID(); // in Schema.cpp, with the name of the count
+    // taken back by an undo. A count of the song's own, never told to anyone (no tree notification, no value's listener): a
+    // song that holds its values (holdValues(), which takes the count from its tree) counts on its member; one that holds
+    // none (a song being made or read: makeNewSong(), the loader) keeps it in its tree, which is then everything it holds.
+    // What a whole copy writes as nextID (model/base/internal/WholeState.h). In Schema.cpp, with the name of the count and
+    // the functions that read and set it (Schema.h: getNextID(), countIDsFrom(), countIDs()).
+    std::uint64_t makeID();
+    std::uint64_t getIDCount() const;     // the count as the song holds it now: its member, or its tree's (from 1)
+    void setIDCount (std::uint64_t next); // the count set, unchecked (Schema.h: countIDsFrom() checks it)
 
     // A change to the project made outside the song's history: a plug-in's own settings, changed in its window, which the
     // song holds only once they are stored (setDeviceStateStore()). Each counts as an unsaved change. Counted for the song,
@@ -263,6 +269,7 @@ private:
     std::function<void (bool)> showingHeard;
     bool showingOther = false;
     int writingOutsideHistory = 0;      // OutsideHistory scopes alive
+    std::uint64_t nextID = 1;           // the count of IDs once the song holds its values (makeID())
     std::unique_ptr<SongValues> values; // after the history, so that it goes first (holdValues())
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (Song)

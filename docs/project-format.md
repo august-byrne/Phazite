@@ -54,8 +54,10 @@ page names), so a property or an element Phazite doesn't know on a `TRACK` or th
 track's element holds its clips, its devices and containers, a folder's tracks, its `LANES`, its modulators and macros
 and its sends alone. Phazite writes a clip's properties only while they are set, so one another program wrote at its
 default (`offset="0"`, `name=""`) is gone at the next save. A `CURVE` holds its `POINT`s alone: an element of another
-type in one goes as the song opens. An element it does know, where `Schema.h` doesn't put it, it leaves
-out as it opens the file (section 7).
+type in one goes as the song opens. At the song's top (`PHAZITE`) nothing Phazite doesn't know is kept: a property of
+`PHAZITE` and an element of a type it doesn't know there, with all it holds, go as the song opens, as do a property and an
+element it doesn't know on `LASTKEY`, `PIANOROLL` and `MERGING` (the song holds its own as values: roadmap step
+S5.20). An element it does know, where `Schema.h` doesn't put it, it leaves out as it opens the file (section 7).
 
 ## 3. The song
 
@@ -210,7 +212,7 @@ isn't XML, or whose element isn't `PHAZITE`, is refused with a reason. Any other
 (`makeConsistent()`, in [`src/model/project/Project.cpp`](../src/model/project/Project.cpp)), with no undo step; a
 file Phazite wrote is consistent already and comes through unchanged, and so does what Phazite doesn't know:
 - **Places and kinds:** an element Phazite knows, where `Schema.h` doesn't put it, or a device or modulator of a type
-  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element of a type Phazite doesn't know stays where it is, untouched, but in a `CURVE`, which holds its points alone, and in a `MODULATOR` or a `MACRO` (below); a property that should be one of a set of words
+  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element of a type Phazite doesn't know stays where it is, untouched, but in a `CURVE`, which holds its points alone, in a `MODULATOR` or a `MACRO` (below), and at the song's top (`PHAZITE`), where it goes as the song opens with a property Phazite doesn't know there (section 2); a property that should be one of a set of words
   (a track's kind, a clip's) and isn't is left out, a track without a kind becoming a track or a folder; text between
   tags is dropped.
 - **Numbers:** each number `Schema.h` gives a range is brought within it, made whole where it is an integer, and one
@@ -229,7 +231,7 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   compare text, see no change where there is none.
 - **IDs:** an item without an ID, or with one another item holds, gets a new one (a track that does is no longer frozen,
   as its frozen file is found by its ID); IDs stay below 2^62, and `nextID` is set past every ID the song holds (an ID
-  past 2^61 inside an element Phazite doesn't know, which stays as it is, isn't counted). A song whose IDs or `nextID`
+  past 2^61 inside an element Phazite doesn't know isn't counted). A song whose IDs or `nextID`
   reach 3 * 2^60 gets, once, a new ID for every one at 2^61 or past it (an item's, a fader's, a VCA's, an alias group's,
   a note's, the same in each clip of its alias group), counted on from past every ID it holds or names below 2^61, and
   what named each names its new one (a name of none of them goes); a merge waiting in it goes; and the song is stamped
@@ -341,7 +343,8 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   grid that held only that holds none); a `LASTKEY` without a `keyRoot` goes (it holds no key; one with a root and no
   `keyScale` stays so, read as major); an empty text on `MERGING` goes (one without its `version`, `head` or `before`
   stays as it is: no merge waits, the versions say so, and Cancel Merge takes it out). A property or an element Phazite
-  doesn't know there stays.
+  doesn't know on `PHAZITE`, `LASTKEY`, `PIANOROLL` or `MERGING` goes as the song opens (section 2). `LASTKEY`,
+  `PIANOROLL` and `MERGING`, where the song holds them, are written after its other elements, in that order.
 - **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values, and its audio clips play
   one file alike: they share their `file` (the path as written, compared as text, whether the file is there or not),
   `tempo`, `pitch`, `reversed` and `WARP` markers. Each keeps its own place, the part of the file it plays (`fileStart`,

@@ -4,21 +4,17 @@
 #include "internal/Schema.h"
 #include "internal/SongOwnValue.h"
 #include "internal/SongValues.h"
+#include "internal/WholeState.h"
 
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
 namespace
 {
-    // In the step in progress, or outside the history while the song is written outside it (Song::OutsideHistory).
-    juce::UndoManager* getUndoOfTheMoment (Song& song)
-    {
-        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-    }
-
     // The song's LASTKEY, PIANOROLL or MERGING (a child of its root of one of those types), or an element in one (which none
     // holds as Schema.h describes them: an element Phazite doesn't know). Looked for no deeper than that, as each property
     // changed anywhere in the song asks it, once for each listener of the root.
@@ -30,171 +26,296 @@ namespace
         return isOne (element) || (element.getParent().isValid() && isOne (element.getParent()));
     }
 
-    // Each setter's writes, bracketed for the keeper (SongValues::SongOwnWrite): the values written into the song's root by what
-    // differs, one of them, the others as the song holds them.
-    void write (Song& song, SongOwnPart part, const SongOwnValue& own, const SongStanding& standing, const SongOutside& outside,
-                juce::UndoManager* undo)
+    // A property of the root's that the song holds beside its tree: one of its own, or its count of IDs.
+    bool isHeldProperty (const juce::Identifier& property)
     {
-        const SongValues::SongOwnWrite bracket (song);
-        writeSongOwnPart (song.getState(), part, own, standing, outside, undo);
+        return isSongOwnProperty (property) || property == schema::nextID.getName();
+    }
+
+    // Whether two optional ends of a loop differ, exactly (GCC: no == between floating-point values).
+    bool loopEndsDiffer (const std::optional<double>& a, const std::optional<double>& b)
+    {
+        return a.has_value() != b.has_value() || (a.has_value() && ! juce::exactlyEqual (*a, *b));
+    }
+
+    // The song's own as the song holds it, written into a root of its own (SongOwnValue.h: writeSongOwnInto()): what the safety
+    // net writes what it takes in into, to read it back as the song holds it.
+    juce::ValueTree writeHeld (const Song& song)
+    {
+        juce::ValueTree root (schema::PHAZITE);
+        writeSongOwnInto (root, getSongOwn (song), getSongStanding (song), getSongOutside (song));
+        return root;
+    }
+
+    // The three values read from such a root, each set through its setter where it differs (the song is written outside the
+    // history: the mode of the moment).
+    void setHeld (Song& song, const juce::ValueTree& root)
+    {
+        setSongOwn (song, readHeldSongOwn (root));
+        storeStandingOutsideHistory (song, readHeldSongStanding (root));
+        setSongOutside (song, readHeldSongOutside (root));
     }
 } // namespace
 
 //==============================================================================
 void setSongOwn (Song& song, SongOwnValue next)
 {
-    if (next == getSongOwn (song))
-        return;
-
-    write (song, SongOwnPart::own, next, getSongStanding (song), getSongOutside (song), getUndoOfTheMoment (song));
+    if (auto* values = song.getValues())
+        values->setOwn (song, std::move (next));
+    else
+        jassertfalse; // a song that holds no values holds none of its own to set
 }
 
 void setSongStanding (Song& song, SongStanding next)
 {
-    if (next == getSongStanding (song))
-        return;
-
-    write (song, SongOwnPart::standing, getSongOwn (song), next, getSongOutside (song), getUndoOfTheMoment (song));
+    if (auto* values = song.getValues())
+        values->setStanding (song, std::move (next));
+    else
+        jassertfalse;
 }
 
 void storeStandingOutsideHistory (Song& song, SongStanding next)
 {
-    if (next == getSongStanding (song))
-        return;
-
-    write (song, SongOwnPart::standing, getSongOwn (song), next, getSongOutside (song), nullptr);
+    if (auto* values = song.getValues())
+        values->setStandingOutsideHistory (std::move (next));
+    else
+        jassertfalse;
 }
 
 void setSongOutside (Song& song, SongOutside next)
 {
-    if (next == getSongOutside (song))
-        return;
-
-    write (song, SongOwnPart::outside, getSongOwn (song), getSongStanding (song), next, nullptr);
+    if (auto* values = song.getValues())
+        values->setOutside (std::move (next));
+    else
+        jassertfalse;
 }
 
 //==============================================================================
-SongValues::SongOwnWrite::SongOwnWrite (Song& song)
-    : keeper (song.getValues() != nullptr ? song.getValues()->findSongOwnKeeper() : nullptr)
+bool SongValues::setOwn (Song& song, SongOwnValue next)
 {
-    if (keeper != nullptr)
-        keeper->beginWrite();
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    if (next == songOwn.get())
+        return false;
+
+    if (song.isWritingOutsideHistory())
+        songOwn.setOutsideHistory (std::move (next));
+    else
+        songOwn.set (std::move (next));
+
+    return true;
 }
 
-SongValues::SongOwnWrite::~SongOwnWrite()
+bool SongValues::setStanding (Song& song, SongStanding next)
 {
-    if (keeper != nullptr)
-        keeper->endWrite();
+    JUCE_ASSERT_MESSAGE_THREAD
+    jassert (song.getValues() == this);
+
+    if (next == songStanding.get())
+        return false;
+
+    if (song.isWritingOutsideHistory())
+        songStanding.setOutsideHistory (std::move (next));
+    else
+        songStanding.set (std::move (next));
+
+    return true;
+}
+
+bool SongValues::setStandingOutsideHistory (SongStanding next)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (next == songStanding.get())
+        return false;
+
+    songStanding.setOutsideHistory (std::move (next));
+    return true;
+}
+
+bool SongValues::setOutside (SongOutside next)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (next == songOutside.get())
+        return false;
+
+    songOutside.set (std::move (next));
+    return true;
+}
+
+//==============================================================================
+SongValues::SongOwnTeller::SongOwnTeller (ValueArea<SongOwnValue>& a, juce::ListenerList<SongValues::Listener>& l)
+    : area (a),
+      listeners (l)
+{
+    area.addListener (this);
+}
+
+SongValues::SongOwnTeller::~SongOwnTeller()
+{
+    area.removeListener (this);
+}
+
+void SongValues::SongOwnTeller::valueAreaChanged (const SongOwnValue& before, const SongOwnValue& after)
+{
+    SongOwnChange change;
+    const auto partIf = [&change] (bool differs, SongOwnChange::Part part)
+    {
+        if (differs)
+            change.parts = (std::uint8_t) (change.parts | part);
+    };
+
+    partIf (before.outline != after.outline, SongOwnChange::outline);
+    partIf (before.notes != after.notes, SongOwnChange::notes);
+    partIf (before.idNumbering != after.idNumbering, SongOwnChange::idNumbering);
+    partIf (before.patternsKeepTheirSpeed != after.patternsKeepTheirSpeed, SongOwnChange::patterns);
+    partIf (before.merging != after.merging, SongOwnChange::merging);
+
+    if (change.parts != 0)
+        listeners.call ([&change] (SongValues::Listener& listener) { listener.songOwnChanged (change); });
+}
+
+SongValues::SongStandingTeller::SongStandingTeller (ValueArea<SongStanding>& a, juce::ListenerList<SongValues::Listener>& l)
+    : area (a),
+      listeners (l)
+{
+    area.addListener (this);
+}
+
+SongValues::SongStandingTeller::~SongStandingTeller()
+{
+    area.removeListener (this);
+}
+
+void SongValues::SongStandingTeller::valueAreaChanged (const SongStanding& before, const SongStanding& after)
+{
+    const auto lastKey = before.lastKey != after.lastKey;
+    const auto names = before.versionsBranch != after.versionsBranch || before.versionsBase != after.versionsBase;
+
+    if (lastKey || names)
+        listeners.call ([lastKey, names] (SongValues::Listener& listener) { listener.songStandingChanged (lastKey, names); });
+}
+
+SongValues::SongOutsideTeller::SongOutsideTeller (OutsideValue<SongOutside>& a, juce::ListenerList<SongValues::Listener>& l)
+    : area (a),
+      listeners (l)
+{
+    area.addListener (this);
+}
+
+SongValues::SongOutsideTeller::~SongOutsideTeller()
+{
+    area.removeListener (this);
+}
+
+void SongValues::SongOutsideTeller::outsideValueChanged (const SongOutside& before, const SongOutside& after)
+{
+    if (before == after)
+        return;
+
+    // What plays (SongPlayer.h: a plan's loop and metronome): the loop's four and the metronome.
+    const auto plays = before.loop != after.loop || before.metronome != after.metronome || before.loopFollowsSong != after.loopFollowsSong
+                       || loopEndsDiffer (before.loopStart, after.loopStart) || loopEndsDiffer (before.loopEnd, after.loopEnd);
+
+    listeners.call ([plays] (SongValues::Listener& listener) { listener.songOutsideChanged (plays); });
 }
 
 //==============================================================================
 SongValues::SongOwnKeeper::SongOwnKeeper (SongValues& v, Song& s)
     : values (v),
-      song (s),
-      toldOwn (getSongOwn (s)),
-      toldStanding (getSongStanding (s)),
-      toldOutside (getSongOutside (s))
+      song (s)
 {
-    song.addHistoryListener (this);
-}
-
-SongValues::SongOwnKeeper::~SongOwnKeeper()
-{
-    song.removeHistoryListener (this);
 }
 
 void SongValues::SongOwnKeeper::propertyChanged (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (isHeardAsSongOwn (tree, property))
-        heard();
-}
-
-void SongValues::SongOwnKeeper::childChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    if (isHeardAsSongOwn (parent, child))
-        heard();
-}
-
-void SongValues::SongOwnKeeper::heard()
-{
-    // In a setter's bracket: told as it ends. In an Undo or a Redo: told once the move is whole (historyMoved()). Else at once.
-    marked = true;
-
-    if (writing == 0 && ! song.getUndoManager().isPerformingUndoRedo())
-        tell();
-}
-
-void SongValues::SongOwnKeeper::endWrite()
-{
-    jassert (writing > 0);
-
-    if (--writing == 0 && marked && ! song.getUndoManager().isPerformingUndoRedo())
-        tell();
-}
-
-void SongValues::SongOwnKeeper::historyMoved()
-{
-    if (! marked || writing > 0)
+    // The song's root alone, a property it holds beside its tree, written (not taken out: its own taking out tells too), and
+    // nothing while the history undoes or redoes a step (the Undo of a step that wrote one refused takes it out again).
+    if (tree != song.getState() || ! isHeldProperty (property) || ! tree.hasProperty (property)
+        || song.getUndoManager().isPerformingUndoRedo())
         return;
 
-    const juce::ScopedValueSetter<bool> moving (tellingMove, true);
-    tell();
-}
-
-void SongValues::SongOwnKeeper::tell()
-{
-    marked = false;
-
-    // What the song holds now against what was told, each value as a whole, then field by field.
-    auto own = getSongOwn (song);
-    auto standing = getSongStanding (song);
-    auto outside = getSongOutside (song);
-
-    SongOwnChange change;
-
-    if (! (own == toldOwn))
+    if (! song.isWritingOutsideHistory())
     {
-        const auto partIf = [&change] (bool differs, SongOwnChange::Part part)
-        {
-            if (differs)
-                change.parts = (std::uint8_t) (change.parts | part);
-        };
-
-        partIf (own.outline != toldOwn.outline, SongOwnChange::outline);
-        partIf (own.notes != toldOwn.notes, SongOwnChange::notes);
-        partIf (own.idNumbering != toldOwn.idNumbering, SongOwnChange::idNumbering);
-        partIf (own.patternsKeepTheirSpeed != toldOwn.patternsKeepTheirSpeed, SongOwnChange::patterns);
-        partIf (own.merging != toldOwn.merging, SongOwnChange::merging);
+        jassertfalse; // the song's own written to its tree: its setters change it (SongOwnValue.h), its count makeID()
+        return;
     }
 
-    const auto keyChanged = standing.lastKey != toldStanding.lastKey;
-    const auto namesChanged = standing.versionsBranch != toldStanding.versionsBranch || standing.versionsBase != toldStanding.versionsBase;
-    const auto outsideChanged = ! (outside == toldOutside);
+    auto root = song.getState();
 
-    // What plays (SongPlayer.h: a plan's loop and metronome): the loop's four and the metronome.
-    const auto loopEndsDiffer = [] (const std::optional<double>& a, const std::optional<double>& b)
-    { return a.has_value() != b.has_value() || (a.has_value() && ! juce::exactlyEqual (*a, *b)); };
+    if (property == schema::nextID.getName())
+    {
+        song.setIDCount (readID (root[schema::nextID])); // the count as it is, as countIDsFrom() would set it
+    }
+    else
+    {
+        auto held = writeHeld (song);
+        held.setProperty (property, root[property], nullptr);
+        setHeld (song, held);
+    }
 
-    const auto plays =
-        outsideChanged
-        && (outside.loop != toldOutside.loop || outside.metronome != toldOutside.metronome
-            || outside.loopFollowsSong != toldOutside.loopFollowsSong || loopEndsDiffer (outside.loopStart, toldOutside.loopStart)
-            || loopEndsDiffer (outside.loopEnd, toldOutside.loopEnd));
+    ++values.songOwnAdopted;
+    root.removeProperty (property, nullptr);
+}
 
-    // What is told is told once: what the listeners do may set the song's own again, which is told after.
-    toldOwn = std::move (own);
-    toldStanding = std::move (standing);
-    toldOutside = std::move (outside);
+void SongValues::SongOwnKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
+{
+    // A LASTKEY, a PIANOROLL or a MERGING added to the song's root.
+    if (parent != song.getState() || ! isSongOwnElement (child.getType()))
+        return;
 
-    if (change.parts != 0)
-        values.listeners.call ([&change] (Listener& listener) { listener.songOwnChanged (change); });
+    if (! song.isWritingOutsideHistory())
+    {
+        jassertfalse; // the song's own added to its tree: its setters change it (SongOwnValue.h)
+        return;
+    }
 
-    if (keyChanged || namesChanged)
-        values.listeners.call ([keyChanged, namesChanged] (Listener& listener)
-                               { listener.songStandingChanged (keyChanged, namesChanged); });
+    // The song's own with this element in place of its own of the type.
+    auto held = writeHeld (song);
+    held.removeChild (held.getChildWithName (child.getType()), nullptr);
+    held.appendChild (child.createCopy(), nullptr);
+    setHeld (song, held);
 
-    if (outsideChanged)
-        values.listeners.call ([plays] (Listener& listener) { listener.songOutsideChanged (plays); });
+    ++values.songOwnAdopted;
+    parent.removeChild (child, nullptr);
+}
+
+void SongValues::SongOwnKeeper::adopt (SongValues& into, Song& loaded)
+{
+    // As the loader left the root: each of its own read as held, written back, itself (SongOwnValue.h: keepSongOwnAsHeld()),
+    // asked of a root holding its properties and its own elements alone (a copy of the whole song would copy all it holds).
+    auto root = loaded.getState();
+   #if JUCE_DEBUG
+    juce::ValueTree own (schema::PHAZITE);
+    own.copyPropertiesFrom (root, nullptr);
+
+    for (const auto& child : root)
+        if (isSongOwnElement (child.getType()))
+            own.appendChild (child.createCopy(), nullptr);
+
+    jassert (! keepSongOwnAsHeld (own));
+   #endif
+
+    into.songOwn.setOutsideHistory (readHeldSongOwn (root));
+    into.songStanding.setOutsideHistory (readHeldSongStanding (root));
+    into.songOutside.set (readHeldSongOutside (root));
+    loaded.setIDCount (readID (root[schema::nextID]));
+
+    // Then out of the tree: every property of the root (its own and its count, read in; any other, Phazite doesn't know: one
+    // the descriptions don't put on PHAZITE), its LASTKEY, PIANOROLL and MERGING, and every element of a type Phazite doesn't
+    // know there, with everything in it (dropped: no value holds it; SongOwnValue.h: isKnownRootProperty(), isKnownRootElement(),
+    // the rule a merge leaves them out by).
+    root.removeAllProperties (nullptr);
+    std::vector<juce::ValueTree> gone;
+
+    for (const auto& child : root)
+        if (isSongOwnElement (child.getType()) || ! isKnownRootElement (child.getType()))
+            gone.push_back (child);
+
+    for (const auto& child : gone)
+        root.removeChild (child, nullptr);
 }
 
 //==============================================================================
@@ -205,11 +326,34 @@ bool isHeardAsSongOwn (const juce::ValueTree& element)
 
 bool isHeardAsSongOwn (const juce::ValueTree& element, const juce::Identifier& property)
 {
-    return (element.hasType (schema::PHAZITE) && isSongOwnProperty (property)) || isInSongOwnElement (element);
+    return (element.hasType (schema::PHAZITE) && isHeldProperty (property)) || isInSongOwnElement (element);
 }
 
 bool isHeardAsSongOwn (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
     return (parent.hasType (schema::PHAZITE) && isSongOwnElement (child.getType())) || isInSongOwnElement (parent);
+}
+
+//==============================================================================
+void writeSongOwnIn (juce::ValueTree& element, const ValuesKept& kept)
+{
+    if (! element.hasType (schema::PHAZITE))
+        return;
+
+    writeSongOwnInto (element, kept.songOwn, kept.songStanding, kept.songOutside);
+
+    if (kept.nextID != 0)
+        element.setProperty (schema::nextID, (juce::int64) kept.nextID, nullptr);
+}
+
+bool holdSameSongOwn (const ValuesKept& kept, const ValuesKept& otherKept)
+{
+    return kept.songOwn == otherKept.songOwn && kept.songStanding.lastKey == otherKept.songStanding.lastKey;
+}
+
+bool holdSameSongOwnOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree&, const ValuesKept& otherKept)
+{
+    // The other element is of the same type, its counterpart in the other song (WholeState.h: holdSameKeptOf()).
+    return ! element.hasType (schema::PHAZITE) || holdSameSongOwn (kept, otherKept);
 }
 } // namespace phazite

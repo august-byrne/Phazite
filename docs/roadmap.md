@@ -59,8 +59,8 @@ anyone can download. What the comparison left for later is under [After 1.0](#af
 Added on 2026-11-20 and 2026-11-21 (the owner's decisions, so that the model under Phazite is robust before the
 beta): the song's schema as data (S5.19) and the song as an immutable value (S5.20), which was weighed and left at
 first and taken once it was measured ([decisions.md](design/decisions.md), "Engineering"). S5.19 comes before S5.20,
-and both before the stage's other steps that add to the model, which then write through them. Of S5.20, the first fourteen
-areas are built (2026-11-21 to 24): a clip's notes and its controllers' values, the clips themselves (with each
+and both before the stage's other steps that add to the model, which then write through them. Of S5.20, every
+area is built (2026-11-21 to 24): a clip's notes and its controllers' values, the clips themselves (with each
 track's order of clips and the alias groups), the tempo map, the chord lane (its element kept as the sign that the
 song has one), the MIDI links (their element kept as the place the first link made), automation's curves (their
 AUTOMATION kept as their place, each point with a key the selection of points holds), the sections (theirs kept as
@@ -72,10 +72,12 @@ and the devices, containers and chains themselves (each by its ID, each owner's 
 come and go), and the tracks' switches (mute, solo, frozen and the automation mode: keyed, undone by entry) with their
 view (each row's height, collapsed and pinned switches, drum rows and automation lanes, outside the history), and the
 tracks, folders, returns and master themselves (each by its ID, each folder's list and the top list in their order, the
-master a member: the tree's TRACKS and MASTER kept as empty places a whole copy writes them into) are values beside the
-song's tree, in the song's one undo history, with immer in `external/`. The rest goes leaf first, as an element can
-leave the tree only once nothing left in it is its child: the song's own properties; then the history as a list of
-roots, and the tree goes.
+master a member: the tree's TRACKS and MASTER kept as empty places a whole copy writes them into), and the song's own (its
+root's properties and its LASTKEY, PIANOROLL and MERGING: what a step alone writes, plain; the key set last and the
+versions' names, keyed; the loop, the play start, the grids and the rest of how it plays and shows, outside the history;
+its count of IDs on the song, told to no one; what Phazite doesn't know at its root dropped as it opens) are values
+beside the song's tree, in the song's one undo history, with immer in `external/`, and the song's tree holds only empty
+placeholders. The end step is still to come: the history as a list of roots, and the tree goes.
 
 ### Stage 1. Safe: the bugs that lose work or sound
 

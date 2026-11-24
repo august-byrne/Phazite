@@ -1560,6 +1560,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SongCheck.h
         tests/SongIDs.h
         tests/SongIndexTests.cpp
+        tests/SongOwnAreasTests.cpp
         tests/SongOwnValueTests.cpp
         tests/SongPlaceTextTests.cpp
         tests/SongTextTests.cpp

@@ -5,15 +5,14 @@
 // the song writes them: what only an undo step writes (SongOwnValue, plain: an Undo puts it back whole), what a step and a
 // write outside the history both write (SongStanding, keyed: an Undo puts back only the entries its step changed, as the
 // tree's Undo of a property does), and what no step writes (SongOutside: state and view, never in the history). nextID is no
-// value of these: a count, which stays on the tree until the song's own switch moves it onto the song.
+// value of these: a count, which the song holds itself (Song.h: makeID()).
 //
-// The song's tree still holds them (the next piece switches the storage): the getters below build each value from the song's
-// root on each call, as the song holds it, and every reader of the song's own reads through them; the setters below are
-// their writers' one way to change them, each writing the root by what differs from the value it holds; and what listens to
-// the song hears them change from the values' listener (SongValues.h: songOwnChanged(), songStandingChanged(),
-// songOutsideChanged(); SongOwnArea.h, which tells them from the tree until the switch). The conversion below is the one
-// place that reads and writes these names: what the getters read, what the setters write, and what a whole copy will be
-// written from.
+// The song holds them as areas of its values (SongValues.h: songOwn, songStanding, songOutside), its tree none of them: the
+// getters below read each area's value as it is, and every reader of the song's own reads through them; the setters below
+// are their writers' one way to change them, each setting the area's next value once; and what listens to the song hears
+// them change from the values' listener (SongValues.h: songOwnChanged(), songStandingChanged(), songOutsideChanged(), told
+// by each area's teller: SongOwnArea.h). The conversion below is the one place that reads and writes these names: what the
+// song takes in as it opens (SongOwnArea.h: the adoption) and what a whole copy is written from (WholeState.h).
 #pragma once
 
 #include "model/base/internal/ValueArea.h"
@@ -145,6 +144,10 @@ SongOutside readHeldSongOutside (const juce::ValueTree& phazite);
 // (where a merge waits), each appended.
 void writeSongOwnInto (juce::ValueTree& phazite, const SongOwnValue&, const SongStanding&, const SongOutside&);
 
+// The same, the root's properties alone (none of its elements): what the versions' skeleton of the song takes
+// (model/versions/ChangesWorker.cpp: makeSkeleton()).
+void writeSongOwnPropertiesInto (juce::ValueTree& phazite, const SongOwnValue&, const SongStanding&, const SongOutside&);
+
 // A song's root as the song holds it, written as Phazite writes that, so that the root read as held and written back is
 // itself: the loader's rule (makeConsistent(), once each number is within its range, each word one of its words and each
 // element held once), the held readers' by the same conversion. Of the root's properties and its first LASTKEY, PIANOROLL and
@@ -168,50 +171,40 @@ SavedGrid readSavedGrid (const juce::ValueTree& gridHolder);
 // What the three values hold of a song's root, by name: a property of its own (Schema.h: PHAZITE's outline, notes,
 // idNumbering, patternsKeepTheirSpeed, the versions' two names, the loop's four, playStart, metronome, punch, lastInput and
 // the playlist's grid; not nextID, a count, nor a property Phazite doesn't know); and an element of its own (LASTKEY,
-// PIANOROLL, MERGING), by its type. What the passes over a song's elements leave to the values (model/versions/
-// ApplySong.cpp) and what the root's listeners leave to the values' listener (SongOwnArea.h: isHeardAsSongOwn()).
+// PIANOROLL, MERGING), by its type. What the song takes in as it opens and what its keeper's safety net takes in
+// (SongOwnArea.h), what the passes over a song's elements leave to the values (model/versions/ApplySong.cpp) and what the
+// root's listeners leave to the values' listener (SongOwnArea.h: isHeardAsSongOwn()).
 bool isSongOwnProperty (const juce::Identifier& property);
 bool isSongOwnElement (const juce::Identifier& type);
 
-// Which of the three values a write is of.
-enum class SongOwnPart
-{
-    own,
-    standing,
-    outside
-};
-
-// A song's root written as the three values say, for one of them alone (part): each of that value's properties and its
-// element (MERGING, LASTKEY, PIANOROLL) as writeSongOwnInto() writes them, by what differs from what the root holds: a
-// property set where its text differs (SongText.h: isSameValue()) or removed where the value writes none; the element added
-// where the root has none (after its other children), taken out where the value writes none, else its properties by what
-// differs, in place. Through this undo manager (nullptr: outside the history). What is the same writes nothing, and the
-// other values' properties and elements, nextID and what Phazite doesn't know are left as they are. Whether it wrote. The
-// setters' writes while the tree holds the song's own (SongOwnArea.cpp).
-bool writeSongOwnPart (juce::ValueTree phazite, SongOwnPart, const SongOwnValue&, const SongStanding&, const SongOutside&,
-                       juce::UndoManager*);
+// Whether Phazite knows a property of a song's root, by the descriptions: one they put on PHAZITE (Schema.h: the song's own,
+// and its count of IDs, nextID); and an element there, by its type (Schema.h: isKnownType()). What it doesn't know at the
+// root, the one rule of both: dropped as the song opens (SongOwnArea.h, the adoption), and left out of a merge, neither
+// merged nor compared (model/versions/SongMerge.cpp: mergeSongs()), so that no clash is made of what the song can't hold.
+bool isKnownRootProperty (const juce::Identifier& property);
+bool isKnownRootElement (const juce::Identifier& type);
 
 //==============================================================================
-// The getters: each value as the song holds it, built from its root on each call (readHeld...()) while the tree holds them. A
-// root's dozen properties and its three small elements, read without allocating (the texts shared with the tree's): what the
-// readers of the song's own read, a tick's poll among them (the top bar's loop, the time line's punch). By value: nothing
-// keeps a reference into one.
-SongOwnValue getSongOwn (const Song&);
-SongStanding getSongStanding (const Song&);
-SongOutside getSongOutside (const Song&);
+// The getters: each value as the song holds it, its area's (SongValues.h: songOwn, songStanding, songOutside), by reference
+// into it, valid until the area's next change: what the readers of the song's own read, a tick's poll among them (the top
+// bar's loop, the time line's punch), with nothing allocated and nothing read but the one value. A caller that keeps one
+// across a write keeps a copy (auto, not auto&). The defaults for a song that holds no values (a song being made or read).
+const SongOwnValue& getSongOwn (const Song&);
+const SongStanding& getSongStanding (const Song&);
+const SongOutside& getSongOutside (const Song&);
 
 //==============================================================================
-// The setters: each value's writers' one way to change it, the next value worked out and set once. None begins an undo step.
-// A value equal to what the song holds is no change: nothing written, no action in the history, nothing told.
+// The setters: each value's writers' one way to change it, the next value worked out and set once into its area. None begins
+// an undo step. A value equal to what the song holds is no change: nothing set, no action in the history, nothing told.
 //   - setSongOwn(): in the song's undo history (the step in progress: an outline applied, the notes, patterns' speed, a merge
 //     taken or a clash chosen, a version applied), or outside it while the song is written outside it (Song::OutsideHistory).
 //   - setSongStanding(): the same (Take the Newer Versions' base, a version applied's key set last).
 //   - storeStandingOutsideHistory(): outside the history whatever is open (a key set on a track, the key set last, where the
-//     song stands in its versions as the versions move it).
+//     song stands in its versions as the versions move it): taken into the action of a step still open that changed the
+//     standing, but for the entries that step changed, which keep its before and after (ValueArea.h: keyed).
 //   - setSongOutside(): outside the history, always (the loop, the play start, the metronome, punch, the input chosen last,
 //     the grids).
-// While the song's tree holds them: written into its root by what differs (writeSongOwnPart()), the values' listener told
-// once for the set as its writes end (SongOwnArea.h). In SongOwnArea.cpp.
+// Nothing for a song that holds no values (asserted). In SongOwnArea.cpp.
 void setSongOwn (Song&, SongOwnValue);
 void setSongStanding (Song&, SongStanding);
 void storeStandingOutsideHistory (Song&, SongStanding);

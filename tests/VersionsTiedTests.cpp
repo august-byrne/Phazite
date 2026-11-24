@@ -964,9 +964,9 @@ TEST_CASE ("Undo past a Take of the newer versions and a version saved after it,
 
 TEST_CASE ("A Redo of the song's own that makes the song the branch's newer version grows from it; the edit itself doesn't")
 {
-    // VersionHistory::edited(): a change of the song's own told once a move of the history is whole (SongOwnArea.h:
-    // isTellingHistoryMove()) is the move's, after which the history looks for the song being the branch's last version
-    // (healPending); the same change made as an edit is no move.
+    // VersionHistory::edited(): a change of the song's own told during a move of the history (its area's teller tells inside
+    // JUCE's undo() and redo(): SongOwnArea.h) is the move's, after which the history looks for the song being the
+    // branch's last version (healPending); the same change made as an edit is no move.
     TestSong s;
     s.addTrack ("Bass");
     const auto first = keepVersion (s.context, "First");

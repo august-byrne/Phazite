@@ -8,6 +8,7 @@
 #include "model/base/internal/ModulationArea.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
+#include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/TracksArea.h"
 #include "model/base/internal/WholeState.h"
 
@@ -87,7 +88,11 @@ namespace
     {
         const auto song = whole.getState();
         juce::ValueTree own (song.getType());
-        own.copyPropertiesFrom (song, nullptr);
+
+        // Its own properties and its count of IDs, the values' (the song's tree holds none: SongOwnArea.h), as whole state
+        // writes them, without the elements of its own (its LASTKEY, PIANOROLL and MERGING), which the line compares nothing of.
+        writeSongOwnPropertiesInto (own, getSongOwn (whole), getSongStanding (whole), getSongOutside (whole));
+        own.setProperty (schema::nextID, (juce::int64) getNextID (whole), nullptr);
 
         for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::MIDILINKS })
             if (const auto part = song.getChildWithName (*type); part.isValid())

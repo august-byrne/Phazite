@@ -53,8 +53,8 @@ AreaChoice chooseChordLaneClash (Song&, const MergeClash&, int value, const Merg
 // each in the choice's step. Refused (nothing written) for a value the song can't hold as that side has it (a commit's song
 // may come from anyone), an uncounted property of its own (which a merge never reports), a property of its LASTKEY or what is
 // deeper in it, a key's element that stands in for what its version couldn't read, and any path into its PIANOROLL or its
-// MERGING. Asked first: what is left of the song's top for the song's tree (VersionsModel.cpp: chooseInTree()) is a property
-// Phazite doesn't know there, and an element of a type it doesn't know.
+// MERGING. Asked first: what is left of the song's top, a property Phazite doesn't know there or an element of a type it doesn't
+// know, the song holds nowhere (dropped as it opens): chosen with nothing to write (VersionsModel.cpp: chooseClash()).
 AreaChoice chooseSongOwnClash (Song&, const MergeClash&, int value, const MergeSides&);
 
 // The MIDI links' (model/midi/MidiLinks.cpp): a path into the song's MIDILINKS, whose links merge whole, each by its
@@ -107,6 +107,6 @@ AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSide
 //     there (an ID it holds elsewhere; the master taken away);
 //   - anything deeper in a track or the master (an element Phazite doesn't know): refused.
 // Asked after the clips' (a path through a TRACK to a CLIP is theirs) and the other areas'. Nothing through a TRACK or the
-// MASTER is chosen in the song's tree (VersionsModel.cpp: chooseInTree()).
+// MASTER is written into the song's tree.
 AreaChoice chooseTrackClash (Song&, const MergeClash&, int value, const MergeSides&);
 } // namespace phazite

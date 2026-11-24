@@ -4,6 +4,7 @@
 #include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 
 #include <algorithm>
 #include <array>
@@ -151,10 +152,17 @@ namespace
     }
 
     //==============================================================================
+    // Which of the three values a write is of.
+    enum class SongOwnPart
+    {
+        own,
+        standing,
+        outside
+    };
+
     // The writers: each property of one of the three values as Phazite writes it, handed to a function that writes it (the
-    // name, and the value, nullptr for none: a property left out), in a fixed order; nothing made but the values, so that a
-    // setter writes what differs allocating no tree (writeSongOwnPart()). A text each where not empty; a switch where its
-    // writer always wrote it.
+    // name, and the value, nullptr for none: a property left out), in a fixed order. A text each where not empty; a switch
+    // where its writer always wrote it.
     template <typename Write>
     void writeText (const schema::PropertyDescription& property, const juce::String& text, Write&& write)
     {
@@ -448,20 +456,30 @@ SongOutside readHeldSongOutside (const juce::ValueTree& phazite)
     return readOutside (phazite, Reading::held);
 }
 
-void writeSongOwnInto (juce::ValueTree& phazite, const SongOwnValue& own, const SongStanding& standing, const SongOutside& outside)
+namespace
 {
-    // Each value's properties in their order, then the elements, LASTKEY, PIANOROLL and MERGING, each appended where held.
-    const auto setOn = [] (juce::ValueTree& element)
+    // A writer that sets each property written on an element.
+    auto setOn (juce::ValueTree& element)
     {
         return [&element] (const juce::Identifier& name, const juce::var* value)
         {
             if (value != nullptr)
                 element.setProperty (name, *value, nullptr);
         };
-    };
+    }
+} // namespace
 
+void writeSongOwnPropertiesInto (juce::ValueTree& phazite, const SongOwnValue& own, const SongStanding& standing,
+                                 const SongOutside& outside)
+{
     for (const auto part : { SongOwnPart::own, SongOwnPart::standing, SongOwnPart::outside })
         writeRootProperties (part, own, standing, outside, setOn (phazite));
+}
+
+void writeSongOwnInto (juce::ValueTree& phazite, const SongOwnValue& own, const SongStanding& standing, const SongOutside& outside)
+{
+    // Each value's properties in their order, then the elements, LASTKEY, PIANOROLL and MERGING, each appended where held.
+    writeSongOwnPropertiesInto (phazite, own, standing, outside);
 
     for (const auto part : { SongOwnPart::standing, SongOwnPart::outside, SongOwnPart::own })
     {
@@ -569,64 +587,14 @@ bool isSongOwnElement (const juce::Identifier& type)
     return type == schema::LASTKEY.getName() || type == schema::PIANOROLL.getName() || type == schema::MERGING.getName();
 }
 
-bool writeSongOwnPart (juce::ValueTree phazite, SongOwnPart part, const SongOwnValue& own, const SongStanding& standing,
-                       const SongOutside& outside, juce::UndoManager* undo)
+bool isKnownRootProperty (const juce::Identifier& property)
 {
-    // Each property as writeSongOwnInto() writes it, compared with what the element holds (as its text: SongText.h,
-    // isSameValue()): nothing made but the values, no tree.
-    jassert (phazite.hasType (schema::PHAZITE));
-    auto changed = false;
+    return schema::getTables().findProperty (schema::PHAZITE.getName(), property) != nullptr;
+}
 
-    const auto writeOn = [&changed, undo] (juce::ValueTree& element)
-    {
-        return [&changed, undo, &element] (const juce::Identifier& name, const juce::var* value)
-        {
-            const auto* there = element.getPropertyPointer (name);
-
-            if (value != nullptr && (there == nullptr || ! isSameValue (*there, *value)))
-            {
-                element.setProperty (name, *value, undo);
-                changed = true;
-            }
-            else if (value == nullptr && there != nullptr)
-            {
-                element.removeProperty (name, undo);
-                changed = true;
-            }
-        };
-    };
-
-    writeRootProperties (part, own, standing, outside, writeOn (phazite));
-
-    const auto& type = getPartElement (part);
-    auto held = phazite.getChildWithName (type);
-
-    if (holdsPartElement (part, own, standing, outside))
-    {
-        if (held.isValid())
-        {
-            writeElementProperties (part, own, standing, outside, writeOn (held));
-        }
-        else
-        {
-            juce::ValueTree made (type);
-            writeElementProperties (part, own, standing, outside,
-                                    [&made] (const juce::Identifier& name, const juce::var* value)
-                                    {
-                                        if (value != nullptr)
-                                            made.setProperty (name, *value, nullptr);
-                                    });
-            phazite.appendChild (made, undo);
-            changed = true;
-        }
-    }
-    else if (held.isValid())
-    {
-        phazite.removeChild (held, undo);
-        changed = true;
-    }
-
-    return changed;
+bool isKnownRootElement (const juce::Identifier& type)
+{
+    return schema::isKnownType (type);
 }
 
 bool keepSongOwnAsHeld (juce::ValueTree phazite)
@@ -665,18 +633,24 @@ SavedGrid readSavedGrid (const juce::ValueTree& gridHolder)
 }
 
 //==============================================================================
-SongOwnValue getSongOwn (const Song& song)
+const SongOwnValue& getSongOwn (const Song& song)
 {
-    return readHeldSongOwn (song.getState());
+    static const SongOwnValue none {};
+    const auto* values = song.getValues();
+    return values != nullptr ? values->songOwn.get() : none;
 }
 
-SongStanding getSongStanding (const Song& song)
+const SongStanding& getSongStanding (const Song& song)
 {
-    return readHeldSongStanding (song.getState());
+    static const SongStanding none {};
+    const auto* values = song.getValues();
+    return values != nullptr ? values->songStanding.get() : none;
 }
 
-SongOutside getSongOutside (const Song& song)
+const SongOutside& getSongOutside (const Song& song)
 {
-    return readHeldSongOutside (song.getState());
+    static const SongOutside none {};
+    const auto* values = song.getValues();
+    return values != nullptr ? values->songOutside.get() : none;
 }
 } // namespace phazite

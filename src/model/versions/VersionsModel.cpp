@@ -1491,10 +1491,8 @@ namespace
     // song is: none for none.
     void setMergingElement (Song& song, const juce::ValueTree& element)
     {
-        // The song's own value, its record read as the element holds it (SongOwnValue.h: setSongOwn()), in the step. Its setter
-        // writes the root by what differs (writeSongOwnPart()): a MERGING replaced keeps its place among the root's children,
-        // its properties written in place, and one where the song has none is appended after them. The order whole state
-        // writes the root's children in is the storage switch's (roadmap step S5.20, the song's own).
+        // The song's own value, its record read as the element holds it (SongOwnValue.h: setSongOwn()), in the step; whole
+        // state writes the MERGING after the root's other children (SongOwnArea.h: writeSongOwnIn()).
         jassert (! song.isWritingOutsideHistory());
         auto own = getSongOwn (song);
         own.merging = element.isValid() ? std::optional (readMergingRecord (element)) : std::nullopt;
@@ -2145,7 +2143,9 @@ namespace
                                                        // (chooseTrackClash()) through the store's functions
                    + values->countTrackLeavesAdopted() // the tracks' switches and view: a switch's clash and a whole
                                                        // track's through their setters (chooseTrackClash())
-                   + values->countTracksAdopted();     // the tracks': a track's or the master's through their setters
+                   + values->countTracksAdopted()      // the tracks': a track's or the master's through their setters
+                   + values->countSongOwnAdopted();    // the song's own: a clash of it through its setters
+                                                       // (chooseSongOwnClash()), the merge's record through setSongOwn()
         }
 
         const Song& song;
@@ -2206,60 +2206,6 @@ namespace
 
         return AreaChoice::notTheArea;
     }
-
-    // A clash in the song's tree (no area's: chooseInAreas()), chosen in it, in the history of the choice's step: a property
-    // given the value chosen, or taken away where that side had none; an element replaced whole by the side chosen's, in its
-    // place, or taken out where that side had none. Whether it was chosen (false for a path that names nothing in the song).
-    // What comes here is what Phazite doesn't know at the song's top alone: a property of PHAZITE's that the song's own values
-    // don't hold (SongOwnValue.h: isSongOwnProperty(); nextID, a count, is never a clash) and an element Phazite doesn't know
-    // there. The song's own properties and its LASTKEY are the song's own chooser's (chooseSongOwnClash()), and a merge reports
-    // no PIANOROLL (view state) and no MERGING (no version holds one). No path through a DEVICE, a CONTAINER or a CHAIN comes
-    // here: the devices' choosers take or refuse every one; nor any path through the song's TRACKS or its MASTER, which the
-    // tracks' chooser takes or refuses (chooseTrackClash(): a track's or the master's own property through the tracks'
-    // setters, a whole track or master), so that nothing here writes a track or what an area's keeper would take in.
-    bool chooseInTree (Song& song, const MergeClash& clash, int value)
-    {
-        jassert (clash.path.isEmpty()
-                 || ! (clash.path[0].startsWith (schema::TRACKS.toString() + ":")
-                       || clash.path[0].startsWith (schema::MASTER.toString() + ":")));
-
-        auto* undo = &song.getUndoManager();
-
-        if (clash.property.isValid())
-        {
-            const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
-            auto element = findByPath (song.getState(), clash.path);
-
-            if (! element.isValid())
-                return false;
-
-            if (values[value]->isVoid())
-                element.removeProperty (clash.property, undo);
-            else
-                element.setProperty (clash.property, *values[value], undo);
-
-            return true;
-        }
-
-        auto parentPath = clash.path;
-        parentPath.remove (parentPath.size() - 1);
-        auto parent = findByPath (song.getState(), parentPath);
-
-        if (! parent.isValid())
-            return false;
-
-        const auto existing = findByPath (song.getState(), clash.path);
-        const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
-        const auto place = existing.isValid() ? parent.indexOf (existing) : -1;
-
-        if (existing.isValid())
-            parent.removeChild (existing, undo);
-
-        if (elements[value]->isValid())
-            parent.addChild (elements[value]->createCopy(), place, undo);
-
-        return true;
-    }
 } // namespace
 
 bool chooseClash (ProjectContext& context, int index, int value)
@@ -2280,13 +2226,14 @@ bool chooseClash (ProjectContext& context, int index, int value)
     const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
     const NothingTakenIn byTheValuesAlone (*song);
 
-    // Each area the song holds as a value beside its tree asked first; a clash none of them has, in the song's tree.
-    const auto inAreas = chooseInAreas (*song, clash, value, { merging.base, merging.before, merging.theirs });
+    // Each area the song holds as a value beside its tree asked. Nothing should reach a clash none of them has: only what
+    // Phazite doesn't know at the song's top could, which the song drops as it opens (SongOwnArea.h) and a merge leaves out,
+    // making no clash of it (SongMerge.cpp: mergeSongs()). Should one come all the same, it is chosen with nothing of the
+    // song's to write but the choice itself, below.
+    const auto choice = chooseInAreas (*song, clash, value, { merging.base, merging.before, merging.theirs });
+    jassert (choice != AreaChoice::notTheArea); // a clash no area holds: the merge makes none (above)
 
-    if (inAreas == AreaChoice::refused)
-        return false;
-
-    if (inAreas == AreaChoice::notTheArea && ! chooseInTree (*song, clash, value))
+    if (choice == AreaChoice::refused)
         return false;
 
     // What the value chosen names that the song took away since (a send to a return deleted here, a sidechain from a track

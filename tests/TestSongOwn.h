@@ -67,6 +67,7 @@ juce::ValueTree copyWaitingMerge (const Song&);
 bool hasWaitingMerge (const Song&);
 
 // The merge waiting in the song with one of its values set by hand, as a file from anyone may hold it, set in the song outside
-// its history (model/versions/internal/VersionHistory.h: setWaitingMerge()).
+// its history (model/versions/internal/VersionHistory.h: setWaitingMerge()), which it lets go of first, as a song opened from
+// such a file has none.
 void changeWaitingMerge (Song&, const juce::Identifier& property, const juce::var& value);
 } // namespace phazite::test
