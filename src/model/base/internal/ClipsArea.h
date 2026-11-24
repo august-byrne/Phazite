@@ -61,10 +61,6 @@ void readHeldClipsIn (const juce::ValueTree& song, SongState&);
 // audio clip of a group sharing the group's sound alike. Nothing for an element whose kind holds no clips. How many it read.
 int takeTrackClipsIn (SongClips&, NotesByClip&, const juce::ValueTree& track, TrackID);
 
-// The clips' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a track's
-// clips, the same in the same order (holdSameTrackClips()); true for an element that isn't a track.
-bool holdSameClipsOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
-
 // The largest ID the clips' area holds below schema::maxID (IDsHeld.h): each clip's ID and its alias group's. 0 for none.
 std::uint64_t findLargestIDIn (const SongClips&);
 } // namespace phazite

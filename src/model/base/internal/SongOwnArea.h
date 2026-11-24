@@ -130,9 +130,9 @@ bool isHeardAsSongOwn (const juce::ValueTree& parent, const juce::ValueTree& chi
 // placeholders, its track list and its master, in the tree's order), and its count of IDs (nextID) where it is kept; nothing
 // for another element. And whether two songs' roots, each with its kept values, hold the same of what counts of the song's
 // own: its own value (the outline, the notes, the numbering, patterns' speed, a merge waiting) and its key set last (LASTKEY,
-// counted; the versions' names and how the song plays and shows count nothing, nor its count of IDs); true for another
-// element. Both of Project's comparisons with the saved copy compare the song's own so (the quick one, isSongOwnAsSaved(), and
-// the whole song's, through WholeState.h's holdSameKeptOf()), so that the two agree. Any thread.
+// counted; the versions' names and how the song plays and shows count nothing, nor its count of IDs). Both of Project's
+// comparisons with the saved copy compare the song's own so (the quick one, isSongOwnAsSaved(), and the whole song's,
+// WholeState.h's holdSameSong()), so that the two agree. Any thread.
 struct SongState;
 void writeSongOwnIn (juce::ValueTree& element, const SongState&);
 
@@ -141,5 +141,4 @@ void writeSongOwnIn (juce::ValueTree& element, const SongState&);
 // thread.
 void readHeldSongOwnIn (const juce::ValueTree& song, SongState&);
 bool holdSameSongOwn (const SongState&, const SongState&);
-bool holdSameSongOwnOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 } // namespace phazite

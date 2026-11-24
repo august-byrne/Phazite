@@ -2,7 +2,8 @@
 // The changes of the open song against a version's song (its base's, or one compared with it: VersionHistory.h), worked out
 // on the history's thread (docs/design/versions.md: Off the message thread). The message thread marks what the song's
 // notifications say changed (a track, the master, an automation curve, the song's own, its tracks' order and names), and
-// hands over, a round at a time, copies of only those parts (take()); the history's thread compares them with the version's
+// hands over, a round at a time, the song's state (SongState.h: a cheap copy of each area's value) with those marks (take());
+// the history's thread writes the trees of only those parts from the state and compares them with the version's
 // (work()), keeps what it found for each part, and gives back the whole list; the message thread keeps the last list
 // (takeResult()), and works out none of it. A track that didn't change is never copied or compared again. One round under
 // way at a time: what changes meanwhile goes into the next.
@@ -10,6 +11,7 @@
 
 #include "SongDiff.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongState.h"
 
 #include <juce_data_structures/juce_data_structures.h>
 
@@ -33,21 +35,22 @@ public:
     // what each part compared to; only that thread touches it once given.
     struct State;
 
-    // A round: what changed since the last, copied on the message thread.
+    // A round: what changed since the last, marked on the message thread, with the song's state as it was taken there, which
+    // the history's thread writes the trees of those parts from (a SongState: the one thing about the song handed over).
     struct Request
     {
         std::shared_ptr<State> state;
         int epoch = 0, number = 0;
-        bool all = false;         // the whole song, copied (songNow): everything compared again
-        juce::ValueTree songNow;  // all: the song; else, with skeleton, the song's own parts and its tracks' order (or none)
-        bool skeleton = false;    // songNow holds the song's own and its tracks' names and order
-        std::uint64_t master = 0; // the master's ID now, which its line is named by
-        std::map<std::uint64_t, juce::ValueTree> tracks; // tracks and the master (masterKey) that changed, as they are (none: gone)
-        std::map<juce::String, juce::ValueTree> curves;  // automation curves that changed, by key, as they are (none: gone)
-        PluginParameterValues parameters;                // the plug-ins' knobs in what was copied, as they are now
-        PluginParameterValues opened;                    // knobs of the reference's plug-ins that loaded after it was read
-        std::set<std::uint64_t> reported;                // the plug-ins that said they changed since the reference
-        bool withReported = true;                        // with it (the version the song grew from); without, every state counts
+        SongState songNow {};              // the song as it was as the round was taken
+        bool all = false;                  // the whole song written from it: everything compared again
+        bool skeleton = false;             // the song's own parts and its tracks' names and order written from it
+        std::uint64_t master = 0;          // the master's ID now, which its line is named by
+        std::set<std::uint64_t> tracks {}; // tracks and the master (masterKey) that changed (one the state hasn't: gone)
+        std::set<juce::String> curves {};  // automation curves that changed, by key (one the state hasn't: gone)
+        PluginParameterValues parameters;  // the plug-ins' knobs in what was copied, as they are now
+        PluginParameterValues opened;      // knobs of the reference's plug-ins that loaded after it was read
+        std::set<std::uint64_t> reported;  // the plug-ins that said they changed since the reference
+        bool withReported = true;          // with it (the version the song grew from); without, every state counts
     };
 
     struct Result
@@ -78,10 +81,10 @@ public:
     // Whether the last list is the song's as it is: nothing changed since the round it came from, which is in.
     bool isUpToDate() const noexcept { return state == nullptr || (hasResult && ! working && ! isDirty()); }
 
-    // A round's copies of what changed in the song (its plug-ins' knobs read through readKnobs, by the devices in what was
-    // copied; the reference's own knobs for those that weren't known as it was read, through readOpened; and the plug-ins
-    // that said they changed), which leaves nothing dirty, and marks a round under way. None while one is, or without a
-    // reference.
+    // A round of what changed in the song: its state and the marks (its plug-ins' knobs read through readKnobs, by the
+    // plug-ins in the tracks marked, found in the state's devices; the reference's own knobs for those that weren't known as
+    // it was read, through readOpened; and the plug-ins that said they changed), which leaves nothing dirty, and marks a
+    // round under way. None while one is, or without a reference.
     using KnobReader = std::function<PluginParameterValues (const std::set<std::uint64_t>& devices)>;
     std::shared_ptr<Request> take (const Song&, const KnobReader& readKnobs, const KnobReader& readOpened,
                                    std::set<std::uint64_t> reported);
@@ -93,10 +96,13 @@ public:
     // The history's thread: a round worked out, against what the rounds before left.
     static Result work (const Request&);
 
-    // How many tracks (and masters) the rounds compared since the program started, on any thread, and how many parts the
-    // message thread copied for them: what the performance gates count (tests/PerformanceGateTests.cpp).
+    // How many tracks (and masters) the rounds compared since the program started, on any thread; how many parts they copied
+    // for them (a track, the master, the song whole counted as its tracks and the master: written from the round's state); and
+    // how many of those copies were made on the message thread (none where the rounds run on the history's thread): what the
+    // performance gates count (tests/PerformanceGateTests.cpp).
     static juce::int64 countTracksCompared();
     static juce::int64 countTracksCopied();
+    static juce::int64 countCopiedOnMessageThread();
 
 private:
     std::shared_ptr<State> state;

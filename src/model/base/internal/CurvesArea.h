@@ -78,10 +78,4 @@ void writeCurvesIn (juce::ValueTree& element, const SongState&);
 // The curves' reader of a song's tree (SongState.h: readSongTree(), a line of it): its AUTOMATION's curves into the state, as
 // the song holds them, each point given a key from the count given (none where it has none); no tree changed. Any thread.
 void readHeldCurvesIn (const juce::ValueTree& song, SongState&, std::uint64_t& nextPointKey);
-
-// The curves' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where both
-// are a song's element (PHAZITE), the same curves (holdSameCurves()); and whether a child is the place of the curves, which
-// the comparison of the elements in them leaves out (the song's AUTOMATION).
-bool holdSameCurvesOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
-bool isCurvesPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

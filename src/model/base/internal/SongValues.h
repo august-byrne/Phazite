@@ -105,7 +105,8 @@
 //   5. SongState.h, WholeState.h and WholeState.cpp: a member of SongState and a line of getSongState() and of readSongTree()
 //      (its readHeld<Area>In(), in its area's file: what its adopt() read before it took its elements out, which now takes them
 //      out alone) and of SongValues::takeIn(); a line of writeIn() (its write<Area>In()) and of leadsToKept() (its
-//      leadsTo<Area>()); a line of holdSameKeptOf() and of isPlaceOfKept(); its holdSame<Area>() declared with the others.
+//      leadsTo<Area>()); a line of holdSameSong() (or of holdSameChannels(), for what a track or a device holds); its
+//      holdSame<Area>() declared with the others, comparing two states by identity first.
 //   6. IDsHeld.cpp: a line of findLargestIDHeld(), if it holds IDs.
 //   7. tests/SongCheck.cpp: its rule as a function of its own (check<Area>Value(): no element of it in the song's tree, its
 //      place there empty, its invariants), a line of findValueProblems() and of findStateDifferences().
@@ -154,8 +155,8 @@
 //        changes: the tracks' notes and audio, the tempo, the curves by their parameters).
 //      - Project (model/project/Project.cpp, internal/Project.h): counts the change and marks what to compare (a member of
 //        its own, as tempoToCompare, cleared in clearToCompare()); its quick check, a line of compareWithSavedState()'s list
-//        (as isTempoMapAsSaved()); and its whole comparison, holdTheSameProject(), through holdSameKeptOf() (step 5), which
-//        the quick check agrees with.
+//        (as isTempoMapAsSaved()); and its whole comparison, WholeState.h's holdSameSong() (step 5), which the quick check
+//        agrees with (tests/SavedCopyTests.cpp).
 //      - ProjectContext's SongWatcher (model/project/ProjectContext.cpp): names what changed and adds it to its group of
 //        SongChanges (ProjectContext.h; a group of its own where the views need one).
 //      - VersionHistory (model/versions/VersionHistory.cpp, internal/VersionHistory.h): counts the song's change
@@ -169,8 +170,8 @@
 //  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
 //      copyWholeSong(), copyWhole(), getSongState(), or a part's own whole copy, as copyWholeClip()): the changes' worker
 //      (model/versions/ChangesWorker.cpp: take(), makeSkeleton(), copyTrack(), which writes a track's modulation in as
-//      whole state does); the saved copy (model/project/Project.cpp: savedState, the tree with getSongState(), written with
-//      copyWhole()); the clipboard (model/arrangement/Clipboard.cpp); an export
+//      whole state does, on the history's thread from a state); the saved copy (model/project/Project.cpp: savedState,
+//      a state, written on the writer's thread with writeSongTree()); the clipboard (model/arrangement/Clipboard.cpp); an export
 //      (model/project/Export.cpp, DawProject.cpp). What reads the area on the message thread reads it in place, by
 //      reference (Automation.h: getCurvesValue(), findCurve()), keeping no reference across a set; a song that holds no
 //      values (a check's copy) reads as one whose area is empty.

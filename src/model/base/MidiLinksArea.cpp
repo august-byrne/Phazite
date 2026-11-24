@@ -156,26 +156,13 @@ void writeMidiLinksIn (juce::ValueTree& element, const SongState& kept)
     writeMidiLinks (kept.midiLinks, element);
 }
 
-bool holdSameMidiLinks (const juce::ValueTree& song, const SongState& kept, const juce::ValueTree& otherSong, const SongState& otherKept)
+bool holdSameMidiLinks (const SongState& kept, const SongState& otherKept)
 {
-    // Whether each has a MIDILINKS (an empty one is written into the file, and is no song without one), and the values kept.
-    if (song.getChildWithName (schema::MIDILINKS).isValid() != otherSong.getChildWithName (schema::MIDILINKS).isValid())
+    // Whether each has a MIDILINKS among its root's places (an empty one is written into the file, and is no song without one),
+    // and the values.
+    if (kept.holdsPlace (RootPlace::midiLinks) != otherKept.holdsPlace (RootPlace::midiLinks))
         return false;
 
     return kept.midiLinks.isSameAs (otherKept.midiLinks) || kept.midiLinks == otherKept.midiLinks;
-}
-
-bool holdSameMidiLinksOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                          const SongState& otherKept)
-{
-    const auto hasMidiLinks = [] (const juce::ValueTree& each)
-    { return each.hasType (schema::PHAZITE) && each.getChildWithName (schema::MIDILINKS).isValid(); };
-
-    return ! (hasMidiLinks (element) || hasMidiLinks (otherElement)) || holdSameMidiLinks (element, kept, otherElement, otherKept);
-}
-
-bool isMidiLinksPlace (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    return leadsToMidiLinks (parent, child);
 }
 } // namespace phazite

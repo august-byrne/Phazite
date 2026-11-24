@@ -157,26 +157,9 @@ void writeChordLaneIn (juce::ValueTree& element, const SongState& kept)
     writeChordLane (kept.chordLane, element);
 }
 
-bool holdSameChordLane (const juce::ValueTree& song, const SongState& kept, const juce::ValueTree& otherSong, const SongState& otherKept)
+bool holdSameChordLane (const SongState& kept, const SongState& otherKept)
 {
-    // Whether each has a lane (its tree's CHORDLANE, the sign of it), and the values kept.
-    if (song.getChildWithName (schema::CHORDLANE).isValid() != otherSong.getChildWithName (schema::CHORDLANE).isValid())
-        return false;
-
+    // The values, whether each has a lane among them (ChordLaneValue.h: placed, which the equality compares).
     return kept.chordLane.isSameAs (otherKept.chordLane) || kept.chordLane == otherKept.chordLane;
-}
-
-bool holdSameChordLaneOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                          const SongState& otherKept)
-{
-    const auto hasChordLane = [] (const juce::ValueTree& each)
-    { return each.hasType (schema::PHAZITE) && each.getChildWithName (schema::CHORDLANE).isValid(); };
-
-    return ! (hasChordLane (element) || hasChordLane (otherElement)) || holdSameChordLane (element, kept, otherElement, otherKept);
-}
-
-bool isChordLanePlace (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    return leadsToChordLane (parent, child);
 }
 } // namespace phazite

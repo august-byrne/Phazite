@@ -2214,31 +2214,46 @@ public:
     void forgetWritten() noexcept { writtenAt = 0; }
     void wait() { waitForThreadToExit (-1); } // the write under way, which a save of the same file mustn't overlap
 
-    // Writes a state that nothing else changes (a copy) into a file.
-    void write (juce::ValueTree copy, const juce::File& target)
+    // Writes the song a state holds into a file: its tree (SongState.h: writeSongTree()) and its text made here, on this
+    // thread, which takes the state for its own and lets it go once written (its values shared with the song's, their counts
+    // atomic: SongState.h).
+    void write (SongState song, const juce::File& target)
     {
         jassert (! isBusy());
         wait(); // the last write's thread, which has finished its work, is gone
-        state = std::move (copy);
+        state = std::move (song);
         file = target;
         busy = true;
         startThread();
     }
 
+    // A test's hold at the start of each write (Project::setWriteStartForTests()): set once the last write's thread is gone,
+    // read by the writer's thread started after.
+    void setAtStart (std::function<void()> called)
+    {
+        wait();
+        jassert (! isBusy());
+        atStart = std::move (called);
+    }
+
 private:
-    juce::ValueTree state;
+    SongState state;
     juce::File file;
+    std::function<void()> atStart;
     std::atomic<bool> busy { false }, failed { false };
     std::atomic<juce::int64> writtenAt { 0 }; // in milliseconds since 1970
 
     void run() override
     {
-        if (writeProjectFile (state, file).wasOk())
+        if (atStart != nullptr)
+            atStart();
+
+        if (writeProjectFile (writeSongTree (state), file).wasOk())
             writtenAt = juce::Time::currentTimeMillis();
         else
             failed = true;
 
-        state = {};
+        state = {}; // let go of here
         busy = false;
     }
 };
@@ -2316,11 +2331,12 @@ Project::~Project()
     finishBackgroundSave(); // a save in the background under way, which took them along: pending again if it failed
     compareWithSavedState();
 
-    if (namesPending && ! changedSinceSave && savedState.tree.isValid())
+    if (namesPending && ! changedSinceSave && savedState.has_value())
     {
-        writeNamesNow (*song, savedState.values);
+        writeNamesNow (*song, *savedState);
 
-        if (writeProjectFile (copyWhole (savedState.tree, savedState.values), file).wasOk())
+        // At once, as the project closes (a write on this thread: its tree made here).
+        if (writeProjectFile (writeSongTree (*savedState), file).wasOk())
             namesPending = false;
     }
 
@@ -2357,7 +2373,7 @@ bool Project::checkUnsavedChanges()
         storeForSaving (*song);
     }
 
-    if (! holdTheSameProject (song->getState(), getSongState (*song), savedState.tree, savedState.values))
+    if (! isWholeAsSaved())
         return true; // changedSinceSave stays as it was, true
 
     // The song is as saved after all.
@@ -2381,20 +2397,21 @@ juce::Result Project::save()
 
     autosaveWriter->wait(); // an autosave being written, which this makes old
     takeNamesWritten();     // and the versions' names being written into the file, which this writes too
-    backgroundSave = {};    // and a save in the background, which this overtakes
+    backgroundSave.reset(); // and a save in the background, which this overtakes
     backUpProjectFile();
     backedUpAt = getBackupTime();
 
-    // The song copied once: written whole, then the saved copy (nothing changes it between the two).
-    SongCopy copy;
+    // The song's state taken once: written whole (its tree made here, as this save writes on the message thread), then the
+    // saved copy (nothing changes it between the two).
+    SongState copy;
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
         storeForSaving (*song);
         compareStoredStates(); // should the write fail, which leaves them out of the file (one that works forgets this)
-        copy = copySong();
+        copy = getSongState (*song);
 
-        if (const auto written = writeProjectFile (copyWhole (copy.tree, copy.values), file); written.failed())
+        if (const auto written = writeProjectFile (writeSongTree (copy), file); written.failed())
             return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ": " + written.getErrorMessage());
     }
 
@@ -2465,8 +2482,8 @@ void Project::autosaveInBackground()
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*song);
-        compareStoredStates(); // which the project file doesn't hold
-        autosaveWriter->write (copyWholeSong (*song), target);
+        compareStoredStates();                                // which the project file doesn't hold
+        autosaveWriter->write (getSongState (*song), target); // its tree and text made on the writer's thread
     }
 
     changedSinceAutosave = false;
@@ -2487,7 +2504,7 @@ void Project::saveInBackground()
     compareWithSavedState();
 
     // Also for the versions' names alone, where a write of them failed (namesPending).
-    if ((! changedSinceSave && ! (namesPending && namesFailed)) || autosaveWriter->isBusy() || backgroundSave.tree.isValid()
+    if ((! changedSinceSave && ! (namesPending && namesFailed)) || autosaveWriter->isBusy() || backgroundSave.has_value()
         || namesWriter->isBusy())
         return;
 
@@ -2501,10 +2518,10 @@ void Project::saveInBackground()
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*song);
-        // The saved copy once it is written (finishBackgroundSave()), and the song written whole from it, in a tree of the
-        // writer's own.
-        backgroundSave = copySong();
-        autosaveWriter->write (copyWhole (backgroundSave.tree, backgroundSave.values), file);
+        // The saved copy once it is written (finishBackgroundSave()), and the song written whole from it, its tree and its text
+        // made on the writer's thread.
+        backgroundSave = getSongState (*song);
+        autosaveWriter->write (*backgroundSave, file);
     }
 
     namesPending = false; // in what it writes; pending again if the write fails (finishBackgroundSave())
@@ -2517,21 +2534,21 @@ bool Project::finishBackgroundSave()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    if (! backgroundSave.tree.isValid() || autosaveWriter->isBusy())
+    if (! backgroundSave.has_value() || autosaveWriter->isBusy())
         return true;
 
-    const auto written = std::exchange (backgroundSave, {});
+    auto written = std::move (*backgroundSave);
+    backgroundSave.reset();
 
     if (autosaveWriter->takeFailure())
     {
-        namesPending = namesPending || written.values.songStanding.versionsBase.isNotEmpty()
-                       || written.values.songStanding.versionsBranch.isNotEmpty();
+        namesPending = namesPending || written.songStanding.versionsBase.isNotEmpty() || written.songStanding.versionsBranch.isNotEmpty();
         return false; // its changes are still to save
     }
 
     // What the file holds now: saved, unless the song changed since it was copied. What is noted to compare stays, compared
     // with this copy at the next check: what a store wrote since without a notification (compareStoredStates()).
-    setSavedState (written);
+    setSavedState (std::move (written));
     changesOutsideHistory = outsideAtBackgroundSave;
 
     if (changeCount == changesAtBackgroundSave && getOwnChangesOutsideHistory() == outsideAtBackgroundSave)
@@ -2921,7 +2938,7 @@ void Project::clearToCompare()
     deviceOwnersToCompare.clear();
     comparingStoreWhole = false;
     storeToCompare.clear();
-    toCompare.clear();
+    placesToCompare = channelsToCompare = false;
     notesToCompare.clear();
     clipsToCompare.clear();
     tracksToCompare.clear();
@@ -2929,23 +2946,17 @@ void Project::clearToCompare()
     clearTracksToCompare();
 }
 
-void Project::setSavedState (SongCopy copy)
+void Project::setSavedState (SongState copy)
 {
     savedState = std::move (copy);
 }
 
-Project::SongCopy Project::copySong() const
-{
-    // The tree's half alone (never the song whole: SongCopy), with the values kept at the same moment.
-    return { song->getState().createCopy(), getSongState (*song) };
-}
-
 void Project::rememberSavedState()
 {
-    rememberSavedState (copySong());
+    rememberSavedState (getSongState (*song));
 }
 
-void Project::rememberSavedState (SongCopy copy)
+void Project::rememberSavedState (SongState copy)
 {
     setSavedState (std::move (copy));
     clearToCompare();
@@ -2953,9 +2964,9 @@ void Project::rememberSavedState (SongCopy copy)
 
 void Project::forgetSavedState()
 {
-    // No song to compare with, so none is the same (holdTheSameProject()): unsaved, whatever closing compares, until a save
+    // No song to compare with, so none is the same (isWholeAsSaved()): unsaved, whatever closing compares, until a save
     // remembers what it wrote.
-    setSavedState ({});
+    savedState.reset();
     clearToCompare();
     changedSinceSave = changedSinceAutosave = true;
 }
@@ -2970,31 +2981,6 @@ namespace
         trackElementsWalkedWithSaved.fetch_add (1, std::memory_order_relaxed);
     }
 
-    // An element's place among those of its parent's that count (what holdTheSameProject() compares), or -1.
-    int indexAmongCounted (const juce::ValueTree& parent, const juce::ValueTree& element)
-    {
-        auto index = 0;
-
-        for (const auto& child : parent)
-        {
-            if (child == element)
-                return index;
-
-            if (! schema::isUncountedElement (parent, child))
-                ++index;
-        }
-
-        return -1;
-    }
-
-    juce::ValueTree getCountedChild (const juce::ValueTree& parent, int index)
-    {
-        for (const auto& child : parent)
-            if (! schema::isUncountedElement (parent, child) && index-- == 0)
-                return child;
-
-        return {};
-    }
 } // namespace
 
 void Project::compareStoredStates()
@@ -3002,12 +2988,7 @@ void Project::compareStoredStates()
     // Noted while the project has unsaved changes too: a save in the background under way (finishBackgroundSave()) may yet
     // make the copy it took the saved one, which this store came after.
     mayHaveChanged = true;
-    const auto state = song->getState();
-
-    for (const auto* type : { &schema::TRACKS, &schema::MASTER })
-        if (const auto element = state.getChildWithName (*type);
-            element.isValid() && std::find (toCompare.begin(), toCompare.end(), element) == toCompare.end())
-            toCompare.push_back (element);
+    channelsToCompare = true;
 }
 
 juce::int64 Project::countElementsCompared()
@@ -3018,42 +2999,6 @@ juce::int64 Project::countElementsCompared()
 juce::int64 Project::countTrackElementsWalkedWithSaved()
 {
     return trackElementsWalkedWithSaved.load (std::memory_order_relaxed);
-}
-
-juce::ValueTree Project::findSavedCopy (const juce::ValueTree& element) const
-{
-    // Its places from the song down, among the elements that count: what a view state element added (a track's LANES) moves
-    // in the song moves nothing in the copy.
-    const auto state = song->getState();
-    std::vector<int> places;
-
-    for (auto e = element; e != state; e = e.getParent())
-        places.push_back (indexAmongCounted (e.getParent(), e));
-
-    auto copy = savedState.tree;
-
-    for (auto place = places.rbegin(); place != places.rend() && copy.isValid(); ++place)
-        copy = getCountedChild (copy, *place);
-
-    return copy;
-}
-
-bool Project::isAsSaved (const juce::ValueTree& element) const
-{
-    // One no longer in the song: what it was taken out of notified, and is compared whole.
-    const auto state = song->getState();
-
-    if (! (element == state || element.isAChildOf (state)))
-        return true;
-
-    // At the same place in the copy: where an element was added, removed or moved, its parent notified, and is compared
-    // whole, which finds the difference; or there is none, and the places below are the same in both.
-    const auto copy = findSavedCopy (element);
-
-    if (! copy.isValid() || copy.getType() != element.getType())
-        return false;
-
-    return holdTheSameProject (element, getSongState (*song), copy, savedState.values);
 }
 
 void Project::compareWithSavedState()
@@ -3075,8 +3020,19 @@ void Project::compareWithSavedState()
     if (! mayHaveChanged || changedSinceSave)
         return;
 
-    auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const juce::ValueTree& entry) { return isAsSaved (entry); });
-    same = same && isSongOwnAsSaved(); // the song's own, by its values while the tree holds them
+    // No saved copy (forgetSavedState()): none is the same. A store of the plug-ins' states (compareStoredStates()): the tracks
+    // and the master whole, as values (WholeState.h: holdSameChannels()). Then the root's places the tree told of, which it
+    // holds (arePlacesAsSaved()), and the song's own.
+    auto same = savedState.has_value();
+
+    if (same && channelsToCompare)
+    {
+        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+        same = holdSameChannels (getSongState (*song), *savedState);
+    }
+
+    same = same && arePlacesAsSaved();
+    same = same && isSongOwnAsSaved(); // the song's own, by its values
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
     // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the
@@ -3125,13 +3081,11 @@ void Project::markChanged (const juce::ValueTree& tree)
         return;
     }
 
-    // Perhaps nothing changed: compared with savedState when asked, what notified (an element whose elements changed: what a
-    // live song's tree tells is its own element's, a placeholder come or gone or its elements in another order, and the
-    // master's, where a step left an element a safety net refused until its Undo), once.
+    // Perhaps nothing changed: compared with savedState when asked, once. What a live song's tree tells is its own element's (a
+    // place come or gone, or its places in another order) and the master's, where a step left an element a safety net refused
+    // until its Undo, which no file holds: the root's places compared (arePlacesAsSaved()).
     mayHaveChanged = true;
-
-    if (std::find (toCompare.begin(), toCompare.end(), tree) == toCompare.end())
-        toCompare.push_back (tree);
+    placesToCompare = true;
 }
 
 void Project::versionsMoved()
@@ -3142,7 +3096,7 @@ void Project::versionsMoved()
     // none of the song's clips (model/base/internal/SongValues.h), as the comparison with the saved copy does.
     namesPending = true;
 
-    if (changedSinceSave || ! savedState.tree.isValid())
+    if (changedSinceSave || ! savedState.has_value())
         changedSinceAutosave = true;
     else
         triggerAsyncUpdate();
@@ -3160,23 +3114,23 @@ void Project::writeVersionsNames()
 
     compareWithSavedState();
 
-    if (changedSinceSave || ! savedState.tree.isValid())
+    if (changedSinceSave || ! savedState.has_value())
     {
         changedSinceAutosave = true; // the next save writes them, and the next autosave holds them
         return;
     }
 
     // Not over another write of the file (a save in the background, or the names before): looked at again in a moment.
-    if (autosaveWriter->isBusy() || backgroundSave.tree.isValid() || namesWriter->isBusy())
+    if (autosaveWriter->isBusy() || backgroundSave.has_value() || namesWriter->isBusy())
     {
         startTimer (20);
         return;
     }
 
     // The file as it was saved, the song's names in it as they are now: no backup, as the song in it is the one backed up.
-    writeNamesNow (*song, savedState.values);
+    writeNamesNow (*song, *savedState);
 
-    namesWriter->write (copyWhole (savedState.tree, savedState.values), file);
+    namesWriter->write (*savedState, file); // its tree and text made on the writer's thread
     namesPending = false;
     namesWriting = true;
     startTimer (20);
@@ -3413,16 +3367,16 @@ bool Project::areCurvesAsSaved() const
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
     if (comparingCurvesWhole)
-        return holdSameCurves (now, savedState.values);
+        return holdSameCurves (now, *savedState);
 
-    if (! holdSameCurveOrder (now, savedState.values))
+    if (! holdSameCurveOrder (now, *savedState))
         return false;
 
     return std::all_of (curvesToCompare.begin(), curvesToCompare.end(),
                         [this, &now] (const ParameterRef& parameter)
                         {
                             elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-                            return holdSameCurve (now, savedState.values, parameter);
+                            return holdSameCurve (now, *savedState, parameter);
                         });
 }
 
@@ -3473,16 +3427,10 @@ void Project::clipsChanged (const std::vector<SongValues::ClipChange>& clips, co
     }
 }
 
-bool Project::isComparedWhole (const juce::ValueTree& element) const
-{
-    return std::any_of (toCompare.begin(), toCompare.end(),
-                        [&element] (const juce::ValueTree& entry) { return entry == element || element.isAChildOf (entry); });
-}
-
 bool Project::isTrackComparedWhole (TrackID track) const
 {
-    // A track's place in the tree is the song's TRACKS (which holds none of them): compared whole with it, or with the song.
-    return hasTrack (*song, track) && isComparedWhole (song->getState().getChildWithName (schema::TRACKS));
+    // Compared with the tracks whole anyway (holdSameChannels()), which finds it.
+    return channelsToCompare && hasTrack (*song, track);
 }
 
 bool Project::areNotesAsSaved() const
@@ -3493,7 +3441,7 @@ bool Project::areNotesAsSaved() const
     // The clips whose notes changed, each in the song now: its value against the saved one, the same value or one alike.
     const auto now = getSongState (*song);
     return std::all_of (notesToCompare.begin(), notesToCompare.end(), [this, &now] (ClipID clip)
-                        { return ! getClipTrack (*song, clip).isValid() || holdSameNotes (now, savedState.values, clip); });
+                        { return ! getClipTrack (*song, clip).isValid() || holdSameNotes (now, *savedState, clip); });
 }
 
 bool Project::areClipsAsSaved() const
@@ -3516,7 +3464,7 @@ bool Project::isTempoMapAsSaved() const
 
     // The tempo map, against the saved copy's, as one value.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-    return holdSameTempoMap (song->getState(), getSongState (*song), savedState.tree, savedState.values);
+    return holdSameTempoMap (getSongState (*song), *savedState);
 }
 
 bool Project::isSongOwnAsSaved() const
@@ -3525,15 +3473,9 @@ bool Project::isSongOwnAsSaved() const
         return true;
 
     // The song's own value and the key set last (what of its standing counts: Schema.h), against the saved copy's kept values
-    // (SongOwnArea.h: holdSameSongOwn()), as the whole comparison compares them (holdTheSameProject(), through
-    // holdSameKeptOf()). No element compared (countElementsCompared()), as a property of the root compared alone counted none.
-    if (! savedState.tree.isValid())
-        return false;
-
-    SongState now;
-    now.songOwn = getSongOwn (*song);
-    now.songStanding = getSongStanding (*song);
-    return holdSameSongOwn (now, savedState.values);
+    // (SongOwnArea.h: holdSameSongOwn()), as the whole comparison compares them (WholeState.h: holdSameSong()). No element
+    // compared (countElementsCompared()), as a property of the root compared alone counted none.
+    return holdSameSongOwn (getSongState (*song), *savedState);
 }
 
 bool Project::isChordLaneAsSaved() const
@@ -3543,7 +3485,7 @@ bool Project::isChordLaneAsSaved() const
 
     // The chord lane, against the saved copy's, as one value, and whether each has one.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-    return holdSameChordLane (song->getState(), getSongState (*song), savedState.tree, savedState.values);
+    return holdSameChordLane (getSongState (*song), *savedState);
 }
 
 bool Project::areMidiLinksAsSaved() const
@@ -3553,7 +3495,7 @@ bool Project::areMidiLinksAsSaved() const
 
     // The MIDI links, against the saved copy's, as one value, and whether each has a MIDILINKS.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-    return holdSameMidiLinks (song->getState(), getSongState (*song), savedState.tree, savedState.values);
+    return holdSameMidiLinks (getSongState (*song), *savedState);
 }
 
 bool Project::areSectionsAsSaved() const
@@ -3563,7 +3505,7 @@ bool Project::areSectionsAsSaved() const
 
     // The sections, against the saved copy's, as one value, and whether each has a SECTIONS.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-    return holdSameSections (song->getState(), getSongState (*song), savedState.tree, savedState.values);
+    return holdSameSections (getSongState (*song), *savedState);
 }
 
 void Project::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators, const std::vector<ModulatorPlace>& reordered)
@@ -3626,19 +3568,19 @@ bool Project::areModulatorsAsSaved() const
     if (! comparingModulationWhole && modulatorsToCompare.empty() && modulatorOwnersToCompare.empty())
         return true;
 
-    // As values (WholeState.h), as the whole comparison compares them (holdTheSameProject(), each owner's through
-    // holdSameKeptOf()): past mostToCompare, the song's modulation whole; else each owner's order, then each modulator against
+    // As values (WholeState.h), as the whole comparison compares them (holdSameSong(), each owner's list and
+    // what is in it): past mostToCompare, the song's modulation whole; else each owner's order, then each modulator against
     // the saved copy's of its ID, its place among it, one compared each (a modulator gone from both is the same).
     const auto now = getSongState (*song);
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
     if (comparingModulationWhole)
-        return holdSameModulation (now, savedState.values);
+        return holdSameModulation (now, *savedState);
 
     return std::all_of (modulatorOwnersToCompare.begin(), modulatorOwnersToCompare.end(),
-                        [this, &now] (const ModulatorPlace& owner) { return holdSameModulatorOrder (now, savedState.values, owner); })
+                        [this, &now] (const ModulatorPlace& owner) { return holdSameModulatorOrder (now, *savedState, owner); })
            && std::all_of (modulatorsToCompare.begin(), modulatorsToCompare.end(),
-                           [this, &now] (ModulatorID id) { return holdSameModulator (now, savedState.values, id); });
+                           [this, &now] (ModulatorID id) { return holdSameModulator (now, *savedState, id); });
 }
 
 void Project::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered, const SongSends&)
@@ -3756,20 +3698,20 @@ bool Project::areDevicesAsSaved() const
     if (! comparingDevicesWhole && devicesToCompare.empty() && deviceOwnersToCompare.empty())
         return true;
 
-    // As values (WholeState.h), as the whole comparison compares them (holdTheSameProject(), each track's and the master's
-    // through holdSameKeptOf()): past mostToCompare, the song's devices whole; else each owner's list's order, then each device
+    // As values (WholeState.h), as the whole comparison compares them (holdSameSong(), each track's and the master's
+    // devices): past mostToCompare, the song's devices whole; else each owner's list's order, then each device
     // against the saved copy's of its ID, its place among it, one compared each (one gone from both is the same). What the store
     // holds of each is the store's check (isDeviceStoreAsSaved()).
     const auto now = getSongState (*song);
 
     if (comparingDevicesWhole)
-        return holdSameDevices (now, savedState.values);
+        return holdSameDevices (now, *savedState);
 
     for (const auto& owner : deviceOwnersToCompare)
     {
         elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
-        if (! holdSameDeviceOrder (now, savedState.values, owner))
+        if (! holdSameDeviceOrder (now, *savedState, owner))
             return false;
     }
 
@@ -3777,7 +3719,7 @@ bool Project::areDevicesAsSaved() const
                         [this, &now] (DeviceID id)
                         {
                             elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-                            return holdSameDevice (now, savedState.values, id);
+                            return holdSameDevice (now, *savedState, id);
                         });
 }
 
@@ -3830,27 +3772,14 @@ bool Project::isDeviceStoreAsSaved() const
     if (! comparingStoreWhole && storeToCompare.empty())
         return true;
 
-    // As values (WholeState.h), as the whole comparison compares them (holdTheSameProject(), each DEVICE's and CHAIN's through
-    // holdSameKeptOf()): past mostToCompare, the tracks and the master whole; else each item the song holds against the saved
+    // As values (WholeState.h), as the whole comparison compares them (holdSameSong(), each device's and chain's the
+    // song holds): past mostToCompare, the tracks and the master whole; else each item the song holds against the saved
     // copy's entries of its ID, one compared each (one the song no longer holds, or holds since, is the devices' to find:
     // areDevicesAsSaved()).
     const auto now = getSongState (*song);
 
     if (comparingStoreWhole)
-    {
-        const auto state = song->getState();
-
-        for (const auto* type : { &schema::TRACKS, &schema::MASTER })
-        {
-            const auto element = state.getChildWithName (*type), saved = savedState.tree.getChildWithName (*type);
-
-            if (element.isValid() != saved.isValid()
-                || (element.isValid() && ! holdTheSameProject (element, now, saved, savedState.values)))
-                return false;
-        }
-
-        return true;
-    }
+        return holdSameChannels (now, *savedState);
 
     return std::all_of (storeToCompare.begin(), storeToCompare.end(),
                         [this, &now] (DeviceID id)
@@ -3859,7 +3788,7 @@ bool Project::isDeviceStoreAsSaved() const
                                 return true;
 
                             elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-                            return holdSameDeviceStore (now, savedState.values, id);
+                            return holdSameDeviceStore (now, *savedState, id);
                         });
 }
 
@@ -3960,25 +3889,16 @@ bool Project::areTracksAsSaved() const
     if (! comparingTracksWhole && trackOwnToCompare.empty() && trackListsToCompare.empty() && ! masterOwnToCompare)
         return true;
 
-    // Past mostToCompare, the tracks and the master whole (holdTheSameProject(), which compares the song's TRACKS and MASTER
-    // with the tracks' own fields written in: WholeState.h, withTracksOwn()); else as values, as that comparison compares them:
+    // Past mostToCompare, the tracks and the master whole (WholeState.h: holdSameChannels(), each with what it holds); else as
+    // values, as that comparison compares them:
     // each list's tracks in their order, then each track's value and switches against the saved copy's of its ID (one look on
     // each side, counted, however many tracks the song has), one gone from both the same, and the master's.
-    const auto state = song->getState();
     const auto now = getSongState (*song);
 
     if (comparingTracksWhole)
     {
-        for (const auto* type : { &schema::TRACKS, &schema::MASTER })
-        {
-            const auto element = state.getChildWithName (*type), saved = savedState.tree.getChildWithName (*type);
-
-            if (element.isValid() != saved.isValid()
-                || (element.isValid() && ! holdTheSameProject (element, now, saved, savedState.values)))
-                return false;
-        }
-
-        return true;
+        elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+        return holdSameChannels (now, *savedState);
     }
 
     for (const auto owner : trackListsToCompare)
@@ -3987,7 +3907,7 @@ bool Project::areTracksAsSaved() const
         countTrackElementWalked();
         countTrackElementWalked();
 
-        if (! holdSameTrackList (now, savedState.values, owner))
+        if (! holdSameTrackList (now, *savedState, owner))
             return false;
     }
 
@@ -3996,11 +3916,11 @@ bool Project::areTracksAsSaved() const
         countTrackElementWalked();
         countTrackElementWalked();
 
-        if (! holdSameTrack (now, savedState.values, id))
+        if (! holdSameTrack (now, *savedState, id))
             return false;
     }
 
-    return ! masterOwnToCompare || holdSameMaster (now, savedState.values);
+    return ! masterOwnToCompare || holdSameMaster (now, *savedState);
 }
 
 bool Project::areSendsAsSaved() const
@@ -4008,19 +3928,19 @@ bool Project::areSendsAsSaved() const
     if (! comparingSendsWhole && sendsToCompare.empty() && sendTracksToCompare.empty())
         return true;
 
-    // As values (WholeState.h), as the whole comparison compares them (holdTheSameProject(), each track's through
-    // holdSameKeptOf()): past mostToCompare, the song's sends whole; else each track's sends' order, then each send against the
+    // As values (WholeState.h), as the whole comparison compares them (holdSameSong(), each track's sends and what
+    // is in them): past mostToCompare, the song's sends whole; else each track's sends' order, then each send against the
     // saved copy's of its ID, its track among it, one compared each (a send gone from both is the same).
     const auto now = getSongState (*song);
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
     if (comparingSendsWhole)
-        return holdSameSends (now, savedState.values);
+        return holdSameSends (now, *savedState);
 
     return std::all_of (sendTracksToCompare.begin(), sendTracksToCompare.end(),
-                        [this, &now] (TrackID track) { return holdSameTrackSendOrder (now, savedState.values, track); })
+                        [this, &now] (TrackID track) { return holdSameTrackSendOrder (now, *savedState, track); })
            && std::all_of (sendsToCompare.begin(), sendsToCompare.end(),
-                           [this, &now] (DeviceID id) { return holdSameSend (now, savedState.values, id); });
+                           [this, &now] (DeviceID id) { return holdSameSend (now, *savedState, id); });
 }
 
 bool Project::holdSameClip (ClipID clip, const SongState& now) const
@@ -4034,7 +3954,7 @@ bool Project::holdSameClip (ClipID clip, const SongState& now) const
 
     // Against the saved copy's clip of its ID (its track among its value), as a value, by its ID: one compared.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-    return phazite::holdSameClip (now, savedState.values, clip);
+    return phazite::holdSameClip (now, *savedState, clip);
 }
 
 bool Project::holdSameTrackClips (TrackID track, const SongState& now) const
@@ -4043,78 +3963,43 @@ bool Project::holdSameTrackClips (TrackID track, const SongState& now) const
         return true; // gone: what it was taken out of notified, and is compared whole; or compared whole anyway
 
     // Its clips, in their order, against the saved copy's clips of its ID.
-    return phazite::holdSameTrackClips (now, savedState.values, track);
+    return phazite::holdSameTrackClips (now, *savedState, track);
 }
 
-bool Project::holdTheSameProject (const juce::ValueTree& a, const SongState& aValues, const juce::ValueTree& b, const SongState& bValues)
+bool Project::arePlacesAsSaved() const
 {
-    // A song's places for its tracks (its TRACKS, its MASTER) with the tracks' own fields its kept values hold written in
-    // (WholeState.h: withTracksOwn(), a copy, which has no parent and is compared as it is), as its tree held them while it
-    // stored the tracks: each TRACK's switches and what the other areas hold of it compared through holdSameKeptOf() below.
-    const auto isPlace = [] (const juce::ValueTree& element)
-    { return (element.hasType (schema::TRACKS) || element.hasType (schema::MASTER)) && element.getParent().hasType (schema::PHAZITE); };
+    if (! placesToCompare)
+        return true;
 
-    if (isPlace (a) || isPlace (b))
-        return holdTheSameProject (isPlace (a) ? withTracksOwn (a, aValues) : a, aValues, isPlace (b) ? withTracksOwn (b, bValues) : b,
-                                   bValues);
-
+    // Which of the places that come and go the root holds (a lane's CHORDLANE, its value's placed; a MIDILINKS; a SECTIONS),
+    // against the saved copy's, as the whole comparison compares them (WholeState.h: holdSameSong()): their order no part of
+    // it. One compared.
     elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+    const auto now = getSongState (*song);
+    return now.chordLane.placed == savedState->chordLane.placed
+           && now.holdsPlace (RootPlace::midiLinks) == savedState->holdsPlace (RootPlace::midiLinks)
+           && now.holdsPlace (RootPlace::sections) == savedState->holdsPlace (RootPlace::sections);
+}
 
-    if (a.getType() != b.getType())
-        return false;
+bool Project::isWholeAsSaved() const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+    return savedState.has_value() && holdSameSong (getSongState (*song), *savedState);
+}
 
-    // Each of a's counted properties is in b with the same value, and b has no others.
-    int numCounted = 0;
+void Project::setWriteStartForTests (std::function<void()> called)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    autosaveWriter->setAtStart (std::move (called));
+}
 
-    for (int i = 0; i < a.getNumProperties(); ++i)
-    {
-        const auto name = a.getPropertyName (i);
-
-        if (schema::isUncountedProperty (a, name))
-            continue;
-
-        const auto* other = b.getPropertyPointer (name);
-
-        if (other == nullptr || ! isSameValue (a[name], *other))
-            return false;
-
-        ++numCounted;
-    }
-
-    for (int i = 0; i < b.getNumProperties(); ++i)
-        if (! schema::isUncountedProperty (b, b.getPropertyName (i)))
-            --numCounted;
-
-    if (numCounted != 0)
-        return false;
-
-    // What each song keeps beside its tree of the element (WholeState.h: holdSameKeptOf(), each area in turn): a track's
-    // clips, with their notes and controllers' values; the tempo map as one value, as the quick comparison compares it
-    // (compareWithSavedState()), so that the two agree: its elements' order, and what reads as its default, are no
-    // difference; the chord lane as one value, with whether each has one; the curves as values, in their order; the MIDI
-    // links as one value, with whether each has a MIDILINKS. The places of what is kept (the TEMPOMAP, the CHORDLANE, the
-    // AUTOMATION, the MIDILINKS) are left out of the elements below.
-    if (! holdSameKeptOf (a, aValues, b, bValues))
-        return false;
-
-    const auto isSkipped = [] (const juce::ValueTree& parent, const juce::ValueTree& child)
-    { return schema::isUncountedElement (parent, child) || isPlaceOfKept (parent, child); };
-
-    // The counted elements, in the same order, holding the same.
-    for (int i = 0, j = 0;; ++i, ++j)
-    {
-        while (i < a.getNumChildren() && isSkipped (a, a.getChild (i)))
-            ++i;
-
-        while (j < b.getNumChildren() && isSkipped (b, b.getChild (j)))
-            ++j;
-
-        if (i == a.getNumChildren() || j == b.getNumChildren())
-            return i == a.getNumChildren() && j == b.getNumChildren();
-
-        if (! holdTheSameProject (a.getChild (i), aValues, b.getChild (j), bValues))
-            return false;
-    }
+void Project::takeAsSavedForTests()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    rememberSavedState();
+    changedSinceSave = changedSinceAutosave = false;
+    changesOutsideHistory = getOwnChangesOutsideHistory();
 }
 
 //==============================================================================

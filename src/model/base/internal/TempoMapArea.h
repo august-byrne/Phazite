@@ -64,10 +64,4 @@ void writeTempoMapIn (juce::ValueTree& element, const SongState&);
 // The tempo map's reader of a song's tree (SongState.h: readSongTree(), a line of it): its TEMPOMAP's entries into the state,
 // as the song holds them (an empty TEMPOMAP's where it has none); no tree changed. Any thread.
 void readHeldTempoMapIn (const juce::ValueTree& song, SongState&);
-
-// The tempo map's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
-// either holds a TEMPOMAP, the same map (holdSameTempoMap()); and whether a child is the place of the map, which the
-// comparison of the elements in them leaves out (a TEMPOMAP).
-bool holdSameTempoMapOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
-bool isTempoMapPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

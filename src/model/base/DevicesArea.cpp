@@ -603,14 +603,10 @@ bool holdSameDeviceOrder (const SongState& a, const SongState& b, const DevicePl
     return first->identity() == second->identity() || *first == *second;
 }
 
-bool holdSameDevicesOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                        const SongState& otherKept)
+bool holdSameChannelDevices (const SongState& kept, const SongState& otherKept, const DevicePlace& channel)
 {
-    if (! (element.hasType (schema::TRACK) || element.hasType (schema::MASTER)))
-        return true;
-
-    const auto* list = findChannelList (kept.devices, element);
-    const auto* otherList = findChannelList (otherKept.devices, otherElement);
+    const auto* list = kept.devices.findList (channel);
+    const auto* otherList = otherKept.devices.findList (channel);
 
     if (list == nullptr || otherList == nullptr)
         return list == otherList;

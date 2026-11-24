@@ -941,19 +941,6 @@ void writeTrackLeavesIn (juce::ValueTree& element, const SongState& kept)
         writeViewInto (element, *view);
 }
 
-bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                              const SongState& otherKept)
-{
-    if (element.hasType (schema::MASTER))
-        return holdSameSwitchesOf (kept.trackSwitches, otherKept.trackSwitches, 0);
-
-    if (! element.hasType (schema::TRACK))
-        return true;
-
-    const auto id = readTrackElementID (element).getRaw();
-    return id == readTrackElementID (otherElement).getRaw() && holdSameSwitchesOf (kept.trackSwitches, otherKept.trackSwitches, id);
-}
-
 //==============================================================================
 bool holdSameTracks (const SongState& a, const SongState& b)
 {
@@ -992,55 +979,6 @@ bool holdSameTrackList (const SongState& a, const SongState& b, TrackID folder)
         return first == second;
 
     return first->identity() == second->identity() || *first == *second;
-}
-
-bool holdSameTracksOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                       const SongState& otherKept)
-{
-    // The song's TRACKS and MASTER are its root's alone (a copy of one, given its tracks' own fields, has none).
-    if (! kept.tracks.has_value() || ! otherKept.tracks.has_value() || element.getType() != otherElement.getType())
-        return true;
-
-    if (element.hasType (schema::TRACKS))
-        return holdSameTracks (kept, otherKept);
-
-    return ! element.hasType (schema::MASTER) || holdSameMaster (kept, otherKept);
-}
-
-juce::ValueTree withTracksOwn (const juce::ValueTree& place, const SongState& kept)
-{
-    // The tracks' own fields alone, as the song's tree held them before the tracks were values: a TRACK for each, nested in its
-    // folder's, in each list's order, with its own properties (writeTrackElement()); the master's on the MASTER.
-    if (! kept.tracks.has_value() || ! (place.hasType (schema::TRACKS) || place.hasType (schema::MASTER)))
-        return place;
-
-    auto copy = place.createCopy();
-    const auto& tracks = *kept.tracks;
-
-    if (place.hasType (schema::MASTER))
-    {
-        writeMasterInto (copy, tracks.master);
-        return copy;
-    }
-
-    const std::function<void (juce::ValueTree&, TrackID)> addList = [&tracks, &addList] (juce::ValueTree& parent, TrackID owner)
-    {
-        if (const auto* list = tracks.findList (owner))
-        {
-            for (const auto id : *list)
-            {
-                if (const auto* value = tracks.tracks.find (id.getRaw()))
-                {
-                    auto element = writeTrackElement (*value);
-                    addList (element, id);
-                    parent.appendChild (element, nullptr);
-                }
-            }
-        }
-    };
-
-    addList (copy, {});
-    return copy;
 }
 
 //==============================================================================

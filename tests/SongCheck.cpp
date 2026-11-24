@@ -1893,9 +1893,6 @@ namespace
     // The song whole as a value (SongState.h): the state read back from its whole copy (readSongTree (copyWholeSong (song))) is
     // the state the song holds (getSongState()), area by area (identity aside), with the places of its root a whole copy writes:
     // so that both converters agree with each other for every song checked.
-    //
-    // And while the song's tree still holds the places its areas are written into, the state written is the old whole copy:
-    // its tree copied with the state written in (WholeState.h: copyWhole (tree, state)), as the file writes each.
     void checkSongState (const Song& song, std::vector<std::string>& problems)
     {
         const auto state = getSongState (song);
@@ -1903,25 +1900,6 @@ namespace
 
         for (const auto& difference : findStateDifferences (readSongTree (written), state))
             problems.push_back ("state: the song read back from its whole copy holds other " + difference);
-
-        const auto toText = [] (const juce::ValueTree& tree)
-        {
-            juce::MemoryOutputStream text;
-            writeProjectText (text, tree);
-            return text.toString();
-        };
-
-        // Only of a live root that holds its places alone, each once and empty (else checkLiveRoot() says what it holds, which
-        // the old copy would copy: a second AUTOMATION a step refused, until its Undo).
-        std::set<juce::String> seen;
-
-        for (const auto& child : song.getState())
-            if (findRootPlace (child.getType()) == RootPlace::none || ! seen.insert (child.getType().toString()).second
-                || child.getNumChildren() > 0 || child.getNumProperties() > 0)
-                return;
-
-        if (toText (written) != toText (copyWhole (song.getState(), state)))
-            problems.push_back ("state: the song's state written isn't its tree made whole with it (the old whole copy)");
     }
 
     // The places of a root a state's whole copy writes, in their order (SongState.h: writeSongTree(), stated again): its places

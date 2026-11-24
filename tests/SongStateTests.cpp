@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song whole as one value (model/base/internal/SongState.h; roadmap step S5.20, its end's first piece): a song's state
-// written as its file's tree (writeSongTree()) is what a whole copy of the song gave while its tree held the places its areas
-// are written into (the old path, while both are there: a copy of the song's tree with the state's values written in,
-// WholeState.h's copyWhole (tree, state)), element for element in their order, each property as the file writes it; and read
-// back (readSongTree()), it is the state it was, area by area (identity aside). For the golden projects, the example songs, a
+// The song whole as one value (model/base/internal/SongState.h; roadmap step S5.20, its end): a song's state written as its
+// file's tree (writeSongTree()) is the song's whole copy (WholeState.h: copyWholeSong(), which every save, version and copy
+// writes the song's file form by), element for element in their order, each property as the file writes it; and read back
+// (readSongTree(), what the song takes its values from as it opens), it is the state it was, area by area (identity aside), so
+// that the two converters lose nothing either way. For the golden projects, the example songs, a
 // random song after each of 200 edits and the benchmark's big song; the inconsistent tests' files, the fuzzer's and every
 // other song the check is asked of are compared the same way by the check itself (SongCheck.cpp: checkSongState()). And a
 // state is a moment: taken, then the song edited in every area, it writes the song as it was. The state read on another
@@ -60,16 +60,15 @@ std::string findFirstDifference (const juce::String& a, const juce::String& b)
     return {};
 }
 
-// A song's state written, against the old path's copy of the song taken at the same moment; and read back, against itself.
+// A song's state written, against the song's whole copy taken at the same moment; and read back, against itself.
 void checkConverters (const phazite::Song& song)
 {
     const auto state = phazite::getSongState (song);
     const auto written = phazite::writeSongTree (state);
     const auto writtenText = toText (written);
-    const auto before = toText (phazite::copyWhole (song.getState(), state));
-    INFO ("the state written, against the old path's whole copy: " << findFirstDifference (before, writtenText));
-    CHECK (writtenText == before);
-    CHECK (toText (phazite::copyWholeSong (song)) == writtenText);
+    const auto whole = toText (phazite::copyWholeSong (song));
+    INFO ("the state written, against the song's whole copy: " << findFirstDifference (whole, writtenText));
+    CHECK (writtenText == whole);
 
     for (const auto& difference : findStateDifferences (phazite::readSongTree (written), state))
     {
@@ -91,7 +90,7 @@ std::unique_ptr<phazite::Project> openGolden (const TemporaryFolder& temporary, 
 }
 } // namespace
 
-TEST_CASE ("Song state: each golden project's state, written, is its old whole copy, and read back, the same state")
+TEST_CASE ("Song state: each golden project's state, written, is its whole copy, and read back, the same state")
 {
     TemporaryFolder temporary;
 
@@ -103,7 +102,7 @@ TEST_CASE ("Song state: each golden project's state, written, is its old whole c
     }
 }
 
-TEST_CASE ("Song state: each example song's state, written, is its old whole copy, and read back, the same state")
+TEST_CASE ("Song state: each example song's state, written, is its whole copy, and read back, the same state")
 {
     for (const auto& example : phazite::getExampleSongs())
     {
@@ -118,7 +117,7 @@ TEST_CASE ("Song state: each example song's state, written, is its old whole cop
     }
 }
 
-TEST_CASE ("Song state: a random song's state after each of 200 edits, written, is its old whole copy, and read back, the same")
+TEST_CASE ("Song state: a random song's state after each of 200 edits, written, is its whole copy, and read back, the same")
 {
     TemporaryFolder sounds;
     auto song = phazite::createSong();
@@ -132,7 +131,7 @@ TEST_CASE ("Song state: a random song's state after each of 200 edits, written, 
     }
 }
 
-TEST_CASE ("Song state: the benchmark's song of 100 tracks, written, is its old whole copy, and read back, the same state")
+TEST_CASE ("Song state: the benchmark's song of 100 tracks, written, is its whole copy, and read back, the same state")
 {
     TestSong s;
     buildBenchmarkSong (s, 100);

@@ -354,10 +354,4 @@ bool holdSameSongOwn (const SongState& kept, const SongState& otherKept)
 {
     return kept.songOwn == otherKept.songOwn && kept.songStanding.lastKey == otherKept.songStanding.lastKey;
 }
-
-bool holdSameSongOwnOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree&, const SongState& otherKept)
-{
-    // The other element is of the same type, its counterpart in the other song (WholeState.h: holdSameKeptOf()).
-    return ! element.hasType (schema::PHAZITE) || holdSameSongOwn (kept, otherKept);
-}
 } // namespace phazite

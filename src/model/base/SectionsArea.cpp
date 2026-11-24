@@ -181,27 +181,14 @@ void writeSectionsIn (juce::ValueTree& element, const SongState& kept)
     writeSections (kept.sections, element);
 }
 
-bool holdSameSections (const juce::ValueTree& song, const SongState& kept, const juce::ValueTree& otherSong, const SongState& otherKept)
+bool holdSameSections (const SongState& kept, const SongState& otherKept)
 {
-    // Whether each has a SECTIONS (an empty one is written into the file, and is no song without one), and the values kept.
-    if (song.getChildWithName (schema::SECTIONS).isValid() != otherSong.getChildWithName (schema::SECTIONS).isValid())
+    // Whether each has a SECTIONS among its root's places (an empty one is written into the file, and is no song without one),
+    // and the values.
+    if (kept.holdsPlace (RootPlace::sections) != otherKept.holdsPlace (RootPlace::sections))
         return false;
 
     return kept.sections.isSameAs (otherKept.sections) || kept.sections == otherKept.sections;
-}
-
-bool holdSameSectionsOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                         const SongState& otherKept)
-{
-    const auto hasSections = [] (const juce::ValueTree& each)
-    { return each.hasType (schema::PHAZITE) && each.getChildWithName (schema::SECTIONS).isValid(); };
-
-    return ! (hasSections (element) || hasSections (otherElement)) || holdSameSections (element, kept, otherElement, otherKept);
-}
-
-bool isSectionsPlace (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    return leadsToSections (parent, child);
 }
 
 std::uint64_t findLargestIDIn (const SectionsValue& value)

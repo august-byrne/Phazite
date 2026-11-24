@@ -363,6 +363,10 @@ struct Script
         // follow from there, the same in every run.
         REQUIRE (phazite::test::waitForVersionHistory (context));
         undoCheck.emplace (song);
+
+        // After every command, its Undo and its Redo, the project's three answers to whether the song is as saved agree.
+        savedCheck.emplace (*project);
+        undoCheck->atEachMoment = [this] (const juce::String& when) { savedCheck->check (when); };
         snapshot ("start");
     }
 
@@ -600,8 +604,9 @@ struct Script
     phazite::Selection& selection = getSelection (context);
     phazite::RangeSelection& range = getRangeSelection (context);
     phazite::CommandRegistry registry;
-    std::optional<phazite::test::UndoCheck> undoCheck; // from the script's start
-    phazite::test::EnginePlayback* engine = nullptr;   // what drives the engine, while the script has it play
+    std::optional<phazite::test::UndoCheck> undoCheck;       // from the script's start
+    std::optional<phazite::test::SavedCopyCheck> savedCheck; // the same
+    phazite::test::EnginePlayback* engine = nullptr;         // what drives the engine, while the script has it play
 
     std::map<juce::String, juce::String> states;      // each command's state at the last snapshot
     juce::String selected, playhead, loop, transport; // the lines the last snapshot had for them
@@ -1019,6 +1024,11 @@ TEST_SUITE ("golden")
         s.checkEveryCommandRan();
         s.undoCheck->walkBackAndForth();
         phazite::test::dispatchPendingMessages();
+
+        // The project's quick check, its whole comparison and the files' texts agreed at every moment (UndoCheck.h:
+        // SavedCopyCheck), some of which found the song unsaved.
+        CHECK (s.savedCheck->getNumChecked() > 0);
+        CHECK (s.savedCheck->getNumUnsaved() > 0);
 
         REQUIRE (s.project->save().wasOk());
         phazite::test::checkProjectGolden ("commands/script.xml", *phazite::test::readNormalisedProject (s.project->getFile()),

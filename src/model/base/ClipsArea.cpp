@@ -372,12 +372,6 @@ bool holdSameTrackClips (const SongState& a, const SongState& b, TrackID track)
     return true;
 }
 
-bool holdSameClipsOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree&, const SongState& otherKept)
-{
-    return ! element.hasType (schema::TRACK)
-           || holdSameTrackClips (kept, otherKept, TrackID::fromRaw ((std::uint64_t) (juce::int64) element[schema::trackID]));
-}
-
 std::uint64_t findLargestIDIn (const SongClips& clips)
 {
     std::uint64_t largest = 0;

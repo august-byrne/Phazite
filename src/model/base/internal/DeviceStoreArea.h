@@ -91,9 +91,4 @@ void writeDeviceStoreIn (juce::ValueTree& element, const SongState&);
 // The store's reader of a song's tree (SongState.h: readSongTree(), a line of it): what every DEVICE and CHAIN of its channels
 // stores, and each device's window's place, into the state, as the song holds them; no tree changed. Any thread.
 void readHeldDeviceStoreIn (const juce::ValueTree& song, SongState&);
-
-// The store's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a DEVICE's
-// or a CHAIN's entries, the song's alone (a held value aside; a window's place, which counts as no change, aside), the same
-// in both; true for another element.
-bool holdSameDeviceStoreOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 } // namespace phazite

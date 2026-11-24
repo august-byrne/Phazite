@@ -91,9 +91,4 @@ void readHeldModulationIn (const juce::ValueTree& song, SongState&);
 // readHeldModulator(), at its owner's place) after the others of its owner; one of an ID the area holds already left out. How
 // many it read.
 int takeChannelModulatorsIn (SongModulation&, const juce::ValueTree& channel);
-
-// Modulation's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's,
-// the MASTER's or a CONTAINER's modulators and macros, the same in the same order, each the same value (its place too); true
-// for another element.
-bool holdSameModulationOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 } // namespace phazite

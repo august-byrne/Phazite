@@ -39,6 +39,7 @@
 
 #include "TestHelpers.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongState.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/project/ProjectContext.h"
 
@@ -48,8 +49,9 @@
 
 namespace phazite
 {
+class Project;
 class SongPlayer;
-}
+} // namespace phazite
 
 namespace phazite::test
 {
@@ -108,6 +110,10 @@ public:
     // What a failure is told to, in place of failing the test (FAIL_CHECK): for the tests of the check itself.
     std::function<void (const juce::String& failure)> onFailure;
 
+    // Told at each moment the check leaves the song at (after a change, after its Undo, after its Redo, after an undo or a
+    // redo the test runs), with which: what a test checks at every one of them (SavedCopyCheck, below).
+    std::function<void (const juce::String& when)> atEachMoment;
+
 private:
     Song& song;
 
@@ -127,5 +133,30 @@ private:
     void fail (const juce::String& failure);
 
     JUCE_DECLARE_NON_COPYABLE (UndoCheck)
+};
+// Whether a project's three answers to "is the song as saved?" agree (CHECK): its quick check (Project::hasUnsavedChanges(),
+// area by area, from what was marked since the saved copy was taken), its whole comparison with its saved copy
+// (Project::isWholeAsSaved(): model/base/internal/WholeState.h, holdSameSong()), and the two files' texts, the saved state's and
+// the song's now as a save writes them (writeSongTree(), writeProjectText()), with what counts alone, as the old whole
+// comparison read them (Schema.h: isUncountedProperty(), isUncountedElement(); the root's places in no order). Each check then
+// takes the song as it is as the saved copy (Project::takeAsSavedForTests()), so that the next compares what changed since.
+// The quick check is left out while a version is shown in the song's place (its mark held then: Song::isShowingOther()), and
+// where a plug-in changed itself outside the history since (which it counts as a change on its own).
+class SavedCopyCheck
+{
+public:
+    explicit SavedCopyCheck (Project&);
+    void check (const juce::String& when);
+
+    // How many moments were checked, and how many of them found the song unsaved.
+    int getNumChecked() const noexcept { return checked; }
+    int getNumUnsaved() const noexcept { return unsaved; }
+
+private:
+    Project& project;
+    SongState saved {};
+    int outsideAtSave = 0;
+    int checked = 0, unsaved = 0;
+    void takeAsSaved();
 };
 } // namespace phazite::test

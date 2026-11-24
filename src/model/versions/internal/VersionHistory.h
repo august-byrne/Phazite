@@ -16,6 +16,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/SongState.h"
 #include "model/base/internal/SongValues.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
@@ -326,7 +327,7 @@ public:
     {
         juce::String version;
         std::unique_ptr<Trial> trial;
-        juce::ValueTree now;
+        SongState now {}; // Now, the song as it was as the version opened: its state, its tree written where it is used
         PluginParameterValues nowParameters;
         juce::String nowPiece;
         bool nowPieceComing = false; // its write asked for (keepShownNow()), until it is in or failed
@@ -599,8 +600,8 @@ public:
     // its last version's read), and how it ends, the song made the other's. Invalid, with nothing done, if it can't be.
     struct Switch
     {
-        juce::String branchID; // the branch entered
-        juce::ValueTree left;  // the song as it is, kept on the branch it leaves
+        juce::String branchID;         // the branch entered
+        std::optional<SongState> left; // the song as it is, kept on the branch it leaves: its state, written where it is split
         PluginParameterValues leftParameters;
         juce::int64 changesAtCopy = 0;
         juce::String otherPiece;  // the other's song: as it was left there, or its last commit's

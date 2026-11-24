@@ -8,11 +8,15 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/playback/internal/SongPlayer.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
 #include <limits>
+#include <vector>
 
 namespace phazite::test
 {
@@ -278,6 +282,9 @@ void UndoCheck::run (const juce::String& what, const std::function<void()>& chan
     change();
     compilePlan();
 
+    if (atEachMoment != nullptr)
+        atEachMoment (what + ": after it");
+
     const auto depthAfter = getDepth();
     const auto after = writeSong (song, SongPart::undoable);
     const auto steps = depthAfter - depthBefore;
@@ -320,11 +327,17 @@ void UndoCheck::run (const juce::String& what, const std::function<void()>& chan
     compilePlan();
     compare (what, "Undo doesn't give the song as it was before", before, writeSong (song, SongPart::undoable));
 
+    if (atEachMoment != nullptr)
+        atEachMoment (what + ": undone");
+
     for (int i = 0; i < steps; ++i)
         redo (song);
 
     compilePlan();
     compare (what, "Redo doesn't give the song as it was after", after, writeSong (song, SongPart::undoable));
+
+    if (atEachMoment != nullptr)
+        atEachMoment (what + ": redone");
 
     if (getDepth() != depthAfter)
         fail (what + ": after Undo and Redo, the history has " + juce::String (getDepth() - base) + " steps, not "
@@ -341,6 +354,9 @@ void UndoCheck::stepBackOrForth (const juce::String& what, const std::function<v
 {
     undoOrRedo();
     compilePlan();
+
+    if (atEachMoment != nullptr)
+        atEachMoment (what);
     const auto step = getDepth() - base;
 
     if (step < 0 || step >= (int) history.size())
@@ -406,5 +422,90 @@ void UndoCheck::walkBackAndForth()
     dispatchPendingMessages();
     compare ("The walk", "back to where the check began and forth again, the whole song isn't as it was", whole,
              writeSong (song, SongPart::whole));
+}
+//==============================================================================
+namespace
+{
+    // What counts of a song's file form, as the old whole comparison with the saved copy read it: each property and element
+    // that isn't uncounted (Schema.h), the root's places in one order (their order no part of it).
+    void keepCounted (juce::ValueTree& tree)
+    {
+        for (auto i = tree.getNumProperties(); --i >= 0;)
+            if (const auto name = tree.getPropertyName (i); schema::isUncountedProperty (tree, name))
+                tree.removeProperty (name, nullptr);
+
+        for (auto i = tree.getNumChildren(); --i >= 0;)
+        {
+            auto child = tree.getChild (i);
+
+            if (schema::isUncountedElement (tree, child))
+                tree.removeChild (i, nullptr);
+            else
+                keepCounted (child);
+        }
+    }
+
+    juce::String writeCounted (const SongState& state)
+    {
+        auto tree = writeSongTree (state);
+        keepCounted (tree);
+        std::vector<juce::ValueTree> children;
+
+        for (const auto& child : tree)
+            children.push_back (child);
+
+        std::stable_sort (children.begin(), children.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+                          { return a.getType().toString() < b.getType().toString(); });
+        tree.removeAllChildren (nullptr);
+
+        for (const auto& child : children)
+            tree.appendChild (child, nullptr);
+
+        juce::MemoryOutputStream text;
+        writeProjectText (text, tree);
+        return text.toString();
+    }
+} // namespace
+
+SavedCopyCheck::SavedCopyCheck (Project& p)
+    : project (p)
+{
+    takeAsSaved();
+}
+
+void SavedCopyCheck::takeAsSaved()
+{
+    project.takeAsSavedForTests();
+    saved = getSongState (project.getSong());
+    outsideAtSave = project.getSong().getChangesOutsideHistory();
+}
+
+void SavedCopyCheck::check (const juce::String& when)
+{
+    auto& song = project.getSong();
+
+    if (! song.isShowingOther())
+    {
+        const auto whole = project.isWholeAsSaved();
+        const auto text = writeCounted (saved) == writeCounted (getSongState (song));
+        // Made as text first: a choice of two words in the message's stream would print as their addresses.
+        const auto says = "the song as saved, " + when + ": the whole comparison says " + juce::String (whole ? "saved" : "unsaved")
+                          + ", the files' texts " + juce::String (text ? "the same" : "differ");
+        INFO (says.toStdString());
+        CHECK (whole == text);
+
+        if (song.getChangesOutsideHistory() == outsideAtSave)
+        {
+            const auto quick = ! project.hasUnsavedChanges();
+            const auto quickSays = "the quick check says " + juce::String (quick ? "saved" : "unsaved");
+            INFO (quickSays.toStdString());
+            CHECK (quick == whole);
+        }
+
+        ++checked;
+        unsaved += text ? 0 : 1;
+    }
+
+    takeAsSaved();
 }
 } // namespace phazite::test

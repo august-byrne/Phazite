@@ -1542,6 +1542,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SandboxedPluginTests.cpp
         tests/SandboxedPlugins.h
         tests/SaturatorTests.cpp
+        tests/SavedCopyTests.cpp
         tests/SchemaTests.cpp
         tests/ScrollingFrameTests.cpp
         tests/SectionTests.cpp

@@ -164,24 +164,12 @@ void writeTempoMapIn (juce::ValueTree& element, const SongState& kept)
     writeTempoMap (kept.tempoMap, element);
 }
 
-bool holdSameTempoMap (const juce::ValueTree& song, const SongState& kept, const juce::ValueTree& otherSong, const SongState& otherKept)
+bool holdSameTempoMap (const SongState& kept, const SongState& otherKept)
 {
-    // The values kept, each tree's TEMPOMAP the place of its map alone.
-    if (song.getChildWithName (schema::TEMPOMAP).isValid() != otherSong.getChildWithName (schema::TEMPOMAP).isValid())
+    // The values, and whether each root holds a TEMPOMAP (the place of its map alone).
+    if (kept.holdsPlace (RootPlace::tempoMap) != otherKept.holdsPlace (RootPlace::tempoMap))
         return false;
 
     return kept.tempoMap.isSameAs (otherKept.tempoMap) || kept.tempoMap == otherKept.tempoMap;
-}
-
-bool holdSameTempoMapOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                         const SongState& otherKept)
-{
-    const auto hasTempoMap = [] (const juce::ValueTree& each) { return each.getChildWithName (schema::TEMPOMAP).isValid(); };
-    return ! (hasTempoMap (element) || hasTempoMap (otherElement)) || holdSameTempoMap (element, kept, otherElement, otherKept);
-}
-
-bool isTempoMapPlace (const juce::ValueTree&, const juce::ValueTree& child)
-{
-    return child.hasType (schema::TEMPOMAP);
 }
 } // namespace phazite

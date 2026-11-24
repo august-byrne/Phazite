@@ -517,20 +517,4 @@ bool holdSameModulatorOrder (const SongState& a, const SongState& b, const Modul
 
     return first->identity() == second->identity() || *first == *second;
 }
-
-bool holdSameModulationOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                           const SongState& otherKept)
-{
-    const auto* list = findKeptList (kept.modulation, element);
-    const auto* otherList = findKeptList (otherKept.modulation, otherElement);
-
-    if (list == nullptr || otherList == nullptr)
-        return list == otherList;
-
-    if (! (*list == *otherList))
-        return false;
-
-    return std::all_of (list->begin(), list->end(),
-                        [&kept, &otherKept] (ModulatorID id) { return holdSameModulator (kept, otherKept, id); });
-}
 } // namespace phazite

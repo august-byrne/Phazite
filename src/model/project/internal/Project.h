@@ -220,22 +220,24 @@ public:
     // Whether anything changed since the last save or autosave: what autosave() would write. Message thread only.
     bool hasChangesToAutosave();
 
-    // As autosave(), with the state copied here and its XML made and written on a background thread, so that the window
-    // and what is played don't wait for it (docs/archive/performance-audit.md, U2). Nothing while one is being written. Whether the
-    // last one failed is told once, by takeAutosaveFailure(), and its changes are written again at the next.
+    // As autosave(), with the song's state taken here (SongState.h: getSongState(), a cheap copy of each area's value), and its
+    // tree, its text and its file made and written from it on a background thread, so that the window and what is played
+    // don't wait for it (docs/archive/performance-audit.md, U2): an edit made after this, while the file is written, is no
+    // part of it. Nothing while one is being written. Whether the last one failed is told once, by takeAutosaveFailure(), and
+    // its changes are written again at the next.
     void autosaveInBackground();
     bool isAutosaving() const;
     bool takeAutosaveFailure();
 
-    // Auto Save (AutosaveTimer::setAutoSave()): as save(), into the project file, with the state copied here and its XML
-    // made and written on a background thread as autosaveInBackground() writes, so that the window and what plays don't wait
-    // for it; the previous file into Backups/ at most every backupMinutes (the first one at once), so that the backups keep
-    // the project as it was then and not each second of it. Nothing while a write is under way, or with nothing to save.
-    // Then, once isAutosaving() is false, finishBackgroundSave() takes in what was written: the project is saved, unless it
-    // changed since it was copied; false if the write failed, which leaves its changes to save again. And how many changes
-    // the project has had, to tell when they stop.
+    // Auto Save (AutosaveTimer::setAutoSave()): as save(), into the project file, with the song's state taken here and its
+    // tree and text made and written on a background thread as autosaveInBackground() writes, so that the window and what
+    // plays don't wait for it; the previous file into Backups/ at most every backupMinutes (the first one at once), so that
+    // the backups keep the project as it was then and not each second of it. Nothing while a write is under way, or with
+    // nothing to save. Then, once isAutosaving() is false, finishBackgroundSave() takes in what was written: the project is
+    // saved, unless it changed since its state was taken; false if the write failed, which leaves its changes to save again.
+    // And how many changes the project has had, to tell when they stop.
     void saveInBackground();
-    bool hasBackgroundSave() const noexcept { return backgroundSave.tree.isValid(); }
+    bool hasBackgroundSave() const noexcept { return backgroundSave.has_value(); }
     bool finishBackgroundSave();
     juce::int64 getChangeCount() const noexcept { return changeCount; }
     static constexpr int backupMinutes = 10;
@@ -324,40 +326,31 @@ private:
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
     juce::int64 autosavedAt = 0; // when autosave() last wrote it, in milliseconds since 1970; 0 for none
 
-    // The song as it was at a moment: a copy of its tree, and what it kept beside its tree then (model/base/internal/
-    // WholeState.h), which copyWhole() makes the song whole of. Never the whole song itself: the copy's tree is then of the
-    // same shape as the song's (holding no more than the song's own tree holds), which the comparisons below find an element
-    // in by its place and compare with the song's, its clips and their notes compared as values (WholeState.h:
-    // holdSameTrackClips()).
-    struct SongCopy
-    {
-        juce::ValueTree tree;
-        SongState values;
-    };
-
-    SongCopy copySong() const; // the song as it is now
-
-    // A save in the background: what it writes, and the counts of the changes as it was copied; when the project file was
-    // last backed up (milliseconds since 1970); and the changes counted since the project opened.
-    SongCopy backgroundSave;
+    // A save in the background: the song's state it writes (SongState.h: what the writer's thread writes the tree and the
+    // text of), the saved copy once it is written; and the counts of the changes as it was taken; when the project file was
+    // last backed up (milliseconds since 1970); and the changes counted since the project opened. None while none is under way.
+    std::optional<SongState> backgroundSave;
     juce::int64 changesAtBackgroundSave = 0, backedUpAt = 0, changeCount = 0;
     int outsideAtBackgroundSave = 0;
 
-    // The song as it was when the project was opened, with Phazite's parts added, or last saved. JUCE notifies a value
-    // written again as another type, which changes nothing. So while the project has no unsaved changes, a notification
-    // only sets mayHaveChanged, and hasUnsavedChanges() and autosave() compare the song with this copy, once. Never listen
-    // to it or change it. Only what notified is compared (docs/archive/performance-audit.md, U3): a property that notified
-    // with its copy's, and an element whose elements were added, removed or moved whole, each found in the copy at the same
-    // place among the elements that count; after many notifications, the track (or the song's element) each was in, whole.
-    // No song at all while the project file doesn't hold the song that was opened (a restored autosave, or a song from
-    // elsewhere: forgetSavedState()): then the song is unsaved, whatever it is compared with, until it is saved.
-    SongCopy savedState;
+    // The song as it was when the project was opened, with Phazite's parts added, or last saved: its state (SongState.h), what
+    // the file holds. While the project has no unsaved changes, a notification only marks what changed (mayHaveChanged, and
+    // each area's marks below), and hasUnsavedChanges() and autosave() compare what was marked with this copy, once, area by
+    // area, each by identity first (an area the session hasn't changed since shares its root with this one), each item by
+    // its ID (docs/archive/performance-audit.md, U3); after many notifications of an area, the area whole. Never changed: a
+    // state holds values alone. No song at all while the project file doesn't hold the song that was opened (a restored
+    // autosave, or a song from elsewhere: forgetSavedState()): then the song is unsaved, whatever it is compared with, until
+    // it is saved.
+    std::optional<SongState> savedState;
     bool mayHaveChanged = false;
 
-    // What the tree told, each once, each element compared whole: the song's element (a placeholder come or gone, its elements
-    // in another order), its MASTER (an element a safety net refused in a step, left there until its Undo), and its TRACKS and
-    // MASTER as a store of the devices' states asks (compareStoredStates()): a few at most.
-    std::vector<juce::ValueTree> toCompare;
+    // What the tree told (its callbacks, until the song's tree goes): a root's place come or gone (a CHORDLANE, a MIDILINKS or
+    // a SECTIONS), or the root's places in another order, and what a safety net refused in a step: the places compared with
+    // the saved copy's (arePlacesAsSaved(): which the root holds, never their order). And a store of the devices' states, which
+    // writes the store without a notification (compareStoredStates()): the tracks and the master compared whole
+    // (WholeState.h: holdSameChannels()).
+    bool placesToCompare = false, channelsToCompare = false;
+    bool arePlacesAsSaved() const;
     void clearToCompare();
 
     // The clips whose notes and controllers' values changed (the song holds them beside its tree: SongValues.h), compared
@@ -453,7 +446,7 @@ private:
     // saved copy's of its ID, as values (WholeState.h: holdSameDevice(), holdSameDeviceOrder(), each a look in the two
     // values by its ID), its place too, so that a knob turned and turned back is saved again, and a device taken out and put
     // back at another place before the comparison compares by where it is among its owner's.
-    // Bounded: past mostToCompare of them, the tracks and the master whole, as toCompare's are.
+    // Bounded: past mostToCompare of them, the song's devices whole.
     std::vector<DeviceID> devicesToCompare;
     std::vector<DevicePlace> deviceOwnersToCompare;
     bool comparingDevicesWhole = false;
@@ -505,22 +498,19 @@ private:
 
     // Whether a clip of the song is as savedState holds it, all it holds (its properties, its track, its warp markers, its
     // notes and controllers' values), and whether a track holds the clips savedState's does, in the same order: the song's
-    // values against savedState.values, by their IDs (WholeState.h: holdSameClip(), holdSameTrackClips()). A clip gone, or on
+    // values against savedState's, by their IDs (WholeState.h: holdSameClip(), holdSameTrackClips()). A clip gone, or on
     // a track compared whole anyway, compares as that track does.
     bool holdSameClip (ClipID, const SongState& now) const;
     bool holdSameTrackClips (TrackID, const SongState& now) const;
-    bool isComparedWhole (const juce::ValueTree&) const; // it, or what it is in, is among toCompare whole
-    bool isTrackComparedWhole (TrackID) const;           // a track the song holds, with the song's TRACKS
+    bool isTrackComparedWhole (TrackID) const; // a track the song holds, with the tracks whole (channelsToCompare)
 
-    void setSavedState (SongCopy);
+    void setSavedState (SongState);
 
     // What a store of the plug-ins' states wrote into the song without notifying (storeForSaving() while isWriting) where
     // the project file doesn't get it (Save a Copy As, an autosave, a save whose write fails): the tracks and the master
     // compared whole at the next check, as a plug-in may have changed its state without saying so. Kept while the project
     // has unsaved changes, for a save in the background that may yet make an older copy the saved one.
     void compareStoredStates();
-    bool isAsSaved (const juce::ValueTree& element) const;
-    juce::ValueTree findSavedCopy (const juce::ValueTree& element) const;
 
     // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated, Renders and Cache folders, and
     // of its Versions if it keeps any, as moveTo() does, and returns the project file that goes in it. If the name is empty,
@@ -558,23 +548,13 @@ private:
     bool takeNamesWritten(); // a names write under way finished, before another write or copy of the file: pending if it failed
     void tellNamesFailed();  // once, until a write of them works
     void handleAsyncUpdate() override;
-    void timerCallback() override;           // a names write under way, or one waiting for another write of the file, looked at
-    void rememberSavedState();               // the song as it is now
-    void rememberSavedState (SongCopy copy); // or a copy of it taken since its last change (what save() wrote)
-    void forgetSavedState();                 // the project file doesn't hold the song: unsaved until a save
+    void timerCallback() override;       // a names write under way, or one waiting for another write of the file, looked at
+    void rememberSavedState();           // the song as it is now
+    void rememberSavedState (SongState); // or a state of it taken since its last change (what save() wrote)
+    void forgetSavedState();             // the project file doesn't hold the song: unsaved until a save
     void compareWithSavedState();
     void markChanged (const juce::ValueTree&);
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
-
-    // What isn't a change (Schema.h: schema::isUncountedProperty() and isUncountedElement(): view state, how the song plays,
-    // its next ID) is left out of notifications and of the comparison with savedState alike. A plug-in's own change (its
-    // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()). Each
-    // element with what its song kept beside its tree (a track's clips and their notes: holdSameTrackClips()). The tempo map
-    // as one value, as compareWithSavedState() compares it (holdSameTempoMap()), not its elements in their order; the chord
-    // lane likewise, with whether each has one (holdSameChordLane()); the curves as values, in their order
-    // (holdSameCurves()), not their elements; and the MIDI links as one value, with whether each has a MIDILINKS
-    // (holdSameMidiLinks()).
-    static bool holdTheSameProject (const juce::ValueTree&, const SongState&, const juce::ValueTree&, const SongState&);
 
 public:
     // How many elements the comparisons with the saved copies looked at since the program started (each element compared
@@ -589,9 +569,19 @@ public:
     // How many notifications since the last comparison are compared one by one; past them, each one's track whole.
     static constexpr size_t mostToCompare = 64;
 
-    // For tests: what the comparison of the whole song with the saved copy says, which hasUnsavedChanges() works out
-    // comparing only what notified since. Message thread.
-    bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), getSongState (*song), savedState.tree, savedState.values); }
+    // What the comparison of the whole song with the saved copy says (WholeState.h: holdSameSong(): what isn't a change, as
+    // Schema.h says, left out: view state, how the song plays, its next ID, where it stands in its versions), which
+    // hasUnsavedChanges() works out comparing only what notified since; false while there is no saved copy. For tests, and
+    // closing's check (checkUnsavedChanges()). And, for tests, the song as it is now taken as the saved copy, as a save takes
+    // it, but nothing stored nor written: its changes from here on compared with it. Message thread.
+    bool isWholeAsSaved() const;
+    void takeAsSavedForTests();
+
+    // For tests: what the writer's thread calls as each of its writes begins (a save's in the background, an autosave's),
+    // before it makes the song's tree from the state it was handed, so that a test can hold the write there until it lets it
+    // go, and what the message thread does meanwhile happens while the write is under way, for certain. None by default; set
+    // once a write under way is over (it waits for it, so a hold is let go first). Message thread.
+    void setWriteStartForTests (std::function<void()>);
 
 private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }

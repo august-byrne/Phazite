@@ -137,10 +137,10 @@ struct DeviceSoundFile
 std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song&, TrackID channel);
 std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song&);
 
-// A device's or a container's element whole (model/base/internal/DevicesArea.h: writeDeviceWhole(), made whole by
-// WholeState.h's copyWhole()): with what a plug-in keeps of its own as the song holds it (store it first:
-// Song::storeDeviceStates()), its window's place, a container's chains with their devices and its macros. What a preset and
-// the DAWproject export read a device from. An invalid tree for one the song hasn't (a chain is none of these).
+// A device's or a container's element whole (model/base/internal/WholeState.h: writeDeviceTree(), of the song's state): with
+// what a plug-in keeps of its own as the song holds it (store it first: Song::storeDeviceStates()), its window's place, a
+// container's chains with their devices and its macros. What a preset and the DAWproject export read a device from. An
+// invalid tree for one the song hasn't (a chain is none of these).
 juce::ValueTree copyWholeDevice (const Song&, DeviceID);
 
 //==============================================================================

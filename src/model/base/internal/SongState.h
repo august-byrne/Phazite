@@ -117,8 +117,8 @@ juce::ValueTree writeSongTree (const SongState&);
 
 // One of the root's places written whole from a state, as writeSongTree() writes it (its TRACKS with every track, its TEMPOMAP
 // with the map...): an invalid tree for a place the state's root doesn't hold. What asks a part of the song whole that is one
-// of them asks through WholeState.h's copyWhole() (the changes' worker, model/versions/ChangesWorker.cpp, makeSkeleton(); a
-// version's MIDI links and sections, model/versions/ApplySong.cpp). Any thread.
+// of them asks it here (the changes' worker, on the history's thread: model/versions/ChangesWorker.cpp, makeSkeleton()), or
+// through WholeState.h's copyWhole() (a version's MIDI links and sections, model/versions/ApplySong.cpp). Any thread.
 juce::ValueTree writeSongPart (const SongState&, RootPlace);
 
 // A state read from a song's tree as the loader made it consistent (model/project/internal/Project.h: makeConsistent()), each

@@ -85,12 +85,6 @@ void writeSectionsIn (juce::ValueTree& element, const SongState&);
 // holds them (none where it has none); no tree changed. Any thread.
 void readHeldSectionsIn (const juce::ValueTree& song, SongState&);
 
-// The sections' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
-// either is a song's element that holds a SECTIONS, the same sections (holdSameSections()); and whether a child is the place
-// of the sections, which the comparison of the elements in them leaves out (the song's SECTIONS).
-bool holdSameSectionsOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
-bool isSectionsPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
-
 // The largest ID the sections' area holds below schema::maxID (IDsHeld.h): each section's. 0 for none.
 std::uint64_t findLargestIDIn (const SectionsValue&);
 } // namespace phazite

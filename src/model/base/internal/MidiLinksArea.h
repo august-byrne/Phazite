@@ -71,10 +71,4 @@ void writeMidiLinksIn (juce::ValueTree& element, const SongState&);
 // The MIDI links' reader of a song's tree (SongState.h: readSongTree(), a line of it): its MIDILINKS into the state, as the
 // song holds them (none where it has none); no tree changed. Any thread.
 void readHeldMidiLinksIn (const juce::ValueTree& song, SongState&);
-
-// The MIDI links' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
-// either is a song's element that holds a MIDILINKS, the same links (holdSameMidiLinks()); and whether a child is the place of
-// the links, which the comparison of the elements in them leaves out (the song's MIDILINKS).
-bool holdSameMidiLinksOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
-bool isMidiLinksPlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

@@ -346,16 +346,6 @@ bool holdSameDeviceStore (const SongState& a, const SongState& b, DeviceID id)
     return holdSameEntriesOf (a.deviceStore, b.deviceStore, id);
 }
 
-bool holdSameDeviceStoreOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                            const SongState& otherKept)
-{
-    if (! isDeviceOrChain (element))
-        return true;
-
-    const auto id = readDeviceElementID (element);
-    return id == readDeviceElementID (otherElement) && holdSameEntriesOf (kept.deviceStore, otherKept.deviceStore, id);
-}
-
 //==============================================================================
 bool isHeardAsDeviceStore (const juce::ValueTree& element)
 {

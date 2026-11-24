@@ -15,8 +15,11 @@
 #include "internal/TempoMapArea.h"
 #include "internal/TracksArea.h"
 
+#include <juce_events/juce_events.h>
+
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -158,6 +161,9 @@ namespace
         return places;
     }
 
+    // Whole songs written as trees (writeSongTree()), and those of them on the message thread: countSongTreesWritten().
+    std::atomic<int> treesWritten { 0 }, treesWrittenOnMessageThread { 0 };
+
     // A place's element as whole state writes it, empty: what the areas' writers write into (writeIn()).
     juce::ValueTree makePlace (RootPlace place)
     {
@@ -286,6 +292,11 @@ juce::ValueTree writeSongTree (const SongState& state)
     // elements, as whole state wrote them into a copy of the song's tree (writeIn()). A state of a song that holds its values
     // (getSongState() of one, readSongTree()): one of a song without values names no tracks, and would write an empty song.
     jassert (state.tracks.has_value());
+    ++treesWritten;
+
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        ++treesWrittenOnMessageThread;
+
     juce::ValueTree root (schema::PHAZITE);
 
     for (const auto place : state.rootPlaces)
@@ -352,83 +363,104 @@ juce::ValueTree copyWholeClip (const Song& song, ClipID clip)
     return {};
 }
 
-juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const SongState& kept)
+juce::ValueTree writeDeviceTree (const SongState& state, DeviceID id)
 {
-    auto copy = treeCopy.createCopy();
-    writeIn (copy, kept);
-    return copy;
+    // Its element with what it holds (a container's chains, a chain's devices), then what the other areas hold of each written
+    // in (writeIn(): its store's, its window's place, a container's macros), as whole state writes it into a song.
+    auto element = writeDeviceWhole (state.devices, id);
+
+    if (element.isValid())
+        writeIn (element, state);
+
+    return element;
 }
 
-void makeWhole (juce::ValueTree& written, const SongState& kept)
+SongTreesWritten countSongTreesWritten()
 {
-    writeIn (written, kept);
+    return { .all = treesWritten.load(), .onMessageThread = treesWrittenOnMessageThread.load() };
 }
 
-bool holdSameKeptOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement, const SongState& otherKept)
+namespace
 {
-    // Each area in turn, a line each, in this order (a track's clips, then the tempo map, then the chord lane, then the
-    // curves, then the MIDI links), as each is compared once the element's own properties are.
-    if (! holdSameClipsOf (element, kept, otherElement, otherKept))
+    // An owner's modulators and macros (a channel's, a container's) in two states: the same IDs in the same order, each the
+    // same (ModulationArea.h's comparisons), as the file holds them under their owner's element.
+    bool holdSameOwned (const SongState& a, const SongState& b, const ModulatorPlace& owner)
+    {
+        if (! holdSameModulatorOrder (a, b, owner))
+            return false;
+
+        const auto* list = a.modulation.findList (owner);
+        return list == nullptr
+               || std::all_of (list->begin(), list->end(), [&a, &b] (ModulatorID id) { return holdSameModulator (a, b, id); });
+    }
+
+    // A track's sends in two states: the same IDs in the same order, each the same (SendsArea.h's comparisons).
+    bool holdSameTrackSends (const SongState& a, const SongState& b, TrackID track)
+    {
+        if (! holdSameTrackSendOrder (a, b, track))
+            return false;
+
+        const auto* list = a.sends.tracks.find (track.getRaw());
+        return list == nullptr || std::all_of (list->begin(), list->end(), [&a, &b] (DeviceID id) { return holdSameSend (a, b, id); });
+    }
+} // namespace
+
+bool holdSameChannels (const SongState& a, const SongState& b)
+{
+    // The tracks whole first (their values, lists and the master's): the same, both hold the same tracks.
+    if (! holdSameTracks (a, b))
         return false;
 
-    if (! holdSameTempoMapOf (element, kept, otherElement, otherKept))
+    if (! a.tracks.has_value())
+        return true; // neither holds tracks (states of songs that hold no values)
+
+    // Each area that shares its roots with the other state's the same without a look inside: none walked at all where every
+    // one does (a session that changed none of them since the save).
+    const auto sameClips = a.clips.isSameAs (b.clips) && a.notes.isSameAs (b.notes);
+    const auto sameModulation = a.modulation.isSameAs (b.modulation);
+    const auto sameSends = a.sends.isSameAs (b.sends);
+    const auto sameDevices = a.devices.isSameAs (b.devices) && a.deviceStore.isSameAs (b.deviceStore);
+    const auto sameSwitches = a.trackSwitches.isSameAs (b.trackSwitches);
+
+    if (sameClips && sameModulation && sameSends && sameDevices && sameSwitches)
+        return true;
+
+    // A channel's (a track's, by its ID; the master's): what each area holds of it, a line each.
+    const auto holdSameChannel = [&] (TrackID track, bool onMaster)
+    {
+        return (onMaster || sameClips || holdSameTrackClips (a, b, track))
+               && (sameModulation || holdSameOwned (a, b, { .track = track, .onMaster = onMaster }))
+               && (onMaster || sameSends || holdSameTrackSends (a, b, track))
+               && (sameDevices || holdSameChannelDevices (a, b, makeChannelPlace (track, onMaster)))
+               && (sameSwitches || holdSameSwitchesOf (a.trackSwitches, b.trackSwitches, onMaster ? 0 : track.getRaw()));
+    };
+
+    for (const auto& entry : a.tracks->tracks)
+        if (! holdSameChannel (TrackID::fromRaw (entry.first), false))
+            return false;
+
+    if (! holdSameChannel ({}, true))
         return false;
 
-    if (! holdSameChordLaneOf (element, kept, otherElement, otherKept))
-        return false;
-
-    if (! holdSameCurvesOf (element, kept, otherElement, otherKept))
-        return false;
-
-    if (! holdSameMidiLinksOf (element, kept, otherElement, otherKept))
-        return false;
-
-    if (! holdSameSectionsOf (element, kept, otherElement, otherKept)) // then the sections
-        return false;
-
-    if (! holdSameModulationOf (element, kept, otherElement, otherKept)) // then an owner's modulators and macros
-        return false;
-
-    if (! holdSameSendsOf (element, kept, otherElement, otherKept)) // then a track's sends
-        return false;
-
-    if (! holdSameDevicesOf (element, kept, otherElement, otherKept)) // then a channel's devices, with what each holds
-        return false;
-
-    if (! holdSameDeviceStoreOf (element, kept, otherElement, otherKept)) // then what a device or a chain stores
-        return false;
-
-    if (! holdSameTrackSwitchesOf (element, kept, otherElement, otherKept)) // then a track's switches, the master's mode
-        return false;
-
-    if (! holdSameTracksOf (element, kept, otherElement, otherKept)) // then the tracks whole, the master's value and mode
-        return false;
-
-    if (! holdSameSongOwnOf (element, kept, otherElement, otherKept)) // then the song's own, of a song's root
-        return false;
+    // Each container's macros (its owner's list: a channel's devices, the same in both, hold the same containers).
+    if (! sameModulation)
+        for (const auto& entry : a.devices.devices)
+            if (const auto& device = entry.second; device.form == DeviceValue::Form::container)
+                if (! holdSameOwned (a, b, { .track = device.place.track, .onMaster = device.place.onMaster, .container = device.id }))
+                    return false;
 
     return true;
 }
 
-bool isPlaceOfKept (const juce::ValueTree& parent, const juce::ValueTree& child)
+bool holdSameSong (const SongState& a, const SongState& b)
 {
-    // Each area whose place in the tree is an element of its own, a line each: the tempo map's TEMPOMAP, the chord lane's
-    // CHORDLANE; the curves' AUTOMATION; the MIDI links' MIDILINKS. The clips' are none: the copy's tree holds none of them.
-    if (isTempoMapPlace (parent, child))
-        return true;
-
-    if (isChordLanePlace (parent, child))
-        return true;
-
-    if (isCurvesPlace (parent, child))
-        return true;
-
-    if (isMidiLinksPlace (parent, child))
-        return true;
-
-    if (isSectionsPlace (parent, child)) // the sections' SECTIONS
-        return true;
-
-    return false;
+    // Each area in turn, a line each, in this order, the cheapest first: each by identity first.
+    return holdSameSongOwn (a, b)      // the song's own value and its key set last
+           && holdSameTempoMap (a, b)  // the tempo map, and its place
+           && holdSameChordLane (a, b) // the chord lane, and whether the song has one
+           && holdSameCurves (a, b)    // the curves, in their order
+           && holdSameMidiLinks (a, b) // the MIDI links, and whether the song has their place
+           && holdSameSections (a, b)  // the sections, and whether the song has their place
+           && holdSameChannels (a, b); // the tracks and the master, with what each holds
 }
 } // namespace phazite

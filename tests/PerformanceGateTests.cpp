@@ -3797,15 +3797,17 @@ TEST_CASE ("Performance gate: an edit has the versions copy and compare the one 
     REQUIRE (phazite::test::waitForVersionHistory (s.context));
     REQUIRE (phazite::countChanges (phazite::test::withChangesIn (s.context)) == 0);
 
+    // The copies made from the round's state on the history's thread: none on the message thread
+    // (ChangesWorker::countCopiedOnMessageThread()), which takes the song's state alone (ChangesWorker.cpp: take()).
     struct Counts
     {
-        juce::int64 copied, compared, onMessageThread;
+        juce::int64 copied, compared, onMessageThread, copiedOnMessageThread;
     };
 
     const auto count = []
     {
         return Counts { phazite::ChangesWorker::countTracksCopied(), phazite::ChangesWorker::countTracksCompared(),
-                        phazite::countElementsComparedOnMessageThread() };
+                        phazite::countElementsComparedOnMessageThread(), phazite::ChangesWorker::countCopiedOnMessageThread() };
     };
 
     // A version just saved of the song as it is: no changes, known without a round.
@@ -3827,6 +3829,7 @@ TEST_CASE ("Performance gate: an edit has the versions copy and compare the one 
         CHECK (after.copied - before.copied == 1);
         CHECK (after.compared - before.compared == 1);
         CHECK (after.onMessageThread == before.onMessageThread);
+        CHECK (after.copiedOnMessageThread == before.copiedOnMessageThread);
     }
 
     // Told again and again, nothing changed: nothing copied or compared.
@@ -3895,9 +3898,9 @@ TEST_CASE ("Performance gate: a round of the versions' changes after a rename on
 {
     // A rename marks its track and the tracks' names (VersionHistory.cpp: markTrack()), so the round copies that track and the
     // song's skeleton (ChangesWorker.cpp: makeSkeleton(): each track's ID, kind and name, in its folder, and the master's ID),
-    // on the message thread. The skeleton reads those three fields one at a time from the tracks' value in the song's
-    // order (getTrackOrder(), made once), through the tracks' readers of one field (model/base/internal/TracksValue.h),
-    // never a track whole (countTracksReadAsValues()), and allocates no more than the walk of the elements it replaced did.
+    // written on the history's thread from the song's state, which the message thread takes alone (ChangesWorker.cpp: take()).
+    // The skeleton reads those three fields one at a time from the state's tracks, each folder's list in its order, never a
+    // track read whole (countTracksReadAsValues()); the message thread's part allocates far less than the copies did there.
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 40);
 
@@ -3941,9 +3944,10 @@ TEST_CASE ("Performance gate: a round of the versions' changes after a rename on
 #if JUCE_WINDOWS
     // Measured 2026-11-23 on Windows (MSVC's Debug build), the whole round's copies (the renamed track's, with its devices,
     // and the skeleton), the same in every run: 126 with the walk of the track list's elements the skeleton made before the
-    // tracks' readers moved, 405 with each track read whole (getTracksValue()) and its element written, 130 now (the list of
-    // the index's elements, and the open folders').
-    CHECK (*allocations <= 130);
+    // tracks' readers moved, 405 with each track read whole (getTracksValue()) and its element written, 130 with the list
+    // of the index's elements and the open folders; 20 since the round takes the song's state alone, its copies made on the
+    // history's thread (2026-11-24).
+    CHECK (*allocations <= 24);
 #endif
 }
 
@@ -4867,30 +4871,170 @@ TEST_CASE ("Performance gate: the song whole taken as a value allocates nothing 
     }
 }
 
-TEST_CASE ("Performance gate: the song whole written from its state allocates no more than the copy of its tree made whole did")
+TEST_CASE ("Performance gate: the song whole written from its state allocates no more than one and a half copies of its tree")
 {
     // copyWholeSong() writes the song from its state alone (SongState.h: writeSongTree()), where it copied the song's tree, its
-    // empty places, and wrote the state's values in (WholeState.h: copyWhole (tree, state), the old path while both are there):
-    // no more allocations for it, on the gates' songs.
+    // empty places, and wrote the state's values in (the old path, gone since the saved copy and the versions take states):
+    // on the gates' song of 40 tracks, no more allocations than the tree it writes takes to copy whole, with room.
     phazite::test::TestSong s;
     phazite::test::buildBenchmarkSong (s, 40);
-    phazite::test::TemporaryFolder sounds;
-    auto random = phazite::createSong();
-    phazite::test::RandomEdits (*random, 20261129, sounds.folder).edit (100);
+    const auto state = phazite::getSongState (getSong (s));
+    juce::ValueTree tree;
+    const auto written = phazite::test::countAllocations ([&] { tree = phazite::writeSongTree (state); });
 
-    for (const auto* song : { &getSong (s), random.get() })
+    if (! written.has_value())
+        return; // nothing counted on this build
+
+    // Against the least a tree of the same song can be made with, measured beside it on the same build, so that every system
+    // whose allocations are counted checks one bound, whatever its allocator: the written tree copied whole, an allocation for
+    // each element, its properties and its children, nothing else. Measured 2026-11-24 on MSVC's Debug build: 18,177 written,
+    // 18,330 copied (0.99 times; the old path made 18,578). Bound at one and a half times the copy, room for another system's
+    // containers: the tree written once more, or copied after it is written, makes twice the copy or more, and fails.
+    const auto copied = phazite::test::countAllocations ([&tree] { juce::ignoreUnused (tree.createCopy()); });
+    REQUIRE (copied.has_value());
+    MESSAGE ("Allocations of a whole copy of the song of 40 tracks, written from its state: " << *written
+                                                                                              << "; its tree copied: " << *copied);
+    CHECK (*written * 2 <= *copied * 3);
+}
+
+TEST_CASE ("Performance gate: an autosave's work on the message thread allocates as much on a song of 40 tracks as on one of 4")
+{
+    // model/project/internal/Project.h: autosaveInBackground() takes the song's state on the message thread (SongState.h:
+    // getSongState(), a copy of each area's value that shares what it holds) and hands it to the writer, whose thread writes
+    // the song's tree from it and its text. Counted: what one autosave allocates on the message thread, an edit before it,
+    // on songs of 4 and of 40 tracks: nothing that grows with the song.
+    const auto countFor = [] (int numTracks)
     {
-        const auto state = phazite::getSongState (*song);
-        const auto before = phazite::test::countAllocations ([&] { juce::ignoreUnused (phazite::copyWhole (song->getState(), state)); });
-        const auto after = phazite::test::countAllocations ([&] { juce::ignoreUnused (phazite::copyWholeSong (*song)); });
+        phazite::test::TestSong s;
+        const auto built = phazite::test::buildBenchmarkSong (s, numTracks, 16.0);
+        auto& project = s.getProject();
+        REQUIRE (project.save().wasOk());
+        phazite::test::dispatchPendingMessages();
+        auto pitch = 60;
 
-        if (! before.has_value() || ! after.has_value())
-            return; // nothing counted on this build
+        const auto autosaveOnce = [&]
+        {
+            REQUIRE (phazite::addNote (s.context, built.clips[0], pitch++, at (2.5), lasting (0.25), 100).isValid());
+            REQUIRE (project.hasChangesToAutosave());
+            const auto allocations = phazite::test::countAllocations ([&project] { project.autosaveInBackground(); });
+            REQUIRE (phazite::test::dispatchMessagesUntil ([&project] { return ! project.isAutosaving(); }));
+            CHECK_FALSE (project.takeAutosaveFailure());
+            CHECK_FALSE (project.hasChangesToAutosave());
+            return allocations;
+        };
 
-        // Measured (2026-11-24, Windows, Debug): see the report of roadmap step S5.20's piece K1.
-        MESSAGE ("Allocations of a whole copy: " << *before << " by the tree made whole, " << *after << " by the state written");
-        CHECK (*after <= *before);
-    }
+        autosaveOnce(); // what is made once (the writer's thread's first start) made before the one counted
+        return autosaveOnce();
+    };
+
+    const auto small = countFor (4), big = countFor (40);
+
+    if (! small.has_value() || ! big.has_value())
+        return; // nothing counted on this build
+
+    MESSAGE ("An autosave's allocations on the message thread: " << *small << " on 4 tracks, " << *big << " on 40");
+
+    // Measured 2026-11-24 on MSVC's Debug build, 4 tracks / 40: 619 / 5,432 while the song's tree was written whole on the
+    // message thread; 35 / 41 since it hands over its state.
+    constexpr auto few = 8;
+    CHECK (*big <= *small + few);
+}
+
+TEST_CASE ("Performance gate: a save in the background, an autosave, a version saved, a branch made and switched to, a merge "
+           "started and the changes' rounds write no whole song as a tree on the message thread")
+{
+    // What takes the song whole takes its state on the message thread (SongState.h: getSongState()) and writes its tree where
+    // the work is done: the writer's thread of a save in the background and of an autosave (model/project/internal/
+    // Project.h), the history's thread of a version, a branch's song left, a merge and the changes' rounds
+    // (model/versions/). Counted: whole songs written as trees on the message thread (WholeState.h: countSongTreesWritten()),
+    // and the changes' copies made there (ChangesWorker::countCopiedOnMessageThread()), around each. What is left there: a
+    // save on the message thread (Project::save(), the save a switch or a new branch asks: TestSong::save), which writes
+    // its file there, its tree with it, once each, counted apart.
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 4, 8.0);
+    auto& song = getSong (s);
+    auto& project = s.getProject();
+    REQUIRE (project.save().wasOk());
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+
+    auto saves = 0;
+    const phazite::SaveProjectThen save = [&s, &saves] (std::function<void (bool)> then)
+    {
+        ++saves;
+        s.save (std::move (then));
+    };
+
+    const auto onMessageThread = [] { return phazite::countSongTreesWritten().onMessageThread; };
+    const auto copiesBefore = phazite::ChangesWorker::countCopiedOnMessageThread();
+    const auto splitsBefore = phazite::countSongsSplit().onMessageThread;
+    auto volume = -1.0f;
+    const auto edit = [&] { phazite::setChannelVolume (song, built.tracks[0], volume -= 0.5f); };
+
+    // Each step, and the trees it wrote on the message thread besides those of the saves it asked.
+    const auto written = [&] (const char* what, const std::function<void()>& step)
+    {
+        INFO (what);
+        const auto before = onMessageThread();
+        const auto savesBefore = saves;
+        step();
+        CHECK (onMessageThread() - before == saves - savesBefore);
+    };
+
+    written ("a save in the background (Auto Save)",
+             [&]
+             {
+                 edit();
+                 project.saveInBackground();
+                 REQUIRE (project.hasBackgroundSave());
+                 REQUIRE (phazite::test::dispatchMessagesUntil ([&project] { return ! project.isAutosaving(); }));
+                 CHECK (project.finishBackgroundSave());
+             });
+
+    written ("an autosave",
+             [&]
+             {
+                 edit();
+                 project.autosaveInBackground();
+                 REQUIRE (phazite::test::dispatchMessagesUntil ([&project] { return ! project.isAutosaving(); }));
+                 CHECK_FALSE (project.takeAutosaveFailure());
+             });
+
+    const auto commit = [&s]
+    {
+        std::optional<juce::Result> result;
+        REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+        REQUIRE (phazite::test::waitForVersionHistory (s.context));
+        return phazite::getLastVersion (s.context)->id;
+    };
+
+    written ("a version saved", [&] { commit(); });
+    const auto main = phazite::getCurrentBranch (s.context)->id;
+    written ("a branch made", [&] { REQUIRE (phazite::newBranch (s.context, {}, save)); });
+    edit();
+    juce::String theirs;
+    written ("a version saved on it", [&] { theirs = commit(); });
+    edit(); // a change left on the branch as it switches
+
+    written ("a branch switched to",
+             [&] { REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, main, save); })); });
+    edit();
+    commit(); // main moves on, so that a merge has something of each line
+
+    written ("a merge started",
+             [&] { REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); })); });
+
+    written ("the changes' round after an edit",
+             [&]
+             {
+                 edit();
+                 phazite::test::dispatchPendingMessages();
+                 phazite::countChanges (phazite::test::withChangesIn (s.context));
+             });
+
+    CHECK (phazite::ChangesWorker::countCopiedOnMessageThread() == copiesBefore);
+    CHECK (phazite::countSongsSplit().onMessageThread == splitsBefore);
+    CHECK (saves > 0);
 }
 
 TEST_CASE ("Performance gate: the tracks' keeper compares no entry of the tracks' lists for a volume's drag event, a mute's "

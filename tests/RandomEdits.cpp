@@ -5,17 +5,22 @@
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
 #include "devices/dynamics/Compressor.h"
+#include "devices/modulation/Modulators.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongOwnValue.h"
+#include "model/base/internal/SongState.h"
 #include "model/chords/internal/Chords.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/devices/internal/SamplerSound.h"
+#include "model/midi/internal/MidiLinks.h"
 #include "model/mixer/ContainerValues.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Freeze.h"
@@ -23,11 +28,13 @@
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/DeviceStore.h"
 #include "model/presets/internal/Presets.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 namespace phazite::test
@@ -431,7 +438,13 @@ void RandomEdits::edit()
     const auto track = pick (tracks);
     const auto other = pick (tracks);
     const auto plain = getPlainTracks (song);
-    const auto kind = draw (45 + numNoteAndClipKinds);
+    const auto kind = draw (45 + numNoteAndClipKinds + (editsOneAreaAlone ? numOneAreaKinds : 0));
+
+    if (kind >= 45 + numNoteAndClipKinds) // where asked, after all the others: a seed's songs without them stay as they were
+    {
+        editOneArea (kind - 45 - numNoteAndClipKinds);
+        return;
+    }
 
     if (kind >= 45)
     {
@@ -488,24 +501,8 @@ void RandomEdits::edit()
             break;
 
         case 6: // a value set by hand
-        {
-            const auto devices = getAllDevices (song);
-
-            if (devices.empty())
-                break;
-
-            const auto device = pick (devices);
-            const auto* info = findOwnDevice (phazite::test::copyDevice (song, device)[schema::deviceType].toString().toStdString());
-
-            if (info == nullptr || info->parameters.empty())
-                break;
-
-            const auto& parameter = info->parameters[(size_t) draw ((int) info->parameters.size())];
-            const auto along = random.nextFloat();
-            const auto value = devices::constrain (parameter, parameter.minimum + along * (parameter.maximum - parameter.minimum));
-            setValueSetByHand (song, { device, juce::String (parameter.id.data(), parameter.id.size()) }, value);
+            setAValueByHand();
             break;
-        }
 
         case 7: // a MIDI clip with a note
             if (! plain.empty())
@@ -1003,5 +1000,292 @@ void RandomEdits::edit()
             break;
         }
     }
+}
+
+void RandomEdits::setAValueByHand()
+{
+    const auto all = getAllDevices (song);
+
+    if (all.empty())
+        return;
+
+    const auto device = pick (all);
+    const auto* info = findOwnDevice (phazite::test::copyDevice (song, device)[schema::deviceType].toString().toStdString());
+
+    if (info == nullptr || info->parameters.empty())
+        return;
+
+    const auto& parameter = info->parameters[(size_t) draw ((int) info->parameters.size())];
+    const auto along = random.nextFloat();
+    const auto value = devices::constrain (parameter, parameter.minimum + along * (parameter.maximum - parameter.minimum));
+    setValueSetByHand (song, { device, juce::String (parameter.id.data(), parameter.id.size()) }, value);
+}
+
+void RandomEdits::editOneArea (int kind)
+{
+    switch (kind)
+    {
+        case 0: // a send's level, of a send made before (the sends')
+        {
+            std::vector<DeviceID> sends;
+
+            for (const auto track : getTrackIDs (song))
+                for (const auto send : getSends (song, track))
+                    sends.push_back (send);
+
+            if (sends.empty())
+                break;
+
+            const auto send = pick (sends);
+            const auto level = -random.nextFloat() * 30.0f;
+            setSendLevel (song, send, level);
+            break;
+        }
+
+        case 1: // a container's macro renamed, its value moved, or a device in its chains modulated by it (modulation's)
+        case 2:
+        case 3:
+        {
+            const auto containers = getAllContainers (song);
+
+            if (containers.empty())
+                break;
+
+            const auto container = pick (containers);
+            const auto macros = getContainerMacros (song, container);
+
+            if (macros.empty())
+                break;
+
+            const auto macro = pick (macros);
+
+            if (kind == 1)
+            {
+                const auto number = draw (100);
+                renameMacro (song, macro, "Macro " + juce::String (number));
+                break;
+            }
+
+            if (kind == 2)
+            {
+                const auto value = random.nextFloat();
+                setMacroValue (song, macro, value);
+                break;
+            }
+
+            const auto inside = getContainerDevices (song, container);
+
+            if (inside.empty())
+                break;
+
+            const auto device = pick (inside);
+            const auto* info = findOwnDevice (phazite::test::copyDevice (song, device)[schema::deviceType].toString().toStdString());
+
+            if (info == nullptr || info->parameters.empty())
+                break;
+
+            const auto& p = info->parameters[(size_t) draw ((int) info->parameters.size())];
+            const ParameterRef parameter { device, juce::String (p.id.data(), p.id.size()) };
+            const auto amount = random.nextFloat() * 2.0f - 1.0f;
+
+            if (canModulate (song, macro, parameter))
+                setModulation (song, macro, parameter, amount);
+            break;
+        }
+
+        case 4: // a modulator's parameter, its rate where it has one (modulation's)
+        {
+            std::vector<ModulatorID> modulators;
+
+            for (const auto track : getTrackIDs (song))
+                for (const auto modulator : getModulators (song, track))
+                    if (! isMacro (song, modulator))
+                        modulators.push_back (modulator);
+
+            if (modulators.empty())
+                break;
+
+            const auto modulator = pick (modulators);
+            const auto value = getModulatorValue (song, modulator);
+
+            if (! value.has_value() || ! value->kind.has_value())
+                break;
+
+            const auto parameters = devices::getModulatorParameters (*value->kind);
+
+            if (parameters.empty())
+                break;
+
+            const auto rate = devices::findModulatorParameter (*value->kind, "rate");
+            const auto index = rate >= 0 ? rate : draw ((int) parameters.size());
+            const auto& parameter = parameters[(size_t) index];
+            const auto along = random.nextFloat();
+            setModulatorValueSetByHand (song, modulator, parameter, parameter.minimum + along * (parameter.maximum - parameter.minimum));
+            break;
+        }
+
+        case 5: // a device's value set by hand (the devices')
+            setAValueByHand();
+            break;
+
+        case 6: // a container's chain muted or soloed, or back (the devices' store)
+            if (const auto containers = getAllContainers (song); ! containers.empty())
+            {
+                const auto chains = getChains (song, pick (containers));
+
+                if (chains.empty())
+                    break;
+
+                const auto chain = pick (chains);
+
+                if (random.nextBool())
+                    setChainMuted (song, chain, ! isChainMuted (song, chain));
+                else
+                    setChainSoloed (song, chain, ! isChainSoloed (song, chain));
+            }
+            break;
+
+        case 7: // a track muted, or not (the tracks' switches)
+            if (const auto tracks = getTrackIDs (song); ! tracks.empty())
+            {
+                const auto track = pick (tracks);
+                setTrackMuted (song, track, ! isTrackMuted (song, track, false));
+            }
+            break;
+
+        case 8: // an automation point moved (the curves')
+            if (const auto curves = getCurveKeys (song); ! curves.empty())
+            {
+                const auto parameter = pick (curves);
+                const auto points = getPoints (song, parameter);
+
+                if (points.empty())
+                    break;
+
+                const auto index = draw ((int) points.size());
+                const auto by = draw (5) - 2;
+                const auto change = (random.nextFloat() - 0.5f) * 0.2f;
+                movePoints (song, parameter, { index }, lasting (by), change);
+            }
+            break;
+
+        case 9: // a section renamed (the sections')
+            if (const auto sections = getSections (song); ! sections.empty())
+            {
+                const auto section = pick (sections);
+                const auto number = draw (100);
+                renameSection (song, section.id, "Part " + juce::String (number));
+            }
+            break;
+
+        case 10: // a tempo change (the tempo map's)
+        {
+            const auto beat = draw (16) * 4;
+            const auto bpm = 60.0 + draw (120);
+            addTempoChange (song, at (beat), bpm);
+            break;
+        }
+
+        case 11: // a chord on the chord lane (the chord lane's)
+        {
+            const auto start = draw (8) * 4;
+            Numeral numeral;
+            numeral.degree = 1 + draw (7);
+            putLaneChord (song, { at (start), at (start + 4) }, numeral);
+            break;
+        }
+
+        case 12: // the key set last, which new tracks get (the song's standing)
+        {
+            const auto root = draw (12);
+            const auto minor = random.nextBool();
+            setLastKey (song, Key { root, minor ? Scale::minor : Scale::major });
+            break;
+        }
+
+        case 13: // the song's MIDILINKS alone, put in or taken away empty, as a version's links give it (the root's places)
+            if (getMidiLinks (song).empty())
+            {
+                const auto placed = getSongState (song).holdsPlace (RootPlace::midiLinks);
+                makeMidiLinksAs (song, placed ? juce::ValueTree() : juce::ValueTree (schema::MIDILINKS));
+            }
+            break;
+
+        case 14: // a controller linked to a track's volume (the MIDI links')
+            if (const auto tracks = getTrackIDs (song); ! tracks.empty())
+            {
+                const auto track = pick (tracks);
+                const auto number = 20 + draw (8);
+                linkMidiController (song, { 1, number }, { getFader (song, track), getVolumeParameterID (song, track) });
+            }
+            break;
+
+        case 15: // the project's notes (the song's own)
+        {
+            const auto number = draw (100);
+            auto own = getSongOwn (song);
+            own.notes = "Notes " + juce::String (number);
+            setSongOwn (song, std::move (own));
+            break;
+        }
+
+        case 16: // a note added to a MIDI clip (the clips' notes)
+            if (const auto clips = getAllClips (song, true); ! clips.empty())
+            {
+                const auto clip = pick (clips);
+                const auto pitch = 30 + draw (40);
+                const auto beat = draw (4);
+                addMidiNote (song, clip, pitch, at (beat), lasting (0.25));
+            }
+            break;
+
+        case 17: // a clip muted, or not (the clips')
+            if (const auto clips = getAllClips (song, false); ! clips.empty())
+                toggleClipsMuted (song, { pick (clips) });
+            break;
+
+        default: // a track renamed (the tracks')
+            if (const auto tracks = getTrackIDs (song); ! tracks.empty())
+            {
+                const auto track = pick (tracks);
+                const auto number = draw (100);
+                setTrackName (song, track, "Track " + juce::String (number));
+            }
+            break;
+    }
+}
+
+void RandomEdits::addOneOfEach()
+{
+    const auto plain = getPlainTracks (song);
+    const auto track = plain.empty() ? insertTrack (song, {}, nullptr) : plain.front();
+    const auto* effect = getOwnOfKind (devices::DeviceKind::effect).front();
+    phazite::test::tryAddOwnDevice (song, track, effect->typeID);
+
+    if (const auto container = addContainer (song, track); container.isValid())
+        if (const auto chains = getChains (song, container); ! chains.empty())
+            phazite::test::tryAddOwnDeviceToChain (song, chains.front(), effect->typeID);
+
+    addModulator (song, track, ModulatorType::lfo);
+    addSend (song, track, addReturnTrack (song, "Return", nullptr), false);
+
+    if (const auto clip = addMidiClip (song, track, { at (0.0), at (4.0) }); clip.isValid())
+        addMidiNote (song, clip, 60, at (0.0), lasting (0.5));
+
+    SectionInfo section;
+    section.name = "Part";
+    section.length = lasting (8.0);
+    insertSection (song, at (0.0), section);
+
+    Numeral numeral;
+    numeral.degree = 1;
+    putLaneChord (song, { at (0.0), at (4.0) }, numeral);
+
+    // No MIDI link: the first is made by the edits of one area (editOneArea()), after the place they are kept in.
+    const ParameterRef volume { getFader (song, track), getVolumeParameterID (song, track) };
+    AutomationPoint point;
+    point.beat = at (0.0);
+    point.position = 0.5f;
+    addPoint (song, volume, point);
 }
 } // namespace phazite::test

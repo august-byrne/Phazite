@@ -10,6 +10,8 @@
 // thread's).
 #include "RandomEdits.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
+#include "UiTestHelpers.h"
 #include "devices/core/LevelTrail.h"
 #include "devices/core/SampleTap.h"
 #include "devices/sampler/Sampler.h"
@@ -22,6 +24,7 @@
 #include "model/base/internal/SongState.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/WholeState.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/MidiTap.h"
 #include "model/project/ProjectContext.h"
@@ -1428,5 +1431,61 @@ TEST_CASE ("A song's state raced: written on another thread while the message th
     for (int i = 0; i < rounds; ++i)
         differ += written[(size_t) i] == expected[(size_t) i] ? 0 : 1;
 
+    CHECK (differ == 0);
+}
+
+TEST_CASE ("A project's autosaves raced: the song's state written on the writer's thread while the message thread edits on, each "
+           "file the song as its autosave began")
+{
+    // model/project/internal/Project.h: autosaveInBackground() hands the song's state (SongState.h) to its writer, whose thread
+    // writes the song's tree and text from it and lets it go there once written, while the message thread edits the song on:
+    // the counts of the nodes the state shares with the song's new values raised and dropped on both threads, and the last
+    // holder of a node the song let go of meanwhile the writer's thread. A fixed count of autosaves, three edits made while
+    // each writes; each file is the song as it was as its autosave began.
+    constexpr int rounds = 12;
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    auto& project = s.getProject();
+    phazite::test::RandomEdits edits (song, 20261130, s.getSoundsFolder());
+    const auto edit = [&song, &edits]
+    {
+        const phazite::UndoStep step (song, "Random Edit");
+        edits.edit();
+    };
+
+    for (int i = 0; i < 20; ++i)
+        edit();
+
+    const auto toText = [] (const juce::ValueTree& tree)
+    {
+        juce::MemoryOutputStream text;
+        phazite::writeProjectText (text, tree);
+        return text.toString();
+    };
+
+    auto differ = 0, written = 0;
+
+    for (int i = 0; i < rounds; ++i)
+    {
+        edit();
+
+        if (! project.hasChangesToAutosave())
+            continue;
+
+        project.autosaveInBackground();
+        const auto expected = toText (phazite::test::copyWholeSong (song)); // nothing changed the song since it was taken
+
+        for (int j = 0; j < 3; ++j)
+            edit();
+
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&project] { return ! project.isAutosaving(); }));
+        CHECK_FALSE (project.takeAutosaveFailure());
+        juce::MemoryBlock bytes;
+        REQUIRE (phazite::Project::getAutosaveFile (project.getFile()).loadFileAsData (bytes));
+        differ += bytes.toString() == expected ? 0 : 1;
+        ++written;
+    }
+
+    CHECK (written > 0);
     CHECK (differ == 0);
 }

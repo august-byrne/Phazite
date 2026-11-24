@@ -89,8 +89,8 @@ DevicePlace makeContainerPlace (const DevicePlace& channel, DeviceID container, 
 
 // An item of the devices' value as an element with what it holds, as whole state writes one (writeDeviceElement(), a
 // container's CHAINs in their order, each with its DEVICEs in theirs): without what the other areas write into it (the store's,
-// a window's place, a container's macros), which a whole copy of it writes (WholeState.h: copyWhole()). An invalid tree for an
-// ID the value hasn't.
+// a window's place, a container's macros), which a whole copy of it writes (WholeState.h: writeDeviceTree()). An invalid
+// tree for an ID the value hasn't.
 juce::ValueTree writeDeviceWhole (const SongDevices&, DeviceID);
 
 // The devices' part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to a
@@ -111,8 +111,8 @@ void readHeldDevicesIn (const juce::ValueTree& song, SongState&);
 // holds already left out with what it holds. How many it read.
 int takeChannelDevicesIn (SongDevices&, const juce::ValueTree& channel, const DevicePlace&);
 
-// The devices' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
-// or the MASTER's devices and containers, the same in the same order, each the same value with what it holds (a container's
-// chains in their order, each chain's devices in theirs); true for another element.
-bool holdSameDevicesOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
+// The devices' part of the comparison of two states (WholeState.h: holdSameChannels()): a channel's devices and containers (a
+// track's, the master's: makeChannelPlace()), the same in the same order, each the same value with what it holds (a container's
+// chains in their order, each chain's devices in theirs) and what the store holds of each (holdSameDeviceStore()). Any thread.
+bool holdSameChannelDevices (const SongState&, const SongState&, const DevicePlace& channel);
 } // namespace phazite

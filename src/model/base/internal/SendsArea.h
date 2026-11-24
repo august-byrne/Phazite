@@ -64,8 +64,4 @@ void readHeldSendsIn (const juce::ValueTree& song, SongState&);
 // read as the song holds one (SendsValue.h: readHeldSend()) from the track of this ID, after its others; one of an ID the
 // sends hold already left out. How many it read.
 int takeTrackSendsIn (SongSends&, const juce::ValueTree& track, TrackID);
-
-// The sends' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
-// sends, the same in the same order, each the same value; true for another element.
-bool holdSameSendsOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
 } // namespace phazite

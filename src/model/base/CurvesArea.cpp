@@ -301,15 +301,4 @@ bool holdSameCurves (const SongState& kept, const SongState& otherKept)
 {
     return kept.curves.isSameAs (otherKept.curves) || kept.curves == otherKept.curves;
 }
-
-bool holdSameCurvesOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                       const SongState& otherKept)
-{
-    return ! element.hasType (schema::PHAZITE) || ! otherElement.hasType (schema::PHAZITE) || holdSameCurves (kept, otherKept);
-}
-
-bool isCurvesPlace (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    return leadsToCurves (parent, child);
-}
 } // namespace phazite

@@ -231,16 +231,6 @@ void writeTrackLeavesIn (juce::ValueTree& element, const SongState&);
 void readHeldTrackLeavesIn (const juce::ValueTree& song, SongState&);
 void readHeldTracksIn (const juce::ValueTree& song, SongState&);
 
-// The switches' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
-// switches (its ID's entries) or the MASTER's mode, the same in both; true for another element. The view counts as no change,
-// and is no part of it.
-bool holdSameTrackSwitchesOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
-
-// The tracks' part of the same comparison: a song's TRACKS, the tracks whole (holdSameTracks()), its MASTER, the master's value
-// and mode (holdSameMaster()), as values, where both kept them; true for another element. What a TRACK holds is compared
-// through its element and the other parts, each TRACK given its own fields first (WholeState.h: withTracksOwn()).
-bool holdSameTracksOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
-
 // Whether what the song's tree tells is the tracks', which a listener of the song's root hears from the values' listener
 // alone (SongValues::Listener::tracksChanged(), trackSwitchesChanged(), tracksViewChanged()) and leaves alone in its tree
 // callbacks: the places and what the keeper takes in there (the top of this header). Of an element (children in another

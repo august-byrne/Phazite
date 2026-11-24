@@ -1538,7 +1538,7 @@ namespace
         // This line's merges to translate by (those whose version the parting follows); every one of each line's; the other
         // line's whose version the parting follows.
         std::vector<RenumberedID> renumbering, ourMerges, theirMerges, theirMergesAtParting;
-        juce::ValueTree ours;
+        SongState ours {}; // the song as it was taken for the merge: its tree written where the merge is worked out
         PluginParameterValues ourParameters;
         juce::int64 changesAtCopy = 0;
     };
@@ -1603,18 +1603,19 @@ namespace
     // The song as it was copied for the merge's list, kept in the store as Merge will need it for Cancel Merge (VersionHistory.h:
     // keepMerge()), here on the history's thread (known bug 126: Merge split and wrote the whole song on the message thread):
     // its piece, which Merge takes while the song is still as it was copied; none if it couldn't be written.
-    void keepSongBeforeMerge (VersionStore& store, MergeWorked& worked, const MergeStart& start)
+    void keepSongBeforeMerge (VersionStore& store, MergeWorked& worked, const MergeStart& start, const juce::ValueTree& ours)
     {
-        const auto pieces = splitSong (start.ours);
+        const auto pieces = splitSong (ours);
         const auto kept = store.writeSong (pieces);
         store.getPieces().closeFiles();
-        worked.preview.before = start.ours;
+        worked.preview.before = ours;
         worked.preview.beforePiece = kept ? pieces.song : juce::String();
         worked.preview.beforeChanges = start.changesAtCopy;
     }
 
     MergeWorked readMerge (VersionStore& store, const MergeStart& start)
     {
+        const auto ours = writeSongTree (start.ours); // the song whole, written here, on the history's thread, from its state
         MergeWorked worked;
         worked.preview.version = start.version;
         worked.preview.otherBranch = start.otherBranch;
@@ -1632,15 +1633,15 @@ namespace
         // idNumbering), one of them from before the song's IDs were given anew as it opened: its items would be matched with
         // others of the song's.
         worked.numberedOtherwise = worked.baseRead.isValid() && worked.theirsRead.isValid()
-                                   && (! areNumberedAlike (start.ours, worked.theirsRead)
-                                       || (start.basePiece.isNotEmpty() && ! areNumberedAlike (start.ours, worked.baseRead)));
+                                   && (! areNumberedAlike (ours, worked.theirsRead)
+                                       || (start.basePiece.isNotEmpty() && ! areNumberedAlike (ours, worked.baseRead)));
 
         if (worked.baseRead.isValid() && worked.theirsRead.isValid() && ! worked.idsGivenAnew && ! worked.numberedOtherwise)
         {
-            workOutMerge (worked, start, start.ours, start.ourParameters);
+            workOutMerge (worked, start, ours, start.ourParameters);
 
             if (! worked.heldTwice)
-                keepSongBeforeMerge (store, worked, start);
+                keepSongBeforeMerge (store, worked, start, ours);
         }
 
         return worked;
@@ -1678,7 +1679,7 @@ namespace
                                                          "lines share can't be told apart.");
 
             // Numbered otherwise than the song as it was read against, or than the song now, made another whole meanwhile.
-            if (worked->numberedOtherwise || ! areNumberedAlike (*song, start.ours))
+            if (worked->numberedOtherwise || getSongOwn (*song).idNumbering != start.ours.songOwn.idNumbering)
                 return VersionHistory::Taken::refused (mergeNumberingRefusal (*history, start.version));
 
             if (last == nullptr || last->id != start.head || version == nullptr || history->getMerging().has_value()
@@ -1688,7 +1689,7 @@ namespace
             if (history->countSongChanges() != start.changesAtCopy)
             {
                 song->storeDeviceStates();
-                start.ours = copyWholeSong (*song);
+                start.ours = getSongState (*song);
                 start.ourParameters = history->readPluginParameters();
                 start.changesAtCopy = history->countSongChanges();
 
@@ -1696,14 +1697,17 @@ namespace
                     return VersionHistory::Taken::readAgain (
                         [&context, start, worked, rounds, store = history->getStore()]() -> VersionHistory::TakeIn
                         {
-                            workOutMerge (*worked, start, start.ours, start.ourParameters);
+                            const auto ours = writeSongTree (start.ours); // on the history's thread, from its state
+                            workOutMerge (*worked, start, ours, start.ourParameters);
 
                             if (! worked->heldTwice)
-                                keepSongBeforeMerge (*store, *worked, start);
+                                keepSongBeforeMerge (*store, *worked, start, ours);
                             return takeInMerge (context, start, worked, rounds - 1);
                         });
 
-                workOutMerge (*worked, start, start.ours, start.ourParameters);
+                // Here, on the message thread, its tree written here: the hold keeps the user's edits out after two rounds
+                // (rare).
+                workOutMerge (*worked, start, writeSongTree (start.ours), start.ourParameters);
                 worked->preview.beforePiece.clear(); // kept again as Merge is clicked
             }
 
@@ -1722,7 +1726,7 @@ namespace
                 worked->preview.beforeChanges = history->countSongChanges();
             }
 
-            worked->preview.numbering = start.ours[schema::idNumbering].toString(); // the song's, as the list was worked out
+            worked->preview.numbering = start.ours.songOwn.idNumbering; // the song's, as the list was worked out
             history->preview = std::move (worked->preview);
             history->tellNow();
             return true;
@@ -1769,7 +1773,7 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
 
     history->mergeFailure.clear();
     song->storeDeviceStates();
-    start.ours = copyWholeSong (*song);
+    start.ours = getSongState (*song); // its tree written on the history's thread (readMerge())
     start.ourParameters = history->readPluginParameters();
     start.changesAtCopy = history->countSongChanges();
 
@@ -2029,12 +2033,15 @@ bool finishMerge (ProjectContext& context)
     if (merge.beforePiece.isNotEmpty() && history->countSongChanges() == merge.beforeChanges)
         return takeMergeIn (context, std::move (merge));
 
-    merge.before = copyWholeSong (*song);
+    // The song as it is, its state taken here and its tree written on the history's thread, which the merge then takes in (no
+    // tree the message thread holds handed over).
+    merge.before = {};
     merge.beforePiece.clear();
     return startCommandRead (
         context, *history, "Keeping the song as it is, for Cancel Merge",
-        [&context, merge, store = history->getStore()]() mutable -> VersionHistory::TakeIn
+        [&context, merge, taken = getSongState (*song), store = history->getStore()]() mutable -> VersionHistory::TakeIn
         {
+            merge.before = writeSongTree (taken);
             const auto pieces = splitSong (merge.before);
             const auto kept = store->writeSong (pieces);
             store->getPieces().closeFiles();
@@ -3221,7 +3228,8 @@ namespace
         // What isn't an undo step made as Now had it while the song is still shown, so that it is no change of the project's.
         auto shown = std::move (*history.shown);
         history.shown.reset();
-        shown.trial->putBackHeld ([song, &shown] { makeSongAsCopied (*song, shown.now); });
+        // Now's tree written here, from its state, where the song is made as it was.
+        shown.trial->putBackHeld ([song, &shown] { makeSongAsCopied (*song, writeSongTree (shown.now)); });
 
         // What was selected, and the range: the redo steps undone with the version set the range from before they were done.
         getSelection (context).putBack (shown.selected);
@@ -3435,7 +3443,7 @@ namespace
             VersionHistory::Shown shown;
             shown.version = versionID;
             shown.number = ++history.shownFromNow;
-            shown.now = copyWholeSong (*song);
+            shown.now = getSongState (*song);
             shown.nowParameters = history.readPluginParameters();
             shown.outsideAtOpen = song->getDeviceChangesOutsideHistory();
             shown.mayHaveChanges = history.mayHaveChanges(); // Now's, before the trial changes the song

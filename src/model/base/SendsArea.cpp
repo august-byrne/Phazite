@@ -341,19 +341,4 @@ bool holdSameTrackSendOrder (const SongState& a, const SongState& b, TrackID tra
 
     return first->identity() == second->identity() || *first == *second;
 }
-
-bool holdSameSendsOf (const juce::ValueTree& element, const SongState& kept, const juce::ValueTree& otherElement,
-                      const SongState& otherKept)
-{
-    const auto* list = findKeptList (kept.sends, element);
-    const auto* otherList = findKeptList (otherKept.sends, otherElement);
-
-    if (list == nullptr || otherList == nullptr)
-        return list == otherList;
-
-    if (! (*list == *otherList))
-        return false;
-
-    return std::all_of (list->begin(), list->end(), [&kept, &otherKept] (DeviceID id) { return holdSameSend (kept, otherKept, id); });
-}
 } // namespace phazite

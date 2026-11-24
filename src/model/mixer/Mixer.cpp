@@ -580,9 +580,7 @@ juce::ValueTree copyWholeDevice (const Song& song, DeviceID id)
     if (findDeviceOrContainer (song, id) == nullptr)
         return {};
 
-    auto element = writeDeviceWhole (getDevicesValue (song), id);
-    makeWhole (element, getSongState (song));
-    return element;
+    return writeDeviceTree (getSongState (song), id);
 }
 
 //==============================================================================

@@ -70,10 +70,4 @@ void writeChordLaneIn (juce::ValueTree& element, const SongState&);
 // The chord lane's reader of a song's tree (SongState.h: readSongTree(), a line of it): its CHORDLANE into the state, as the
 // song holds it, placed where the tree has one (ChordLaneValue.h); no tree changed. Any thread.
 void readHeldChordLaneIn (const juce::ValueTree& song, SongState&);
-
-// The chord lane's part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): where
-// either is a song's element that holds a CHORDLANE, the same lane (holdSameChordLane()); and whether a child is the place of
-// the lane, which the comparison of the elements in them leaves out (the song's CHORDLANE).
-bool holdSameChordLaneOf (const juce::ValueTree& element, const SongState&, const juce::ValueTree& otherElement, const SongState&);
-bool isChordLanePlace (const juce::ValueTree& parent, const juce::ValueTree& child);
 } // namespace phazite

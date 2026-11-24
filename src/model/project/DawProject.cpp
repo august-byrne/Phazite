@@ -2271,9 +2271,9 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
         import->said = takeDawProject (*song, *in, import->audio); // unpacked already: nothing more on this thread
 
         return VersionHistory::Taken::readAgain (
-            [&context, import, fromVersion, nothing, copy = copyWholeSong (*song), store = reading->getStore()]() -> VersionHistory::TakeIn
+            [&context, import, fromVersion, nothing, taken = getSongState (*song), store = reading->getStore()]() -> VersionHistory::TakeIn
             {
-                const auto pieces = splitSong (copy);
+                const auto pieces = splitSong (writeSongTree (taken)); // its tree written here, on the history's thread
                 const auto kept = store->writeSong (pieces);
                 store->getPieces().closeFiles();
 
