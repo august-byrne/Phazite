@@ -12,6 +12,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/DeviceStoreValue.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/TrackSwitchesValue.h"
@@ -94,94 +95,78 @@ namespace
         return {};
     }
 
-    // Properties of a device's element that don't change its sound: where its window was, view state (which the song's tree
-    // holds none of now, as of a plug-in's own state: the devices' store's, holdSameStoreOf() below leaving that out).
+    // Properties of an element that don't change what a frozen track sounds like: where a device's window was, view state.
     bool isIgnoredProperty (const juce::Identifier& property)
     {
         return schema::isDeviceViewProperty (property);
     }
 
-    bool isSameSound (const juce::ValueTree& a, const juce::ValueTree& b)
+    // Whether a device, a container or a chain sounds now as it did as its track was frozen: alike in all the devices' value
+    // covers but its place (DevicesValue.h: DeviceValue::operator==(), each map by identity first), what the elements it was
+    // compared as before held (a window's place is no part of the value, and a plug-in's state is the store's: below).
+    bool isSameSound (const DeviceValue& now, const DeviceValue& then)
     {
-        if (a.getType() != b.getType())
-            return false;
-
-        const auto sameProperties = [] (const juce::ValueTree& one, const juce::ValueTree& other)
-        {
-            for (int i = 0; i < one.getNumProperties(); ++i)
-            {
-                const auto name = one.getPropertyName (i);
-
-                if (! isIgnoredProperty (name) && ! (other.hasProperty (name) && one[name] == other[name] && other[name] == one[name]))
-                    return false;
-            }
-
+        if (now.isSameAs (then))
             return true;
-        };
 
-        if (! sameProperties (a, b) || ! sameProperties (b, a))
-            return false;
-
-        // Their children compared in turn, in place (this runs at every change in a frozen track).
-        if (a.getNumChildren() != b.getNumChildren())
-            return false;
-
-        for (int i = 0; i < a.getNumChildren(); ++i)
-            if (! isSameSound (a.getChild (i), b.getChild (i)))
-                return false;
-
-        return true;
+        auto placed = now;
+        placed.place = then.place;
+        return placed == then;
     }
 
-    // Whether the store holds the same now of a frozen part (a device, a container with its chains and their devices) as the
-    // values kept as it was frozen: a plug-in's values set by hand, program, format ID and version, a chain's mute and solo,
-    // each item's by its ID; not a plug-in's state, which every save stores again, as isSameSound() leaves it out.
-    bool holdSameStoreOf (const juce::ValueTree& part, const Song& song, const ValuesKept& frozen)
+    // Whether the store holds the same now of an item as the values kept as it was frozen: a plug-in's values set by hand,
+    // program, format ID and version, a chain's mute and solo; not a plug-in's state, which every save stores again.
+    bool holdSameStoreOf (const DeviceStore& now, const DeviceStore& then, DeviceID id)
     {
-        const auto* values = song.getValues();
-
-        if (values == nullptr)
-            return true;
-
         const auto withoutState = [] (DeviceStore entries)
         {
             entries.states = {};
             return entries;
         };
 
-        const auto& now = values->deviceStore.get();
-
-        if (now.isSameAs (frozen.deviceStore))
-            return true;
-
-        const std::function<bool (const juce::ValueTree&)> holdSame = [&] (const juce::ValueTree& item) -> bool
-        {
-            if (item.hasType (schema::DEVICE) || item.hasType (schema::CHAIN))
-            {
-                const auto id = readDeviceElementID (item);
-
-                if (! (withoutState (takeEntriesOf (now, id)) == withoutState (takeEntriesOf (frozen.deviceStore, id))))
-                    return false;
-            }
-
-            return std::all_of (item.begin(), item.end(), holdSame);
-        };
-
-        return holdSame (part);
+        return withoutState (takeEntriesOf (now, id)) == withoutState (takeEntriesOf (then, id));
     }
 
-    // What a frozen track's file holds, as the song's tree has it: its frozen devices. Its clips, with their notes, are the
-    // song's values' (Holds::values), the song's tempos, which put its notes and clips where they are in seconds, its tempo
-    // map's (Holds::tempos), its frozen devices' automation the song's curves (Holds::curves: getFrozenCurves()), and its
-    // modulators and macros, which can move them, modulation's (Holds::modulators: getFrozenModulators()).
-    std::vector<juce::ValueTree> getWhatTheFreezeHolds (const Song& song, TrackID track)
+    // What a container holds (its chains) or a chain (its devices), in their order; none for anything else.
+    const immer::flex_vector<DeviceID>* findInside (const SongDevices& devices, const DeviceValue& value)
     {
-        std::vector<juce::ValueTree> parts;
+        if (value.form == DeviceValue::Form::container)
+            return devices.chains.find (value.id.getRaw());
 
-        for (const auto id : getFrozenDevices (song, track))
-            parts.push_back (findDeviceState (song, id));
+        return value.form == DeviceValue::Form::chain ? devices.chainDevices.find (value.id.getRaw()) : nullptr;
+    }
 
-        return parts;
+    // Whether a frozen part (a device, or a container with its chains and their devices) sounds now as it did as its track
+    // was frozen, by the song's devices and store now and as they were kept then (Holds::values): each item alike
+    // (isSameSound()) with the store's entries of a device and a chain (holdSameStoreOf(), skipped where the whole store is
+    // the same value), and what it holds the same IDs in the same order, each alike in turn. Nothing written, nothing read
+    // into a value: looks in the two values by ID.
+    bool soundsAsFrozen (const SongDevices& now, const DeviceStore& storeNow, const ValuesKept& then, DeviceID id)
+    {
+        const auto* is = now.find (id);
+        const auto* was = then.devices.find (id);
+
+        if (is == nullptr || was == nullptr)
+            return false;
+
+        if (! isSameSound (*is, *was))
+            return false;
+
+        if (is->form != DeviceValue::Form::container && ! storeNow.isSameAs (then.deviceStore)
+            && ! holdSameStoreOf (storeNow, then.deviceStore, id))
+            return false;
+
+        const auto* listNow = findInside (now, *is);
+        const auto* listThen = findInside (then.devices, *was);
+
+        if (listNow == nullptr || listThen == nullptr)
+            return listNow == listThen;
+
+        if (listNow->identity() != listThen->identity() && ! (*listNow == *listThen))
+            return false;
+
+        return std::all_of (listNow->begin(), listNow->end(),
+                            [&now, &storeNow, &then] (DeviceID inside) { return soundsAsFrozen (now, storeNow, then, inside); });
     }
 
     // A frozen track's modulators and macros as values (Modulation.h: getOwnedModulators()): its own, in their order, then
@@ -240,12 +225,7 @@ namespace
 
     FreezeKeeper::Holds copyWhatTheFreezeHolds (const Song& song, TrackID track)
     {
-        juce::ValueTree copy ("FROZEN");
-
-        for (const auto& part : getWhatTheFreezeHolds (song, track))
-            copy.appendChild (part.createCopy(), nullptr);
-
-        return { .parts = copy,
+        return { .parts = getFrozenDevices (song, track),
                  .values = keepValues (song),
                  .tempos = getTempoMapValue (song).tempos,
                  .curves = getFrozenCurves (song, track),
@@ -257,20 +237,27 @@ namespace
     // FreezeKeeper::modulatorsAsFrozen).
     bool holdsWhatWasFrozen (const Song& song, TrackID track, const FreezeKeeper::Holds& frozen, bool compareCurves, bool compareModulators)
     {
-        const auto parts = getWhatTheFreezeHolds (song, track);
-
-        if ((int) parts.size() != frozen.parts.getNumChildren())
+        if (getFrozenDevices (song, track) != frozen.parts)
             return false;
 
-        // Each as it is in the song, against its copy as copyWhatTheFreezeHolds() made it: in place, since this runs at every
-        // change in a frozen track (a fader dragged); its clips with their notes as values, the same values or ones alike; the
-        // song's tempos, the same value or one alike (a tempo changed and changed back compares as the same); and its frozen
-        // devices' curves, the same curves in the same order, each alike, and its modulators and macros, read into values only
-        // where asked. Its parts first: what its curves are of (getFrozenCurveOwners()) and the containers whose macros it holds
-        // are in them, so curves and macros left out are of the same owners as before.
-        for (int i = 0; i < (int) parts.size(); ++i)
-            if (! isSameSound (parts[(size_t) i], frozen.parts.getChild (i)) || ! holdSameStoreOf (parts[(size_t) i], song, frozen.values))
-                return false;
+        // Each as it is in the song, against what copyWhatTheFreezeHolds() kept: as values, since this runs at every change in
+        // a frozen track (a fader dragged): its frozen devices, the same IDs in the same order, each alike in the song's
+        // devices' value now and as kept then (the same value at once: nothing compared), never written into elements; its
+        // clips with their notes as values, the same values or ones alike; the song's tempos, the same value or one alike (a
+        // tempo changed and changed back compares as the same); and its frozen devices' curves, the same curves in the same
+        // order, each alike, and its modulators and macros, read into values only where asked. Its parts first: what its
+        // curves are of (getFrozenCurveOwners()) and the containers whose macros it holds are in them, so curves and macros
+        // left out are of the same owners as before.
+        if (const auto* values = song.getValues())
+        {
+            const auto& devices = values->devices.get();
+            const auto& store = values->deviceStore.get();
+
+            if (! (devices.isSameAs (frozen.values.devices) && store.isSameAs (frozen.values.deviceStore)))
+                for (const auto id : frozen.parts)
+                    if (! soundsAsFrozen (devices, store, frozen.values, id))
+                        return false;
+        }
 
         if (const auto tempos = getTempoMapValue (song).tempos;
             tempos.identity() != frozen.tempos.identity() && ! (tempos == frozen.tempos))

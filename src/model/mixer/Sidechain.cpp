@@ -6,6 +6,7 @@
 #include "internal/Containers.h"
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -64,7 +65,7 @@ namespace
     // Whether a track's sound comes from any of these tracks: a folder mixes the tracks inside it, a return takes in what
     // is sent to it, a drum pad's track plays what its sampler's track's sampler plays for it (DrumKit.h), and a device can
     // listen to a sidechain.
-    bool isFedBy (const Song& song, const juce::ValueTree& state, const std::vector<TrackID>& feeding)
+    bool isFedBy (const Song& song, const SongDevices& devices, const juce::ValueTree& state, const std::vector<TrackID>& feeding)
     {
         const auto track = readTrackElementID (state);
         const auto kind = readTrackKind (state);
@@ -83,9 +84,10 @@ namespace
                     if (getSendTarget (song, send) == track)
                         return true;
 
-        for (const auto& device : getDeviceStates (state))
-            if (contains (feeding, readDeviceSidechain (device)))
-                return true;
+        if (const auto* list = devices.findList (makeChannelPlace (track, false)))
+            for (const auto id : *list)
+                if (const auto* device = devices.find (id); device != nullptr && contains (feeding, device->sidechain))
+                    return true;
 
         return false;
     }
@@ -102,8 +104,8 @@ namespace
     {
         const auto plays = [&song] (TrackID each)
         {
-            const auto devices = getDeviceStates (findChainState (song, each)); // the devices' (Mixer.h)
-            return std::any_of (devices.begin(), devices.end(), [] (const juce::ValueTree& device) { return isDrumSampler (device); });
+            const auto devices = getDevices (song, each); // the devices' (Mixer.h)
+            return std::any_of (devices.begin(), devices.end(), [&song] (DeviceID device) { return isDrumSampler (song, device); });
         };
 
         const auto inside = getTracksInFolder (song, track);
@@ -124,18 +126,22 @@ namespace
 
     // Whether every parameter of a device's is still as it was made, as the song holds its values set by hand, but the one
     // given, if any.
-    bool isAsMade (const juce::ValueTree& state, const devices::DeviceInfo& info, std::string_view except = {})
+    bool isAsMade (const DeviceValue& value, const devices::DeviceInfo& info, std::string_view except = {})
     {
-        for (const auto& parameter : info.parameters)
-            if (parameter.id != except && std::abs (readDeviceParameterValue (state, parameter) - parameter.defaultValue) > 1.0e-4f)
+        for (size_t i = 0; i < info.parameters.size(); ++i)
+            if (const auto& parameter = info.parameters[i];
+                parameter.id != except && std::abs (value.getParameterValue ((int) i) - parameter.defaultValue) > 1.0e-4f)
                 return false;
 
         return true;
     }
 
-    bool isCompressor (const juce::ValueTree& state)
+    // A device's value of one of Phazite's own types, by its type's ID: nullptr for none, or for another type.
+    const DeviceValue* findOfType (const Song& song, DeviceID id, std::string_view typeID)
     {
-        return readDeviceType (state) == juce::String (devices::Compressor::typeID);
+        const auto* value = findDevice (song, id);
+        return value != nullptr && value->form == DeviceValue::Form::own && std::string_view (value->type.toRawUTF8()) == typeID ? value
+                                                                                                                                 : nullptr;
     }
 
     // Phazite's compressor, still as it was made (but for its mode, set by its Duck tab first), ducks under the key chosen for
@@ -152,17 +158,16 @@ namespace
     void startDucking (Song& song, DeviceID id, TrackID source)
     {
         using devices::Compressor, devices::Multiband;
-        const auto state = findDeviceState (song, id);
-        const auto setValue = [&song, &state] (const devices::DeviceInfo& info, std::string_view parameter, float value)
+        const auto setValue = [&song, id] (const devices::DeviceInfo& info, std::string_view parameter, float value)
         {
             if (const auto index = devices::findParameter (info, parameter); index >= 0)
-                setDeviceValue (song, state, info.parameters[(size_t) index], value);
+                setDeviceValue (song, id, index, value);
         };
 
-        if (isCompressor (state))
+        if (const auto* compressor = findOfType (song, id, Compressor::typeID))
         {
             const auto& info = Compressor::info;
-            if (! isAsMade (state, info, info.parameters[(size_t) Compressor::mode].id))
+            if (! isAsMade (*compressor, info, info.parameters[(size_t) Compressor::mode].id))
                 return;
 
             setValue (info, "mode", (float) Compressor::Mode::duck);
@@ -182,7 +187,8 @@ namespace
             return;
         }
 
-        if (readDeviceType (state) != juce::String (Multiband::typeID) || ! isAsMade (state, Multiband::info))
+        if (const auto* multiband = findOfType (song, id, Multiband::typeID);
+            multiband == nullptr || ! isAsMade (*multiband, Multiband::info))
             return;
 
         // Its low band's curve: 8:1 over -30 dB, its last point in the places the others leave.
@@ -211,10 +217,26 @@ namespace
     void startCarrying (Song& song, DeviceID id)
     {
         using devices::Vocoder;
-        const auto state = findDeviceState (song, id);
+        if (findOfType (song, id, Vocoder::typeID) != nullptr)
+            setDeviceValue (song, id, (int) Vocoder::carrier, (float) Vocoder::Carrier::track);
+    }
 
-        if (readDeviceType (state) == juce::String (Vocoder::typeID))
-            setDeviceValue (song, state, Vocoder::info.parameters[(size_t) Vocoder::carrier], (float) Vocoder::Carrier::track);
+    // A channel's DEVICE element by its ID in the tree of a song that holds no values (the loader's, whose tree holds its
+    // devices: model/project/internal/Project.h, makeConsistent()), invalid for none: a device that listens to a sidechain is
+    // on a channel, never in a container.
+    juce::ValueTree findChannelDeviceElement (const juce::ValueTree& element, DeviceID id)
+    {
+        for (const auto& child : element)
+        {
+            if (child.hasType (schema::DEVICE) && readDeviceElementID (child) == id)
+                return child;
+
+            if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK) || child.hasType (schema::MASTER))
+                if (auto found = findChannelDeviceElement (child, id); found.isValid())
+                    return found;
+        }
+
+        return {};
     }
 } // namespace
 
@@ -222,6 +244,9 @@ std::vector<TrackID> getTracksFedBy (const Song& song, TrackID track)
 {
     std::vector<TrackID> fed { track };
     const auto all = getTrackStates (song);
+    // Read once (a copy, whatever reads the song meanwhile): nothing here changes it; for a song that holds no values (the
+    // loader's) its tree's fields alone (DevicesValue.h: readDevicesFields()), never a device's values.
+    const auto devices = song.getValues() != nullptr ? getDevicesValue (song) : readDevicesFields (song.getState());
 
     for (auto grew = true; grew;)
     {
@@ -229,7 +254,7 @@ std::vector<TrackID> getTracksFedBy (const Song& song, TrackID track)
 
         for (const auto& other : all)
         {
-            if (const auto id = readTrackElementID (other); ! contains (fed, id) && isFedBy (song, other, fed))
+            if (const auto id = readTrackElementID (other); ! contains (fed, id) && isFedBy (song, devices, other, fed))
             {
                 fed.push_back (id);
                 grew = true;
@@ -242,14 +267,17 @@ std::vector<TrackID> getTracksFedBy (const Song& song, TrackID track)
 
 bool hasSidechain (const Song& song, DeviceID id)
 {
-    const auto state = findDeviceState (song, id);
+    const auto* value = findDevice (song, id);
 
     // A container wires only the sound passing through its devices (Containers.h).
-    if (! state.hasType (schema::DEVICE) || getOwningContainer (state).isValid())
+    if (value == nullptr || ! (value->form == DeviceValue::Form::own || value->isPlugin()) || value->place.container.isValid())
         return false;
 
-    if (const auto* own = findOwnDevice (readDeviceType (state).toStdString()))
-        return own->hasSidechain;
+    if (value->form == DeviceValue::Form::own)
+    {
+        const auto* own = findOwnDevice (std::string_view (value->type.toRawUTF8()));
+        return own != nullptr && own->hasSidechain;
+    }
 
     // A plug-in's inputs, as its helper tells them while it plays: a sidechain's after its main ones.
     auto* instance = findPluginInstance (song, id);
@@ -276,7 +304,8 @@ std::vector<TrackID> getSidechainSources (const Song& song, DeviceID id)
 
 TrackID getSidechainSource (const Song& song, DeviceID id)
 {
-    const auto source = readDeviceSidechain (findDeviceState (song, id));
+    const auto* value = findDevice (song, id);
+    const auto source = value != nullptr ? value->sidechain : TrackID();
     return hasSoundOfItsOwn (song, source) ? source : TrackID();
 }
 
@@ -285,10 +314,10 @@ bool hearsSidechain (const Song& song, DeviceID id)
     if (! getSidechainSource (song, id).isValid())
         return false;
 
-    const auto state = findDeviceState (song, id);
-    const auto& mode = devices::Compressor::info.parameters[(size_t) devices::Compressor::mode];
-    return ! isCompressor (state)
-           || devices::Compressor::getMode (readDeviceParameterValue (state, mode)) != devices::Compressor::Mode::transient;
+    const auto* compressor = findOfType (song, id, devices::Compressor::typeID);
+    return compressor == nullptr
+           || devices::Compressor::getMode (compressor->getParameterValue ((int) devices::Compressor::mode))
+                  != devices::Compressor::Mode::transient;
 }
 
 bool switchesSidechain (std::string_view typeID, int parameterIndex)
@@ -340,13 +369,11 @@ void setSidechainSource (Song& song, DeviceID id, TrackID source)
     if (source == getSidechainSource (song, id) || (source.isValid() && ! contains (getSidechainSources (song, id), source)))
         return;
 
-    auto state = findDeviceState (song, id);
-
-    if (! state.isValid())
+    if (findDevice (song, id) == nullptr)
         return;
 
     const UndoStep step (song, source.isValid() ? "Sidechain from " + getTrackName (song, source) : juce::String ("Turn Sidechain Off"));
-    setDeviceFields (song, state, [source] (DeviceValue& value) { value.sidechain = source; });
+    setDeviceFields (song, id, [source] (DeviceValue& value) { value.sidechain = source; });
 
     if (source.isValid())
     {
@@ -398,8 +425,14 @@ void forgetSidechainLoops (Song& song)
         if (! device.sidechain.isValid() || device.container.isValid() || ! isSongTrack (song, device.channel))
             continue;
 
-        if (contains (getTracksFedBy (song, device.channel), device.sidechain))
+        if (! contains (getTracksFedBy (song, device.channel), device.sidechain))
+            continue;
+
+        // The loader's song holds no values yet: its tree holds its devices.
+        if (song.getValues() != nullptr)
             setDeviceFields (song, device.id, [] (DeviceValue& value) { value.sidechain = {}; });
+        else
+            findChannelDeviceElement (song.getState(), device.id).removeProperty (schema::deviceSidechain, nullptr);
     }
 }
 } // namespace phazite

@@ -27,8 +27,9 @@ namespace
     }
 
     // View state (model/base/internal/Schema.h), how the song shows and no change to it, which no plan holds: a track's or
-    // the master's view properties (their heights, their lanes shown), a device's (where its window was), the editors'
-    // grids, and the elements of view state (a piano roll's, a track's lanes) with everything in them.
+    // the master's view properties (their heights, their lanes shown), the editors' grids, and the elements of view state (a
+    // piano roll's, a track's lanes) with everything in them. (Where a device's window was is the song's values', outside
+    // the history: the song's tree holds no device.)
     bool isInViewElement (juce::ValueTree element)
     {
         for (; element.isValid(); element = element.getParent())
@@ -43,8 +44,7 @@ namespace
         if ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER)) && schema::isTrackViewProperty (property))
             return true;
 
-        if ((tree.hasType (schema::DEVICE) && schema::isDeviceViewProperty (property))
-            || (tree.hasType (schema::PHAZITE) && schema::isGridProperty (property)))
+        if (tree.hasType (schema::PHAZITE) && schema::isGridProperty (property))
             return true;
 
         return isInViewElement (tree);

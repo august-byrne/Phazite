@@ -163,7 +163,10 @@ and elements.
 ## 4. Devices
 
 A track's devices are `DEVICE` elements in the order the sound goes through them, an instrument first, with containers
-(`CONTAINER`, each with its `CHAIN`s) among them.
+(`CONTAINER`, each with its `CHAIN`s, then its macros) among them, written right after the track's clips and before its
+other children (a folder's before the tracks in it), as the song holds them beside its tree (in its devices' area, each by
+its ID, each owner's in its order). A device's `SOUNDS` is written before its `VALUES`, and a plug-in's `VALUE` children
+after both.
 
 **Phazite's own devices** have a `type` ("phaziteSynth"), and their values set by hand in a `VALUES` child, a property
 for each parameter by its ID; a parameter at its default isn't written. A number is its value; **a choice is written by
@@ -270,8 +273,9 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
     or a chain's `name` empty);
   - a device's `VALUES` and `SOUNDS`: a value set by hand at its parameter's default is left out, a sound of a property
     the device's type hasn't (a sampler's `pad36Sound`) or an empty one is left out, a `VALUES` or a `SOUNDS` left empty
-    goes, and a property or an element Phazite doesn't know in either goes (the two stay in their order); a
-    plug-in's `SOUNDS` goes, as its `VALUES` does (it plays neither);
+    goes, and a property or an element Phazite doesn't know in either goes; a plug-in's `SOUNDS` goes, as its `VALUES`
+    does (it plays neither); and a device's `SOUNDS` is written before its `VALUES`, so a file that held them the other
+    way round has them in that order from its first save;
   - what the devices' store holds of it is written as Phazite writes what the song holds of it (one rule, the one the song
     reads it by: `keepStoreAsHeld()` in `src/model/base/DeviceStoreValue.cpp`): a plug-in's `VALUE` children are written
     after its other children, sorted by their `parameter` (numbers as numbers: `"2"` before `"10"`), one of each
@@ -279,8 +283,13 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
     text of the same bytes); an empty `formatID` or `version` goes; a chain's `mute` or `solo` written off (`"0"`) goes; a
     store's property or a `VALUE` on a device that isn't a plug-in goes; and a device's `windowX` without its `windowY`
     gets a `windowY` of `0`, a `windowY` without its `windowX` goes;
-  - what neither covers stays as the file has it: a `mix` on one of Phazite's own devices (whose mix is its `VALUES`'
-    `mix`), the element's other children, and a property Phazite doesn't know.
+  - what neither covers goes from the first save, as the song holds its devices as values beside its tree and nothing
+    reads it: a `mix` on one of Phazite's own devices (whose mix is its `VALUES`' `mix`), a property Phazite doesn't know
+    on a `DEVICE`, a `CONTAINER` or a `CHAIN`, and an element Phazite doesn't know in one; a device's window's place
+    (`windowX`, `windowY`) stays;
+  - a track's and the master's devices and containers are written right after its clips and before its other children,
+    in their order: a file that held a track's `LANES` before its devices, or a folder's tracks before its devices, has
+    them after its devices from its first save.
 
   A file Phazite wrote holds each of them so already, and comes through without any of them read whole.
 - **Tracks and the master:** each `TRACK` and the `MASTER` is written as Phazite writes what the song holds of it, where

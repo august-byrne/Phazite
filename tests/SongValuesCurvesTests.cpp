@@ -78,6 +78,13 @@ struct Told final : phazite::SongValues::Listener
     void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<phazite::TrackID>&) override { ++clips; }
     void tempoMapChanged() override { ++tempo; }
 
+    // The devices', which a device removed comes and goes with since the devices' switch (no DEVICE element in the tree).
+    void devicesChanged (const std::vector<phazite::SongValues::DeviceChange>&, const std::vector<phazite::DevicePlace>&,
+                         const phazite::SongDevices&) override
+    {
+        ++devices;
+    }
+
     void curvesChanged (const std::vector<phazite::ParameterRef>& told) override
     {
         ++curves;
@@ -91,7 +98,7 @@ struct Told final : phazite::SongValues::Listener
         }
     }
 
-    int notes = 0, clips = 0, tempo = 0, curves = 0;
+    int notes = 0, clips = 0, tempo = 0, curves = 0, devices = 0;
     std::vector<phazite::ParameterRef> parameters;
 };
 
@@ -301,8 +308,9 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
             CHECK (each.told.tempo == 0);
         }
 
-        // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more.
-        if (each.other == 0)
+        // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more (where
+        // nothing else changed: the tree, or the devices, which a device removed comes and goes with).
+        if (each.other == 0 && each.told.devices == 0)
         {
             CHECK (each.project == each.told.curves);
             CHECK (each.versions == each.told.curves);

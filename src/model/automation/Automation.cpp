@@ -845,7 +845,7 @@ juce::String getParameterName (const Song& song, const ParameterRef& parameter)
         case ParameterSource::chainVolume:
         case ParameterSource::chainPan:
         case ParameterSource::crossover:
-            return found->state[schema::chainName].toString() + " " + describeParameter (song, *found).name;
+            return getChainName (song, parameter.device) + " " + describeParameter (song, *found).name;
 
         case ParameterSource::device:
         case ParameterSource::plugin:

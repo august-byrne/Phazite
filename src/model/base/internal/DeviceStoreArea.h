@@ -27,7 +27,7 @@ class Song;
 
 // What the values' listeners are told of the store (Listener::deviceStoreChanged()): once for each change of its value, each
 // entry that differs between the two (MapChanges.h, through immer's diff, which skips what the two share), each with its
-// item's place as the devices' part of the keeper last told it (getDevicesAsTold(): no read of the tree), and the area's
+// item's place as the devices' area holds it (SongValues.h: devices; no read of the tree), and the area's
 // whole value after (cheap: it shares what it holds). It listens to the store's area from its making to its end.
 struct SongValues::DeviceStoreTeller final : ValueArea<DeviceStore>::Listener
 {
@@ -49,9 +49,8 @@ struct SongValues::DeviceStoreTeller final : ValueArea<DeviceStore>::Listener
 //       holdsStoreIn()): each such item's entries read as the song holds them (readHeldStoreOf()), made the item's in the
 //       store (its song's entries replaced: the element is what the item holds), its window's place given, all of it taken
 //       out of the element, each item counted (countDeviceStoreAdopted());
-//   (b) a VALUE added by itself to a DEVICE of the song's: refused in a step (a JUCE assertion: the step can't take it out
-//       again, as its Undo, taking the tree's change back first, would find it gone; JUCE workaround W62
-//       (docs/juce-workarounds.md)), and read in (a plug-in's, as the song holds it) and taken out outside the history, counted;
+//   (b) nothing for a VALUE by itself: none comes, as the song's tree holds no DEVICE (the devices' part of the keeper takes
+//       one out as it comes in, after (a): DevicesArea.h);
 //   (c) nothing as an item leaves: the store keeps its entries (DeviceStoreValue.h, rule (b)).
 // And the adoption from the loaded tree, which the song's holdValues() asks.
 struct SongValues::DeviceStoreKeeper

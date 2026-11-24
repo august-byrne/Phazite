@@ -2,6 +2,8 @@
 #include "TestDeviceValues.h"
 
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesArea.h"
+#include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/WholeState.h"
@@ -15,16 +17,6 @@ namespace phazite::test
 {
 namespace
 {
-    // The song's element of a device, a container or a chain, invalid for one it hasn't: what the helpers below read and write
-    // while the song's tree holds its devices.
-    juce::ValueTree findDeviceElement (const Song& song, DeviceID id)
-    {
-        if (auto device = findDeviceState (song, id); device.isValid())
-            return device;
-
-        return findContainerChain (song, id);
-    }
-
     // The element of a song's whole copy of a type with an ID (Schema.h: trackID, deviceID, chainID: "id"), invalid for none.
     juce::ValueTree findInCopy (const juce::ValueTree& tree, const juce::Identifier& type, std::uint64_t id)
     {
@@ -38,12 +30,6 @@ namespace
         return {};
     }
 
-    juce::ValueTree findDeviceToWrite (const Song& song, DeviceID id)
-    {
-        auto device = findDeviceState (song, id);
-        REQUIRE (device.isValid());
-        return device;
-    }
 } // namespace
 
 DeviceID tryAddOwnDevice (Song& song, TrackID channel, std::string_view typeID, const OwnValues& values, int index)
@@ -123,13 +109,15 @@ TrackID addReturnWithOwnEffect (Song& song, TrackID sender, std::string_view typ
 //==============================================================================
 juce::ValueTree copyDevice (const Song& song, DeviceID id)
 {
-    const auto element = findDeviceElement (song, id);
-    return element.isValid() ? copyWhole (song, element) : juce::ValueTree();
+    // Its element with what it holds, made whole (the store's, a window's place, a container's macros), as a whole copy of the
+    // song writes it.
+    return phazite::findDevice (song, id) != nullptr ? copyWhole (writeDeviceWhole (getDevicesValue (song), id), keepValues (song))
+                                                     : juce::ValueTree();
 }
 
 bool hasDevice (const Song& song, DeviceID id)
 {
-    return findDeviceElement (song, id).isValid();
+    return phazite::findDevice (song, id) != nullptr;
 }
 
 juce::ValueTree copyWholeSongWithDevice (const Song& song, TrackID channel, const juce::ValueTree& device)
@@ -158,16 +146,34 @@ juce::ValueTree copyWholeSongWithDeviceEdited (const Song& song, DeviceID id, co
     return copy;
 }
 
+void writeValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& info, float value)
+{
+    const juce::Identifier parameter (juce::String (info.id.data(), info.id.size()));
+    auto values = element.getChildWithName (schema::VALUES);
+
+    if (! isDefaultValue (info, value))
+    {
+        element.getOrCreateChildWithName (schema::VALUES, nullptr).setProperty (parameter, toSavedValue (info, value), nullptr);
+        return;
+    }
+
+    values.removeProperty (parameter, nullptr);
+
+    if (values.isValid() && values.getNumProperties() == 0 && values.getNumChildren() == 0)
+        element.removeChild (values, nullptr);
+}
+
 juce::String getDeviceTypeOf (const Song& song, DeviceID id)
 {
-    return findDeviceState (song, id)[schema::deviceType].toString();
+    const auto* value = phazite::findDevice (song, id);
+    return value == nullptr ? juce::String() : value->isPlugin() ? juce::String (schema::deviceIsPlugin) : value->type;
 }
 
 //==============================================================================
 void storePluginState (Song& song, DeviceID id, const juce::MemoryBlock& state)
 {
     // As a plug-in's instance stores it, outside the history, by the device's ID (model/plugins/internal/DeviceStore.h).
-    REQUIRE (findDeviceToWrite (song, id).isValid());
+    REQUIRE (phazite::findDevice (song, id) != nullptr);
     StoredPlugin stored;
     stored.state = &state;
     storePluginOutsideHistory (song, id, stored);
@@ -188,6 +194,8 @@ void setPluginStateInStep (Song& song, DeviceID id, const juce::MemoryBlock& sta
 
 void writeDeviceSoundByHand (Song& song, DeviceID id, const juce::Identifier& property, const juce::String& value)
 {
-    findDeviceToWrite (song, id).getOrCreateChildWithName (schema::SOUNDS, nullptr).setProperty (property, value, nullptr);
+    REQUIRE (phazite::findDevice (song, id) != nullptr);
+    const Song::OutsideHistory outside (song);
+    setDeviceSound (song, id, property, value);
 }
 } // namespace phazite::test

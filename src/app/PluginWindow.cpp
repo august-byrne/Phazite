@@ -49,7 +49,7 @@ namespace
         {
             if (const auto* song = findSong (context))
             {
-                if (const auto device = findDevice (*song, id); device.has_value() && device->isPlugin())
+                if (const auto* device = findDevice (*song, id); device != nullptr && device->isPlugin())
                 {
                     name = getDeviceName (*song, id);
                     identity = getIdentity (toDescription (device->plugin));

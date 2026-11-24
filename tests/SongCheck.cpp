@@ -8,6 +8,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/ModulationValue.h"
@@ -22,6 +23,7 @@
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
 #include "model/base/internal/TracksValue.h"
+#include "model/base/internal/WholeState.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
@@ -1158,11 +1160,11 @@ namespace
 
             if (value.place.container.isValid())
             {
-                const auto container = findDevice (song, value.place.container);
+                const auto* container = findDevice (song, value.place.container);
                 const DevicePlace onChannel { .track = value.place.onMaster ? TrackID() : value.place.track,
                                               .onMaster = value.place.onMaster };
 
-                if (! container.has_value() || container->form != DeviceValue::Form::container || container->place != onChannel)
+                if (container == nullptr || container->form != DeviceValue::Form::container || container->place != onChannel)
                     problems.push_back (text + " is a macro of a container that isn't on its channel");
             }
 
@@ -1248,12 +1250,12 @@ namespace
         }
     }
 
-    // The song's devices read again from its tree, each as the song holds one (DevicesValue.h: readHeldDevice()), as the
-    // devices' part of the keeper read them as the song took its values (DevicesArea.h): each TRACK's (in the track list, a
+    // The song's devices read again from a whole copy's tree, each as the song holds one (DevicesValue.h: readHeldDevice()), as
+    // the devices' adoption reads them as a song takes its values (DevicesArea.h): each TRACK's (in the track list, a
     // folder's before the tracks in it) and the MASTER's, each channel's DEVICEs and CONTAINERs in its element's order, each
     // CONTAINER's CHAINs and each CHAIN's DEVICEs in theirs; of two with one ID the first, none of an ID the song can't count
-    // on, nor of a type Phazite doesn't play, nor what such a container or chain holds. Written here, apart from the keeper's
-    // walks, so that the check doesn't take the keeper's word for it.
+    // on, nor of a type Phazite doesn't play, nor what such a container or chain holds. Written here, apart from the adoption's
+    // walk, so that the check doesn't take its word for it.
     SongDevices readDevicesAfresh (const juce::ValueTree& song)
     {
         SongDevices devices;
@@ -1347,25 +1349,93 @@ namespace
         return fields;
     }
 
-    // The devices' area, while the song's tree holds the devices: what the devices' part of the keeper keeps of them, which
-    // the listeners were told (SongValues.h: getDevicesAsTold()), is what the song holds, read again (readDevicesAfresh()),
-    // item by item (one kept and not held, or held and not kept; the fields that differ), and list by list, each in its order.
+    // The devices' area (DevicesValue.h): no DEVICE, CONTAINER, CHAIN, VALUES or SOUNDS in the song's tree; its lists held
+    // together (holdsItsLists(): each in one list, places agreeing, a device in a chain no container); each place a TRACK of
+    // the song's or the master; Phazite's own device of a type Phazite has, each value set by hand within its parameter's
+    // range, on its steps and none at its default, each sound of a property its type has (a sound file's path, inside the
+    // project's folder, is the whole copy's check: checkValues()); a container without chains is held as it is (no rule
+    // makes one). And whole state: the song's devices read again from a whole copy (readDevicesAfresh()) are the area's, item
+    // by item (one held and not read, or read and not held; the fields that differ), and list by list, each in its order.
     void checkDevicesValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
-        const auto* kept = values.getDevicesAsTold();
-
-        if (kept == nullptr)
+        const auto& kept = values.devices.get();
+        const std::function<void (const juce::ValueTree&)> visit = [&problems, &visit] (const juce::ValueTree& element)
         {
-            problems.push_back ("values: the keeper holds no devices");
-            return;
-        }
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN)
+                    || child.hasType (schema::VALUES) || child.hasType (schema::SOUNDS))
+                    problems.push_back ("values: the song's tree holds a " + child.getType().toString().toStdString());
 
-        const auto read = readDevicesAfresh (song.getState());
+                visit (child);
+            }
+        };
 
-        if (! holdsItsLists (*kept))
+        visit (song.getState());
+
+        if (! holdsItsLists (kept))
             problems.push_back ("values: the devices kept don't hold their lists");
 
-        for (const auto& [id, value] : kept->devices)
+        for (const auto& [id, value] : kept.devices)
+        {
+            const auto text = "values: device " + std::to_string (id);
+
+            if (! value.place.onMaster && ! (value.place.track.isValid() && phazite::hasTrack (song, value.place.track)))
+                problems.push_back (text + " is on no channel of the song's");
+
+            if (value.form != DeviceValue::Form::own)
+                continue;
+
+            const auto* info = findOwnDevice (std::string_view (value.type.toRawUTF8()));
+
+            if (info == nullptr)
+            {
+                problems.push_back (text + " is of no type Phazite has");
+                continue;
+            }
+
+            for (const auto& [index, held] : value.values)
+            {
+                if (index >= info->parameters.size())
+                {
+                    problems.push_back (text + " holds a value of no parameter of its type's");
+                    continue;
+                }
+
+                const auto& parameter = info->parameters[index];
+
+                if (! std::isfinite (held) || ! juce::exactlyEqual (devices::constrain (parameter, held), held))
+                    problems.push_back (text + " holds a value outside its parameter's range or off its steps");
+                else if (isDefaultValue (parameter, held))
+                    problems.push_back (text + " holds a value at its default");
+            }
+
+            const auto& sounds = getSoundPropertiesOf (std::string_view (value.type.toRawUTF8()));
+
+            for (const auto& [index, sound] : value.sounds)
+                if (index >= sounds.size() || sound.isEmpty())
+                    problems.push_back (text + " holds a sound of no property of its type's, or an empty one");
+        }
+
+        // A copy of the tree given its devices alone, as a whole copy writes them (DevicesArea.h: writeDevicesIn()): what the
+        // other areas write is their checks', and a song whose tree holds what its keeper refused (a second AUTOMATION, which
+        // a whole copy can't write) still has its devices checked.
+        auto whole = song.getState().createCopy();
+        const auto valuesKept = keepValues (song);
+        const std::function<void (juce::ValueTree)> writeDevices = [&valuesKept, &writeDevices] (juce::ValueTree element)
+        {
+            writeDevicesIn (element, valuesKept);
+
+            for (auto child : element)
+                if (leadsToDevices (element, child))
+                    writeDevices (child);
+        };
+
+        writeDevices (whole);
+        const auto read = readDevicesAfresh (whole);
+        const auto* keptValue = &kept;
+
+        for (const auto& [id, value] : keptValue->devices)
         {
             const auto text = "values: device " + std::to_string (id);
 
@@ -1373,7 +1443,7 @@ namespace
 
             if (held == nullptr)
             {
-                problems.push_back (text + " is kept but not in the song");
+                problems.push_back (text + " is held but not written whole");
                 continue;
             }
 
@@ -1383,12 +1453,12 @@ namespace
                 fields += (fields.empty() ? "" : ", ") + field;
 
             if (! fields.empty())
-                problems.push_back (text + " is kept other than the song holds it, in its " + fields);
+                problems.push_back (text + " is held other than a whole copy writes it, in its " + fields);
         }
 
         for (const auto& [id, value] : read.devices)
-            if (kept->devices.find (id) == nullptr)
-                problems.push_back ("values: device " + std::to_string (id) + " is in the song but not kept");
+            if (keptValue->devices.find (id) == nullptr)
+                problems.push_back ("values: device " + std::to_string (id) + " is written whole but not held");
 
         // Each owner's list, in its order.
         const auto compareLists = [&problems] (const auto& keptLists, const auto& readLists, const char* kind)
@@ -1407,14 +1477,14 @@ namespace
                     problems.push_back ("values: " + std::string (kind) + " " + std::to_string (key) + "'s devices aren't kept");
         };
 
-        compareLists (kept->channels, read.channels, "channel");
-        compareLists (kept->chains, read.chains, "container");
-        compareLists (kept->chainDevices, read.chainDevices, "chain");
+        compareLists (keptValue->channels, read.channels, "channel");
+        compareLists (keptValue->chains, read.chains, "container");
+        compareLists (keptValue->chainDevices, read.chainDevices, "chain");
 
         // What a writer wrote is what the song holds (the devices' writers: model/mixer/internal/Mixer.h): the lenient reader,
         // as Phazite's code always read the tree (DevicesValue.h: readDevicesValue()), reads each item as the reader of what the
         // song holds does; a value written off its steps, at its default or out of its range would read otherwise.
-        const auto lenient = readDevicesValue (song.getState());
+        const auto lenient = readDevicesValue (whole);
 
         for (const auto& [id, value] : read.devices)
         {
@@ -1461,7 +1531,7 @@ namespace
         visit (song.getState());
 
         const auto& store = values.deviceStore.get();
-        const auto* told = values.getDevicesAsTold();
+        const auto* told = &values.devices.get();
 
         const auto check = [&problems, told] (std::uint64_t item, DeviceValue::Form form, const char* what)
         {

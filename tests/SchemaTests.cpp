@@ -330,17 +330,19 @@ struct Changed
         // MIDI link, a curve or its point, a section, a modulator, a macro or a modulation, a send, or a plug-in's value set by
         // hand: the loader's part alone (makeConsistent()), on a song that keeps everything in its tree, since a song made by
         // makeSong() holds its clips, their notes, its tempo map, its chord lane, its MIDI links, its curves, its sections, its
-        // modulation, its sends and its devices' store as values beside it (Song::holdValues()); and the song opened, whose
-        // values findOpened() reads back through whole state.
+        // modulation, its sends, its devices' store and its devices as values beside it (Song::holdValues()); and the song
+        // opened, whose values findOpened() reads back through whole state.
         if (isCurveElement (element))
             curveKey = schema::getElementKey (element.hasType (schema::CURVE) ? element : element.getParent());
 
         if (element.hasType (schema::CLIP) || element.hasType (schema::WARP) || element.hasType (schema::NOTE)
             || element.hasType (schema::CONTROL) || isTempoMapEntry (element) || isChordLaneEntry (element) || isMidiLink (element)
-            || isCurveElement (element) || isSection (element) || isModulation (element) || isSend (element) || isStoreEntry (element))
+            || isCurveElement (element) || isSection (element) || isModulation (element) || isSend (element) || isStoreEntry (element)
+            || isDeviceItem (element))
         {
             if (! isTempoMapEntry (element) && ! isChordLaneEntry (element) && ! isMidiLink (element) && ! isCurveElement (element)
-                && ! isSection (element) && ! isModulation (element) && ! isSend (element) && ! isStoreEntry (element))
+                && ! isSection (element) && ! isModulation (element) && ! isSend (element) && ! isStoreEntry (element)
+                && ! isDeviceItem (element))
             {
                 const auto clipElement = element.hasType (schema::CLIP) ? element : element.getParent();
                 clip = phazite::ClipID::fromRaw (phazite::readID (clipElement[schema::clipID]));
@@ -402,6 +404,14 @@ struct Changed
         return element.hasType (schema::VALUE) && element.getParent().hasType (schema::DEVICE);
     }
 
+    // A device, a container or a chain, or a device's VALUES or SOUNDS: the devices' area's (DevicesValue.h), which the song
+    // holds beside its tree.
+    static bool isDeviceItem (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN)
+               || ((element.hasType (schema::VALUES) || element.hasType (schema::SOUNDS)) && element.getParent().hasType (schema::DEVICE));
+    }
+
     // A modulator's, a macro's, a modulation's, a send's or a plug-in's value's owner in the whole state of the opened song: the
     // element of the original's parent's type and key (a track, the master or a container for a modulator or a macro; the
     // modulator or the macro for a modulation; a track for a send; a plug-in's device for its value), whose children the
@@ -460,8 +470,8 @@ struct Changed
                                : isSection (original)        ? phazite::copyWholeSong (*opened).getChildWithName (schema::SECTIONS)
                                : isModulation (original)     ? findModulationState()
                                : isSend (original)           ? findModulationState()
-                               : original.hasType (schema::VALUE)
-                                   ? findModulationState() // a plug-in's (isStoreEntry(): the copy has no parent)
+                               : original.hasType (schema::VALUE) || isDeviceItem (element)
+                                   ? findModulationState() // a plug-in's value, a device's (the copy has no parent)
                                    : phazite::copyWholeClip (*opened, clip);
 
         if (! clipState.isValid() || original.hasType (schema::CLIP))
@@ -559,7 +569,12 @@ TEST_CASE ("Every range the description gives is what the loader keeps a number 
                     INFO ("as the song opened holds it");
                     const auto opened = changed.findOpened();
 
-                    if (expected.has_value())
+                    // A mix on one of Phazite's own devices, which nothing reads (its mix is a parameter in its VALUES:
+                    // Schema.h, deviceMix): what the loader kept of it is dropped as the song opens.
+                    const auto isOwnDevicesMix = changed.original.hasType (schema::DEVICE) && property == &schema::deviceMix
+                                                 && changed.original[schema::deviceType].toString() != schema::deviceIsPlugin;
+
+                    if (expected.has_value() && ! isOwnDevicesMix)
                     {
                         REQUIRE (opened.isValid());
                         const auto held = opened.hasProperty (*property) ? opened[*property] : getHeldDefault (type->getName(), *property);

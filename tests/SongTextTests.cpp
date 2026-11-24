@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // How Phazite writes a song as text (model/base/internal/SongText.h; docs/project-format.md): one text for each value, the
 // same in a project file and in a version's pieces; bytes in standard base 64; and XML that any XML reader takes.
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "devices/modulation/Modulators.h"
 #include "model/base/internal/DevicesValue.h"
@@ -349,7 +350,7 @@ TEST_CASE ("Every choice of Phazite's devices and modulators is saved by a name 
         {
             const auto value = parameter.minimum + (float) i;
             juce::ValueTree element ("DEVICE");
-            phazite::keepValueSetByHand (element, parameter, value, nullptr);
+            phazite::test::writeValueSetByHand (element, parameter, value);
             const auto saved = element.getChildWithName (
                 phazite::schema::VALUES)[juce::Identifier (juce::String (parameter.id.data(), parameter.id.size()))];
 

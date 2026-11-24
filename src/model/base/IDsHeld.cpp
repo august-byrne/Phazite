@@ -17,10 +17,6 @@ namespace phazite
 {
 namespace
 {
-    // Whether the song holds its devices, containers and chains beside its tree: not yet (the devices' first piece, roadmap
-    // step S5.20: the tree is their storage). forEachNameableIDHeld()'s line for them reads nothing until it is on.
-    constexpr bool devicesHeldBesideTheTree = false;
-
     // Whether the song holds its tracks (TracksValue.h, TrackSwitchesValue.h, TracksOutside.h) beside its tree: not yet (the
     // tracks' first piece, roadmap step S5.20: the tree is their storage, whose IDs findLargestID() and holdsID() count). The
     // lines for them read nothing until it is on.
@@ -41,6 +37,7 @@ std::uint64_t findLargestIDHeld (const Song& song)
     largest = std::max (largest, findLargestIDIn (values->sections.get()));   // the sections' (each section's ID)
     largest = std::max (largest, findLargestIDIn (values->modulation.get())); // modulation's (each modulator's and macro's ID)
     largest = std::max (largest, findLargestIDIn (values->sends.get()));      // the sends' (each send's ID)
+    largest = std::max (largest, findLargestIDIn (values->devices.get()));    // the devices' (a device's, container's, chain's)
 
     // The tracks' (each track's, its fader's and its VCA's ID, and the master's), the same: the tree holds them until their
     // switch, which turns tracksHeldBesideTheTree on and reads the area's value in place of the tree's.
@@ -60,13 +57,8 @@ void forEachNameableIDHeld (const Song& song, const std::function<void (std::uin
     {
         forEachIDHeld (values->modulation.get(), each);
         forEachIDHeld (values->sends.get(), each);
+        forEachIDHeld (values->devices.get(), each); // the devices' (each device's, container's and chain's: DevicesValue.h)
     }
-
-    // The devices' (each device's, container's and chain's ID: DevicesValue.h), the same: the tree holds them until their
-    // switch (holdsID() of a DEVICE, a CONTAINER and a CHAIN), which turns devicesHeldBesideTheTree on and reads the area's
-    // value in place of the tree's.
-    if constexpr (devicesHeldBesideTheTree)
-        forEachIDHeld (readDevicesValue (song.getState()), each);
 
     // The tracks' (each track's, its fader's and its VCA's, and the master's: TracksValue.h), what a curve, a lane, a modulation
     // and a MIDI link name a fader by and a send, a sidechain and a modulator's place a track by, the same until their switch.

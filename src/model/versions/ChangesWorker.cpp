@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/CurveValues.h"
+#include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/ModulationArea.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
@@ -35,8 +36,9 @@ namespace
     // without the tracks in it (a folder's), which are parts of their own. Its own properties and the elements its element
     // holds, whole state of one track (Tracks.h: findTrackState(), the one element function the versions' copies still find a
     // track by). Its clips first, by their IDs (Clips.h), each whole with its notes (WholeState.h: copyWholeClip()), as the
-    // song holds them beside its tree; then its other parts, each whole (a container with its macros); then its modulators and
-    // macros, then its sends, as whole state writes them (ModulationArea.h: writeModulationIn(); SendsArea.h: writeSendsIn()).
+    // song holds them beside its tree; then its devices and containers, each whole (a container with its chains and macros);
+    // then its other parts, each whole; then its modulators and macros, then its sends, as whole state writes them
+    // (ModulationArea.h: writeModulationIn(); SendsArea.h: writeSendsIn()).
     // A comparison finds a clip by its key, in no order among the rest (Schema.h: CLIP is in no order group), and a modulator
     // and a send by its ID, in the order of its kind.
     juce::ValueTree copyTrack (const Song& song, TrackID id)
@@ -53,11 +55,23 @@ namespace
             for (const auto clip : getClips (song, id))
                 copy.appendChild (copyWholeClip (song, clip), nullptr);
 
+        // Its devices and containers after its clips, each whole as whole state writes it (DevicesArea.h: writeDeviceWhole(),
+        // made whole with what the store and modulation hold of it: WholeState.h, makeWhole(), in place).
+        const auto kept = keepValues (song);
+        const auto onMaster = isMaster (song, id);
+
+        if (const auto* list = kept.devices.findList (makeChannelPlace (id, onMaster)))
+            for (const auto device : *list)
+            {
+                auto element = writeDeviceWhole (kept.devices, device);
+                makeWhole (element, kept);
+                copy.appendChild (element, nullptr);
+            }
+
         for (const auto& child : track)
             if (! readTrackKind (child).has_value()) // not a track in it (TracksValue.h)
                 copy.appendChild (copyWhole (song, child), nullptr);
 
-        const auto kept = keepValues (song);
         writeModulationIn (copy, kept);
         writeSendsIn (copy, kept);
         return copy;

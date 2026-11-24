@@ -1002,20 +1002,18 @@ namespace
             if (values == nullptr)
                 return 0;
 
-            return values->countAdopted()               // the clips', with their notes
-                   + values->countTempoMapAdopted()     // the tempo map's
-                   + values->countChordLaneAdopted()    // the chord lane's
-                   + values->countMidiLinksAdopted()    // the MIDI links'
-                   + values->countCurvesAdopted()       // the curves'
-                   + values->countSectionsAdopted()     // the sections'
-                   + values->countModulationAdopted()   // modulation's: no copy the passes add holds one (copyForSong())
-                   + values->countSendsAdopted()        // the sends': nor a send (copyForSong())
-                   + values->countDeviceStoreAdopted(); // the store's: the devices pass sets an item's entries in the store
-
-            // Not the devices': their part of the keeper (DevicesArea.h) tells what the tree holds and takes nothing in until
-            // the devices' switch, so it has no count; no copy the passes add holds a device, a container or a chain
-            // (copyForSong()), which the devices pass alone adds (makeDevicesLike()), with what the store holds of each
-            // (Mixer.h: setNewDevices()), none of it in its element.
+            return values->countAdopted()              // the clips', with their notes
+                   + values->countTempoMapAdopted()    // the tempo map's
+                   + values->countChordLaneAdopted()   // the chord lane's
+                   + values->countMidiLinksAdopted()   // the MIDI links'
+                   + values->countCurvesAdopted()      // the curves'
+                   + values->countSectionsAdopted()    // the sections'
+                   + values->countModulationAdopted()  // modulation's: no copy the passes add holds one (copyForSong())
+                   + values->countSendsAdopted()       // the sends': nor a send (copyForSong())
+                   + values->countDeviceStoreAdopted() // the store's: the devices pass sets an item's entries in the store
+                   + values->countDevicesAdopted();    // the devices': no copy the passes add holds a device, a container or a
+                                                       // chain (copyForSong()), which the devices pass alone sets
+                                                       // (makeDevicesLike())
         }
 
         const Song& song;
@@ -2143,15 +2141,10 @@ namespace
         return writes;
     }
 
-    // The song's devices as the devices' keeper told them (SongValues.h: getDevicesAsTold()), kept up to date at each change
-    // of the tree, so that none is read (what tests/SongCheck.cpp compares with the song's devices read again); read whole only
-    // for a song that holds no values.
+    // The song's devices as the devices' area holds them (SongValues.h: devices; none read), a copy the pass keeps up to date
+    // as it writes; read from its tree only for a song that holds no values.
     SongDevices getSongDevices (const Song& song)
     {
-        if (const auto* values = song.getValues())
-            if (const auto* told = values->getDevicesAsTold())
-                return *told;
-
         return getDevicesValue (song);
     }
 
@@ -2183,107 +2176,6 @@ namespace
         return writes;
     }
 
-    // Whether a child of a folder is one placeTracksAmongDevices() (below) orders: a track, or one of the folder's devices and
-    // containers.
-    bool isPlacedHere (const juce::ValueTree& owner, const juce::ValueTree& child)
-    {
-        return child.hasType (schema::TRACK) || isListedIn (owner, child);
-    }
-
-    // A folder's tracks put among its devices and containers where the other song has them, after the areas' passes: the
-    // passes over elements place a track among the tracks alone, past the devices (isPlaced()), and the devices pass a device
-    // among the devices alone, the first of an empty list after its owner's other children (DeviceWriters.cpp:
-    // findChildIndex()), so that a
-    // folder whose tracks and devices stand among each other (a bus's effects before a track moved into it) would not stand
-    // as the other's. Its tracks moved alone, each the same element, in the mode of the moment (in the song's step, or
-    // without an undo manager outside the history): of those both hold (all of them, or the one given), in the other's
-    // order, each right before what follows, among those both hold, the one before it there (else right after that one; the
-    // first before the others), so that the folder's tracks and devices stand in the other's order, and nothing moves where
-    // they do already (a second pass moves nothing). This goes with the devices' switch: from then a whole copy writes a
-    // channel's devices before its tracks, always, and the tracks' places among the devices are no more. How many it moved.
-    int placeTracksAmongDevices (juce::ValueTree folder, const juce::ValueTree& there, juce::UndoManager* undo,
-                                 const juce::ValueTree& only = {})
-    {
-        if (! folder.getChildWithName (schema::TRACK).isValid())
-            return 0;
-
-        std::map<juce::String, juce::ValueTree> held;
-
-        for (const auto& child : folder)
-            if (isPlacedHere (folder, child))
-                held.emplace (nameOf (child), child);
-
-        // The folder's that the other holds too, in the other's order; nothing to place among tracks alone.
-        std::vector<juce::ValueTree> wanted;
-        std::set<juce::String> wantedNames;
-        auto withDevices = false;
-
-        for (const auto& child : there)
-        {
-            if (! isPlacedHere (there, child))
-                continue;
-
-            if (const auto found = held.find (nameOf (child)); found != held.end() && wantedNames.insert (found->first).second)
-            {
-                wanted.push_back (found->second);
-                withDevices = withDevices || ! child.hasType (schema::TRACK);
-            }
-        }
-
-        if (! withDevices)
-            return 0;
-
-        const auto isWanted = [&folder, &wantedNames] (const juce::ValueTree& child)
-        { return isPlacedHere (folder, child) && wantedNames.count (nameOf (child)) > 0; };
-
-        auto moves = 0;
-
-        for (size_t k = 0; k < wanted.size(); ++k)
-        {
-            const auto track = wanted[k];
-
-            if (! track.hasType (schema::TRACK) || (only.isValid() && track != only))
-                continue;
-
-            // What it goes before: the first after the one before it there (or the first of all) that both hold.
-            const auto index = folder.indexOf (track);
-            const auto before = k > 0 ? wanted[k - 1] : juce::ValueTree();
-            juce::ValueTree next;
-
-            for (int i = before.isValid() ? folder.indexOf (before) + 1 : 0; i < folder.getNumChildren() && ! next.isValid(); ++i)
-                if (const auto child = folder.getChild (i); child != track && isWanted (child))
-                    next = child;
-
-            if (! next.isValid() && ! before.isValid())
-                continue; // the only one both hold
-
-            const auto at = folder.indexOf (next.isValid() ? next : before);
-            const auto target = next.isValid() ? (at < index ? at : at - 1) : (at < index ? at + 1 : at);
-
-            if (target != index)
-            {
-                folder.moveChild (index, target, undo);
-                ++moves;
-            }
-        }
-
-        return moves;
-    }
-
-    // Every folder's tracks put among its devices where the other has them (placeTracksAmongDevices()), in the mode of the
-    // moment; a folder the other's version couldn't read left as it is. How many it moved.
-    int placeEveryFolderLike (Song& song, const juce::ValueTree& other)
-    {
-        auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-        auto moves = 0;
-
-        for (const auto& folder : getTrackElements (song.getState()))
-            if (const auto there = findTrack (other, readID (folder[schema::trackID])); there.isValid() && ! isStandIn (there))
-                moves += placeTracksAmongDevices (folder, there, undo);
-
-        return moves;
-    }
-
     // Every track's clips made like the other's, once the rest of the song is: how many writes it made.
     int makeClipsLike (Song& song, const juce::ValueTree& other, bool standInsStay)
     {
@@ -2302,9 +2194,9 @@ namespace
     // store and a window's place; what the other's version couldn't read that stays where the song has it). How many writes
     // they made (the tempo map's one, where it wrote; the chord lane's one, where it wrote), of what the undo history alone
     // writes: not the devices' store's, which is written outside it too, and which a song made as copied takes back
-    // (makeSongAsCopied()), as the passes over elements took back a plug-in's state and a chain's solo. Then, once the
-    // devices are the other's, every folder's tracks put among its devices where the other has them
-    // (placeEveryFolderLike()), its moves counted with the writes.
+    // (makeSongAsCopied()), as the passes over elements took back a plug-in's state and a chain's solo. A channel's devices
+    // stand before its other children in a whole copy, always (DevicesArea.h: writeDevicesIn()), so that a folder's tracks have
+    // no place among its devices to be given.
     int makeValuesLike (Song& song, const juce::ValueTree& other, bool standInsStay, Taken taken, const StandIns& standIns)
     {
         auto writes = makeClipsLike (song, other, standInsStay);
@@ -2316,7 +2208,6 @@ namespace
         writes += makeSectionsLike (song, other) ? 1 : 0; // the sections' one, where it wrote
         writes += makeAllModulationLike (song, other);
         writes += makeAllSendsLike (song, other);
-        writes += placeEveryFolderLike (song, other);
         return writes;
     }
 
@@ -2537,7 +2428,6 @@ namespace
         { return isMaster ? place.onMaster : ! place.onMaster && lineTracks.count (place.track.getRaw()) > 0; };
         const auto standIns = then.isValid() ? findStandIns (then) : StandIns();
         auto devicesDone = false;
-        juce::ValueTree cameBack; // the track, gone since, put back
 
         if (live.isValid() && then.isValid())
         {
@@ -2602,7 +2492,6 @@ namespace
             }
 
             parent.addChild (copy, index, undo);
-            cameBack = copy;
 
             // Its clips, and those of the tracks in it that came back with it; and their devices, modulators and macros, which
             // the copy holds none of (copyForSong()); and their automation, as the other song's elements of them hold what it is
@@ -2643,17 +2532,6 @@ namespace
         // master's line none.
         if (! isMaster)
             makeSendsLike (song, other, isLineTrack);
-
-        // Once its devices are the other's, the tracks of each of the line's folders put among its devices where the other has
-        // them, and the track, gone since, among its folder's (placeTracksAmongDevices()): as the passes put its tracks among
-        // the tracks alone, and a device back into an empty list after them.
-        for (const auto track : lineTracks)
-            if (const auto there = findTrack (other, track); there.isValid() && ! isStandIn (there))
-                if (const auto folder = findTrack (state, track); folder.isValid())
-                    placeTracksAmongDevices (folder, there, undo);
-
-        if (cameBack.isValid())
-            placeTracksAmongDevices (cameBack.getParent(), then.getParent(), undo, cameBack);
 
         return true;
     }
@@ -2775,60 +2653,40 @@ int removeBrokenReferences (Song& song)
     // And those the song's values hold of items that something can name, which its tree may not (IDsHeld.h:
     // forEachNameableIDHeld(): a modulator's, a macro's and a send's).
     forEachNameableIDHeld (song, [&items] (std::uint64_t id) { items.insert (id); });
-    std::vector<juce::ValueTree> sidechains;
-    const std::function<void (const juce::ValueTree&)> find = [&] (const juce::ValueTree& element)
-    {
-        for (const auto& child : element)
-        {
-            if (child.hasType (schema::DEVICE) && child.hasProperty (schema::deviceSidechain)
-                && tracks.count (readID (child[schema::deviceSidechain])) == 0)
-                sidechains.push_back (child);
+    std::vector<DeviceID> sidechains;
 
-            find (child);
-        }
-    };
-
-    find (state);
+    for (const auto& [id, device] : getDevicesValue (song).devices)
+        if (device.sidechain.isValid() && tracks.count (device.sidechain.getRaw()) == 0)
+            sidechains.push_back (device.id);
 
     // A modulation of a parameter of an item the song hasn't, through modulation's code.
     const auto modulations = (size_t) forgetModulationsOf (song, [&items] (DeviceID device) { return items.count (device.getRaw()) == 0; });
 
-    // A sidechain that listens to a track the song hasn't turned off through the devices' setter, on the element found
+    // A sidechain that listens to a track the song hasn't turned off through the devices' setter, by its device's ID
     // (Mixer.h: setDeviceFields()).
-    for (const auto& device : sidechains)
+    for (const auto device : sidechains)
         setDeviceFields (song, device, [] (DeviceValue& value) { value.sidechain = {}; });
 
     // And what an edit takes away with what it names (model/mixer/internal/Mixer.h): a send to a return that is gone, with
     // what modulated it, and a pad's track whose drum sampler is gone; so that the song is as makeConsistent() leaves it.
     // Then a sidechain that would hear the device's own sound round a loop, which two lines' changes can make together (one
     // a sidechain, the other a send), as an edit that makes one lets it go (Sidechain.h: forgetSidechainLoops()).
-    const auto count = [&state] (const std::function<bool (const juce::ValueTree&)>& counts)
-    {
-        auto found = 0;
-        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                found += counts (child) ? 1 : 0;
-                visit (child);
-            }
-        };
-
-        visit (state);
-        return found;
-    };
-
     // The song's sends, as its area holds them (SendsValue.h: getSendsValue()).
     const auto countSends = [&song] { return (int) getSendsValue (song).sends.size(); };
-    const auto hasSidechain = [] (const juce::ValueTree& element)
-    { return element.hasType (schema::DEVICE) && element.hasProperty (schema::deviceSidechain); };
+
+    // The devices that listen to a sidechain, as the devices' area holds them.
+    const auto countSidechains = [&song]
+    {
+        const auto& devices = getDevicesValue (song).devices;
+        return (int) std::count_if (devices.begin(), devices.end(), [] (const auto& each) { return each.second.sidechain.isValid(); });
+    };
 
     const auto sendsBefore = countSends();
     forgetWhatNamesTheGone (song);
-    const auto sidechainsBefore = count (hasSidechain);
+    const auto sidechainsBefore = countSidechains();
     forgetSidechainLoops (song);
 
-    return (int) (modulations + sidechains.size()) + sendsBefore - countSends() + sidechainsBefore - count (hasSidechain);
+    return (int) (modulations + sidechains.size()) + sendsBefore - countSends() + sidechainsBefore - countSidechains();
 }
 
 std::uint64_t countDeviceStorePassWrites() noexcept

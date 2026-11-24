@@ -9,8 +9,8 @@
 #include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/base/internal/SongValues.h"
 #include "model/devices/internal/Devices.h"
-#include "model/mixer/internal/Mixer.h"
 
 #include <algorithm>
 #include <atomic>
@@ -19,6 +19,7 @@
 #include <optional>
 #include <set>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -27,7 +28,33 @@ namespace phazite
 {
 namespace
 {
-    std::atomic<std::uint64_t> devicesRead { 0 }; // countDevicesReadAsValues(): a count alone, which orders nothing
+    std::atomic<std::uint64_t> devicesRead { 0 };     // countDevicesReadAsValues(): a count alone, which orders nothing
+    std::atomic<std::uint64_t> entriesCompared { 0 }; // countDeviceEntriesCompared(): the same
+
+    // Two entries of a device's values or sounds alike, each pair compared counted: a value's number exactly (immer's own ==
+    // would compare floats with ==), a sound's text.
+    struct SameEntry
+    {
+        template <typename Entry>
+        bool operator() (const Entry& a, const Entry& b) const
+        {
+            entriesCompared.fetch_add (1, std::memory_order_relaxed);
+
+            if constexpr (std::is_floating_point_v<typename Entry::second_type>)
+                return a.first == b.first && juce::exactlyEqual (a.second, b.second);
+            else
+                return a.first == b.first && a.second == b.second;
+        }
+    };
+
+    // Whether two of a device's maps (its values, its sounds) hold the same entries: the same map at once (immer: the same
+    // root), else by the nodes where they differ alone, those they share skipped (immer's equality, as a map of the same
+    // entries has one shape whatever made it): a value set on a device of thousands compares a few entries, not every one.
+    template <typename Map>
+    bool holdSameEntries (const Map& a, const Map& b)
+    {
+        return a.identity() == b.identity() || a.impl().template equals<SameEntry> (b.impl());
+    }
 
     using IDList = immer::flex_vector<DeviceID>;
     using Lists = immer::map<std::uint64_t, IDList>;
@@ -318,6 +345,72 @@ namespace
         }
 
         return sounds.persistent();
+    }
+
+    //==============================================================================
+    // The conversion's readers of one field of one element, as readDeviceValue() reads it (DevicesValue.h: the public
+    // ones read the others), each of an element that isn't one it is on read as one without it.
+    bool readDeviceOff (const juce::ValueTree& element)
+    {
+        return (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER)) && (bool) element[schema::deviceOff];
+    }
+
+    TrackID readDeviceSidechain (const juce::ValueTree& device)
+    {
+        return device.hasType (schema::DEVICE) ? TrackID::fromRaw (readIDOf (device[schema::deviceSidechain])) : TrackID();
+    }
+
+    float readDeviceMix (const juce::ValueTree& element)
+    {
+        return element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER)
+                   ? toFloat (readNumber (element[schema::deviceMix], 1.0))
+                   : 1.0f;
+    }
+
+    ContainerSplit readContainerSplit (const juce::ValueTree& container)
+    {
+        return container.hasType (schema::CONTAINER) ? readSplitWord (container[schema::containerSplit]) : ContainerSplit::layers;
+    }
+
+    bool readContainerInstrument (const juce::ValueTree& container)
+    {
+        return container.hasType (schema::CONTAINER) && (bool) container[schema::containerInstrument];
+    }
+
+    float readChainVolume (const juce::ValueTree& chain)
+    {
+        return chain.hasType (schema::CHAIN) ? toFloat (readNumber (chain[schema::channelVolume], 0.0)) : 0.0f;
+    }
+
+    float readChainPan (const juce::ValueTree& chain)
+    {
+        return chain.hasType (schema::CHAIN) ? toFloat (readNumber (chain[schema::channelPan], 0.0)) : 0.0f;
+    }
+
+    std::optional<float> readChainCrossover (const juce::ValueTree& chain)
+    {
+        if (! chain.hasType (schema::CHAIN))
+            return std::nullopt;
+
+        const auto hertz = readValueNumber (chain[schema::chainCrossover]);
+        return hertz.has_value() && std::isfinite (*hertz) ? std::optional<float> (toFloat (*hertz)) : std::nullopt;
+    }
+
+    NoteRange readChainKeys (const juce::ValueTree& chain)
+    {
+        if (! chain.hasType (schema::CHAIN))
+            return allKeys;
+
+        return { readWhole (chain[schema::chainLowKey], allKeys.low), readWhole (chain[schema::chainHighKey], allKeys.high) };
+    }
+
+    NoteRange readChainVelocities (const juce::ValueTree& chain)
+    {
+        if (! chain.hasType (schema::CHAIN))
+            return allVelocities;
+
+        return { readWhole (chain[schema::chainLowVelocity], allVelocities.low),
+                 readWhole (chain[schema::chainHighVelocity], allVelocities.high) };
     }
 
     // What both readers read alike: whether the element is one, its ID, its place, its form and an own device's type.
@@ -759,21 +852,12 @@ bool DeviceValue::isSameAs (const DeviceValue& other) const noexcept
 
 bool DeviceValue::operator== (const DeviceValue& other) const
 {
-    if (! (id == other.id && place == other.place && form == other.form && off == other.off && sidechain == other.sidechain
-           && type == other.type && sounds == other.sounds && plugin == other.plugin && juce::exactlyEqual (mix, other.mix)
-           && name == other.name && split == other.split && instrument == other.instrument && juce::exactlyEqual (volume, other.volume)
+    return id == other.id && place == other.place && form == other.form && off == other.off && sidechain == other.sidechain
+           && type == other.type && plugin == other.plugin && juce::exactlyEqual (mix, other.mix) && name == other.name
+           && split == other.split && instrument == other.instrument && juce::exactlyEqual (volume, other.volume)
            && juce::exactlyEqual (pan, other.pan) && crossover.has_value() == other.crossover.has_value()
            && (! crossover.has_value() || juce::exactlyEqual (*crossover, *other.crossover)) && keys == other.keys
-           && velocities == other.velocities)
-        || values.size() != other.values.size())
-        return false;
-
-    // The values compared with exactlyEqual(): immer's own == would compare floats with ==.
-    for (const auto& [index, held] : values)
-        if (const auto* otherHeld = other.values.find (index); otherHeld == nullptr || ! juce::exactlyEqual (held, *otherHeld))
-            return false;
-
-    return true;
+           && velocities == other.velocities && holdSameEntries (values, other.values) && holdSameEntries (sounds, other.sounds);
 }
 
 const immer::flex_vector<DeviceID>* SongDevices::findList (const DevicePlace& place) const
@@ -913,36 +997,6 @@ SongDevices withListOrder (const SongDevices& devices, const DevicePlace& owner,
     auto next = devices;
     auto& lists = getLists (next, owner);
     lists = lists.set (getListKey (owner), std::move (order));
-    return next;
-}
-
-SongDevices withChannelPlace (const SongDevices& devices, TrackID from, TrackID to, bool toMaster)
-{
-    if (! from.isValid() || (! toMaster && to == from))
-        return devices;
-
-    auto next = devices;
-
-    for (const auto& [key, value] : devices.devices)
-    {
-        if (value.place.onMaster || value.place.track != from)
-            continue;
-
-        auto moved = value;
-        moved.place.track = toMaster ? TrackID() : to;
-        moved.place.onMaster = toMaster;
-        next.devices = next.devices.set (key, std::move (moved));
-    }
-
-    // The channel's list under its new key, after what may be there.
-    if (const auto* list = devices.channels.find (from.getRaw()))
-    {
-        const auto newKey = toMaster ? (std::uint64_t) 0 : to.getRaw();
-        const auto* there = next.channels.find (newKey);
-        auto joined = there != nullptr ? *there + *list : *list;
-        next.channels = next.channels.erase (from.getRaw()).set (newKey, std::move (joined));
-    }
-
     return next;
 }
 
@@ -1227,195 +1281,57 @@ bool keepDeviceAsHeld (juce::ValueTree element)
     return changed;
 }
 
-bool writeDeviceFields (juce::ValueTree& element, const DeviceValue& value, juce::UndoManager* undo)
+namespace
 {
-    // Each compared as the file writes it before it is set, so that with no undo manager (the song written outside its
-    // history) the same value as another type (a number over its text) is no change. JUCE workaround W8
-    // (docs/juce-workarounds.md).
-    auto changed = false;
-
-    forEachWrittenProperty (value,
-                            [&element, &changed, undo] (const juce::Identifier& property, const juce::var& written)
-                            {
-                                if (const auto* there = element.getPropertyPointer (property);
-                                    there == nullptr || ! isSameValue (*there, written))
-                                {
-                                    element.setProperty (property, written, undo);
-                                    changed = true;
-                                }
-                            });
-
-    // Those the writer leaves out, looked for without a list made (a chain's fader is set at a drag's rate).
-    for (auto i = element.getNumProperties(); --i >= 0;)
+    // Every device, container and chain of a song's tree, each read by the reader given.
+    SongDevices readTreeDevices (const juce::ValueTree& song,
+                                 const std::function<std::optional<DeviceValue> (const juce::ValueTree&, const DevicePlace&)>& read)
     {
-        const auto property = element.getPropertyName (i);
+        SongDevices devices;
 
-        if (! isCovered (value.form, property))
-            continue;
-
-        auto written = false;
-        forEachWrittenProperty (value, [&property, &written] (const juce::Identifier& each, const juce::var&)
-                                { written = written || each == property; });
-
-        if (! written)
+        // Each read and added after the others of its list; one of an ID read already, or none, with what it holds left out.
+        const auto add = [&devices, &read] (const juce::ValueTree& element)
         {
-            element.removeProperty (property, undo);
-            changed = true;
-        }
+            auto value = read (element, readDevicePlace (element));
+
+            if (! value.has_value() || devices.find (value->id) != nullptr)
+                return false;
+
+            devices = withDevice (devices, std::move (*value));
+            return true;
+        };
+
+        forEachChannelElement (song,
+                               [&add] (const juce::ValueTree& channel)
+                               {
+                                   for (const auto& child : channel)
+                                   {
+                                       if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)) || ! add (child)
+                                           || ! child.hasType (schema::CONTAINER))
+                                           continue;
+
+                                       for (const auto& chain : child)
+                                           if (chain.hasType (schema::CHAIN) && add (chain))
+                                               for (const auto& device : chain)
+                                                   if (device.hasType (schema::DEVICE))
+                                                       add (device);
+                                   }
+                               });
+
+        return devices;
     }
-
-    return changed;
-}
-
-bool writeDeviceValueOf (juce::ValueTree& device, const devices::ParameterInfo& info, std::optional<float> held, juce::UndoManager* undo)
-{
-    const juce::Identifier parameter (toString (info.id));
-    auto values = device.getChildWithName (schema::VALUES);
-
-    if (held.has_value())
-    {
-        const auto saved = toSavedValue (info, *held);
-
-        if (const auto* there = values.isValid() ? values.getPropertyPointer (parameter) : nullptr;
-            there != nullptr && isSameValue (*there, saved))
-            return false;
-
-        device.getOrCreateChildWithName (schema::VALUES, undo).setProperty (parameter, saved, undo);
-        return true;
-    }
-
-    if (! values.isValid() || ! values.hasProperty (parameter))
-        return false;
-
-    values.removeProperty (parameter, undo);
-
-    if (values.getNumProperties() == 0 && values.getNumChildren() == 0)
-        device.removeChild (values, undo);
-
-    return true;
-}
-
-bool writeDeviceSoundOf (juce::ValueTree& device, const juce::Identifier& property, const juce::String& sound, juce::UndoManager* undo)
-{
-    auto sounds = device.getChildWithName (schema::SOUNDS);
-
-    if (sound.isNotEmpty())
-    {
-        if (const auto* there = sounds.isValid() ? sounds.getPropertyPointer (property) : nullptr;
-            there != nullptr && there->toString() == sound)
-            return false;
-
-        device.getOrCreateChildWithName (schema::SOUNDS, undo).setProperty (property, sound, undo);
-        return true;
-    }
-
-    if (! sounds.isValid() || ! sounds.hasProperty (property))
-        return false;
-
-    sounds.removeProperty (property, undo);
-
-    // None left: none (a SOUNDS left empty made a file differ from its saved copy with nothing changed).
-    if (sounds.getNumProperties() == 0 && sounds.getNumChildren() == 0)
-        device.removeChild (sounds, undo);
-
-    return true;
-}
-
-bool writeDeviceLike (juce::ValueTree& element, const DeviceValue& held, const DeviceValue& next, juce::UndoManager* undo)
-{
-    auto changed = writeDeviceFields (element, next, undo);
-
-    if (next.form != Form::own)
-        return changed;
-
-    const auto* info = findInfo (next.type);
-
-    if (info == nullptr)
-        return changed;
-
-    // Another type's values and sounds are none of this one's: each taken away first (a merge's choice of the type).
-    const auto sameType = held.form == Form::own && held.type == next.type;
-
-    if (! sameType)
-    {
-        for (const auto* type : { &schema::VALUES, &schema::SOUNDS })
-        {
-            if (auto child = element.getChildWithName (*type); child.isValid())
-            {
-                element.removeChild (child, undo);
-                changed = true;
-            }
-        }
-    }
-
-    const auto noValues = immer::map<std::uint32_t, float>();
-    const auto noSounds = immer::map<std::uint16_t, juce::String>();
-    const auto& heldValues = sameType ? held.values : noValues;
-    const auto& heldSounds = sameType ? held.sounds : noSounds;
-
-    // Each value that differs, by its index (immer's maps looked through, no element read again); those gone first.
-    for (const auto& [index, value] : heldValues)
-        if (next.values.find (index) == nullptr && index < info->parameters.size())
-            changed = writeDeviceValueOf (element, info->parameters[index], std::nullopt, undo) || changed;
-
-    for (const auto& [index, value] : next.values)
-    {
-        if (index >= info->parameters.size())
-            continue;
-
-        if (const auto* was = heldValues.find (index); was == nullptr || ! juce::exactlyEqual (*was, value))
-            changed =
-                writeDeviceValueOf (element, info->parameters[index], keepHeldValue (info->parameters[index], value), undo) || changed;
-    }
-
-    // Each sound that differs, by its index among the type's.
-    const auto& properties = getSoundPropertiesOf (std::string_view (next.type.toRawUTF8()));
-
-    for (const auto& [index, sound] : heldSounds)
-        if (next.sounds.find (index) == nullptr && index < properties.size())
-            changed = writeDeviceSoundOf (element, properties[index], {}, undo) || changed;
-
-    for (const auto& [index, sound] : next.sounds)
-        if (const auto* was = heldSounds.find (index); index < properties.size() && (was == nullptr || *was != sound))
-            changed = writeDeviceSoundOf (element, properties[index], sound, undo) || changed;
-
-    return changed;
-}
+} // namespace
 
 SongDevices readDevicesValue (const juce::ValueTree& song)
 {
-    SongDevices devices;
+    return readTreeDevices (song,
+                            [] (const juce::ValueTree& element, const DevicePlace& place) { return readDeviceValue (element, place); });
+}
 
-    // Each read and added after the others of its list; one of an ID read already, or none, with what it holds left out.
-    const auto add = [&devices] (const juce::ValueTree& element)
-    {
-        auto value = readDeviceValue (element, readDevicePlace (element));
-
-        if (! value.has_value() || devices.find (value->id) != nullptr)
-            return false;
-
-        devices = withDevice (devices, std::move (*value));
-        return true;
-    };
-
-    forEachChannelElement (song,
-                           [&add] (const juce::ValueTree& channel)
-                           {
-                               for (const auto& child : channel)
-                               {
-                                   if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)) || ! add (child)
-                                       || ! child.hasType (schema::CONTAINER))
-                                       continue;
-
-                                   for (const auto& chain : child)
-                                       if (chain.hasType (schema::CHAIN) && add (chain))
-                                           for (const auto& device : chain)
-                                               if (device.hasType (schema::DEVICE))
-                                                   add (device);
-                               }
-                           });
-
-    return devices;
+SongDevices readDevicesFields (const juce::ValueTree& song)
+{
+    return readTreeDevices (song, [] (const juce::ValueTree& element, const DevicePlace& place)
+                            { return readHeldDeviceFields (element, place); });
 }
 
 bool setDeviceProperty (DeviceValue& value, const juce::Identifier& element, const juce::Identifier& property, const juce::var& held)
@@ -1600,22 +1516,6 @@ juce::String readDeviceType (const juce::ValueTree& device)
     return device.hasType (schema::DEVICE) ? device[schema::deviceType].toString() : juce::String();
 }
 
-bool readDeviceOff (const juce::ValueTree& element)
-{
-    return (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER)) && (bool) element[schema::deviceOff];
-}
-
-TrackID readDeviceSidechain (const juce::ValueTree& device)
-{
-    return device.hasType (schema::DEVICE) ? TrackID::fromRaw (readIDOf (device[schema::deviceSidechain])) : TrackID();
-}
-
-float readDeviceMix (const juce::ValueTree& element)
-{
-    return element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) ? toFloat (readNumber (element[schema::deviceMix], 1.0))
-                                                                                   : 1.0f;
-}
-
 PluginIdentity readPluginIdentity (const juce::ValueTree& device)
 {
     if (! device.hasType (schema::DEVICE))
@@ -1658,52 +1558,6 @@ juce::String readDeviceElementName (const juce::ValueTree& element)
     return element.hasType (schema::CHAIN) ? element[schema::chainName].toString() : juce::String();
 }
 
-ContainerSplit readContainerSplit (const juce::ValueTree& container)
-{
-    return container.hasType (schema::CONTAINER) ? readSplitWord (container[schema::containerSplit]) : ContainerSplit::layers;
-}
-
-bool readContainerInstrument (const juce::ValueTree& container)
-{
-    return container.hasType (schema::CONTAINER) && (bool) container[schema::containerInstrument];
-}
-
-float readChainVolume (const juce::ValueTree& chain)
-{
-    return chain.hasType (schema::CHAIN) ? toFloat (readNumber (chain[schema::channelVolume], 0.0)) : 0.0f;
-}
-
-float readChainPan (const juce::ValueTree& chain)
-{
-    return chain.hasType (schema::CHAIN) ? toFloat (readNumber (chain[schema::channelPan], 0.0)) : 0.0f;
-}
-
-std::optional<float> readChainCrossover (const juce::ValueTree& chain)
-{
-    if (! chain.hasType (schema::CHAIN))
-        return std::nullopt;
-
-    const auto hertz = readValueNumber (chain[schema::chainCrossover]);
-    return hertz.has_value() && std::isfinite (*hertz) ? std::optional<float> (toFloat (*hertz)) : std::nullopt;
-}
-
-NoteRange readChainKeys (const juce::ValueTree& chain)
-{
-    if (! chain.hasType (schema::CHAIN))
-        return allKeys;
-
-    return { readWhole (chain[schema::chainLowKey], allKeys.low), readWhole (chain[schema::chainHighKey], allKeys.high) };
-}
-
-NoteRange readChainVelocities (const juce::ValueTree& chain)
-{
-    if (! chain.hasType (schema::CHAIN))
-        return allVelocities;
-
-    return { readWhole (chain[schema::chainLowVelocity], allVelocities.low),
-             readWhole (chain[schema::chainHighVelocity], allVelocities.high) };
-}
-
 float readDeviceParameterValue (const juce::ValueTree& device, const devices::ParameterInfo& info)
 {
     return readDeviceParameterValue (device, info, juce::Identifier (toString (info.id)));
@@ -1714,19 +1568,9 @@ float readDeviceParameterValue (const juce::ValueTree& device, const devices::Pa
     return readSavedValue (info, device.getChildWithName (schema::VALUES).getProperty (id));
 }
 
-juce::String readDeviceSound (const juce::ValueTree& device, const juce::Identifier& property)
-{
-    return readSoundsProperty (device.getChildWithName (schema::SOUNDS), property);
-}
-
 juce::String readSoundsProperty (const juce::ValueTree& sounds, const juce::Identifier& property)
 {
     return sounds.hasType (schema::SOUNDS) ? sounds[property].toString() : juce::String();
-}
-
-juce::ValueTree readDeviceSounds (const juce::ValueTree& device)
-{
-    return device.hasType (schema::DEVICE) ? device.getChildWithName (schema::SOUNDS) : juce::ValueTree();
 }
 
 std::vector<DeviceID> readDeviceList (const juce::ValueTree& owner)
@@ -1755,7 +1599,12 @@ bool holdsDevice (const Song& song, DeviceID id, bool chainsToo)
     if (! id.isValid())
         return false;
 
-    countDeviceWalk(); // a walk of the song, counted as findDeviceState() counts its own (Mixer.h: countDeviceWalks())
+    // A look in the devices' area, for a song that holds its values; a walk of its tree for one that holds none (the loader's).
+    if (const auto* values = song.getValues())
+    {
+        const auto* held = values->devices.get().find (id);
+        return held != nullptr && (chainsToo || held->form != Form::chain);
+    }
 
     const auto isIt = [id] (const juce::ValueTree& element) { return readDeviceElementID (element) == id; };
 
@@ -1825,6 +1674,16 @@ int findSoundIndex (std::string_view typeID, const juce::Identifier& property)
     return found != table->indices.end() ? found->second : -1;
 }
 
+juce::String getDeviceSound (const DeviceValue& value, const juce::Identifier& property)
+{
+    if (value.form != Form::own)
+        return {};
+
+    const auto index = findSoundIndex (std::string_view (value.type.toRawUTF8()), property);
+    const auto* sound = index >= 0 ? value.sounds.find ((std::uint16_t) index) : nullptr;
+    return sound != nullptr ? *sound : juce::String();
+}
+
 //==============================================================================
 std::uint64_t findLargestIDIn (const SongDevices& devices)
 {
@@ -1852,5 +1711,10 @@ void forEachIDNamed (const SongDevices& devices, const std::function<void (std::
 std::uint64_t countDevicesReadAsValues() noexcept
 {
     return devicesRead.load (std::memory_order_relaxed);
+}
+
+std::uint64_t countDeviceEntriesCompared() noexcept
+{
+    return entriesCompared.load (std::memory_order_relaxed);
 }
 } // namespace phazite

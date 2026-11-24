@@ -131,12 +131,12 @@ void SongValues::DeviceStoreTeller::valueAreaChanged (const DeviceStore& before,
     if (told.empty())
         return;
 
-    // Each item's place, as the devices' keeper last told it: none for one the song doesn't hold.
-    const auto* devices = values.getDevicesAsTold();
+    // Each item's place, as the devices' area holds it: none for one the song doesn't hold.
+    const auto held = values.devices.get();
 
     for (auto& change : told)
     {
-        if (const auto* item = devices != nullptr ? devices->find (change.item) : nullptr)
+        if (const auto* item = held.find (change.item))
         {
             change.place = item->place;
             change.isInSong = true;
@@ -156,40 +156,10 @@ SongValues::DeviceStoreKeeper::DeviceStoreKeeper (SongValues& v, Song& s)
 {
 }
 
-void SongValues::DeviceStoreKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
+void SongValues::DeviceStoreKeeper::childAdded (juce::ValueTree&, juce::ValueTree& child)
 {
-    // A lone VALUE (b): refused in a step, read in and taken out outside the history.
-    if (child.hasType (schema::VALUE))
-    {
-        if (! parent.hasType (schema::DEVICE))
-            return;
-
-        if (! song.isWritingOutsideHistory())
-        {
-            jassertfalse; // a plug-in's value on a device of the song's: the store's functions set one (DeviceStore.h)
-            return;
-        }
-
-        DeviceStore held;
-        readHeldStoreOf (parent, held);
-        const auto id = readDeviceElementID (parent);
-        const auto parameter = child[schema::valueParameter].toString();
-
-        if (const auto* entry = findPluginEntry (held, id, parameter))
-        {
-            PluginValueKey key;
-            key.device = id;
-            key.parameter = parameter;
-            auto next = values.deviceStore.get();
-            next.pluginValues = next.pluginValues.set (key, *entry);
-            values.storeOutsideHistory (song, std::move (next));
-        }
-
-        ++values.deviceStoreAdopted;
-        parent.removeChild (child, nullptr);
-        return;
-    }
-
+    // (A lone VALUE (b) never comes: the song's tree holds no DEVICE for one to be added to, as the devices' part of the keeper
+    // takes one out as it comes in, DevicesArea.h.)
     if (! isDeviceOrChain (child) && ! mayHoldDevices (child))
         return;
 

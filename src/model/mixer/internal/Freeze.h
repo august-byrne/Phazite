@@ -91,16 +91,17 @@ public:
     // own, getFrozenFile(), whichever froze it), or as the project opened. Every other plays live.
     bool keepThrough (const std::function<bool()>& apply);
 
-    // What a frozen track's file holds, as the song held it then: a copy of its parts' elements (its frozen devices, a frozen
-    // container without its macros), the song's values (model/base/internal/WholeState.h), its clips and their notes among
-    // them, the song's tempos (TempoMapValue.h), which put its notes and clips where they are in seconds (its time signatures
-    // put nothing there), the curves of what it plays the automation of (its frozen devices', those in its frozen containers
-    // and their chains': CurveValues.h), in the song's order of its curves, and its modulators and macros, which can move
-    // them, as values (ModulationValue.h): its own, in their order, then each frozen container's macros, in the frozen
-    // devices' order.
+    // What a frozen track's file holds, as the song held it then: its parts (its frozen devices, a frozen container with its
+    // chains and their devices, without its macros) by their IDs, in their order, as the song's values hold them
+    // (model/base/internal/WholeState.h: the devices' value and the store's, kept whole, which share what they hold), its
+    // clips and their notes among those values, the song's tempos (TempoMapValue.h), which put its notes and clips where
+    // they are in seconds (its time signatures put nothing there), the curves of what it plays the automation of (its
+    // frozen devices', those in its frozen containers and their chains': CurveValues.h), in the song's order of its curves,
+    // and its modulators and macros, which can move them, as values (ModulationValue.h): its own, in their order, then each
+    // frozen container's macros, in the frozen devices' order.
     struct Holds
     {
-        juce::ValueTree parts;
+        std::vector<DeviceID> parts;
         ValuesKept values;
         immer::flex_vector<TempoEntry> tempos;
         SongCurves curves;
@@ -164,9 +165,9 @@ private:
 
     // The devices, containers and chains that changed (SongValues.h), what the devices' value covers of which the tree's
     // callbacks below leave alone (isHeardAsKept()): the frozen tracks they were on and are on, and those whose devices came in
-    // another order, marked and compared at the later moment, as check() takes a change in a frozen track. Its Holds keep
-    // copies of its frozen devices' elements still (they move to values at the devices' switch): compared whole there, as
-    // before, with what the store holds of them (the song's values kept: Holds::values).
+    // another order, marked and compared at the later moment, as check() takes a change in a frozen track. Its Holds keep its
+    // frozen devices by their IDs, with the song's devices and store as they were (Holds::values): compared as values, by
+    // identity first, never written into elements.
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
 

@@ -190,7 +190,7 @@ private:
 
     void callWaiting (bool allIn); // what waits for the states, each once
 
-    Entry* open (DeviceID, const juce::ValueTree& deviceState, bool inBackground, Reloaded then = {});
+    Entry* open (DeviceID, const PluginIdentity&, bool inBackground, Reloaded then = {});
     void startOpening (Entry&, std::shared_ptr<Opening>, const PluginHost::Reopening&);
     void finishOpening (DeviceID, Entry&);
     void finishReloading (DeviceID, Entry&);

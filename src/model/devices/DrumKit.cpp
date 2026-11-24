@@ -74,11 +74,23 @@ namespace
         return sound;
     }
 
+    // A drum sampler's sound by its property, from its value or from a SOUNDS element (what the sampler's loader takes).
+    juce::String readSoundText (const DeviceValue& device, const juce::Identifier& property)
+    {
+        return getDeviceSound (device, property);
+    }
+
+    juce::String readSoundText (const juce::ValueTree& sounds, const juce::Identifier& property)
+    {
+        return readSoundsProperty (sounds, property);
+    }
+
     // The factory sound a pad's layer's sounds name, or else the pad's own in the default kit (its first layer's): -1 for
     // none, off the kit's sixteen pads.
-    int getFactorySound (const juce::ValueTree& sounds, int pad, int layer)
+    template <typename Sounds>
+    int getFactorySound (const Sounds& sounds, int pad, int layer)
     {
-        if (const auto named = devices::findFactoryDrum (readSoundsProperty (sounds, schema::getPadSound (pad, layer)).toStdString());
+        if (const auto named = devices::findFactoryDrum (readSoundText (sounds, schema::getPadSound (pad, layer)).toStdString());
             named >= 0)
             return named;
 
@@ -89,7 +101,7 @@ namespace
     // The factory sound a pad's layer's sounds name, -1 for none: what the sampler is given rather than playing its default.
     int getNamedFactorySound (const juce::ValueTree& sounds, int pad, int layer)
     {
-        return devices::findFactoryDrum (readSoundsProperty (sounds, schema::getPadSound (pad, layer)).toStdString());
+        return devices::findFactoryDrum (readSoundText (sounds, schema::getPadSound (pad, layer)).toStdString());
     }
 
     bool isPadLayer (int pad, int layer)
@@ -97,16 +109,17 @@ namespace
         return juce::isPositiveAndBelow (pad, DrumSampler::numPads) && juce::isPositiveAndBelow (layer, DrumSampler::numLayers);
     }
 
-    // A drum sampler's sounds in the song, if the device is one and the pad's layer is one of its.
-    juce::ValueTree findPadSounds (const Song& song, DeviceID id, int pad, int layer)
+    // A drum sampler in the song, if the device is one and the pad's layer is one of its.
+    const DeviceValue* findPadSampler (const Song& song, DeviceID id, int pad, int layer)
     {
-        const auto device = findDeviceState (song, id);
-        return isDrumSampler (device) && isPadLayer (pad, layer) ? device.getChildWithName (schema::SOUNDS) : juce::ValueTree();
+        const auto* device = findDevice (song, id);
+        return device != nullptr && isDrumSampler (*device) && isPadLayer (pad, layer) ? device : nullptr;
     }
 
-    juce::File getPadFile (const Song& song, const juce::ValueTree& sounds, int pad, int layer)
+    template <typename Sounds>
+    juce::File getPadFile (const Song& song, const Sounds& sounds, int pad, int layer)
     {
-        return findProjectFile (song, readSoundsProperty (sounds, schema::getPadSoundFile (pad, layer)));
+        return findProjectFile (song, readSoundText (sounds, schema::getPadSoundFile (pad, layer)));
     }
 
     // "Pad 36", or "Pad 36's Layer 2".
@@ -116,22 +129,21 @@ namespace
     }
 } // namespace
 
-bool isDrumSampler (const juce::ValueTree& deviceState)
+bool isDrumSampler (const DeviceValue& device)
 {
-    return deviceState.hasType (schema::DEVICE) && readDeviceType (deviceState) == DrumSampler::typeID;
+    return device.form == DeviceValue::Form::own && device.type == DrumSampler::typeID;
 }
 
 bool isDrumSampler (const Song& song, DeviceID id)
 {
-    return isDrumSampler (findDeviceState (song, id));
+    const auto* device = findDevice (song, id);
+    return device != nullptr && isDrumSampler (*device);
 }
 
-juce::String getPadName (const Song& song, const juce::ValueTree& deviceState, int pad, int layer)
+juce::String getPadName (const Song& song, const DeviceValue& sounds, int pad, int layer)
 {
     if (! isPadLayer (pad, layer))
         return {};
-
-    const auto sounds = deviceState.getChildWithName (schema::SOUNDS);
 
     if (const auto file = getPadFile (song, sounds, pad, layer); file != juce::File())
         return file.getFileNameWithoutExtension();
@@ -148,20 +160,18 @@ juce::String getPadName (const Song& song, const juce::ValueTree& deviceState, i
 
 juce::String getPadName (const Song& song, DeviceID id, int pad, int layer)
 {
-    const auto device = findDeviceState (song, id);
-    return isDrumSampler (device) ? getPadName (song, device, pad, layer) : juce::String();
+    const auto* device = findDevice (song, id);
+    return device != nullptr && isDrumSampler (*device) ? getPadName (song, *device, pad, layer) : juce::String();
 }
 
 bool hasPadSound (const Song& song, DeviceID id, int pad, int layer)
 {
-    const auto sounds = findPadSounds (song, id, pad, layer);
-    return sounds.isValid() && getPadFile (song, sounds, pad, layer) != juce::File();
+    const auto* sampler = findPadSampler (song, id, pad, layer);
+    return sampler != nullptr && getPadFile (song, *sampler, pad, layer) != juce::File();
 }
 
-bool isPadEmpty (const Song& song, const juce::ValueTree& deviceState, int pad)
+bool isPadEmpty (const Song& song, const DeviceValue& sounds, int pad)
 {
-    const auto sounds = deviceState.getChildWithName (schema::SOUNDS);
-
     for (int layer = 0; layer < DrumSampler::numLayers; ++layer)
         if (getPadFile (song, sounds, pad, layer) != juce::File() || getFactorySound (sounds, pad, layer) >= 0)
             return false;
@@ -171,19 +181,20 @@ bool isPadEmpty (const Song& song, const juce::ValueTree& deviceState, int pad)
 
 bool isPadEmpty (const Song& song, DeviceID id, int pad)
 {
-    const auto device = findDeviceState (song, id);
-    return ! isDrumSampler (device) || ! juce::isPositiveAndBelow (pad, DrumSampler::numPads) || isPadEmpty (song, device, pad);
+    const auto* device = findDevice (song, id);
+    return device == nullptr || ! isDrumSampler (*device) || ! juce::isPositiveAndBelow (pad, DrumSampler::numPads)
+           || isPadEmpty (song, *device, pad);
 }
 
 std::vector<std::pair<int, juce::String>> getSoundingPads (const Song& song, DeviceID id)
 {
     std::vector<std::pair<int, juce::String>> pads;
-    const auto device = findDeviceState (song, id);
+    const auto* device = findDevice (song, id);
 
-    if (isDrumSampler (device))
+    if (device != nullptr && isDrumSampler (*device))
         for (int pad = 0; pad < DrumSampler::numPads; ++pad)
-            if (! isPadEmpty (song, device, pad))
-                pads.emplace_back (pad, getPadName (song, device, pad));
+            if (! isPadEmpty (song, *device, pad))
+                pads.emplace_back (pad, getPadName (song, *device, pad));
 
     return pads;
 }
@@ -203,9 +214,8 @@ void clearPadSound (Song& song, DeviceID id, int pad, int layer)
 {
     // The first layer's file, which leaves the pad its kit's sound; another layer's file and factory sound, which leave it
     // empty.
-    const auto sounds = findPadSounds (song, id, pad, layer);
-
-    if (! sounds.isValid() || (layer == 0 ? ! hasPadSound (song, id, pad) : getPadName (song, id, pad, layer).isEmpty()))
+    if (findPadSampler (song, id, pad, layer) == nullptr
+        || (layer == 0 ? ! hasPadSound (song, id, pad) : getPadName (song, id, pad, layer).isEmpty()))
         return;
 
     const UndoStep step (song, (layer == 0 ? "Reset " : "Clear ") + describePadLayer (pad, layer));

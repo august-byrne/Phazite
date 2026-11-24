@@ -28,34 +28,27 @@ namespace
         return program.has_value() ? std::max (0, *program) : -1;
     }
 
-    // The plug-ins' elements in a part of the song (a track's element, with its containers' chains'), in their order.
-    void findPlugins (const juce::ValueTree& tree, std::vector<juce::ValueTree>& found)
+    // The song's plug-ins, each by its ID with which plug-in it is, in the outline's order (Mixer.h: getSongDeviceOutline():
+    // every track's, those in its containers' chains too, then the master's): one missed here would be made anew from what its
+    // device stored at each change of the song, and never store what it keeps of its own.
+    std::vector<DeviceOutline> findPlugins (const Song& song)
     {
-        for (const auto& child : tree)
-        {
-            if (child.hasType (schema::DEVICE))
-            {
-                if (isPluginState (child))
-                    found.push_back (child);
-            }
-            else if (child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
-            {
-                findPlugins (child, found);
-            }
-        }
+        auto found = getSongDeviceOutline (song);
+        std::erase_if (found, [] (const DeviceOutline& each) { return each.form != DeviceValue::Form::plugin; });
+        return found;
     }
 
-    // Every track's and the master's (which isn't among the tracks): one missed here would be made anew from what its device
-    // stored at each change of the song, and never store what it keeps of its own.
-    std::vector<juce::ValueTree> findPlugins (const Song& song)
+    // Which plug-in a device of the song's is, by its ID: none for one the song hasn't, or that is no plug-in.
+    std::optional<PluginIdentity> findIdentity (const Song& song, DeviceID id)
     {
-        std::vector<juce::ValueTree> found;
+        const auto* device = findDevice (song, id);
+        return device != nullptr && device->isPlugin() ? std::optional (device->plugin) : std::nullopt;
+    }
 
-        for (const auto& track : getTrackStates (song))
-            findPlugins (track, found);
-
-        findPlugins (song.getState().getChildWithName (schema::MASTER), found);
-        return found;
+    juce::String findName (const Song& song, DeviceID id)
+    {
+        const auto identity = findIdentity (song, id);
+        return identity.has_value() ? identity->name : juce::String();
     }
 } // namespace
 
@@ -166,14 +159,14 @@ std::shared_ptr<SandboxedInstance> PluginInstances::find (DeviceID id)
     if (const auto found = entries.find (id); found != entries.end())
         return found->second.instance;
 
-    const auto device = findDeviceState (song, id);
+    const auto identity = findIdentity (song, id);
 
-    if (! isPluginState (device))
+    if (! identity.has_value())
         return nullptr;
 
     // In the background, as sync() opens them (known bug 166: one added opened while the message thread waited); at once for
     // a song no session plays, which a render's own thread opens.
-    auto* entry = open (id, device, synced);
+    auto* entry = open (id, *identity, synced);
     return entry != nullptr ? entry->instance : nullptr;
 }
 
@@ -203,13 +196,13 @@ bool PluginInstances::isLoading (DeviceID id) const
     return found != entries.end() && found->second.opening != nullptr;
 }
 
-PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTree& device, bool inBackground, Reloaded then)
+PluginInstances::Entry* PluginInstances::open (DeviceID id, const PluginIdentity& plugin, bool inBackground, Reloaded then)
 {
     auto& entry = entries[id];
     entry.instance = nullptr;
     entry.opening = nullptr;
     entry.error = {};
-    const auto known = findKnownPlugin (host, getPluginIdentity (device));
+    const auto known = findKnownPlugin (host, toDescription (plugin));
     entry.wasKnown = known.has_value();
 
     if (! host.loadsPlugins())
@@ -223,7 +216,7 @@ PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTre
     if (! known.has_value())
     {
         entry.unloaded = Status::missing;
-        entry.error = getPluginIdentity (device).name + " isn't installed on this computer.";
+        entry.error = plugin.name + " isn't installed on this computer.";
         tellReloaded (then, false, entry.error);
         return &entry;
     }
@@ -397,7 +390,7 @@ juce::StringArray PluginInstances::getLoading() const
 
     for (const auto& [id, entry] : entries)
         if (entry.opening != nullptr)
-            names.add (getPluginIdentity (findDeviceState (song, id)).name);
+            names.add (findName (song, id));
 
     return names;
 }
@@ -559,7 +552,7 @@ juce::StringArray PluginInstances::getAsked() const
 
     for (const auto& [id, entry] : entries)
         if (entry.instance != nullptr && entry.instance->isAskingState())
-            names.addIfNotAlreadyThere (getPluginIdentity (findDeviceState (song, id)).name);
+            names.addIfNotAlreadyThere (findName (song, id));
 
     return names;
 }
@@ -570,7 +563,7 @@ juce::StringArray PluginInstances::getOlderStates() const
 
     for (const auto& [id, entry] : entries)
         if (entry.instance != nullptr && entry.instance->isStateOlder())
-            names.addIfNotAlreadyThere (getPluginIdentity (findDeviceState (song, id)).name);
+            names.addIfNotAlreadyThere (findName (song, id));
 
     return names;
 }
@@ -641,7 +634,7 @@ void PluginInstances::sync()
     std::set<DeviceID> held;
 
     for (const auto& device : findPlugins (song))
-        held.insert (getDeviceID (device));
+        held.insert (device.id);
 
     // Told of nothing more as they go (known bug 166: one kept for an answer still to come told its changes to the song).
     std::erase_if (entries,
@@ -667,15 +660,15 @@ void PluginInstances::sync()
     // In the background, beside each other (known bugs 69 and 166): as the song opens, as one is added, and as an undo or a
     // redo brings one back.
     for (const auto& device : findPlugins (song))
-        if (const auto id = getDeviceID (device); ! entries.contains (id))
-            open (id, device, true);
+        if (! entries.contains (device.id))
+            open (device.id, device.plugin, true);
 
     synced = true;
 }
 
 std::optional<PluginInstances::Status> PluginInstances::getStatus (DeviceID id)
 {
-    if (! isPluginState (findDeviceState (song, id)))
+    if (! isPlugin (song, id))
         return {};
 
     const auto instance = find (id);
@@ -699,10 +692,10 @@ juce::String PluginInstances::getError (DeviceID id) const
 
 bool PluginInstances::reload (DeviceID id, Reloaded then)
 {
-    const auto device = findDeviceState (song, id);
+    const auto identity = findIdentity (song, id);
     const auto status = getStatus (id);
 
-    if (! status.has_value() || (*status != Status::crashed && *status != Status::crashedWhileLoading))
+    if (! identity.has_value() || ! status.has_value() || (*status != Status::crashed && *status != Status::crashedWhileLoading))
         return false;
 
     // One whose helper went opens in a new one, the same instance, from the state it last had: its own, the user's latest
@@ -745,10 +738,10 @@ bool PluginInstances::reload (DeviceID id, Reloaded then)
     }
     else
     {
-        if (const auto known = findKnownPlugin (host, getPluginIdentity (device)))
+        if (const auto known = findKnownPlugin (host, toDescription (*identity)))
             host.forgetCrashWhileLoading (*known);
 
-        open (id, device, true, std::move (then));
+        open (id, *identity, true, std::move (then));
     }
 
     host.sendChangeMessage(); // what shows it shows it loading
@@ -801,12 +794,12 @@ void PluginInstances::store (const std::vector<DeviceID>& ids)
     {
         if (const auto found = entries.find (id); found != entries.end() && found->second.instance != nullptr)
         {
-            const auto device = findDeviceState (song, id);
+            const auto plugin = findIdentity (song, id);
 
-            if (! device.isValid())
+            if (! plugin.has_value())
                 continue;
 
-            const auto identity = getPluginIdentity (device);
+            const auto identity = toDescription (*plugin);
             auto& instance = *found->second.instance;
             instance.askState (SandboxedInstance::Ask::changedAndAnswering);
             write (id, identity, instance);
@@ -951,7 +944,7 @@ void PluginInstances::storeAll()
     std::vector<DeviceID> ids;
 
     for (const auto& device : findPlugins (song))
-        ids.push_back (getDeviceID (device));
+        ids.push_back (device.id);
 
     store (ids);
 }
@@ -963,12 +956,10 @@ void PluginInstances::changeListenerCallback (juce::ChangeBroadcaster*)
     // off, or that crashed as it loaded, waits for a reload by hand).
     for (const auto& device : findPlugins (song))
     {
-        const auto id = getDeviceID (device);
-
-        if (const auto found = entries.find (id); found != entries.end() && found->second.instance == nullptr)
+        if (const auto found = entries.find (device.id); found != entries.end() && found->second.instance == nullptr)
             if (found->second.unloaded == Status::missing && ! found->second.wasKnown
-                && findKnownPlugin (host, getPluginIdentity (device)).has_value())
-                open (id, device, synced);
+                && findKnownPlugin (host, toDescription (device.plugin)).has_value())
+                open (device.id, device.plugin, synced);
     }
 }
 
@@ -996,7 +987,7 @@ void PluginInstances::takeFromSong (DeviceID id, const DeviceStore& store)
 
 void PluginInstances::giveSongState (DeviceID id)
 {
-    if (const auto* values = song.getValues(); values != nullptr && isPluginState (findDeviceState (song, id)))
+    if (const auto* values = song.getValues(); values != nullptr && isPlugin (song, id))
         takeFromSong (id, values->deviceStore.get());
 }
 
@@ -1189,8 +1180,8 @@ juce::StringArray getPluginsMissing (const Song& song)
 
     if (auto* session = findSession (song))
         for (const auto& device : findPlugins (song))
-            if (session->getPlugins().getStatus (getDeviceID (device)) == PluginInstances::Status::missing)
-                missing.addIfNotAlreadyThere (getDeviceName (device));
+            if (session->getPlugins().getStatus (device.id) == PluginInstances::Status::missing)
+                missing.addIfNotAlreadyThere (device.plugin.name);
 
     return missing;
 }

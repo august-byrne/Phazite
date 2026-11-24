@@ -107,12 +107,11 @@ namespace
         return wanted;
     }
 
-    bool isSamePlugin (const juce::ValueTree& device, const juce::var& identity)
+    // Whether a plug-in is the one a preset names: by its name, maker and format.
+    bool isSamePlugin (const PluginIdentity& plugin, const juce::var& identity)
     {
-        const auto description = getPluginIdentity (device);
-        return description.name == identity[keys::name].toString()
-               && description.manufacturerName == identity[keys::manufacturer].toString()
-               && description.pluginFormatName == identity[keys::format].toString();
+        return plugin.name == identity[keys::name].toString() && plugin.maker == identity[keys::manufacturer].toString()
+               && plugin.format == identity[keys::format].toString();
     }
 
     // How many steps a step sequencer plays (its numSteps set by hand, else its default).
@@ -1484,8 +1483,16 @@ bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target
 bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& file)
 {
     auto* song = findSong (context);
-    auto device = song != nullptr && id.isValid() ? findDeviceState (*song, id) : juce::ValueTree();
-    const auto preset = device.isValid() ? readPreset (file) : juce::var();
+    const auto* device = song != nullptr ? findDevice (*song, id) : nullptr; // a look in the devices' area by its ID
+
+    if (device == nullptr)
+        return false;
+
+    // What it is, taken before anything is written (a pointer into the area is good until its next write).
+    const auto* own = getOwnDeviceInfo (*song, id);
+    const auto isPlugin = device->isPlugin();
+    const auto plugin = device->plugin;
+    const auto preset = readPreset (file);
 
     if (! preset.isObject() || findKind (preset[keys::kind].toString()) != PresetKind::device)
         return false;
@@ -1493,7 +1500,7 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
     const auto saved = preset[keys::device];
     const auto stepName = "Load Preset " + file.getFileNameWithoutExtension();
 
-    if (const auto* own = findOwnInfo (device))
+    if (own != nullptr)
     {
         if (saved[keys::type].toString() != toString (own->typeID))
             return false;
@@ -1509,10 +1516,10 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
                                         .apply = [&context, id, file, preset] { return loadOwnPresetNow (context, id, file, preset); } });
     }
 
-    if (! isPluginState (device) || ! saved[keys::plugin].isObject() || ! isSamePlugin (device, saved[keys::plugin]))
+    if (! isPlugin || ! saved[keys::plugin].isObject() || ! isSamePlugin (plugin, saved[keys::plugin]))
         return false;
 
-    // A plug-in keeps its settings in a block of its own, which its element holds once stored: stored first, outside the
+    // A plug-in keeps its settings in a block of its own, which the store holds once stored: stored first, outside the
     // undo history, so that an undo puts back the settings it has now. Its instance takes the preset's program and settings
     // from the song, and the ones before them again on undo (model/plugins/internal/PluginInstances.h).
     if (auto* session = getSession (context))

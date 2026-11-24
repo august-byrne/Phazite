@@ -5,6 +5,7 @@
 #include "internal/ClipsArea.h"
 #include "internal/CurvesArea.h"
 #include "internal/DeviceStoreArea.h"
+#include "internal/DevicesArea.h"
 #include "internal/MidiLinksArea.h"
 #include "internal/ModulationArea.h"
 #include "internal/Schema.h"
@@ -49,6 +50,9 @@ namespace
         if (leadsToDeviceStore (parent, child)) // a channel, its devices, a container's chains, a chain's devices: the store
             return true;
 
+        if (leadsToDevices (parent, child)) // the track list, a track or a folder's tracks, the master, for the devices
+            return true;
+
         return false;
     }
 
@@ -62,6 +66,8 @@ namespace
     void writeIn (juce::ValueTree element, const ValuesKept& kept)
     {
         writeClipsIn (element, kept);
+        writeDevicesIn (element, kept); // a TRACK's or the MASTER's devices and containers, right after its clips, each with
+                                        // its chains and their devices, so that the parts below write into them: DevicesArea.h
         writeTempoMapIn (element, kept);
         writeChordLaneIn (element, kept);
         writeMidiLinksIn (element, kept);
@@ -123,6 +129,7 @@ ValuesKept keepValues (const Song& song)
         kept.sends = values->sends.get();
         kept.deviceStore = values->deviceStore.get();
         kept.devicesOutside = values->devicesOutside.get();
+        kept.devices = values->devices.get();
     }
 
     return kept;
@@ -133,6 +140,11 @@ juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const ValuesKept& ke
     auto copy = treeCopy.createCopy();
     writeIn (copy, kept);
     return copy;
+}
+
+void makeWhole (juce::ValueTree& written, const ValuesKept& kept)
+{
+    writeIn (written, kept);
 }
 
 bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, const juce::ValueTree& otherElement,
@@ -162,6 +174,9 @@ bool holdSameKeptOf (const juce::ValueTree& element, const ValuesKept& kept, con
         return false;
 
     if (! holdSameSendsOf (element, kept, otherElement, otherKept)) // then a track's sends
+        return false;
+
+    if (! holdSameDevicesOf (element, kept, otherElement, otherKept)) // then a channel's devices, with what each holds
         return false;
 
     if (! holdSameDeviceStoreOf (element, kept, otherElement, otherKept)) // then what a device or a chain stores

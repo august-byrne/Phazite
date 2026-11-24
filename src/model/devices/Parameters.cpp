@@ -18,7 +18,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <optional>
+#include <string_view>
+#include <utility>
 
 namespace phazite
 {
@@ -71,48 +74,59 @@ namespace
         return std::any_of (parameters.begin(), parameters.end(), [info] (const devices::ParameterInfo& each) { return &each == info; });
     }
 
-    std::optional<FoundParameter> found (const ParameterRef& ref, ParameterSource kind, const juce::ValueTree& state,
-                                         const devices::ParameterInfo* info = nullptr)
+    std::optional<FoundParameter> found (const ParameterRef& ref, ParameterSource kind, const devices::ParameterInfo* info = nullptr)
     {
-        return FoundParameter { ref, kind, state, info };
+        return FoundParameter { ref, kind, info };
     }
 
     // A fader's volume or pan, by its channel (FoundParameter::channel), with no element.
     std::optional<FoundParameter> foundOnChannel (const ParameterRef& ref, ParameterSource kind, ChannelRef channel)
     {
-        FoundParameter parameter { ref, kind, {}, nullptr };
+        FoundParameter parameter { ref, kind, nullptr };
         parameter.channel = channel;
         return parameter;
     }
 
     // A chain's place among its container's, and how many chains it has; and whether it has a crossover: a band's, but the
-    // first's (which starts at the bottom), in a container split into bands.
-    std::pair<int, int> getChainPlace (const juce::ValueTree& chain)
+    // first's (which starts at the bottom), in a container split into bands. Each by the chain's ID, looks in the devices' area.
+    std::pair<int, int> getChainPlace (const Song& song, DeviceID chain)
     {
-        const auto chains = getChainStates (chain.getParent());
-        return { (int) (std::find (chains.begin(), chains.end(), chain) - chains.begin()), (int) chains.size() };
+        return { getChainIndex (song, chain), (int) getChains (song, getChainContainer (song, chain)).size() };
     }
 
-    bool hasCrossover (const juce::ValueTree& chain)
+    bool hasCrossover (const Song& song, DeviceID chain)
     {
-        return readContainerSplit (chain.getParent()) == ContainerSplit::bands && getChainPlace (chain).first > 0;
+        return getContainerSplit (song, getChainContainer (song, chain)) == ContainerSplit::bands && getChainIndex (song, chain) > 0;
     }
 
     // A chain's crossover, its own or its place's default; and the ones it stays between: the chain's before it (the bottom,
     // for the second chain) and the one's after it (the top, for the last).
-    float getCrossover (const juce::ValueTree& chain)
+    juce::Range<float> getCrossoverRoom (const Song& song, DeviceID chain)
     {
-        const auto [index, count] = getChainPlace (chain);
-        return readChainCrossover (chain).value_or (getDefaultCrossover (index, count));
+        const auto chains = getChains (song, getChainContainer (song, chain));
+        const auto index = getChainIndex (song, chain);
+        const auto below = index > 1 ? getChainCrossover (song, chains[(size_t) index - 1]) : lowestCrossover;
+        const auto above = index + 1 < (int) chains.size() ? getChainCrossover (song, chains[(size_t) index + 1]) : highestCrossover;
+        return { below, std::max (below, above) };
     }
 
-    juce::Range<float> getCrossoverRoom (const juce::ValueTree& chain)
+    // A parameter's description among one of Phazite's own device's, by the device's ID: its index there, -1 for a device the
+    // song hasn't, of another form, or one whose type's description holds no such parameter (a type changed since it was
+    // found).
+    int findParameterIndex (const Song& song, DeviceID device, const devices::ParameterInfo* info)
     {
-        const auto chains = getChainStates (chain.getParent());
-        const auto index = getChainPlace (chain).first;
-        const auto below = index > 1 ? getCrossover (chains[(size_t) index - 1]) : lowestCrossover;
-        const auto above = index + 1 < (int) chains.size() ? getCrossover (chains[(size_t) index + 1]) : highestCrossover;
-        return { below, std::max (below, above) };
+        const auto* value = findDevice (song, device);
+        const auto* own = value != nullptr && value->form == DeviceValue::Form::own
+                              ? findOwnDevice (std::string_view (value->type.toRawUTF8()))
+                              : nullptr;
+
+        const std::less<const devices::ParameterInfo*> before;
+
+        if (own == nullptr || info == nullptr || own->parameters.empty() || before (info, own->parameters.data())
+            || ! before (info, own->parameters.data() + own->parameters.size()))
+            return -1;
+
+        return (int) (info - own->parameters.data());
     }
 
     juce::String describeFrequency (float hertz)
@@ -120,38 +134,122 @@ namespace
         return hertz < 1000.0f ? juce::String (juce::roundToInt (hertz)) + " Hz"
                                : juce::String (hertz / 1000.0f, hertz < 10000.0f ? 2 : 1) + " kHz";
     }
+
+    // The same as hasCrossover() in a value of the song's devices given (a value of their own properties alone will do).
+    bool hasCrossoverIn (const SongDevices& devices, DeviceID chain)
+    {
+        const auto* value = devices.find (chain);
+        const auto* container =
+            value != nullptr && value->form == DeviceValue::Form::chain ? devices.find (value->place.container) : nullptr;
+
+        if (container == nullptr || container->form != DeviceValue::Form::container || container->split != ContainerSplit::bands)
+            return false;
+
+        const auto* chains = devices.chains.find (container->id.getRaw());
+        return chains != nullptr && ! chains->empty() && chains->front() != chain
+               && std::find (chains->begin(), chains->end(), chain) != chains->end();
+    }
+
+    // locateParameter()'s look, with how a device, a container or a chain is found by its ID (a pointer valid while the look
+    // lasts, nullptr for none) and whether a chain has a crossover.
+    template <typename FindDevice, typename HasCrossover>
+    std::optional<FoundParameter> locate (const Song& song, const ParameterRef& ref, FindDevice&& findDeviceOf, HasCrossover&& crossover)
+    {
+        if (! ref.isValid())
+            return {};
+
+        // A modulator's or a macro's first: a look in modulation's area by its ID (its FoundParameter holds no element: the
+        // song's tree holds none of it), which allocates nothing, before the tree's walks (locateParameterInTree()), which a
+        // macro's turn (the automation's watcher asks at each step) would otherwise pay for every track. A reference to a
+        // device, a chain or a fader looks there for an ID no modulator has (the song's IDs are each one item's), and finds
+        // none whatever the area holds.
+        if (const auto modulator = findModulatorOf (song, ref))
+        {
+            // A macro's one parameter has the macro's ID.
+            if (modulator->isMacro())
+                return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterSource::macro) : std::nullopt;
+
+            if (const auto index = devices::findModulatorParameter (*modulator->kind, ref.parameter.toStdString()); index >= 0)
+                return found (ref, ParameterSource::modulator, &devices::getModulatorParameters (*modulator->kind)[(size_t) index]);
+
+            return {};
+        }
+
+        // A send's level, by the send's ID: a look in the sends' area (its FoundParameter holds no element: the song's tree
+        // holds no send). Its level is a send's one parameter (where it goes and whether it is before the fader are no
+        // parameters), and no chain or modulator has a send's ID, so only a reference to that parameter asks the sends.
+        if (ref.parameter == schema::sendLevelParameter)
+            if (getSendValue (song, ref.device).has_value())
+                return found (ref, ParameterSource::send);
+
+        // A fader's, which controls read most, in the song's tree.
+        if (auto onFader = locateParameterInTree (song, ref))
+            return onFader;
+
+        // A device's, a plug-in's or a chain's: a look in the devices' area by its ID (its FoundParameter holds no element:
+        // the song's tree holds none of them).
+        const auto* value = findDeviceOf (ref.device);
+
+        if (value == nullptr)
+            return {};
+
+        switch (value->form)
+        {
+            case DeviceValue::Form::plugin:
+            {
+                // One its instance has, or one the song keeps a value of (a plug-in that doesn't load keeps what refers to
+                // it).
+                const auto there =
+                    findPluginParameter (song, ref).first != nullptr || findPluginValue (song, ref.device, ref.parameter).has_value();
+                return there ? found (ref, ParameterSource::plugin) : std::nullopt;
+            }
+
+            case DeviceValue::Form::own:
+            {
+                // One of Phazite's own (or of a type a test registered: model/devices/internal/Devices.h).
+                if (const auto* info = findOwnDevice (std::string_view (value->type.toRawUTF8())))
+                    if (const auto index = devices::findParameter (*info, ref.parameter.toStdString()); index >= 0)
+                        return found (ref, ParameterSource::device, &info->parameters[(size_t) index]);
+
+                return {};
+            }
+
+            case DeviceValue::Form::chain:
+            {
+                // A container's chain's volume and pan, and a band's crossover.
+                if (ref.parameter == schema::chainVolumeParameter)
+                    return found (ref, ParameterSource::chainVolume);
+
+                if (ref.parameter == schema::chainPanParameter)
+                    return found (ref, ParameterSource::chainPan);
+
+                if (ref.parameter == schema::crossoverParameter && crossover (ref.device))
+                    return found (ref, ParameterSource::crossover, &engine::crossoverInfo);
+
+                return {};
+            }
+
+            case DeviceValue::Form::container:
+                break;
+        }
+
+        return {};
+    }
 } // namespace
 
 //==============================================================================
 std::optional<FoundParameter> locateParameter (const Song& song, const ParameterRef& ref)
 {
-    if (! ref.isValid())
-        return {};
+    return locate (
+        song, ref, [&song] (DeviceID id) { return findDevice (song, id); },
+        [&song] (DeviceID chain) { return hasCrossover (song, chain); });
+}
 
-    // A modulator's or a macro's first: a look in modulation's area by its ID (its FoundParameter holds no element: the song's
-    // tree holds none of it), which allocates nothing, before the tree's walks (locateParameterInTree()), which a macro's turn
-    // (the automation's watcher asks at each step) would otherwise pay for every track. A reference to a device, a chain or a
-    // fader looks there for an ID no modulator has (the song's IDs are each one item's), and finds none whatever the area holds.
-    if (const auto modulator = findModulatorOf (song, ref))
-    {
-        // A macro's one parameter has the macro's ID.
-        if (modulator->isMacro())
-            return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterSource::macro, {}) : std::nullopt;
-
-        if (const auto index = devices::findModulatorParameter (*modulator->kind, ref.parameter.toStdString()); index >= 0)
-            return found (ref, ParameterSource::modulator, {}, &devices::getModulatorParameters (*modulator->kind)[(size_t) index]);
-
-        return {};
-    }
-
-    // A send's level, by the send's ID: a look in the sends' area (its FoundParameter holds no element: the song's tree holds
-    // no send). Its level is a send's one parameter (where it goes and whether it is before the fader are no parameters), and
-    // no chain or modulator has a send's ID, so only a reference to that parameter asks the sends.
-    if (ref.parameter == schema::sendLevelParameter)
-        if (getSendValue (song, ref.device).has_value())
-            return found (ref, ParameterSource::send, {});
-
-    return locateParameterInTree (song, ref);
+std::optional<FoundParameter> locateParameter (const Song& song, const ParameterRef& ref, const SongDevices& devices)
+{
+    return locate (
+        song, ref, [&devices] (DeviceID id) { return devices.find (id); },
+        [&devices] (DeviceID chain) { return hasCrossoverIn (devices, chain); });
 }
 
 std::optional<FoundParameter> locateParameterInTree (const Song& song, const ParameterRef& ref)
@@ -159,7 +257,7 @@ std::optional<FoundParameter> locateParameterInTree (const Song& song, const Par
     if (! ref.isValid())
         return {};
 
-    // A fader's first, which controls read most.
+    // A fader's, by its channel.
     if (const auto channel = findChannelOfFader (song, ref.device); channel.isValid())
     {
         const auto isMaster = channel.onMaster;
@@ -172,43 +270,6 @@ std::optional<FoundParameter> locateParameterInTree (const Song& song, const Par
 
         if (ref.parameter == (isMaster ? schema::masterPan : schema::faderPan))
             return foundOnChannel (ref, ParameterSource::pan, channel);
-
-        return {};
-    }
-
-    if (const auto device = findDeviceState (song, ref.device); device.isValid())
-    {
-        if (isPluginState (device))
-        {
-            // One its instance has, or one the song keeps a value of (a plug-in that doesn't load keeps what refers to it).
-            const auto there =
-                findPluginParameter (song, ref).first != nullptr || findPluginValue (song, ref.device, ref.parameter).has_value();
-            return there ? found (ref, ParameterSource::plugin, device) : std::nullopt;
-        }
-
-        // One of Phazite's own (or of a type a test registered: model/devices/internal/Devices.h).
-        const auto* info = findOwnDevice (readDeviceType (device).toStdString());
-
-        if (info != nullptr)
-            if (const auto index = devices::findParameter (*info, ref.parameter.toStdString()); index >= 0)
-                return found (ref, ParameterSource::device, device, &info->parameters[(size_t) index]);
-
-        return {};
-    }
-
-    // A container's chain's volume and pan, and a band's crossover.
-    if (const auto chain = findContainerChain (song, ref.device); chain.isValid())
-    {
-        if (ref.parameter == schema::chainVolumeParameter)
-            return found (ref, ParameterSource::chainVolume, chain);
-
-        if (ref.parameter == schema::chainPanParameter)
-            return found (ref, ParameterSource::chainPan, chain);
-
-        if (ref.parameter == schema::crossoverParameter && hasCrossover (chain))
-            return found (ref, ParameterSource::crossover, chain, &engine::crossoverInfo);
-
-        return {};
     }
 
     return {};
@@ -237,17 +298,19 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
     if (parameter.source == ParameterSource::volume || parameter.source == ParameterSource::pan)
         return isFaderOf (song, parameter.channel, parameter.ref.device);
 
-    if (! parameter.state.isAChildOf (song.getState()))
-        return false;
+    // A device's, a plug-in's or a chain's by its ID, a look in the devices' area, still of the form it was found of: one of
+    // Phazite's own still of the type whose parameter it found (none allocated), a chain's crossover still a band's.
+    const auto* value = findDevice (song, parameter.ref.device);
 
-    // Its element still names it: a folder's fader of the other kind, for one, has another ID.
-    const auto id = parameter.ref.device.getRaw();
+    if (value == nullptr)
+        return false;
 
     switch (parameter.source)
     {
         case ParameterSource::device:
+            return findParameterIndex (song, parameter.ref.device, parameter.info) >= 0;
         case ParameterSource::plugin:
-            return readDeviceElementID (parameter.state).getRaw() == id;
+            return value->isPlugin();
         case ParameterSource::volume:
         case ParameterSource::pan:
         case ParameterSource::send:
@@ -256,9 +319,9 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
             break; // above
         case ParameterSource::chainVolume:
         case ParameterSource::chainPan:
-            return readDeviceElementID (parameter.state).getRaw() == id;
+            return value->form == DeviceValue::Form::chain;
         case ParameterSource::crossover:
-            return readDeviceElementID (parameter.state).getRaw() == id && hasCrossover (parameter.state);
+            return value->form == DeviceValue::Form::chain && hasCrossover (song, parameter.ref.device);
     }
 
     return false;
@@ -267,7 +330,6 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
 //==============================================================================
 ParameterDescription describeParameter (const Song& song, const FoundParameter& parameter)
 {
-    const auto& state = parameter.state;
     const auto atZeroDecibels = engine::decibelsToFaderPosition (0.0f);
 
     switch (parameter.source)
@@ -313,7 +375,7 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
 
         case ParameterSource::crossover:
         {
-            const auto [index, count] = getChainPlace (state);
+            const auto [index, count] = getChainPlace (song, parameter.ref.device);
             return { parameter.source, "Crossover", devices::getRange (engine::crossoverInfo), getDefaultCrossover (index, count),
                      engine::crossoverInfo };
         }
@@ -383,13 +445,16 @@ juce::String getParameterText (const Song& song, const FoundParameter& parameter
 
 float getValueSetByHand (const Song& song, const FoundParameter& parameter)
 {
-    const auto& state = parameter.state;
-
     switch (parameter.source)
     {
         case ParameterSource::device:
-            // By the name the reference holds, which JUCE's pool of names has: no text made at each tick.
-            return readDeviceParameterValue (state, *parameter.info, juce::Identifier (parameter.ref.parameter));
+        {
+            // By the parameter's index among its device's description's, a look in the devices' area and one in its values' map:
+            // nothing allocated at a tick. The parameter's default for a device it is no parameter of now.
+            const auto* value = findDevice (song, parameter.ref.device);
+            const auto index = findParameterIndex (song, parameter.ref.device, parameter.info);
+            return value != nullptr && index >= 0 ? value->getParameterValue (index) : parameter.info->defaultValue;
+        }
 
         case ParameterSource::modulator:
         {
@@ -423,13 +488,13 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
         }
 
         case ParameterSource::chainVolume:
-            return engine::decibelsToFaderPosition (readChainVolume (state));
+            return engine::decibelsToFaderPosition (getChainVolume (song, parameter.ref.device));
 
         case ParameterSource::chainPan:
-            return readChainPan (state);
+            return getChainPan (song, parameter.ref.device);
 
         case ParameterSource::crossover:
-            return getCrossover (state);
+            return getChainCrossover (song, parameter.ref.device);
 
         case ParameterSource::plugin:
             // The song's, where it sets one (a look in the store by its ID: model/plugins/internal/DeviceStore.h); else its
@@ -454,7 +519,6 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         return;
 
     const auto& ref = parameter.ref;
-    auto state = parameter.state;
     auto told = value;
 
     switch (parameter.source)
@@ -462,12 +526,11 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         case ParameterSource::device:
         {
             // As the song holds it: within its range and on its steps (SavedValues.h: keepHeldValue()), through the devices'
-            // setter of one value on the element found (model/mixer/internal/Mixer.h: setDeviceValue()); and so on its steps
-            // to a curve's lone point too, and to what is told of it (since the devices' writers: within its range alone
-            // before).
+            // setter of one value by the parameter's index (model/mixer/internal/Mixer.h: setDeviceValue()); and so on its steps
+            // to a curve's lone point too, and to what is told of it.
             told = devices::constrain (*parameter.info, value);
             moveOnlyPoint (song, ref, told);
-            setDeviceValue (song, state, *parameter.info, told);
+            setDeviceValue (song, ref.device, findParameterIndex (song, ref.device, parameter.info), told);
             break;
         }
 
@@ -561,7 +624,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         case ParameterSource::crossover:
         {
             // Between its neighbours' crossovers: a band can't pass the one beside it.
-            told = getCrossoverRoom (state).clipValue (juce::jlimit (lowestCrossover, highestCrossover, value));
+            told = getCrossoverRoom (song, ref.device).clipValue (juce::jlimit (lowestCrossover, highestCrossover, value));
             moveOnlyPoint (song, ref, told);
             setChainCrossover (song, ref.device, told);
             break;
@@ -615,7 +678,8 @@ std::optional<devices::Travel> getControlTravel (const Song& song, const Paramet
         return devices::Travel { .step = description.has_value() ? description->range.interval : 0.0f };
     }
 
-    if (ref.parameter == schema::crossoverParameter && findContainerChain (song, ref.device).isValid())
+    if (const auto* chain = ref.parameter == schema::crossoverParameter ? findDevice (song, ref.device) : nullptr;
+        chain != nullptr && chain->form == DeviceValue::Form::chain)
         return devices::getTravel (engine::crossoverInfo);
 
     const auto found = locateParameter (song, ref);
@@ -695,13 +759,5 @@ float getCurrentValue (const Song& song, const ParameterRef& ref, bool withModul
 {
     const auto parameter = locateParameter (song, ref);
     return parameter.has_value() ? getCurrentValue (song, *parameter, withModulation) : 0.0f;
-}
-
-//==============================================================================
-void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& info, float value, juce::UndoManager* undo)
-{
-    // The devices' writer of one value (DevicesValue.h), which leaves VALUES none at its default and none empty, the value as
-    // it is given (not on its steps).
-    writeDeviceValueOf (element, info, isDefaultValue (info, value) ? std::nullopt : std::optional<float> (value), undo);
 }
 } // namespace phazite

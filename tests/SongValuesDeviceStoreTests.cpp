@@ -782,7 +782,7 @@ TEST_CASE ("Song values' device store: a window's place is no step and is told n
     const auto copy = phazite::test::copyDevice (song, equalizer);
     CHECK ((int) copy[phazite::schema::deviceWindowX] == 30);
     CHECK ((int) copy[phazite::schema::deviceWindowY] == 40);
-    CHECK_FALSE (phazite::findDeviceState (song, equalizer).hasProperty (phazite::schema::deviceWindowX)); // the tree's none
+    phazite::test::checkSong (song); // the tree holds no device, nor its window's place
 
     phazite::removeDevice (s.context, equalizer);
     CHECK_FALSE (phazite::getWindowPlace (song, equalizer).has_value());
@@ -826,8 +826,8 @@ TEST_CASE ("Song values' device store: a version applied makes the store the ver
 }
 
 //==============================================================================
-TEST_CASE ("Song values' device store: a DEVICE that comes into the song with the store's properties and VALUEs has them taken in "
-           "and out of the tree; a lone VALUE is taken in outside the history")
+TEST_CASE ("Song values' device store: a DEVICE that comes into the song with the store's properties and VALUEs has them taken in, "
+           "and the DEVICE out of the tree")
 {
     const TestPlugin testPlugin;
     phazite::test::TestSong s;
@@ -863,23 +863,14 @@ TEST_CASE ("Song values' device store: a DEVICE that comes into the song with th
     CHECK (phazite::findPluginValue (song, id, "7") == std::optional (0.5f));
     CHECK (phazite::getWindowPlace (song, id) == std::optional (phazite::WindowPlace { .x = 5, .y = 6 }));
 
-    // A lone VALUE added to it outside the history: taken in, and out of the tree.
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        device.appendChild (juce::ValueTree (phazite::schema::VALUE,
-                                             { { phazite::schema::valueParameter, "8" }, { phazite::schema::valueSetByHand, 0.25 } }),
-                            nullptr);
-    }
+    // The DEVICE taken out of the tree as it came in (the devices' keeper's safety net, DevicesArea.h), so that nothing can be
+    // added to it in the song's tree afterwards.
+    CHECK_FALSE (device.getParent().isValid());
 
-    CHECK (values->countDeviceStoreAdopted() == adopted + 2);
-    CHECK_FALSE (device.getChildWithName (phazite::schema::VALUE).isValid());
-    CHECK (phazite::findPluginValue (song, id, "8") == std::optional (0.25f));
-
-    // In whole state, written back: its VALUEs sorted by their parameters, after its other children.
+    // In whole state, written back: its one VALUE, after its other children.
     const auto copy = phazite::test::copyDevice (song, id);
-    REQUIRE (copy.getNumChildren() == 2);
+    REQUIRE (copy.getNumChildren() == 1);
     CHECK (copy.getChild (0)[phazite::schema::valueParameter].toString() == "7");
-    CHECK (copy.getChild (1)[phazite::schema::valueParameter].toString() == "8");
     CHECK (phazite::readBytes (copy[phazite::schema::pluginState].toString()) == std::optional (state));
     phazite::test::checkSong (song);
 }

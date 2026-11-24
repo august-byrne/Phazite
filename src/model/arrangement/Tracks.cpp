@@ -4,6 +4,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/DeviceStoreValue.h"
+#include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
@@ -1086,10 +1087,25 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         // its own automation, right after the original. A frozen track's copy plays live: the frozen file is the original's.
         song.storeDeviceStates (track.getRaw());
         auto copy = original.createCopy();
-        auto copied = giveNewIDs (song, copy);
-
         std::vector<juce::ValueTree> inside { copy };
         collectTrackStates (copy, inside);
+
+        // Its devices written into it as whole state writes them (DevicesArea.h: writeDevicesIn(): first among its children,
+        // as it holds no clips), so that each is given a new ID with what names it in the copy (a lane of its parameter), and
+        // taken off it again below: the song's tree holds none (DevicesValue.h), so what is written in is all the copy loses.
+        const auto kept = keepValues (song);
+        std::vector<int> written;
+
+        for (auto state : inside)
+        {
+            jassert (std::none_of (state.begin(), state.end(), [] (const juce::ValueTree& child)
+                                   { return child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER); }));
+            const auto before = state.getNumChildren();
+            writeDevicesIn (state, kept);
+            written.push_back (state.getNumChildren() - before);
+        }
+
+        auto copied = giveNewIDs (song, copy);
 
         // Nor does a copy of a pad's track play the pad, which plays on the original. Its clips aren't the song's tree's: the
         // clips' code copies each track's onto its copy (copyTrackClips()), once the copy is the song's.
@@ -1098,33 +1114,13 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
                 state.removeProperty (*property, nullptr);
 
         // Nor are its devices the copy's elements: the devices' code gives each copied track its original's
-        // (copyDevices()), by the IDs given them above, once the copy is the song's. A track's lanes (view state) that stood
-        // after its devices are put back after them, as the copy of its element held them.
-        std::vector<std::pair<juce::ValueTree, juce::ValueTree>> lanesAfter;
-
-        for (auto state : inside)
+        // (copyDevices()), by the IDs given them above, once the copy is the song's. What was written in above taken off.
+        for (size_t i = 0; i < inside.size(); ++i)
         {
-            auto devicesSeen = false;
-
-            for (auto i = 0; i < state.getNumChildren();)
+            for (auto n = 0; n < written[i]; ++n)
             {
-                const auto child = state.getChild (i);
-
-                if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER))
-                {
-                    devicesSeen = true;
-                    state.removeChild (i, nullptr);
-                    continue;
-                }
-
-                if (devicesSeen && child.hasType (schema::LANES))
-                {
-                    lanesAfter.emplace_back (state, child);
-                    state.removeChild (i, nullptr);
-                    continue;
-                }
-
-                ++i;
+                jassert (inside[i].getChild (0).hasType (schema::DEVICE) || inside[i].getChild (0).hasType (schema::CONTAINER));
+                inside[i].removeChild (0, nullptr);
             }
         }
 
@@ -1141,15 +1137,10 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
             if (const auto found = originals.find (getTrackID (state).getRaw()); found != originals.end())
                 copyTrackClips (song, TrackID::fromRaw (found->second), getTrackID (state), copied, true);
 
-        // Its devices, through the devices' code, its lanes back after them; then its sends, through the sends' code, then its
-        // modulators and its containers' macros, through modulation's code, each with their new IDs among the copied before
-        // what names them is copied: a modulation of a send's level names the send's copy by its ID, and a curve a send's copy
-        // or a macro's.
+        // Its devices, through the devices' code; then its sends, through the sends' code, then its modulators and its
+        // containers' macros, through modulation's code, each with their new IDs among the copied before what names them is
+        // copied: a modulation of a send's level names the send's copy by its ID, and a curve a send's copy or a macro's.
         copyDevices (song, copied);
-
-        for (auto& [state, lanes] : lanesAfter)
-            state.appendChild (lanes, nullptr); // view state, without an undo step
-
         copySends (song, copied);
         copyModulation (song, copied);
         copyCurves (song, copied);
@@ -1286,20 +1277,27 @@ void eraseTrackHoldings (Song& song, const std::vector<TrackID>& tracks)
         return;
 
     // Each track once, with the tracks in each folder among them; and each channel's place, with its containers': a
-    // container's macros are listed by its ID (ModulationValue.h: SongModulation), a device's that is none finding no list.
-    std::vector<TrackID> held;
+    // container's macros are listed by its ID (ModulationValue.h: SongModulation), each keeping its channel in its place, by
+    // which they are found (a container a version's pass took away first leaves its macros to the modulation pass after it).
+    std::vector<TrackID> held, channels;
     std::vector<ModulatorPlace> owners;
     std::set<std::uint64_t> seen;
+    const auto modulation = song.getValues()->modulation.get(); // a copy, which shares what it holds
 
-    const auto addChannel = [&song, &owners] (TrackID id, const ModulatorPlace& channel)
+    const auto addChannel = [&modulation, &owners, &channels] (TrackID id, const ModulatorPlace& channel)
     {
         owners.push_back (channel);
+        channels.push_back (id);
 
-        for (const auto device : getDevices (song, id))
+        for (const auto& [container, list] : modulation.containers)
         {
-            auto container = channel;
-            container.container = device;
-            owners.push_back (container);
+            if (const auto* first = list.empty() ? nullptr : modulation.find (list.front());
+                first != nullptr && first->place.onMaster == channel.onMaster && first->place.track == channel.track)
+            {
+                auto owner = channel;
+                owner.container = DeviceID::fromRaw (container);
+                owners.push_back (owner);
+            }
         }
     };
 
@@ -1332,10 +1330,11 @@ void eraseTrackHoldings (Song& song, const std::vector<TrackID>& tracks)
                 addTrack (inside);
     }
 
-    // Each area through its own code, a line each, each set once: the clips with their notes, then modulation, then the sends.
-    // Their devices, containers and chains are still the TRACK element's (and the master's) children in the song's tree, which
-    // go and come back with it: the devices' switch adds their line here, between the clips' and modulation's.
+    // Each area through its own code, a line each, each set once: the clips with their notes, then the devices (each channel's
+    // devices, containers and chains, the master's too: Mixer.h, eraseChannelDevices(); what the store holds of them stays),
+    // then modulation (a container's macros by the places found above), then the sends.
     eraseTrackClips (song, held);
+    eraseChannelDevices (song, channels);
     eraseModulatorsOf (song, owners);
     eraseTrackSends (song, held);
 }
@@ -1416,9 +1415,8 @@ AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, con
     // The song's, in its place, with what it holds in the song's areas (eraseTrackHoldings()); then the side chosen's in that
     // place, where it has one: its element without its tracks' clips and sends and its owners' modulators and macros, which
     // each area's code then gives the song as the keeper took them in (Clips.h: takeClipsOf(); Modulation.h:
-    // takeModulatorsOf(); Mixer.h: takeSendsOf(); what its devices hold of the store: DeviceStore.h, setStoreEntries()), so
-    // that nothing is left to the keeper. Its devices, containers and chains come in its element still, as the song's tree
-    // holds them until the devices' switch, which gives them through the devices' setters here.
+    // takeModulatorsOf(); Mixer.h: takeSendsOf(); its devices, containers and chains: Mixer.h, takeDevicesOf(); what they hold
+    // of the store: DeviceStore.h, setStoreEntries()), so that nothing is left to the keeper.
     auto* undo = &song.getUndoManager();
     const auto existing = findByPath (song.getState(), clash.path);
     const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
@@ -1440,9 +1438,10 @@ AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, con
     }
 
     // What the keeper's parts would take out of the element as it comes (its tracks' CLIP and SEND elements, its owners'
-    // MODULATOR and MACRO elements, what its devices and chains hold of the store), taken out of a copy of it first; then what
-    // they would read of it, read from the side's element and given to the song once the copy is in it, in the order the
-    // keeper asks its parts: the clips', modulation's, the sends', the store's.
+    // MODULATOR and MACRO elements, what its devices and chains hold of the store, its channels' DEVICE and CONTAINER
+    // elements), taken out of a copy of it first; then what they would read of it, read from the side's element and given to
+    // the song once the copy is in it: the clips', the devices' (before modulation's: a container's macros need their
+    // container), modulation's, the sends', the store's.
     auto copy = chosen.createCopy();
     std::vector<juce::ValueTree> tracks, owners, items;
     collectTrackElements (copy, tracks);
@@ -1458,6 +1457,12 @@ AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, con
     for (const auto& item : items)
         takeStoreOutOf (item, nullptr);
 
+    for (const auto& track : tracks)
+        removeChildrenOf (track, schema::DEVICE, schema::CONTAINER);
+
+    if (copy.hasType (schema::MASTER))
+        removeChildrenOf (copy, schema::DEVICE, schema::CONTAINER);
+
     parent.addChild (copy, place, undo);
     tracks.clear();
     owners.clear();
@@ -1468,6 +1473,12 @@ AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, con
 
     for (const auto& track : tracks)
         takeClipsOf (song, track);
+
+    for (const auto& track : tracks)
+        takeDevicesOf (song, track);
+
+    if (chosen.hasType (schema::MASTER))
+        takeDevicesOf (song, chosen);
 
     for (const auto& owner : owners)
         takeModulatorsOf (song, owner);

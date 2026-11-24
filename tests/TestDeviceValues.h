@@ -6,6 +6,7 @@
 #pragma once
 
 #include "TestHelpers.h"
+#include "devices/core/DeviceInfo.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/mixer/DeviceType.h"
@@ -69,6 +70,11 @@ bool hasDevice (const Song&, DeviceID);
 // as a song opens any file. A live song's own elements are never written so.
 juce::ValueTree copyWholeSongWithDevice (const Song&, TrackID channel, const juce::ValueTree& device);
 juce::ValueTree copyWholeSongWithDeviceEdited (const Song&, DeviceID, const std::function<void (juce::ValueTree&)>& edit);
+
+// A parameter's value set by hand written into an element made or edited by hand (a device's or a modulator's, never a live
+// song's), into its VALUES by the parameter's ID as the song writes one (SavedValues.h: toSavedValue(), a choice by its
+// name), or none at the parameter's default (and no VALUES left empty).
+void writeValueSetByHand (juce::ValueTree element, const devices::ParameterInfo&, float value);
 
 // A device's type as the song holds it (Schema.h: deviceType; deviceIsPlugin for a plug-in), none for a container, a chain
 // or what the song hasn't.

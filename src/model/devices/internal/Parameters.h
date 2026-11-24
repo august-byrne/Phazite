@@ -21,6 +21,8 @@
 
 namespace phazite
 {
+struct SongDevices; // model/base/internal/DevicesValue.h
+
 class AutomationWriter;
 
 enum class ParameterSource
@@ -93,40 +95,43 @@ float getCurrentValue (const Song&, const ParameterRef&, bool withModulation);
 
 //==============================================================================
 // A parameter found in the song, for what reads one often (a control, at each of the display ticker's ticks): what it is of,
-// its element (state), and for one of Phazite's own devices' parameters, its description. The element is the one that holds
-// its value set by hand: a device's or a plug-in's DEVICE, a container's chain's CHAIN; none for a fader's volume and pan,
-// whose channel it holds by its track's ID or the master's flag (channel: model/base/IDs.h, ChannelRef), looked for in the
-// tracks by it (model/arrangement/internal/Tracks.h: isFaderOf()), nor for a modulator's parameter and a macro's value, which
-// are looked for by their modulator's ID in modulation's area (model/modulation/internal/Modulation.h: getModulatorValue()),
-// the modulator's still of the kind it was found of, nor for a send's level, looked for by its send's ID in the sends' area
-// (model/mixer/internal/Mixer.h: getSendValue()), one look at each tick. The functions above, given one, take it as found,
-// which holds while its element is the song's and still names it, and for a fader, a modulator, a macro or a send, while the
-// song holds it so (isStillThere()).
+// and for one of Phazite's own devices' parameters, its description. It holds no element: a fader's volume and pan hold
+// their channel by its track's ID or the master's flag (channel: model/base/IDs.h, ChannelRef), looked for in the tracks by it
+// (model/arrangement/internal/Tracks.h: isFaderOf()); a device's, a plug-in's and a chain's parameter is looked for by its
+// device's or chain's ID in the devices' area (model/mixer/internal/Mixer.h: findDevice()), the device still of the form (and
+// one of Phazite's own of the type) it was found of; a modulator's parameter and a macro's value by their modulator's ID in
+// modulation's area (model/modulation/internal/Modulation.h: getModulatorValue()), the modulator's still of the kind it was
+// found of; a send's level by its send's ID in the sends' area (Mixer.h: getSendValue()): one look at each tick. The
+// functions above, given one, take it as found, which holds while the song holds it so (isStillThere()).
 struct FoundParameter
 {
     // Made by locateParameter() alone; a constructor of its own, so that a braced reference ({ device, "gain" }) is never
     // taken for one.
-    FoundParameter (const ParameterRef& r, ParameterSource s, const juce::ValueTree& st, const devices::ParameterInfo* i)
+    FoundParameter (const ParameterRef& r, ParameterSource s, const devices::ParameterInfo* i)
         : ref (r),
           source (s),
-          state (st),
           info (i)
     {
     }
 
     ParameterRef ref;
     ParameterSource source = ParameterSource::device;
-    juce::ValueTree state;
     ChannelRef channel {}; // a fader's volume's or pan's channel; none for the other sources
     const devices::ParameterInfo* info = nullptr;
 };
 
 std::optional<FoundParameter> locateParameter (const Song&, const ParameterRef&);
 
+// The same with the song's devices, containers and chains given, never looked up in the song: a value of their own
+// properties alone will do (model/base/internal/DevicesValue.h: readDevicesFields()), as no parameter's look reads a device's
+// values set by hand or its sounds. What the loader's checks of the curves and the MIDI links ask of a song that holds no
+// values yet, whose devices they read once (model/project/Project.cpp: makeConsistent()).
+std::optional<FoundParameter> locateParameter (const Song&, const ParameterRef&, const SongDevices& devices);
+
 // The half of locateParameter() that looks in the song's tree alone, which it asks after its looks in modulation's area and,
-// for a send's level, the sends': the sources the tree holds (a device's, a plug-in's, a chain's and a fader's parameters);
-// none for a modulator's parameter, a macro's value and a send's level. What a tree callback asks, which reads no area of the
-// song's values (MidiLinker's, model/midi/internal/MidiLinks.h).
+// for a send's level, the sends', and before the devices' area: the sources the tree holds (a fader's parameters); none for
+// any other. What a tree callback asks, which reads no area of the song's values (MidiLinker's,
+// model/midi/internal/MidiLinks.h).
 std::optional<FoundParameter> locateParameterInTree (const Song&, const ParameterRef&);
 
 bool isStillThere (const Song&, const FoundParameter&);
@@ -140,14 +145,4 @@ float getValueSetByHand (const Song&, const FoundParameter&);
 void setValueSetByHand (Song&, const FoundParameter&, float value);
 float getCurrentValue (const Song&, const FoundParameter&, bool withModulation);
 
-//==============================================================================
-// A value of a parameter written into an element's VALUES (Schema.h), a device's or a modulator's, through an undo manager or
-// none: none at the parameter's default, and no VALUES left without values, the value as it is given otherwise (not brought
-// to its steps), through the devices' writer of one value (model/base/internal/DevicesValue.h: writeDeviceValueOf()). No
-// writer of the song's calls it: the devices' setters write a live song's (model/mixer/internal/Mixer.h: setDeviceValue()),
-// and modulation's its own values. Its callers are the tests' builders of elements by hand alone
-// (tests/ModulationWritersTests.cpp, tests/SongTextTests.cpp), which write an element a song then opens: it stays for them.
-// (Whether a value is the default, and its saved form: model/base/internal/SavedValues.h, isDefaultValue(), toSavedValue(),
-// readSavedValue().)
-void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo&, float value, juce::UndoManager*);
 } // namespace phazite

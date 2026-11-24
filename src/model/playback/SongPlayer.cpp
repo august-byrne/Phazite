@@ -73,18 +73,61 @@ namespace
         return readTrackKind (channel) == kind;
     }
 
-    // A device's, a container's or a chain's ID as the plans key it, read through the devices' conversion
-    // (model/base/internal/DevicesValue.h: readDeviceElementID()), as the compile reads every field of a device.
-    std::int64_t getDeviceKey (const juce::ValueTree& element)
+    // A device's, a container's or a chain's ID as the plans key it.
+    std::int64_t getDeviceKey (const DeviceValue& value)
     {
-        return (std::int64_t) readDeviceElementID (element).getRaw();
+        return (std::int64_t) value.id.getRaw();
     }
 
-    // Whether an element is a device's, of Phazite's own or a plug-in (not a container nor a chain).
-    bool isDeviceForm (const juce::ValueTree& element)
+    // Whether a value is a device's, of Phazite's own or a plug-in (not a container nor a chain).
+    bool isDeviceForm (const DeviceValue& value)
     {
-        const auto form = readDeviceForm (element);
-        return form == DeviceValue::Form::own || form == DeviceValue::Form::plugin;
+        return value.form == DeviceValue::Form::own || value.form == DeviceValue::Form::plugin;
+    }
+
+    // The place of what a channel's element holds (a TRACK's by its ID, the MASTER's by its flag), as the devices' area
+    // lists it.
+    DevicePlace getChannelPlaceOf (const juce::ValueTree& channel)
+    {
+        return makeChannelPlace (readTrackElementID (channel), channel.hasType (schema::MASTER)); // read without a text made
+    }
+
+    // Each item of a channel's list in the devices' values, in its order (a device, or a container, which holds the rest).
+    template <typename Each>
+    void forEachOnChannel (const SongDevices& all, const juce::ValueTree& channel, Each&& each)
+    {
+        if (const auto* list = all.findList (getChannelPlaceOf (channel)))
+            for (const auto id : *list)
+                if (const auto* value = all.find (id))
+                    each (*value);
+    }
+
+    // What a container holds (its chains) or a chain (its devices), in their order, each as the values hold it.
+    template <typename Each>
+    void forEachInside (const SongDevices& all, const DeviceValue& owner, Each&& each)
+    {
+        const auto* list = owner.form == DeviceValue::Form::container ? all.chains.find (owner.id.getRaw())
+                           : owner.form == DeviceValue::Form::chain   ? all.chainDevices.find (owner.id.getRaw())
+                                                                      : nullptr;
+
+        if (list != nullptr)
+            for (const auto id : *list)
+                if (const auto* value = all.find (id))
+                    each (*value);
+    }
+
+    // A device's sounds as a SOUNDS element (those of the properties from `first` on, `count` of them): what the sounds'
+    // loaders take (DrumKit.h, Wavetables.h, SamplerSound.h).
+    juce::ValueTree makeSoundsElement (const DeviceValue& device, int first, int count)
+    {
+        const auto& properties = getSoundPropertiesOf (std::string_view (device.type.toRawUTF8()));
+        juce::ValueTree sounds (schema::SOUNDS);
+
+        for (auto i = first; i < first + count && i < (int) properties.size(); ++i)
+            if (const auto* sound = device.sounds.find ((std::uint16_t) i))
+                sounds.setProperty (properties[(size_t) i], *sound, nullptr);
+
+        return sounds;
     }
 
     // A note's or a controller's MIDI channel, as the engine takes it: the song's 1 to 16 as 0 to 15.
@@ -417,16 +460,15 @@ void SongPlayer::deviceStoreChanged (const std::vector<SongValues::DeviceStoreCh
 void SongPlayer::holdDevices()
 {
     // Each device (its own or a plug-in, its containers' chains' too) by its ID: its sidechain's track and its channel, from
-    // the song's devices as the values' listeners were told them (SongValues.h: getDevicesAsTold()), so that what is held
-    // here and what devicesChanged() keeps up to date never disagree. Not in a callback: as the player is made.
+    // the song's devices' area (SongValues.h: devices), which tells what devicesChanged() keeps up to date: so the two never
+    // disagree. Not in a callback: as the player is made.
     heldDevices.clear();
     const auto* values = song.getValues();
-    const auto* told = values != nullptr ? values->getDevicesAsTold() : nullptr;
 
-    if (told == nullptr)
+    if (values == nullptr)
         return;
 
-    for (const auto& [id, device] : told->devices)
+    for (const auto& [id, device] : values->devices.get().devices)
         if (device.form == DeviceValue::Form::own || device.form == DeviceValue::Form::plugin)
             heldDevices[id] = { .sidechain = (std::int64_t) device.sidechain.getRaw(),
                                 .channel = device.place.onMaster ? 0 : (std::int64_t) device.place.track.getRaw() };
@@ -504,35 +546,27 @@ std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const juce::Va
     return compiled;
 }
 
-void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
+void SongPlayer::markChange (const juce::ValueTree& changed)
 {
     // The clips and their notes are values beside the tree, heard by clipsChanged() and clipNotesChanged(); the tempo map is
     // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsKept()), which marks
     // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats); the curves by
     // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter; the modulators and macros by
     // modulationChanged() (the tree holds none of them), each by its channel; the sends by sendsChanged() (the tree holds
-    // none of them either), by the tracks they were added to or taken out of; the devices, containers and chains, as far as
-    // their value covers them, by devicesChanged() (isHeardAsKept(), through isHeardAsDevices()), by their channels, their
-    // sounds by their devices. In a channel (a track, a folder, a return or the master), its devices' values are read again
-    // only for what can change them: what the tree still tells at or under a device or a chain (a plug-in's state's format
-    // ID and version, a chain's mute and solo, a plug-in's first value set by hand: the store's), or an element of the
-    // channel added, removed or moved; not the channel's own properties (its height, mute, solo, volume, pan), which no
-    // device reads, nor a plug-in's own values (VALUE), which the plug-in keeps, the engine reading none.
-    auto inDevice = structure;
-
+    // none of them either), by the tracks they were added to or taken out of; the devices, containers and chains, by
+    // devicesChanged(), by their channels, their sounds by their devices, and what the store holds of them (a plug-in's
+    // state's format ID and version, a chain's mute and solo, a plug-in's first value set by hand) by deviceStoreChanged():
+    // the song's tree holds none of them. In a channel (a track, a folder, a return or the master), its devices' values are
+    // read again only for an element of the channel added, removed or moved; not for the channel's own properties (its
+    // height, mute, solo, volume, pan), which no device reads (valueTreePropertyChanged() marks nothing here).
     for (auto element = changed; element.isValid(); element = element.getParent())
     {
         if (schema::isUncountedElement (element.getParent(), element))
             return; // view state (a track's lanes)
 
-        if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN))
-            inDevice = true;
-
         if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
         {
-            if (inDevice)
-                changes.channels.insert (element.hasType (schema::MASTER) ? 0 : getID (element, schema::trackID));
-
+            changes.channels.insert (element.hasType (schema::MASTER) ? 0 : getID (element, schema::trackID));
             return;
         }
     }
@@ -549,8 +583,6 @@ void SongPlayer::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Id
     // its own is under an ID no longer known.
     if (tree.hasType (schema::TRACK) && property == schema::trackID)
         changes.allNotes = changes.allChannels = true;
-
-    markChange (tree, false);
 }
 
 void SongPlayer::markTracksIn (const juce::ValueTree& element)
@@ -581,7 +613,7 @@ void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& 
         return;
 
     if (! schema::isUncountedElement (parent, child))
-        markChange (parent, true);
+        markChange (parent);
 
     markTracksIn (child);
 }
@@ -592,7 +624,7 @@ void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree
         return; // the areas': tempoMapChanged(); the chord lane's, which nothing played reads; curvesChanged(); devicesChanged()
 
     if (! schema::isUncountedElement (parent, child))
-        markChange (parent, true);
+        markChange (parent);
 
     markTracksIn (child);
 }
@@ -603,7 +635,7 @@ void SongPlayer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
     // (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's, which nothing played reads; the curves',
     // curvesChanged().
     if (! isHeardAsKept (parent))
-        markChange (parent, true);
+        markChange (parent);
 }
 
 void SongPlayer::letGoOfPlugins()
@@ -963,15 +995,15 @@ std::shared_ptr<engine::StripState> SongPlayer::getStrip (std::int64_t id)
     return strip;
 }
 
-std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree& deviceState, bool channelChanged)
+std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const DeviceValue& deviceState, bool channelChanged)
 {
     // A plug-in: its instance in its helper (model/plugins/internal/PluginInstances.h), which a render holds while it
     // plays a block, the engine skipping it then (SandboxedProcessor.h).
-    if (readDeviceForm (deviceState) == DeviceValue::Form::plugin)
+    if (deviceState.isPlugin())
         return getPluginDevice (deviceState);
 
     // Phazite's own devices.
-    const auto* info = findOwnDevice (readDeviceType (deviceState).toStdString());
+    const auto* info = findOwnDevice (std::string_view (deviceState.type.toRawUTF8()));
 
     if (info == nullptr)
         return nullptr;
@@ -1017,40 +1049,33 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
     for (size_t i = 0; i < values.size(); ++i)
         node->setValue ((int) i, values[i]);
 
-    node->setOn (! readDeviceOff (deviceState));
+    node->setOn (! deviceState.off);
     return node;
 }
 
-std::vector<float> SongPlayer::readValues (const devices::DeviceInfo& info, const juce::ValueTree& deviceState)
+std::vector<float> SongPlayer::readValues (const devices::DeviceInfo& info, const DeviceValue& deviceState)
 {
-    auto& names = parameterNames[&info];
-
-    if (names.size() != info.parameters.size())
-    {
-        names.clear();
-
-        for (const auto& parameter : info.parameters)
-            names.emplace_back (juce::String (parameter.id.data(), parameter.id.size()));
-    }
-
-    // Each through the devices' conversion, one field at a time (DevicesValue.h: readDeviceParameterValue()), its name taken as
-    // it is kept here, never the device whole: a drum sampler's whole value holds thousands of entries.
+    // Each by its index, a look in the device's values' map (DevicesValue.h: getParameterValue()), the parameter's default for
+    // one it holds none of.
     std::vector<float> values;
     values.reserve (info.parameters.size());
 
     for (size_t i = 0; i < info.parameters.size(); ++i)
-        values.push_back (readDeviceParameterValue (deviceState, info.parameters[i], names[i]));
+    {
+        const auto* held = deviceState.values.find ((std::uint32_t) i);
+        values.push_back (held != nullptr ? *held : info.parameters[i].defaultValue);
+    }
 
     return values;
 }
 
-void SongPlayer::checkValues (const engine::DeviceNode& node, const juce::ValueTree& deviceState)
+void SongPlayer::checkValues (const engine::DeviceNode& node, const DeviceValue& deviceState)
 {
     // As getDevice() would set them, each kept to its range: a difference is a change of the song's that its player didn't
     // hear of (markChange()).
     const auto& info = node.getDeviceInfo();
     const auto values = readValues (info, deviceState);
-    auto same = node.isOn() == ! readDeviceOff (deviceState);
+    auto same = node.isOn() == ! deviceState.off;
 
     for (size_t i = 0; i < values.size(); ++i)
         same = same && juce::exactlyEqual (node.getValue ((int) i), devices::constrain (info.parameters[i], values[i]));
@@ -1059,31 +1084,31 @@ void SongPlayer::checkValues (const engine::DeviceNode& node, const juce::ValueT
     juce::ignoreUnused (same);
 }
 
-std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::ValueTree& deviceState)
+std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const DeviceValue& deviceState)
 {
     // One that is loaded (not one missing on this computer), in its helper, kept by its ID while the song's instances keep
     // the same instance: through its channel, with its mix as the engine's.
-    const auto sandboxed = plugins != nullptr ? plugins->find (readDeviceElementID (deviceState)) : nullptr;
+    const auto sandboxed = plugins != nullptr ? plugins->find (deviceState.id) : nullptr;
     const auto id = getDeviceKey (deviceState);
 
     if (sandboxed == nullptr)
     {
         // One still loading as its project opened: silence in its place (an effect that can't play is silent, never dry),
         // until it has, then its sound fades in (model/plugins/internal/SandboxedProcessor.h: LoadingPlugin).
-        if (plugins == nullptr || ! plugins->isLoading (readDeviceElementID (deviceState)))
+        if (plugins == nullptr || ! plugins->isLoading (deviceState.id))
             return nullptr;
 
         auto& loading = devices[id];
 
         if (loading == nullptr || dynamic_cast<const LoadingPlugin*> (&loading->getRunner().getProcessor()) == nullptr)
         {
-            auto processor = std::make_unique<LoadingPlugin> (readPluginIdentity (deviceState).instrument);
+            auto processor = std::make_unique<LoadingPlugin> (deviceState.plugin.instrument);
             const auto& info = processor->getInfo();
             loading = std::make_shared<engine::DeviceNode> (info, std::move (processor));
             loading->getRunner().prepare (preparedRate, preparedBlockSize);
         }
 
-        loading->setOn (! readDeviceOff (deviceState));
+        loading->setOn (! deviceState.off);
         used.insert (id);
         return loading;
     }
@@ -1107,9 +1132,9 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::Val
     }
 
     if (const auto mix = devices::findParameter (node->getDeviceInfo(), devices::mixParameterID); mix >= 0)
-        node->setValue (mix, readDeviceMix (deviceState));
+        node->setValue (mix, deviceState.mix);
 
-    node->setOn (! readDeviceOff (deviceState));
+    node->setOn (! deviceState.off);
     used.insert (id);
     return node;
 }
@@ -1124,12 +1149,15 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
     const auto lowLatencyLimit = toWhole<int> (lowLatencyLimitSeconds * preparedRate);
 
     // A frozen track's devices before its freeze point are in its frozen file.
-    const auto isFrozen = [this, skipFrozen] (const juce::ValueTree& state)
-    { return skipFrozen && isFrozenDevice (song, readDeviceElementID (state)); };
+    const auto isFrozen = [this, skipFrozen] (const DeviceValue& state) { return skipFrozen && isFrozenDevice (song, state.id); };
+
+    // The song's devices as its area holds them now (a copy, which shares what it holds: what the compile reads stays while it
+    // reads it, whatever opens meanwhile).
+    const auto all = getDevicesValue (song);
 
     const auto changed = compiling.hasChannel (channel.id); // the master's is 0
 
-    const auto add = [&] (const juce::ValueTree& deviceState)
+    const auto add = [&] (const DeviceValue& deviceState)
     {
         if (isFrozen (deviceState))
             return;
@@ -1148,7 +1176,7 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
             strip.hasInstrument = true;
 
         engine::Plan::Device device { std::move (node) };
-        const auto id = readDeviceElementID (deviceState).getRaw();
+        const auto id = deviceState.id.getRaw();
 
         // What tells an instrument from the one before in its place, from plan to plan: its device, and a plug-in's instance
         // with the times it was loaded again after a crash (one still loading, silent meanwhile, is another).
@@ -1160,8 +1188,7 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
             {
                 strip.instrument = mixInto (strip.instrument, (std::uint64_t) reinterpret_cast<std::uintptr_t> (&sandboxed->getInstance()));
                 strip.instrument =
-                    mixInto (strip.instrument,
-                             (std::uint64_t) (plugins != nullptr ? plugins->getGeneration (readDeviceElementID (deviceState)) : 0));
+                    mixInto (strip.instrument, (std::uint64_t) (plugins != nullptr ? plugins->getGeneration (deviceState.id) : 0));
             }
         }
 
@@ -1178,7 +1205,7 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
         // where it had waited). An instrument's sound isn't held back (it takes notes): its
         // sidechain is lined up where it can be, a later track not heard earlier; nor is one that is off, which doesn't play
         // and so isn't waited for, as its latency isn't.
-        if (const auto source = (std::int64_t) readDeviceSidechain (deviceState).getRaw();
+        if (const auto source = (std::int64_t) deviceState.sidechain.getRaw();
             source != 0 && places.contains (source) && ! channel.refuses (source))
         {
             auto& heard = plan.strips[(size_t) places.at (source)];
@@ -1227,38 +1254,33 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
         ids.push_back ((std::int64_t) id);
     };
 
-    for (const auto& deviceState : channelState)
-    {
-        // A render of some of them (a freeze's): the others left out.
-        if (only != nullptr && ! only->contains (getDeviceKey (deviceState)))
-            continue;
+    forEachOnChannel (all, channelState,
+                      [&] (const DeviceValue& deviceState)
+                      {
+                          // A render of some of them (a freeze's): the others left out.
+                          if (only != nullptr && ! only->contains (getDeviceKey (deviceState)))
+                              return;
 
-        const auto form = readDeviceForm (deviceState);
-
-        if (form == DeviceValue::Form::own || form == DeviceValue::Form::plugin)
-        {
-            add (deviceState);
-        }
-        else if (form == DeviceValue::Form::container && ! readDeviceOff (deviceState) && ! isFrozen (deviceState))
-        {
-            addContainer (strip, deviceState, add);
-        }
-    }
+                          if (isDeviceForm (deviceState))
+                              add (deviceState);
+                          else if (deviceState.form == DeviceValue::Form::container && ! deviceState.off && ! isFrozen (deviceState))
+                              addContainer (strip, deviceState, all, add);
+                      });
 
     return ids;
 }
 
-void SongPlayer::addContainer (engine::Plan::Strip& strip, const juce::ValueTree& containerState,
-                               const std::function<void (const juce::ValueTree&)>& add)
+void SongPlayer::addContainer (engine::Plan::Strip& strip, const DeviceValue& containerState, const SongDevices& all,
+                               const std::function<void (const DeviceValue&)>& add)
 {
     // Its chains side by side, each its devices from the sound as it comes in, as late as it comes there, lined up with the
     // latest; then its mix of what they put out with what came in, delayed as much. An instrument container is its strip's
     // instrument.
     engine::Plan::Container container;
     container.first = (int) strip.devices.size();
-    container.instrument = readContainerInstrument (containerState);
+    container.instrument = containerState.instrument;
 
-    switch (readContainerSplit (containerState))
+    switch (containerState.split)
     {
         case ContainerSplit::bands:
             container.split = engine::Split::bands;
@@ -1280,11 +1302,11 @@ void SongPlayer::addContainer (engine::Plan::Strip& strip, const juce::ValueTree
     if (container.instrument && container.first == 0)
         strip.hasInstrument = true;
 
-    for (const auto& chainState : containerState)
-    {
-        if (readDeviceForm (chainState) != DeviceValue::Form::chain)
-            continue;
+    std::vector<DeviceValue> chainValues;
+    forEachInside (all, containerState, [&chainValues] (const DeviceValue& each) { chainValues.push_back (each); });
 
+    for (const auto& chainState : chainValues)
+    {
         if ((int) container.chains.size() == engine::maximumChains)
             break;
 
@@ -1293,14 +1315,17 @@ void SongPlayer::addContainer (engine::Plan::Strip& strip, const juce::ValueTree
         chain.first = (int) strip.devices.size();
         strip.latency = latencyBefore;
 
-        for (const auto& inside : chainState)
-            if (isDeviceForm (inside))
-                add (inside);
+        forEachInside (all, chainState,
+                       [&add] (const DeviceValue& inside)
+                       {
+                           if (isDeviceForm (inside))
+                               add (inside);
+                       });
 
         chain.count = (int) strip.devices.size() - chain.first;
         chain.latency = strip.latency;
         latest = std::max (latest, strip.latency - latencyBefore);
-        chain.state = getChain (chainState);
+        chain.state = getChain (chainState, all);
         chain.volume = findCurve ((std::uint64_t) chain.id, schema::chainVolumeParameter);
         chain.pan = findCurve ((std::uint64_t) chain.id, schema::chainPanParameter);
         chain.crossover = findCurve ((std::uint64_t) chain.id, schema::crossoverParameter);
@@ -1322,7 +1347,7 @@ void SongPlayer::addContainer (engine::Plan::Strip& strip, const juce::ValueTree
     if (kept == nullptr || kept->getLatency() != latest)
         kept = std::make_shared<engine::ContainerState> (preparedBlockSize, latest);
 
-    kept->setMix (readDeviceMix (containerState));
+    kept->setMix (containerState.mix);
     container.state = kept;
     usedContainers.insert (id);
 
@@ -1330,15 +1355,14 @@ void SongPlayer::addContainer (engine::Plan::Strip& strip, const juce::ValueTree
     auto& listed = containerChains[id];
     listed.clear();
 
-    for (const auto& chainState : containerState)
-        if (readDeviceForm (chainState) == DeviceValue::Form::chain)
-            listed.push_back (getDeviceKey (chainState));
+    for (const auto& chainState : chainValues)
+        listed.push_back (getDeviceKey (chainState));
 
     updateChainAudibility (id);
     strip.containers.push_back (std::move (container));
 }
 
-std::shared_ptr<engine::ChainState> SongPlayer::getChain (const juce::ValueTree& chainState)
+std::shared_ptr<engine::ChainState> SongPlayer::getChain (const DeviceValue& chainState, const SongDevices& all)
 {
     const auto id = getDeviceKey (chainState);
     auto& chain = chains[id];
@@ -1349,36 +1373,9 @@ std::shared_ptr<engine::ChainState> SongPlayer::getChain (const juce::ValueTree&
         chain->prepare (preparedRate, preparedBlockSize);
     }
 
-    setChainValues (*chain, chainState);
+    setChainValues (*chain, chainState, all);
     usedChains.insert (id);
     return chain;
-}
-
-void SongPlayer::setChainValues (engine::ChainState& chain, const juce::ValueTree& chainState)
-{
-    // Its fader's volume and pan, as a channel's; its crossover, the default for its place where it has none of its own; and
-    // the notes it plays. Each through the devices' conversion (DevicesValue.h), one field at a time.
-    auto& fader = chain.getFader();
-    fader.setVolume (std::max (readChainVolume (chainState), engine::Channel::silenceDb));
-    fader.setPan (readChainPan (chainState));
-
-    // Its place among its container's chains, and how many it has.
-    auto index = 0, count = 0;
-
-    for (const auto& sibling : chainState.getParent())
-    {
-        if (readDeviceForm (sibling) != DeviceValue::Form::chain)
-            continue;
-
-        if (sibling == chainState)
-            index = count;
-
-        ++count;
-    }
-
-    chain.setCrossover (readChainCrossover (chainState).value_or (getDefaultCrossover (index, count)));
-    const auto keys = readChainKeys (chainState), velocities = readChainVelocities (chainState);
-    chain.setNotes (keys.low, keys.high, velocities.low, velocities.high);
 }
 
 void SongPlayer::setChainValues (engine::ChainState& chain, const DeviceValue& value, const SongDevices& all)
@@ -1432,6 +1429,7 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels (const SongSends& s
 {
     // Each track's, bus's and return's: where it goes (the bus it is in, or the master), and what it takes in.
     std::vector<ChannelInfo> infos;
+    const auto& all = getDevicesValue (song);
 
     for (const auto& state : getTrackStates (song))
     {
@@ -1478,25 +1476,20 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels (const SongSends& s
                         info.needs.push_back (other.id);
         }
 
-        const auto addSidechains = [&info] (const juce::ValueTree& chain, auto& addInside) -> void
+        const std::function<void (const DeviceValue&)> addSidechains = [&info, &all, &addSidechains] (const DeviceValue& device)
         {
-            for (const auto& device : chain)
+            if (isDeviceForm (device))
             {
-                const auto form = readDeviceForm (device);
-
-                if (form == DeviceValue::Form::own || form == DeviceValue::Form::plugin)
-                {
-                    if (const auto source = (std::int64_t) readDeviceSidechain (device).getRaw(); source != 0)
-                        info.needs.push_back (source);
-                }
-                else if (form == DeviceValue::Form::container || form == DeviceValue::Form::chain)
-                {
-                    addInside (device, addInside);
-                }
+                if (const auto source = (std::int64_t) device.sidechain.getRaw(); source != 0)
+                    info.needs.push_back (source);
+            }
+            else
+            {
+                forEachInside (all, device, addSidechains);
             }
         };
 
-        addSidechains (info.state, addSidechains);
+        forEachOnChannel (all, info.state, addSidechains);
 
         if (info.padSource != 0)
             info.needs.push_back (info.padSource);
@@ -1959,9 +1952,12 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const SongModulation
     const auto channel = isMaster ? TrackID() : readTrackElementID (channelState);
     addSources (modulation.channels.find (isMaster ? 0 : channel.getRaw()));
 
-    for (const auto& child : channelState)
-        if (readDeviceForm (child) == DeviceValue::Form::container)
-            addSources (modulation.containers.find (readDeviceElementID (child).getRaw()));
+    forEachOnChannel (getDevicesValue (song), channelState,
+                      [&addSources, &modulation] (const DeviceValue& child)
+                      {
+                          if (child.form == DeviceValue::Form::container)
+                              addSources (modulation.containers.find (child.id.getRaw()));
+                      });
 
     const auto fader = (std::int64_t) readChannelFader (channelState).getRaw();
     std::optional<std::vector<DeviceID>> sends;
@@ -2243,12 +2239,13 @@ void SongPlayer::addFaderAutomation (engine::Plan::Strip& strip, const juce::Val
     strip.pan = findCurve (fader, isMaster ? "master pan" : "pan");
 }
 
-void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& deviceState)
+void SongPlayer::loadSounds (engine::DeviceNode& node, const DeviceValue& deviceState)
 {
     // What a drum sampler's pads, a synth's oscillators and a sampler play: the song's SOUNDS name it as the
     // plug-in's state does.
     soundLoads.fetch_add (1, std::memory_order_relaxed);
-    const auto sounds = readDeviceSounds (deviceState);
+    const auto sounds =
+        makeSoundsElement (deviceState, 0, (int) getSoundPropertiesOf (std::string_view (deviceState.type.toRawUTF8())).size());
     auto& processor = node.getRunner().getProcessor();
     const auto type = node.getDeviceInfo().typeID;
 

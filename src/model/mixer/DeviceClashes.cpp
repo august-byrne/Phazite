@@ -106,16 +106,16 @@ namespace
     // The song's item a clash names: the song holds it, at the place the path names, of the kind its step names.
     std::optional<DeviceValue> findItemNamed (const Song& song, const ClashItem& item)
     {
-        auto held = findDevice (song, item.id);
+        const auto* held = findDevice (song, item.id);
 
-        if (! held.has_value() || ! (held->place == item.place))
+        if (held == nullptr || ! (held->place == item.place))
             return std::nullopt;
 
         const auto isDevice = held->form == DeviceValue::Form::own || held->form == DeviceValue::Form::plugin;
         const auto kindNamed = item.type == schema::DEVICE.getName()      ? isDevice
                                : item.type == schema::CONTAINER.getName() ? held->form == DeviceValue::Form::container
                                                                           : held->form == DeviceValue::Form::chain;
-        return kindNamed ? held : std::nullopt;
+        return kindNamed ? std::optional (*held) : std::nullopt;
     }
 
     const juce::var& getChosen (const MergeClash& clash, int value)

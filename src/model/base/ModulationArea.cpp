@@ -45,10 +45,11 @@ namespace
         return parent.hasType (schema::TRACK) && isFolder (parent) && isSongChannel (parent);
     }
 
-    // What holds the song's modulators and macros: a channel of the song's, or a CONTAINER on one.
+    // What holds the song's modulators in its tree: a channel of the song's (a container's macros are by the container's ID, and
+    // the song's tree holds no container: the devices' area does).
     bool isSongOwner (const juce::ValueTree& element)
     {
-        return isSongChannel (element) || (element.hasType (schema::CONTAINER) && isSongChannel (element.getParent()));
+        return isSongChannel (element);
     }
 
     // An owner's place as the song holds its modulators': a channel's, or a container's on its channel (ModulationValue.h:
@@ -314,14 +315,13 @@ SongValues::ModulationKeeper::ModulationKeeper (SongValues& v, Song& s)
 
 void SongValues::ModulationKeeper::remember (const juce::ValueTree& owner, SongModulation& next)
 {
-    // What it held now, in its list's order, in the place of what it may have been remembered with before (taken out, and
+    // What it held now, in its list's order, then the macros of each container on it, by their places (the song's tree holds
+    // no container: the devices' area does), in the place of what it may have been remembered with before (taken out, and
     // brought back by an undo since, which gave its modulators back itself).
     Remembered gone { owner, {} };
 
-    if (const auto* list = next.findList (readOwnerKey (owner)))
+    const auto take = [&next, &gone] (const immer::flex_vector<ModulatorID>& order)
     {
-        const auto order = *list;
-
         for (const auto id : order)
         {
             if (const auto* value = next.find (id))
@@ -329,7 +329,22 @@ void SongValues::ModulationKeeper::remember (const juce::ValueTree& owner, SongM
 
             next = withoutModulator (next, id);
         }
-    }
+    };
+
+    const auto key = readOwnerKey (owner);
+
+    if (const auto* list = next.findList (key))
+        take (*list);
+
+    std::vector<immer::flex_vector<ModulatorID>> macros;
+
+    for (const auto& [container, list] : next.containers)
+        if (const auto* first = list.empty() ? nullptr : next.find (list.front());
+            first != nullptr && first->place.onMaster == key.onMaster && first->place.track == key.track)
+            macros.push_back (list);
+
+    for (const auto& list : macros)
+        take (list);
 
     const auto found =
         std::find_if (remembered.begin(), remembered.end(), [&owner] (const Remembered& each) { return each.owner == owner; });
@@ -354,7 +369,8 @@ bool SongValues::ModulationKeeper::giveBack (const juce::ValueTree& owner, const
 
     for (auto value : given)
     {
-        value.place = place;
+        value.place.track = place.track; // a container's macro keeps its container
+        value.place.onMaster = place.onMaster;
         next = withHeldModulator (next, std::move (value));
     }
 
@@ -398,11 +414,16 @@ void SongValues::ModulationKeeper::childAdded (juce::ValueTree& parent, juce::Va
 
     const auto isTrackList = child.hasType (schema::TRACKS) && parent == state;
 
-    if (! isTrackList && ! isSongOwner (child))
+    // (A CONTAINER added to a channel by itself, its macros in it, is the devices' keeper's safety net, which reads it in outside
+    // the history and takes it out after this: its macros are taken in here first.)
+    const auto isLoneContainer = child.hasType (schema::CONTAINER) && isSongChannel (parent) && song.isWritingOutsideHistory();
+
+    if (! isTrackList && ! isSongOwner (child) && ! isLoneContainer)
         return;
 
-    // A track (or the track list, the master, a container) put in the song: what each owner in it was remembered with given
-    // back (a and b), and the elements each holds read in (c), in the elements' order, each owner's in its own.
+    // A track (or the track list, the master) put in the song: what each was remembered with given back, its containers'
+    // macros with it (a), and the elements each holds read in, a CONTAINER's in it too (b), in the elements' order, each
+    // owner's in its own.
     auto next = values.modulation.get();
     std::vector<juce::ValueTree> taken;
     auto changed = false;
@@ -459,15 +480,14 @@ void SongValues::ModulationKeeper::childAdded (juce::ValueTree& parent, juce::Va
 
 void SongValues::ModulationKeeper::childRemoved (juce::ValueTree& parent, juce::ValueTree& child)
 {
-    // A track (or the track list, the master) taken out of the song (a), or a container taken out of a channel of the
-    // song's (b): what each owner in it holds remembered with its element, and erased.
+    // A track (or the track list, the master) taken out of the song (a): what each channel in it holds, with its containers'
+    // macros, remembered with its element, and erased.
     const auto isTrackList = child.hasType (schema::TRACKS) && parent == state;
     const auto isChannel =
         (child.hasType (schema::TRACK) && (parent.hasType (schema::TRACKS) ? parent.getParent() == state : isSongChannel (parent)))
         || (child.hasType (schema::MASTER) && parent == state);
-    const auto isContainer = child.hasType (schema::CONTAINER) && isSongChannel (parent);
 
-    if (! isTrackList && ! isChannel && ! isContainer)
+    if (! isTrackList && ! isChannel)
         return;
 
     const auto before = values.modulation.get();
@@ -478,12 +498,8 @@ void SongValues::ModulationKeeper::childRemoved (juce::ValueTree& parent, juce::
         if (! owner.hasType (schema::TRACKS))
             remember (owner, next);
 
-        if (owner.hasType (schema::CONTAINER))
-            return;
-
         for (const auto& element : owner)
-            if (element.hasType (schema::CONTAINER)
-                || (element.hasType (schema::TRACK) && (owner.hasType (schema::TRACKS) || isFolder (owner))))
+            if (element.hasType (schema::TRACK) && (owner.hasType (schema::TRACKS) || isFolder (owner)))
                 forget (element);
     };
 

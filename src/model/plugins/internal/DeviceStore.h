@@ -11,8 +11,8 @@
 //
 // The song's values are their storage (SongValues.h: deviceStore, a keyed area, and devicesOutside, a value outside the
 // history), which the song's tree holds nothing of. Each read is a look in a map: whether the song holds the item asked of
-// (a plug-in, a chain, a device) is found in what the devices' part of the keeper last told (SongValues.h:
-// getDevicesAsTold()), so that no read walks the song (tests/PerformanceGateTests.cpp). The store keeps the entries of an item
+// (a plug-in, a chain, a device) is found in the devices' area (SongValues.h: devices), so that no read walks the
+// song (tests/PerformanceGateTests.cpp). The store keeps the entries of an item
 // a step took away (its Undo finds them, an answer of its plug-in's is written for it by ID), which no reader here gives and
 // no comparison sees. What hears the store change hears it from the values' listener (SongValues.h:
 // Listener::deviceStoreChanged()). Message thread only.

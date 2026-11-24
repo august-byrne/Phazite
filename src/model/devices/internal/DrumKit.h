@@ -8,6 +8,7 @@
 #include "devices/drums/DrumSampler.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/DevicesValue.h"
 
 #include <optional>
 #include <utility>
@@ -15,17 +16,17 @@
 
 namespace phazite
 {
-// Whether a device is Phazite's drum sampler, by its element in the song or its ID.
-bool isDrumSampler (const juce::ValueTree& deviceState);
+// Whether a device is Phazite's drum sampler, by its value (model/base/internal/DevicesValue.h) or its ID.
+bool isDrumSampler (const DeviceValue&);
 bool isDrumSampler (const Song&, DeviceID);
 
 // What a pad's layer plays: its sound file's name, or its factory sound's ("808 Kick", or the default kit's "Kick"), or
 // nothing; and whether it plays a file. And whether a pad is empty, none of its layers playing a file or a factory sound
 // (as a pad off the default kit's sixteen is until it is given one).
-juce::String getPadName (const Song&, const juce::ValueTree& deviceState, int pad, int layer = 0);
+juce::String getPadName (const Song&, const DeviceValue&, int pad, int layer = 0);
 juce::String getPadName (const Song&, DeviceID, int pad, int layer = 0);
 bool hasPadSound (const Song&, DeviceID, int pad, int layer = 0);
-bool isPadEmpty (const Song&, const juce::ValueTree& deviceState, int pad);
+bool isPadEmpty (const Song&, const DeviceValue&, int pad);
 bool isPadEmpty (const Song&, DeviceID, int pad);
 
 // A drum sampler's pads that play a sound (those not empty: isPadEmpty()), in their order, each with its name (its first

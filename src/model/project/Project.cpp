@@ -944,6 +944,11 @@ namespace
             bool readInPart = false; // makeConsistent()'s ReadAs::inPart: what names an ID the song hasn't may lead into what wasn't read
             const schema::Tables& tables; // the description's ranges, words and hexadecimal ids, which a test may change
 
+            // The song's devices, containers and chains, each its own properties alone (DevicesValue.h: readDevicesFields(),
+            // which reads no device's values set by hand nor its sounds), read once for the checks of the curves and the MIDI
+            // links (keepCurves(), keepMidiLinks()), which find each there by its ID and read none whole.
+            SongDevices heldDevices {};
+
             //==============================================================================
             // Each element of a type Phazite knows where Schema.h puts it; one somewhere else goes, with everything in it. One
             // of a type it doesn't know stays as it is (isKnown()).
@@ -1592,11 +1597,11 @@ namespace
 
                     const ParameterRef parameter { DeviceID::fromRaw (readID (curve[schema::curveDevice])),
                                                    curve[schema::curveParameter].toString() };
+                    const auto* device = heldDevices.find (parameter.device);
+                    const auto isChain = device != nullptr && device->form == DeviceValue::Form::chain && device->place.container.isValid();
 
-                    if (findDeviceState (song, parameter.device)[schema::deviceType].toString() != schema::deviceIsPlugin
-                        && ! describeParameter (song, parameter).has_value()
-                        && ! (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter)
-                        && ! readInPart)
+                    if (! (device != nullptr && device->isPlugin()) && ! locateParameter (song, parameter, heldDevices).has_value()
+                        && ! (isChain && parameter.parameter == schema::crossoverParameter) && ! readInPart)
                     {
                         automation.removeChild (i, nullptr);
                         continue;
@@ -1651,9 +1656,9 @@ namespace
                     }
 
                     const auto parameter = readMidiLinkParameter (song, link);
-                    const auto isThere =
-                        readInPart || describeParameter (song, parameter).has_value()
-                        || findDeviceState (song, parameter.device)[schema::deviceType].toString() == schema::deviceIsPlugin;
+                    const auto* device = heldDevices.find (parameter.device);
+                    const auto isThere = readInPart || locateParameter (song, parameter, heldDevices).has_value()
+                                         || (device != nullptr && device->isPlugin());
 
                     if (! link.hasProperty (schema::midiLinkChannel) || ! link.hasProperty (schema::midiLinkNumber) || ! parameter.isValid()
                         || ! isThere)
@@ -1891,6 +1896,7 @@ namespace
                 keepSendsAsHeld (state);
                 keepDevicesAsHeld (state);
                 keepTracksAsHeld (state);
+                heldDevices = readDevicesFields (state); // once each is as the song holds it
                 keepCurves();
                 keepMidiLinks();
                 keepPaths (state);
@@ -3673,48 +3679,28 @@ bool Project::areDevicesAsSaved() const
     if (! comparingDevicesWhole && devicesToCompare.empty() && deviceOwnersToCompare.empty())
         return true;
 
-    // While the trees hold the devices, by element: past mostToCompare, the tracks and the master whole (holdTheSameProject(),
-    // which holds the devices); else each owner's list's order, then each device against the saved copy's of its ID, its place
-    // and its element, one compared each (one gone from both is the same).
-    const auto state = song->getState();
+    // As values (WholeState.h), as the whole comparison compares them (holdTheSameProject(), each track's and the master's
+    // through holdSameKeptOf()): past mostToCompare, the song's devices whole; else each owner's list's order, then each device
+    // against the saved copy's of its ID, its place among it, one compared each (one gone from both is the same). What the store
+    // holds of each is the store's check (isDeviceStoreAsSaved()).
     const auto now = keepValues (*song);
 
     if (comparingDevicesWhole)
-    {
-        for (const auto* type : { &schema::TRACKS, &schema::MASTER })
-        {
-            const auto element = state.getChildWithName (*type), saved = savedState.tree.getChildWithName (*type);
-
-            if (element.isValid() != saved.isValid()
-                || (element.isValid() && ! holdTheSameProject (element, now, saved, savedState.values)))
-                return false;
-        }
-
-        return true;
-    }
-
-    // Each tree indexed once, however many are compared (a walk of each for each device was a walk of the song per knob).
-    const auto held = indexDeviceElementsIn (state);
-    const auto inSaved = indexDeviceElementsIn (savedState.tree);
+        return holdSameDevices (now, savedState.values);
 
     for (const auto& owner : deviceOwnersToCompare)
     {
         elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
 
-        if (held.getOrder (owner) != inSaved.getOrder (owner))
+        if (! holdSameDeviceOrder (now, savedState.values, owner))
             return false;
     }
 
     return std::all_of (devicesToCompare.begin(), devicesToCompare.end(),
-                        [this, &held, &inSaved, &now] (DeviceID id)
+                        [this, &now] (DeviceID id)
                         {
-                            const auto found = held.find (id);
-                            const auto saved = inSaved.find (id);
-
-                            if (! found.element.isValid() || ! saved.element.isValid())
-                                return found.element.isValid() == saved.element.isValid();
-
-                            return found.place == saved.place && holdTheSameProject (found.element, now, saved.element, savedState.values);
+                            elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+                            return holdSameDevice (now, savedState.values, id);
                         });
 }
 
@@ -3789,12 +3775,10 @@ bool Project::isDeviceStoreAsSaved() const
         return true;
     }
 
-    const auto* told = song->getValues() != nullptr ? song->getValues()->getDevicesAsTold() : nullptr;
-
     return std::all_of (storeToCompare.begin(), storeToCompare.end(),
-                        [this, &now, told] (DeviceID id)
+                        [this, &now] (DeviceID id)
                         {
-                            if (told == nullptr || told->find (id) == nullptr)
+                            if (now.devices.find (id) == nullptr)
                                 return true;
 
                             elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);

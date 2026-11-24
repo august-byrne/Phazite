@@ -27,12 +27,11 @@ namespace
         return values != nullptr ? values->deviceStore.get() : none;
     }
 
-    // An item the song holds by its ID, as the devices' keeper last told it (a look in a map: no walk), nullptr for none.
+    // An item the song holds by its ID, as the devices' area holds it (a look in a map: no walk), nullptr for none.
     const DeviceValue* findHeld (const Song& song, DeviceID id)
     {
         const auto* values = song.getValues();
-        const auto* told = values != nullptr && id.isValid() ? values->getDevicesAsTold() : nullptr;
-        return told != nullptr ? told->find (id) : nullptr;
+        return values != nullptr && id.isValid() ? values->devices.get().find (id) : nullptr;
     }
 
     bool holdsForm (const Song& song, DeviceID id, DeviceValue::Form form)

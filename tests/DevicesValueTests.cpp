@@ -197,7 +197,8 @@ int checkSongsDevices (const phazite::Song& song)
     for (const auto& [raw, value] : all.devices)
     {
         const auto id = DeviceID::fromRaw (raw);
-        CHECK (phazite::findDevice (song, id) == value);
+        REQUIRE (phazite::findDevice (song, id) != nullptr);
+        CHECK (*phazite::findDevice (song, id) == value);
         CHECK (phazite::hasDevice (song, id));
         CHECK (phazite::isPlugin (song, id) == value.isPlugin());
 
@@ -288,13 +289,14 @@ TEST_CASE ("Devices value: the golden project's devices read the same both ways,
                               ++inFile;
                           });
 
+    // Read before the song opens it: the song takes its devices out of the tree it is made of (the file's, shared).
+    const auto all = phazite::readDevicesValue (file);
     const auto song = phazite::makeSong (file);
     REQUIRE (song != nullptr);
     CHECK (checkSongsDevices (*song) == inFile);
     CHECK (inFile > 20);
 
     // What the file holds: a container's chains in their order, a chain's devices, the master's devices.
-    const auto all = phazite::readDevicesValue (file);
     CHECK (all == phazite::getDevicesValue (*song));
     const auto* layers = all.find (DeviceID::fromRaw (37));
     REQUIRE (layers != nullptr);
@@ -438,7 +440,7 @@ TEST_CASE ("Devices value: damaged devices open as the song holds them, the load
     CHECK_FALSE (phazite::isInstrument (*opened, gone));
     CHECK (phazite::getPluginIdentity (phazite::test::copyDevice (*opened, gone)).uniqueId == 7);
     CHECK_FALSE (phazite::hasDevice (*opened, DeviceID::fromRaw (900006)));
-    CHECK_FALSE (phazite::findDevice (*opened, DeviceID::fromRaw (900006)).has_value());
+    CHECK (phazite::findDevice (*opened, DeviceID::fromRaw (900006)) == nullptr);
 
     const auto empty = DeviceID::fromRaw (900007);
     CHECK (phazite::isContainer (*opened, empty));
@@ -460,12 +462,12 @@ TEST_CASE ("Devices value: damaged devices open as the song holds them, the load
     CHECK (phazite::isInstrument (*opened, DeviceID::fromRaw (900010)));
     CHECK (phazite::findChainOf (*opened, DeviceID::fromRaw (900011)) == oddChain);
     CHECK (phazite::findContainerOf (*opened, DeviceID::fromRaw (900011)) == odd);
-    const auto oddValue = phazite::findDevice (*opened, oddChain);
-    REQUIRE (oddValue.has_value());
+    const auto* oddValue = phazite::findDevice (*opened, oddChain);
+    REQUIRE (oddValue != nullptr);
     CHECK (oddValue->place == DevicePlace { .onMaster = true, .container = odd });
 
-    const auto onReturn = phazite::findDevice (*opened, DeviceID::fromRaw (900012));
-    REQUIRE (onReturn.has_value());
+    const auto* onReturn = phazite::findDevice (*opened, DeviceID::fromRaw (900012));
+    REQUIRE (onReturn != nullptr);
     CHECK (onReturn->place == onTrack (reverbReturn.getRaw()));
     CHECK (juce::exactlyEqual (onReturn->mix, 1.0f)); // an own device's mix is its VALUES' "mix"
     CHECK (phazite::getDeviceChannel (*opened, onReturn->id) == reverbReturn);
@@ -485,7 +487,8 @@ TEST_CASE ("Devices value: explicit defaults and long numbers another program wr
     // instrument="0", a range's ends, a range's end past it, brought to it), and a mix, a chain's volume, pan and crossover
     // in more digits than their floats hold: the loader's rule writes each covered property as Phazite's writer does (none
     // at its default, each number in the fewest digits that read back as its float), and leaves what the value doesn't
-    // cover (a plug-in's state, a chain's mute, a window's place, a property Phazite doesn't know) as it was.
+    // cover and the store does (a plug-in's state, a chain's mute) and a window's place as they were; a property Phazite
+    // doesn't know on a DEVICE, a CONTAINER or a CHAIN is dropped as the song opens (the song holds its devices as values).
     auto song = phazite::createSong();
     const auto track = phazite::ensureTracks (*song, 1).front();
     auto file = phazite::test::copyWholeSongWithDevice (
@@ -518,19 +521,19 @@ TEST_CASE ("Devices value: explicit defaults and long numbers another program wr
     CHECK (phazite::writeValue (plugin[schema::deviceMix]) == "0.3");
     CHECK (plugin[schema::pluginState].toString() == "AAAA"); // the store's
     CHECK ((int) plugin[schema::deviceWindowX] == 10);        // a window's place
-    CHECK (plugin["unknown"].toString() == "kept");           // Phazite doesn't know it
+    CHECK_FALSE (plugin.hasProperty ("unknown"));             // Phazite doesn't know it: dropped
 
     const auto own = phazite::test::copyDevice (*opened, DeviceID::fromRaw (900102));
     CHECK_FALSE (own.hasProperty (schema::deviceOff));
     CHECK_FALSE (own.hasProperty (schema::deviceSidechain));
-    CHECK (own["unknown"].toString() == "kept");
+    CHECK_FALSE (own.hasProperty ("unknown"));
 
     const auto layers = phazite::test::copyDevice (*opened, DeviceID::fromRaw (900103));
 
     for (const auto* gone : { "off", "mix", "instrument" })
         CHECK_FALSE (layers.hasProperty (gone));
 
-    CHECK (layers["unknown"].toString() == "kept");
+    CHECK_FALSE (layers.hasProperty ("unknown"));
     const auto chainA = phazite::test::copyDevice (*opened, DeviceID::fromRaw (900104));
 
     for (const auto* gone : { "volume", "pan", "lowKey", "highKey", "lowVelocity", "highVelocity" })
@@ -695,15 +698,6 @@ TEST_CASE ("Devices value: the helpers keep the lists, a container's chains and 
     CHECK (listOf (reordered.channels.find (1)) == ids ({ 1, 2, 3, 10 }));
     const auto refused = ids ({ 1, 2, 3 });
     CHECK (phazite::withListOrder (devices, onTrack (1), immer::flex_vector<DeviceID> (refused.begin(), refused.end())) == devices);
-
-    // A channel's track given another ID: its devices' places follow, the master's too.
-    const auto renamed = phazite::withChannelPlace (devices, TrackID::fromRaw (1), TrackID::fromRaw (5), false);
-    CHECK (phazite::holdsItsLists (renamed));
-    CHECK (renamed.channels.find (1) == nullptr);
-    CHECK (renamed.find (DeviceID::fromRaw (13))->place.track == TrackID::fromRaw (5));
-    const auto toMaster = phazite::withChannelPlace (devices, TrackID::fromRaw (1), {}, true);
-    CHECK (phazite::holdsItsLists (toMaster));
-    CHECK (listOf (toMaster.channels.find (0)) == ids ({ 20, 3, 1, 2, 10 }));
 
     // A container moved to another channel takes its chains and their devices along, and a chain moved to another
     // container its devices: their places follow it, their lists stay its.

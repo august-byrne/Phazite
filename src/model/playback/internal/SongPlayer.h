@@ -306,8 +306,8 @@ private:
     std::set<std::int64_t> usedNotes;
     juce::ValueTree songState;
     std::shared_ptr<const engine::NoteSequence> getNotes (const juce::ValueTree& trackState);
-    void markChange (const juce::ValueTree& changed, bool structure); // an element added, removed or moved in it
-    void markTracksIn (const juce::ValueTree& element);               // it, if a track or the master, and the tracks it holds
+    void markChange (const juce::ValueTree& changed);   // an element added, removed or moved in it
+    void markTracksIn (const juce::ValueTree& element); // it, if a track or the master, and the tracks it holds
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
@@ -366,7 +366,7 @@ private:
     };
 
     std::map<std::uint64_t, HeldDevice> heldDevices;
-    void holdDevices(); // from the devices the keeper told (SongValues.h: getDevicesAsTold()), as the player is made
+    void holdDevices(); // from the devices' area (SongValues.h: devices), as the player is made
 
     // A chain's values as the song's values told them (takeDevice()), its place among its container's from the song's devices
     // handed whole (its default crossover: Containers.h, getDefaultCrossover()).
@@ -445,16 +445,14 @@ private:
 
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
     // What plays a device, its values set by hand read again from the song if its channel changed (Changes::channels).
-    std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState, bool channelChanged);
-    std::shared_ptr<engine::DeviceNode> getPluginDevice (const juce::ValueTree& deviceState);
+    std::shared_ptr<engine::DeviceNode> getDevice (const DeviceValue& device, bool channelChanged);
+    std::shared_ptr<engine::DeviceNode> getPluginDevice (const DeviceValue& device);
     static int findParameter (const engine::DeviceNode&, const juce::String& id); // its index, or -1
 
-    // A device's values set by hand, in its description's order, as the song holds them (DevicesValue.h:
-    // readDeviceParameterValue()), each parameter's name made once for each kind of device: a juce::Identifier made from a
-    // string is looked up in JUCE's pool of names, under a lock, which was most of a big song's compile (known bug 145).
-    std::map<const devices::DeviceInfo*, std::vector<juce::Identifier>> parameterNames;
-    std::vector<float> readValues (const devices::DeviceInfo&, const juce::ValueTree& deviceState);
-    void checkValues (const engine::DeviceNode&, const juce::ValueTree& deviceState); // kept ones, while checking
+    // A device's values set by hand, in its description's order, as the song holds them (DevicesValue.h: each by its index in
+    // its values' map, the parameter's default for none).
+    std::vector<float> readValues (const devices::DeviceInfo&, const DeviceValue& device);
+    void checkValues (const engine::DeviceNode&, const DeviceValue& device); // kept ones, while checking
 
     // A plug-in in a helper: the parameters whose values the engine sends it with each block, which the plan's automation
     // (but while written by hand) and modulation move.
@@ -498,10 +496,9 @@ private:
     // A container on a strip, its chains' devices each added as add() adds a device; each chain's state, kept by its ID,
     // with its values set (its fader's volume and pan, its crossover, the notes it plays), and whether each is heard; and
     // a chain of the plan being compiled, by its ID, or nullptr.
-    void addContainer (engine::Plan::Strip&, const juce::ValueTree& containerState,
-                       const std::function<void (const juce::ValueTree&)>& add);
-    std::shared_ptr<engine::ChainState> getChain (const juce::ValueTree& chainState);
-    void setChainValues (engine::ChainState&, const juce::ValueTree& chainState);
+    void addContainer (engine::Plan::Strip&, const DeviceValue& container, const SongDevices& all,
+                       const std::function<void (const DeviceValue&)>& add);
+    std::shared_ptr<engine::ChainState> getChain (const DeviceValue& chain, const SongDevices& all);
     void updateChainAudibility (std::int64_t container);
     static engine::Plan::Container::Chain* findPlannedChain (engine::Plan::Strip&, std::int64_t id);
     // A modulator or a macro as the song holds it (model/base/internal/ModulationValue.h), its node kept by its ID; and a
@@ -510,7 +507,7 @@ private:
     void setModulatorValues (engine::ModulatorNode&, const ModulatorValue&);
     void addModulation (engine::Plan::Strip&, const SongModulation&, const juce::ValueTree& channelState,
                         const std::vector<std::int64_t>& deviceIDs);
-    void loadSounds (engine::DeviceNode&, const juce::ValueTree& deviceState);
+    void loadSounds (engine::DeviceNode&, const DeviceValue& device);
     void setChannel (const juce::ValueTree& channelState, bool isMaster);
     void updateAudibility();
 };

@@ -9,6 +9,7 @@
 #include "devices/sampler/Sampler.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/DevicesValue.h"
 
 #include <memory>
 #include <optional>
@@ -19,7 +20,7 @@ namespace phazite
 class Selection;
 
 // Whether a device is Phazite's sampler, by its element in the song or its ID.
-bool isSampler (const juce::ValueTree& deviceState);
+bool isSampler (const DeviceValue&);
 bool isSampler (const Song&, DeviceID);
 
 // What it plays: its sound file's name, or its factory sound's ("808 Bass"); whether it plays a file; and which factory

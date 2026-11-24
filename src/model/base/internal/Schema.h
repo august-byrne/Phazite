@@ -400,7 +400,9 @@ inline const Property<int> pluginUid { "uid", on (DEVICE), Kind::song };
 // On a plug-in's DEVICE: true for an instrument, which turns notes into sound, as its description says; none for an effect.
 inline const Property<bool> pluginInstrument { "instrument", on (DEVICE), byDefault (false), Kind::song };
 
-// On a plug-in's DEVICE and on a CONTAINER: its mix, 0 to 1, as setMix() sets it; none for 1.
+// On a plug-in's DEVICE and on a CONTAINER: its mix, 0 to 1, as setMix() sets it; none for 1. Not on one of Phazite's own
+// devices, whose mix is a parameter in its VALUES (devices::mixParameterID): one there is read by nothing, and dropped as the
+// song opens.
 inline const Property<float> deviceMix { "mix", on (DEVICE, CONTAINER), within (0.0, 1.0), byDefault (1.0f), Kind::song };
 
 // On a plug-in's DEVICE: what the plug-in keeps of its own, which the project stores outside the undo history as it saves,

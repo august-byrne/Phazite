@@ -60,6 +60,7 @@ struct ValuesKept
     SongSends sends {};               // none kept of a song that holds no values, and of one without sends
     DeviceStore deviceStore {};       // none kept of a song that holds no values, and of one without what devices store
     DevicesOutside devicesOutside {}; // none kept of a song that holds no values, and of one whose windows never moved
+    SongDevices devices {};           // none kept of a song that holds no values, and of one without devices
 };
 
 ValuesKept keepValues (const Song&); // message thread
@@ -67,6 +68,10 @@ ValuesKept keepValues (const Song&); // message thread
 // A copy of the song's tree (or of a part of it) taken with keepValues() at the same moment, made whole: a copy of it with
 // the kept values written in, which the tree given doesn't get. Any thread.
 juce::ValueTree copyWhole (const juce::ValueTree& treeCopy, const ValuesKept&);
+
+// The same in place, for a tree just written from values that nothing else holds (DevicesArea.h: writeDeviceWhole()): the
+// kept values written into it, without a copy of it made first. Any thread.
+void makeWhole (juce::ValueTree& written, const ValuesKept&);
 
 // The halves of a comparison of the song with a copy of it that the trees don't hold (Project's holdTheSameProject(), the
 // frozen tracks' FreezeKeeper), compared as values (the same value, or two alike), or none in either. Any thread. Each
@@ -143,6 +148,16 @@ bool holdSameTrackSendOrder (const ValuesKept&, const ValuesKept&, TrackID);
 // with the saved copy compare the store so (the quick one, an item at a time, and the whole song's, each DEVICE's and CHAIN's
 // as holdSameKeptOf() asks it), so that the two agree. The trees hold none of it. In DeviceStoreArea.cpp. Any thread.
 bool holdSameDeviceStore (const ValuesKept&, const ValuesKept&, DeviceID);
+
+// Whether two songs' kept values hold the same devices, as values (DevicesValue.h): all of them; one device, container or
+// chain by its ID (none in both, or the same value in both, its place too, what the store holds of it aside:
+// holdSameDeviceStore()); and an owner's list (a channel's, a container's, a chain's: DevicePlace), the same IDs in the same
+// order, or none in both. Both of Project's comparisons with the saved copy compare the devices so (the quick one, an item and
+// an owner at a time, and the whole song's, each TRACK's and the MASTER's as holdSameKeptOf() asks it), so that the two agree.
+// The trees hold none of them. In DevicesArea.cpp. Any thread.
+bool holdSameDevices (const ValuesKept&, const ValuesKept&);
+bool holdSameDevice (const ValuesKept&, const ValuesKept&, DeviceID);
+bool holdSameDeviceOrder (const ValuesKept&, const ValuesKept&, const DevicePlace& owner);
 
 // Whether two elements of the same type (a song's tree or a part of it, each with its song's kept values) hold the same of
 // what the areas keep beside the tree for them: each area asked in turn, a line each, in this order: a track's clips

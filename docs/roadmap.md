@@ -59,7 +59,7 @@ anyone can download. What the comparison left for later is under [After 1.0](#af
 Added on 2026-11-20 and 2026-11-21 (the owner's decisions, so that the model under Phazite is robust before the
 beta): the song's schema as data (S5.19) and the song as an immutable value (S5.20), which was weighed and left at
 first and taken once it was measured ([decisions.md](design/decisions.md), "Engineering"). S5.19 comes before S5.20,
-and both before the stage's other steps that add to the model, which then write through them. Of S5.20, the first ten
+and both before the stage's other steps that add to the model, which then write through them. Of S5.20, the first eleven
 areas are built (2026-11-21 to 23): a clip's notes and its controllers' values, the clips themselves (with each
 track's order of clips and the alias groups), the tempo map, the chord lane (its element kept as the sign that the
 song has one), the MIDI links (their element kept as the place the first link made), automation's curves (their
@@ -68,8 +68,9 @@ the place the first section made), modulation (each track's, the master's and ea
 kept as their tracks and containers come and go), the sends (each track's, kept as its track comes and goes), and what
 the devices store in the history and outside it alike (a plug-in's values set by hand, state, program, format ID and
 version, a chain's mute and solo: the first keyed area, undone by entry, with the windows' places outside the history)
-are values beside the song's tree, in the song's one undo history, with immer in `external/`. The rest goes leaf first,
-as an element can leave the tree only once nothing left in it is its child: devices, containers and chains; tracks, folders
+and the devices, containers and chains themselves (each by its ID, each owner's list in its order, kept as their tracks
+come and go) are values beside the song's tree, in the song's one undo history, with immer in `external/`. The rest goes
+leaf first, as an element can leave the tree only once nothing left in it is its child: tracks, folders
 and the master with their view; the song's own properties; then the history as a list of roots, and the tree goes.
 
 ### Stage 1. Safe: the bugs that lose work or sound

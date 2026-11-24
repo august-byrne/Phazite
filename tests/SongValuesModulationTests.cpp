@@ -91,6 +91,13 @@ struct Told final : phazite::SongValues::Listener
     void tempoMapChanged() override { ++tempo; }
     void curvesChanged (const std::vector<phazite::ParameterRef>&) override { ++curves; }
 
+    // The devices', which a container's macros come and go with since the devices' switch (no CONTAINER element in the tree).
+    void devicesChanged (const std::vector<phazite::SongValues::DeviceChange>&, const std::vector<phazite::DevicePlace>&,
+                         const phazite::SongDevices&) override
+    {
+        ++devices;
+    }
+
     void modulationChanged (const std::vector<Change>& changes, const std::vector<ModulatorPlace>& owners) override
     {
         ++calls;
@@ -128,7 +135,7 @@ struct Told final : phazite::SongValues::Listener
         reordered.insert (reordered.end(), owners.begin(), owners.end());
     }
 
-    int notes = 0, clips = 0, tempo = 0, curves = 0, calls = 0;
+    int notes = 0, clips = 0, tempo = 0, curves = 0, devices = 0, calls = 0;
     std::map<std::uint64_t, Entry> told;
     std::vector<ModulatorPlace> reordered;
 };
@@ -437,8 +444,9 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
             CHECK (each.told.curves == 0);
         }
 
-        // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more.
-        if (each.other == 0)
+        // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more (where
+        // nothing else changed: the tree, or the devices, which a container's macros come and go with).
+        if (each.other == 0 && each.told.devices == 0)
         {
             CHECK (each.project == each.told.calls);
             CHECK (each.versions == each.told.calls);
@@ -1049,35 +1057,7 @@ TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a
     CHECK (holdsNoElement());
     undo.walkBackAndForth();
 
-    // (d) A lone macro added to a container in a step: refused, the song's modulation as it was; its step's Undo takes the
-    // element out again. Outside the history: read in and taken out.
-    const auto held = phazite::getModulationValue (song);
-    auto containerState = phazite::findDeviceState (song, container);
-    const auto loneID = song.makeID();
-    juce::ValueTree lone (phazite::schema::MACRO);
-    lone.setProperty (phazite::schema::modulatorID, (juce::int64) loneID, nullptr);
-    lone.setProperty (phazite::schema::macroName, "Lone", nullptr);
-
-    {
-        const phazite::test::ExpectedAssertion refused ("ModulationArea.cpp");
-        const phazite::UndoStep step (song, "A Lone Macro");
-        containerState.appendChild (lone.createCopy(), &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (phazite::getModulationValue (song) == held);
-    phazite::undo (song);
-    CHECK (holdsNoElement());
-
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        containerState.appendChild (lone.createCopy(), nullptr);
-    }
-
-    REQUIRE (phazite::getModulatorValue (song, ModulatorID::fromRaw (loneID)).has_value());
-    CHECK (phazite::getModulatorValue (song, ModulatorID::fromRaw (loneID))->place.container == container);
+    // (A lone macro added to a container's element: none since the devices' switch, the song's tree holding no container.)
     CHECK (holdsNoElement());
     phazite::test::checkSong (song);
 }
@@ -1197,9 +1177,9 @@ TEST_CASE ("Song values' modulation: Swap's trial of a preset on a track with mo
 
 TEST_CASE ("Song values' modulation: a learning device's removal heard by the MIDI linker's tree callback looks at no modulation")
 {
-    // The linker hears a device taken out of the tree (model/midi/internal/MidiLinks.h), and asks the tree alone whether the
-    // parameter it learns is still there (Parameters.h: locateParameterInTree()): no tree callback reads an area. The device's
-    // element taken out by hand, outside the history, so that only the tree's callbacks run meanwhile.
+    // The linker hears a device taken out from the devices' listener, by its ID (model/midi/internal/MidiLinks.h), and its tree
+    // callback asks the tree alone of what the tree holds (Parameters.h: locateParameterInTree()): no tree callback reads an
+    // area. The device taken out through the devices' setter, outside the history, so that no step's work runs meanwhile.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     const auto track = s.firstTrack;
@@ -1209,14 +1189,13 @@ TEST_CASE ("Song values' modulation: a learning device's removal heard by the MI
     phazite::startMidiLearn (phazite::getParameter (s.context, { reverb, "mix" }));
     REQUIRE (phazite::isLearningMidi (s.context));
 
-    auto element = phazite::findDeviceState (song, reverb);
-    REQUIRE (element.isValid());
+    REQUIRE (phazite::hasDevice (song, reverb));
     const auto looked = phazite::countModulationLooks();
     const auto read = phazite::countModulatorsRead();
 
     {
         const phazite::Song::OutsideHistory outside (song);
-        element.getParent().removeChild (element, nullptr);
+        phazite::eraseDevice (song, reverb);
     }
 
     CHECK (phazite::countModulationLooks() == looked);

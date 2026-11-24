@@ -122,10 +122,11 @@ void restoreLine (phazite::Song& song, TrackID track, const juce::ValueTree& ver
 // A device moved by hand through the devices' setter to a place (what no edit but a version does: Mixer.h, setDevice()).
 void moveTo (phazite::Song& song, DeviceID device, const DevicePlace& place)
 {
-    auto moved = phazite::findDevice (song, device);
-    REQUIRE (moved.has_value());
-    moved->place = place;
-    REQUIRE (phazite::setDevice (song, *moved));
+    const auto* found = phazite::findDevice (song, device);
+    REQUIRE (found != nullptr);
+    auto moved = *found;
+    moved.place = place;
+    REQUIRE (phazite::setDevice (song, moved));
 }
 
 DevicePlace placeOf (const phazite::Song& song, DeviceID device)
@@ -741,8 +742,8 @@ TEST_CASE ("A merge's clash on a device, a container or a chain is chosen throug
 
     const auto readValueOf = [&song] (DeviceID device, const char* parameter)
     {
-        const auto held = phazite::findDevice (song, device);
-        REQUIRE (held.has_value());
+        const auto* held = phazite::findDevice (song, device);
+        REQUIRE (held != nullptr);
         const auto* info = phazite::getOwnDeviceInfo (song, device);
         REQUIRE (info != nullptr);
         return held->getParameterValue (phazite::devices::findParameter (*info, parameter));
@@ -1069,9 +1070,9 @@ struct StoreWrites final : phazite::SongValues::Listener
 TEST_CASE ("A version brought back puts a bus's tracks among its effects where it holds them, the project as saved: a track "
            "deleted since comes back before the effect")
 {
-    // The passes over elements leave a channel's devices alone (ApplySong.cpp: isKeptBeside()): a track that comes back is
-    // placed among the tracks, and would land after the bus's effect; the tracks are put among the devices where the version
-    // has them after the areas' passes (placeTracksAmongDevices()).
+    // A channel's devices are written before its tracks, always (DevicesArea.h: writeDevicesIn(), since the devices' switch:
+    // before it a bus's effect added after its tracks stood after them in the file), so that a track that comes back, placed
+    // among the tracks by the passes over elements, is where the version holds it.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& project = s.getProject();
@@ -1079,8 +1080,8 @@ TEST_CASE ("A version brought back puts a bus's tracks among its effects where i
     const auto second = s.addTrack ("Second");
     const auto bus = s.addBus ("Bus", { first, second });
     const auto effect = s.addEffect (bus, "phaziteEq");
-    const std::vector<juce::String> held { nameOfItem (schema::TRACK, first.getRaw()), nameOfItem (schema::TRACK, second.getRaw()),
-                                           nameOfItem (schema::DEVICE, effect.getRaw()) };
+    const std::vector<juce::String> held { nameOfItem (schema::DEVICE, effect.getRaw()), nameOfItem (schema::TRACK, first.getRaw()),
+                                           nameOfItem (schema::TRACK, second.getRaw()) };
     REQUIRE (readTracksAndDevices (phazite::test::copyWholeSong (song), bus) == held);
     REQUIRE (project.save().wasOk());
     const auto version = phazite::test::copyWholeSong (song);
@@ -1111,8 +1112,8 @@ TEST_CASE ("A version brought back puts a bus's tracks among its effects where i
 TEST_CASE ("A version brought back puts a bus's tracks among its effects where it holds them, the project as saved: an effect "
            "removed since comes back before a track")
 {
-    // A device put back into an empty list goes after its owner's other children (DeviceWriters.cpp: findChildIndex()), after
-    // the bus's tracks: they are put among the devices where the version has them after the areas' passes.
+    // A device put back into the bus's list is written before its tracks, as the version holds it (DevicesArea.h:
+    // writeDevicesIn(), since the devices' switch).
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& project = s.getProject();
@@ -1126,7 +1127,7 @@ TEST_CASE ("A version brought back puts a bus's tracks among its effects where i
         phazite::moveTrackIntoFolder (song, second, bus);
     }
 
-    const std::vector<juce::String> held { nameOfItem (schema::TRACK, first.getRaw()), nameOfItem (schema::DEVICE, effect.getRaw()),
+    const std::vector<juce::String> held { nameOfItem (schema::DEVICE, effect.getRaw()), nameOfItem (schema::TRACK, first.getRaw()),
                                            nameOfItem (schema::TRACK, second.getRaw()) };
     REQUIRE (readTracksAndDevices (phazite::test::copyWholeSong (song), bus) == held);
     REQUIRE (project.save().wasOk());
@@ -1169,7 +1170,7 @@ TEST_CASE ("A bus's line put back puts its tracks among its effects where the ve
         phazite::moveTrackIntoFolder (song, second, bus);
     }
 
-    const std::vector<juce::String> held { nameOfItem (schema::TRACK, first.getRaw()), nameOfItem (schema::DEVICE, effect.getRaw()),
+    const std::vector<juce::String> held { nameOfItem (schema::DEVICE, effect.getRaw()), nameOfItem (schema::TRACK, first.getRaw()),
                                            nameOfItem (schema::TRACK, second.getRaw()) };
     REQUIRE (project.save().wasOk());
     const auto version = phazite::test::copyWholeSong (song);

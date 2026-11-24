@@ -9,6 +9,7 @@
 #include "internal/DrumKit.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/WholeFile.h"
+#include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
@@ -19,6 +20,9 @@
 #include "model/transport/internal/Playback.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -29,14 +33,34 @@ namespace
     constexpr int noteMilliseconds = 600; // an instrument's note, while the song is stopped
     constexpr int instrumentNote = 60;    // C4; the drum sampler's first pad's for its kits
 
+    // Each of a device's sounds with its property (DevicesValue.h: getSoundPropertiesOf()), in their order: a copy of them,
+    // which what writes a sound may outlive.
+    std::vector<std::pair<juce::Identifier, juce::String>> getSounds (const Song& song, DeviceID id)
+    {
+        std::vector<std::pair<juce::Identifier, juce::String>> sounds;
+
+        if (const auto* device = findDevice (song, id); device != nullptr && device->form == DeviceValue::Form::own)
+        {
+            const auto& properties = getSoundPropertiesOf (std::string_view (device->type.toRawUTF8()));
+
+            std::vector<std::pair<std::uint16_t, juce::String>> held (device->sounds.begin(), device->sounds.end());
+            std::sort (held.begin(), held.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+
+            for (const auto& [index, path] : held)
+                if (index < properties.size())
+                    sounds.emplace_back (properties[index], path);
+        }
+
+        return sounds;
+    }
+
     // The files a device's sounds name outside the project's folder, by their full paths, as Swap tries them.
     juce::Array<juce::File> findFilesOutside (const Song& song, DeviceID id)
     {
         juce::Array<juce::File> outside;
-        const auto sounds = findDeviceState (song, id).getChildWithName (schema::SOUNDS);
 
-        for (int i = 0; i < sounds.getNumProperties(); ++i)
-            if (const auto path = sounds[sounds.getPropertyName (i)].toString(); juce::File::isAbsolutePath (path))
+        for (const auto& [property, path] : getSounds (song, id))
+            if (juce::File::isAbsolutePath (path))
                 if (const auto file = makeFileOfFullPath (path); file.existsAsFile())
                     outside.addIfNotAlreadyThere (file);
 
@@ -47,13 +71,9 @@ namespace
     // copyIntoProject() finds without reading, in the caller's undo step.
     void copyFilesIn (Song& song, DeviceID id, const juce::Array<juce::File>& brought)
     {
-        const auto sounds = findDeviceState (song, id).getChildWithName (schema::SOUNDS);
-
-        for (int i = 0; i < sounds.getNumProperties(); ++i)
+        for (const auto& [property, path] : getSounds (song, id))
         {
-            const auto property = sounds.getPropertyName (i);
-
-            if (const auto path = sounds[property].toString(); juce::File::isAbsolutePath (path))
+            if (juce::File::isAbsolutePath (path))
                 if (const auto file = makeFileOfFullPath (path); brought.contains (file))
                     if (const auto copy = copyIntoProject (song, file); copy != file)
                         setDeviceSound (song, id, property, getProjectPath (song, copy));
@@ -95,12 +115,15 @@ struct Swap::Impl : private juce::Timer
         if (s == nullptr || ended || context.getProjectNumber() != projectNumber || findSong (context) != s)
             return nullptr;
 
-        const auto state = findDeviceState (*s, device);
+        const auto* value = findDevice (*s, device);
+
+        if (value == nullptr || value->form != DeviceValue::Form::own)
+            return nullptr;
 
         if (pad >= 0)
-            return isDrumSampler (state) && juce::isPositiveAndBelow (pad, devices::DrumSampler::numPads) ? s : nullptr;
+            return isDrumSampler (*value) && juce::isPositiveAndBelow (pad, devices::DrumSampler::numPads) ? s : nullptr;
 
-        return findOwnDevice (state[schema::deviceType].toString().toStdString()) != nullptr ? s : nullptr;
+        return findOwnDevice (std::string_view (value->type.toRawUTF8())) != nullptr ? s : nullptr;
     }
 
     // The step's name, after what it tries: "Put Kick 03 on Pad 36", "Load Preset Warm Pad".
@@ -158,7 +181,7 @@ struct Swap::Impl : private juce::Timer
                                      {
                                          auto* kept = weak.get();
 
-                                         if (kept == nullptr || ! findDeviceState (*kept, id).isValid())
+                                         if (kept == nullptr || findDevice (*kept, id) == nullptr)
                                              return false;
 
                                          const UndoStep step (*kept, "Copy Sounds into the Project");
@@ -195,16 +218,18 @@ struct Swap::Impl : private juce::Timer
             return;
         }
 
-        const auto state = findDeviceState (s, device);
+        const auto* value = findDevice (s, device);
 
-        if (! isInstrumentState (state))
+        if (value == nullptr || ! value->isInstrument())
             return;
+
+        const auto drums = isDrumSampler (*value);
 
         if (auto* session = findPlayingSession (s))
         {
             stopNote();
             noteTrack = getDeviceChannel (s, device);
-            const auto note = isDrumSampler (state) ? devices::DrumSampler::kitFirstNote : instrumentNote;
+            const auto note = drums ? devices::DrumSampler::kitFirstNote : instrumentNote;
             session->playGuideNotes ((std::int64_t) noteTrack.getRaw(), { note }, noteVelocity);
             startTimer (noteMilliseconds);
         }

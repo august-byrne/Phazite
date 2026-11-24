@@ -121,8 +121,8 @@ std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
 //     forgetWhatNamesTheGone()'s walk of the pads' tracks; the sends' there: getSendValue(), getSendValues(), addSend(),
 //     takeSendsOf() (the keeper's) and chooseSendClash() (a merge's); the devices' there: findChainState() (a channel's chain
 //     by its TRACK or MASTER) and what reads a chain through it (getDevices(), getInstrument(), hasInstrument(),
-//     getDeviceSoundFiles(), getChannelDeviceValues(), getDeviceChannelPlace()), findDeviceState()'s walk of every channel,
-//     and getItemIDs()' walk of the IDs the tree holds.
+//     getDeviceSoundFiles(), getChannelDeviceValues(), getDeviceChannelPlace()), and getItemIDs()' walk of the IDs the tree
+//     holds.
 //   - model/notes/Notes.cpp, the tracks' view and key kept there (the writers' and the view's pieces): getTrackKey(),
 //     setTrackKey(), applyLastKey(); isDrumTrack()'s drum mode (its instrument by its ID), setDrumTrack(), getDrumRowOrder(),
 //     setDrumRowOrder(), getHiddenDrumRows(), hideDrumRow(), showAllDrumRows(); and chooseNoteClash() (a merge's path).
@@ -131,14 +131,12 @@ std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
 //     isParameterValue() (a tree callback's test).
 //   - The writers (the writers' piece): model/devices/DrumKit.cpp: givePadItsOwnTrack(); model/mixer/Freeze.cpp:
 //     freezeFromFile(), unfreeze(); model/transport/RecordingModel.cpp: findTrack() (its helper), setTrackInput(),
-//     setInputMonitoring(), addTrackForInput(); model/presets/Presets.cpp: addTrackFromPreset()'s drum view;
-//     model/mixer/DeviceWriters.cpp: findOwnerElement(), isListed() (a device's place).
+//     setInputMonitoring(), addTrackForInput(); model/presets/Presets.cpp: addTrackFromPreset()'s drum view.
 //   - Walks that read one field of each track from the elements the song's index gives: Freeze.cpp: getFrozenTracks();
 //     model/mixer/Sidechain.cpp: getSoundTracks(), getTracksFedBy(), describeTracksToListenTo().
-//   - The devices' code (the devices' switch): Sidechain.cpp: playsDrumSampler(); model/mixer/Containers.cpp:
-//     findContainerChain(), makeContainerName(), canGroupIntoContainer() (a device's channel by its parent element);
-//     model/mixer/ContainerModel.cpp: addContainer() (whether the channel's element is there); model/plugins/DeviceStore.cpp:
-//     getChannelStore(); model/plugins/PluginInstances.cpp: findPlugins().
+//   - The devices' code: model/mixer/ContainerModel.cpp: addContainer() (whether the channel's element is there). The
+//     devices themselves are values (model/base/internal/DevicesValue.h), read by ID; a device's channel is its value's
+//     place, and model/mixer/DeviceWriters.cpp asks the song's index whether it holds a track (holdsOwner(): hasTrack()).
 //   - A merge's clash's path (an element the path names): model/modulation/Modulation.cpp: readOwnerPlace();
 //     model/arrangement/Clips.cpp: findClipOnPath().
 //   - The plan's compile (model/playback/SongPlayer.cpp), each channel's fields from the element the index gives it, through

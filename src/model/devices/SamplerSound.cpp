@@ -51,20 +51,35 @@ namespace
         setDeviceSound (song, id, schema::samplerSlicesRemoved, {});
     }
 
-    juce::ValueTree findSamplerSounds (const Song& song, DeviceID id)
+    // A sampler's value in the song, its sounds among it (a copy, which shares what it holds); none (holding no sound) for a
+    // device that is no sampler.
+    DeviceValue findSamplerSounds (const Song& song, DeviceID id)
     {
-        const auto device = findDeviceState (song, id);
-        return isSampler (device) ? device.getChildWithName (schema::SOUNDS) : juce::ValueTree();
+        const auto* device = findDevice (song, id);
+        return device != nullptr && isSampler (*device) ? *device : DeviceValue();
     }
 
-    juce::File getSampleFile (const Song& song, const juce::ValueTree& sounds)
+    // A sampler's sound by its property, from its value or from a SOUNDS element (what the sampler's loader takes).
+    juce::String readSoundText (const DeviceValue& device, const juce::Identifier& property)
     {
-        return findProjectFile (song, readSoundsProperty (sounds, schema::samplerSampleFile));
+        return getDeviceSound (device, property);
     }
 
-    int getFactoryIndex (const juce::ValueTree& sounds)
+    juce::String readSoundText (const juce::ValueTree& sounds, const juce::Identifier& property)
     {
-        return std::max (0, devices::findFactorySample (readSoundsProperty (sounds, schema::samplerSample).toStdString()));
+        return readSoundsProperty (sounds, property);
+    }
+
+    template <typename Sounds>
+    juce::File getSampleFile (const Song& song, const Sounds& sounds)
+    {
+        return findProjectFile (song, readSoundText (sounds, schema::samplerSampleFile));
+    }
+
+    template <typename Sounds>
+    int getFactoryIndex (const Sounds& sounds)
+    {
+        return std::max (0, devices::findFactorySample (readSoundText (sounds, schema::samplerSample).toStdString()));
     }
 
     std::vector<float> parseSlices (const juce::String& text)
@@ -90,10 +105,11 @@ namespace
         return words.joinIntoString (" ");
     }
 
-    Sampler::ManualSlices readManualSlices (const juce::ValueTree& sounds)
+    template <typename Sounds>
+    Sampler::ManualSlices readManualSlices (const Sounds& sounds)
     {
-        return { parseSlices (readSoundsProperty (sounds, schema::samplerSlices)),
-                 parseSlices (readSoundsProperty (sounds, schema::samplerSlicesRemoved)) };
+        return { parseSlices (readSoundText (sounds, schema::samplerSlices)),
+                 parseSlices (readSoundText (sounds, schema::samplerSlicesRemoved)) };
     }
 
     // The sound it plays, as loaded for it: its file's, or its factory sound.
@@ -165,14 +181,15 @@ namespace
     }
 } // namespace
 
-bool isSampler (const juce::ValueTree& deviceState)
+bool isSampler (const DeviceValue& device)
 {
-    return deviceState.hasType (schema::DEVICE) && readDeviceType (deviceState) == Sampler::typeID;
+    return device.form == DeviceValue::Form::own && device.type == Sampler::typeID;
 }
 
 bool isSampler (const Song& song, DeviceID id)
 {
-    return isSampler (findDeviceState (song, id));
+    const auto* device = findDevice (song, id);
+    return device != nullptr && isSampler (*device);
 }
 
 juce::String getSampleName (const Song& song, DeviceID id)

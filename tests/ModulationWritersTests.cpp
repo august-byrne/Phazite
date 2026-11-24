@@ -12,6 +12,7 @@
 // its MIDI links with it (known bug 241).
 //   phazite_tests.exe --source-file=*ModulationWritersTests*
 #include "SongCheck.h"
+#include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "TestTracks.h"
@@ -101,7 +102,7 @@ namespace asBefore
         const auto kind = (phazite::devices::ModulatorKind) type;
 
         if (type == ModulatorType::lfo || type == ModulatorType::random)
-            phazite::keepValueSetByHand (modulator, infoOf (kind, "bipolar"), 1.0f, nullptr);
+            phazite::test::writeValueSetByHand (modulator, infoOf (kind, "bipolar"), 1.0f);
 
         if (type == ModulatorType::steps)
         {
@@ -128,7 +129,7 @@ namespace asBefore
     void setValue (juce::ValueTree modulator, phazite::devices::ModulatorKind kind, const char* parameter, float value)
     {
         const auto& info = infoOf (kind, parameter);
-        phazite::keepValueSetByHand (modulator, info, phazite::devices::constrain (info, value), nullptr);
+        phazite::test::writeValueSetByHand (modulator, info, phazite::devices::constrain (info, value));
     }
 
     void setMacroValue (juce::ValueTree macro, float value)
@@ -864,14 +865,14 @@ TEST_CASE ("A line put back takes away the modulators and macros added to it sin
     undo.check ("Restore Track", inStep (song, "Restore Track", [&] { REQUIRE (phazite::makeTrackLike (song, track, version)); }));
     CHECK_FALSE (phazite::getModulatorValue (song, lfo).has_value());
     CHECK_FALSE (phazite::getModulatorValue (song, macro).has_value());
-    CHECK_FALSE (phazite::findDeviceState (song, container).isValid());
+    CHECK_FALSE (phazite::hasDevice (song, container));
     CHECK (hasNoCurves (onTrack));
     CHECK (hasCurves ({ masterRate }));
     phazite::test::checkSong (song);
 
     phazite::undo (song);
     CHECK (trackHolds());
-    CHECK (phazite::findDeviceState (song, container).isValid());
+    CHECK (phazite::hasDevice (song, container));
     CHECK (hasCurves (onTrack));
     phazite::redo (song);
     CHECK_FALSE (phazite::getModulatorValue (song, lfo).has_value());

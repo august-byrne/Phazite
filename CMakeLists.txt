@@ -1393,6 +1393,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DeviceStatesTests.cpp
         tests/DeviceStoreValueTests.cpp
         tests/DeviceWritersTests.cpp
+        tests/DevicesKeeperTests.cpp
         tests/DevicesValueTests.cpp
         tests/DevicesVersionsTests.cpp
         tests/DevicesViewTests.cpp

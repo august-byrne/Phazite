@@ -352,7 +352,7 @@ namespace
             items.named.erase (std::unique (items.named.begin(), items.named.end()), items.named.end());
         }
 
-        // The channel whose element holds a device or a container's chain, at any depth (a send's: sendsChanged()).
+        // The channel an element is, or is in (a track frozen or played live again).
         void nameChannelOf (const juce::ValueTree& changed)
         {
             auto channel = changed;
@@ -363,8 +363,8 @@ namespace
             name (pending.deviceChannels, channel.isValid() ? getTrackID (channel) : TrackID());
         }
 
-        // The group a change to this element, or to something in it, belongs to (what the devices' value covers:
-        // devicesChanged(); what the tree still tells of a device or a chain, the store's, the devices' group here).
+        // The group a change to this element, or to something in it, belongs to (the song's tree holds no device, container
+        // or chain: devicesChanged(), deviceStoreChanged()).
         void mark (const juce::ValueTree& changed)
         {
             for (auto element = changed; element.isValid(); element = element.getParent())
@@ -384,13 +384,6 @@ namespace
 
                 if (element.hasType (schema::CHORDLANE))
                     return add (pending.chords);
-
-                // Devices, on a track's element or the master's (a send's change: sendsChanged()).
-                if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER))
-                {
-                    nameChannelOf (element);
-                    return add (pending.devices);
-                }
 
                 if (isTrackElement (element))
                     return add (pending.tracks);

@@ -30,7 +30,8 @@ namespace
     Song* songOf (const std::shared_ptr<const DeviceHandle::Impl>& impl)
     {
         auto* song = impl != nullptr ? impl->song.get() : nullptr;
-        return song != nullptr && findDeviceState (*song, impl->id).isValid() ? song : nullptr;
+        const auto* device = song != nullptr ? findDevice (*song, impl->id) : nullptr;
+        return device != nullptr && device->form != DeviceValue::Form::chain ? song : nullptr;
     }
 
     // The device as Phazite's engine plays it, while it plays the song: what its editor shows and plays is that one's.
@@ -44,11 +45,11 @@ namespace
         return nullptr;
     }
 
-    // The description of one of Phazite's own devices the song holds by an ID, read through the devices' conversion
-    // (DevicesValue.h: readDeviceType()): one look for the device; nullptr for any other, and for one the song hasn't.
+    // The description of one of Phazite's own devices the song holds by an ID: one look for the device in the devices' area;
+    // nullptr for any other, and for one the song hasn't.
     const devices::DeviceInfo* findOwnInfo (const Song& song, DeviceID id)
     {
-        return findOwnDevice (readDeviceType (findDeviceState (song, id)).toStdString());
+        return getOwnDeviceInfo (song, id);
     }
 } // namespace
 

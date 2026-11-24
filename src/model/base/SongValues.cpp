@@ -61,17 +61,9 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     ModulationKeeper modulation;
     SendsKeeper sends;
     DeviceStoreKeeper deviceStore;
-    DevicesKeeper devices; // tells the devices' listener from the tree, in an undo and a redo too, until the devices' switch
+    DevicesKeeper devices;
 
     bool isUndoingOrRedoing() const { return song.getUndoManager().isPerformingUndoRedo(); }
-
-    // A property changed, and children in another order: the devices' alone, while the tree holds them (DevicesArea.h).
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
-    {
-        devices.propertyChanged (tree, property);
-    }
-
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { devices.childOrderChanged (parent); }
 
     // A child added: every area asked in turn, each doing nothing (and returning at once) for what is not its own, so that an
     // area whose elements sit inside another's (a track's, say) sees them come in with it. The tempo map's first (the song's
@@ -81,18 +73,15 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
     // in it, which holds nothing of another area's), then the sections' (the song's SECTIONS, or one in it, which holds
     // nothing of another area's), then the clips' (a track, what holds tracks, a CLIP, in the song's track list: none of them
     // the tempo map's, the chord lane's, the MIDI links', the curves' or the sections'), then modulation's (a track, what holds
-    // tracks, the master, a container, a MODULATOR or a MACRO, of the song's: a track's modulators are neither its clips nor
-    // anything in them, so the clips' and modulation's each take their own out of a track that came in with both), then the
-    // sends' (a track, what holds tracks, a SEND, in the song's track list: a track's sends are neither its clips nor its
-    // modulators, so each takes its own out of a track that came in with all three), then the store's (what a DEVICE or a
-    // CHAIN that came holds of the store, which no other area holds anything of). Before them the devices', in an undo and
-    // a redo too, which tells what came, takes nothing in and changes nothing of the tree: so it may come first (a track that
-    // comes in with devices, clips and modulators has its devices told as it comes, read alone, its clips and its modulators
-    // left to the parts after it).
+    // tracks, the master, a MODULATOR or a MACRO, of the song's, and the macros of a CONTAINER that came in a channel: a
+    // track's modulators are neither its clips nor anything in them, so the clips' and modulation's each take their own out of
+    // a track that came in with both), then the sends' (a track, what holds tracks, a SEND, in the song's track list: a track's
+    // sends are neither its clips nor its modulators, so each takes its own out of a track that came in with all three), then
+    // the store's (what a DEVICE or a CHAIN that came holds of the store, which no other area holds anything of), then the
+    // devices' last (a track, what holds tracks, the master, a DEVICE, a CONTAINER, a CHAIN, a VALUES or a SOUNDS), which take
+    // each DEVICE and CONTAINER out of the tree whole once modulation and the store took theirs out of them.
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
     {
-        devices.childAdded (parent, child);
-
         if (isUndoingOrRedoing())
             return;
 
@@ -105,22 +94,23 @@ struct SongValues::Keeper final : juce::ValueTree::Listener
         modulation.childAdded (parent, child);
         sends.childAdded (parent, child);
         deviceStore.childAdded (parent, child);
+        devices.childAdded (parent, child);
     }
 
     // A child taken out: every area that acts there asked in turn, each doing nothing for what is not its own. The clips' (a
-    // track, or what holds tracks), then modulation's (a track, what holds tracks, the master, a container), then the sends'
-    // (a track, or what holds tracks): the tempo map, the chord lane, the MIDI links, the curves and the sections do nothing
-    // as their elements leave. Before them the devices', in an undo and a redo too, which tells what went.
+    // track, or what holds tracks), then modulation's (a track, what holds tracks, the master: a channel's modulators and its
+    // containers' macros), then the sends' (a track, or what holds tracks), then the devices' (a track, or what holds
+    // tracks), last, so that modulation finds a track's containers in the devices' area still: the tempo map, the chord lane,
+    // the MIDI links, the curves, the sections and the store do nothing as their elements leave.
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
     {
-        devices.childRemoved (parent, child);
-
         if (isUndoingOrRedoing())
             return;
 
         clips.childRemoved (parent, child);
         modulation.childRemoved (parent, child);
         sends.childRemoved (parent, child);
+        devices.childRemoved (parent, child);
     }
 };
 
@@ -136,6 +126,7 @@ SongValues::SongValues (Song& song)
       modulation (song.getUndoManager(), {}),
       sends (song.getUndoManager(), {}),
       deviceStore (song.getUndoManager(), {}),
+      devices (song.getUndoManager(), {}),
       clipsTeller (std::make_unique<ClipsTeller> (clips, listeners)),
       notesTeller (std::make_unique<NotesTeller> (notes, listeners)),
       tempoMapTeller (std::make_unique<TempoMapTeller> (tempoMap, listeners)),
@@ -145,7 +136,8 @@ SongValues::SongValues (Song& song)
       sectionsTeller (std::make_unique<SectionsTeller> (sections, listeners)),
       modulationTeller (std::make_unique<ModulationTeller> (modulation, listeners)),
       sendsTeller (std::make_unique<SendsTeller> (sends, listeners)),
-      deviceStoreTeller (std::make_unique<DeviceStoreTeller> (*this, listeners))
+      deviceStoreTeller (std::make_unique<DeviceStoreTeller> (*this, listeners)),
+      devicesTeller (std::make_unique<DevicesTeller> (devices, listeners))
 {
     // Each area with its teller, in the order of the areas; the keeper comes once the tree is consistent (adopt()). The
     // macro's statement ended again here, so that the formatter reads a body that holds nothing else.
@@ -158,6 +150,7 @@ SongValues::~SongValues()
 
     // The keeper first, then each area's teller, in the reverse of their making.
     keeper = nullptr;
+    devicesTeller = nullptr;
     deviceStoreTeller = nullptr;
     sendsTeller = nullptr;
     modulationTeller = nullptr;
@@ -197,18 +190,10 @@ int SongValues::countHoldingsLeftWithKeepers() const
     if (keeper == nullptr)
         return 0;
 
-    // A track's element (or the master's) out of the song, or a container's that left with its channel's: one taken out of
-    // its channel alone has no parent (DeviceWriters.cpp), and is the devices' own until their switch.
+    // A track's element (or the master's) out of the song.
     const auto& state = keeper->state;
     const auto isGone = [&state] (const juce::ValueTree& element)
-    {
-        if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
-            return ! element.isAChildOf (state);
-
-        const auto channel = element.getParent();
-        return element.hasType (schema::CONTAINER) && (channel.hasType (schema::TRACK) || channel.hasType (schema::MASTER))
-               && ! element.isAChildOf (state);
-    };
+    { return (element.hasType (schema::TRACK) || element.hasType (schema::MASTER)) && ! element.isAChildOf (state); };
 
     int count = 0;
 
@@ -221,20 +206,19 @@ int SongValues::countHoldingsLeftWithKeepers() const
     for (const auto& each : keeper->sends.remembered)
         count += ! each.sends.empty() && isGone (each.track) ? 1 : 0;
 
-    return count;
-}
+    for (const auto& each : keeper->devices.remembered)
+        count += ! each.devices.empty() && isGone (each.track) ? 1 : 0;
 
-const SongDevices* SongValues::getDevicesAsTold() const noexcept
-{
-    return keeper != nullptr ? &keeper->devices.told : nullptr;
+    return count;
 }
 
 void SongValues::adopt (Song& song)
 {
     // What the tree the loader made consistent holds of each area, into the area, outside the history, and out of the tree:
     // each area in turn, in this order (the clips with their notes, then the tempo map, then the chord lane, then the MIDI
-    // links, then the curves, then the sections, then modulation, then the sends: none reads another's); then the keeper, from
-    // here on.
+    // links, then the curves, then the sections, then modulation, then the sends, then the store, then the devices, last,
+    // which take every DEVICE, CONTAINER and CHAIN element out of the tree once modulation took a container's macros and the
+    // store what a device or a chain stores out of them: none reads another's); then the keeper, from here on.
     ClipsKeeper::adopt (*this, song);
     TempoMapKeeper::adopt (*this, song);
     ChordLaneKeeper::adopt (*this, song);
@@ -244,6 +228,7 @@ void SongValues::adopt (Song& song)
     ModulationKeeper::adopt (*this, song);
     SendsKeeper::adopt (*this, song);
     DeviceStoreKeeper::adopt (*this, song);
+    DevicesKeeper::adopt (*this, song);
     keeper = std::make_unique<Keeper> (*this, song);
 }
 
@@ -268,7 +253,7 @@ bool isHeardAsKept (const juce::ValueTree& element)
            || isHeardAsCurves (element)       // the song's AUTOMATION, or an element in it
            || isHeardAsMidiLinks (element)    // the song's MIDILINKS, or an element in it
            || isHeardAsSections (element)     // the song's SECTIONS, or an element in it
-           || isHeardAsDevices (element)      // a CONTAINER or a CHAIN of the song's, or what is in a device's VALUES or SOUNDS
+           || isHeardAsDevices (element)      // a DEVICE, a CONTAINER or a CHAIN, or an element in one (the safety net's)
            || isHeardAsDeviceStore (element); // a plug-in's VALUE, or an element in it
 }
 
@@ -279,7 +264,7 @@ bool isHeardAsKept (const juce::ValueTree& element, const juce::Identifier& prop
            || isHeardAsCurves (element)                 // the song's AUTOMATION, or an element in it
            || isHeardAsMidiLinks (element)              // the song's MIDILINKS, or an element in it
            || isHeardAsSections (element)               // the song's SECTIONS, or an element in it
-           || isHeardAsDevices (element, property)      // what the devices' value covers of a device, a container or a chain
+           || isHeardAsDevices (element, property)      // a DEVICE, a CONTAINER or a CHAIN, or an element in one
            || isHeardAsDeviceStore (element, property); // a store's property of a device or a chain, or one in a VALUE
 }
 
@@ -290,7 +275,7 @@ bool isHeardAsKept (const juce::ValueTree& parent, const juce::ValueTree& child)
            || isHeardAsCurves (parent, child)       // the AUTOMATION itself, or a child of an element in it
            || isHeardAsMidiLinks (parent, child)    // a child of the MIDILINKS or of an element in it (not the MIDILINKS itself)
            || isHeardAsSections (parent, child)     // a child of the SECTIONS or of an element in it (not the SECTIONS itself)
-           || isHeardAsDevices (parent, child)      // a device, a container or a chain added or taken out, or what is in one
+           || isHeardAsDevices (parent, child)      // a device, a container, a chain, its VALUES or SOUNDS, or what is in one
            || isHeardAsDeviceStore (parent, child); // a plug-in's VALUE added or taken out, or what is in one
 }
 } // namespace phazite

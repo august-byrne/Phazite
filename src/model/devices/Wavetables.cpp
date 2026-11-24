@@ -31,26 +31,38 @@ namespace
 
     // A synth's sounds in the song (none while nothing was ever set: its defaults), if the device is one and the
     // oscillator is one of its oscillators.
-    std::optional<juce::ValueTree> findOscillatorSounds (const Song& song, DeviceID id, int osc)
+    std::optional<DeviceValue> findOscillatorSounds (const Song& song, DeviceID id, int osc)
     {
-        const auto device = findDeviceState (song, id);
+        const auto* device = findDevice (song, id);
 
-        if (! device.hasType (schema::DEVICE) || readDeviceType (device) != Synth::typeID
+        if (device == nullptr || device->form != DeviceValue::Form::own || device->type != Synth::typeID
             || ! juce::isPositiveAndBelow (osc, Synth::numOscillators))
             return {};
 
-        return device.getChildWithName (schema::SOUNDS);
+        return *device;
     }
 
-    juce::File getTableFile (const Song& song, const juce::ValueTree& sounds, int osc)
+    // A synth's sound by its property, from its value or from a SOUNDS element (what the synth's loader takes).
+    juce::String readSoundText (const DeviceValue& device, const juce::Identifier& property)
     {
-        return findProjectFile (song, readSoundsProperty (sounds, schema::getOscillatorWavetableFile (osc)));
+        return getDeviceSound (device, property);
     }
 
-    int getFactoryTable (const juce::ValueTree& sounds, int osc)
+    juce::String readSoundText (const juce::ValueTree& sounds, const juce::Identifier& property)
     {
-        return std::max (0,
-                         devices::findFactoryWavetable (readSoundsProperty (sounds, schema::getOscillatorWavetable (osc)).toStdString()));
+        return readSoundsProperty (sounds, property);
+    }
+
+    template <typename Sounds>
+    juce::File getTableFile (const Song& song, const Sounds& sounds, int osc)
+    {
+        return findProjectFile (song, readSoundText (sounds, schema::getOscillatorWavetableFile (osc)));
+    }
+
+    template <typename Sounds>
+    int getFactoryTable (const Sounds& sounds, int osc)
+    {
+        return std::max (0, devices::findFactoryWavetable (readSoundText (sounds, schema::getOscillatorWavetable (osc)).toStdString()));
     }
 
     // At most this much of a sound becomes a table: 256 frames of 8192 samples.

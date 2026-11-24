@@ -33,22 +33,9 @@ std::vector<DeviceID> getContainerDevices (const Song&, DeviceID container);
 DeviceID findContainerOf (const Song&, DeviceID device);
 
 //==============================================================================
-// Chains (Schema.h: CHAIN). A container's chains' elements, in their order; a chain's element by its ID, invalid for one the
-// song hasn't; and the container's element a chain's, or a device's in a chain, is in (invalid for any other). For the
-// devices' own code alone, no reader outside it (roadmap step S5.20, the devices' second piece; a reader reads by ID below,
-// each of which reads its fields through the conversion: model/base/internal/DevicesValue.h). Their callers:
-// getChainStates() the containers' code and the parameters' (model/devices/Parameters.cpp); findContainerChain() the
-// mixer's, the containers' and the parameters' code, the devices' setters (Mixer.h: setChainFields()), the store's, and the
-// loader (model/project/Project.cpp, keepCurves()) and the tests' helpers; getOwningContainer() the containers' and the
-// sidechains' code. None of them writes an element: the devices' setters do (Mixer.h).
-std::vector<juce::ValueTree> getChainStates (const juce::ValueTree& container);
-juce::ValueTree findContainerChain (const Song&, DeviceID chain);
-juce::ValueTree getOwningContainer (const juce::ValueTree& chainOrDevice);
-
-// By IDs: a container's chains, in their order; a chain's devices, in theirs (its DEVICEs alone: a container in a chain,
-// which no edit makes and the loader takes away, isn't listed, where the reading before the devices' values listed it); the
-// chain a device in a container is in (none for one on a channel); the container a chain is in; and a chain's place among
-// its container's.
+// Chains (Schema.h: CHAIN), each a look in the devices' area (Mixer.h: findDevice()), by IDs: a container's chains, in their
+// order; a chain's devices, in theirs; the chain a device in a container is in (none for one on a channel); the container a
+// chain is in; and a chain's place among its container's.
 std::vector<DeviceID> getChains (const Song&, DeviceID container);
 std::vector<DeviceID> getChainDevices (const Song&, DeviceID chain);
 DeviceID findChainOf (const Song&, DeviceID device);

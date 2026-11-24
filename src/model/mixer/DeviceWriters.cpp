@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices' setters (internal/Mixer.h: setDevice() and those beside it), while the song's tree is the devices' storage:
-// the one place, with the versions' passes until they move and the store's code (model/plugins/internal/DeviceStore.h), that
-// writes a DEVICE, CONTAINER or CHAIN element of a live song. Each finds the elements it writes (by an ID, a walk of the song
-// as findDeviceState() walks it; by a place, its channel's element and the container and chain in it, no walk) and writes
-// them by what differs through the conversion (model/base/internal/DevicesValue.h), in the mode of the moment.
+// The devices' setters (internal/Mixer.h: setDevice() and those beside it): the one place, with the keeper and the versions'
+// pass, that sets the devices' area of the song's values (model/base/internal/SongValues.h: devices). Each finds what it
+// changes by a look in the area (getDevicesValue(), findDevice(): no walk of the song), computes the area's next value and
+// sets it once, in the mode of the moment.
 #include "internal/Containers.h"
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
+#include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongValues.h"
 #include "model/devices/internal/Devices.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/plugins/internal/DeviceStore.h"
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -23,22 +26,6 @@ namespace phazite
 namespace
 {
     using Form = DeviceValue::Form;
-
-    // The song's tree written as the song is written now: in the step in progress, or outside the history.
-    juce::UndoManager* getTreeUndo (Song& song)
-    {
-        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-    }
-
-    // A device's or a container's element by its ID (a walk), a chain's (a walk), or either (a walk, then another for a chain).
-    juce::ValueTree findItemElement (const Song& song, DeviceID id, std::optional<Form> form = {})
-    {
-        if (form != Form::chain)
-            if (auto device = findDeviceState (song, id); device.isValid() || form.has_value())
-                return device;
-
-        return findContainerChain (song, id);
-    }
 
     // The kind of item a form is: a device (one of Phazite's own, or a plug-in), a container or a chain. No two items of the
     // song have one ID, whatever their kinds.
@@ -65,147 +52,93 @@ namespace
         return Kind::device;
     }
 
-    // A child of an element with an ID, of the types a list holds, invalid for none: what a place's owner is looked for by.
-    juce::ValueTree findChildWithID (const juce::ValueTree& parent, DeviceID id, const juce::Identifier& type)
+    // Whether the song holds the owner of the list of what is at a place: its channel (a track of the song's, or the master),
+    // and its container and chain where it names them, each where its place says.
+    bool holdsOwner (const Song& song, const DevicePlace& place)
     {
-        for (const auto& child : parent)
-            if (child.hasType (type) && readDeviceElementID (child) == id)
-                return child;
+        if (! place.onMaster && ! (place.track.isValid() && hasTrack (song, place.track)))
+            return false;
 
-        return {};
-    }
+        const auto& devices = getDevicesValue (song);
+        const auto onChannel = makeChannelPlace (place.track, place.onMaster);
 
-    // The element that holds the list of what is at a place (a chain's CHAIN, a container's CONTAINER, else the channel's
-    // TRACK or MASTER), found from its channel's element down, no walk of the song; invalid for one the song hasn't.
-    juce::ValueTree findOwnerElement (const Song& song, const DevicePlace& place)
-    {
-        auto owner = place.onMaster ? song.getState().getChildWithName (schema::MASTER)
-                                    : (place.track.isValid() ? findTrackState (song, place.track) : juce::ValueTree());
-
-        if (owner.isValid() && place.container.isValid())
+        if (place.container.isValid())
         {
-            owner = findChildWithID (owner, place.container, schema::CONTAINER);
+            const auto* container = devices.find (place.container);
 
-            if (owner.isValid() && place.chain.isValid())
-                owner = findChildWithID (owner, place.chain, schema::CHAIN);
+            if (container == nullptr || container->form != Form::container || container->place != onChannel)
+                return false;
         }
 
-        return owner;
-    }
-
-    // Whether a child of an owner's element is in the owner's list (DevicesValue.h: readDeviceList() lists the same).
-    bool isListed (const juce::ValueTree& owner, const juce::ValueTree& child)
-    {
-        if (owner.hasType (schema::TRACK) || owner.hasType (schema::MASTER))
-            return child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER);
-
-        if (owner.hasType (schema::CONTAINER))
-            return child.hasType (schema::CHAIN);
-
-        return owner.hasType (schema::CHAIN) && child.hasType (schema::DEVICE);
-    }
-
-    // The child index at which what goes to a place in an owner's list (from 0; -1, or one past the list, after the others)
-    // is put: before the one there, else after the list's last, else, for an empty list, after the owner's other children
-    // (as the writers have always put a channel's first device: after its lanes, a folder's after its tracks).
-    int findChildIndex (const juce::ValueTree& owner, int listIndex)
-    {
-        auto count = 0, last = -1;
-
-        for (int i = 0; i < owner.getNumChildren(); ++i)
+        if (place.chain.isValid())
         {
-            if (! isListed (owner, owner.getChild (i)))
-                continue;
+            const auto* chain = devices.find (place.chain);
 
-            if (count++ == listIndex)
-                return i;
-
-            last = i;
+            if (chain == nullptr || chain->form != Form::chain || chain->place != makeContainerPlace (onChannel, place.container))
+                return false;
         }
 
-        return last >= 0 ? last + 1 : owner.getNumChildren();
+        return true;
     }
 
-    // An owner's list's members: each one's child index and ID, in order.
-    std::vector<std::pair<int, DeviceID>> readListed (const juce::ValueTree& owner)
+    // Whether what is of a form can be in the list of what is at a place: a device or a container on a channel, a chain in a
+    // container, a device in a chain.
+    bool canBeListedAt (Form form, const DevicePlace& place)
     {
-        std::vector<std::pair<int, DeviceID>> listed;
+        if (place.chain.isValid())
+            return getKind (form) == Kind::device;
 
-        for (int i = 0; i < owner.getNumChildren(); ++i)
-            if (const auto child = owner.getChild (i); isListed (owner, child))
-                listed.emplace_back (i, readDeviceElementID (child));
+        if (place.container.isValid())
+            return form == Form::chain;
 
-        return listed;
+        return form != Form::chain;
     }
 
-    // Whether two places name one list (DevicesArea.h: getDeviceListPlace()).
-    bool isSameList (const DevicePlace& a, const DevicePlace& b, Form form)
+    SongValues* findValues (Song& song)
     {
-        return getDeviceListPlace (a, form) == getDeviceListPlace (b, form);
+        auto* values = song.getValues();
+        jassert (values != nullptr); // a live song's devices are its area's: the loader's song writes none through these
+        return values;
     }
 
-    // An owner's list put in the order wanted (the same IDs), each moved as the same element: one moved alone (a drag's
-    // step) in one move, to the place of the one there, as the writers have always moved one; else each in its turn, from
-    // the first that differs.
-    bool putInOrder (juce::ValueTree& owner, const std::vector<DeviceID>& wanted, juce::UndoManager* undo)
+    // A container's macros go with it to the channel it is put on, in the same step and the mode of the moment, as its
+    // element carried them while the tree held the devices: their places name its channel (ModulationValue.h:
+    // ModulatorPlace), set through modulation's setter of the whole value (model/modulation/internal/Modulation.h:
+    // setAllModulation()). Nothing for anything else, nor for a container that stays on its channel.
+    void moveMacrosWith (Song& song, const SongValues& values, const DeviceValue& was, const DevicePlace& to)
     {
-        auto moved = false;
+        if (was.form != Form::container || (was.place.track == to.track && was.place.onMaster == to.onMaster))
+            return;
 
-        for (;;)
+        auto modulation = values.modulation.get();
+        const auto* list = modulation.containers.find (was.id.getRaw());
+
+        if (list == nullptr)
+            return;
+
+        const auto macros = *list;
+
+        for (const auto id : macros)
         {
-            const auto listed = readListed (owner);
-
-            if (listed.size() != wanted.size())
-                return moved;
-
-            size_t k = 0;
-
-            while (k < listed.size() && listed[k].second == wanted[k])
-                ++k;
-
-            if (k == listed.size())
-                return moved;
-
-            // The one at k wanted later, alone: moved there.
-            const auto later = (size_t) std::distance (wanted.begin(), std::find (wanted.begin(), wanted.end(), listed[k].second));
-            std::vector<DeviceID> held;
-
-            for (const auto& [index, id] : listed)
-                held.push_back (id);
-
-            auto tried = held;
-            tried.erase (tried.begin() + (std::ptrdiff_t) k);
-            tried.insert (tried.begin() + (std::ptrdiff_t) std::min (later, tried.size()), listed[k].second);
-
-            if (later > k && later < listed.size() && tried == wanted)
+            if (const auto* found = modulation.find (id))
             {
-                owner.moveChild (listed[k].first, listed[later].first, undo);
-                return true;
+                auto macro = *found;
+                macro.place.track = to.track;
+                macro.place.onMaster = to.onMaster;
+                modulation = withModulator (modulation, std::move (macro));
             }
-
-            // Else the one wanted at k, from where it is, put there.
-            const auto from = (size_t) std::distance (held.begin(), std::find (held.begin(), held.end(), wanted[k]));
-
-            if (from >= listed.size())
-                return moved;
-
-            owner.moveChild (listed[from].first, listed[k].first, undo);
-            moved = true;
         }
-    }
 
+        setAllModulation (song, std::move (modulation));
+    }
 } // namespace
 
 //==============================================================================
 bool setNewDevices (Song& song, const MadeDevices& made, int index)
 {
-    if (made.devices.empty())
-        return false;
+    auto* values = findValues (song);
 
-    const auto& first = made.devices.front();
-    auto owner = findOwnerElement (song, first.place);
-
-    if (! owner.isValid())
+    if (made.devices.empty() || values == nullptr || ! holdsOwner (song, made.devices.front().place))
         return false;
 
     // What the store holds of each made, set first (model/plugins/internal/DeviceStore.h: setMadeStore(): outside the history
@@ -217,241 +150,233 @@ bool setNewDevices (Song& song, const MadeDevices& made, int index)
 
     setMadeStore (song, ids, made.store);
 
-    // The first with the rest in it: a container's chains, each chain's devices, each in its owner's list in their order.
-    auto element = writeDeviceElement (first);
-    std::vector<std::pair<DeviceID, juce::ValueTree>> owners { { first.id, element } };
+    // The first at its index, the rest in it after it, each in its list in their order: one set of the area.
+    auto next = withDevice (values->devices.get(), made.devices.front(), index);
 
     for (size_t i = 1; i < made.devices.size(); ++i)
-    {
-        const auto& inside = made.devices[i];
-        const auto ownerID = inside.form == Form::chain ? inside.place.container : inside.place.chain;
-        const auto found = std::find_if (owners.begin(), owners.end(), [ownerID] (const auto& each) { return each.first == ownerID; });
+        next = withDevice (next, made.devices[i]);
 
-        if (found == owners.end())
-        {
-            jassertfalse; // made in nothing it holds
-            continue;
-        }
-
-        auto child = writeDeviceElement (inside);
-        found->second.appendChild (child, nullptr);
-
-        if (inside.form == Form::chain)
-            owners.emplace_back (inside.id, child);
-    }
-
-    owner.addChild (element, findChildIndex (owner, index), getTreeUndo (song));
-    return true;
+    return values->setAllDevices (song, std::move (next));
 }
 
 bool setDevice (Song& song, DeviceValue value, int index)
 {
-    // Looked for among all the song's items, whatever their kind (a walk, and another for a chain), and refused where the
-    // song holds its ID as another kind of item: a second item of the ID is none the song can hold.
-    auto element = findItemElement (song, value.id);
+    auto* values = findValues (song);
 
-    if (const auto form = readDeviceForm (element); form.has_value() && getKind (*form) != getKind (value.form))
+    if (values == nullptr || ! value.id.isValid() || ! holdsOwner (song, value.place) || ! canBeListedAt (value.form, value.place))
         return false;
 
-    const auto held = element.isValid() ? readHeldDevice (element, readDevicePlace (element)) : std::nullopt;
-    auto* undo = getTreeUndo (song);
+    // Refused where the song holds its ID as another kind of item: a second item of the ID is none the song can hold.
+    const auto& held = values->devices.get();
+    const auto* was = held.find (value.id);
 
-    // One the song hasn't, or holds as another form of a device (an element no reader reads as this one): made anew at its
-    // place.
-    if (! held.has_value() || held->form != value.form)
-    {
-        if (element.isValid() && ! findOwnerElement (song, value.place).isValid())
-            return false;
+    if (was != nullptr && getKind (was->form) != getKind (value.form))
+        return false;
 
-        if (element.isValid())
-            element.getParent().removeChild (element, undo);
+    // One held as another form of a device: made anew at its place.
+    if (was != nullptr && was->form != value.form)
+        return values->setAllDevices (song, withDevice (withoutDevice (held, value.id), std::move (value), index));
 
-        MadeDevices made;
-        made.devices.push_back (std::move (value));
-        return setNewDevices (song, made, index);
-    }
+    // A container put on another channel takes its macros along (a version's line sends it there).
+    const auto before = was != nullptr ? std::optional (*was) : std::nullopt;
+    const auto to = value.place;
 
-    // One whose list is another: moved there as the same element, with all it holds.
-    auto moved = false;
+    if (! values->setDevice (song, std::move (value), index))
+        return false;
 
-    if (! isSameList (held->place, value.place, value.form))
-    {
-        auto owner = findOwnerElement (song, value.place);
+    if (before.has_value())
+        moveMacrosWith (song, *values, *before, to);
 
-        if (! owner.isValid())
-            return false;
-
-        element.getParent().removeChild (element, undo);
-        owner.addChild (element, findChildIndex (owner, index), undo);
-        moved = true;
-    }
-
-    return writeDeviceLike (element, *held, value, undo) || moved;
+    return true;
 }
 
 bool eraseDevice (Song& song, DeviceID id)
 {
-    auto element = findItemElement (song, id);
-
-    if (! element.isValid())
-        return false;
-
-    element.getParent().removeChild (element, getTreeUndo (song));
-    return true;
+    auto* values = findValues (song);
+    return values != nullptr && values->eraseDevice (song, id);
 }
 
 bool eraseDevice (Song& song, DeviceID id, const DevicePlace& at)
 {
-    // Among its owner's children: a chain's devices, a container's chains, a channel's devices and containers.
-    auto owner = findOwnerElement (song, at);
+    // Only where it is: in the list of what is at its place.
+    auto* values = findValues (song);
+    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
 
-    for (const auto* type : { &schema::DEVICE, &schema::CONTAINER, &schema::CHAIN })
-    {
-        if (const auto element = findChildWithID (owner, id, *type); element.isValid() && isListed (owner, element))
-        {
-            owner.removeChild (element, getTreeUndo (song));
-            return true;
-        }
-    }
+    if (found == nullptr || getDeviceListPlace (found->place, found->form) != getDeviceListPlace (at, found->form))
+        return false;
 
-    return false;
+    return values->eraseDevice (song, id);
 }
 
 bool setDeviceListOrder (Song& song, const DevicePlace& owner, immer::flex_vector<DeviceID> order)
 {
-    auto element = findOwnerElement (song, owner);
-
-    if (! element.isValid())
-        return false;
-
-    // The same IDs, each once, else nothing.
-    std::vector<DeviceID> held, wanted (order.begin(), order.end());
-
-    for (const auto& [index, id] : readListed (element))
-        held.push_back (id);
-
-    auto sortedHeld = held, sortedWanted = wanted;
-    std::sort (sortedHeld.begin(), sortedHeld.end());
-    std::sort (sortedWanted.begin(), sortedWanted.end());
-
-    if (sortedHeld != sortedWanted || std::adjacent_find (sortedWanted.begin(), sortedWanted.end()) != sortedWanted.end())
-        return false;
-
-    return putInOrder (element, wanted, getTreeUndo (song));
+    auto* values = findValues (song);
+    return values != nullptr && values->setDeviceListOrder (song, owner, std::move (order));
 }
 
 bool moveInDeviceList (Song& song, DeviceID id, int newIndex, ListMove move)
 {
-    auto element = findItemElement (song, id, move == ListMove::chains ? std::optional (Form::chain) : std::optional (Form::own));
-    auto owner = element.getParent();
+    auto* values = findValues (song);
+    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
 
-    if (! element.isValid() || (move == ListMove::inChain && (! owner.hasType (schema::CHAIN) || readIsInstrument (element))))
+    if (found == nullptr || (move == ListMove::chains) != (found->form == Form::chain)
+        || (move == ListMove::inChain && (! found->place.chain.isValid() || found->isInstrument())))
+        return false;
+
+    const auto owner = getDeviceListPlace (found->place, found->form);
+    const auto& devices = values->devices.get();
+    const auto* list = devices.findList (owner);
+
+    if (list == nullptr)
         return false;
 
     // To the place of the one there now, never before a chain's instrument where the move keeps it first.
-    const auto listed = readListed (owner);
-    const auto first = move == ListMove::inChain && ! listed.empty() && readIsInstrument (owner.getChild (listed.front().first)) ? 1 : 0;
+    const auto* firstItem = list->empty() ? nullptr : devices.find (list->front());
+    const auto first = move == ListMove::inChain && firstItem != nullptr && firstItem->isInstrument() ? 1 : 0;
 
-    if ((int) listed.size() <= first)
+    if ((int) list->size() <= first)
         return false;
 
-    const auto at = (size_t) juce::jlimit (first, (int) listed.size() - 1, newIndex);
-    const auto from = owner.indexOf (element);
+    const auto at = (size_t) juce::jlimit (first, (int) list->size() - 1, newIndex);
+    const auto from = (size_t) std::distance (list->begin(), std::find (list->begin(), list->end(), id));
 
-    if (listed[at].first == from)
+    if (from >= list->size() || from == at)
         return false;
 
-    owner.moveChild (from, listed[at].first, getTreeUndo (song));
-    return true;
+    return values->setDeviceListOrder (song, owner, list->erase (from).insert (at, id));
 }
 
 bool moveDevices (Song& song, const std::vector<DeviceID>& ids, const DevicePlace& from, const DevicePlace& to, int index,
                   const std::function<void (DeviceValue&)>& edit)
 {
-    auto source = findOwnerElement (song, from);
-    auto target = findOwnerElement (song, to);
+    auto* values = findValues (song);
 
-    if (! source.isValid() || ! target.isValid())
+    if (values == nullptr || ! holdsOwner (song, from) || ! holdsOwner (song, to))
         return false;
 
-    auto* undo = getTreeUndo (song);
+    // Each from the list at `from` into the one at `to`, with what it holds, in their order: one set of the area.
+    auto next = values->devices.get();
     auto moved = false;
+    std::vector<DeviceValue> containers; // as they were, for their macros (moveMacrosWith())
 
     for (const auto id : ids)
     {
-        auto element = findChildWithID (source, id, schema::DEVICE);
+        const auto* found = next.find (id);
 
-        if (! element.isValid())
-            element = findChildWithID (source, id, schema::CONTAINER);
-
-        if (! element.isValid())
-            element = findChildWithID (source, id, schema::CHAIN);
-
-        if (! element.isValid() || ! isListed (target, element))
+        if (found == nullptr || getDeviceListPlace (found->place, found->form) != getDeviceListPlace (from, found->form)
+            || ! canBeListedAt (found->form, to))
             continue;
 
-        source.removeChild (element, undo);
-        target.addChild (element, findChildIndex (target, index), undo);
+        if (found->form == Form::container)
+            containers.push_back (*found);
+
+        auto value = *found;
+        value.place = to;
+
+        if (edit != nullptr)
+        {
+            const auto keep = value;
+            edit (value);
+            value.id = keep.id;
+            value.form = keep.form;
+            value.place = keep.place;
+            value.values = keep.values;
+            value.sounds = keep.sounds;
+        }
+
+        next = withDevice (next, std::move (value), index);
         moved = true;
 
         if (index >= 0)
             ++index;
-
-        if (edit != nullptr)
-            setDeviceFields (song, element, edit);
     }
 
-    return moved;
+    if (! moved || ! values->setAllDevices (song, std::move (next)))
+        return false;
+
+    for (const auto& container : containers)
+        moveMacrosWith (song, *values, container, to);
+
+    return true;
 }
 
 bool setDeviceFields (Song& song, DeviceID id, const std::function<void (DeviceValue&)>& edit)
 {
-    return setDeviceFields (song, findDeviceState (song, id), edit);
+    // A device's or a container's (not a chain's), its own fields alone: its place, values and sounds kept.
+    auto* values = findValues (song);
+    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
+
+    if (found == nullptr || found->form == Form::chain)
+        return false;
+
+    auto next = *found;
+    edit (next);
+    next.id = found->id;
+    next.form = found->form;
+    next.place = found->place;
+    next.values = found->values;
+    next.sounds = found->sounds;
+    return values->setDevice (song, std::move (next));
 }
 
 bool setChainFields (Song& song, DeviceID chain, const std::function<void (DeviceValue&)>& edit)
 {
-    return setDeviceFields (song, findContainerChain (song, chain), edit);
-}
+    auto* values = findValues (song);
+    const auto* found = values != nullptr ? values->devices.get().find (chain) : nullptr;
 
-bool setDeviceFields (Song& song, juce::ValueTree element, const std::function<void (DeviceValue&)>& edit)
-{
-    // Its own fields alone, read without its values and sounds (no map made), which its fields' writer doesn't write.
-    auto fields = element.isValid() ? readHeldDeviceFields (element, {}) : std::nullopt;
-
-    if (! fields.has_value())
+    if (found == nullptr || found->form != Form::chain)
         return false;
 
-    edit (*fields);
-    return writeDeviceFields (element, *fields, getTreeUndo (song));
+    auto next = *found;
+    edit (next);
+    next.id = found->id;
+    next.form = found->form;
+    next.place = found->place;
+    return values->setDevice (song, std::move (next));
 }
 
 bool setDeviceValue (Song& song, DeviceID id, int parameterIndex, float value)
 {
-    const auto device = findDeviceState (song, id);
-    const auto* info = readDeviceForm (device) == Form::own
-                           ? findOwnDevice (std::string_view (device[schema::deviceType].toString().toRawUTF8()))
-                           : nullptr;
+    // One entry of one map: the device's values', by the parameter's index, held as the song holds it.
+    auto* values = findValues (song);
+    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
+    const auto* info = found != nullptr && found->form == Form::own ? findOwnDevice (std::string_view (found->type.toRawUTF8())) : nullptr;
 
     if (info == nullptr || ! juce::isPositiveAndBelow (parameterIndex, (int) info->parameters.size()))
         return false;
 
-    return setDeviceValue (song, device, info->parameters[(size_t) parameterIndex], value);
-}
+    const auto held = keepHeldValue (info->parameters[(size_t) parameterIndex], value);
+    const auto key = (std::uint32_t) parameterIndex;
+    const auto* was = found->values.find (key);
 
-bool setDeviceValue (Song& song, juce::ValueTree device, const devices::ParameterInfo& info, float value)
-{
-    if (readDeviceForm (device) != Form::own)
+    if (held.has_value() ? (was != nullptr && juce::exactlyEqual (*was, *held)) : was == nullptr)
         return false;
 
-    return writeDeviceValueOf (device, info, keepHeldValue (info, value), getTreeUndo (song));
+    auto next = *found;
+    next.values = held.has_value() ? found->values.set (key, *held) : found->values.erase (key);
+    return values->setDevice (song, std::move (next));
 }
 
 void setDeviceSound (Song& song, DeviceID id, const juce::Identifier& property, const juce::String& value)
 {
-    // One of its type's sounds (a property it hasn't would be one the song reads none of: DevicesValue.h).
-    if (auto device = findDeviceState (song, id);
-        readDeviceForm (device) == Form::own && findSoundIndex (std::string_view (readDeviceType (device).toRawUTF8()), property) >= 0)
-        writeDeviceSoundOf (device, property, value, getTreeUndo (song));
+    // One of its type's sounds (a property it hasn't would be one the song reads none of: DevicesValue.h), one entry of one
+    // map; empty for none.
+    auto* values = findValues (song);
+    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
+    const auto index =
+        found != nullptr && found->form == Form::own ? findSoundIndex (std::string_view (found->type.toRawUTF8()), property) : -1;
+
+    if (index < 0)
+        return;
+
+    const auto key = (std::uint16_t) index;
+    const auto* was = found->sounds.find (key);
+
+    if (value.isEmpty() ? was == nullptr : (was != nullptr && *was == value))
+        return;
+
+    auto next = *found;
+    next.sounds = value.isNotEmpty() ? found->sounds.set (key, value) : found->sounds.erase (key);
+    values->setDevice (song, std::move (next));
 }
 } // namespace phazite

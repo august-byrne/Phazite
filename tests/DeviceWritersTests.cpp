@@ -10,8 +10,9 @@
 // each leaving the song written as Phazite wrote it before (a copy written as its original, but for the IDs; a round trip
 // back to the text it started from): a container made around three devices and taken apart, a chain duplicated, moved and
 // removed, an instrument replaced, a container's preset added (its macros set as values, none taken in by modulation's
-// safety net), Swap's trial kept and put back, a track with a container duplicated (its lanes after its devices or before
-// them, as the original's, its MIDI links not copied), a device turned off and on, a mix set, a chain's fader and ranges, a
+// safety net), Swap's trial kept and put back, a track with a container duplicated (its devices before its lanes, as the
+// original's, its MIDI links not copied), a bus folder duplicated (its children in the original's order), a device turned
+// off and on, a mix set, a chain's fader and ranges, a
 // split and its crossovers, effects moved in and between chains, an instrument replaced in a chain, an instrument container
 // added, a duck, an effect replaced, a return with an effect, a preset loaded and tried, the sidechains forgotten, devices
 // removed, and a bus made plain (its plug-ins' states stored first: a guard for an Undo after a bus with a plug-in is made
@@ -182,8 +183,8 @@ void checkOneStep (phazite::test::UndoCheck& undo, phazite::Song& song, const ju
 // A device as the song holds it, REQUIRE'd there.
 DeviceValue findHeld (const phazite::Song& song, DeviceID id)
 {
-    const auto device = phazite::findDevice (song, id);
-    REQUIRE (device.has_value());
+    const auto* device = phazite::findDevice (song, id);
+    REQUIRE (device != nullptr);
     return *device;
 }
 
@@ -240,8 +241,8 @@ TEST_CASE ("Device writers: the setters write nothing for a value the song holds
     // (a) A value equal to what the song holds: nothing written, no action, through each setter.
     for (const auto id : { synth, eq })
     {
-        const auto held = phazite::findDevice (song, id);
-        REQUIRE (held.has_value());
+        const auto* held = phazite::findDevice (song, id);
+        REQUIRE (held != nullptr);
         const auto before = writeWhole (song);
         {
             const phazite::UndoStep step (song, "Nothing");
@@ -409,8 +410,8 @@ TEST_CASE ("Device writers: a value set off its steps is written on them, as the
     set (toggle, toggle.defaultValue > 0.5f ? 0.25f : 0.75f);
     set (choice, choice.minimum + 1.6f);
 
-    const auto device = phazite::findDevice (song, compressor);
-    REQUIRE (device.has_value());
+    const auto* device = phazite::findDevice (song, compressor);
+    REQUIRE (device != nullptr);
     const auto toggleIndex = (std::uint32_t) (&toggle - dev::Compressor::info.parameters.data());
     const auto choiceIndex = (std::uint32_t) (&choice - dev::Compressor::info.parameters.data());
     CHECK (device->getParameterValue ((int) toggleIndex) == doctest::Approx (toggleOn));
@@ -661,19 +662,21 @@ TEST_CASE ("Device writers: a bus made plain stores its plug-ins' states first, 
     CHECK (phazite::test::TestPlugin::getGain (song, plugin) == doctest::Approx (0.75f));
 }
 
-TEST_CASE ("Device writers: a track duplicated holds its lanes where they stood among its devices, after them or before them, "
-           "naming the copy's devices, in one step whose Undo and Redo are exact")
+TEST_CASE ("Device writers: a track duplicated holds its devices before its lanes, as the original does, its lanes naming the "
+           "copy's devices, in one step whose Undo and Redo are exact")
 {
-    // The copy's devices are put on it by the devices' code once it is the song's (copyDevices()), after what its element
-    // holds: lanes that stood after the devices are taken off the copy's element and put back after them.
-    for (const auto lanesFirst : { false, true })
+    // Whole state writes a track's devices right after its clips, before its other children (DevicesArea.h:
+    // writeDevicesIn()), whichever was made first: a lane shown before the devices were added, or after.
+    const auto lanesType = schema::LANES.getName().toString();
+
+    for (const auto laneShownFirst : { false, true })
     {
-        CAPTURE (lanesFirst);
+        CAPTURE (laneShownFirst);
         phazite::test::TestSong s;
         auto& song = *phazite::findSong (s.context);
         const auto track = s.firstTrack;
 
-        if (lanesFirst)
+        if (laneShownFirst)
             phazite::showLane (song, track, s.getVolumeParameter (track));
 
         s.setInstrument (track, dev::Synth::typeID);
@@ -681,10 +684,12 @@ TEST_CASE ("Device writers: a track duplicated holds its lanes where they stood 
         REQUIRE (phazite::addContainer (s.context, track).isValid());
         phazite::showLane (song, track, { delay, "mix" });
 
+        // The original's devices and its container before its lanes.
         const auto original = getChildTypes (getWrittenTrack (song, track));
-        REQUIRE (original.contains (schema::LANES.getName().toString()));
-        CHECK ((original.indexOf (schema::LANES.getName().toString()) < original.indexOf (schema::DEVICE.getName().toString()))
-               == lanesFirst);
+        const auto lanesAt = original.indexOf (lanesType);
+        REQUIRE (lanesAt >= 0);
+        CHECK (original.indexOf (schema::DEVICE.getName().toString()) < lanesAt);
+        CHECK (original.indexOf (schema::CONTAINER.getName().toString()) < lanesAt);
 
         phazite::test::UndoCheck undo (s.context);
         std::vector<TrackID> copies;
@@ -693,22 +698,60 @@ TEST_CASE ("Device writers: a track duplicated holds its lanes where they stood 
         REQUIRE (copies.size() == 1);
         const auto copy = copies.front();
 
-        // Its children of each kind in the original's order: its devices, then its lanes, or its lanes first.
-        CHECK (getChildTypes (getWrittenTrack (song, copy)) == original);
+        // Its children the original's, kind for kind: its devices and its container, then its lanes.
+        const auto copied = getChildTypes (getWrittenTrack (song, copy));
+        CHECK (copied == original);
+        CHECK (copied.indexOf (schema::CONTAINER.getName().toString()) < copied.indexOf (lanesType));
 
         // Its lanes name its own devices (and its own volume).
         const auto lanes = phazite::getLanes (song, copy);
         const auto copiedDevices = phazite::getDevices (song, copy);
-        REQUIRE (lanes.size() == (lanesFirst ? 2u : 1u));
+        REQUIRE (lanes.size() == (laneShownFirst ? 2u : 1u));
         REQUIRE (copiedDevices.size() == 3);
         CHECK (lanes.back().parameter == phazite::ParameterRef { copiedDevices[1], "mix" });
 
-        if (lanesFirst)
+        if (laneShownFirst)
             CHECK (lanes.front().parameter == s.getVolumeParameter (copy));
 
         undo.walkBackAndForth();
         CHECK (getChildTypes (getWrittenTrack (song, copy)) == original);
     }
+}
+
+TEST_CASE ("Device writers: a bus folder duplicated holds its children in the original's order: its devices, then its tracks and "
+           "its lanes as they stood")
+{
+    // A bus with an effect, its lane shown while it held one track, then a second track moved into it: its devices first (as
+    // whole state writes them), then its first track, its lanes, its second track.
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto second = s.addTrack ("Second");
+    const auto bus = s.addBus ("Bus", { s.firstTrack });
+    s.addEffect (bus, dev::Delay::typeID);
+    phazite::showLane (song, bus, s.getVolumeParameter (bus));
+
+    {
+        const phazite::UndoStep step (song, "Into the Folder");
+        phazite::moveTrackIntoFolder (song, second, bus);
+    }
+
+    const auto original = getWrittenTrack (song, bus);
+    const auto types = getChildTypes (original);
+    const auto track = schema::TRACK.getName().toString();
+    REQUIRE (types == juce::StringArray { schema::DEVICE.getName().toString(), track, schema::LANES.getName().toString(), track });
+
+    phazite::test::UndoCheck undo (s.context);
+    std::vector<TrackID> copies;
+    checkOneStep (undo, song, "Duplicate Track",
+                  inStep (song, "Duplicate Track", [&] { copies = phazite::duplicateTracks (song, { bus }, nullptr); }));
+    REQUIRE (copies.size() == 1);
+
+    // The copy whole, the original's but for the IDs: its children in the original's order.
+    CHECK (getChildTypes (getWrittenTrack (song, copies.front())) == types);
+    CHECK (withIDsInOrder ({ getWrittenTrack (song, copies.front()) }) == withIDsInOrder ({ original }));
+
+    undo.walkBackAndForth();
+    CHECK (withIDsInOrder ({ getWrittenTrack (song, copies.front()) }) == withIDsInOrder ({ original }));
 }
 
 TEST_CASE ("Device writers: a track duplicated holds no copy of its devices' MIDI links")

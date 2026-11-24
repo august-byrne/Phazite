@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/SavedValues.h"
@@ -29,6 +30,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <deque>
 #include <functional>
 #include <optional>
 #include <set>
@@ -41,34 +43,98 @@ namespace
 {
     constexpr float newSendDb = -6.0f;
 
-    std::atomic<std::uint64_t> deviceWalks { 0 }; // countDeviceWalks(): a count alone, which orders nothing
+    std::atomic<std::uint64_t> deviceLooks { 0 }; // countDeviceLooks(): a count alone, which orders nothing
 
     juce::UndoManager* getUndo (Song& song)
     {
         return &song.getUndoManager();
     }
 
-    bool isDeviceElement (const juce::ValueTree& state)
+    // The description of one of Phazite's own devices a value is; nullptr for none, a plug-in, a container or a chain.
+    const devices::DeviceInfo* findOwnInfo (const DeviceValue* value)
     {
-        return state.hasType (schema::DEVICE) || state.hasType (schema::CONTAINER);
+        return value != nullptr && value->form == DeviceValue::Form::own ? findOwnDevice (std::string_view (value->type.toRawUTF8()))
+                                                                         : nullptr;
     }
 
-    // The description of one of Phazite's own devices an element names; nullptr for a plug-in or a container. Its type read
-    // through the devices' conversion (DevicesValue.h), as every reader below reads one field of one device.
-    const devices::DeviceInfo* findOwnInfo (const juce::ValueTree& deviceState)
+    // A device or a container (not a chain) by its ID, nullptr for none.
+    const DeviceValue* findDeviceOrContainer (const Song& song, DeviceID id)
     {
-        return readDeviceForm (deviceState) == DeviceValue::Form::own ? findOwnDevice (readDeviceType (deviceState).toStdString())
-                                                                      : nullptr;
+        const auto* value = findDevice (song, id);
+        return value != nullptr && value->form != DeviceValue::Form::chain ? value : nullptr;
     }
 
-    // A device's, a container's or a chain's element by its ID, invalid for one the song hasn't: what findDevice() reads
-    // while the song's tree holds its devices.
-    juce::ValueTree findDeviceElement (const Song& song, DeviceID id)
+    // The list of a channel's devices and containers, none for a channel without any (getDeviceChannelPlace()).
+    const immer::flex_vector<DeviceID>* findChannelList (const Song& song, TrackID channel)
     {
-        if (auto device = findDeviceState (song, id); device.isValid())
-            return device;
+        return getDevicesValue (song).findList (getDeviceChannelPlace (song, channel));
+    }
 
-        return findContainerChain (song, id);
+    // A device's, a container's or a chain's element in a song's tree by its ID (the first of it: each track's, a folder's before
+    // the tracks in it, then the master's), invalid for none: what a song that holds no values reads (the loader's), whose
+    // tree holds its devices.
+    juce::ValueTree findDeviceElementIn (const juce::ValueTree& state, DeviceID id)
+    {
+        const auto isIt = [id] (const juce::ValueTree& element)
+        { return readDeviceForm (element).has_value() && readDeviceElementID (element) == id; };
+
+        const auto inChannel = [&isIt] (const juce::ValueTree& channel) -> juce::ValueTree
+        {
+            for (const auto& child : channel)
+            {
+                if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)))
+                    continue;
+
+                if (isIt (child))
+                    return child;
+
+                for (const auto& chain : child)
+                {
+                    if (! chain.hasType (schema::CHAIN))
+                        continue;
+
+                    if (isIt (chain))
+                        return chain;
+
+                    for (const auto& device : chain)
+                        if (device.hasType (schema::DEVICE) && isIt (device))
+                            return device;
+                }
+            }
+
+            return {};
+        };
+
+        const std::function<juce::ValueTree (const juce::ValueTree&)> inTracks = [&inChannel, &inTracks] (const juce::ValueTree& list)
+        {
+            for (const auto& track : list)
+            {
+                if (! track.hasType (schema::TRACK))
+                    continue;
+
+                if (auto found = inChannel (track); found.isValid())
+                    return found;
+
+                if (auto found = inTracks (track); found.isValid())
+                    return found;
+            }
+
+            return juce::ValueTree();
+        };
+
+        if (auto found = inTracks (state.getChildWithName (schema::TRACKS)); found.isValid())
+            return found;
+
+        return inChannel (state.getChildWithName (schema::MASTER));
+    }
+
+    // What a container holds (its chains) or a chain (its devices), in their order; none for anything else.
+    const immer::flex_vector<DeviceID>* findInside (const SongDevices& devices, const DeviceValue& value)
+    {
+        if (value.form == DeviceValue::Form::container)
+            return devices.chains.find (value.id.getRaw());
+
+        return value.form == DeviceValue::Form::chain ? devices.chainDevices.find (value.id.getRaw()) : nullptr;
     }
 
     juce::String getOwnName (const devices::DeviceInfo& info)
@@ -229,139 +295,86 @@ juce::ValueTree findChainState (const Song& song, TrackID channel)
     return channel.isValid() ? findTrackState (song, channel) : song.getState().getChildWithName (schema::MASTER);
 }
 
-std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain)
+const SongDevices& getDevicesValue (const Song& song)
 {
-    std::vector<juce::ValueTree> devices;
+    if (const auto* values = song.getValues())
+        return values->devices.get();
 
-    // A container's are its chains', in their order.
-    if (isContainerState (chain))
-    {
-        for (const auto& child : chain)
-            if (child.hasType (schema::CHAIN))
-                for (const auto& device : child)
-                    if (device.hasType (schema::DEVICE))
-                        devices.push_back (device);
+    // A song that holds no values (the loader's, a check's copy): its tree read whole, kept for the thread where it differs
+    // from what was read before, so that what was found in it stays while the tree doesn't change.
+    thread_local SongDevices fromTree;
 
-        return devices;
-    }
+    if (auto read = readDevicesValue (song.getState()); ! (read == fromTree))
+        fromTree = std::move (read);
 
-    for (const auto& child : chain)
-        if (isDeviceElement (child))
-            devices.push_back (child);
-
-    return devices;
+    return fromTree;
 }
 
-juce::ValueTree findDeviceState (const Song& song, DeviceID id)
+const DeviceValue* findDevice (const Song& song, DeviceID id)
 {
-    // In a chain, or in one of its containers.
-    const auto findIn = [id] (const juce::ValueTree& chain)
-    {
-        for (const auto& state : getDeviceStates (chain))
-        {
-            if (getDeviceID (state) == id)
-                return state;
-
-            for (const auto& inside : getDeviceStates (state))
-                if (getDeviceID (inside) == id)
-                    return inside;
-        }
-
-        return juce::ValueTree();
-    };
-
     if (! id.isValid())
-        return {};
+        return nullptr;
 
-    countDeviceWalk();
+    deviceLooks.fetch_add (1, std::memory_order_relaxed);
 
-    for (const auto& track : getTrackStates (song))
-        if (const auto found = findIn (track); found.isValid())
-            return found;
+    if (const auto* values = song.getValues())
+        return values->devices.get().find (id);
 
-    return findIn (song.getState().getChildWithName (schema::MASTER));
+    // A song that holds no values (the loader's, the tests' check of a song made of a tree): the one element of the ID read
+    // from its tree (never every device of the song for each look), kept for the thread among the last 16 read, so that what
+    // reads one, and another, still holds the first: good through the next 15 such looks on the thread.
+    const auto element = findDeviceElementIn (song.getState(), id);
+    auto value = element.isValid() ? readDeviceValue (element, readDevicePlace (element)) : std::nullopt;
+
+    if (! value.has_value())
+        return nullptr;
+
+    thread_local std::deque<DeviceValue> readFromTree;
+    readFromTree.push_back (std::move (*value));
+
+    if (readFromTree.size() > 16)
+        readFromTree.pop_front();
+
+    return &readFromTree.back();
 }
 
-DeviceID getDeviceID (const juce::ValueTree& deviceState)
+std::uint64_t countDeviceLooks() noexcept
 {
-    return readDeviceElementID (deviceState);
-}
-
-std::uint64_t countDeviceWalks() noexcept
-{
-    return deviceWalks.load (std::memory_order_relaxed);
-}
-
-void countDeviceWalk() noexcept
-{
-    deviceWalks.fetch_add (1, std::memory_order_relaxed);
-}
-
-bool isPluginState (const juce::ValueTree& deviceState)
-{
-    return readDeviceForm (deviceState) == DeviceValue::Form::plugin;
-}
-
-bool holdsPlugin (const juce::ValueTree& tree)
-{
-    if (isPluginState (tree))
-        return true;
-
-    if (tree.hasType (schema::DEVICE) && ! isContainerState (tree))
-        return false;
-
-    for (const auto& child : tree)
-        if ((child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN)) && holdsPlugin (child))
-            return true;
-
-    return false;
-}
-
-bool isContainerState (const juce::ValueTree& deviceState)
-{
-    return deviceState.hasType (schema::CONTAINER);
-}
-
-bool isInstrumentState (const juce::ValueTree& deviceState)
-{
-    return readIsInstrument (deviceState);
-}
-
-SongDevices getDevicesValue (const Song& song)
-{
-    return readDevicesValue (song.getState());
-}
-
-std::optional<DeviceValue> findDevice (const Song& song, DeviceID id)
-{
-    const auto element = findDeviceElement (song, id);
-    return element.isValid() ? readDeviceValue (element, readDevicePlace (element)) : std::nullopt;
+    return deviceLooks.load (std::memory_order_relaxed);
 }
 
 bool hasDevice (const Song& song, DeviceID id)
 {
-    return id.isValid() && findDeviceElement (song, id).isValid();
+    return findDevice (song, id) != nullptr;
 }
 
 bool isPlugin (const Song& song, DeviceID id)
 {
-    return isPluginState (findDeviceState (song, id));
+    const auto* value = findDevice (song, id);
+    return value != nullptr && value->isPlugin();
 }
 
 bool isInstrument (const Song& song, DeviceID id)
 {
-    return readIsInstrument (findDeviceState (song, id));
+    const auto* value = findDeviceOrContainer (song, id);
+    return value != nullptr && value->isInstrument();
 }
 
 std::vector<DeviceID> getDevices (const Song& song, TrackID channel)
 {
-    return readDeviceList (findChainState (song, channel));
+    const auto* list = findChannelList (song, channel);
+    return list != nullptr ? std::vector<DeviceID> (list->begin(), list->end()) : std::vector<DeviceID>();
 }
 
 DeviceID getInstrument (const Song& song, TrackID track)
 {
-    const auto devices = getDeviceStates (findChainState (song, track));
-    return ! devices.empty() && isInstrumentState (devices.front()) ? getDeviceID (devices.front()) : DeviceID();
+    const auto* list = findChannelList (song, track);
+
+    if (list == nullptr || list->empty())
+        return {};
+
+    const auto* first = getDevicesValue (song).find (list->front());
+    return first != nullptr && first->isInstrument() ? first->id : DeviceID();
 }
 
 std::vector<DeviceID> getEffects (const Song& song, TrackID channel)
@@ -373,19 +386,27 @@ std::vector<DeviceID> getEffects (const Song& song, TrackID channel)
 
 bool hasInstrument (const Song& song, TrackID track)
 {
-    const auto devices = getDeviceStates (findChainState (song, track));
-    return std::any_of (devices.begin(), devices.end(), isInstrumentState);
+    const auto* list = findChannelList (song, track);
+    const auto& devices = getDevicesValue (song);
+
+    return list != nullptr
+           && std::any_of (list->begin(), list->end(),
+                           [&devices] (DeviceID id)
+                           {
+                               const auto* value = devices.find (id);
+                               return value != nullptr && value->isInstrument();
+                           });
 }
 
 TrackID getDeviceChannel (const Song& song, DeviceID device)
 {
-    // Out of its chain and its container, for a device in one.
-    auto parent = findDeviceState (song, device).getParent();
+    // The channel of its place, for a device in a container too: a track's ID, or the master's.
+    const auto* value = findDeviceOrContainer (song, device);
 
-    while (parent.hasType (schema::CHAIN) || isContainerState (parent))
-        parent = parent.getParent();
+    if (value == nullptr)
+        return {};
 
-    return getTrackID (parent);
+    return value->place.onMaster ? getMasterID (song) : value->place.track;
 }
 
 bool needsInstrument (const Song& song, TrackID track)
@@ -400,19 +421,26 @@ bool needsInstrument (const Song& song, TrackID track)
 
 juce::String getDeviceName (const Song& song, DeviceID id)
 {
-    return getDeviceName (findDeviceState (song, id));
+    const auto* value = findDeviceOrContainer (song, id);
+    return value != nullptr ? getDeviceName (*value) : juce::String();
 }
 
-juce::String getDeviceName (const juce::ValueTree& state)
+juce::String getDeviceName (const juce::ValueTree& deviceInCopy)
 {
-    if (isContainerState (state))
-        return readDeviceElementName (state);
+    switch (readDeviceForm (deviceInCopy).value_or (DeviceValue::Form::chain))
+    {
+        case DeviceValue::Form::container:
+            return readDeviceElementName (deviceInCopy);
+        case DeviceValue::Form::plugin:
+            return readPluginIdentity (deviceInCopy).name;
+        case DeviceValue::Form::own:
+            if (const auto* own = findOwnDevice (std::string_view (readDeviceType (deviceInCopy).toRawUTF8())))
+                return getOwnName (*own);
 
-    if (isPluginState (state))
-        return readPluginIdentity (state).name;
-
-    if (const auto* own = findOwnInfo (state))
-        return getOwnName (*own);
+            return {};
+        case DeviceValue::Form::chain:
+            break;
+    }
 
     return {};
 }
@@ -424,105 +452,104 @@ bool opensWindow (const Song& song, DeviceID id)
 
 bool popsOut (const Song& song, DeviceID id)
 {
-    return findOwnInfo (findDeviceState (song, id)) != nullptr;
+    return findOwnInfo (findDevice (song, id)) != nullptr;
 }
 
 //==============================================================================
 namespace
 {
-    // An outline's entry of what an element is, at its place: none for an element that is no device, container or chain.
-    std::optional<DeviceOutline> outlineOf (const juce::ValueTree& element, TrackID channel, DeviceID container, DeviceID chain)
+    // An outline's entry of what a value is.
+    DeviceOutline outlineOf (const DeviceValue& value, TrackID channel)
     {
-        const auto form = readDeviceForm (element);
-
-        if (! form.has_value())
-            return std::nullopt;
-
         DeviceOutline outline;
-        outline.id = readDeviceElementID (element);
-        outline.form = *form;
+        outline.id = value.id;
+        outline.form = value.form;
         outline.channel = channel;
-        outline.container = container;
-        outline.chain = chain;
+        outline.container = value.place.container;
+        outline.chain = value.place.chain;
 
-        if (*form == DeviceValue::Form::own)
-            outline.type = readDeviceType (element);
+        if (value.form == DeviceValue::Form::own)
+            outline.type = value.type;
 
-        if (*form == DeviceValue::Form::plugin)
-            outline.plugin = readPluginIdentity (element);
+        if (value.form == DeviceValue::Form::plugin)
+            outline.plugin = value.plugin;
 
-        outline.instrument = readIsInstrument (element);
-        outline.sidechain = readDeviceSidechain (element);
+        outline.instrument = value.isInstrument();
+        outline.sidechain = value.sidechain;
         return outline;
     }
 
-    // A channel's element's outline, after what the list holds already.
-    void addOutlineOf (const juce::ValueTree& channelState, TrackID channel, std::vector<DeviceOutline>& outline)
+    // Each item of a channel's list in the outline's order (a container followed by its chains, each chain by its devices),
+    // after what is there already.
+    void forEachOnChannel (const SongDevices& devices, const DevicePlace& channel, const std::function<void (const DeviceValue&)>& each)
     {
-        for (const auto& child : channelState)
+        const auto* list = devices.findList (channel);
+
+        if (list == nullptr)
+            return;
+
+        const std::function<void (DeviceID)> visit = [&devices, &each, &visit] (DeviceID id)
         {
-            const auto entry = outlineOf (child, channel, {}, {});
+            const auto* value = devices.find (id);
 
-            if (! entry.has_value() || entry->form == DeviceValue::Form::chain)
-                continue;
+            if (value == nullptr)
+                return;
 
-            outline.push_back (*entry);
+            each (*value);
 
-            if (entry->form != DeviceValue::Form::container)
-                continue;
+            if (const auto* inside = findInside (devices, *value))
+                for (const auto item : *inside)
+                    visit (item);
+        };
 
-            for (const auto& chainState : child)
-            {
-                const auto chain = outlineOf (chainState, channel, entry->id, {});
-
-                if (! chain.has_value() || chain->form != DeviceValue::Form::chain)
-                    continue;
-
-                outline.push_back (*chain);
-
-                for (const auto& inside : chainState)
-                    if (const auto device = outlineOf (inside, channel, entry->id, chain->id);
-                        device.has_value() && (device->form == DeviceValue::Form::own || device->form == DeviceValue::Form::plugin))
-                        outline.push_back (*device);
-            }
-        }
+        for (const auto id : *list)
+            visit (id);
     }
 
-    // Each sound file a device's element names, after those the list holds already.
-    void addSoundFilesOf (const juce::ValueTree& device, std::vector<DeviceSoundFile>& files)
+    void addOutlineOf (const Song& song, const SongDevices& devices, TrackID channel, std::vector<DeviceOutline>& outline)
     {
-        const auto sounds = readDeviceSounds (device);
+        const auto place = getDeviceChannelPlace (song, channel);
+        const auto named = place.onMaster ? getMasterID (song) : channel;
+        forEachOnChannel (devices, place, [&outline, named] (const DeviceValue& value) { outline.push_back (outlineOf (value, named)); });
+    }
 
-        for (int i = 0; i < sounds.getNumProperties(); ++i)
-            if (const auto property = sounds.getPropertyName (i); schema::isSoundFileProperty (property))
-                if (const auto path = readSoundsProperty (sounds, property); path.isNotEmpty())
-                    files.push_back ({ .device = readDeviceElementID (device), .property = property, .path = path });
+    // Each sound file a device's value names, after those the list holds already.
+    void addSoundFilesOf (const DeviceValue& device, std::vector<DeviceSoundFile>& files)
+    {
+        if (device.form != DeviceValue::Form::own)
+            return;
+
+        const auto& properties = getSoundPropertiesOf (std::string_view (device.type.toRawUTF8()));
+
+        for (const auto& [index, path] : device.sounds)
+            if (index < properties.size() && schema::isSoundFileProperty (properties[index]) && path.isNotEmpty())
+                files.push_back ({ .device = device.id, .property = properties[index], .path = path });
     }
 } // namespace
 
 std::vector<DeviceOutline> getDeviceOutline (const Song& song, TrackID channel)
 {
     std::vector<DeviceOutline> outline;
-    const auto state = findChainState (song, channel);
-    addOutlineOf (state, state.hasType (schema::MASTER) ? getTrackID (state) : channel, outline);
+    addOutlineOf (song, getDevicesValue (song), channel, outline);
     return outline;
 }
 
 std::vector<DeviceOutline> getSongDeviceOutline (const Song& song)
 {
     std::vector<DeviceOutline> outline;
+    // Read once (a copy); for a song that holds no values (the loader's) its tree's fields alone, never a device's values.
+    const auto devices = song.getValues() != nullptr ? getDevicesValue (song) : readDevicesFields (song.getState());
 
     for (const auto& track : getTrackStates (song))
-        addOutlineOf (track, getTrackID (track), outline);
+        addOutlineOf (song, devices, getTrackID (track), outline);
 
-    const auto master = findChainState (song, {});
-    addOutlineOf (master, getTrackID (master), outline);
+    addOutlineOf (song, devices, {}, outline);
     return outline;
 }
 
 const devices::DeviceInfo* getOwnDeviceInfo (const Song& song, DeviceID id)
 {
-    return findOwnInfo (findDeviceState (song, id));
+    return findOwnInfo (findDevice (song, id));
 }
 
 bool holdsPlugin (const Song& song, TrackID track)
@@ -533,98 +560,68 @@ bool holdsPlugin (const Song& song, TrackID track)
 
 std::optional<DevicePlace> findContainerPlace (const Song& song, DeviceID container)
 {
-    const auto element = findDeviceState (song, container);
+    const auto* value = findDevice (song, container);
 
-    if (readDeviceForm (element) != DeviceValue::Form::container)
+    if (value == nullptr || value->form != DeviceValue::Form::container)
         return std::nullopt;
 
-    return readDevicePlace (element);
+    return value->place;
 }
 
 std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song& song, TrackID channel)
 {
-    std::vector<DeviceSoundFile> files;
-
     // In the outline's order: a channel's devices, and its containers' chains' devices in their places.
-    const auto addIn = [&files] (const juce::ValueTree& list, auto& addInside) -> void
-    {
-        for (const auto& child : list)
-        {
-            const auto form = readDeviceForm (child);
-
-            if (form == DeviceValue::Form::own)
-                addSoundFilesOf (child, files);
-            else if (form == DeviceValue::Form::container || form == DeviceValue::Form::chain)
-                addInside (child, addInside);
-        }
-    };
-
-    addIn (findChainState (song, channel), addIn);
+    std::vector<DeviceSoundFile> files;
+    forEachOnChannel (getDevicesValue (song), getDeviceChannelPlace (song, channel),
+                      [&files] (const DeviceValue& value) { addSoundFilesOf (value, files); });
     return files;
 }
 
 std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song& song)
 {
+    // Every channel's in the song's order: each track's (a folder's before the tracks in it), then the master's.
     std::vector<DeviceSoundFile> files;
+    const auto& devices = getDevicesValue (song);
+    const auto addOf = [&files, &devices] (const DevicePlace& channel)
+    { forEachOnChannel (devices, channel, [&files] (const DeviceValue& value) { addSoundFilesOf (value, files); }); };
 
-    // Every element of the song's tree in turn, each device's sounds where it is.
-    const auto addIn = [&files] (const juce::ValueTree& element, auto& addInside) -> void
-    {
-        for (const auto& child : element)
-        {
-            if (readDeviceForm (child) == DeviceValue::Form::own)
-                addSoundFilesOf (child, files);
+    for (const auto& track : getTrackStates (song))
+        addOf (makeChannelPlace (getTrackID (track), false));
 
-            addInside (child, addInside);
-        }
-    };
-
-    addIn (song.getState(), addIn);
+    addOf (makeChannelPlace ({}, true));
     return files;
 }
 
 juce::ValueTree copyWholeDevice (const Song& song, DeviceID id)
 {
-    const auto device = findDeviceState (song, id);
-    return device.isValid() ? copyWhole (song, device) : juce::ValueTree();
+    // Its element with what it holds, made whole: its store's, its window's place, a container's macros.
+    if (findDeviceOrContainer (song, id) == nullptr)
+        return {};
+
+    auto element = writeDeviceWhole (getDevicesValue (song), id);
+    makeWhole (element, keepValues (song));
+    return element;
 }
 
 //==============================================================================
 std::optional<DevicePlace> findDevicePlace (const Song& song, DeviceID id)
 {
-    const auto element = findDeviceState (song, id);
-    return element.isValid() ? std::optional (readDevicePlace (element)) : std::nullopt;
+    const auto* value = findDeviceOrContainer (song, id);
+    return value != nullptr ? std::optional (value->place) : std::nullopt;
 }
 
 std::optional<DevicePlace> findChainPlace (const Song& song, DeviceID chain)
 {
-    const auto element = findContainerChain (song, chain);
-    return element.isValid() ? std::optional (readDevicePlace (element)) : std::nullopt;
+    const auto* value = findDevice (song, chain);
+    return value != nullptr && value->form == DeviceValue::Form::chain ? std::optional (value->place) : std::nullopt;
 }
 
 std::vector<DeviceValue> getChannelDeviceValues (const Song& song, TrackID channel)
 {
+    // Each with what it holds, in the outline's order.
     std::vector<DeviceValue> values;
-
-    // Each read whole at its place, then what it holds, in the outline's order.
-    const std::function<void (const juce::ValueTree&)> add = [&values, &add] (const juce::ValueTree& element)
-    {
-        if (auto value = readDeviceValue (element, readDevicePlace (element)))
-        {
-            const auto form = value->form;
-            values.push_back (std::move (*value));
-
-            if (form == DeviceValue::Form::container || form == DeviceValue::Form::chain)
-                for (const auto& child : element)
-                    if (child.hasType (form == DeviceValue::Form::container ? schema::CHAIN : schema::DEVICE))
-                        add (child);
-        }
-    };
-
-    for (const auto& child : findChainState (song, channel))
-        if (isDeviceElement (child))
-            add (child);
-
+    forEachOnChannel (getDevicesValue (song), getDeviceChannelPlace (song, channel),
+                      [&values] (const DeviceValue& value) { values.push_back (value); });
     return values;
 }
 
@@ -819,9 +816,72 @@ void copyDevices (Song& song, CopiedIDs& copied)
     copyWindowPlaces (song, copied);
 }
 
+bool eraseChannelDevices (Song& song, const std::vector<TrackID>& channels)
+{
+    auto* values = song.getValues();
+
+    if (values == nullptr)
+        return false;
+
+    // Each channel's list alone, each item with what it holds.
+    auto next = values->devices.get();
+
+    for (const auto channel : channels)
+        if (const auto* list = next.findList (getDeviceChannelPlace (song, channel)))
+            for (const auto id : immer::flex_vector<DeviceID> (*list))
+                next = withoutDevice (next, id);
+
+    return values->setAllDevices (song, std::move (next));
+}
+
+void takeDevicesOf (Song& song, const juce::ValueTree& channel)
+{
+    auto* values = song.getValues();
+    const auto onMaster = channel.hasType (schema::MASTER);
+
+    if (values == nullptr || ! (onMaster || channel.hasType (schema::TRACK)))
+        return;
+
+    const auto place = makeChannelPlace (getTrackID (channel), onMaster);
+
+    if (! onMaster && ! hasTrack (song, place.track))
+        return;
+
+    // Each as the song holds it, an owner before what it holds, one of an ID the song holds left out with what it holds.
+    auto next = values->devices.get();
+
+    const auto add = [&next] (const juce::ValueTree& element, const DevicePlace& at)
+    {
+        auto value = readHeldDevice (element, at);
+
+        if (! value.has_value() || next.find (value->id) != nullptr)
+            return DeviceID();
+
+        const auto id = value->id;
+        next = withDevice (next, std::move (*value));
+        return id;
+    };
+
+    for (const auto& child : channel)
+    {
+        if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)))
+            continue;
+
+        if (const auto container = add (child, place); container.isValid() && child.hasType (schema::CONTAINER))
+            for (const auto& chain : child)
+                if (const auto id = chain.hasType (schema::CHAIN) ? add (chain, makeContainerPlace (place, container)) : DeviceID();
+                    id.isValid())
+                    for (const auto& device : chain)
+                        if (device.hasType (schema::DEVICE))
+                            add (device, makeContainerPlace (place, container, id));
+    }
+
+    values->setAllDevices (song, std::move (next));
+}
+
 void removeDevice (Song& song, DeviceID id)
 {
-    if (! findDeviceState (song, id).isValid())
+    if (findDeviceOrContainer (song, id) == nullptr)
         return;
 
     const UndoStep step (song, "Remove " + getDeviceName (song, id));
@@ -838,6 +898,24 @@ void removeDevice (Song& song, DeviceID id)
 void forgetWhatNamesTheGone (Song& song)
 {
     auto* undo = getUndo (song);
+
+    // A container's macros, with what they modulate, where the song holds the container no more (removed, ungrouped): erased
+    // through modulation's code, in one set of its area, before the IDs the song holds are counted, so that what names a
+    // macro (a MIDI link of its value) goes below as what names any item gone.
+    if (auto* values = song.getValues())
+    {
+        const auto& devices = values->devices.get();
+        std::vector<ModulatorID> macros;
+
+        for (const auto& [container, list] : values->modulation.get().containers)
+            if (const auto* held = devices.find (DeviceID::fromRaw (container));
+                held == nullptr || held->form != DeviceValue::Form::container)
+                macros.insert (macros.end(), list.begin(), list.end());
+
+        if (! macros.empty())
+            values->eraseModulators (song, macros);
+    }
+
     auto ids = getItemIDs (song);
 
     // A send to a return that is gone, with the ID it is known by: the sends' next value worked out whole, then set once.
@@ -888,39 +966,37 @@ void forgetWhatNamesTheGone (Song& song)
 
 void moveDevice (Song& song, DeviceID id, int newIndex)
 {
-    if (! findDeviceState (song, id).isValid())
+    if (findDeviceOrContainer (song, id) == nullptr)
         return;
 
-    // To the place of the device that is there now: after it when moving down, before it when moving up. Lanes and a
-    // folder's tracks can sit between devices in the track's element.
+    // To the place of the device that is there now: after it when moving down, before it when moving up.
     const UndoStep step (song, "Move Device");
     moveInDeviceList (song, id, newIndex);
 }
 
 void setDeviceOn (Song& song, DeviceID id, bool on)
 {
-    auto state = findDeviceState (song, id);
-
-    if (! state.isValid() || isDeviceOn (song, id) == on)
+    if (findDeviceOrContainer (song, id) == nullptr || isDeviceOn (song, id) == on)
         return;
 
     const UndoStep step (song, on ? "Turn Device On" : "Turn Device Off");
-    setDeviceFields (song, state, [on] (DeviceValue& value) { value.off = ! on; });
+    setDeviceFields (song, id, [on] (DeviceValue& value) { value.off = ! on; });
 }
 
 bool isDeviceOn (const Song& song, DeviceID id)
 {
-    return ! readDeviceOff (findDeviceState (song, id));
+    const auto* value = findDeviceOrContainer (song, id);
+    return value == nullptr || ! value->off;
 }
 
 bool hasMix (const Song& song, DeviceID id)
 {
-    const auto state = findDeviceState (song, id);
+    const auto* value = findDeviceOrContainer (song, id);
 
-    if (const auto* own = findOwnInfo (state))
+    if (const auto* own = findOwnInfo (value))
         return own->kind != devices::DeviceKind::instrument && devices::findParameter (*own, devices::mixParameterID) >= 0;
 
-    return (isContainerState (state) || isPluginState (state)) && ! isInstrumentState (state);
+    return value != nullptr && (value->form == DeviceValue::Form::container || value->isPlugin()) && ! value->isInstrument();
 }
 
 float getMix (const Song& song, DeviceID id)
@@ -928,20 +1004,17 @@ float getMix (const Song& song, DeviceID id)
     if (! hasMix (song, id))
         return 1.0f;
 
-    const auto state = findDeviceState (song, id);
+    const auto* value = findDeviceOrContainer (song, id);
 
-    if (const auto* own = findOwnInfo (state))
-    {
-        const auto& mix = own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)];
-        return readDeviceParameterValue (state, mix);
-    }
+    if (const auto* own = findOwnInfo (value))
+        return value->getParameterValue (devices::findParameter (*own, devices::mixParameterID));
 
-    return readDeviceMix (state);
+    return value->mix;
 }
 
 float getDefaultMix (const Song& song, DeviceID id)
 {
-    if (const auto* own = hasMix (song, id) ? findOwnInfo (findDeviceState (song, id)) : nullptr)
+    if (const auto* own = hasMix (song, id) ? findOwnInfo (findDevice (song, id)) : nullptr)
         return own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)].defaultValue;
 
     return 1.0f;
@@ -952,14 +1025,13 @@ void setMix (Song& song, DeviceID id, float mix)
     if (! hasMix (song, id))
         return;
 
-    // One of Phazite's own effects' mix parameter, or a plug-in's or a container's mix, on the element found.
-    const auto state = findDeviceState (song, id);
+    // One of Phazite's own effects' mix parameter, or a plug-in's or a container's mix.
     const auto wet = juce::jlimit (0.0f, 1.0f, mix);
 
-    if (const auto* own = findOwnInfo (state))
-        setDeviceValue (song, state, own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)], wet);
+    if (const auto* own = findOwnInfo (findDevice (song, id)))
+        setDeviceValue (song, id, devices::findParameter (*own, devices::mixParameterID), wet);
     else
-        setDeviceFields (song, state, [wet] (DeviceValue& value) { value.mix = wet; });
+        setDeviceFields (song, id, [wet] (DeviceValue& value) { value.mix = wet; });
 }
 
 juce::PluginDescription getPluginIdentity (const juce::ValueTree& device)

@@ -3,10 +3,11 @@
 // (Schema.h: DEVICE, CONTAINER, CHAIN) by its ID as a DeviceValue, with where it is (DevicePlace), Phazite's own device's
 // values set by hand (its VALUES) by the parameter's index and its sounds (its SOUNDS) by their index among its type's; every
 // one of a song (SongDevices) with the lists that order them, and the helpers that alone write it; and the conversion between
-// those elements and the values, the one place that reads and writes them by name. The song's tree is still the storage: the
-// area's readers read the tree through this conversion (model/mixer/internal/Mixer.h: getDevicesValue(), findDevice(), and
-// for one field of one device, the readers of one field below, on the element found), and the song holds no area of it yet
-// (SongValues.h).
+// those elements and the values, the one place that reads and writes them by name. The values are the storage: the song holds
+// them in its devices' area (SongValues.h: devices), which its readers read by reference (model/mixer/internal/Mixer.h:
+// getDevicesValue(), findDevice()), and its tree holds no DEVICE, CONTAINER or CHAIN; the conversion reads what enters the area
+// (a file's devices as the song opens, a version's, a merge's choice, the keeper's safety net), writes a whole copy's
+// elements (DevicesArea.h: writeDeviceWhole()), and reads a copy's elements (a preset's, a version's compared).
 //
 // What the value covers, and what it doesn't. A DEVICE's deviceID, deviceType, deviceOff, deviceSidechain, pluginFormat to
 // pluginInstrument and deviceMix (a plug-in's), and its VALUES and SOUNDS children (Phazite's own device's); a CONTAINER's
@@ -135,7 +136,8 @@ struct DeviceValue
     // else the parameter's default; 0 for another form, a type Phazite doesn't know or an index its type hasn't.
     float getParameterValue (int index) const;
 
-    // The same maps without a look inside (ValueArea.h), the rest alike; and alike, compared (the floats exactly).
+    // The same maps without a look inside (ValueArea.h), the rest alike; and alike, compared (the floats exactly), each map
+    // by identity first, then by the entries where the two differ alone (countDeviceEntriesCompared()).
     bool isSameAs (const DeviceValue&) const noexcept;
     bool operator== (const DeviceValue&) const;
 };
@@ -177,10 +179,6 @@ SongDevices withoutDevice (const SongDevices&, DeviceID);
 
 // A list in another order: the same IDs (else nothing changes). The list of what is at the place given (SongDevices::findList()).
 SongDevices withListOrder (const SongDevices&, const DevicePlace& owner, immer::flex_vector<DeviceID> order);
-
-// Every place on a track's channel moved to another channel, a track's by its ID or the master's (toMaster): what follows a
-// channel's track given another ID (a version applied, which gives the MASTER its ID anew). Nothing for none (from invalid).
-SongDevices withChannelPlace (const SongDevices&, TrackID from, TrackID to, bool toMaster);
 
 // Whether the four agree: each item under its own ID, once in one list, the list its place names; each list holding only
 // those there, none of them empty, each a list of an owner the value holds (a container's chains of a container, a chain's
@@ -226,9 +224,9 @@ std::optional<DeviceValue> readDeviceValue (const juce::ValueTree& element, cons
 std::optional<DeviceValue> readHeldDevice (const juce::ValueTree& element, const DevicePlace&);
 
 // What readHeldDevice() reads of an element but Phazite's own device's values set by hand and sounds, which it leaves empty:
-// its own properties as the song holds them, read without a map made, and not counted (countDevicesReadAsValues()). What the
-// devices' part of the keeper reads of an element whose property changed (DevicesArea.h), taking its values and sounds from
-// the value it keeps, and whether an element is one the song holds (none for what readHeldDevice() reads none of).
+// its own properties as the song holds them, read without a map made, and not counted (countDevicesReadAsValues()): what the
+// versions' pass reads of a version's item on a channel it doesn't take (model/versions/ApplySong.cpp), and whether an
+// element is one the song holds (none for what readHeldDevice() reads none of).
 std::optional<DeviceValue> readHeldDeviceFields (const juce::ValueTree& element, const DevicePlace&);
 
 // A device's, a container's or a chain's element, new, as Phazite's writers write one (model/mixer/Mixer.cpp,
@@ -262,37 +260,17 @@ juce::ValueTree writeDeviceElement (const DeviceValue&);
 // readDeviceValue() reads it and as readHeldDevice() does, and is the element writeDeviceElement() writes of that.
 bool keepDeviceAsHeld (juce::ValueTree element);
 
-// The setters' writes (model/mixer/internal/Mixer.h: setDevice(), setNewDevices() and the narrow setters beside them), while
-// the song's tree is the devices' storage: each makes an element of the song's hold what a value says by what differs,
-// through the undo manager given (the step in progress) or none (the song written outside its history), so that a value
-// equal to what the element holds writes nothing and makes no action. With the readers above, the one place that writes
-// these elements' properties and their VALUES and SOUNDS by name; the store's (a plug-in's state, its VALUE children, a
-// chain's mute and solo), a window's place and what Phazite doesn't know are left as they are.
-//   - writeDeviceFields(): the element's own properties the value covers made those writeDeviceElement() writes of it, each
-//     set where it holds another text (SongText.h: isSameValue()), each the writer leaves out taken away; its values set by
-//     hand and its sounds not looked at. What the wide setter and the narrow setters of a device's own fields (its switch, a
-//     mix, a sidechain, a chain's fader and ranges, a name, a split) all write through, so that they can never disagree.
-//   - writeDeviceValueOf(): one of Phazite's own device's values set by hand, its VALUES' property of the parameter's ID,
-//     written as the song holds it (none: taken away, and VALUES with its last; one: as toSavedValue() writes it, VALUES made
-//     with the first, after the device's other children). The narrow setter of a value and the wide setter both write a
-//     value through it, the value given held by keepHeldValue() (SavedValues.h) first.
-//   - writeDeviceSoundOf(): one of its sounds, its SOUNDS' property: set, or for an empty text taken away, SOUNDS made with
-//     the first and taken away with the last (an empty SOUNDS is none).
-//   - writeDeviceLike(): a whole value, held as `held` was read from the element (readHeldDevice()): its own properties, and
-//     of one of Phazite's own devices each value and each sound that differs between the two (a type changed: every one of
-//     the type's before taken away first). Its place is the setter's.
-// Each returns whether it changed the element.
-bool writeDeviceFields (juce::ValueTree& element, const DeviceValue&, juce::UndoManager*);
-bool writeDeviceValueOf (juce::ValueTree& device, const devices::ParameterInfo&, std::optional<float> held, juce::UndoManager*);
-bool writeDeviceSoundOf (juce::ValueTree& device, const juce::Identifier& property, const juce::String& sound, juce::UndoManager*);
-bool writeDeviceLike (juce::ValueTree& element, const DeviceValue& held, const DeviceValue& next, juce::UndoManager*);
-
 // Every device, container and chain of a song's tree (PHAZITE), read as readDeviceValue() reads one: each TRACK's (in the
 // track list, a folder's before the tracks in it) and the MASTER's, each channel's DEVICEs and CONTAINERs in its element's
 // order, each CONTAINER's CHAINs and each CHAIN's DEVICEs in theirs; of two with one ID (which the loader leaves none of),
-// the first, and none of a type Phazite doesn't know. What reads the song's devices whole while the tree is their storage
-// (Mixer.h: getDevicesValue()), and the tests.
+// the first, and none of a type Phazite doesn't know. What reads a tree's devices whole: a whole copy's, and a song that holds no
+// values (Mixer.h: getDevicesValue()), and the tests.
 SongDevices readDevicesValue (const juce::ValueTree& song);
+
+// The same items in the same lists, each read as readHeldDeviceFields() reads it, without its values set by hand and its
+// sounds (not counted: countDevicesReadAsValues()): what the outline of a song that holds no values reads (Mixer.h:
+// getSongDeviceOutline(), which the loader asks for the sidechains' loops), never a device's values whole.
+SongDevices readDevicesFields (const juce::ValueTree& song);
 
 // A device, a container or a chain with one of its own properties given a value as readHeldDevice() reads one, or taken
 // away (a void value: as if the element hadn't it): of its element (DEVICE, CONTAINER, CHAIN: a property the value covers of
@@ -304,39 +282,22 @@ bool setDeviceProperty (DeviceValue&, const juce::Identifier& element, const juc
 
 //==============================================================================
 // One field of one element read as readDeviceValue() reads it, without reading the rest (none counted:
-// countDevicesReadAsValues()): what the area's readers read one field of one device by, at every tick of a control and
-// every slot of a strip, while the song's tree is the storage (a drum sampler's whole value holds thousands of entries). Each
-// of an element that isn't one it is on reads as one without it.
+// countDevicesReadAsValues()): what reads one field of a copy's element (a preset's, a version's compared, the store's and
+// the keeper's safety net). Each of an element that isn't one it is on reads as one without it. (The conversion's readers
+// of the other fields are its own, in DevicesValue.cpp.)
 DeviceID readDeviceElementID (const juce::ValueTree& element); // a DEVICE's, a CONTAINER's (deviceID), a CHAIN's (chainID)
 juce::String readDeviceType (const juce::ValueTree& device);   // deviceType, as written (deviceIsPlugin for a plug-in)
-bool readDeviceOff (const juce::ValueTree& element);           // deviceOff
-TrackID readDeviceSidechain (const juce::ValueTree& device);   // deviceSidechain
-float readDeviceMix (const juce::ValueTree& element);          // deviceMix, 1 for none (a plug-in's, a container's)
 PluginIdentity readPluginIdentity (const juce::ValueTree& device);
 bool readIsInstrument (const juce::ValueTree& element);              // DeviceValue::isInstrument()
 juce::String readDeviceElementName (const juce::ValueTree& element); // a CONTAINER's (containerName), a CHAIN's (chainName)
-ContainerSplit readContainerSplit (const juce::ValueTree& container);
-bool readContainerInstrument (const juce::ValueTree& container);
-float readChainVolume (const juce::ValueTree& chain);
-float readChainPan (const juce::ValueTree& chain);
-std::optional<float> readChainCrossover (const juce::ValueTree& chain);
-NoteRange readChainKeys (const juce::ValueTree& chain);
-NoteRange readChainVelocities (const juce::ValueTree& chain);
 
 // Phazite's own device's value set by hand of one of its parameters (its VALUES' property of the parameter's ID, as
-// readSavedValue() reads it), the parameter's default for none; and one of its sounds (its SOUNDS' property), empty for none,
-// from the DEVICE or from its SOUNDS (what the sounds' loaders take: model/devices/internal/DrumKit.h, SamplerSound.h,
-// Wavetables.h). The first makes the parameter's name a text each time (an allocation); the second takes it as the caller
-// holds it, which a control's reading at every tick does (model/devices/Parameters.cpp: getValueSetByHand()).
+// readSavedValue() reads it), the parameter's default for none, its name made a text, or taken as the caller holds it; and
+// one of a SOUNDS' properties, empty for none (what the sounds' loaders take: model/devices/internal/DrumKit.h,
+// SamplerSound.h, Wavetables.h).
 float readDeviceParameterValue (const juce::ValueTree& device, const devices::ParameterInfo&);
 float readDeviceParameterValue (const juce::ValueTree& device, const devices::ParameterInfo&, const juce::Identifier& id);
-juce::String readDeviceSound (const juce::ValueTree& device, const juce::Identifier& property);
 juce::String readSoundsProperty (const juce::ValueTree& sounds, const juce::Identifier& property);
-
-// Phazite's own device's SOUNDS as the element holds it, what the sounds' loaders take (model/devices/internal/DrumKit.h:
-// loadPadSound(), SamplerSound.h, Wavetables.h) and what reads the sound files a device names (Mixer.h:
-// getDeviceSoundFiles()); an invalid tree for none.
-juce::ValueTree readDeviceSounds (const juce::ValueTree& device);
 
 // The IDs of what an owner's element lists, in its order (readDeviceElementID()): a TRACK's or the MASTER's DEVICEs and
 // CONTAINERs, a CONTAINER's CHAINs, a CHAIN's DEVICEs; none for another element.
@@ -345,9 +306,8 @@ std::vector<DeviceID> readDeviceList (const juce::ValueTree& owner);
 // Whether a song holds a device or a container with this ID, and with chainsToo a container's chain too (an invalid ID: no),
 // without a value made of its devices and without an allocation: what the selection asks of the devices it names and of an
 // automation point's owner (Selection.h), and what the readers outside the devices' own code ask of a device by its ID
-// (Mixer.h: hasDevice(), which counts a chain). While the song's tree holds its devices, a walk of each track's and the
-// master's devices and containers and of each container's chains, counted as findDeviceState()'s is (Mixer.h:
-// countDeviceWalks()).
+// (Mixer.h: hasDevice(), which counts a chain). A look in the devices' area; for a song that holds no values (the loader's),
+// a walk of each track's and the master's devices and containers and of each container's chains in its tree.
 bool holdsDevice (const Song&, DeviceID, bool chainsToo = false);
 
 //==============================================================================
@@ -357,6 +317,10 @@ bool holdsDevice (const Song&, DeviceID, bool chainsToo = false);
 // thread. And a property's index among a type's, -1 for one it hasn't.
 const std::vector<juce::Identifier>& getSoundPropertiesOf (std::string_view typeID);
 int findSoundIndex (std::string_view typeID, const juce::Identifier& property);
+
+// One of Phazite's own device's sounds by its property's name (SOUNDS), as its value holds it: empty for none, for a property
+// its type hasn't, and for another form. A look in its sounds' map, nothing allocated but the text given back.
+juce::String getDeviceSound (const DeviceValue&, const juce::Identifier& property);
 
 //==============================================================================
 // The IDs the song's devices hold and name (IDsHeld.h): the largest a device, a container or a chain holds, below
@@ -373,4 +337,9 @@ void forEachIDNamed (const SongDevices&, const std::function<void (std::uint64_t
 // (SongPlayer::countDevicesRead()), which counts another reading. Allocations can't tell it: immer takes its nodes from lists
 // of freed ones.
 std::uint64_t countDevicesReadAsValues() noexcept;
+
+// How many entries of devices' values set by hand and sounds were compared (DeviceValue::operator==(), each a pair of entries
+// of one index) since Phazite started, on any thread: for the test that a step of a knob's drag compares a few, however many
+// values its device holds (tests/PerformanceGateTests.cpp). Two maps that share their root compare none.
+std::uint64_t countDeviceEntriesCompared() noexcept;
 } // namespace phazite

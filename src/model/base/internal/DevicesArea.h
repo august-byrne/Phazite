@@ -1,133 +1,105 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows), as far as it is built:
-// the song's devices, containers and chains are still the song's tree's (Schema.h: DEVICE, CONTAINER and CHAIN under a
-// TRACK or the MASTER, with a DEVICE's VALUES and SOUNDS), and their values and the conversion are DevicesValue.h's. Here:
-// the devices' part of the keeper, which tells the values' listeners what the tree tells of them (Listener::devicesChanged());
-// and what the unsaved check compares of them with the saved copy while the trees hold them.
+// The devices' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): its parts, each of
+// which a list of SongValues.h's, WholeState.h's or IDsHeld.h's asks in turn, a line for each area. Its value and the
+// conversion of its elements are DevicesValue.h's. It holds IDs (each device's, container's and chain's). Message thread,
+// but for whole state's parts and the comparisons, which read only the values they are given.
 //
-// What is the devices' and what isn't, written once (DevicesArea.cpp: isDeviceStoreProperty()): everything at or under a
-// DEVICE, a CONTAINER or a CHAIN of the song's, but a plug-in's VALUE children, its state, program, format ID and version, a
-// chain's mute and solo (the keyed store's, DeviceStoreArea.h, which the song's tree holds none of but for what its keeper
-// takes out of an element that comes in with it) and a window's place (the value outside the history's). Message thread,
-// but for the comparisons' readers, which read only the trees they are given.
+// The song's devices, containers and chains are the area's (ValueArea<SongDevices>, plain: undone whole): the song's tree
+// holds no DEVICE, CONTAINER, CHAIN, VALUES or SOUNDS element. What is the devices' and what isn't: everything a DEVICE, a
+// CONTAINER or a CHAIN of a file holds, but a plug-in's VALUE children, its state, program, format ID and version, a chain's
+// mute and solo (the keyed store's, DeviceStoreArea.h) and a window's place (the value outside the history's), and a
+// container's macros (modulation's, ModulationArea.h). The area sits under elements that stay in the song's tree (a TRACK,
+// the MASTER), as the sends' do, and holds the rest of its owners itself (a container, a chain): so its keeper follows a
+// track as it comes and goes (alone, a folder with its tracks, the track list), and nothing else.
 #pragma once
 
 #include "model/base/IDs.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/SongValues.h"
+#include "model/base/internal/WholeState.h"
 
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstdint>
-#include <map>
-#include <optional>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace phazite
 {
 class Song;
 
-// The devices' part of the keeper (SongValues.h), while the song's tree holds the devices: for each of the tree's
-// notifications at or under the song's devices, containers and chains (isHeardAsDevices()), for a track given another ID or
-// made a folder or a plain track again, and for each TRACK, MASTER or track list that comes into the song or leaves it with
-// devices in it, whatever the history does (an undo's and a redo's, a write's outside the history), the values' listeners
-// told at once, in one call, each device, container and chain it changed (Listener::devicesChanged()), so that a value set by
-// hand plays in the same call, as the tree's callbacks played it: exactly what differs between the song's devices as the
-// listeners were last told them (told: at the start, every one the song holds read once, as readHeldDevice() reads it, which
-// no one is told) and as the song holds them now. How a notification is worked out, by its cost:
-//   - A property of a device's VALUES or SOUNDS (a knob's drag, a pad's sound): that one value read from that one property
-//     (SavedValues.h: readHeldSavedValue(); a sound as it is), set in the value told before (immer: a path copied), the device
-//     read no more (countDevicesReadAsValues() counts none) and the song walked nowhere (countDeviceWalks() none). Only of the
-//     element the value was read from (elements), its first VALUES or SOUNDS: another of the same ID the song doesn't read.
-//   - Another property of a device, a container or a chain that the value covers (DevicesValue.h): its own properties read
-//     again without its values and sounds (readHeldDeviceFields()), which it keeps from the value told before. Its type: read
-//     whole, as another type holds other values.
-//   - A device's VALUES or SOUNDS added or taken out: the device read whole again (readHeldDevice()).
-//   - A device, a container or a chain added to its owner (a channel, a container, a chain), taken out of it or moved among
-//     its owner's others: the DEVICE, CONTAINER and CHAIN elements of the one channel (a TRACK, the MASTER) that owner is on
-//     walked as readDevicesValue() walks a channel's (each element's ID alone read; counted as a walk, countDeviceWalks(), and
-//     each element looked at, countDeviceItemsWalked()), each read whole that the listeners didn't know or that is another
-//     element than before, each come to another place given it, each the listeners were told on that channel and that went
-//     told taken out, and each owner there whose list holds those it held before in another order told reordered: the work
-//     that channel's devices make, never the song's (a drag of a device within its chain makes one at each step).
-//   - Where that channel can't be counted on to say it all: a device given another ID or a type that wasn't read; a track
-//     given another ID, made a folder or a plain track; a track, the master or the track list that comes or goes with
-//     devices in it; an element on no channel the song reads; an item kept from an element the song still holds elsewhere,
-//     or an ID found twice; and while the song holds an ID, or a channel's track's ID, twice (shadowed: which is the first,
-//     only the song's order says): the song's elements walked so, each of its channels in the song's order (a folder before
-//     the tracks in it, then the master), the first of an ID, a type Phazite plays.
-// The calls are the tree's (one for each of its notifications that changes what the value covers, none for one that changes
-// nothing of it), so that what a step told in all, not how many calls, is what holds from the devices' switch on. Nothing of the
-// song's values is read.
+// What the values' listeners are told of the devices (Listener::devicesChanged()): once for each change of its value, each
+// device, container and chain whose value differs between the two (immer's diff, which skips what the two share; one whose
+// value is another alike, none), with where it was and is, the parts of it that changed and its value before and after; each
+// owner whose list holds those it held before in another order; and the area's whole value after (cheap: it shares what it
+// holds). It listens to the devices' area from its making to its end.
+struct SongValues::DevicesTeller final : ValueArea<SongDevices>::Listener
+{
+    DevicesTeller (ValueArea<SongDevices>&, juce::ListenerList<SongValues::Listener>&);
+    ~DevicesTeller() override;
+
+    ValueArea<SongDevices>& area;
+    juce::ListenerList<SongValues::Listener>& listeners;
+
+    void valueAreaChanged (const SongDevices& before, const SongDevices& after) override;
+
+    JUCE_DECLARE_NON_COPYABLE (DevicesTeller)
+};
+
+// The devices' part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes:
+//   (a) a TRACK (alone, a folder with its tracks, the track list) taken out of the song's track list: each track's channel's
+//       devices and containers, their chains and their devices remembered with its element, in their lists' order, and
+//       erased; what an element was remembered with at an earlier removal (taken out, and brought back by an undo since,
+//       which gave its devices back itself) replaced at every removal, or forgotten where it holds none now, so that it never
+//       brings back a device removed since (as the sends' keeper does: SendsArea.cpp); the same element back: given back,
+//       their places' track the element's ID then. Every function that removes a track erases its devices first
+//       (model/arrangement/internal/Tracks.h: eraseTrackHoldings()), so that this is a track JUCE moves (taken out and put in
+//       again in one step) alone, until the tracks' switch;
+//   (b) a TRACK, a folder's tracks, the track list or the MASTER that comes into the song with DEVICE or CONTAINER elements in
+//       it (a safety net: a test's; no path of Phazite's relies on it): each device, container and chain read as the song
+//       holds it (DevicesValue.h: readHeldDevice(); what the store holds of it taken in before by the store's part,
+//       DeviceStoreArea.h, and a container's macros by modulation's), set, taken out of the tree, and counted
+//       (countDevicesAdopted()); one of an ID the song holds already dropped, the song's kept;
+//   (c) a DEVICE, a CONTAINER, a CHAIN, a VALUES or a SOUNDS added by itself to an element of the song's: refused in a step (a
+//       JUCE assertion: the step can't take it out again, as its Undo, taking the tree's change back first, would find it
+//       gone; JUCE workaround W62 (docs/juce-workarounds.md)); outside the history, a DEVICE or a CONTAINER added to a channel
+//       read in after its others there and counted, and each of them taken out.
+// The store's entries stay as a device leaves (the store's own rule: DeviceStoreArea.h). And the adoption from the loaded
+// tree, which the song's holdValues() asks.
 struct SongValues::DevicesKeeper
 {
     DevicesKeeper (SongValues&, Song&);
 
-    // The keeper's callbacks, each for every element, whoever's it is, in an undo or a redo too: nothing, at once, but for
-    // what is the devices'.
-    void propertyChanged (const juce::ValueTree& tree, const juce::Identifier& property);
-    void childAdded (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void childRemoved (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void childOrderChanged (const juce::ValueTree& parent);
+    // A child added to an element of the song's tree, or taken out of one (the keeper's callbacks, but while the history
+    // undoes or redoes, for every element, whoever's it is): nothing, at once, but for what is the devices' (a track or the
+    // track list in the song's, the master, a DEVICE, a CONTAINER, a CHAIN, a VALUES or a SOUNDS in the song's tree).
+    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
+    void childRemoved (juce::ValueTree& parent, juce::ValueTree& child);
+
+    // Every device, container and chain of the tree the loader made consistent into the area, outside the history, as the song
+    // holds them (each read once by readHeldDevice(), each of which the loader left as the song holds it), and every DEVICE,
+    // CONTAINER and CHAIN element out of the tree, those anywhere else too (SongValues.cpp: adopt()).
+    static void adopt (SongValues& into, Song& loaded);
 
     SongValues& values;
     Song& song;
-    SongDevices told {}; // the song's devices as the listeners were last told them (at the start: as the song holds them)
+    juce::ValueTree state;
 
-    // Each of told's items' element, by its ID, and the walk that last found it there (settle()).
-    struct Kept
+    // A track taken out of the song with its devices, containers and chains as it went, each list's in its order, an owner
+    // before what it holds: given back if the same element comes back, let go of once nothing else holds the element (the
+    // history let go of the step that could bring it back) or it is back in the song by an undo, which brought them back
+    // itself.
+    struct Remembered
     {
-        juce::ValueTree element {};
-        std::uint64_t seenIn = 0;
+        juce::ValueTree track {};
+        std::vector<DeviceValue> devices {};
     };
 
-    std::unordered_map<std::uint64_t, Kept> elements {};
-    std::uint64_t walks = 0;
-    bool shadowed = false; // the last walk of the song found an ID, or a channel's track's ID, twice: every walk the song's
+    std::vector<Remembered> remembered {};
+    size_t sweepAt = 64;
 
-    // What one notification changed, told in one call as it ends.
-    struct Heard
-    {
-        std::vector<DeviceChange> changes {};
-        std::vector<DevicePlace> reordered {};
-    };
-
-    // Each owner's list found by a walk, by its kind and its key (a channel's, a container's, a chain's), with its place and
-    // its IDs in its element's order.
-    using Lists = std::map<std::pair<int, std::uint64_t>, std::pair<DevicePlace, std::vector<DeviceID>>>;
-
-    // A channel the song's walk reads (a TRACK of its track list or of a folder there, by an ID the song can count on; its
-    // MASTER), with its place; and an item a channel's walk found: its element and place, and its value where the listeners
-    // are told of it (read whole, or come to another place).
-    struct Channel
-    {
-        juce::ValueTree element {};
-        DevicePlace place {};
-    };
-
-    struct Found
-    {
-        DeviceID id {};
-        juce::ValueTree element {};
-        DevicePlace place {};
-        std::optional<DeviceValue> taken {};
-    };
-
-    const DeviceValue* findKept (const juce::ValueTree& element) const; // told's value of what the element is, or nullptr
-    void take (const DeviceValue& was, DeviceValue now, Heard&);        // one item changed in place, or come to another place
-    void rereadFields (const juce::ValueTree& element, Heard&);
-    void rereadWhole (const juce::ValueTree& device, Heard&);
-    void rereadValue (const juce::ValueTree& device, const juce::ValueTree& values, const juce::Identifier& parameter, Heard&);
-    void rereadSound (const juce::ValueTree& device, const juce::ValueTree& sounds, const juce::Identifier& property, Heard&);
-    void forget (const juce::ValueTree& element);           // read again by the next walk, as one the value wasn't read from
-    void settle (Heard&);                                   // the song's elements walked
-    void settleIn (const juce::ValueTree& element, Heard&); // the elements of the channel an element is on, or the song's
-    std::optional<Channel> findChannelOf (const juce::ValueTree& element) const;
-    void finish (Heard&, SongDevices next, std::vector<DeviceValue>& taken, const Lists&); // a walk's items and lists, told
-    static void addToList (Lists&, const juce::ValueTree& element, const DevicePlace&, DeviceID);
-    void tell (Heard&, const SongDevices& before) const;
+    bool isInTrackList (const juce::ValueTree& parent, const juce::ValueTree& child) const;
+    bool isInSong (const juce::ValueTree& element) const;
+    void sweep();
 
     JUCE_DECLARE_NON_COPYABLE (DevicesKeeper)
 };
@@ -136,32 +108,27 @@ struct SongValues::DevicesKeeper
 // one, a container's for a chain, else its channel's.
 DevicePlace getDeviceListPlace (const DevicePlace&, DeviceValue::Form);
 
-// What the unsaved check compares of the devices with the saved copy (model/project/Project.cpp) while the song's tree and the
-// saved copy's hold them, each tree indexed by one walk, however many devices it compares (indexDeviceElementsIn()): its
-// devices', containers' and chains' elements by their IDs, each with its place (the first that readDevicesValue() reads; an
-// invalid tree for none: find()); and each owner's list in its element's order (a channel's devices and containers, a
-// container's chains, a chain's devices: DevicePlace, as SongDevices::findList() names one), those readDevicesValue() reads,
-// empty for an owner the tree hasn't (getOrder()). Reading only the tree given, each element's ID and its own properties alone
-// (readHeldDeviceFields()), no value whole.
-struct DeviceElements
-{
-    struct Found
-    {
-        juce::ValueTree element {};
-        DevicePlace place {};
-    };
+// The place of what a channel holds: a track's by its ID, the master's by its flag; and of what a container (by its ID), or a
+// chain in it, holds on a channel's place.
+DevicePlace makeChannelPlace (TrackID track, bool onMaster);
+DevicePlace makeContainerPlace (const DevicePlace& channel, DeviceID container, DeviceID chain = {});
 
-    Found find (DeviceID) const;
-    const std::vector<DeviceID>& getOrder (const DevicePlace& owner) const;
+// An item of the devices' value as an element with what it holds, as whole state writes one (writeDeviceElement(), a
+// container's CHAINs in their order, each with its DEVICEs in theirs): without what the other areas write into it (the store's,
+// a window's place, a container's macros), which a whole copy of it writes (WholeState.h: copyWhole()). An invalid tree for an
+// ID the value hasn't.
+juce::ValueTree writeDeviceWhole (const SongDevices&, DeviceID);
 
-    std::unordered_map<std::uint64_t, Found> items {};
-    std::map<std::pair<int, std::uint64_t>, std::vector<DeviceID>> lists {};
-};
+// The devices' part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to a
+// channel (the track list, a track, a folder's tracks, the master, from the song's element down); and a copy's TRACK or
+// MASTER given its devices and containers from the values kept (a track's by its ID, the master's under 0), in their list's
+// order, each with what it holds (writeDeviceWhole()), right after its clips (which the clips' part writes first among its
+// children) and before its other children. Nothing for another element.
+bool leadsToDevices (const juce::ValueTree& parent, const juce::ValueTree& child);
+void writeDevicesIn (juce::ValueTree& element, const ValuesKept&);
 
-DeviceElements indexDeviceElementsIn (const juce::ValueTree& song);
-
-// How many DEVICE, CONTAINER and CHAIN elements the walk above and the keeper's (DevicesKeeper::settle(), settleIn()) looked
-// at, by every song since the program started: for the speed gates (tests/PerformanceGateTests.cpp), which count what an edit
-// and the unsaved check walk. Any thread.
-std::uint64_t countDeviceItemsWalked() noexcept;
+// The devices' part of the comparison of two elements with what their songs kept (WholeState.h: holdSameKeptOf()): a TRACK's
+// or the MASTER's devices and containers, the same in the same order, each the same value with what it holds (a container's
+// chains in their order, each chain's devices in theirs); true for another element.
+bool holdSameDevicesOf (const juce::ValueTree& element, const ValuesKept&, const juce::ValueTree& otherElement, const ValuesKept&);
 } // namespace phazite
