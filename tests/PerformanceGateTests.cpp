@@ -54,6 +54,7 @@
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TracksArea.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
@@ -1516,6 +1517,94 @@ TEST_CASE ("Performance gate: one track's line of a version a knob apart, restor
     // alone (83: its 82, and the one set once more).
     CHECK (*allocations <= 1500);
 #endif
+}
+
+TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 tracks, applied, writes one property, reads each "
+           "of the version's tracks once and none of the song's, nor what a track holds; a line's restore reads its own track")
+{
+    // The versions' tracks pass (model/versions/ApplySong.cpp: makeTracksLike()) takes the song's tracks from the tracks'
+    // keeper (Tracks.h: getHeldTracks(), findHeldTrack(): none read), reads the version's once each, as the song holds one
+    // (TracksValue.h: readHeldTrack()), and writes through the tracks' setters only what differs: here one track's name, one
+    // property of its element, while the song's tree is the tracks' storage. It reads nothing a track holds (no device read
+    // whole for it: the devices pass reads the version's once each, as its own gate above counts) and erases nothing. One
+    // track's line reads the version's track alone, the song's from the keeper.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 40);
+
+    for (const auto track : tracks)
+    {
+        phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID);
+        phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
+    }
+
+    const auto line = tracks[20];
+    const auto rename = [&song, line] (const juce::String& name)
+    {
+        const phazite::UndoStep step (*song, "Rename");
+        phazite::setTrackName (*song, line, name);
+    };
+
+    rename ("Then");
+    const auto version = phazite::copyWholeSong (*song);
+    rename ("Now");
+
+    struct Writes : public juce::ValueTree::Listener
+    {
+        int properties = 0, children = 0;
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++properties; }
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++children; }
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++children; }
+        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++children; }
+    };
+
+    struct Taken
+    {
+        Writes writes {};
+        std::uint64_t tracksRead = 0, devicesRead = 0;
+    };
+
+    const auto measure = [&song, line] (const std::function<void()>& apply)
+    {
+        Taken taken;
+        auto state = song->getState(); // a listener belongs to the tree object it was added to
+        state.addListener (&taken.writes);
+        const auto tracksBefore = phazite::countTracksReadAsValues();
+        const auto devicesBefore = phazite::countDevicesReadAsValues();
+
+        {
+            const phazite::UndoStep step (*song, "Apply");
+            apply();
+        }
+
+        taken.tracksRead = phazite::countTracksReadAsValues() - tracksBefore;
+        taken.devicesRead = phazite::countDevicesReadAsValues() - devicesBefore;
+        state.removeListener (&taken.writes);
+        CHECK (phazite::getTrackName (*song, line) == "Then");
+        phazite::undo (*song);
+        REQUIRE (phazite::getTrackName (*song, line) == "Now");
+        return taken;
+    };
+
+    const auto songTaken = measure ([&song, &version] { phazite::makeSongLike (*song, version); });
+    const auto lineTaken = measure ([&song, line, &version] { phazite::makeTrackLike (*song, line, version); });
+    const auto devices = (std::uint64_t) phazite::getDevicesValue (*song).devices.size();
+    MESSAGE ("A version a track's name apart on 40 tracks: properties written "
+             << songTaken.writes.properties << ", elements added, taken out or moved " << songTaken.writes.children
+             << ", tracks read whole " << songTaken.tracksRead << " (40 and the master on each side), devices read whole "
+             << songTaken.devicesRead << " (of " << devices << " on each side); the line's: properties written "
+             << lineTaken.writes.properties << ", tracks read whole " << lineTaken.tracksRead << ", devices read whole "
+             << lineTaken.devicesRead);
+    // Measured 2026-11-24 with the tracks' versions pass: one property written, nothing added, taken out or moved, the
+    // version's 40 tracks and its master read once each and none of the song's, the version's 80 devices once each by the
+    // devices pass (none for the tracks); the line's one property, its one track read, its two devices.
+    CHECK (songTaken.writes.properties == 1);
+    CHECK (songTaken.writes.children == 0);
+    CHECK (songTaken.tracksRead == 41);
+    CHECK (songTaken.devicesRead == devices);
+    CHECK (lineTaken.writes.properties == 1);
+    CHECK (lineTaken.writes.children == 0);
+    CHECK (lineTaken.tracksRead == 1);
+    CHECK (lineTaken.devicesRead <= 3); // the version's of the line's channel
 }
 
 TEST_CASE ("Performance gate: the loader's rule for the devices allocates nothing for a song Phazite wrote, a full drum sampler's "

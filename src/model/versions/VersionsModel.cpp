@@ -175,6 +175,16 @@ namespace
                + " Open the version to hear it, or restore the whole version (Restore This Version).";
     }
 
+    // Why a line's restore or discard takes nothing where it would give a track an ID the song holds now for something else
+    // (ApplySong.h: givesTrackIDsHeldElsewhere()), after what it is (what: "Couldn't restore ..."), with what does work.
+    juce::String idsElsewhereRefusal (const juce::String& what, const juce::String& whatWorks)
+    {
+        return what
+               + ": it would give a track a number the song now gives something else (a branch made on another computer can "
+                 "number its items as this one does), so Phazite can't tell the two apart. "
+               + whatWorks;
+    }
+
     // A merge's refusal for the same reason, with what does work: on another branch, going on from it there; on the song's
     // own branch (Merge the Newer Versions), the newer versions taken whole once the song's changes are discarded (which
     // Local History keeps), as Take the Newer Versions takes them without a match by ID.
@@ -869,6 +879,18 @@ bool takeBack (ProjectContext& context, const VersionChange& line)
         history->tellNow();
     }
 
+    // Not where it would give a track an ID the song holds now for something else, which it can't take: nothing written.
+    if (! line.isSong && givesTrackIDsHeldElsewhere (*song, line.isMaster ? getMasterID (*song) : line.track, then))
+    {
+        history->restoreRefused =
+            compared != nullptr ? idsElsewhereRefusal ("Couldn't restore " + line.name + " from \"" + getDisplayName (*compared) + "\"",
+                                                       "Restore This Version takes the whole version.")
+                                : idsElsewhereRefusal ("Couldn't discard the changes in " + line.name,
+                                                       "Discard All Changes makes the whole song the last version again.");
+        history->tellNow();
+        return false;
+    }
+
     // A change of its own, one undo step: Discard Changes, from the last version; Restore from another version.
     const UndoStep step (*song, compared != nullptr ? "Restore " + line.name + " from \"" + getDisplayName (*compared) + "\""
                                                     : "Discard Changes in " + line.name);
@@ -999,6 +1021,16 @@ namespace
                 history->tellNow();
                 return false;
             }
+        }
+
+        // Not where it would give a track an ID the song holds now for something else, which it can't take: nothing written.
+        if (! line.isSong && givesTrackIDsHeldElsewhere (*song, line.isMaster ? getMasterID (*song) : line.track, then))
+        {
+            history->restoreMissing.clear();
+            history->restoreRefused = idsElsewhereRefusal ("Couldn't restore " + line.name + " from \"" + getDisplayName (*version) + "\"",
+                                                           "Restore This Version takes the whole version.");
+            history->tellNow();
+            return false;
         }
 
         // A change of its own, one undo step, as git restore --source <commit> <file> makes one file a commit's.
@@ -2076,8 +2108,8 @@ namespace
 {
     // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net): each area's choice sets its
     // values (chooseInAreas()), a whole track's or the master's among them (chooseTrackClash(): its clips, modulators, macros,
-    // sends and its devices' store entries through each area's code, its element added without them), and no choice in the
-    // tree adds an area's entries; checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp:
+    // sends and its devices' store entries through each area's code, its values through the tracks' setters), and no choice
+    // in the tree adds an area's entries; checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp:
     // NothingTakenIn). What the keeper took in counted for every area that counts it, a line each, in the order of the areas.
     struct NothingTakenIn
     {
@@ -2170,11 +2202,17 @@ namespace
     // A clash in the song's tree (no area's: chooseInAreas()), chosen in it, in the history of the choice's step: a property
     // given the value chosen, or taken away where that side had none; an element replaced whole by the side chosen's, in its
     // place, or taken out where that side had none. Whether it was chosen (false for a path that names nothing in the song).
-    // No path through a DEVICE, a CONTAINER or a CHAIN comes here: the devices' choosers take or refuse every one; nor a whole
-    // TRACK or the MASTER, which the tracks' chooser takes (chooseTrackClash()), so that no element added here holds what an
-    // area's keeper would take in.
+    // What comes here is the song's own alone: a property of its own (PHAZITE's), its LASTKEY (which merges whole), its
+    // PIANOROLL, and an element Phazite doesn't know at its top. No path through a DEVICE, a CONTAINER or a CHAIN comes here:
+    // the devices' choosers take or refuse every one; nor any path through the song's TRACKS or its MASTER, which the tracks'
+    // chooser takes or refuses (chooseTrackClash(): a track's or the master's own property through the tracks' setters, a whole
+    // track or master), so that nothing here writes a track or what an area's keeper would take in.
     bool chooseInTree (Song& song, const MergeClash& clash, int value)
     {
+        jassert (clash.path.isEmpty()
+                 || ! (clash.path[0].startsWith (schema::TRACKS.toString() + ":")
+                       || clash.path[0].startsWith (schema::MASTER.toString() + ":")));
+
         auto* undo = &song.getUndoManager();
 
         if (clash.property.isValid())

@@ -1614,6 +1614,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TrackTests.cpp
         tests/TrackWritersTests.cpp
         tests/TracksValueTests.cpp
+        tests/TracksVersionsTests.cpp
         tests/TransportModelTests.cpp
         tests/TruePeakTests.cpp
         tests/UiTestHelpers.cpp

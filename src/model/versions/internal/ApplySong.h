@@ -10,9 +10,12 @@
 // pass of their own, by their parameters through automation's functions (model/automation/internal/Automation.h: setCurveValue(),
 // eraseCurve()), a curve's points by their places, the whole song's in the other's order; and the song's modulators and
 // macros, in a pass of their own, by their IDs through modulation's setters (model/modulation/internal/Modulation.h:
-// setModulator(), eraseModulator(), setModulatorOrder()), each owner's in the other's order. No ID is in the song twice
-// after: what the other has in another place than the song (a clip on another track, a track in another folder) is taken
-// from where the song has it. And the song's count of IDs ends past every ID it holds and past the other's count, so that
+// setModulator(), eraseModulator(), setModulatorOrder()), each owner's in the other's order; and the song's tracks, folders,
+// returns and master, first, by their IDs through the tracks' setters (model/arrangement/internal/Tracks.h: setTrack(),
+// setNewTracks(), setTrackPlace(), eraseTrack()), a track the other has in another folder moved there as the same element,
+// with what it holds. No ID is in the song twice after: what the other has in another place than the song (a clip on
+// another track) is taken from where the song has it. And the song's count of IDs ends past every ID it holds and past the
+// other's count, so that
 // what it took, from a song that counted further than it did, keeps its IDs to itself.
 #pragma once
 
@@ -48,8 +51,17 @@ void makeSongAsCopied (Song&, const juce::ValueTree& copy);
 // song than in this one (a clip moved since) ends where the other has it, once, whichever of the two tracks is made like
 // the other's: what the track held then comes back from where it is now, and what it holds now that the other holds
 // somewhere else goes there, as it is now; only where the song has nothing to hold it there (that track deleted since) does
-// it go with the rest, for that track's own line to bring back. False if neither has it.
+// it go with the rest, for that track's own line to bring back. False if neither has it; and false, the song as it was (its
+// count of IDs too), where it would give a track an ID the song holds now for another item (givesTrackIDsHeldElsewhere()).
 bool makeTrackLike (Song&, TrackID, const juce::ValueTree& other);
+
+// Whether a track's line (makeTrackLike()) would give a track an ID (its own, its fader's or its VCA's) that the song holds now
+// for another item than that track as it is (another track, a fader or a VCA, a device, a container or a chain, a send, a
+// modulator or a macro, a clip, a section): one the line's passes may not reach, so that the song would hold the ID twice.
+// Two lines that counted their IDs on from the same place make it (another computer's branch switched to or restored; a merge
+// gives IDs anew). What a line's restore refuses then, saying why (VersionsModel.cpp: takeBack(), takeInRestoreLine()); the
+// whole song's passes take such an ID (makeSongLike()).
+bool givesTrackIDsHeldElsewhere (const Song&, TrackID, const juce::ValueTree& other);
 
 // The song's own like the other's: its own properties, its tempo map, its sections, its chord lane and the order of the
 // tracks both have.

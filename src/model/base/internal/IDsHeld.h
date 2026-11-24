@@ -32,4 +32,15 @@ void forEachNameableIDHeld (const Song&, const std::function<void (std::uint64_t
 // The larger of the largest counted so far and an ID held, where that is below schema::maxID (else the largest so far): how
 // each area's count counts each ID it holds.
 std::uint64_t countHeldID (std::uint64_t largest, std::uint64_t held) noexcept;
+
+// Each ID an item of the song holds as its own, once for each item that holds it, in no order: each track's, its fader's and
+// its VCA's, and the master's (as the tracks' keeper keeps them, or the song's tree reads them where it holds no values), each
+// device's, container's and chain's, each send's, each modulator's and macro's, each clip's and each section's. Not an alias
+// group's (clipLink: its clips share it), nor a note's (its clip's notes count their own).
+void forEachItemIDHeld (const Song&, const std::function<void (std::uint64_t)>& each);
+
+// An ID two items of the song hold (forEachItemIDHeld()), the smallest of them; 0 for none, as the song holds after anything
+// (Project.h: makeConsistent() leaves none, and every maker makes an ID anew). What the versions' passes assert of the song they
+// made like another (model/versions/ApplySong.cpp), which may hold one twice meanwhile.
+std::uint64_t findIDHeldTwice (const Song&);
 } // namespace phazite

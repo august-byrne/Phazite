@@ -80,14 +80,23 @@ AreaChoice chooseCurveClash (Song&, const MergeClash&, int value, const MergeSid
 AreaChoice chooseNoteClash (Song&, const MergeClash&, int value, const MergeSides&);
 AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSides&);
 
-// The tracks' (model/arrangement/Tracks.cpp): a whole TRACK or the MASTER (a path that ends at one, with no property), which
-// only a commit's song from anyone makes a clash of: the song's taken out with what it holds in the song's areas
-// (Tracks.h: eraseTrackHoldings()), and the side chosen's put in its place, its clips with their notes, its devices,
-// containers and chains, its modulators and macros, its sends, what its devices hold of the store and its tracks' switches
-// and view (the master's mode and row) given through each area's code as the keeper of the song's values took them in, so
-// that nothing is left to the keeper. And a switch of a TRACK or the MASTER's mode (a path to one, with its property: a
-// merge's clash on a mute), through the switches' setter in the choice's step. Asked after the clips' (a path through a
-// TRACK to a CLIP is theirs). A track's other properties stay the tree's (VersionsModel.cpp: chooseInTree()) until the
-// tracks' writers move to their values.
+// The tracks' (model/arrangement/Tracks.cpp): every path through the song's TRACKS or its MASTER that no area before took,
+// read by the song's value of its tracks (no element read), each written through the tracks' setters (Tracks.h: setTrack(),
+// setNewTracks(), eraseTrack(), setMasterAnew()):
+//   - a property of a TRACK's or the MASTER's own (a path to one, with its property): a switch (a merge's clash on a mute, the
+//     master's mode) through the switches' setter in the choice's step; else a field of its value (a name, a colour, a kind,
+//     a volume, a pan, a key, an input, its monitoring, a pad's fields, a fader or a VCA, the master's ID), the side chosen's
+//     as the song reads one (TracksValue.h: setTrackProperty(); the field's default where that side held none), refused where
+//     the song couldn't hold it: a kind that holds no clips for a track that holds some, a folder made a track while it holds
+//     tracks, an ID the song holds as something else, a track's own ID (its key), a property the value doesn't cover;
+//   - a whole TRACK or the MASTER (a path that ends at one, with no property), which only a commit's song from anyone makes a
+//     clash of: the song's taken out with what it holds in the song's areas (Tracks.h: eraseTrackHoldings()), and the side
+//     chosen's put in its place, its values, its clips with their notes, its devices, containers and chains, its modulators
+//     and macros, its sends, what its devices hold of the store and its tracks' switches and view (the master's mode and row)
+//     given through each area's code, so that nothing is left to the keeper; refused where the song couldn't hold the side's
+//     there (an ID it holds elsewhere; the master taken away);
+//   - anything deeper in a track or the master (an element Phazite doesn't know): refused.
+// Asked after the clips' (a path through a TRACK to a CLIP is theirs) and the other areas'. Nothing through a TRACK or the
+// MASTER is chosen in the song's tree (VersionsModel.cpp: chooseInTree()).
 AreaChoice chooseTrackClash (Song&, const MergeClash&, int value, const MergeSides&);
 } // namespace phazite

@@ -117,6 +117,36 @@ TEST_CASE ("A live song's next ID is past every ID its values hold beside its tr
     }
 }
 
+TEST_CASE ("An ID two items of a song hold is found, whatever their kinds; none in a song that holds each once")
+{
+    // IDsHeld.h: findIDHeldTwice(), what the versions' passes assert of the song they made like another. The song's count set
+    // back, as no Phazite does, so that the next item made takes an ID the song holds.
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.addTrack ("Keys");
+    const auto clip = s.addMidiClip (track, 0.0, 4.0);
+    s.addNote (clip, 60, 0.0, 1.0);
+    const auto alias = s.copyClip (clip, 8.0, true); // an alias group's ID, which its clips share, and its notes' are no items'
+    REQUIRE (alias.isValid());
+    CHECK (phazite::findIDHeldTwice (song) == 0);
+
+    const auto countFrom = [&song] (std::uint64_t id) { song.getState().setProperty (phazite::schema::nextID, (juce::int64) id, nullptr); };
+
+    SUBCASE ("a clip of a track's ID")
+    {
+        countFrom (track.getRaw());
+        REQUIRE (s.addMidiClip (track, 16.0, 4.0).getRaw() == track.getRaw());
+        CHECK (phazite::findIDHeldTwice (song) == track.getRaw());
+    }
+
+    SUBCASE ("a modulator of a clip's ID")
+    {
+        countFrom (clip.getRaw());
+        REQUIRE (s.addModulator (track, phazite::ModulatorType::lfo).getRaw() == clip.getRaw());
+        CHECK (phazite::findIDHeldTwice (song) == clip.getRaw());
+    }
+}
+
 //==============================================================================
 // The description of the song (Schema.h, SchemaDescription.h), and the loader (model/project/internal/Project.h:
 // makeConsistent()) and the consistency check (SongCheck.h), which read it.

@@ -12,6 +12,7 @@
 #include "model/base/internal/TracksValue.h"
 
 #include <algorithm>
+#include <set>
 
 namespace phazite
 {
@@ -69,5 +70,42 @@ void forEachNameableIDHeld (const Song& song, const std::function<void (std::uin
 std::uint64_t countHeldID (std::uint64_t largest, std::uint64_t held) noexcept
 {
     return held < schema::maxID ? std::max (largest, held) : largest;
+}
+
+void forEachItemIDHeld (const Song& song, const std::function<void (std::uint64_t)>& each)
+{
+    const auto* values = song.getValues();
+    const auto* told = values != nullptr ? values->getTracksAsTold() : nullptr;
+
+    if (told != nullptr)
+        forEachIDHeld (*told, each);
+    else
+        forEachIDHeld (readTracksValue (song.getState()), each);
+
+    if (values == nullptr)
+        return;
+
+    forEachIDHeld (values->devices.get(), each);
+    forEachIDHeld (values->sends.get(), each);
+    forEachIDHeld (values->modulation.get(), each);
+
+    for (const auto& entry : values->clips.get().clips)
+        each (entry.second.id.getRaw());
+
+    for (const auto& section : values->sections.get().sections)
+        each (section.id.getRaw());
+}
+
+std::uint64_t findIDHeldTwice (const Song& song)
+{
+    std::set<std::uint64_t> seen, twice;
+    forEachItemIDHeld (song,
+                       [&seen, &twice] (std::uint64_t id)
+                       {
+                           if (id != 0 && ! seen.insert (id).second)
+                               twice.insert (id);
+                       });
+
+    return twice.empty() ? 0 : *twice.begin();
 }
 } // namespace phazite

@@ -542,10 +542,16 @@ TEST_CASE ("Track holdings: a merge's choice of a whole track gives it the side'
     INFO (chosen.toXmlString() << "\n" << then.toXmlString());
     CHECK (chosen.isEquivalentTo (then));
 
-    // A path to what isn't a whole track or the master is another chooser's.
+    // A path to a track's own property is the tracks' chooser's too (roadmap step S5.20, the tracks' versions pass): its field
+    // the side's, through the tracks' setter (its name taken away: the side held none).
     auto property = clash;
     property.property = schema::trackName;
-    CHECK (phazite::chooseTrackClash (h.song, property, 2, sides) == phazite::AreaChoice::notTheArea);
+    {
+        const phazite::UndoStep step (h.song, "Take the Other Branch's: Name");
+        CHECK (phazite::chooseTrackClash (h.song, property, 2, sides) == phazite::AreaChoice::chosen);
+    }
+
+    CHECK (phazite::test::getTrackProperty (h.song, h.track, schema::trackName).isVoid());
 }
 
 TEST_CASE ("Track holdings: a merge's choice of the whole master gives it the side's modulators and its container's macros "

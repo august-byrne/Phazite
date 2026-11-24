@@ -109,9 +109,9 @@ TrackOrder::Place getTrackPlace (const Song&, TrackID);
 std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
 
 //==============================================================================
-// The tracks' setters (model/arrangement/TrackWriters.cpp; roadmap step S5.20, the tracks' writers): with the versions'
-// passes until they move, the conversion, the tracks' part of the keeper and the loader, the only code that changes a TRACK's
-// or the MASTER's own properties or the track lists of a live song. Every writer of the tracks' own code (this file's,
+// The tracks' setters (model/arrangement/TrackWriters.cpp; roadmap step S5.20, the tracks' writers): with the conversion,
+// the tracks' part of the keeper and the loader, the only code that changes a TRACK's or the MASTER's own properties or the
+// track lists of a live song. Every writer of the tracks' own code (this file's, the versions' passes and a merge's choice,
 // Buses.h, the channels' of Mixer.h, model/devices/internal/DrumKit.h's pads, model/transport/RecordingModel.h's input and
 // monitoring, model/notes/internal/Notes.h's key) reads a track's value by its ID, makes the next value and sets it through
 // them. While the song's tree is the tracks' storage each writes it by what differs between what the song holds (the tracks'
@@ -124,7 +124,8 @@ std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
 // equal to what the song holds writes nothing; each refuses what the song can't hold, the song left as it was, and returns
 // false: a track without an ID or with the master's, one whose folder is none the song holds as a folder, a folder put into
 // itself or into a folder in it, a folder made another kind while it holds tracks (TracksValue.h: withTrack()), and a new
-// track of an ID the song holds as something else (a fader, a VCA, a device). True where they wrote.
+// track of an ID the song holds as something else (a fader, a VCA, a device; a device's but where setNewTracks() is told
+// otherwise: IDsHeldElsewhere). True where they wrote.
 //
 // A track's place in its folder's list (the top list for none) is its index there once it is there: from 0, before the
 // track at that index now (0: before the first; past the list's end, after its last), or -1 for after the folder's last
@@ -149,13 +150,40 @@ SongTracks getHeldTracks (const Song&);
 // (its own properties by what differs), and moved where its folder (TrackValue::parent) is another, as the same element, to
 // its place there (`index`); one whose folder stays keeps its place, `index` ignored: a reorder within a folder is
 // setTrackPlace()'s or setTrackListOrder()'s. The master's value (refused without an ID) is its own properties alone: what its
-// channel's writers set by its narrow setters (Mixer.h: setChannelVolume(), setChannelPan()) and the versions' pass, a later
-// piece, will set whole.
-bool setTrack (Song&, TrackValue, int index = -1);
+// channel's writers set by its narrow setters (Mixer.h: setChannelVolume(), setChannelPan()), and the versions' passes set whole,
+// its ID too (model/versions/ApplySong.cpp: makeTracksLike(), makeTrackLikeIn()).
+// Given an element of a version's (writtenLike), what it adds of the track's own properties is added in that element's order and
+// what it takes away taken away from the last back, so that the song's text holds the version's to the letter while its tree is
+// the tracks' storage (the versions' passes and a merge's choice: model/versions/ApplySong.cpp; Tracks.cpp, chooseTrackClash()).
+// It serves only while the tree stores a TRACK's properties in an order (the versions' list of changes names a track's
+// properties in its element's order), and goes with the tracks' switch (roadmap step S5.20), as writtenLike does on
+// setMasterAnew() and setNewTracks().
+bool setTrack (Song&, TrackValue, int index = -1, const juce::ValueTree& writtenLike = {});
+
+// The master put in the song anew, with its value (refused without an ID, or for a value that isn't the master's): a merge's
+// choice of the whole MASTER (model/arrangement/Tracks.cpp: chooseTrackClash()), what it held in the song's areas erased first
+// by its caller (eraseTrackHoldings()). Told as the master made (TracksArea.h: TrackChange::made), as its element is put in
+// anew while the song's tree is the tracks' storage: what follows the master's channel starts again (MIDI learn of its fader
+// ends: model/midi/internal/MidiLinks.h).
+bool setMasterAnew (Song&, const TrackValue&, const juce::ValueTree& writtenLike = {});
+
+// What setNewTracks() does with a new track whose ID the song holds as an item of another area's (a device's, a container's,
+// a chain's): refused, the song left as it was (every caller but one); or put in all the same where the caller makes that
+// area like a whole song's that holds none of that kind under that ID in the same step, or outside the history with the rest
+// (model/versions/ApplySong.cpp: makeTracksLike(), the whole song's tracks pass, the first of the passes: the other holder goes
+// in its own area's pass, after it). Meanwhile the song holds that ID twice. A new track of an ID a fader or a VCA of the
+// song's holds, the tracks' own, is refused either way.
+enum class IDsHeldElsewhere
+{
+    refused,
+    goWithTheirAreas
+};
 
 // Tracks made together, as one element in one action: the first at its place in its folder's list (above), each other in a
-// folder made before it in the list, after the tracks put in it before (a folder duplicated with the tracks in it).
-bool setNewTracks (Song&, const std::vector<TrackValue>&, int index = -1);
+// folder made before it in the list, after the tracks put in it before (a folder duplicated with the tracks in it). writtenLike
+// as setTrack()'s, each the element of the track at its index.
+bool setNewTracks (Song&, const std::vector<TrackValue>&, int index = -1, const std::vector<juce::ValueTree>& writtenLike = {},
+                   IDsHeldElsewhere = IDsHeldElsewhere::refused);
 
 // A track taken out of the song, a folder with the tracks in it. What it holds in the song's areas is erased first by its
 // caller (eraseTrackHoldings()), as what names it after (Mixer.h: forgetWhatNamesTheGone()).
@@ -211,7 +239,6 @@ TrackCopies makeTrackCopies (Song&, TrackID original, CopiedIDs& copied);
 //     holds.
 //   - model/notes/Notes.cpp, the tracks' key read there: getTrackKey(); and chooseNoteClash() (a merge's path).
 //   - model/automation/Automation.cpp: isParameterValue() (a tree callback's test).
-//   - A merge's choice of a whole track or the master (the versions' piece): this file's chooseTrackClash().
 //   - Walks that read one field of each track from the elements the song's index gives: model/mixer/Sidechain.cpp:
 //     getSoundTracks(), getTracksFedBy(), describeTracksToListenTo().
 // The tracks' switches and view are areas of the song's values, read and written by ID (getTrackSwitches(), getTrackView()
@@ -237,7 +264,7 @@ TrackCopies makeTrackCopies (Song&, TrackID original, CopiedIDs& copied);
 //     keepPlaces(), belongsIn(), keepIDs(), keepNames(), keepModulators(), keepSendsAsHeld(), keepDevicesAsHeld(),
 //     keepTracksAsHeld(), collectLinkedClips(), getCountedChild(); holdSameClip(), holdSameTrackClips()); Freeze.cpp:
 //     forgetMissingFrozenFiles(); Clips.cpp: takeClipsOf().
-//   - The versions: model/versions/ApplySong.cpp's passes; ChangesWorker.cpp: copyTrack() (whole state of one track) and
+//   - The versions: ChangesWorker.cpp: copyTrack() (whole state of one track) and
 //     makeSkeleton() (each track's ID, kind and name, from the index's elements, through the readers of one field).
 // The track list, which every song has (a new song starts with it, the master's element too: model/project/internal/
 // Project.h, makeNewSong()): added if the song has none yet, without an undo step. And the master's ID, which its channel's
@@ -488,8 +515,8 @@ void deleteTracks (Song&, const std::vector<TrackID>&, Selection*);
 // Begins no step. Every function that takes a track out of the song calls it first, before the element goes, as it calls
 // forgetWhatNamesTheGone() after (Mixer.h): deleteTracks() (and through it the pad tracks forgetWhatNamesTheGone() deletes,
 // a pad brought back, the DAWproject import), ungroupFolder() (the folder alone, its tracks moved out first), a version's
-// passes over elements (model/versions/ApplySong.cpp: makeLike(), removeMovedItems(), a line's track added since:
-// makeTrackLikeIn()) and a merge's choice of a whole track (chooseTrackClash()), so that the keeper of the song's values,
+// tracks' passes (model/versions/ApplySong.cpp: makeTracksLike(), a line's track added since: makeTrackLikeIn()) and a
+// merge's choice of a whole track (chooseTrackClash()), so that the keeper of the song's values,
 // which still erases what a track taken out holds and remembers it with the element (model/base/internal/SongValues.h),
 // finds nothing (SongValues::countHoldingsLeftWithKeepers(), which the tests' checks hold at 0). Each area's own undo action
 // brings its things back with the track's in an Undo, whatever order JUCE undoes them in: the keeper does nothing while the
@@ -503,8 +530,8 @@ void deleteTracks (Song&, const std::vector<TrackID>&, Selection*);
 //     the keeper, which remembers it as it goes and gives it back as it comes, in the same step: setTrackPlace() and its
 //     callers (moveTracksTo(), moveTracksAfter(), moveSelectedTracks(), moveTrackIntoFolder(), groupIntoFolder(), the tracks
 //     ungroupFolder() takes out of its folder, the clipboard's track for a paste, the mixer's setOutput()), a line's folder's
-//     tracks hoisted as it goes and the song's own line's tracks put in another folder (ApplySong.cpp: makeTrackLikeIn(),
-//     makeSongOwnLikeIn()). The tracks' switch replaces each by a change of the track's place, which no area follows.
+//     tracks hoisted as it goes and the tracks a version puts in another folder (ApplySong.cpp: makeTrackLikeIn(),
+//     makeTrackOrderLike()). The tracks' switch replaces each by a change of the track's place, which no area follows.
 void eraseTrackHoldings (Song&, const std::vector<TrackID>&);
 
 // The track commands that need no window: add, select the track above or below, move, mute and solo. They act

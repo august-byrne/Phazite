@@ -10,6 +10,7 @@
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -1512,139 +1513,151 @@ namespace
                 collectDeviceItems (child, items);
     }
 
-    // An element's children of two types taken out of it, outside any history (a copy's, before it joins the song).
-    void removeChildrenOf (juce::ValueTree element, const juce::Identifier& first, const juce::Identifier& second)
+    // The track a merge's clash's path names, by the steps that name it ("TRACKS:TRACKS", then a "TRACK:12" for each folder
+    // it is in and for itself; or "MASTER:MASTER"), read from the song's value of its tracks (getHeldTracks(): no element
+    // read): whether the path goes past it, into what is in it; whether the song holds the folders the path names it in, each
+    // in the one before (placeHeld); and the song's own, where the song holds it there (held).
+    struct ClashTrack
     {
-        for (int i = element.getNumChildren(); --i >= 0;)
-            if (const auto child = element.getChild (i); child.hasType (first) || child.hasType (second))
-                element.removeChild (i, nullptr);
+        bool master = false;
+        TrackID id {};
+        TrackID folder {}; // the folder the path names it in, none for the track list
+        bool deeper = false;
+        bool placeHeld = false;
+        std::optional<TrackValue> held {};
+    };
+
+    std::optional<ClashTrack> findClashTrack (const Song& song, const juce::StringArray& path)
+    {
+        const auto isStepOf = [] (const juce::String& step, const juce::Identifier& type)
+        { return step.startsWith (type.toString() + ":"); };
+
+        if (path.isEmpty())
+            return std::nullopt;
+
+        const auto tracks = getHeldTracks (song);
+        ClashTrack found;
+
+        if (isStepOf (path[0], schema::MASTER))
+        {
+            found.master = true;
+            found.id = tracks.master.id;
+            found.deeper = path.size() > 1;
+            found.placeHeld = true;
+            found.held = tracks.master;
+            return found;
+        }
+
+        if (! isStepOf (path[0], schema::TRACKS))
+            return std::nullopt;
+
+        found.placeHeld = true;
+        auto heldThere = true;
+
+        for (int i = 1; i < path.size() && ! found.deeper; ++i)
+        {
+            if (! isStepOf (path[i], schema::TRACK))
+            {
+                found.deeper = true;
+                continue;
+            }
+
+            found.placeHeld = found.placeHeld && heldThere;
+            found.folder = found.id;
+            found.id = TrackID::fromRaw ((std::uint64_t) path[i].fromFirstOccurrenceOf (":", false, false).getLargeIntValue());
+            const auto* held = tracks.tracks.find (found.id.getRaw());
+            heldThere = held != nullptr && held->parent == found.folder;
+        }
+
+        if (found.id.isValid() && heldThere)
+            found.held = *tracks.tracks.find (found.id.getRaw());
+
+        return found;
     }
-} // namespace
 
-AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
-{
-    // A switch of a track or the master's mode ("TRACK:12" and its mute): the switches' entry of its key given the value
-    // chosen, or taken away where that side had none, in the choice's step, as the conversion reads it (TrackSwitchesValue.h:
-    // readHeldSwitchesOf(), of the element with the song's other entries of it and the value chosen). The view counts nothing,
-    // and a merge reports no clash of it.
-    if (clash.property.isValid())
+    // Whether the song can hold a track's (or the master's) fields chosen in a merge in place of what it holds of it, as the
+    // tracks' setter can't tell on its own: no kind that holds no clips for a track that holds some (Clips.h: canTrackHold()),
+    // and no ID (the master's own, a fader's, a VCA's) that the song holds as another track's, fader or VCA, or as a device's.
+    bool canHoldChosen (const Song& song, const TrackValue& held, const TrackValue& next)
     {
-        const auto element = findByPath (song.getState(), clash.path);
+        if (! next.isMaster() && ! next.holdsClips() && ! getClips (song, next.id).empty())
+            return false;
 
-        if (! isSwitchProperty (element, clash.property) || song.getValues() == nullptr)
-            return AreaChoice::notTheArea;
+        std::set<std::uint64_t> others;
+        forEachIDHeld (getHeldTracks (song), [&others] (std::uint64_t id) { others.insert (id); });
 
-        if (! juce::isPositiveAndBelow (value, 3))
+        for (const auto own : { held.id.getRaw(), held.fader.getRaw(), held.vca.getRaw() })
+            others.erase (own);
+
+        for (const auto& [now, was] :
+             { std::pair (next.id.getRaw(), held.id.getRaw()), std::pair (next.fader.getRaw(), held.fader.getRaw()),
+               std::pair (next.vca.getRaw(), held.vca.getRaw()) })
+            if (now != 0 && now != was && (others.count (now) > 0 || findDevice (song, DeviceID::fromRaw (now)) != nullptr))
+                return false;
+
+        return true;
+    }
+
+    // A property of a track's or the master's own chosen (ClashTrack: the song holds it where the path names it): a switch (a
+    // track's mute, solo or frozen switch, its or the master's automation mode), its entry in the switches given the value
+    // chosen, or taken away where that side had none, in the choice's step, as the conversion reads it
+    // (TrackSwitchesValue.h: readHeldSwitchesOf(), of the element with the song's other entries of it and the value chosen);
+    // else a field of the track's value (TracksValue.h: setTrackProperty(), as readHeldTrack() reads one; its default where
+    // that side held none), through the tracks' setter (setTrack()). Refused: a track the song hasn't there; a property the
+    // value doesn't cover (one Phazite doesn't know: the view counts nothing, and a merge reports no clash of it); a track's
+    // ID, which is its key; and fields the song couldn't hold (canHoldChosen(); setTrack()'s refusals: a folder made a track
+    // while it holds tracks).
+    AreaChoice chooseTrackProperty (Song& song, const ClashTrack& track, const MergeClash& clash, const juce::var& chosen)
+    {
+        if (! track.held.has_value())
             return AreaChoice::refused;
 
-        juce::ValueTree holder (element.getType());
-        holder.setProperty (schema::trackID, element[schema::trackID], nullptr);
-        auto switches = getTrackSwitches (song);
-        writeSwitchesInto (holder, switches);
+        juce::ValueTree holder (track.master ? schema::MASTER : schema::TRACK);
+        holder.setProperty (schema::trackID, (juce::int64) track.id.getRaw(), nullptr);
 
-        const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+        if (isSwitchProperty (holder, clash.property))
+        {
+            auto switches = getTrackSwitches (song);
+            writeSwitchesInto (holder, switches);
 
-        if (values[value]->isVoid())
-            holder.removeProperty (clash.property, nullptr);
-        else
-            holder.setProperty (clash.property, *values[value], nullptr);
+            if (chosen.isVoid())
+                holder.removeProperty (clash.property, nullptr);
+            else
+                holder.setProperty (clash.property, chosen, nullptr);
 
-        readHeldSwitchesOf (holder, switches);
-        setTrackSwitches (song, std::move (switches), true);
+            readHeldSwitchesOf (holder, switches);
+            setTrackSwitches (song, std::move (switches), true);
+            return AreaChoice::chosen;
+        }
+
+        auto next = *track.held;
+
+        if ((clash.property == schema::trackID && ! track.master) || ! setTrackProperty (next, clash.property, chosen))
+            return AreaChoice::refused;
+
+        if (next == *track.held)
+            return AreaChoice::chosen;
+
+        if (! canHoldChosen (song, *track.held, next) || ! setTrack (song, std::move (next)))
+            return AreaChoice::refused;
+
         return AreaChoice::chosen;
     }
 
-    // A whole track or the master ("TRACKS:TRACKS", "TRACK:12"; "MASTER:MASTER"): a path that ends at one, with no property.
-    // A merge of two songs Phazite holds never reports one (it keeps a track taken away on one side and changed on the other,
-    // and merges the rest property by property: SongMerge.cpp); a commit's song may come from anyone.
-    if (clash.path.isEmpty())
-        return AreaChoice::notTheArea;
-
-    if (const auto last = clash.path[clash.path.size() - 1];
-        ! last.startsWith (schema::TRACK.toString() + ":") && ! last.startsWith (schema::MASTER.toString() + ":"))
-        return AreaChoice::notTheArea;
-
-    // Nothing written for a path whose place the song hasn't.
-    auto parentPath = clash.path;
-    parentPath.remove (parentPath.size() - 1);
-    auto parent = findByPath (song.getState(), parentPath);
-
-    if (! parent.isValid() || ! juce::isPositiveAndBelow (value, 3))
-        return AreaChoice::refused;
-
-    // The song's, in its place, with what it holds in the song's areas (eraseTrackHoldings()); then the side chosen's in that
-    // place, where it has one: its element without its tracks' clips and sends and its owners' modulators and macros, which
-    // each area's code then gives the song as the keeper took them in (Clips.h: takeClipsOf(); Modulation.h:
-    // takeModulatorsOf(); Mixer.h: takeSendsOf(); its devices, containers and chains: Mixer.h, takeDevicesOf(); what they hold
-    // of the store: DeviceStore.h, setStoreEntries()), so that nothing is left to the keeper.
-    auto* undo = &song.getUndoManager();
-    const auto existing = findByPath (song.getState(), clash.path);
-    const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
-    const auto& chosen = *elements[value];
-    const auto place = existing.isValid() ? parent.indexOf (existing) : -1;
-
-    // The tracks the song holds in the element it replaces, by their IDs: what comes back under one of them takes its switches
-    // in the step (below).
-    std::set<std::uint64_t> heldBefore;
-
-    if (existing.isValid())
+    // The switches and the view of the tracks of a side's element chosen whole (the master's mode and row), read from its
+    // elements as the song holds them and given through their areas before its values come in (TrackSwitchesValue.h,
+    // TracksOutside.h), as a version's track that comes back gets them (model/versions/ApplySong.cpp: makeTrackLeavesLike()):
+    // the switches in the step, the song's entries of their IDs replaced, but those of a track new to the song (neither one of
+    // the tracks replaced, heldBefore, nor of an ID the switches hold any entry of: holdsSwitchesOf()), which are written
+    // outside the history, as a maker gives a new item's (copyTrackLeaves()); the view of each where the song keeps none of
+    // its ID (a row it keeps, of a track it held, stays), the master's where its row holds nothing set.
+    void giveLeavesOf (Song& song, const juce::ValueTree& chosen, const std::set<std::uint64_t>& heldBefore)
     {
-        std::vector<juce::ValueTree> replaced;
-        collectTrackElements (existing, replaced);
+        auto* values = song.getValues();
 
-        for (const auto& element : replaced)
-            heldBefore.insert (readID (element[schema::trackID]));
-    }
+        if (values == nullptr)
+            return;
 
-    if (existing.isValid())
-    {
-        eraseTrackHoldings (song, { getTrackID (existing) });
-        parent.removeChild (existing, undo);
-    }
-
-    // A clip on another track left the only one of its alias group (the song's track held the others, which the side's
-    // holds in no group, or not at all) leaves the group, as deleteTracks() unlinks it.
-    if (! chosen.isValid())
-    {
-        unlinkLoneClips (song);
-        return AreaChoice::chosen;
-    }
-
-    // What the keeper's parts would take out of the element as it comes (its tracks' CLIP and SEND elements, its owners'
-    // MODULATOR and MACRO elements, what its devices and chains hold of the store, its channels' DEVICE and CONTAINER
-    // elements), taken out of a copy of it first; then what they would read of it, read from the side's element and given to
-    // the song once the copy is in it: the clips', the devices' (before modulation's: a container's macros need their
-    // container), modulation's, the sends', the store's.
-    auto copy = chosen.createCopy();
-    std::vector<juce::ValueTree> tracks, owners, items;
-    collectTrackElements (copy, tracks);
-    collectModulationOwners (copy, owners);
-    collectDeviceItems (copy, items);
-
-    for (const auto& track : tracks)
-        removeChildrenOf (track, schema::CLIP, schema::SEND);
-
-    for (const auto& owner : owners)
-        removeChildrenOf (owner, schema::MODULATOR, schema::MACRO);
-
-    for (const auto& item : items)
-        takeStoreOutOf (item, nullptr);
-
-    for (const auto& track : tracks)
-        removeChildrenOf (track, schema::DEVICE, schema::CONTAINER);
-
-    if (copy.hasType (schema::MASTER))
-        removeChildrenOf (copy, schema::DEVICE, schema::CONTAINER);
-
-    // Its tracks' switches and view (the master's mode and row), read from the side's elements as the song holds them and
-    // given through their areas before the copy comes in, taken out of the copy (TrackSwitchesValue.h, TracksOutside.h), as a
-    // version's track that comes back gets them (model/versions/ApplySong.cpp: makeTrackLeavesLike()): the switches in the
-    // step, the song's entries of their IDs replaced, but those of a track new to the song (neither in the element replaced
-    // nor of an ID the switches hold any entry of: holdsSwitchesOf()), which are written outside the history, as a maker gives
-    // a new item's (copyTrackLeaves()); the view of each where the song keeps none of its ID (a row it keeps, of a track it
-    // held, stays), the master's where its row holds nothing set.
-    if (auto* values = song.getValues())
-    {
         const auto held = values->trackSwitches.get();
         auto newSwitches = held;
         auto outside = values->tracksOutside.get();
@@ -1687,58 +1700,190 @@ AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, con
         values->setSwitches (song, std::move (switches));
     }
 
-    for (const auto& track : tracks)
+    // What a side's element chosen whole holds in the song's areas, read from it and given to the song once its tracks (or the
+    // master) are in it, each through its area's code as the keeper of the song's values took it in: its tracks' clips with
+    // their notes (Clips.h: takeClipsOf()), its channels' devices, containers and chains (Mixer.h: takeDevicesOf(): before
+    // modulation's, as a container's macros need their container), its owners' modulators and macros (Modulation.h:
+    // takeModulatorsOf()), its tracks' sends (Mixer.h: takeSendsOf()), and each plug-in's and chain's entries in the devices'
+    // store made the side's, as the versions' devices pass makes a version's (ApplySong.cpp: makeDeviceStoreLike()): those the
+    // store kept of an item of the same ID (the song's, taken out before) replaced (model/plugins/internal/DeviceStore.h:
+    // setStoreEntries()), a device's window's place given where the side has one, as view state outside the history.
+    void giveHoldingsOf (Song& song, const juce::ValueTree& chosen)
     {
-        takeSwitchesOutOf (track, nullptr);
-        takeViewOutOf (track, nullptr);
+        std::vector<juce::ValueTree> tracks, owners, items;
+        collectTrackElements (chosen, tracks);
+        collectModulationOwners (chosen, owners);
+        collectDeviceItems (chosen, items);
+
+        for (const auto& track : tracks)
+            takeClipsOf (song, track);
+
+        for (const auto& track : tracks)
+            takeDevicesOf (song, track);
+
+        if (chosen.hasType (schema::MASTER))
+            takeDevicesOf (song, chosen);
+
+        for (const auto& owner : owners)
+            takeModulatorsOf (song, owner);
+
+        for (const auto& track : tracks)
+            takeSendsOf (song, track);
+
+        for (const auto& item : items)
+        {
+            const auto id = readDeviceElementID (item);
+            DeviceStore entries;
+            readHeldStoreOf (item, entries);
+            setStoreEntries (song, id, entries);
+
+            if (const auto window = item.hasType (schema::DEVICE) ? readWindowPlaceOf (item) : std::nullopt)
+                setWindowPlace (song, id, *window);
+        }
     }
 
-    if (copy.hasType (schema::MASTER))
+    // A whole track chosen (ClashTrack: in the song's folders the path names, which the song holds): the song's, where it
+    // holds it there, taken out with what it holds in the song's areas (eraseTrackHoldings(), then eraseTrack()), and the side
+    // chosen's put in its place, where it has one: its values, its own and the tracks' in it, each read as the song holds one
+    // (readHeldTrack()), in one action (setNewTracks()), their switches and view given before (giveLeavesOf()) and what they
+    // hold after (giveHoldingsOf()), so that nothing is left to the keeper. Refused, nothing written, where the song couldn't
+    // hold the side's in its place: an element the path doesn't name, a track that reads as none, or one of an ID the song
+    // holds outside the track it replaces (another track, a fader, a VCA, a device), or a folder whose tracks it couldn't hold.
+    AreaChoice chooseWholeTrack (Song& song, const ClashTrack& track, const juce::ValueTree& chosen)
     {
-        takeSwitchesOutOf (copy, nullptr);
-        takeViewOutOf (copy, nullptr);
+        if (! track.placeHeld || ! track.id.isValid())
+            return AreaChoice::refused;
+
+        std::vector<TrackValue> made;
+        std::vector<juce::ValueTree> elements;
+
+        if (chosen.isValid())
+        {
+            if (! chosen.hasType (schema::TRACK) || readID (chosen[schema::trackID]) != track.id.getRaw())
+                return AreaChoice::refused;
+
+            collectTrackElements (chosen, elements);
+
+            for (const auto& element : elements)
+            {
+                auto value = readHeldTrack (element);
+
+                if (! value.has_value() || value->isMaster())
+                    return AreaChoice::refused;
+
+                made.push_back (std::move (*value));
+            }
+
+            made.front().parent = track.folder;
+
+            // Each as the song would hold it, the track it replaces taken out first: no ID twice, none the song holds as
+            // something else.
+            auto trial = getHeldTracks (song);
+
+            if (track.held.has_value())
+                trial = withoutTrack (trial, track.id);
+
+            std::set<std::uint64_t> ids;
+            forEachIDHeld (trial, [&ids] (std::uint64_t id) { ids.insert (id); });
+
+            for (const auto& value : made)
+            {
+                for (const auto id : { value.id.getRaw(), value.fader.getRaw(), value.vca.getRaw() })
+                    if (id != 0 && (! ids.insert (id).second || findDevice (song, DeviceID::fromRaw (id)) != nullptr))
+                        return AreaChoice::refused;
+
+                if (auto next = withTrack (trial, value, -1); ! next.isSameAs (trial))
+                    trial = std::move (next);
+                else
+                    return AreaChoice::refused;
+            }
+        }
+
+        // The tracks the song holds in the one it replaces, by their IDs: what comes back under one of them takes its switches
+        // in the step (giveLeavesOf()). And its place in its folder's list, which the side's takes.
+        std::set<std::uint64_t> heldBefore;
+        auto place = -1;
+
+        if (track.held.has_value())
+        {
+            const auto tracks = getHeldTracks (song);
+            if (const auto* list = tracks.findList (track.folder))
+                for (size_t i = 0; i < list->size() && place < 0; ++i)
+                    if ((*list)[i] == track.id)
+                        place = (int) i;
+
+            const std::function<void (TrackID)> collect = [&tracks, &heldBefore, &collect] (TrackID id)
+            {
+                heldBefore.insert (id.getRaw());
+
+                if (const auto* list = tracks.findList (id))
+                    for (const auto inside : *list)
+                        collect (inside);
+            };
+
+            collect (track.id);
+            eraseTrackHoldings (song, { track.id });
+            eraseTrack (song, track.id);
+        }
+
+        // A clip on another track left the only one of its alias group (the song's track held the others, which the side's
+        // holds in no group, or not at all) leaves the group, as deleteTracks() unlinks it.
+        if (chosen.isValid())
+        {
+            giveLeavesOf (song, chosen, heldBefore);
+            [[maybe_unused]] const auto added = setNewTracks (song, made, place, elements);
+            jassert (added); // what the trial above took
+            giveHoldingsOf (song, chosen);
+        }
+
+        unlinkLoneClips (song);
+        return AreaChoice::chosen;
     }
 
-    parent.addChild (copy, place, undo);
-    tracks.clear();
-    owners.clear();
-    items.clear();
-    collectTrackElements (chosen, tracks);
-    collectModulationOwners (chosen, owners);
-    collectDeviceItems (chosen, items);
-
-    for (const auto& track : tracks)
-        takeClipsOf (song, track);
-
-    for (const auto& track : tracks)
-        takeDevicesOf (song, track);
-
-    if (chosen.hasType (schema::MASTER))
-        takeDevicesOf (song, chosen);
-
-    for (const auto& owner : owners)
-        takeModulatorsOf (song, owner);
-
-    for (const auto& track : tracks)
-        takeSendsOf (song, track);
-
-    // Each plug-in's and chain's entries made the side's, as the versions' devices pass makes a version's (ApplySong.cpp:
-    // makeDeviceStoreLike()): those the store kept of an item of the same ID (the song's track's, taken out above) replaced
-    // (model/plugins/internal/DeviceStore.h: setStoreEntries()); a device's window's place given where the side has one, as
-    // view state outside the history.
-    for (const auto& item : items)
+    // The whole master chosen: the side's (a song always has its master, so a side without one is refused) put in anew in
+    // place of the song's (setMasterAnew()), what the song's held in the song's areas erased first (eraseTrackHoldings()),
+    // its mode and row given before (giveLeavesOf()) and what it holds after (giveHoldingsOf()). Refused, nothing written,
+    // where the side's reads as no master, or holds an ID (its own, its fader's, its VCA's) the song holds as something else.
+    AreaChoice chooseWholeMaster (Song& song, const ClashTrack& track, const juce::ValueTree& chosen)
     {
-        const auto id = readDeviceElementID (item);
-        DeviceStore entries;
-        readHeldStoreOf (item, entries);
-        setStoreEntries (song, id, entries);
+        const auto value = chosen.hasType (schema::MASTER) ? readHeldTrack (chosen) : std::nullopt;
 
-        if (const auto window = item.hasType (schema::DEVICE) ? readWindowPlaceOf (item) : std::nullopt)
-            setWindowPlace (song, id, *window);
+        if (! value.has_value() || ! value->isMaster() || ! value->id.isValid() || ! canHoldChosen (song, *track.held, *value))
+            return AreaChoice::refused;
+
+        eraseTrackHoldings (song, { track.id });
+        giveLeavesOf (song, chosen, {});
+        setMasterAnew (song, *value, chosen);
+        giveHoldingsOf (song, chosen);
+        unlinkLoneClips (song);
+        return AreaChoice::chosen;
+    }
+} // namespace
+
+AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
+{
+    // Every clash whose path goes through the song's TRACKS or its MASTER that the areas asked before took none of
+    // (VersionsModel.cpp: chooseInAreas(); a clip's, a device's, a modulator's, a send's are theirs): a property of a track's
+    // or the master's own (chooseTrackProperty()), a whole track (chooseWholeTrack()) or the master (chooseWholeMaster()),
+    // which only a commit's song from anyone makes a clash of (a merge of two songs Phazite holds keeps a track taken away on
+    // one side and changed on the other, and merges the rest property by property: SongMerge.cpp). What is deeper in a track
+    // (an element Phazite doesn't know) is refused: nothing through a TRACK or the MASTER is chosen in the song's tree.
+    const auto found = findClashTrack (song, clash.path);
+
+    if (! found.has_value())
+        return AreaChoice::notTheArea;
+
+    if (found->deeper || ! juce::isPositiveAndBelow (value, 3))
+        return AreaChoice::refused;
+
+    if (clash.property.isValid())
+    {
+        const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+        return chooseTrackProperty (song, *found, clash, *values[value]);
     }
 
-    unlinkLoneClips (song);
-    return AreaChoice::chosen;
+    const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+    return found->master ? chooseWholeMaster (song, *found, *elements[value]) : chooseWholeTrack (song, *found, *elements[value]);
 }
 
 //==============================================================================
