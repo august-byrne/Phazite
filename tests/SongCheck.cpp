@@ -1811,8 +1811,9 @@ Song::Ptr copyAsOpened (const Song& song)
 
     visit (whole);
 
+    // Its curves as they are: what takes something away takes its curves along (model/mixer/internal/Mixer.h:
+    // forgetWhatNamesTheGone()), so a curve of a device the song hasn't is a fault the check finds.
     Song::Ptr copy (new Song (whole));
-    forgetCurvesOfGoneDevices (*copy);
 
     // A song left without curves is written without an AUTOMATION (CurvesArea.h: writeCurvesIn()), as the song opened is.
     if (auto automation = copy->getState().getChildWithName (schema::AUTOMATION); automation.isValid() && automation.getNumChildren() == 0)

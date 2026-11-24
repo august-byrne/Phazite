@@ -1317,9 +1317,9 @@ namespace
             }
 
             // Where the song was given its IDs anew: what named one at or past maxCountedID names its new one, or nothing if
-            // none had it (then left out as any name of nothing is: keepSends(), keepNames()). A macro's curve, which would name the
-            // macro by its ID as its parameter too (model/devices/internal/Parameters.h), isn't followed: no modulator's
-            // parameter is automated, and such a curve goes as every song opens (Automation.h: forgetCurvesOfGoneDevices()).
+            // none had it (then left out as any name of nothing is: keepSends(), keepNames()). A macro's curve, which names the
+            // macro by its ID as its parameter too (model/devices/internal/Parameters.h), has its device followed alone: its
+            // parameter then names no macro's value, and the curve goes (keepCurves()), in a file no Phazite writes.
             void keepRenumberedNames (juce::ValueTree tree)
             {
                 for (auto child : tree)

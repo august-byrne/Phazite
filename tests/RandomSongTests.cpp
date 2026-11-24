@@ -56,16 +56,10 @@ std::string findDifference (const juce::String& a, const juce::String& b)
     return {};
 }
 
-// What opening a song leaves out of it as it was edited, which names what is gone (SongIDs.h): the curves and lanes of
-// devices taken away, which the song keeps for an undo. Nothing else names what is gone.
+// What opening a song leaves out of it as it was edited, which names what is gone (SongIDs.h): the lanes of devices taken
+// away, view state, which stay ignored while they are gone. Nothing else names what is gone: a device's curves go with it.
 void leaveOutWhatNamesNothing (phazite::Song& song)
 {
-    // The curves, through automation's functions outside the history, as the song holds its values (Automation.h).
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        phazite::forgetCurvesOfGoneDevices (song, [] (const phazite::ParameterRef&) { return true; });
-    }
-
     // The items (the tracks, the master, their faders and devices) of the song whole, never of its live tree alone, which
     // holds less as the song's areas move beside it (roadmap step S5.20).
     std::set<std::uint64_t> items;
@@ -110,7 +104,7 @@ TEST_CASE ("Random songs: written as text, a song reads back and opens as the sa
         INFO ("seed " << seed);
         const auto song = makeRandomSong (seed, sounds.folder);
 
-        // What the song keeps only while an undo could bring it back, which opening it leaves out, left out first.
+        // The lanes of what is gone, which opening it leaves out, left out first.
         leaveOutWhatNamesNothing (*song);
         const auto written = toText (phazite::test::copyWholeSong (*song));
         const auto xml = juce::parseXML (written);

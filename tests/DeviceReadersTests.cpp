@@ -150,7 +150,8 @@ TEST_CASE ("A selected device stays selected while the song holds it, wherever i
 TEST_CASE ("A selected automation point of a device's parameter counts as selected while the song holds the device")
 {
     // The selection counts the points still in their curve whose owner the song holds (Selection::getNumObjectsSelected()):
-    // a device's parameter, a container's chain's volume; none once the device is gone, whose curve the song keeps for undo.
+    // a device's parameter, a container's chain's volume; none once the device is gone, its curve with it, and again once
+    // its Undo brings both back.
     auto song = phazite::createSong();
     const auto track = phazite::ensureTracks (*song, 1).front();
     const auto equalizer = phazite::test::addOwnDevice (*song, track, dev::Equalizer::typeID);
@@ -173,7 +174,7 @@ TEST_CASE ("A selected automation point of a device's parameter counts as select
 
     selection.selectPoints (output, phazite::getPointKeys (*song, output));
     phazite::removeDevice (*song, equalizer);
-    CHECK (phazite::hasPoints (*song, output)); // kept for the undo
+    CHECK_FALSE (phazite::hasPoints (*song, output)); // gone with it, for the undo to bring back
     CHECK (selection.getNumObjectsSelected() == 0);
     phazite::undo (*song);
     CHECK (selection.getNumObjectsSelected() == 2);

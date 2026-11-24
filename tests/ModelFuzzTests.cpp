@@ -84,7 +84,7 @@ std::map<phazite::ClipID, juce::String> describeAllNotes (const phazite::Song& s
     return notes;
 }
 
-// The song as an edit left it holds together (SongCheck.h), but for what it keeps for an undo (copyAsOpened()); what it holds
+// The song as an edit left it holds together (SongCheck.h), but for what it keeps while open (copyAsOpened()); what it holds
 // beside its tree (its clips' notes as values) is kept with its tree (checkValues()); and what finds its items by their IDs
 // holds what it does.
 void checkEditedSong (const phazite::Song& song)

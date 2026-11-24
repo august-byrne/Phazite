@@ -386,9 +386,9 @@ void deleteTracks (Song&, const std::vector<TrackID>&, Selection*);
 // finds nothing (SongValues::countHoldingsLeftWithKeepers(), which the tests' checks hold at 0). Each area's own undo action
 // brings its things back with the track's in an Undo, whatever order JUCE undoes them in: the keeper does nothing while the
 // history undoes or redoes, and no area's value is checked against the tree until the step is whole.
-//   - Not what names them: a send to a return that goes, the modulations and MIDI links of what goes, the pad tracks of a
-//     sampler that goes (forgetWhatNamesTheGone()'s). Not their curves (kept, as a deleted track's always were), nor the
-//     view, the switches or the lanes (the TRACK element's own, which go and come back with it).
+//   - Not what names them: a send to a return that goes, the modulations, MIDI links and curves of what goes, the pad tracks
+//     of a sampler that goes (forgetWhatNamesTheGone()'s). Nor the view, the switches or the lanes (the TRACK element's own,
+//     which go and come back with it).
 //   - Not their devices, containers and chains, nor what the devices' store holds of them (kept by ID): the song's tree still
 //     holds them under the TRACK, and they go and come back with it until the devices' switch, which adds their line here.
 //   - Not a move: a track JUCE moves to another parent (taken out and put in again, the same element) keeps what it holds by

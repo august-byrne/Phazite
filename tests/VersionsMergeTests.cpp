@@ -86,7 +86,7 @@ struct Sides
     }
 
     // A merge applied to a copy of this side's song, which then holds together, as it opens (copyAsOpened(): without the
-    // curves of devices taken away, which an edited song keeps for an undo).
+    // lanes of devices taken away, which an edited song keeps while it is open).
     void checkMerged (const phazite::MergeResult& merged) const
     {
         INFO ("the merged song");

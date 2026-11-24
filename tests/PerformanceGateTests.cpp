@@ -4278,3 +4278,70 @@ TEST_CASE ("Performance gate: a stopped song's devices work no block once their 
     playback.play (1.0);
     checkRested (ended, "after Stop, its sound ended");
 }
+
+TEST_CASE ("Performance gate: a device removed on a song of 200 curves of other devices reads no curve and allocates no more than "
+           "on one without curves")
+{
+    // What names the gone forgets the curves of what is gone with the rest, the automation of what is deleted going with it
+    // (Mixer.h: forgetWhatNamesTheGone()): it walks the curves' order by their owners' IDs, each looked for among the items
+    // still there, which it gathered for the modulations, the sends and the MIDI links already; it reads no curve's points,
+    // and allocates nothing for the curves while none is gone. An EQ without curves removed from a song of 40 tracks, without
+    // curves and with 200 of the tracks' synths' (5 each): no point read either way (CurveValues.h: countCurvePointsRead()),
+    // the song's curves the same value after (none written), and the allocations the same.
+    struct Counts
+    {
+        std::uint64_t pointsRead = 0;
+        bool curvesKept = false;
+        std::optional<int> allocations {};
+    };
+
+    const auto countsFor = [] (int numCurves)
+    {
+        auto song = phazite::createSong();
+        const auto tracks = phazite::ensureTracks (*song, 40);
+        std::vector<phazite::DeviceID> synths;
+        phazite::DeviceID victim;
+
+        {
+            const phazite::UndoStep step (*song, "Devices");
+
+            for (const auto track : tracks)
+                synths.push_back (phazite::test::setOwnInstrument (*song, track, dev::Synth::typeID));
+
+            victim = phazite::test::addOwnDevice (*song, tracks.front(), dev::Equalizer::typeID);
+        }
+
+        {
+            const phazite::UndoStep step (*song, "Curves");
+
+            for (int i = 0; i < numCurves; ++i)
+            {
+                const auto id = dev::Synth::info.parameters[(size_t) (i % 5)].id;
+                phazite::addPoint (*song, { synths[(size_t) (i / 5)], juce::String (id.data(), id.size()) }, { at (0.0), 0.5f });
+            }
+        }
+
+        REQUIRE (phazite::getCurveKeys (*song).size() == (size_t) numCurves);
+        song->getUndoManager().clearUndoHistory();
+        const auto before = phazite::getCurvesValue (*song);
+        const auto pointsBefore = phazite::countCurvePointsRead();
+        Counts counts;
+        // The removal runs in every build, counted or not (PerformanceCounts.h).
+        counts.allocations = phazite::test::countAllocations ([&song, victim] { phazite::removeDevice (*song, victim); });
+        REQUIRE_FALSE (phazite::hasDevice (*song, victim));
+        counts.pointsRead = phazite::countCurvePointsRead() - pointsBefore;
+        counts.curvesKept = phazite::getCurvesValue (*song).isSameAs (before);
+        return counts;
+    };
+
+    const auto none = countsFor (0), many = countsFor (200);
+    INFO ("no curves: " << none.allocations.value_or (-1) << " allocations; 200 curves: " << many.allocations.value_or (-1));
+    CHECK (none.pointsRead == 0);
+    CHECK (many.pointsRead == 0);
+    CHECK (many.curvesKept);
+
+    if (! none.allocations.has_value() || ! many.allocations.has_value())
+        return; // nothing counted on this build (PerformanceCounts.h)
+
+    CHECK (*many.allocations == *none.allocations);
+}

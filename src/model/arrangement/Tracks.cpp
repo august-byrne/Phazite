@@ -855,6 +855,10 @@ void ungroupFolder (Song& song, TrackID folder)
     // What it holds itself (a bus's modulators and sends) erased before it goes; its tracks are out of it now.
     eraseTrackHoldings (song, { folder });
     parent.removeChild (folderState, &song.getUndoManager());
+
+    // Then what named its fader or VCA and its bus's devices, which went with it: their curves, and the modulations and the
+    // MIDI links of them (from modulators and links elsewhere), so that nothing is left naming what is gone.
+    forgetWhatNamesTheGone (song);
 }
 
 //==============================================================================

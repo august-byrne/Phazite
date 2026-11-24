@@ -22,7 +22,7 @@ namespace
 
     // A folder's volume as it was, its automation and modulation, and its lanes (view state, without an undo step), named
     // as its fader of the other kind names it, in the caller's step. What named its pan, which a plain folder's VCA hasn't,
-    // goes with the fader it had (forgetWhatNamesTheGone()); a curve stays while an undo could bring that fader back.
+    // its curve too, goes with the fader it had (forgetWhatNamesTheGone()).
     void followVolume (Song& song, TrackID folder, const ParameterRef& was)
     {
         const auto now = getVolume (song, folder);

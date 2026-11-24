@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
@@ -202,33 +203,6 @@ namespace
             next = withHeldModulator (next, macro);
 
         setAllModulation (song, std::move (next));
-    }
-
-    // The IDs of the items that tracks, devices, chains and sends are (Schema.h: holdsID()), as what names one names it: the
-    // tree's (its clips and its automation aside, which hold none that these name), and those the song's values hold of
-    // items that something can name (IDsHeld.h: forEachNameableIDHeld(), a modulator's and a macro's once they leave the
-    // tree, which a MIDI link names, and a send's, which a curve, a MIDI link and a modulation name).
-    std::set<std::uint64_t> getItemIDs (const Song& song)
-    {
-        std::set<std::uint64_t> ids;
-        forEachNameableIDHeld (song, [&ids] (std::uint64_t id) { ids.insert (id); });
-        const std::function<void (const juce::ValueTree&)> visit = [&ids, &visit] (const juce::ValueTree& tree)
-        {
-            for (const auto& child : tree)
-            {
-                if (child.hasType (schema::CLIP) || child.hasType (schema::AUTOMATION))
-                    continue;
-
-                for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
-                    if (child.hasProperty (*property) && schema::holdsID (child, *property))
-                        ids.insert (readID (child[*property]));
-
-                visit (child);
-            }
-        };
-
-        visit (song.getState());
-        return ids;
     }
 
     // The song's sends as its area holds them (SongValues.h: sends), a pointer into the area's value as it is now, valid until
@@ -895,6 +869,31 @@ void removeDevice (Song& song, DeviceID id)
         makePlainFolder (song, channel);
 }
 
+std::set<std::uint64_t> getItemIDs (const Song& song)
+{
+    // The tree's items (Schema.h: holdsID()), as what names one names it, and those the song's values hold (IDsHeld.h:
+    // forEachNameableIDHeld(): a modulator's and a macro's once they leave the tree, and a send's).
+    std::set<std::uint64_t> ids;
+    forEachNameableIDHeld (song, [&ids] (std::uint64_t id) { ids.insert (id); });
+    const std::function<void (const juce::ValueTree&)> visit = [&ids, &visit] (const juce::ValueTree& tree)
+    {
+        for (const auto& child : tree)
+        {
+            if (child.hasType (schema::CLIP) || child.hasType (schema::AUTOMATION))
+                continue;
+
+            for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
+                if (child.hasProperty (*property) && schema::holdsID (child, *property))
+                    ids.insert (readID (child[*property]));
+
+            visit (child);
+        }
+    };
+
+    visit (song.getState());
+    return ids;
+}
+
 void forgetWhatNamesTheGone (Song& song)
 {
     auto* undo = getUndo (song);
@@ -941,6 +940,10 @@ void forgetWhatNamesTheGone (Song& song)
 
     // A MIDI link of a parameter of what is gone.
     forgetMidiLinksOfTheGone (song, ids);
+
+    // An automation curve of a parameter of what is gone, a send's among them, through automation's code, which looks each
+    // curve's owner up among the IDs above and reads no curve; the step's Undo brings them back with the rest.
+    forgetCurvesOfTheGone (song, ids);
 
     // A pad's track whose drum sampler is gone: deleted, or, holding clips, a plain track.
     std::vector<TrackID> padTracks;

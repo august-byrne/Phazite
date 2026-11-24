@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -268,11 +269,21 @@ void takeDevicesOf (Song&, const juce::ValueTree& channel);
 // with it (forgetWhatNamesTheGone()).
 void removeDevice (Song&, DeviceID);
 
-// Takes what names an item the song no longer holds out of it, in the caller's undo step: the modulations of a device's, a
-// chain's, a send's or a fader's parameters; the sends to a return; and the tracks of a drum sampler's pads, which go with
+// The IDs of the items the song holds that something can name (a curve, a modulation, a MIDI link, a send): its tracks,
+// their faders and VCAs and the master's, its devices, containers and chains, its sends,
+// modulators and macros; from its tree (Schema.h: holdsID(), its clips and its automation aside, which hold none that these
+// name) and its values (IDsHeld.h: forEachNameableIDHeld()), a song without values from its tree alone. One walk of the
+// song, gathered once for a pass that asks of many: the one answer to "does the song hold what this names", which
+// forgetWhatNamesTheGone() asks at every removal and automation asks of a curve's owner (Automation.cpp:
+// isCurveOwnerThere(), the loader's too, makeSong()).
+std::set<std::uint64_t> getItemIDs (const Song&);
+
+// Takes what names an item the song no longer holds out of it, in the caller's undo step: the modulations, the MIDI links
+// and the automation curves of a device's, a chain's, a send's, a fader's, a modulator's or a macro's parameters
+// (Automation.h: forgetCurvesOfTheGone()); the sends to a return; and the tracks of a drum sampler's pads, which go with
 // their sampler as a Drum Rack's chains go with it in Ableton Live (one holding clips stays, a plain track, so that no clip
-// is lost). Their automation curves and lanes stay while an undo could bring them back, and go as the project opens
-// (Schema.h: AUTOMATION, LANE); the sidechains that listened to a track are forgotten as it goes (Sidechain.h). Every change
+// is lost). Their lanes, view state, stay, ignored while what they name is gone, and go as the project opens (Schema.h:
+// LANE); the sidechains that listened to a track are forgotten as it goes (Sidechain.h). Every change
 // that takes a device, a chain, a send, a fader or a track out of the song calls it, so that the song stays as
 // makeConsistent() (model/project/internal/Project.h) would leave it.
 void forgetWhatNamesTheGone (Song&);

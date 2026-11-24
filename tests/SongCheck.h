@@ -60,13 +60,14 @@ std::vector<std::string> findSongProblems (const Song&, const schema::Tables&);
 void checkSong (const Song&);
 
 // The problems of the rule values alone (above), which findSongProblems() finds too: for a song an edit, an undo or a redo
-// left, which holds what it keeps for an undo (the curves of devices gone), and so is checked whole only as it would open
-// (copyAsOpened()). None for a song that holds no values.
+// left, which holds what it keeps while it is open (the lanes of devices gone, view state), and so is checked whole only as
+// it would open (copyAsOpened()). None for a song that holds no values.
 std::vector<std::string> findValueProblems (const Song&);
 void checkValues (const Song&); // each a failed check
 
-// A copy of an edited song as a project opens it from its file: without what it keeps only while an undo could bring it back
-// (the curves and lanes of devices taken away: SongIDs.h, which the check takes for names of nothing) and where playback
-// starts. For checking a song an edit, a merge or the fuzzer left. The song itself left as it is.
+// A copy of an edited song as a project opens it from its file: without what it keeps only while it is open (the lanes of
+// devices taken away: SongIDs.h, which the check takes for names of nothing) and where playback starts; its curves as they
+// are, as what takes a device away takes its curves along. For checking a song an edit, a merge or the fuzzer left. The song
+// itself left as it is.
 Song::Ptr copyAsOpened (const Song&);
 } // namespace phazite::test

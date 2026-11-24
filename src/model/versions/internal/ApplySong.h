@@ -57,7 +57,8 @@ void makeSongOwnLike (Song&, const juce::ValueTree& other);
 
 // What a part of the song names that isn't there any more, taken away: a sidechain from a track that is gone, a modulation
 // of a device that is gone, a send to a return that is gone, and a pad's track whose drum sampler is gone, as an edit takes
-// them away (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()); and a sidechain that would hear its own track's sound
+// them away (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone(), which takes the MIDI links and the curves of what is
+// gone too, uncounted); and a sidechain that would hear its own track's sound
 // round a loop (model/mixer/internal/Sidechain.h: forgetSidechainLoops()), which a line taken from one song and another
 // from another can make together. Every apply of a version, a line, a merge or a merge's clash runs it, in its step; how
 // many it took away (of the pads' tracks, none).

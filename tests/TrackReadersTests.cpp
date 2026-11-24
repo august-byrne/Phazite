@@ -137,7 +137,7 @@ TEST_CASE ("A selected automation point of a fader counts as selected while the 
 {
     // The selection counts the points still in their curve whose owner the song holds (Selection::getNumObjectsSelected()): a
     // track's fader, a plain folder's VCA and the master's fader (model/base/Selection.cpp: holdsCurveOwner()); none once the
-    // track is gone, whose curve the song keeps for undo.
+    // track is gone, its curve with it, and again once its Undo brings both back.
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 2);
     const auto folder = phazite::groupIntoFolder (*song, { tracks[1] }, nullptr);
@@ -172,7 +172,7 @@ TEST_CASE ("A selected automation point of a fader counts as selected while the 
 
     selection.selectPoints (volume, phazite::getPointKeys (*song, volume));
     deleteTrack (*song, tracks[0]);
-    CHECK (phazite::hasPoints (*song, volume)); // kept for the undo
+    CHECK_FALSE (phazite::hasPoints (*song, volume)); // gone with its fader, for the undo to bring back
     CHECK (selection.getNumObjectsSelected() == 0);
     phazite::undo (*song);
     CHECK (selection.getNumObjectsSelected() == 2);

@@ -2206,8 +2206,8 @@ void SongPlayer::readCurves()
         ++curvesRead;
 
         // Its points are positions along its parameter's control's travel, which the engine turns into the parameter's
-        // units (engine/automation/Curve.h). One of a parameter the song hasn't (a device's that is gone, kept for an undo)
-        // plays from 0 to 1 until it has, which each plan looks for again.
+        // units (engine/automation/Curve.h). One of a parameter the song hasn't (one its device doesn't have) plays from 0
+        // to 1 until it has, which each plan looks for again.
         if (auto points = toPoints (values[readAt]); ! points.empty())
         {
             const auto travel = getControlTravel (song, { DeviceID::fromRaw (key.first), key.second });

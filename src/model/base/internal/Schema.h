@@ -540,10 +540,11 @@ inline const Property<float> modulatesAmount { "amount", on (MODULATES), within 
 // own ID, with its points in beats. song
 
 // Child of PHAZITE: the curves (CURVE), in the order the song made them (a curve made goes after the others). Written
-// while the song has a curve. A curve whose device the song hasn't any more stays while an undo could bring the device back,
-// and goes as the project opens. The song holds its curves as values beside its tree (model/base/internal/SongValues.h:
-// the curves' area), its AUTOMATION an empty place every song that holds its values has; what Phazite doesn't know on it, a
-// curve or a point (a property, a child of another type) goes as the song opens.
+// while the song has a curve. A curve whose owner (a device, a chain, a fader or a VCA, a send, a modulator or a macro) the
+// song hasn't any more goes with it, in the step that takes it away (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()),
+// and one a file holds goes as the project opens. The song holds its curves as values beside its tree
+// (model/base/internal/SongValues.h: the curves' area), its AUTOMATION an empty place every song that holds its values has;
+// what Phazite doesn't know on it, a curve or a point (a property, a child of another type) goes as the song opens.
 // (AUTOMATION, with the elements above.)
 
 // Child of AUTOMATION: a parameter's curve, with its points (POINT) in time order, two at one beat in the order they go (a

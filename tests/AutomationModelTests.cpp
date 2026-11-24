@@ -1036,8 +1036,8 @@ TEST_CASE ("Every edit of automation is one exact undo step, two points at one b
             });
 
     // A compressor added to B, and the makeup curve of A's copied to it, as a copy with new IDs gives a copied device its
-    // original's automation; then B's compressor removed, its curve kept while an undo could bring it back, and forgotten
-    // in a step, as a restore from a damaged commit forgets those a song taken in part brought in.
+    // original's automation; then B's compressor removed, its curve with it in the removal's step, which its Undo brings back
+    // and its Redo takes again.
     undo.check ("Add B's Compressor", [&] { phazite::addEffect (context, song.b, song.find ("phaziteCompressor")); });
     const auto effectsOfB = phazite::getEffects (context, song.b);
     REQUIRE (effectsOfB.size() == 1);
@@ -1045,11 +1045,12 @@ TEST_CASE ("Every edit of automation is one exact undo step, two points at one b
     inStep ("Copy Curves", [&] { phazite::copyCurves (model, { { makeup.device.getRaw(), makeupOfB.device.getRaw() } }); });
     CHECK (beatsOf (phazite::getPoints (model, makeupOfB)) == beatsOf (phazite::getPoints (model, makeup)));
     undo.check ("Remove B's Compressor", [&] { phazite::removeDevice (context, makeupOfB.device); });
-    CHECK_FALSE (phazite::getPoints (model, makeupOfB).empty());
-    inStep ("Forget Curves of Gone Devices",
-            [&] { phazite::forgetCurvesOfGoneDevices (model, [] (const ParameterRef&) { return true; }); });
     CHECK (phazite::getPoints (model, makeupOfB).empty());
     CHECK_FALSE (phazite::getPoints (model, makeup).empty());
+    undo.stepBackOrForth ("Undo Remove B's Compressor", [&model] { phazite::undo (model); });
+    CHECK (beatsOf (phazite::getPoints (model, makeupOfB)) == beatsOf (phazite::getPoints (model, makeup)));
+    undo.stepBackOrForth ("Redo Remove B's Compressor", [&model] { phazite::redo (model); });
+    CHECK (phazite::getPoints (model, makeupOfB).empty());
 
     // As the UI reaches them, each a step of its own; and a lane cleared.
     undo.check ("Add Automation Point", [&] { phazite::addAutomationPoint (context, pan, { beats (2), 0.25f }); });
@@ -1064,7 +1065,7 @@ TEST_CASE ("Every edit of automation is one exact undo step, two points at one b
         [&] { phazite::replaceAutomationPoints (context, pan, { beats (4), beats (12) }, { { beats (5), 0.1f }, { beats (11), 0.9f } }); });
     undo.check ("Clear the Lane", [&] { phazite::deleteAutomation (phazite::getParameter (context, pan)); });
     CHECK (phazite::getPoints (model, pan).empty());
-    CHECK (undo.getNumSteps() == 32);
+    CHECK (undo.getNumSteps() == 31);
 
     // The lanes A shows and its write mode, view state and a switch, are no undo steps, and leave what undo steps keep alone
     // (UndoCheck.h); the walk then goes through every step with them as they are left.
@@ -1091,7 +1092,7 @@ TEST_CASE ("Every edit of automation is one exact undo step, two points at one b
     CHECK_FALSE (laneOf (panOfA).has_value());
     undo.check ("Latch", [&] { phazite::setAutomationMode (model, song.a, AutomationMode::latch); });
     CHECK (phazite::getAutomationMode (model, song.a) == AutomationMode::latch);
-    CHECK (undo.getNumSteps() == 32);
+    CHECK (undo.getNumSteps() == 31);
 
     undo.walkBackAndForth();
     phazite::test::checkSong (model);

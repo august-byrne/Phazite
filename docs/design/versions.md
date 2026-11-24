@@ -588,13 +588,11 @@ The history is the `Versions` folder beside the project file. Its format is writ
 - **Songs from elsewhere:** a song read from the pieces (a version's, a song left on a branch, a snapshot) is made
   consistent as a project file is as it opens (`makeConsistent()`), whoever wrote it: what no Phazite writes (a number
   that is none or out of its range, an ID twice, a send to nothing, a sound file outside the project's folder) never
-  reaches the song. Of a song Phazite wrote the checks change nothing but what a project opened leaves out too: the
-  curves of a device deleted, which the song keeps while an Undo could bring the device back. That loses nothing: a
-  switch starts the undo history again; Restore This Version and Restore This Automatic Save are undo steps, whose Undo
-  puts the curves back with the rest; a line's restore leaves them as they are; a merge counts them as this side's. A
-  song read in part (a version with damaged pieces) keeps what names what it couldn't read (a send to a lost return, a
-  lost device's curves and modulations), which the song it is taken into judges (`removeBrokenReferences()`, and a
-  curve it brought in of a device the song hasn't taken away again, in the same step), so that the song is what its
+  reaches the song. Of a song Phazite wrote the checks change nothing: what is deleted takes its curves along in its own
+  step (`forgetWhatNamesTheGone()`), whose Undo brings them back, so a song never holds the curve of something it hasn't.
+  A song read in part (a version with damaged pieces) keeps what names what it couldn't read (a send to a lost return, a
+  lost device's curves and modulations), which the song it is taken into judges (`removeBrokenReferences()`, which
+  takes a curve of anything the song hasn't away with the rest, in the same step), so that the song is what its
   file would open as. A merge, Restore This Version and a line's restore refuse a song that held an ID twice, which its
   line's IDs no longer match once the checks give it new ones (an item would come in as new).
 - **A song whose IDs were given anew:** a file whose IDs leave too little room to count on (another program's) has them

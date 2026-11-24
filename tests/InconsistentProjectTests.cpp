@@ -1102,8 +1102,8 @@ TEST_CASE ("Every merge waiting goes from a song given its IDs anew as it opens"
 
 TEST_CASE ("A macro, and the master's fader and VCA, past the mark, are given anew, the master volume's curve following")
 {
-    // The master holds its fader's and its VCA's IDs as a track does; and a macro is an item. (A curve of a macro's parameter,
-    // which no Phazite makes, goes as every song opens: Automation.h, forgetCurvesOfGoneDevices().)
+    // The master holds its fader's and its VCA's IDs as a track does; and a macro is an item. (A curve of a macro's value,
+    // which the UI doesn't make, is given its new ID as its device alone, and so goes: Project.cpp, keepRenumberedNames().)
     Edited edited;
     auto& made = *phazite::findSong (edited.s.context);
     const auto macro = phazite::addMacro (made, edited.lead, "Macro");

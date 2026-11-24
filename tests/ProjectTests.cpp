@@ -936,7 +936,7 @@ TEST_CASE ("A project with MIDI clips and an alias opens without unsaved changes
     CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
 }
 
-TEST_CASE ("A project forgets, as it opens, the automation of devices it hasn't any more, and keeps the rest")
+TEST_CASE ("A device removed takes its automation along, so the project saved holds none of it, and opens with the rest")
 {
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Automated");
@@ -949,14 +949,15 @@ TEST_CASE ("A project forgets, as it opens, the automation of devices it hasn't 
     phazite::addPoint (song, gainRef, { beats (2.0), phazite::getValueSetByHand (song, gainRef), 0.0f });
     phazite::addPoint (song, volumeRef, { beats (2.0), 0.5f, 0.0f });
 
-    // A device removed leaves its curve in the song, for an undo to bring back with it; the file keeps it too.
+    // A device removed takes its curve along, in its step (an undo brings both back); the file holds none of it.
     phazite::removeDevice (song, eq);
-    CHECK (phazite::getCurveValue (song, gainRef).has_value());
+    CHECK_FALSE (phazite::getCurveValue (song, gainRef).has_value());
     REQUIRE (project->save().wasOk());
     const auto file = project->getFile();
+    CHECK_FALSE (file.loadFileAsString().contains ("parameter=\"output\""));
     project = nullptr;
 
-    // Opened, nothing can bring the device back: its curve goes, without an unsaved change, and the volume's stays.
+    // Opened: no curve of the device, without an unsaved change, and the volume's there.
     project = openProject (file);
     const auto& reopened = project->getSong();
     CHECK_FALSE (phazite::getCurveValue (reopened, gainRef).has_value());

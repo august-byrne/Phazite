@@ -160,25 +160,7 @@ struct Holdings
         }
 
         CHECK (values().countHoldingsLeftWithKeepers() == 0);
-        checkSongAsRemoved();
-    }
-
-    // The song checked as checkSong() does, but for what the removers leave as they always did, which this piece doesn't
-    // change: the curve of the macro of the container on the track gone (a deleted thing's curves are kept, known bug 245
-    // (docs/known-bugs.md); the song's check names it, a parameter the song hasn't).
-    void checkSongAsRemoved() const
-    {
-        for (const auto& problem : phazite::test::findSongProblems (song))
-        {
-            if (problem.find ("CURVE") != std::string::npos)
-                continue;
-
-            INFO (problem);
-            CHECK (false);
-        }
-
-        CHECK (song.getIndex().isExact());
-        CHECK (values().countHoldingsLeftWithKeepers() == 0);
+        phazite::test::checkSong (song);
     }
 
     int countAdopted() const
@@ -215,10 +197,7 @@ struct Holdings
             INFO (step);
             CHECK (values().countHoldingsLeftWithKeepers() == 0);
 
-            if (isUndo)
-                phazite::test::checkSong (song);
-            else
-                checkSongAsRemoved();
+            phazite::test::checkSong (song);
 
             const auto now = phazite::test::writeSong (song, phazite::test::SongPart::whole);
             const auto& expected = isUndo ? before : after;
@@ -270,13 +249,13 @@ TEST_CASE ("Track holdings: deleting a track and a return erases what they hold,
                     { h.track, h.goneReturn });
 
     // Redone: the alias left alone in its group keeps its notes (unlinked as the last of its group); what named what went
-    // (stays' send to the return gone) went with it; the macro's curve is kept, as a deleted track's curves always were.
+    // (stays' send to the return gone) went with it, and so did the curve of its container's macro.
     phazite::redo (h.song);
     REQUIRE (phazite::getClipValue (h.song, h.alias).has_value());
     CHECK (phazite::getClipNotesValue (h.song, h.alias) == aliasNotes);
     CHECK (phazite::getClipValue (h.song, h.alias)->link == 0);
     CHECK (phazite::getSends (h.song, h.stays).empty());
-    CHECK (phazite::findCurve (h.song, h.macroValue) != nullptr);
+    CHECK (phazite::findCurve (h.song, h.macroValue) == nullptr);
     CHECK_FALSE (phazite::getModulatorValue (h.song, h.lfo).has_value());
     CHECK_FALSE (phazite::getModulatorValue (h.song, h.macro).has_value());
     CHECK_FALSE (phazite::getModulatorValue (h.song, h.returnLfo).has_value());

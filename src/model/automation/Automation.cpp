@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -472,22 +473,25 @@ namespace
         JUCE_DECLARE_NON_COPYABLE (SongCurve)
     };
 
-    // Whether what a curve names is in the song: a device's, a fader's, a send's or a container's chain's (its volume, pan
-    // and crossover), each an automated parameter's owner as locateParameter() finds it, whether or not it knows the
-    // parameter now (a plug-in that isn't installed, or doesn't load, knows none of its own).
-    bool isCurveOwnerThere (const Song& song, DeviceID owner)
+    // Whether what a curve names is in the song, among its items as a pass gathered them once (Mixer.h: getItemIDs(), the
+    // set forgetWhatNamesTheGone() erases the curves of the gone by): a device's, a container's chain's (its volume, pan and
+    // crossover), a channel's fader's or VCA's, a send's, a modulator's or a macro's, each an automated parameter's owner as
+    // locateParameter() finds it, whether or not it knows the parameter now (a plug-in that isn't installed, or doesn't
+    // load, knows none of its own). The one notion of a curve's owner: the edits', the loader's and the erase's.
+    bool isCurveOwnerThere (const std::set<std::uint64_t>& items, DeviceID owner)
     {
-        return holdsDevice (song, owner, true) || getSendValue (song, owner).has_value() || findChannelOfFader (song, owner).isValid();
+        return items.contains (owner.getRaw());
     }
 
-    // The parameters the song has curves for whose devices are there, a plug-in's that isn't loaded too; not those of
-    // devices gone (whose curves the song keeps for undo).
+    // The parameters the song has curves for whose owners are there, a plug-in's that isn't loaded too; not those of
+    // owners it hasn't.
     std::vector<ParameterRef> getParametersWithCurves (const Song& song)
     {
         std::vector<ParameterRef> parameters;
+        const auto items = getItemIDs (song);
 
         for (const auto& ref : getCurveKeysWithPoints (song))
-            if (isCurveOwnerThere (song, ref.device))
+            if (isCurveOwnerThere (items, ref.device))
                 parameters.push_back (ref);
 
         return parameters;
@@ -1206,9 +1210,11 @@ std::vector<AutomationCopy> copyAutomation (const Song& song, const std::vector<
 
 void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, BeatDuration distance)
 {
+    const auto items = getItemIDs (song);
+
     for (const auto& copy : copies)
     {
-        if (! isCurveOwnerThere (song, copy.parameter.device))
+        if (! isCurveOwnerThere (items, copy.parameter.device))
             continue;
 
         // Where it lands, in place of what is there, what lies around it keeping its shape, as moveAutomation() copies.
@@ -1457,9 +1463,11 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
         if (std::find (parameters.begin(), parameters.end(), point.parameter) == parameters.end())
             parameters.push_back (point.parameter);
 
+    const auto items = getItemIDs (song);
+
     for (const auto& ref : parameters)
     {
-        if (isCurveOwnerThere (song, ref.device))
+        if (isCurveOwnerThere (items, ref.device))
         {
             SongCurve curve (song, ref);
 
@@ -1475,25 +1483,45 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
 void forgetCurvesOfGoneDevices (Song& song)
 {
     // What is there keeps its curves, those of parameters it has now and others (a plug-in that isn't installed has none
-    // until it is): a device's, a fader's, a send's or a container's chain's (its volume, pan and crossover), each an
-    // automated parameter's owner as locateParameter() finds it. (A modulator's parameters aren't automated.) A child that is
-    // no curve names no device, and goes too. It runs as a song opens, before the song holds its values (Project.cpp:
-    // makeSong()), and on a song made of a tree alone (a copy as it would open: tests/SongCheck.cpp): on its tree, without
-    // an undo step, which nothing hears as the song's curves.
+    // until it is), by the one notion of a curve's owner (isCurveOwnerThere(): a device's, a chain's, a fader's or a VCA's,
+    // a send's, a modulator's or a macro's), its items gathered once from its tree. A child that is no curve names no owner,
+    // and goes too. It runs as a song opens, before the song holds its values (Project.cpp: makeSong()), and on a song made
+    // of a tree alone (a copy as it would open: tests/SongCheck.cpp): on its tree, without an undo step, which nothing hears
+    // as the song's curves.
     jassert (song.getValues() == nullptr);
     auto automation = song.getState().getChildWithName (schema::AUTOMATION);
+    const auto items = getItemIDs (song);
 
     for (auto i = automation.getNumChildren(); --i >= 0;)
-        if (! isCurveOwnerThere (song, readCurveParameter (automation.getChild (i)).device))
+        if (! isCurveOwnerThere (items, readCurveParameter (automation.getChild (i)).device))
             automation.removeChild (i, nullptr);
 }
 
-void forgetCurvesOfGoneDevices (Song& song, const std::function<bool (const ParameterRef&)>& which)
+void forgetCurvesOfTheGone (Song& song, const std::set<std::uint64_t>& items)
 {
-    // A curve's alone, each through eraseCurve(): an element of a kind Phazite doesn't know names no device.
-    for (const auto& parameter : getCurveKeys (song))
-        if (which (parameter) && ! isCurveOwnerThere (song, parameter.device))
-            eraseCurve (song, parameter);
+    auto* values = song.getValues();
+
+    if (values == nullptr)
+        return;
+
+    // The next value made only once a curve is found gone, from the one held (a reference into the area, valid until the
+    // set below), each gone one taken out of it; the order walked by its parameters' owners alone.
+    const auto& held = values->curves.get();
+    std::optional<SongCurves> next;
+
+    for (const auto& parameter : held.order)
+    {
+        if (isCurveOwnerThere (items, parameter.device))
+            continue;
+
+        if (! next.has_value())
+            next = held;
+
+        next = withoutCurve (*next, parameter);
+    }
+
+    if (next.has_value())
+        values->setCurves (song, std::move (*next));
 }
 
 //==============================================================================
@@ -1652,7 +1680,7 @@ std::optional<PointSelection> getSelectedPoints (const Selection& selection)
 
     // Of a curve whose device is there (one of a plug-in that isn't loaded too), as Selection::getNumObjectsSelected()
     // counts them.
-    if (song == nullptr || ! parameter.isValid() || ! isCurveOwnerThere (*song, parameter.device))
+    if (song == nullptr || ! parameter.isValid() || ! isCurveOwnerThere (getItemIDs (*song), parameter.device))
         return {};
 
     // Where each selected point is in its curve now, by its key: the curve looked up once, and its points walked once, each

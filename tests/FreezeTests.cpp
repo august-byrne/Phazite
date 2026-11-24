@@ -1258,8 +1258,8 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     CHECK (phazite::getSends (model, song.bass).empty());
 
     // The copies after the song's other curves, in the originals' order (Automation.h: copyCurves(), through setCurveValue()); the
-    // moved send's own kept, as a removed send's is, for an undo to bring it back.
-    CHECK (phazite::getCurveKeys (model) == std::vector { volume, level, gain, newVolume, newLevel });
+    // moved send's own gone with it, as a removed send's goes (Mixer.h: forgetWhatNamesTheGone()), for an undo to bring back.
+    CHECK (phazite::getCurveKeys (model) == std::vector { volume, gain, newVolume, newLevel });
 
     // The modulators that moved the fader and the send, copied onto the new track with those modulations alone; the
     // original's macro modulated the send alone, which has gone, and modulates nothing now.

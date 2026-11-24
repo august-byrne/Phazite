@@ -67,7 +67,9 @@ out as it opens the file (section 7).
   writes the tempos first, then the time signatures, each kind by beat;
 - `TRACKS`: the tracks top to bottom, a folder's tracks inside it, each with its clips (first among its elements, in
   the track's order of them), its devices, its sends and its channel; and `MASTER`, the master's channel and devices;
-- `AUTOMATION`: the curves, each a parameter's by its device's ID and the parameter's ID, with its points in beats,
+- `AUTOMATION`: the curves, each a parameter's by its owner's ID as `device` (a device's, a container's chain's, a
+  channel's fader's or VCA's, a send's, a modulator's or a macro's: a curve stays while its owner is in the song) and
+  the parameter's ID, with its points in beats,
   each at a position along the parameter's control's travel (`value`, 0 to 1, as its knob or fader moves along its
   scale: for a frequency, logarithmic, minimum × (maximum / minimum)^position, so 0.5 on a 20 Hz to 20 kHz cutoff is
   632 Hz; for another skewed parameter, skewed so that its midpoint is at 0.5), so that a straight line between two
@@ -235,8 +237,9 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   that costs); the versions saved before then keep the IDs as they were, without the stamp, and Phazite restores no line
   from them and merges none of them. An ID written another way ("12.0", "012") is written as its whole number, as it is read (one that
   reads as no ID, such as "+12", which reads as 0, gets a new one, and what names it is dropped).
-- **References:** a lane, a curve or a modulation of a device the song hasn't, and a send to a return it hasn't, is left
-  out, and a sidechain or a pad's
+- **References:** a lane, a curve or a modulation of a device the song hasn't (a curve of any owner it hasn't: a device,
+  a chain, a fader or a VCA, a send, a modulator or a macro), and a send to a return it hasn't, is left out, and a
+  sidechain or a pad's
   track that names a device the song hasn't is cleared, and so is a sidechain the model would refuse: a device that
   would hear its own track's sound round a loop (on a drum sampler's track, listening to one of its own pads' tracks, say).
   Of two elements of one parent with one key (two curves of one

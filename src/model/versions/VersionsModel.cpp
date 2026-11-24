@@ -148,22 +148,6 @@ namespace
         return canChangeSongNow (context) ? juce::String() : "The project's versions are busy: " + what;
     }
 
-    // The song's curves now, before a song from the versions is taken in; and, after, those it brought in that name a device
-    // the song hasn't taken away again in the same step: a song read in part (a damaged commit) keeps what names what it
-    // couldn't read, which the song judges here, so that it is what its file would open as (found in review).
-    // By their parameters: what takes a song in keeps the curves it had in their places, by their parameters, and adds those
-    // it hadn't (ApplySong.h), so a curve it brought in is one of a parameter that had none.
-    std::vector<ParameterRef> findCurves (const Song& song)
-    {
-        return getCurveKeys (song);
-    }
-
-    void forgetCurvesBroughtIn (Song& song, const std::vector<ParameterRef>& before)
-    {
-        forgetCurvesOfGoneDevices (song, [&before] (const ParameterRef& parameter)
-                                   { return std::find (before.begin(), before.end(), parameter) == before.end(); });
-    }
-
     // Why a restore of a commit that held an ID twice takes nothing: given anew as it was read, an item would come in as new,
     // beside the song's own, unseen (as a merge refuses such a commit).
     juce::String idsTwiceRefusal()
@@ -237,10 +221,8 @@ namespace
         keepSongBefore (*history, "restore");
         const UndoStep step (*song, "Restore \"" + getDisplayName (*version) + "\"");
         song->storeDeviceStates();
-        const auto curves = findCurves (*song);
         makeSongLike (*song, read.song);
         removeBrokenReferences (*song); // what the song kept where a damaged piece was can name what the commit hadn't
-        forgetCurvesBroughtIn (*song, curves);
         return true;
     }
 } // namespace
@@ -1022,7 +1004,6 @@ namespace
         // A change of its own, one undo step, as git restore --source <commit> <file> makes one file a commit's.
         const UndoStep step (*song, "Restore " + line.name + " from \"" + getDisplayName (*version) + "\"");
         song->storeDeviceStates();
-        const auto curves = findCurves (*song);
         auto done = true;
 
         if (line.isSong)
@@ -1030,8 +1011,7 @@ namespace
         else
             done = makeTrackLike (*song, line.isMaster ? getMasterID (*song) : line.track, then); // the master's by its kind
 
-        removeBrokenReferences (*song);
-        forgetCurvesBroughtIn (*song, curves);
+        removeBrokenReferences (*song); // with the curves of what the song hasn't, one it brought in from a damaged piece too
         return done;
     }
 } // namespace

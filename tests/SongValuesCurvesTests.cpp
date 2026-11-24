@@ -408,8 +408,8 @@ TEST_CASE ("Song values' curves: each edit of a curve through the model tells th
     CHECK (same.project == 0);
 }
 
-TEST_CASE ("Song values' curves: what takes the curves along tells them, and what keeps them tells nothing: a device removed, a "
-           "track duplicated, a folder made a bus and back, a version applied")
+TEST_CASE ("Song values' curves: what takes the curves along tells them: a device removed, a track duplicated, a folder made a bus "
+           "and back, a version applied")
 {
     Watched w;
     auto& song = w.song;
@@ -421,12 +421,16 @@ TEST_CASE ("Song values' curves: what takes the curves along tells them, and wha
     phazite::addAutomationPoint (w.s.context, eqParameter, { at (4.0), 0.7f });
     phazite::addAutomationPoint (w.s.context, w.s.getVolumeParameter (track), { at (2.0), 0.4f });
 
-    // A device removed keeps its curves for an undo to bring it back (Automation.h): no curve changes.
+    // A device removed takes its curves along, in its step (Mixer.h: forgetWhatNamesTheGone()): told once, its Undo and its
+    // Redo too, its curve alone.
     const auto removed = w.hearEach ("Remove Device", [&] { phazite::removeDevice (song, eq); });
     checkHeard ("Remove Device", removed);
 
     for (const auto& each : removed)
-        CHECK (each.told.curves == 0);
+    {
+        CHECK (each.told.curves == 1);
+        CHECK (describe (each.differing) == describe (std::vector { eqParameter }));
+    }
 
     phazite::undo (song); // the EQ back
     REQUIRE (phazite::test::hasDevice (song, eq));
@@ -575,11 +579,11 @@ TEST_CASE ("Song values' curves: a version with other curves applied both ways i
         phazite::addPoint (song, volume, { at (6.0), 0.75f });
         phazite::addPoint (song, pan, { at (2.0), 0.6f });
         phazite::deletePoints (song, otherVolume, allIndices (song, otherVolume));
-        phazite::removeDevice (song, eq); // its curve kept, for an undo to bring it back
+        phazite::removeDevice (song, eq); // its curve with it
     }
 
     const auto after = phazite::test::copyWholeSong (song);
-    REQUIRE (phazite::getCurveKeys (song) == std::vector { eqParameter, volume, pan });
+    REQUIRE (phazite::getCurveKeys (song) == std::vector { volume, pan });
     phazite::test::UndoCheck undo (song);
 
     const auto apply = [&] (const juce::String& name, const juce::ValueTree& version)
@@ -599,7 +603,7 @@ TEST_CASE ("Song values' curves: a version with other curves applied both ways i
     CHECK (phazite::getCurveKeys (song) == std::vector { volume, eqParameter, otherVolume });
     CHECK (phazite::test::hasDevice (song, eq));
     apply ("Bring Back Again", after);
-    CHECK (phazite::getCurveKeys (song) == std::vector { eqParameter, volume, pan });
+    CHECK (phazite::getCurveKeys (song) == std::vector { volume, pan });
     CHECK_FALSE (phazite::test::hasDevice (song, eq));
     apply ("Without Automation", without);
     CHECK (phazite::getCurveKeys (song).empty());
@@ -733,7 +737,8 @@ TEST_CASE ("Song values' curves: a track's line made a version's, and put back, 
     isTheVersions();
     CHECK (phazite::getCurveKeys (song) == std::vector { volume, otherVolume, eqParameter });
 
-    // Deleted, its curves kept (for an undo to bring it back) and one of them changed since; put back from the version.
+    // Deleted, its curves with it, and a point given since to its volume's parameter, by the parameter alone, which makes that
+    // curve again; put back from the version.
     undo.check ("Delete the Track",
                 [&]
                 {

@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace phazite
@@ -209,17 +210,23 @@ std::vector<ParameterPoint> getAutomationPointsIn (Song&, BeatRange);
 void removeAutomationPointsIn (Song&, BeatRange);
 void addAutomationPoints (Song&, const std::vector<ParameterPoint>&);
 
-// Forgets the curves of devices the song hasn't any more (the song keeps them while an undo can bring the device back), and
-// any child of its AUTOMATION that is no curve, as a project opens: without an undo step, on the tree of a song that holds
-// no values yet (model/project/internal/Project.h: makeSong(), before it holds them; asserted), which no one else hears,
-// whose AUTOMATION holds its curves as its file does. A device keeps those of parameters it hasn't, as a plug-in that isn't
-// installed. A song that holds its values forgets them through the form below.
+// Forgets the curves of owners the song hasn't (a file's, which whoever wrote it may have left), and any child of its
+// AUTOMATION that is no curve, as a project opens: without an undo step, on the tree of a song that holds no values yet
+// (model/project/internal/Project.h: makeSong(), before it holds them; asserted), which no one else hears, whose AUTOMATION
+// holds its curves as its file does. A curve's owner is there as for the form below (model/mixer/internal/Mixer.h:
+// getItemIDs()): a device, a chain, a fader or a VCA, a send, a modulator or a macro. A device keeps those of parameters it
+// hasn't, as a plug-in that isn't installed. A song that holds its values forgets them through the form below.
 void forgetCurvesOfGoneDevices (Song&);
 
-// The same through eraseCurve(), in the caller's undo step, of the curves which says alone, by their parameters: those a song
-// taken from the versions in part brought in that name a device the song hasn't (a restore from a damaged commit:
-// model/versions/VersionsModel.cpp), so that the song is what its file would open as.
-void forgetCurvesOfGoneDevices (Song&, const std::function<bool (const ParameterRef&)>& which);
+// The curves of what the song no longer holds taken out, in the caller's undo step (or outside the history while the song is
+// written outside it), so that its Undo brings them back: each curve whose owner's ID (Schema.h: curveDevice, a device's, a
+// container's chain's, a fader's or a VCA's, a send's, a modulator's or a macro's) isn't among the items still there, which
+// the caller gathered (model/mixer/internal/Mixer.h: getItemIDs(), in forgetWhatNamesTheGone(), at every removal, and so
+// after every apply of a song from the versions: model/versions/internal/ApplySong.h, removeBrokenReferences()). The
+// curves' order walked by their parameters alone, each owner looked for among the items: no curve's points read, and
+// nothing allocated while none is gone; those gone taken out of one next value of the curves' area, set once, so that what
+// hears the curves is told once. Nothing for a song that holds no values.
+void forgetCurvesOfTheGone (Song&, const std::set<std::uint64_t>& items);
 
 //==============================================================================
 // Watches the song's values set by hand (Song::ParameterListener): remembers the parameter changed last by hand (by a

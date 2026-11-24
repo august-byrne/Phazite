@@ -135,7 +135,7 @@ juce::String findBranch (const phazite::ProjectContext& context, const juce::Str
     return {};
 }
 
-// The song holds together as its file would open (SongCheck.h: copyAsOpened(), without the curves an undo keeps), by every
+// The song holds together as its file would open (SongCheck.h: copyAsOpened(), without the lanes of what is gone), by every
 // rule, the clips of an alias group holding the same notes among them; and its own values are kept with its tree (values).
 void checkWhole (const phazite::Song& song)
 {
