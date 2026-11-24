@@ -503,11 +503,6 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
     }
 }
 
-bool toldOf (const Watched::Heard& heard, TrackID id)
-{
-    return heard.told.told.contains (id.getRaw());
-}
-
 bool toldAny (const Watched::Heard& heard, TrackID id, std::uint16_t parts)
 {
     const auto found = heard.told.told.find (id.getRaw());
