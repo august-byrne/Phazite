@@ -8,6 +8,7 @@
 #include "TestClips.h"
 #include "TestDeviceValues.h"
 #include "TestSong.h"
+#include "TestSongOwn.h"
 #include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
@@ -91,7 +92,7 @@ struct WaitingMerge
     WaitingMerge()
     {
         auto& song = *phazite::findSong (s.context);
-        const auto count = song.getState()[schema::nextID];
+        const auto count = phazite::getNextID (song);
         REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
         s.setVolume (bass, -12.0f);
         pad = s.addTrack ("Pad");
@@ -99,7 +100,7 @@ struct WaitingMerge
 
         REQUIRE (
             phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
-        song.getState().setProperty (schema::nextID, count, nullptr);
+        phazite::countIDsFrom (song, count);
         s.setVolume (bass, -6.0f);
         lead = s.addTrack ("Lead");
         REQUIRE (lead == pad);
@@ -362,7 +363,7 @@ TEST_CASE ("A merge waiting while another computer commits on the branch goes it
         CHECK (phazite::getMergeProblem (m.s.context).contains ("Cancel Merge"));
         REQUIRE (phazite::canCancelMerge (m.s.context));
         phazite::cancelMerge (m.s.context);
-        CHECK_FALSE (m.song().getState().getChildWithName (schema::MERGING).isValid());
+        CHECK_FALSE (phazite::test::hasWaitingMerge (m.song()));
         CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
     }
 }
@@ -481,8 +482,7 @@ TEST_CASE ("A merge's element that isn't one (a song from anyone) waits for noth
 {
     WaitingMerge m;
     m.merge();
-    auto element = m.song().getState().getChildWithName (schema::MERGING);
-    REQUIRE (element.isValid());
+    REQUIRE (phazite::test::hasWaitingMerge (m.song()));
 
     // Its song before it a track's piece: still waiting (the commit it merged is known), but Cancel Merge makes the song the
     // branch's last commit, not a track.
@@ -493,7 +493,7 @@ TEST_CASE ("A merge's element that isn't one (a song from anyone) waits for noth
             trackPiece = name;
 
     REQUIRE (trackPiece.isNotEmpty());
-    element.setProperty (schema::mergingBefore, trackPiece, nullptr);
+    phazite::test::changeWaitingMerge (m.song(), schema::mergingBefore, trackPiece);
     REQUIRE (m.s.getProject().save().wasOk());
     m.reopenAs (TestSong::Reopening::withoutSaving);
     REQUIRE (phazite::isMerging (m.s.context));
@@ -510,7 +510,7 @@ TEST_CASE ("A merge's element that isn't one (a song from anyone) waits for noth
     {
         WaitingMerge n;
         n.merge();
-        n.song().getState().getChildWithName (schema::MERGING).setProperty (property, value, nullptr);
+        phazite::test::changeWaitingMerge (n.song(), property, value);
         REQUIRE (n.s.getProject().save().wasOk());
         n.reopenAs (TestSong::Reopening::withoutSaving);
         CHECK_FALSE (phazite::isMerging (n.s.context));
@@ -521,13 +521,13 @@ TEST_CASE ("A merge's element that isn't one (a song from anyone) waits for noth
         const auto numTracks = phazite::getTrackIDs (n.song()).size();
         REQUIRE (phazite::canCancelMerge (n.s.context));
         phazite::cancelMerge (n.s.context);
-        CHECK_FALSE (n.song().getState().getChildWithName (schema::MERGING).isValid());
+        CHECK_FALSE (phazite::test::hasWaitingMerge (n.song()));
         CHECK (phazite::getTrackIDs (n.song()).size() == numTracks);
         CHECK (n.named ("Pad").size() == 1); // what the merge brought stays, as the rest of the song
         CHECK (phazite::getMergeProblem (n.s.context).isEmpty());
         CHECK_FALSE (phazite::canCancelMerge (n.s.context));
         phazite::undo (n.song());
-        CHECK (n.song().getState().getChildWithName (schema::MERGING).isValid());
+        CHECK (phazite::test::hasWaitingMerge (n.song()));
     }
 }
 
@@ -561,7 +561,7 @@ TEST_CASE ("A merge commit made after a save leaves the project saved, and no wo
         REQUIRE_FALSE (snapshots.empty());
         keepVersion (m.s.context);
         REQUIRE (phazite::test::finished (m.s.context, [&] { return phazite::restoreSnapshot (m.s.context, snapshots.front().time); }));
-        REQUIRE (m.song().getState().getChildWithName (schema::MERGING).isValid());
+        REQUIRE (phazite::test::hasWaitingMerge (m.song()));
         CHECK_FALSE (phazite::isMerging (m.s.context));
         CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
     }
@@ -587,13 +587,13 @@ TEST_CASE ("A project file opened without its Versions folder holds a merge of a
     REQUIRE (waitForVersionHistory (m.s.context));
     auto& song = project->getSong();
 
-    REQUIRE (song.getState().getChildWithName (schema::MERGING).isValid());
+    REQUIRE (phazite::test::hasWaitingMerge (song));
     CHECK_FALSE (phazite::isMerging (m.s.context));
     CHECK (phazite::getMergeProblem (m.s.context).contains ("Cancel Merge"));
     const auto numTracks = phazite::getTrackIDs (song).size();
     REQUIRE (phazite::canCancelMerge (m.s.context));
     phazite::cancelMerge (m.s.context);
-    CHECK_FALSE (song.getState().getChildWithName (schema::MERGING).isValid());
+    CHECK_FALSE (phazite::test::hasWaitingMerge (song));
     CHECK (phazite::getTrackIDs (song).size() == numTracks);
     CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
 
@@ -614,7 +614,7 @@ TEST_CASE ("No version's song holds a merge's element: not one that waits for no
     keepVersion (m.s.context); // the merge's own version, the element finished in the song
 
     // An element that waits for nothing, and a change, saved with the whole song.
-    m.song().getState().getChildWithName (schema::MERGING).setProperty (schema::mergingVersion, "not a version", nullptr);
+    phazite::test::changeWaitingMerge (m.song(), schema::mergingVersion, "not a version");
     m.s.setVolume (m.drums, -3.0f);
     keepVersion (m.s.context, "Drums down");
 
@@ -648,10 +648,7 @@ TEST_CASE ("Cancel Merge keeps the song in Local History first, and makes it the
         WaitingMerge m;
         m.s.setVolume (m.drums, -3.0f);
         m.merge();
-        m.song()
-            .getState()
-            .getChildWithName (schema::MERGING)
-            .setProperty (schema::mergingHead, juce::String::repeatedString ("ab", 32), nullptr);
+        phazite::test::changeWaitingMerge (m.song(), schema::mergingHead, juce::String::repeatedString ("ab", 32));
         REQUIRE (m.s.getProject().save().wasOk());
         m.reopenAs (TestSong::Reopening::withoutSaving);
         REQUIRE (phazite::isMerging (m.s.context));
@@ -1132,7 +1129,7 @@ void mergeTwoLinesThatMergedPad (bool other)
     const auto bass = s.addTrack ("Bass");
     const auto first = keepVersion (s.context, "First");
     auto& song = *phazite::findSong (s.context);
-    const auto count = song.getState()[schema::nextID];
+    const auto count = phazite::getNextID (song);
 
     const auto named = [&song] (const juce::String& name)
     {
@@ -1161,10 +1158,10 @@ void mergeTwoLinesThatMergedPad (bool other)
     // A, on main: Lead with c, then idea-2 merged, Pad given a.
     REQUIRE (
         phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
-    song.getState().setProperty (schema::nextID, count, nullptr);
+    phazite::countIDsFrom (song, count);
     REQUIRE (s.addTrack ("Lead") == pad);
     keepVersion (s.context, "Lead");
-    const auto atMerge = song.getState()[schema::nextID];
+    const auto atMerge = phazite::getNextID (song);
     merge (x);
     keepVersion (s.context);
     const auto padA = named ("Pad");
@@ -1174,10 +1171,10 @@ void mergeTwoLinesThatMergedPad (bool other)
     // B, a line of its own from First: Keys with c, then idea-2 merged, Pad given b (or a, its count where A's was).
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, first, s.save); }));
     REQUIRE (named ("Lead").empty());
-    song.getState().setProperty (schema::nextID, count, nullptr);
+    phazite::countIDsFrom (song, count);
     REQUIRE (s.addTrack ("Keys") == pad);
     keepVersion (s.context, "Keys");
-    song.getState().setProperty (schema::nextID, other ? (juce::int64) atMerge + 1000 : (juce::int64) atMerge, nullptr);
+    phazite::countIDsFrom (song, other ? atMerge + 1000 : atMerge);
     merge (x);
     const auto byB = keepVersion (s.context);
     REQUIRE (named ("Pad").size() == 1);
@@ -1201,7 +1198,7 @@ void mergeTwoLinesThatMergedPad (bool other)
     const auto crossedToA = [&padA, &crossedTo] (const std::vector<phazite::RenumberedID>& ids) { return crossedTo (ids, padA[0]); };
     CHECK (crossedTo (waiting->crossed, pad));
     CHECK (crossedToA (waiting->renumbered));
-    CHECK (song.getState().getChildWithName (schema::MERGING).hasProperty (schema::mergingCrossed) == true);
+    CHECK (phazite::test::copyWaitingMerge (song).hasProperty (schema::mergingCrossed));
 
     REQUIRE (s.getProject().save().wasOk());
     REQUIRE (s.reopenAs (TestSong::Reopening::withoutSaving));
@@ -1256,8 +1253,8 @@ struct Lines
     phazite::Song& song = *phazite::findSong (s.context);
 
     juce::String branch() const { return phazite::getCurrentBranch (s.context)->id; }
-    juce::var count() const { return song.getState()[schema::nextID]; }
-    void countFrom (const juce::var& next) { song.getState().setProperty (schema::nextID, next, nullptr); }
+    std::uint64_t count() const { return phazite::getNextID (song); }
+    void countFrom (std::uint64_t next) { phazite::countIDsFrom (song, next); }
 
     // A new branch from the song as it is, or from a version; and the branch this one is, the song made its last version's.
     juce::String newLine (const juce::String& from = {})
@@ -1446,7 +1443,7 @@ TEST_CASE ("Two lines that each merged the same version, where only one line's m
     REQUIRE (keys == pad);
     REQUIRE (l.s.addEffect (keys, phazite::devices::Equalizer::typeID) == eq);
     keepVersion (l.s.context, "Keys");
-    l.countFrom ((juce::int64) atMerge + 1000);
+    l.countFrom (atMerge + 1000);
     l.merge (x);
     const auto other = keepVersion (l.s.context);
     REQUIRE (l.named ("Pad").size() == 1);
@@ -1642,7 +1639,7 @@ struct ThreeLines
 
         // Rhodes with the IDs main's merge gave Pad, as idea-2 counting on from where main's count was would give it.
         l.toBranch (idea);
-        l.countFrom ((juce::int64) padOnMain[0].getRaw());
+        l.countFrom (padOnMain[0].getRaw());
         const auto rhodesTrack = l.s.addTrack ("Rhodes");
         REQUIRE (rhodesTrack == padOnMain[0]);
         l.s.setVolume (rhodesTrack, -2.0f);
@@ -1923,7 +1920,7 @@ TEST_CASE ("A merge whose songs, matched by the IDs earlier merges gave anew, wo
     CHECK (phazite::getReadingProblem (l.s.context).contains ("Nothing was merged"));
     CHECK (phazite::getReadingProblem (l.s.context).contains ("one ID for two"));
     CHECK (phazite::findChanges (before, phazite::test::copyWholeSong (song)).empty());
-    CHECK (song.getState()[schema::nextID] == before[schema::nextID]);
+    CHECK (phazite::getNextID (song) == phazite::readID (before[schema::nextID]));
     checkSong (song);
 }
 

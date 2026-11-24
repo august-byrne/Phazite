@@ -187,7 +187,7 @@ TEST_CASE ("A merge waiting whose song before it is no longer kept says so")
     merging.setProperty (phazite::schema::mergingVersion, theirs, nullptr);
     merging.setProperty (phazite::schema::mergingHead, phazite::getLastVersion (s.context)->id, nullptr);
     merging.setProperty (phazite::schema::mergingBefore, juce::String::repeatedString ("c", 64), nullptr);
-    phazite::findSong (s.context)->getState().appendChild (merging, nullptr);
+    phazite::setWaitingMerge (*phazite::findSong (s.context), merging);
     s.reopen();
     REQUIRE (waitForVersionHistory (s.context));
     REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::getMergeProblem (s.context).startsWith ("Reading"); }));

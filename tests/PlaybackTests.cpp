@@ -207,7 +207,7 @@ TEST_CASE ("The song keeps the loop, where playback starts and the metronome on 
     phazite::loopBeatRange (state, 4.0, 12.0);
     phazite::movePlayhead (state, beats (6.0));
     phazite::setMetronomeOn (state, true);
-    const auto element = state.getState();
+    const auto element = phazite::test::copyWholeSong (state); // as the file holds them
     CHECK ((bool) element[schema::loop]);
     CHECK ((double) element[schema::loopStart] == doctest::Approx (4.0));
     CHECK ((double) element[schema::loopEnd] == doctest::Approx (12.0));

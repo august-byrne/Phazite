@@ -125,6 +125,6 @@ inline void checkIDs (const Song& song)
     const auto whole = phazite::test::copyWholeSong (song);
     checkIDs (whole);
     INFO ("the song's count of IDs is behind what it holds");
-    CHECK (findNextID (whole) == (std::uint64_t) (juce::int64) song.getState().getProperty (schema::nextID, (juce::int64) 0));
+    CHECK (findNextID (whole) == getNextID (song));
 }
 } // namespace phazite::test

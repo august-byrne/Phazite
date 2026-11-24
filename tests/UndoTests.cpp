@@ -7,6 +7,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestSongOwn.h"
 #include "TestTracks.h"
 #include "UndoCheck.h"
 #include "devices/reverb/Reverb.h"
@@ -25,6 +26,8 @@
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Metronome.h"
+#include "model/transport/internal/Playback.h"
 
 #include <functional>
 #include <optional>
@@ -40,16 +43,43 @@ phazite::Song::Ptr newSong()
     return song;
 }
 
-// A change to the song, as the model makes one, to its own element.
-void change (phazite::Song& song, const char* property, int value)
+// A song with four tracks, a counted value each in its history (TestSongOwn.h: setTrackProbe()): for the tests that need
+// several independent changes, which change() makes, by the probe's letter, "a" to "d", and isSet() and valueOf() read.
+phazite::Song::Ptr newSongWithProbes()
 {
-    song.getState().setProperty (property, value, &song.getUndoManager());
+    auto song = phazite::createSong();
+    phazite::ensureTracks (*song, 4);
+    song->getUndoManager().clearUndoHistory();
+    return song;
+}
+
+int probePlace (const char* probe)
+{
+    const auto place = juce::String ("abcd").indexOf (juce::String (probe));
+    REQUIRE (place >= 0);
+    return place;
+}
+
+// A change to the song, as the model makes one, joining the step in progress.
+void change (phazite::Song& song, const char* probe, int value)
+{
+    phazite::test::setTrackProbe (song, probePlace (probe), value);
+}
+
+int valueOf (const phazite::Song& song, const char* probe)
+{
+    return phazite::test::getTrackProbe (song, probePlace (probe));
+}
+
+bool isSet (const phazite::Song& song, const char* probe)
+{
+    return valueOf (song, probe) != -1;
 }
 } // namespace
 
 TEST_CASE ("An undo step begun inside another for the same song joins it")
 {
-    auto song = newSong();
+    auto song = newSongWithProbes();
     auto& undo = song->getUndoManager();
 
     SUBCASE ("Inside another for the same song: one step, named after the outer one")
@@ -67,13 +97,13 @@ TEST_CASE ("An undo step begun inside another for the same song joins it")
         }
 
         CHECK (undo.getUndoDescription() == juce::String ("Outer"));
-        CHECK (undo.getNumActionsInCurrentTransaction() == 3);
+        CHECK (undo.getUndoDescriptions().size() == 1);
 
         // One undo reverts all of it.
         phazite::undo (*song);
-        CHECK_FALSE (song->getState().hasProperty ("a"));
-        CHECK_FALSE (song->getState().hasProperty ("b"));
-        CHECK_FALSE (song->getState().hasProperty ("c"));
+        CHECK_FALSE (isSet (*song, "a"));
+        CHECK_FALSE (isSet (*song, "b"));
+        CHECK_FALSE (isSet (*song, "c"));
         CHECK_FALSE (undo.canUndo());
     }
 
@@ -91,17 +121,17 @@ TEST_CASE ("An undo step begun inside another for the same song joins it")
 
         CHECK (undo.getUndoDescription() == juce::String ("Second"));
         phazite::undo (*song);
-        CHECK (song->getState().hasProperty ("a"));
-        CHECK_FALSE (song->getState().hasProperty ("b"));
+        CHECK (isSet (*song, "a"));
+        CHECK_FALSE (isSet (*song, "b"));
         CHECK (undo.getUndoDescription() == juce::String ("First"));
         phazite::undo (*song);
-        CHECK_FALSE (song->getState().hasProperty ("a"));
+        CHECK_FALSE (isSet (*song, "a"));
         CHECK_FALSE (undo.canUndo());
     }
 
     SUBCASE ("Inside a step for another song: a step of its own")
     {
-        auto other = newSong();
+        auto other = newSongWithProbes();
 
         {
             const phazite::UndoStep outer (*song, "Outer");
@@ -118,13 +148,14 @@ TEST_CASE ("An undo step begun inside another for the same song joins it")
         }
 
         CHECK (undo.getUndoDescription() == juce::String ("Outer"));
-        CHECK (undo.getNumActionsInCurrentTransaction() == 2);
+        CHECK (undo.getUndoDescriptions().size() == 1);
         CHECK (other->getUndoManager().getUndoDescription() == juce::String ("Inner"));
+        CHECK (other->getUndoManager().getUndoDescriptions().size() == 1);
 
         phazite::undo (*other);
-        CHECK_FALSE (other->getState().hasProperty ("b"));
-        CHECK (song->getState().hasProperty ("a")); // the other song's undo leaves this one alone
-        CHECK (song->getState().hasProperty ("c"));
+        CHECK_FALSE (isSet (*other, "b"));
+        CHECK (isSet (*song, "a")); // the other song's undo leaves this one alone
+        CHECK (isSet (*song, "c"));
     }
 }
 
@@ -141,7 +172,7 @@ TEST_CASE ("Undo and redo say what they would undo")
 
     {
         const phazite::UndoStep step (*song, "Set Value");
-        change (*song, "testValue", 1);
+        phazite::test::setStepProbe (*song, "1");
     }
 
     CHECK (phazite::canUndo (*song));
@@ -152,7 +183,7 @@ TEST_CASE ("Undo and redo say what they would undo")
 
     // FL Studio's undo-or-redo undoes, then redoes what it undid.
     phazite::undoOrRedo (*song);
-    CHECK_FALSE (song->getState().hasProperty ("testValue"));
+    CHECK (phazite::test::getStepProbe (*song).isEmpty());
     CHECK_FALSE (phazite::canUndo (*song));
     CHECK (phazite::canRedo (*song));
     CHECK (phazite::describeUndo (song.get()) == juce::String ("Undo"));
@@ -160,7 +191,7 @@ TEST_CASE ("Undo and redo say what they would undo")
     CHECK (phazite::describeUndoOrRedo (song.get()) == juce::String ("Redo Set Value"));
 
     phazite::undoOrRedo (*song);
-    CHECK ((int) song->getState()["testValue"] == 1);
+    CHECK (phazite::test::getStepProbe (*song) == "1");
     CHECK (phazite::describeUndoOrRedo (song.get()) == juce::String ("Undo Set Value"));
 
     // Without a song.
@@ -170,7 +201,7 @@ TEST_CASE ("Undo and redo say what they would undo")
 
     // An unnamed step: the bare verb.
     song->getUndoManager().beginNewTransaction();
-    change (*song, "testValue", 2);
+    phazite::test::setStepProbe (*song, "2");
     CHECK (phazite::canUndo (*song));
     CHECK (phazite::describeUndo (song.get()) == juce::String ("Undo"));
     CHECK (phazite::describeUndoOrRedo (song.get()) == juce::String ("Undo"));
@@ -218,7 +249,7 @@ TEST_CASE ("An undo that puts back what devices play keeps what it undid to redo
 
 TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back leaves nothing to undo or redo")
 {
-    auto song = newSong();
+    auto song = newSongWithProbes();
     auto& undo = song->getUndoManager();
 
     {
@@ -242,11 +273,11 @@ TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back 
 
     CHECK (undo.getUndoDescription() == juce::String ("Drag"));
     phazite::undo (*song);
-    CHECK_FALSE (song->getState().hasProperty ("a"));
-    CHECK_FALSE (song->getState().hasProperty ("b"));
+    CHECK_FALSE (isSet (*song, "a"));
+    CHECK_FALSE (isSet (*song, "b"));
     phazite::redo (*song);
-    CHECK ((int) song->getState()["a"] == 4);
-    CHECK ((int) song->getState()["b"] == 3);
+    CHECK (valueOf (*song, "a") == 4);
+    CHECK (valueOf (*song, "b") == 3);
 
     // Rolled back, as Escape during a drag: as if it never happened, with nothing to redo.
     {
@@ -257,8 +288,8 @@ TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back 
         CHECK_FALSE (gesture.isOpen());
     }
 
-    CHECK ((int) song->getState()["a"] == 4);
-    CHECK_FALSE (song->getState().hasProperty ("c"));
+    CHECK (valueOf (*song, "a") == 4);
+    CHECK_FALSE (isSet (*song, "c"));
     CHECK (undo.getUndoDescription() == juce::String ("Drag"));
     CHECK_FALSE (phazite::canRedo (*song));
 
@@ -269,7 +300,7 @@ TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back 
     }
 
     CHECK (undo.getUndoDescription() == juce::String ("Kept"));
-    CHECK ((int) song->getState()["d"] == 7);
+    CHECK (valueOf (*song, "d") == 7);
 }
 
 TEST_CASE ("The undo history lists the song's steps by name, oldest first, and goes back or forth to one as Undo and Redo do")
@@ -349,16 +380,16 @@ TEST_CASE ("The undo check passes a change that is one exact undo step, and one 
                  [&song]
                  {
                      const phazite::UndoStep step (*song, "Set Value");
-                     change (*song, "a", 1);
+                     phazite::test::setStepProbe (*song, "1");
                  });
     CHECK (check.getNumSteps() == 1);
-    CHECK ((int) song->getState()["a"] == 1); // the song is left as the change left it
+    CHECK (phazite::test::getStepProbe (*song) == "1"); // the song is left as the change left it
     CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Set Value"));
 
     // A switch that is no undo step, a view setting, and how the song plays: no step, and nothing to undo.
     check.check ("Mute", [&song, track] { phazite::setTrackMuted (*song, track, true, nullptr); });
     check.check ("Collapse", [&song, track] { phazite::setCollapsed (*song, track, true); });
-    check.check ("Metronome", [&song] { song->getState().setProperty (phazite::schema::metronome, true, nullptr); });
+    check.check ("Metronome", [&song] { phazite::setMetronomeOn (*song, true); });
     CHECK (check.getNumSteps() == 1);
 
     // The test's own changes, with the model's functions that join their caller's step: one step, or several.
@@ -386,7 +417,7 @@ TEST_CASE ("The undo check passes a change that is one exact undo step, and one 
 
 TEST_CASE ("The undo check fails a change that Undo doesn't take back whole, and what makes a later Undo take the wrong thing")
 {
-    auto song = newSong();
+    auto song = newSongWithProbes();
 
     SUBCASE ("A part of the change made round the undo history: Undo leaves it")
     {
@@ -396,23 +427,23 @@ TEST_CASE ("The undo check fails a change that Undo doesn't take back whole, and
                           {
                               const phazite::UndoStep step (*song, "Half a Step");
                               change (*song, "a", 1);
-                              song->getState().setProperty ("b", 2, nullptr);
+                              phazite::test::changeRoundTheHistory (*song);
                           });
 
         REQUIRE (kept.failures.size() == 1);
         CHECK (kept.failures[0].startsWith ("Half a Step: Undo doesn't give the song as it was before:"));
-        CHECK (kept.failures[0].contains ("PHAZITE@b"));
-        CHECK_FALSE (kept.failures[0].contains ("PHAZITE@a"));
+        CHECK (kept.failures[0].contains ("SECTION"));
+        CHECK_FALSE (kept.failures[0].contains ("TRACK"));
     }
 
     SUBCASE ("A change without a step of its own, to what undo steps keep")
     {
         KeptFailures kept (*song);
-        kept.check.check ("No Step", [&song] { song->getState().setProperty ("a", 1, nullptr); });
+        kept.check.check ("No Step", [&song] { phazite::test::changeRoundTheHistory (*song); });
 
         REQUIRE (kept.failures.size() == 1);
         CHECK (kept.failures[0].startsWith ("No Step: changed what undo steps keep without an undo step of its own"));
-        CHECK (kept.failures[0].contains ("PHAZITE@a"));
+        CHECK (kept.failures[0].contains ("SECTION"));
     }
 
     SUBCASE ("A change that joins the step before")
@@ -478,6 +509,8 @@ TEST_CASE ("The undo check fails a change that Undo doesn't take back whole, and
     SUBCASE ("An element taken away round the history between two steps: the walk's Undo takes the wrong one")
     {
         // As automation lanes were, among a track's elements, until 2026-11-13: the history finds an element by its place.
+        // On the song's tree by hand, with elements Phazite doesn't know: it goes when the root holds nothing (roadmap step
+        // S5.20, the song's own switch), with the fault it shows, which only a tree's history has.
         KeptFailures kept (*song);
         auto state = song->getState();
         const auto add = [&song, &state] (const char* type)
@@ -524,7 +557,6 @@ TEST_CASE ("The undo check's texts leave out what no undo step keeps, and nothin
     phazite::test::TemporaryFolder temp;
     auto song = newSong();
     const auto track = phazite::ensureTracks (*song, 1).front();
-    auto state = song->getState();
     REQUIRE (phazite::test::hasTrack (*song, track));
 
     const auto whole = writeSong (*song, SongPart::whole);
@@ -536,8 +568,9 @@ TEST_CASE ("The undo check's texts leave out what no undo step keeps, and nothin
     // View settings, how the song plays and what the project remembers outside the history: in the whole song only.
     phazite::setSavedTrackHeight (*song, track, 96);
     phazite::showLane (*song, track, { phazite::getFader (*song, track), phazite::getVolumeParameterID (*song, track) });
-    state.setProperty (phazite::schema::loop, true, nullptr);
-    state.getOrCreateChildWithName (phazite::schema::LASTKEY, nullptr).setProperty (phazite::schema::keyRoot, 2, nullptr);
+    phazite::toggleLoop (*song);
+    REQUIRE (phazite::isLoopOn (*song));
+    phazite::setLastKey (*song, phazite::Key { 2, phazite::Scale::major });
     phazite::freezeFromFile (*song, track, phazite::test::writeSound (temp.folder.getChildFile ("Frozen.wav"), 0.1));
     REQUIRE ((bool) phazite::test::getTrackProperty (*song, track, phazite::schema::trackFrozen));
     CHECK (writeSong (*song, SongPart::whole) != whole);
@@ -621,13 +654,20 @@ TEST_CASE ("Automation lanes shown and removed between undo steps leave each ste
 
 TEST_CASE ("The undo history keeps the steps its setting says, however much each step changes")
 {
-    // A step that changes many values, as a drag of many notes does: JUCE's budget of units kept only 30 such steps.
+    // A step that changes the song many times, as a drag of many notes does: JUCE's budget of units kept only 30 such steps.
+    // Two values in turn, so that no change joins the one before it (JUCE's coalescing of a property set twice): 600 actions
+    // a step while a track's name and the outline are the tree's properties. Once both are values a step holds one action
+    // for each area it changed, however much it changed, and only "Set lower" still tells a budget of units from a count of
+    // steps.
     const auto bigStep = [] (phazite::Song& song, int step)
     {
         const phazite::UndoStep undoStep (song, "Step " + juce::String (step));
 
-        for (int i = 0; i < 600; ++i)
-            change (song, juce::String ("p" + juce::String (i)).toRawUTF8(), step);
+        for (int i = 0; i < 300; ++i)
+        {
+            phazite::test::setTrackProbe (song, 0, step * 1000 + i);
+            phazite::test::setStepProbe (song, juce::String (step) + "/" + juce::String (i));
+        }
     };
 
     SUBCASE ("By default: hundreds of steps")
@@ -647,7 +687,8 @@ TEST_CASE ("The undo history keeps the steps its setting says, however much each
         }
 
         CHECK (undone == 100);
-        CHECK (! song->getState().hasProperty ("p0"));
+        CHECK (phazite::test::getStepProbe (*song).isEmpty());
+        CHECK (phazite::test::getTrackProbe (*song, 0) == -1);
     }
 
     SUBCASE ("Set lower: the oldest steps go")
@@ -668,7 +709,8 @@ TEST_CASE ("The undo history keeps the steps its setting says, however much each
         }
 
         CHECK (undone == 20);
-        CHECK ((int) song->getState()["p0"] == 5);
+        CHECK (phazite::test::getStepProbe (*song) == "5/299");
+        CHECK (phazite::test::getTrackProbe (*song, 0) == 5299);
     }
 
     SUBCASE ("Kept within its range")
@@ -769,16 +811,16 @@ TEST_CASE ("What waits for a gesture's end runs after it: committed, rolled back
     SUBCASE ("Rolled back: after the rollback, its change a step of its own that the rollback kept")
     {
         phazite::Gesture gesture (*song, "Drag");
-        song->getState().setProperty ("dragged", 1, &song->getUndoManager());
+        phazite::test::setStepProbe (*song, "dragged");
         phazite::Gesture::whenEnded (*song, &owner,
                                      [&song]
                                      {
                                          const phazite::UndoStep step (*song, "Kept");
-                                         song->getState().setProperty ("kept", 1, &song->getUndoManager());
+                                         phazite::test::setTrackProbe (*song, 0, 1);
                                      });
         gesture.rollBack();
-        CHECK_FALSE (song->getState().hasProperty ("dragged"));
-        CHECK (song->getState().hasProperty ("kept"));
+        CHECK (phazite::test::getStepProbe (*song).isEmpty());
+        CHECK (phazite::test::getTrackProbe (*song, 0) == 1);
         CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Kept"));
     }
 

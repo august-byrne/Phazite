@@ -89,6 +89,21 @@ void countIDs (Song& song)
         state.setProperty (schema::nextID, (juce::int64) next, nullptr);
 }
 
+std::uint64_t getNextID (const Song& song)
+{
+    return std::max ((std::uint64_t) 1, readNextID (song.getState()));
+}
+
+void countIDsFrom (Song& song, std::uint64_t next, [[maybe_unused]] IDCount count)
+{
+    auto state = song.getState();
+    jassert (next < schema::maxID);
+    jassert (count == IDCount::mayBeBehind || next > std::max (findLargestID (state), findLargestIDHeld (song)));
+
+    if (next != readNextID (state))
+        state.setProperty (schema::nextID, (juce::int64) next, nullptr);
+}
+
 CopiedIDs giveNewIDs (Song& song, juce::ValueTree& copy)
 {
     CopiedIDs copied;

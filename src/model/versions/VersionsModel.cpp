@@ -1715,7 +1715,7 @@ namespace
 
             if (worked->next > findNextID (*song) && ! worked->preview.renumbered.empty())
             {
-                song->getState().setProperty (schema::nextID, (juce::int64) worked->next, nullptr);
+                countIDsFrom (*song, worked->next);
                 // Its count of IDs, which isn't counted as a change (Cancel Merge leaves it as it is), no reason to keep the song
                 // before it again as Merge is clicked.
                 worked->preview.beforeChanges = history->countSongChanges();

@@ -8,6 +8,7 @@
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestSongOwn.h"
 #include "TestTracks.h"
 #include "UndoCheck.h"
 #include "devices/drums/DrumSampler.h"
@@ -561,7 +562,7 @@ TEST_CASE ("The loader's checks alone leave the song's count of IDs past every I
 
     phazite::Song song (juce::ValueTree::fromXml (*xml));
     phazite::makeConsistent (song);
-    const auto counted = (std::uint64_t) (juce::int64) song.getState()[schema::nextID];
+    const auto counted = phazite::getNextID (song);
     CHECK (phazite::findNextID (phazite::test::copyWholeSong (song)) <= counted); // past all it holds, its tree and values
     CHECK (counted < 900000);
 }
@@ -612,7 +613,7 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
             });
         REQUIRE (project != nullptr);
         auto& song = project->getSong();
-        const auto next = (std::uint64_t) (juce::int64) song.getState()[schema::nextID];
+        const auto next = phazite::getNextID (song);
         CHECK (next < phazite::schema::renumberMark);
 
         if (givenAnew)
@@ -621,7 +622,7 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
             CHECK (next == id + 1);
 
         // Stamped with its new numbering where its IDs were given anew (Schema.h: idNumbering), else not.
-        CHECK (song.getState().hasProperty (schema::idNumbering) == givenAnew);
+        CHECK (phazite::test::copyWholeSong (song).hasProperty (schema::idNumbering) == givenAnew);
 
         // By their names, as the IDs given anew aren't known here.
         const auto findNamed = [] (const phazite::Song& s, const juce::String& name)
@@ -683,7 +684,7 @@ TEST_CASE ("An ID too near the last a song can give opens given anew, and what i
             const phazite::ParameterRef volumeAgain { phazite::getFader (again, added), phazite::getVolumeParameterID (again, added) };
             CHECK (phazite::getPoints (again, volumeAgain).size() == 1);
             CHECK (findDucker (again) == findKey (again).getRaw());
-            CHECK ((std::uint64_t) (juce::int64) again.getState()[schema::nextID] < phazite::schema::maxID);
+            CHECK (phazite::getNextID (again) < phazite::schema::maxID);
 
             REQUIRE (reopened->save().wasOk());
             const auto text = file.loadFileAsString();
@@ -874,8 +875,8 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
     REQUIRE (project != nullptr);
     auto& song = project->getSong();
     CHECK (phazite::readID (findNamedTrack (song, "Drums")[schema::trackID]) == (std::uint64_t) (mark - 1)); // as it is
-    CHECK (phazite::readID (song.getState()[schema::nextID]) == phazite::schema::renumberMark);
-    CHECK_FALSE (song.getState().hasProperty (schema::idNumbering)); // nothing given anew yet
+    CHECK (phazite::getNextID (song) == phazite::schema::renumberMark);
+    CHECK_FALSE (phazite::test::copyWholeSong (song).hasProperty (schema::idNumbering)); // nothing given anew yet
 
     // Made in the session, past the mark: a track with a send to a new return, and its volume's lane and automation.
     const auto track = phazite::addTrackAtEnd (song, false, nullptr);
@@ -897,7 +898,7 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
         juce::String error;
         const auto opened = phazite::Project::open (file, false, error);
         REQUIRE (opened != nullptr);
-        return std::make_pair (opened->getSong().getState()[schema::idNumbering].toString(),
+        return std::make_pair (phazite::test::copyWholeSong (opened->getSong())[schema::idNumbering].toString(),
                                phazite::readID (findNamedTrack (opened->getSong(), "Added")[schema::trackID]));
     };
 
@@ -914,7 +915,7 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
         checkSong (again);
 
         // Stamped with its new numbering at the opening that gave its IDs anew, and the same at every opening after.
-        const auto stampNow = again.getState()[schema::idNumbering].toString();
+        const auto stampNow = phazite::test::copyWholeSong (again)[schema::idNumbering].toString();
         CHECK (stampNow.length() == phazite::schema::idNumberingDigits);
         CHECK (stampNow.containsOnly ("0123456789abcdef"));
         CHECK (stampNow == unsaved.first);
@@ -928,7 +929,7 @@ TEST_CASE ("A file with an ID just below the mark opens as it is, and what its s
         CHECK (phazite::readID (drums[schema::trackID]) < phazite::schema::maxCountedID);
         CHECK (phazite::readID (added[schema::trackID]) < phazite::schema::maxCountedID);
         CHECK (phazite::readID (added[schema::trackID]) == unsaved.second); // as at the openings without a save
-        CHECK (phazite::readID (again.getState()[schema::nextID]) < phazite::schema::maxCountedID);
+        CHECK (phazite::getNextID (again) < phazite::schema::maxCountedID);
 
         // All of it there, what named each naming it.
         const auto addedID = phazite::TrackID::fromRaw (phazite::readID (added[schema::trackID]));
@@ -987,12 +988,12 @@ TEST_CASE ("A song's numbering that isn't 16 lowercase hexadecimal digits is lef
         INFO (wrong);
         const auto project = edited.open ([&] (juce::XmlElement& song) { song.setAttribute (name, wrong); });
         REQUIRE (project != nullptr);
-        CHECK_FALSE (project->getSong().getState().hasProperty (schema::idNumbering));
+        CHECK_FALSE (phazite::test::copyWholeSong (project->getSong()).hasProperty (schema::idNumbering));
     }
 
     const auto project = edited.open ([&] (juce::XmlElement& song) { song.setAttribute (name, "0123456789abcdef"); });
     REQUIRE (project != nullptr);
-    CHECK (project->getSong().getState()[schema::idNumbering].toString() == "0123456789abcdef");
+    CHECK (phazite::test::copyWholeSong (project->getSong())[schema::idNumbering].toString() == "0123456789abcdef");
 }
 
 TEST_CASE ("An ID past 2^61 inside an element Phazite doesn't know neither raises the song's count nor gives its IDs anew")
@@ -1011,7 +1012,7 @@ TEST_CASE ("An ID past 2^61 inside an element Phazite doesn't know neither raise
             });
         REQUIRE (project != nullptr);
         auto& song = project->getSong();
-        CHECK (phazite::readID (song.getState()[schema::nextID]) < phazite::schema::maxCountedID);
+        CHECK (phazite::getNextID (song) < phazite::schema::maxCountedID);
         CHECK (phazite::readID (findNamedTrack (song, "Lead")[schema::trackID]) == edited.lead.getRaw()); // nothing given anew
 
         const auto track = phazite::addTrackAtEnd (song, false, nullptr);
@@ -1097,7 +1098,7 @@ TEST_CASE ("Every merge waiting goes from a song given its IDs anew as it opens"
                 song.createNewChildElement ("MERGING")->setAttribute ("chosen", "1");
         });
     REQUIRE (project != nullptr);
-    CHECK_FALSE (project->getSong().getState().getChildWithName (schema::MERGING).isValid());
+    CHECK_FALSE (phazite::test::hasWaitingMerge (project->getSong()));
 }
 
 TEST_CASE ("A macro, and the master's fader and VCA, past the mark, are given anew, the master volume's curve following")

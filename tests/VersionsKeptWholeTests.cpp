@@ -989,7 +989,7 @@ juce::String writeSongText (const phazite::ProjectContext& context)
 
 juce::String readNumbering (const phazite::ProjectContext& context)
 {
-    return phazite::findSong (context)->getState()[phazite::schema::idNumbering].toString();
+    return phazite::test::copyWholeSong (*phazite::findSong (context))[phazite::schema::idNumbering].toString();
 }
 
 // Tracks added until the song's next ID is past the mark (Schema.h: renumberMark), so that its next opening gives its IDs
@@ -1087,7 +1087,8 @@ TEST_CASE ("After a song's IDs were given anew as it opened, a line's Restore an
 
     // One numbered as the song is now, whose parting with the song is the version before: refused.
     const auto newLine = writeOthersCommit (s, phazite::test::copyWholeSong (song()), "new-line");
-    CHECK (song().getState()[phazite::schema::idNumbering].toString() == stamp); // saved and opened again: nothing given anew
+    CHECK (phazite::test::copyWholeSong (song())[phazite::schema::idNumbering].toString()
+           == stamp); // saved and opened again: nothing given anew
     now = writeSongText (s.context);
     CHECK_FALSE (finished (s.context, [&] { return phazite::startMerge (s.context, newLine); }));
     CHECK (phazite::getReadingProblem (s.context).contains (otherNumbering));
@@ -1097,7 +1098,7 @@ TEST_CASE ("After a song's IDs were given anew as it opened, a line's Restore an
     // The version before opened in the song's place: the song is that version, as it was numbered, and Back to Now brings it
     // back exactly.
     REQUIRE (finished (s.context, [&] { return phazite::openVersion (s.context, before, s.save); }));
-    CHECK_FALSE (song().getState().hasProperty (phazite::schema::idNumbering));
+    CHECK_FALSE (phazite::test::copyWholeSong (song()).hasProperty (phazite::schema::idNumbering));
     CHECK (findTrackNamed (song(), "Bass").getRaw() == (std::uint64_t) (mark - 20));
     CHECK_FALSE (findTrackNamed (song(), "Idea").isValid());
     REQUIRE (phazite::backToNow (s.context));
@@ -1105,12 +1106,12 @@ TEST_CASE ("After a song's IDs were given anew as it opened, a line's Restore an
 
     // And restored whole: the song is that version as it was numbered, one undo step, which Undo takes back.
     REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, before); }));
-    CHECK_FALSE (song().getState().hasProperty (phazite::schema::idNumbering));
+    CHECK_FALSE (phazite::test::copyWholeSong (song()).hasProperty (phazite::schema::idNumbering));
     CHECK (findTrackNamed (song(), "Bass").getRaw() == (std::uint64_t) (mark - 20));
     checkSong (song());
     phazite::undo (song());
     CHECK (findTrackNamed (song(), "Bass") == bass);
-    CHECK (song().getState()[phazite::schema::idNumbering].toString() == stamp);
+    CHECK (phazite::test::copyWholeSong (song())[phazite::schema::idNumbering].toString() == stamp);
 
     // A version saved after: a line restored from it, a line's changes discarded and a merge from it, as ever.
     keepVersion (s.context, "After");

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
-#include "model/base/internal/Schema.h"
+#include "TestSongOwn.h"
 #include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -19,10 +19,10 @@ phazite::Command makeCommand (const juce::String& id, const juce::String& name, 
     return command;
 }
 
-// A change to the song that goes through its undo history, to its own element as the model's are.
+// A change to the song that goes through its undo history, as the model's are (TestSongOwn.h: the step probe).
 phazite::Command makeSongChange (const juce::String& id, const juce::String& name, phazite::Song& song, int value)
 {
-    auto command = makeCommand (id, name, [&song, value] { song.getState().setProperty ("testValue", value, &song.getUndoManager()); });
+    auto command = makeCommand (id, name, [&song, value] { phazite::test::setStepProbe (song, juce::String (value)); });
     command.undoTarget = [&song] { return &song.getUndoManager(); };
     return command;
 }
@@ -31,7 +31,7 @@ phazite::Command makeSongChange (const juce::String& id, const juce::String& nam
 void setValueInOwnStep (phazite::Song& song, int value)
 {
     const phazite::UndoStep step (song, "Set Value");
-    song.getState().setProperty ("testValue", value, &song.getUndoManager());
+    phazite::test::setStepProbe (song, juce::String (value));
 }
 } // namespace
 
@@ -104,11 +104,11 @@ TEST_CASE ("A command that changes a song is one named undo step")
     {
         REQUIRE (registry.addMacro ("test.both", "Set Twice", { "test.two", "test.one" }));
         REQUIRE (registry.invoke ("test.both"));
-        CHECK ((int) song->getState()["testValue"] == 1);
+        CHECK (phazite::test::getStepProbe (*song) == "1");
         CHECK (undo.getUndoDescription() == juce::String ("Set Twice"));
 
         REQUIRE (undo.undo());
-        CHECK ((int) song->getState()["testValue"] == 1); // back to before the macro: "Set to One"
+        CHECK (phazite::test::getStepProbe (*song) == "1"); // back to before the macro: "Set to One"
         CHECK (undo.getUndoDescription() == juce::String ("Set to One"));
     }
 
@@ -119,11 +119,11 @@ TEST_CASE ("A command that changes a song is one named undo step")
 
         REQUIRE (registry.invoke ("test.two"));
         REQUIRE (registry.invoke ("edit.undoOrRedo"));
-        CHECK ((int) song->getState()["testValue"] == 1); // undone
+        CHECK (phazite::test::getStepProbe (*song) == "1"); // undone
         REQUIRE (registry.invoke ("edit.undoOrRedo"));
-        CHECK ((int) song->getState()["testValue"] == 2); // redone
+        CHECK (phazite::test::getStepProbe (*song) == "2"); // redone
         REQUIRE (registry.invoke ("edit.undo"));
-        CHECK ((int) song->getState()["testValue"] == 1);
+        CHECK (phazite::test::getStepProbe (*song) == "1");
 
         selection.setSong (nullptr);
         CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without a song
@@ -164,18 +164,18 @@ TEST_CASE ("A model function that begins its own undo step is part of the step o
 
     // Run by the command, both changes are the command's one step.
     REQUIRE (registry.invoke ("test.setTwice"));
-    CHECK ((int) song->getState()["testValue"] == 2);
+    CHECK (phazite::test::getStepProbe (*song) == "2");
     CHECK (undo.getUndoDescription() == juce::String ("Set Twice"));
 
     phazite::undo (*song);
-    CHECK_FALSE (song->getState().hasProperty ("testValue"));
+    CHECK (phazite::test::getStepProbe (*song).isEmpty());
     CHECK_FALSE (undo.canUndo());
 
     // Called on its own, the function is a step of its own.
     setValueInOwnStep (*song, 3);
     CHECK (undo.getUndoDescription() == juce::String ("Set Value"));
     phazite::undo (*song);
-    CHECK_FALSE (song->getState().hasProperty ("testValue"));
+    CHECK (phazite::test::getStepProbe (*song).isEmpty());
 }
 
 TEST_CASE ("withSong and ifSong act only with a song")

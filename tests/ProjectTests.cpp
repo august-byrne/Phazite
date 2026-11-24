@@ -7,6 +7,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestSongOwn.h"
 #include "TestTracks.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
@@ -184,7 +185,7 @@ TEST_CASE ("A project saves and reopens with Phazite's own data")
     auto project = createProject (temp.folder, "Round Trip");
 
     phazite::ensureTracks (project->getSong(), 3);
-    project->getSong().getState().setProperty ("outline", "Electronic", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "Electronic");
     CHECK (project->hasUnsavedChanges());
 
     REQUIRE (project->save().wasOk());
@@ -195,7 +196,7 @@ TEST_CASE ("A project saves and reopens with Phazite's own data")
 
     auto reopened = openProject (file);
     CHECK (phazite::getTrackIDs (reopened->getSong()).size() == 3);
-    CHECK (reopened->getSong().getState()["outline"].toString() == juce::String ("Electronic"));
+    CHECK (phazite::test::getStepProbe (reopened->getSong()) == "Electronic");
     CHECK (reopened->getSong().getCacheFolder() == reopened->getCacheFolder()); // where its frozen files are
 }
 
@@ -204,12 +205,12 @@ TEST_CASE ("The project file holds each property on a line of its own, in the or
     namespace schema = phazite::schema;
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Lines");
-    auto state = project->getSong().getState();
     phazite::ensureTracks (project->getSong(), 2);
 
     // Set against the order of their names, which the file follows instead.
-    state.setProperty (schema::patternsKeepTheirSpeed, true, nullptr);
-    state.setProperty (schema::outline, "Electronic", nullptr);
+    phazite::togglePatternsFollowTempo (project->getSong());
+    REQUIRE_FALSE (phazite::doPatternsFollowTempo (project->getSong()));
+    phazite::test::changeSongInStep (project->getSong(), "Electronic");
 
     {
         auto& song = project->getSong();
@@ -248,7 +249,7 @@ TEST_CASE ("The project file holds each property on a line of its own, in the or
     project = nullptr;
     auto reopened = openProject (file);
     const auto reopenedTrack = phazite::test::copyTrack (reopened->getSong(), phazite::getTrackIDs (reopened->getSong()).front());
-    CHECK (reopened->getSong().getState()[schema::outline].toString() == "Electronic");
+    CHECK (phazite::test::getStepProbe (reopened->getSong()) == "Electronic");
     CHECK (reopenedTrack[schema::trackName].toString() == "Bass");
     CHECK (juce::approximatelyEqual ((double) reopenedTrack[schema::channelVolume], -6.0));
     CHECK_FALSE (reopened->hasUnsavedChanges());
@@ -260,8 +261,7 @@ TEST_CASE ("The song numbers its items itself, each new one past every ID it hol
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "IDs");
     auto& song = project->getSong();
-    auto state = song.getState();
-    const auto next = [&state] { return (std::uint64_t) (juce::int64) state[schema::nextID]; };
+    const auto next = [&song] { return phazite::getNextID (song); };
     const auto idOf = [] (const juce::ValueTree& element, const juce::Identifier& property)
     { return (std::uint64_t) (juce::int64) element[property]; };
     const auto addTrack = [&song]
@@ -291,7 +291,7 @@ TEST_CASE ("The song numbers its items itself, each new one past every ID it hol
     CHECK (idOf (another, schema::trackID) >= before);
 
     // A song whose count is further on (a project whose last items went before it was saved) goes on from there.
-    state.setProperty (schema::nextID, (juce::int64) 50000, nullptr);
+    phazite::countIDsFrom (song, 50000);
     CHECK (song.makeID() >= 50000u);
 
     // Saved, and opened again where it got to.
@@ -300,7 +300,7 @@ TEST_CASE ("The song numbers its items itself, each new one past every ID it hol
     const auto file = project->getFile();
     project = nullptr;
     auto reopened = openProject (file);
-    CHECK ((std::uint64_t) (juce::int64) reopened->getSong().getState()[schema::nextID] == saved);
+    CHECK (phazite::getNextID (reopened->getSong()) == saved);
     CHECK (reopened->getSong().makeID() >= saved);
 }
 
@@ -318,7 +318,7 @@ TEST_CASE ("Saves that change nothing make no backup: the newest backup holds th
     CHECK (getBackups (*project).size() == 1); // the file as it was made
 
     // A change saved, and saved again ten times: the file as it was before it, and as it is, one backup each.
-    project->getSong().getState().setProperty (phazite::schema::notes, "Changed", &project->getSong().getUndoManager());
+    phazite::test::changeSongInStep (project->getSong());
 
     for (int i = 0; i < 10; ++i)
         REQUIRE (project->save().wasOk());
@@ -379,7 +379,7 @@ TEST_CASE ("Backups of one second are kept by their numbers, and what else is in
 
     phazite::Project::setBackupTime (now);
     REQUIRE (project->getFile().setLastModificationTime (juce::Time (now - minute)));
-    song.getState().setProperty (phazite::schema::notes, "Changed", &song.getUndoManager());
+    phazite::test::changeSongInStep (song);
     REQUIRE (project->save().wasOk());
 
     CHECK (backups.getChildFile ("Kept 2026-01-20 07-00-00_10.phazite").existsAsFile());
@@ -420,7 +420,7 @@ TEST_CASE ("Backups are kept by age: a day's work leaves backups from an hour, a
     const auto saveAt = [&project, &song] (juce::int64 time, const juce::String& change)
     {
         phazite::Project::setBackupTime (time);
-        song.getState().setProperty (phazite::schema::notes, change, &song.getUndoManager());
+        phazite::test::changeSongInStep (song, change);
         REQUIRE (project->save().wasOk());
         REQUIRE (project->getFile().setLastModificationTime (juce::Time (time)));
     };
@@ -476,6 +476,43 @@ TEST_CASE ("Backups are kept by age: a day's work leaves backups from an hour, a
     CHECK (std::count (later.begin(), later.end(), now - lastSaved) == 1);
 }
 
+TEST_CASE ("The tests' changes that no undo step makes leave the project unsaved, and an Undo and a Redo leave them")
+{
+    // TestSongOwn.h's probes outside the history: a plug-in's own change (changeOutsideHistory()), and the key set last
+    // (setKeptOutsideHistory()), which a save writes.
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Outside");
+    auto& song = project->getSong();
+    phazite::test::changeSongInStep (song);
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+    const auto steps = song.getUndoManager().getUndoDescriptions();
+    const auto undoAndRedo = [&song]
+    {
+        phazite::undo (song);
+        phazite::redo (song);
+    };
+
+    phazite::test::changeOutsideHistory (song);
+    CHECK (project->hasUnsavedChanges());
+    CHECK (song.getUndoManager().getUndoDescriptions() == steps);
+    undoAndRedo();
+    CHECK (project->hasUnsavedChanges());
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+
+    phazite::test::setKeptOutsideHistory (song, 4);
+    CHECK (project->hasUnsavedChanges());
+    CHECK (song.getUndoManager().getUndoDescriptions() == steps);
+    undoAndRedo();
+    CHECK (phazite::test::getKeptOutsideHistory (song) == 4);
+    CHECK (project->hasUnsavedChanges());
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+    CHECK (phazite::test::getKeptOutsideHistory (openProject (file)->getSong()) == 4);
+}
+
 TEST_CASE ("An autosave survives a crash and can be restored")
 {
     TemporaryFolder temp;
@@ -483,10 +520,10 @@ TEST_CASE ("An autosave survives a crash and can be restored")
     const auto file = project->getFile();
     const auto autosaveFile = phazite::Project::getAutosaveFile (file);
 
-    project->getSong().getState().setProperty ("take", 1, nullptr);
+    phazite::test::setKeptOutsideHistory (project->getSong(), 1);
     REQUIRE (project->save().wasOk());
 
-    project->getSong().getState().setProperty ("take", 2, nullptr);
+    phazite::test::setKeptOutsideHistory (project->getSong(), 2);
     REQUIRE (project->autosave().wasOk());
     CHECK (phazite::Project::hasNewerAutosave (file));
 
@@ -499,12 +536,12 @@ TEST_CASE ("An autosave survives a crash and can be restored")
     CHECK (phazite::Project::hasNewerAutosave (file));
 
     // Opening without restoring shows the saved version.
-    CHECK ((int) openProject (file)->getSong().getState()["take"] == 1);
+    CHECK (phazite::test::getKeptOutsideHistory (openProject (file)->getSong()) == 1);
     REQUIRE (autosaveFile.replaceWithData (leftOverAutosave.getData(), leftOverAutosave.getSize()));
 
     // Restoring brings the autosaved change back, as an unsaved change to the same project file.
     auto restored = openProject (file, true);
-    CHECK ((int) restored->getSong().getState()["take"] == 2);
+    CHECK (phazite::test::getKeptOutsideHistory (restored->getSong()) == 2);
     CHECK (restored->hasUnsavedChanges());
     CHECK (restored->getFile() == file);
 
@@ -512,7 +549,7 @@ TEST_CASE ("An autosave survives a crash and can be restored")
     CHECK_FALSE (phazite::Project::hasNewerAutosave (file));
     restored = nullptr;
 
-    CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
+    CHECK (phazite::test::getKeptOutsideHistory (openProject (file)->getSong()) == 2);
 }
 
 TEST_CASE ("A restored autosave, or a backup opened in the project's place, is unsaved as closing checks it, until it is saved")
@@ -523,7 +560,7 @@ TEST_CASE ("A restored autosave, or a backup opened in the project's place, is u
     const auto autosaveFile = phazite::Project::getAutosaveFile (file);
 
     // An autosave as a crash leaves it.
-    project->getSong().getState().setProperty ("take", 2, nullptr);
+    phazite::test::setKeptOutsideHistory (project->getSong(), 2);
     REQUIRE (project->autosave().wasOk());
     juce::MemoryBlock leftOverAutosave;
     REQUIRE (autosaveFile.loadFileAsData (leftOverAutosave));
@@ -553,7 +590,7 @@ TEST_CASE ("A restored autosave, or a backup opened in the project's place, is u
     REQUIRE (opened->save().wasOk());
     CHECK_FALSE (opened->checkUnsavedChanges());
     opened = nullptr;
-    CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
+    CHECK (phazite::test::getKeptOutsideHistory (openProject (file)->getSong()) == 2);
 }
 
 TEST_CASE ("A save that can't replace the project file fails, and leaves the changes unsaved and the autosave in place")
@@ -563,7 +600,7 @@ TEST_CASE ("A save that can't replace the project file fails, and leaves the cha
     const auto file = project->getFile();
     const auto autosaveFile = phazite::Project::getAutosaveFile (file);
 
-    project->getSong().getState().setProperty ("take", 2, nullptr);
+    phazite::test::setKeptOutsideHistory (project->getSong(), 2);
     REQUIRE (project->autosave().wasOk());
 
     // A folder where the project file goes, which a file can't take the place of.
@@ -586,7 +623,7 @@ TEST_CASE ("A save that can't replace the project file fails, and leaves the cha
     CHECK_FALSE (project->hasUnsavedChanges());
     CHECK_FALSE (autosaveFile.exists());
     project = nullptr;
-    CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
+    CHECK (phazite::test::getKeptOutsideHistory (openProject (file)->getSong()) == 2);
 }
 
 TEST_CASE ("A change is autosaved in the background soon after it is made, and the project says when, until it is saved")
@@ -598,7 +635,7 @@ TEST_CASE ("A change is autosaved in the background soon after it is made, and t
     CHECK_FALSE (project->getLastAutosave().has_value());
 
     const auto changed = juce::Time::getCurrentTime();
-    project->getSong().getState().setProperty ("take", 1, nullptr);
+    phazite::test::setKeptOutsideHistory (project->getSong(), 1);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return project->getLastAutosave().has_value(); }));
     CHECK (*project->getLastAutosave() >= changed);
     CHECK (autosaveFile.existsAsFile());
@@ -635,7 +672,7 @@ TEST_CASE ("Autosave comes soon after the first change, then waits its interval"
     CHECK_FALSE (project->isAutosaving()); // nothing changed
 
     // A second after the first change, and not before.
-    project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "pop");
     timer.tickNow(); // which sees the change
     clock.advance (999.0);
     timer.tickNow();
@@ -647,7 +684,7 @@ TEST_CASE ("Autosave comes soon after the first change, then waits its interval"
     // The next change waits for the interval, and not longer.
     const auto first = autosaveFile.loadFileAsString();
     timer.tickNow(); // which sees the autosave done
-    project->getSong().getState().setProperty (phazite::schema::outline, "rock", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "rock");
     timer.tickNow();
     clock.advance (119999.0);
     timer.tickNow();
@@ -667,34 +704,34 @@ TEST_CASE ("Auto Save saves the project file a moment after the last change, in 
     timer.setAutoSave (true);
 
     // A change: saved into the project file itself, not into an autosave, a moment after it was made.
-    project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "pop");
     CHECK (project->hasUnsavedChanges());
     REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }));
-    CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "pop");
+    CHECK (phazite::test::getStepProbe (openProject (file)->getSong()) == "pop");
     CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
 
     // Changes one after another: saved once they stop, the last of them too.
     for (const auto* outline : { "rock", "jazz", "house" })
-        project->getSong().getState().setProperty (phazite::schema::outline, outline, nullptr);
+        phazite::test::changeSongInStep (project->getSong(), outline);
 
     REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }));
-    CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "house");
+    CHECK (phazite::test::getStepProbe (openProject (file)->getSong()) == "house");
 
     // A change made while a save is being written stays unsaved until the next.
-    project->getSong().getState().setProperty (phazite::schema::outline, "funk", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "funk");
     project->saveInBackground();
-    project->getSong().getState().setProperty (phazite::schema::outline, "soul", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "soul");
     REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }));
     CHECK (project->finishBackgroundSave());
     CHECK (project->hasUnsavedChanges());
     REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }));
-    CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "soul");
+    CHECK (phazite::test::getStepProbe (openProject (file)->getSong()) == "soul");
 
     // Off, it autosaves for a crash again, the project file as it was: its first a second after the change, not after its
     // interval (by a clock that moves only as the test says).
     phazite::test::HeldClock clock;
     timer.setAutoSave (false);
-    project->getSong().getState().setProperty (phazite::schema::outline, "disco", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "disco");
     timer.tickNow(); // which sees the change
     clock.advance (1001.0);
     timer.tickNow();
@@ -707,7 +744,7 @@ TEST_CASE ("Save As makes a copy with the unsaved changes, and leaves the origin
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Original");
     REQUIRE (project->getAudioFolder().getChildFile ("kick.wav").replaceWithText ("audio, as far as this test cares"));
-    project->getSong().getState().setProperty ("outline", "Pop", nullptr); // not saved yet
+    phazite::test::changeSongInStep (project->getSong(), "Pop"); // not saved yet
 
     juce::String error;
     const auto copyFile = project->saveCopyAs (temp.folder, "Copy", error);
@@ -720,8 +757,8 @@ TEST_CASE ("Save As makes a copy with the unsaved changes, and leaves the origin
     // The copy has the change. The original's file doesn't, and the project still has it unsaved.
     CHECK (project->hasUnsavedChanges());
     const auto copy = openProject (copyFile);
-    CHECK (copy->getSong().getState()["outline"].toString() == juce::String ("Pop"));
-    CHECK (openProject (project->getFile())->getSong().getState()["outline"].toString().isEmpty());
+    CHECK (phazite::test::getStepProbe (copy->getSong()) == "Pop");
+    CHECK (phazite::test::getStepProbe (openProject (project->getFile())->getSong()).isEmpty());
 
     // A name that is taken is refused.
     error.clear();
@@ -780,12 +817,12 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     CHECK_FALSE (phazite::Project::getAutosaveFile (oldFile).exists());
 
     // It saves there from now on, and opens from there with its audio.
-    song.getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::changeSongInStep (song, "pop");
     REQUIRE (project->save().wasOk());
     project = nullptr;
     auto reopened = openProject (newFile);
     const auto& reopenedSong = reopened->getSong();
-    CHECK (reopenedSong.getState()[phazite::schema::outline].toString() == juce::String ("pop"));
+    CHECK (phazite::test::getStepProbe (reopenedSong) == "pop");
     const auto clips = phazite::getClips (reopenedSong, getFirstTrack (reopenedSong));
     REQUIRE (clips.size() == 1);
     REQUIRE (phazite::isAudioClip (reopenedSong, clips.front()));
@@ -1025,12 +1062,12 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     renameAndUndo();
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // The same value written as another type (the file holds text): the track's key chosen as the one it has, which the model
-    // writes again outside the history as the key set last (Notes.h: setTrackKey(); the track's own, the same value, through
-    // the history, is no change).
-    REQUIRE (song.getState().getChildWithName (phazite::schema::LASTKEY)[phazite::schema::keyRoot].isString());
+    // The same value written again, as the file read it: the track's key chosen as the one it has, which the model writes
+    // again outside the history as the key set last (Notes.h: setTrackKey(); the track's own, the same value, through the
+    // history, is no change).
+    REQUIRE (phazite::getLastKey (song) == std::optional (phazite::Key { 2, phazite::Scale::minor }));
     phazite::chooseTrackKey (song, trackID, phazite::Key { 2, phazite::Scale::minor });
-    REQUIRE_FALSE (song.getState().getChildWithName (phazite::schema::LASTKEY)[phazite::schema::keyRoot].isString());
+    REQUIRE (phazite::getLastKey (song) == std::optional (phazite::Key { 2, phazite::Scale::minor }));
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // A note taken out and put back as it was (by Undo).
@@ -1138,7 +1175,7 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     }
 
     // Real changes count, made without an undo step or with one; saving clears them.
-    song.getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::setKeptOutsideHistory (song, 7);
     CHECK (project->hasUnsavedChanges());
     REQUIRE (project->autosave().wasOk());
     CHECK (phazite::Project::getAutosaveFile (file).existsAsFile());
@@ -1929,7 +1966,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
 
     phazite::undo (song);
     CHECK_FALSE (project->hasUnsavedChanges());
-    song.getState().setProperty (schema::outline, "pop", nullptr);
+    phazite::test::setKeptOutsideHistory (song, 5);
     CHECK (project->hasUnsavedChanges());
 
     // Saved and opened again, they are all there.
@@ -1963,8 +2000,8 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
         return project->hasUnsavedChanges();
     };
 
-    CHECK (isUnsavedChange ([&reopened] { reopened.getState().setProperty (schema::outline, "rock", nullptr); }));
-    CHECK (isUnsavedChange ([&reopened] { reopened.getState().getOrCreateChildWithName (schema::LASTKEY, nullptr); }));
+    CHECK (isUnsavedChange ([&reopened] { phazite::test::changeSongInStep (reopened); }));
+    CHECK (isUnsavedChange ([&reopened] { phazite::test::setKeptOutsideHistory (reopened, 9); }));
     CHECK (isUnsavedChange ([&reopened, track] { phazite::setTrackKey (reopened, track, phazite::Key { 2, phazite::Scale::dorian }); }));
     CHECK (isUnsavedChange ([&reopened, folder] { phazite::setMixedAsBus (reopened, folder, false); })); // a new folder is a bus
 
@@ -2101,7 +2138,7 @@ TEST_CASE ("Autosave writes in the background, and says once when it fails")
     const auto autosaveFile = phazite::Project::getAutosaveFile (project->getFile());
     const auto waitForIt = [&project] { return phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }); };
 
-    project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "pop");
     project->autosaveInBackground();
     REQUIRE (waitForIt());
     CHECK (autosaveFile.existsAsFile());
@@ -2112,7 +2149,7 @@ TEST_CASE ("Autosave writes in the background, and says once when it fails")
     const auto backups = autosaveFile.getParentDirectory();
     REQUIRE (backups.deleteRecursively());
     REQUIRE (backups.create().wasOk());
-    project->getSong().getState().setProperty (phazite::schema::outline, "rock", nullptr);
+    phazite::test::changeSongInStep (project->getSong(), "rock");
     project->autosaveInBackground();
     REQUIRE (waitForIt());
     CHECK (project->takeAutosaveFailure());
@@ -2135,7 +2172,7 @@ TEST_CASE ("Autosave waits while the song plays")
     REQUIRE (phazite::isSongPlaying (song));
 
     // Past its first delay while the song plays: none.
-    song.getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::changeSongInStep (song, "pop");
     timer.tickNow(); // which sees the change
     clock.advance (2500.0);
     timer.tickNow();
@@ -2212,12 +2249,12 @@ TEST_CASE ("A save that can't write the project file leaves the file as it was l
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Held");
     const auto file = project->getFile();
-    project->getSong().getState().setProperty ("take", 1, nullptr);
+    phazite::test::setKeptOutsideHistory (project->getSong(), 1);
     REQUIRE (project->save().wasOk());
     juce::MemoryBlock saved;
     REQUIRE (file.loadFileAsData (saved));
 
-    project->getSong().getState().setProperty ("take", 2, nullptr);
+    phazite::test::setKeptOutsideHistory (project->getSong(), 2);
 
     {
         // Held by another program (or, outside Windows, in a folder that can't be written).
@@ -2246,7 +2283,7 @@ TEST_CASE ("A save that can't write the project file leaves the file as it was l
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());
     project = nullptr;
-    CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
+    CHECK (phazite::test::getKeptOutsideHistory (openProject (file)->getSong()) == 2);
 }
 
 TEST_CASE ("A track's height and its collapse, changed between undo steps, stay through Undo and Redo, and are no unsaved change")

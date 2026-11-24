@@ -2267,7 +2267,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
         if (reading == nullptr || song == nullptr)
             return VersionHistory::Taken::refused ("Phazite couldn't read the version it came from. " + nothing);
 
-        song->getState().setProperty (schema::nextID, (juce::int64) std::max (findNextID (*song), findNextID (*songNow)), nullptr);
+        countIDsFrom (*song, std::max (findNextID (*song), findNextID (*songNow)));
         import->said = takeDawProject (*song, *in, import->audio); // unpacked already: nothing more on this thread
 
         return VersionHistory::Taken::readAgain (

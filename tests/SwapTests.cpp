@@ -4,10 +4,12 @@
 // soon as anything else changes the song.
 #include "TestDeviceValues.h"
 #include "TestSong.h"
+#include "TestSongOwn.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/AudioClipModel.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -23,22 +25,34 @@ using phazite::test::TestSong;
 
 namespace
 {
+// The independent changes the tests make, each a counted value in the song's history (TestSongOwn.h: setTrackProbe()), by
+// its name: the name's place here is its track's.
+const juce::StringArray probes { "before", "tried", "a", "b", "inner", "other", "dragged" };
+
 phazite::Song::Ptr newSong()
 {
     auto song = phazite::createSong();
+    phazite::ensureTracks (*song, probes.size());
     song->getUndoManager().clearUndoHistory();
     return song;
 }
 
-// A change to the song, as the model makes one, to its own element.
-void change (phazite::Song& song, const char* property, int value)
+int probePlace (const char* probe)
 {
-    song.getState().setProperty (property, value, &song.getUndoManager());
+    const auto place = probes.indexOf (probe);
+    REQUIRE (place >= 0);
+    return place;
 }
 
-int valueOf (const phazite::Song& song, const char* property)
+// A change to the song, as the model makes one, joining the step in progress.
+void change (phazite::Song& song, const char* probe, int value)
 {
-    return (int) song.getState().getProperty (property, -1);
+    phazite::test::setTrackProbe (song, probePlace (probe), value);
+}
+
+int valueOf (const phazite::Song& song, const char* probe)
+{
+    return phazite::test::getTrackProbe (song, probePlace (probe));
 }
 } // namespace
 

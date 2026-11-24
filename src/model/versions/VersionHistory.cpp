@@ -352,6 +352,18 @@ juce::ValueTree writeMergeState (const MergeState& state)
     return element;
 }
 
+void setWaitingMerge (Song& song, const juce::ValueTree& merging)
+{
+    jassert (! merging.isValid() || merging.hasType (schema::MERGING));
+    auto state = song.getState();
+
+    if (const auto old = state.getChildWithName (schema::MERGING); old.isValid())
+        state.removeChild (old, nullptr);
+
+    if (merging.isValid())
+        state.appendChild (merging.createCopy(), nullptr);
+}
+
 VersionHistory::Merge findMergeAgain (const VersionStore& store, const std::map<juce::String, VersionRecord>& versions,
                                       const MergeState& state)
 {

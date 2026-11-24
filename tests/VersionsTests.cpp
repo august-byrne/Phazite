@@ -11,6 +11,7 @@
 #include "devices/modulation/Modulators.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Grid.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
@@ -23,6 +24,7 @@
 #include "model/plugins/internal/SandboxedInstance.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/SongDiff.h"
@@ -173,9 +175,10 @@ TEST_CASE ("View state and how the song plays are no change since the last versi
     auto& song = *phazite::findSong (s.context);
     phazite::setSavedTrackHeight (song, track, 120);
     phazite::setCollapsed (song, track, true);
-    song.getState().setProperty (schema::loop, true, nullptr);
-    song.getState().setProperty (schema::metronome, true, nullptr);
-    song.getState().setProperty (schema::gridStep, "1 bar", nullptr);
+    phazite::toggleLoop (song);
+    REQUIRE (phazite::isLoopOn (song));
+    phazite::setMetronomeOn (song, true);
+    phazite::saveGridSettings (song, phazite::GridOwner::playlist, { .adaptive = false, .fixedLevel = 10 });
 
     CHECK (describeChanges (s.context).isEmpty());
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));

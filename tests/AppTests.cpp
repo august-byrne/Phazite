@@ -8,6 +8,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "TestSongOwn.h"
 #include "UiTestHelpers.h"
 #include "app/AppServices.h"
 #include "app/MainWindow.h"
@@ -103,7 +104,7 @@ TEST_CASE ("The session opens and saves a project")
         const auto* save = registry.find ("project.save");
         REQUIRE (save != nullptr);
         CHECK (save->isEnabled());
-        session.getProject()->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+        phazite::test::changeSongInStep (session.getProject()->getSong(), "pop");
         REQUIRE (session.getProject()->hasUnsavedChanges());
         REQUIRE (registry.invoke ("project.save"));
         CHECK_FALSE (session.getProject()->hasUnsavedChanges());
@@ -388,7 +389,7 @@ TEST_CASE ("A DAWproject double-clicked imports as a new project, and the open o
     phazite::test::dispatchPendingMessages();
 
     // A change not saved yet, then the DAWproject from Explorer: the change saved, the import open, untitled.
-    session.getProject()->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::changeSongInStep (session.getProject()->getSong(), "pop");
     REQUIRE (session.getProject()->hasUnsavedChanges());
     session.openFile (dawProject);
     phazite::test::dispatchPendingMessages();
@@ -520,7 +521,7 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     CHECK (session.getExportFolder() == temp.folder.getChildFile ("Exports")); // not the untitled project's own folder
 
     auto& song = *findSong (session.getContext());
-    song.getState().setProperty (phazite::schema::outline, "pop", &song.getUndoManager());
+    phazite::test::changeSongInStep (song, "pop");
     REQUIRE (session.getProject()->hasUnsavedChanges());
 
     // Save asks, from Documents/Phazite/Projects. Cancelled, the project stays untitled, its changes unsaved.
@@ -545,7 +546,7 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     CHECK (errors.isEmpty());
 
     // Later saves don't ask.
-    song.getState().setProperty (phazite::schema::outline, "rock", &song.getUndoManager());
+    phazite::test::changeSongInStep (song, "rock");
     REQUIRE (registry.invoke ("project.save"));
     CHECK (suggested.size() == 2);
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
@@ -646,7 +647,7 @@ juce::File leaveUntitledProject (const juce::File& folder, bool withAutosave)
 
     if (withAutosave)
     {
-        project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+        phazite::test::changeSongInStep (project->getSong(), "pop");
         REQUIRE (project->autosave().wasOk());
         REQUIRE (phazite::Project::getAutosaveFile (file).loadFileAsData (autosave));
     }
@@ -695,7 +696,7 @@ TEST_CASE ("At startup, Phazite offers to restore an untitled project it didn't 
         CHECK (session.getProject()->getFile() == crashed);
         CHECK (session.isUntitled());
         CHECK (session.getProject()->hasUnsavedChanges());
-        CHECK (session.getProject()->getSong().getState()[phazite::schema::outline].toString() == juce::String ("pop"));
+        CHECK (phazite::test::getStepProbe (session.getProject()->getSong()) == "pop");
     }
 
     // Closed without saving, it is gone too.
@@ -868,7 +869,7 @@ TEST_CASE ("A save that fails says so, and the project stays open with its chang
     REQUIRE (session.getProject() != nullptr);
     phazite::test::dispatchPendingMessages();
 
-    session.getProject()->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    phazite::test::changeSongInStep (session.getProject()->getSong(), "pop");
     REQUIRE (session.getProject()->hasUnsavedChanges());
 
     // A folder where the project file goes, which a file can't take the place of: Save says that it didn't.
@@ -1039,7 +1040,7 @@ TEST_CASE ("A project file that won't open offers its newest backup that reads i
         auto project = phazite::Project::open (file, false, error);
         REQUIRE (project != nullptr);
         auto& song = project->getSong();
-        song.getState().setProperty (phazite::schema::notes, "Saved twice", &song.getUndoManager());
+        phazite::test::changeSongInStep (song, "Saved twice");
         REQUIRE (project->save().wasOk());
     }
 
@@ -1250,7 +1251,7 @@ TEST_CASE ("An autosave that can't be read gives way to the project's own file, 
         auto project = phazite::Project::open (file, false, error);
         REQUIRE (project != nullptr);
         auto& song = project->getSong();
-        song.getState().setProperty (phazite::schema::notes, "In the file", &song.getUndoManager());
+        phazite::test::changeSongInStep (song, "In the file");
         REQUIRE (project->save().wasOk());
     }
 
@@ -1275,7 +1276,7 @@ TEST_CASE ("An autosave that can't be read gives way to the project's own file, 
     REQUIRE (session.getProject() != nullptr);
     CHECK (session.getProject()->getFile() == file);
     CHECK (offered == 0);
-    CHECK (session.getProject()->getSong().getState()[phazite::schema::notes].toString() == "In the file");
+    CHECK (phazite::test::getStepProbe (session.getProject()->getSong()) == "In the file");
     REQUIRE (errors.size() == 1);
     CHECK (errors[0].contains ("automatically"));
     phazite::test::dispatchPendingMessages();
@@ -1305,7 +1306,7 @@ TEST_CASE ("A backup that can't be made is told, and the save goes on")
     REQUIRE (backups.replaceWithText ("in the way"));
 
     auto& song = session.getProject()->getSong();
-    song.getState().setProperty (phazite::schema::notes, "Changed", &song.getUndoManager());
+    phazite::test::changeSongInStep (song, "Changed");
     session.saveProject();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK (file.loadFileAsString().contains ("Changed"));
@@ -1313,7 +1314,7 @@ TEST_CASE ("A backup that can't be made is told, and the save goes on")
     CHECK (said[0].contains ("backup"));
 
     // Told once, not at every save while it goes on failing.
-    song.getState().setProperty (phazite::schema::notes, "Changed again", &song.getUndoManager());
+    phazite::test::changeSongInStep (song, "Changed again");
     session.saveProject();
     CHECK (said.size() == 1);
 }
@@ -1901,7 +1902,7 @@ TEST_CASE ("A first save that fails part way leaves no folder where it was going
     REQUIRE (session.isUntitled());
     const auto untitledFile = session.getProject()->getFile();
     auto& song = *findSong (session.getContext());
-    song.getState().setProperty (phazite::schema::outline, "pop", &song.getUndoManager());
+    phazite::test::changeSongInStep (song, "pop");
     REQUIRE (projects.createDirectory().wasOk());
 
     // A take in its Audio folder that can't be read as the save copies it.

@@ -1166,6 +1166,13 @@ struct MergeState
 std::optional<MergeState> readMergeState (const juce::ValueTree& element);
 juce::ValueTree writeMergeState (const MergeState&);
 
+// Sets the merge waiting in a song as its element says (a copy of it: writeMergeState()'s, or one a file holds, read as above),
+// in place of the one the song holds, none for an invalid element, outside the song's history: as a song opened from a file
+// that holds one has it. The merge's own steps set theirs in the step (model/versions/VersionsModel.cpp). For a song whose
+// history holds no step that an Undo could still take back across this call (one just opened, or never undone): the merge
+// waiting is undone with the step that set it, so an Undo of an earlier step would put back what that step knew.
+void setWaitingMerge (Song&, const juce::ValueTree& merging);
+
 // A merge waiting found again from what its element says, in a store with these commits: the song before it, read on its
 // own (Abort Merge needs nothing else), each read as a whole song (PHAZITE); and, where they can be, the parting's and the
 // other line's songs translated as they were, with the clashes and notes merging the three gives (Merge::readWhole). For

@@ -263,15 +263,16 @@ TEST_CASE ("Each editor keeps its own grid in the project")
     // A project that has none reads the defaults, and reading adds nothing to it.
     CHECK (phazite::loadGridSettings (*song, phazite::GridOwner::pianoRoll) == phazite::GridSettings());
     CHECK (phazite::loadGridSettings (*song, phazite::GridOwner::playlist) == phazite::GridSettings());
-    CHECK_FALSE (song->getState().getChildWithName (phazite::schema::PIANOROLL).isValid());
-    CHECK_FALSE (song->getState().hasProperty (phazite::schema::gridSnap));
+    CHECK_FALSE (phazite::test::copyWholeSong (*song).getChildWithName (phazite::schema::PIANOROLL).isValid());
+    CHECK_FALSE (phazite::test::copyWholeSong (*song).hasProperty (phazite::schema::gridSnap));
 
     // The piano roll's grid goes on its own child of the song's state, and the playlist's stays as it was.
     const phazite::GridSettings pianoRollGrid { .adaptive = false, .fixedLevel = 8, .triplets = true };
     phazite::saveGridSettings (*song, phazite::GridOwner::pianoRoll, pianoRollGrid);
     CHECK (phazite::loadGridSettings (*song, phazite::GridOwner::pianoRoll) == pianoRollGrid);
     CHECK (phazite::loadGridSettings (*song, phazite::GridOwner::playlist) == phazite::GridSettings());
-    CHECK (phazite::GridSettings::load (song->getState().getChildWithName (phazite::schema::PIANOROLL)) == pianoRollGrid);
+    CHECK (phazite::GridSettings::load (phazite::test::copyWholeSong (*song).getChildWithName (phazite::schema::PIANOROLL))
+           == pianoRollGrid);
 
     const phazite::GridSettings playlistGrid { .snap = false, .adaptiveOffset = 1 };
     phazite::saveGridSettings (*song, phazite::GridOwner::playlist, playlistGrid);

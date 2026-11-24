@@ -1598,6 +1598,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/TempoTests.cpp
         tests/TestSong.cpp
         tests/TestSong.h
+        tests/TestSongOwn.cpp
+        tests/TestSongOwn.h
         tests/TestTracks.cpp
         tests/TestTracks.h
         tests/TextFieldReleaseTests.cpp

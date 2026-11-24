@@ -10,6 +10,7 @@
 #include "HeldFile.h"
 #include "TestDeviceValues.h"
 #include "TestSong.h"
+#include "TestSongOwn.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/WholeFile.h"
@@ -215,9 +216,9 @@ TEST_CASE ("The sweep keeps the song before a merge that waits, in the open song
     merging.setProperty (schema::mergingVersion, head, nullptr);
     merging.setProperty (schema::mergingHead, head, nullptr);
     merging.setProperty (schema::mergingBefore, beforeLeft, nullptr);
-    s.song->getState().appendChild (merging.createCopy(), nullptr);
+    phazite::setWaitingMerge (*s.song, merging);
     const auto leftWithMerge = s.keepSong (-4.0f);
-    s.song->getState().removeChild (s.song->getState().getChildWithName (schema::MERGING), nullptr);
+    phazite::setWaitingMerge (*s.song, {});
     s.putBranch ("main", head, leftWithMerge);
 
     merging.setProperty (schema::mergingBefore, beforeOpen, nullptr);
@@ -855,7 +856,7 @@ TEST_CASE ("Verify History walks Local History's songs and the songs left on bra
     pieces.pieces.erase (lost);
 
     // Another song for the snapshot, the same track lost from it.
-    song.getState().setProperty ("forTheSnapshot", true, nullptr);
+    phazite::test::changeSongInStep (song);
     auto snapshotPieces = phazite::splitSong (phazite::test::copyWholeSong (song));
     snapshotPieces.pieces.erase (lost);
 

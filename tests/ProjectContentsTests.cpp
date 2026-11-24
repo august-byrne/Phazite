@@ -39,7 +39,7 @@ TEST_CASE ("The project's notes are the song's, each change an undo step, a gest
     CHECK (phazite::getProjectNotes (test.context) == juce::String ("Verse needs a lift"));
     phazite::undo (song);
     CHECK (phazite::getProjectNotes (test.context).isEmpty());
-    CHECK_FALSE (song.getState().hasProperty (phazite::schema::notes)); // none written while there are none
+    CHECK_FALSE (phazite::test::copyWholeSong (song).hasProperty (phazite::schema::notes)); // none written while there are none
 
     // In the project's file.
     phazite::setProjectNotes (test.context, "Lyrics:\nfirst line");

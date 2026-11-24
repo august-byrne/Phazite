@@ -825,14 +825,14 @@ TEST_CASE ("A line merged again after it made an item with an ID a merge gave to
     // line's (a switch here would count both on past either).
     Branches b;
     auto& song = *phazite::findSong (b.s.context);
-    const auto count = song.getState()[phazite::schema::nextID];
+    const auto count = phazite::getNextID (song);
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     const auto pad = b.s.addTrack ("Pad");
     const auto t1 = keepVersion (b.s.context, "Pad");
 
     REQUIRE (phazite::test::finished (b.s.context,
                                       [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
-    song.getState().setProperty (phazite::schema::nextID, count, nullptr);
+    phazite::countIDsFrom (song, count);
     const auto lead = b.s.addTrack ("Lead");
     REQUIRE (lead == pad); // counted on from the same place
     keepVersion (b.s.context, "Lead");
@@ -860,7 +860,7 @@ TEST_CASE ("A line merged again after it made an item with an ID a merge gave to
     // idea-2, as the other computer has it: its next track gets the ID the merge gave its Pad here; and its Pad renamed.
     REQUIRE (phazite::test::finished (b.s.context,
                                       [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
-    song.getState().setProperty (phazite::schema::nextID, (juce::int64) padHere.getRaw(), nullptr);
+    phazite::countIDsFrom (song, padHere.getRaw());
     const auto strings = b.s.addTrack ("Strings");
     REQUIRE (strings == padHere);
     b.s.rename (pad, "Pad 2");

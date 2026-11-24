@@ -52,7 +52,7 @@ phazite::VersionHistory& history (phazite::ProjectContext& context)
 // What the song says of where it stands, and what its project file says.
 phazite::VersionHistory::Names namesOf (phazite::ProjectContext& context)
 {
-    return phazite::VersionHistory::readNames (phazite::findSong (context)->getState());
+    return phazite::VersionHistory::readNames (phazite::test::copyWholeSong (*phazite::findSong (context)));
 }
 
 phazite::VersionHistory::Names namesInFile (const juce::File& file)

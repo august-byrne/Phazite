@@ -1340,6 +1340,23 @@ std::uint64_t findNextID (const Song&);
 // Brings the song's count there (findNextID()). As a project opens and saves.
 void countIDs (Song&);
 
+// The song's count of IDs (nextID), as Song::makeID() goes on from it and a whole copy writes it: the ID it gives next where
+// no ID it holds is past it (findNextID() counts those too). From 1.
+std::uint64_t getNextID (const Song&);
+
+// Whether a count of IDs set may be behind an ID the song holds: never, as everything that counts the song's IDs on sets it
+// (asserted); behind on purpose only where a test proves that findNextID() and countIDs() repair such a count, as a file
+// written elsewhere can hold one.
+enum class IDCount : std::uint8_t
+{
+    pastEveryID,
+    mayBeBehind
+};
+
+// Sets the song's count of IDs (nextID) to next, outside its history, as Song::makeID() moves it: never taken back by an
+// undo. Past every ID the song holds, but where the caller says otherwise (IDCount).
+void countIDsFrom (Song&, std::uint64_t next, IDCount = IDCount::pastEveryID);
+
 // A copy of a part of the song (a track's element, a folder's with its tracks, a device's) made the song's own: every item
 // in it given a new ID of the song's (tracks, their faders and VCAs, clips, devices, containers, sends, modulators and
 // macros; not notes, which a clip's copy keeps, as its aliases do, nor alias groups, which the copies join), and what in it

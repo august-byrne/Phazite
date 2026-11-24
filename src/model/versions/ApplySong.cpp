@@ -2340,11 +2340,7 @@ namespace
     // step, as the count never is.
     void countIDsPast (Song& song, const juce::ValueTree& other)
     {
-        auto state = song.getState();
-        const auto next = std::max (findNextID (song), findNextID (other));
-
-        if ((std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0) != next)
-            state.setProperty (schema::nextID, (juce::int64) next, nullptr);
+        countIDsFrom (song, std::max (findNextID (song), findNextID (other)));
     }
 
     // The tracks both songs have put where the other has them: each in the folder the other has it in, where the song holds
@@ -2806,7 +2802,7 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     makeValuesLike (song, other, false, Taken::everything, noStandIns());
     makeTrackLeavesLike (song, other, isEveryTrack, true, Taken::everything, {});
     placePlaceholdersLike (song, other, nullptr, Taken::everything);
-    song.getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
+    countIDsFrom (song, next);
     song.getUndoManager().clearUndoHistory();
     jassert (holdsTracksAsRead (song, tracks)); // as makeSongLike()'s
     jassert (findIDHeldTwice (song) == 0);

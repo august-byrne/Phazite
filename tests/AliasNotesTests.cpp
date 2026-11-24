@@ -1425,7 +1425,7 @@ TEST_CASE ("A song with an alias group saved and opened again goes on as it was:
     CHECK (phazite::test::writeSong (song, phazite::test::SongPart::whole) == opened);
 
     // The song counts its IDs on from what it saved: a note added has an ID none of its items had, the same in every clip.
-    const auto saved = (juce::int64) song.getState()[phazite::schema::nextID];
+    const auto saved = phazite::getNextID (song);
     phazite::test::UndoCheck check (a.song.context);
     NoteRef added;
     a.checkEdit (
@@ -1433,7 +1433,7 @@ TEST_CASE ("A song with an alias group saved and opened again goes on as it was:
         [&]
         {
             CHECK (a.eachHolds (4));
-            CHECK ((juce::int64) added.note.getRaw() >= saved);
+            CHECK (added.note.getRaw() >= saved);
             a.inEach (added.note,
                       [] (const NoteData& note, double start)
                       {

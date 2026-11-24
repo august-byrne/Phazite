@@ -7,6 +7,7 @@
 #include "TestSong.h"
 #include "TestTracks.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/IDsHeld.h"
@@ -35,7 +36,7 @@ TEST_CASE ("A song numbers its items from its own count, which goes past every I
     phazite::Song song { juce::ValueTree (phazite::schema::PHAZITE) };
     CHECK (song.makeID() == 1);
     CHECK (song.makeID() == 2);
-    CHECK ((juce::int64) song.getState()[phazite::schema::nextID] == 3);
+    CHECK (phazite::getNextID (song) == 3);
 
     // An item with a larger ID than the count (as a song read from a file can hold): counting the IDs moves the count past
     // it, and the next ID comes after it. The song opened from such a file (Project.h: makeSong()), its count set back.
@@ -51,16 +52,39 @@ TEST_CASE ("A song numbers its items from its own count, which goes past every I
     CHECK (phazite::findNextID (file) == 12);
     const auto opened = phazite::makeSong (file);
     REQUIRE (phazite::test::hasTrack (*opened, phazite::TrackID::fromRaw (10)));
-    opened->getState().setProperty (schema::nextID, (juce::int64) 3, nullptr);
+    phazite::countIDsFrom (*opened, 3, phazite::IDCount::mayBeBehind); // behind its track, on purpose
     CHECK (phazite::findNextID (*opened) == 12);
     phazite::countIDs (*opened);
-    CHECK ((juce::int64) opened->getState()[schema::nextID] == 12);
+    CHECK (phazite::getNextID (*opened) == 12);
     CHECK (opened->makeID() == 12);
 
     // A count further on than every ID stays where it is.
-    opened->getState().setProperty (schema::nextID, (juce::int64) 50, nullptr);
+    phazite::countIDsFrom (*opened, 50);
     phazite::countIDs (*opened);
     CHECK (opened->makeID() == 50);
+}
+
+TEST_CASE ("A song's count of IDs set by hand goes on from the number given, never taken back by an undo, and a whole copy "
+           "writes it")
+{
+    auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1).front();
+    const auto next = phazite::getNextID (*song) + 1000;
+    REQUIRE (next > track.getRaw());
+
+    {
+        const phazite::UndoStep step (*song, "Rename and Count");
+        phazite::setTrackName (*song, track, "Bass");
+        phazite::countIDsFrom (*song, next);
+    }
+
+    CHECK (phazite::getNextID (*song) == next);
+    phazite::undo (*song);
+    CHECK (phazite::getTrackName (*song, track) != "Bass");
+    CHECK (phazite::getNextID (*song) == next); // outside the history, as Song::makeID() counts
+    CHECK (song->makeID() == next);
+    CHECK (phazite::getNextID (*song) == next + 1);
+    CHECK (phazite::readID (phazite::test::copyWholeSong (*song)[phazite::schema::nextID]) == next + 1);
 }
 
 TEST_CASE ("A live song's next ID is past every ID its values hold beside its tree: a note's, a clip's, an alias group's, as it "
@@ -92,14 +116,14 @@ TEST_CASE ("A live song's next ID is past every ID its values hold beside its tr
         {
             // An alias group numbered past the song's count, as a file can hold one.
             const auto alias = s.copyClip (clip, 8.0, true);
-            largest = (std::uint64_t) (juce::int64) song.getState()[phazite::schema::nextID] + 500;
+            largest = phazite::getNextID (song) + 500;
             const phazite::UndoStep step (song, "Link");
             phazite::setClipLink (song, clip, largest);
             phazite::setClipLink (song, alias, largest);
         }
 
         // The count behind them all, as a song's whose count was worked out from its tree alone.
-        song.getState().setProperty (phazite::schema::nextID, (juce::int64) 1, nullptr);
+        phazite::countIDsFrom (song, 1, phazite::IDCount::mayBeBehind);
         REQUIRE (phazite::findLargestIDHeld (song) == largest);
         CHECK (phazite::findNextID (song.getState()) <= largest);
         CHECK (phazite::findNextID (song) == largest + 1);

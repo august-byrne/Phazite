@@ -5,6 +5,7 @@
 #include "TestDeviceValues.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "TestSongOwn.h"
 #include "UiTestHelpers.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
@@ -822,7 +823,7 @@ TEST_CASE ("A history whose current branch is gone opens on the branch made firs
     TemporaryFolder temporary;
     auto song = phazite::createSong (temporary.folder.getChildFile ("Song.phazite"));
     const auto firstPieces = phazite::splitSong (phazite::test::copyWholeSong (*song));
-    song->getState().setProperty ("madeOnLater", true, nullptr);
+    phazite::test::changeSongInStep (*song);
     const auto laterPieces = phazite::splitSong (phazite::test::copyWholeSong (*song));
     phazite::VersionStore store (temporary.folder.getChildFile ("Versions"), thisComputer);
 
